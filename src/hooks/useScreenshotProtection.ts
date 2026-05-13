@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
@@ -28,7 +29,7 @@ export const useScreenshotProtection = () => {
           await PrivacyScreen.enable();
         }
       } catch (error) {
-        console.warn('Failed to update screenshot protection:', error);
+        logger.warn('Failed to update screenshot protection:', error);
       }
     };
 

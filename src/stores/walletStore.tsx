@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
 import { MRC20, Provider, formatUnits } from '@massalabs/massa-web3';
 import { useAccountStore } from './accountStore';
@@ -59,7 +60,7 @@ const useWalletStoreBase = create<WalletStoreState>((set, get) => ({
           }
         } catch (error) {
           // TODO: Display error for User ?
-          console.error(`Error getting balance for ${token.name}: ${error}`);
+          logger.error(`Error getting balance for ${token.name}: ${error}`);
         }
         return { ...token, balance };
       })
@@ -99,7 +100,7 @@ const useWalletStoreBase = create<WalletStoreState>((set, get) => ({
         error: null,
       });
     } catch (error) {
-      console.error('Error refreshing wallet:', error);
+      logger.error('Error refreshing wallet:', error);
       set({ isLoading: false, error: 'Failed to refresh wallet' });
     }
   },
@@ -125,7 +126,7 @@ const useWalletStoreBase = create<WalletStoreState>((set, get) => ({
           balance = await tokenWrapper.balanceOf(provider.address);
         }
       } catch (e) {
-        console.error(`Error getting balance for ${token.name}: ${e}`);
+        logger.error(`Error getting balance for ${token.name}: ${e}`);
       }
 
       // Fetch only this token price
@@ -139,7 +140,7 @@ const useWalletStoreBase = create<WalletStoreState>((set, get) => ({
       next[tokenIndex] = updated;
       set({ tokens: next });
     } catch (error) {
-      console.error('Error refreshing token balance:', error);
+      logger.error('Error refreshing token balance:', error);
     }
   },
 
@@ -164,7 +165,7 @@ useAccountStore.subscribe(async (state, prevState) => {
       await useWalletStore.getState().refreshBalances();
     }
   } catch (error) {
-    console.error('Error initializing wallet:', error);
+    logger.error('Error initializing wallet:', error);
   }
 });
 

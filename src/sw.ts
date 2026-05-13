@@ -1,5 +1,11 @@
 /// <reference lib="webworker" />
 import {
+  configureLogging,
+  logger,
+  setLogSinks,
+  type LogSink,
+} from '@massalabs/gossip-sdk/utils/logs.js';
+import {
   cleanupOutdatedCaches,
   createHandlerBoundToURL,
   precacheAndRoute,
@@ -13,6 +19,34 @@ import { bridgeGet, bridgeSet } from './sw-bridge';
 import { APP_BUILD_ID } from './config/version';
 
 declare let self: ServiceWorkerGlobalScope;
+
+const isServiceWorkerDebugLoggingEnabled =
+  import.meta.env.DEV || import.meta.env.VITE_DEBUG_LOGS === 'true';
+
+const serviceWorkerConsoleSink: LogSink = (level, _message, args) => {
+  if (level === 'debug') {
+    console.debug(...args);
+  } else if (level === 'info') {
+    console.info(...args);
+  } else if (level === 'warn') {
+    console.warn(...args);
+  } else {
+    console.error(...args);
+  }
+};
+
+// Service workers run in a separate global scope, so the app logger wiring
+// cannot configure their sinks. Debug builds get a local console sink; release
+// builds keep the shared logger disabled and emit nothing.
+configureLogging({
+  enabled: isServiceWorkerDebugLoggingEnabled,
+  minLevel: 'debug',
+  persist: false,
+});
+
+setLogSinks(
+  isServiceWorkerDebugLoggingEnabled ? [serviceWorkerConsoleSink] : []
+);
 
 // Service Worker configuration constants
 // Import from centralized config for easy adjustment
@@ -68,7 +102,7 @@ class ServiceWorkerMessageReception {
       const messages = await this.protocol.fetchMessages(seekers);
       return { success: true, newMessagesCount: messages.length };
     } catch (error) {
-      console.error('Service Worker: Failed to fetch messages:', error);
+      logger.error('Service Worker: Failed to fetch messages:', error);
       return { success: false, newMessagesCount: 0 };
     }
   }
@@ -98,7 +132,7 @@ self.addEventListener('message', event => {
       event.data.payload || {};
 
     if (!title) {
-      console.error('Service Worker: SEND_NOTIFICATION missing title');
+      logger.error('Service Worker: SEND_NOTIFICATION missing title');
       return;
     }
 
@@ -140,7 +174,7 @@ async function handleSyncEvent(event: SyncEvent): Promise<void> {
           // Update last sync timestamp after successful sync
           await updateLastSyncTimestamp();
         } catch (error) {
-          console.error('Service Worker: Periodic sync failed', error);
+          logger.error('Service Worker: Periodic sync failed', error);
         }
       })()
     );
@@ -253,7 +287,7 @@ async function shouldPerformSync(): Promise<boolean> {
 
   const timeSinceLastSync = Date.now() - lastSyncTime;
   if (timeSinceLastSync < MIN_SYNC_INTERVAL_MS) {
-    console.log(
+    logger.info(
       `Service Worker: Skipping sync - too soon since last sync (${Math.round(timeSinceLastSync / 1000)}s ago, minimum is ${Math.round(MIN_SYNC_INTERVAL_MS / 1000)}s)`
     );
     return false;
@@ -324,7 +358,7 @@ async function hasActiveClients(): Promise<boolean> {
       return windowClient.focused === true;
     });
   } catch (error) {
-    console.error('Service Worker: Error checking active clients', error);
+    logger.error('Service Worker: Error checking active clients', error);
     return false;
   }
 }
@@ -347,7 +381,7 @@ async function showNotificationIfAllowed(
         error.message.includes('notification permission')
       )
     ) {
-      console.error('Service Worker: Failed to show notification:', error);
+      logger.error('Service Worker: Failed to show notification:', error);
     }
   }
 }
@@ -366,7 +400,7 @@ async function performSyncAndNotify(): Promise<void> {
       }
     }
   } catch (error) {
-    console.error('Service Worker: Sync failed', error);
+    logger.error('Service Worker: Sync failed', error);
   }
 }
 
@@ -447,7 +481,7 @@ function scheduleNextSync(): void {
     .catch(error => {
       // hasActiveClients() should never reject (it catches errors internally),
       // but if the Promise chain fails for any reason, assume app is not active and sync
-      console.error('Service Worker: Error scheduling sync', error);
+      logger.error('Service Worker: Error scheduling sync', error);
       scheduleBackgroundSync();
     });
 }
@@ -457,7 +491,7 @@ function scheduleNextSync(): void {
 function startFallbackSync() {
   // Check if we're in service worker context
   if (typeof self === 'undefined' || !self.registration) {
-    console.error(
+    logger.error(
       'Service Worker: Not in service worker context, skipping fallback sync setup'
     );
     return;

@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import React, {
   useCallback,
   useEffect,
@@ -173,7 +174,7 @@ const Discussions: React.FC = () => {
         icon: <Lock className="w-5 h-5" />,
         danger: true,
         onClick: () => {
-          logout().catch(e => console.error('Failed to lock app:', e));
+          logout().catch(e => logger.error('Failed to lock app:', e));
         },
       },
     ],

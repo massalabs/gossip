@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight } from 'react-feather';
@@ -267,7 +268,7 @@ const SendModal: React.FC<SendModalProps> = ({
       if (loadingToast) {
         toast.dismiss(loadingToast);
       }
-      console.error('Transaction failed:', err);
+      logger.error('Transaction failed:', err);
       toast.error(t('send.failed'));
     }
   }, [

@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../../stores/accountStore';
@@ -95,7 +96,7 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
         });
         onAccountSelected();
       } catch (error) {
-        console.error('Biometric authentication failed:', error);
+        logger.error('Biometric authentication failed:', error);
         const message = error instanceof Error ? error.message : 'unknown';
         if (message === 'cancelled') {
           onErrorChange?.(null);

@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 /**
  * Background Sync Settings Component
  *
@@ -95,7 +96,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
           setIosStatus(status);
         }
       } catch (error) {
-        console.error('Failed to load background sync status:', error);
+        logger.error('Failed to load background sync status:', error);
       } finally {
         setIsLoading(false);
       }
@@ -145,7 +146,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
         }
         setForegroundHighReliability(enabled);
       } catch (error) {
-        console.error('Failed to toggle foreground sync:', error);
+        logger.error('Failed to toggle foreground sync:', error);
       }
     },
     []
@@ -173,7 +174,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
         setIosStatus(status);
       }
     } catch (error) {
-      console.error('Failed to refresh status:', error);
+      logger.error('Failed to refresh status:', error);
     } finally {
       setIsLoading(false);
     }
@@ -202,7 +203,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
         });
         appStateListenerRef.current = listener;
       } catch (error) {
-        console.error('Failed to setup app state listener:', error);
+        logger.error('Failed to setup app state listener:', error);
       }
     };
 

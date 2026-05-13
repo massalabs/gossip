@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import { generateUserKeys, UserProfile } from '@massalabs/gossip-sdk';
 import { Account, PrivateKey, Provider } from '@massalabs/massa-web3';
 import { useAppStore } from '../appStore';
@@ -29,6 +30,6 @@ export function fetchMnsDomainsIfEnabled(
     .getState()
     .fetchMnsDomains(profile, provider)
     .catch(error => {
-      console.error('Error fetching MNS domains:', error);
+      logger.error('Error fetching MNS domains:', error);
     });
 }

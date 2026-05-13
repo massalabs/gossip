@@ -1,3 +1,4 @@
+import { logger } from './logger.ts';
 /**
  * Centralized localStorage management
  * Single source of truth for all localStorage keys used in the app
@@ -34,7 +35,7 @@ export const getStorageItem = <T = string>(key: StorageKey): T | null => {
       return item as T;
     }
   } catch (error) {
-    console.error(`Error getting localStorage item "${key}":`, error);
+    logger.error(`Error getting localStorage item "${key}":`, error);
     return null;
   }
 };
@@ -49,7 +50,7 @@ export const setStorageItem = <T = string>(key: StorageKey, value: T): void => {
       typeof value === 'string' ? value : JSON.stringify(value);
     localStorage.setItem(key, serialized);
   } catch (error) {
-    console.error(`Error setting localStorage item "${key}":`, error);
+    logger.error(`Error setting localStorage item "${key}":`, error);
   }
 };
 
@@ -61,7 +62,7 @@ export const removeStorageItem = (key: StorageKey): void => {
   try {
     localStorage.removeItem(key);
   } catch (error) {
-    console.error(`Error removing localStorage item "${key}":`, error);
+    logger.error(`Error removing localStorage item "${key}":`, error);
   }
 };
 
@@ -75,7 +76,7 @@ export const clearAppStorage = (): void => {
     try {
       localStorage.removeItem(key);
     } catch (error) {
-      console.error(`Error removing localStorage item "${key}":`, error);
+      logger.error(`Error removing localStorage item "${key}":`, error);
     }
   });
 };

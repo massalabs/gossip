@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check as CheckIcon, Copy, Share2 } from 'react-feather';
@@ -41,7 +42,7 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose }) => {
 
       timeoutRef.current = setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy address:', err);
+      logger.error('Failed to copy address:', err);
     }
   };
 

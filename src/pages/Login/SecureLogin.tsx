@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../../stores/accountStore';
@@ -107,7 +108,7 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
         //      is "stale". Leave it alone.
         // If the user wants to remove a stale credential they can do so
         // explicitly from settings; we never silently nuke it here.
-        console.error('Biometric authentication failed:', error);
+        logger.error('Biometric authentication failed:', error);
         onErrorChange?.(t('login.biometric_failed_use_password'));
         if (window.location.pathname !== ROUTES.welcome()) {
           navigate(ROUTES.welcome());

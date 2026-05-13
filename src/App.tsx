@@ -1,3 +1,4 @@
+import { logger } from './utils/logger.ts';
 import './i18n';
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter, useMatch } from 'react-router-dom';
@@ -57,7 +58,7 @@ const AppContent: React.FC = () => {
   // Setup service worker: register, listen for messages, start sync scheduler, and initialize background sync
   useEffect(() => {
     setupServiceWorker().catch(error => {
-      console.error('Failed to setup service worker:', error);
+      logger.error('Failed to setup service worker:', error);
     });
   }, []); // Only run once on mount
 

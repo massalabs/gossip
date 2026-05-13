@@ -1,3 +1,4 @@
+import { logger } from '../utils/logs.js';
 /**
  * SDK Event Emitter — type-safe event bus backed by mitt.
  */
@@ -77,7 +78,7 @@ export class SdkEventEmitter {
         try {
           (handler as (p: SdkEvents[K]) => void)(payload);
         } catch (error) {
-          console.error(
+          logger.error(
             `[SdkEventEmitter] Error in ${String(event)} handler:`,
             error
           );

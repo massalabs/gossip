@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { shareQRCode } from '../services/shareService';
@@ -30,7 +31,7 @@ export function useQRShare(): {
           fileName: 'contact-qr-code.png',
         });
       } catch (error) {
-        console.error('Failed to share QR code:', error);
+        logger.error('Failed to share QR code:', error);
         toast.error('Failed to share QR code. Please try again.');
       } finally {
         setQrShareSource(null);

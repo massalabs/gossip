@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useCallback, useEffect, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App, URLOpenListenerEvent } from '@capacitor/app';
@@ -34,7 +35,7 @@ export const AppUrlListener: React.FC = () => {
               return;
             }
           } catch (parseError) {
-            console.error(
+            logger.error(
               'Failed to parse shared content URL from appUrlOpen:',
               parseError
             );
@@ -46,7 +47,7 @@ export const AppUrlListener: React.FC = () => {
 
         const parsed = tryParseInvite(url);
         if (!parsed) {
-          console.error('Failed to parse invite from app URL:', url);
+          logger.error('Failed to parse invite from app URL:', url);
           return;
         }
         await setPendingDeepLinkInfo(parsed);
@@ -54,7 +55,7 @@ export const AppUrlListener: React.FC = () => {
         // Reset browser history URL so React Router can control navigation
         window.history.replaceState(null, '', '/');
       } catch (err) {
-        console.error('Failed to handle appUrlOpen event:', err);
+        logger.error('Failed to handle appUrlOpen event:', err);
       }
     },
     [setPendingDeepLinkInfo, setPendingSharedContent, navigate]
@@ -93,7 +94,7 @@ export const AppUrlListener: React.FC = () => {
 
             navigate(targetUrl, { replace: true });
           } catch (err) {
-            console.error('Failed to handle native notification action:', err);
+            logger.error('Failed to handle native notification action:', err);
           }
         }
       );
@@ -102,10 +103,7 @@ export const AppUrlListener: React.FC = () => {
         void handle.remove();
       });
     } catch (err) {
-      console.error(
-        'Failed to setup native notification action listener:',
-        err
-      );
+      logger.error('Failed to setup native notification action listener:', err);
     }
   }, [addCleanup, navigate]);
 
@@ -134,7 +132,7 @@ export const AppUrlListener: React.FC = () => {
           fn();
         } catch (err) {
           // Swallow cleanup errors to avoid unmount crashes
-          console.warn('Cleanup error:', err);
+          logger.warn('Cleanup error:', err);
         }
       });
 

@@ -11,6 +11,12 @@ import { GossipSdk } from '../../src/gossip';
 import { clearAllTables, getTestStorageConfig } from '../testDb';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { MockMessageProtocol } from '../mocks';
+import {
+  configureLogging,
+  resetLoggingForTests,
+  setLogSinks,
+  type LogSink,
+} from '../../src/utils/logs';
 
 vi.mock('../../src/api/messageProtocol', () => ({
   createMessageProtocol: () => new MockMessageProtocol(),
@@ -25,10 +31,19 @@ vi.mock('../../src/api/authProtocol', () => ({
 
 describe('GossipSdk lifecycle', () => {
   let sdk: GossipSdk;
+  const emittedWarnings: unknown[] = [];
+  const testSink: LogSink = (level, message) => {
+    if (level === 'warn') {
+      emittedWarnings.push(message);
+    }
+  };
 
   beforeEach(async () => {
     await clearAllTables();
     vi.clearAllMocks();
+    emittedWarnings.length = 0;
+    configureLogging({ enabled: true, minLevel: 'debug', persist: false });
+    setLogSinks([testSink]);
     sdk = new GossipSdk();
   });
 
@@ -38,6 +53,7 @@ describe('GossipSdk lifecycle', () => {
     } catch {
       // may not be open
     }
+    resetLoggingForTests();
   });
 
   it('initializes once and exposes auth service', async () => {
@@ -45,10 +61,8 @@ describe('GossipSdk lifecycle', () => {
     expect(sdk.isInitialized).toBe(true);
     expect(() => sdk.auth).not.toThrow();
 
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await sdk.init({ storage: getTestStorageConfig() });
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
+    expect(emittedWarnings.length).toBeGreaterThan(0);
   });
 
   it('throws on openSession before init', async () => {

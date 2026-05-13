@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
 import { encodeUserId, UserProfile } from '@massalabs/gossip-sdk';
 
@@ -452,7 +453,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           skipHistorical: true,
         });
       } catch (error) {
-        console.error('Error creating user profile:', error);
+        logger.error('Error creating user profile:', error);
         set({ isLoading: false });
         throw error;
       }
@@ -474,7 +475,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           provisionOpts: opts,
         });
       } catch (error) {
-        console.error('Error restoring account from mnemonic:', error);
+        logger.error('Error restoring account from mnemonic:', error);
         set({ isLoading: false });
         throw error;
       }
@@ -635,14 +636,14 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
               }
               await sdk.secureStorageLock();
             } catch (lockErr) {
-              console.error(
+              logger.error(
                 'Failed to re-lock after loadAccount error:',
                 lockErr
               );
             }
           }
         }
-        console.error('Error loading account:', error);
+        logger.error('Error loading account:', error);
         set({ isLoading: false });
         throw error;
       }
@@ -687,14 +688,14 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           try {
             await sdk.secureStorageDestroy();
           } catch (e) {
-            console.error('secureStorageDestroy failed:', e);
+            logger.error('secureStorageDestroy failed:', e);
             // Best-effort lock so we don't leave the storage in
             // 'unlocked' after a partial wipe.
             if (sdk.storageState === 'unlocked') {
               try {
                 await sdk.secureStorageLock();
               } catch (lockErr) {
-                console.error('Recovery lock also failed:', lockErr);
+                logger.error('Recovery lock also failed:', lockErr);
               }
             }
             throw e;
@@ -717,7 +718,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
             await sdk.clearSessionBlob();
             nbAccounts = await sdk.profiles.getCount();
           } catch (e) {
-            console.error('Error clearing account data:', e);
+            logger.error('Error clearing account data:', e);
           }
           useAppStore.getState().setIsInitialized(nbAccounts > 0);
           set(clearAccountState());
@@ -732,7 +733,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set(clearAccountState());
         useAppStore.getState().setIsInitialized(true);
       } catch (error) {
-        console.error('Error resetting account:', error);
+        logger.error('Error resetting account:', error);
         set({ isLoading: false });
         throw error;
       }
@@ -753,7 +754,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           lockedByUser: options?.lockedByUser ?? true,
         });
       } catch (error) {
-        console.error('Error logging out:', error);
+        logger.error('Error logging out:', error);
         set({ isLoading: false });
         throw error;
       }
@@ -813,7 +814,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           },
         });
       } catch (error) {
-        console.error('Error creating user profile with biometrics:', error);
+        logger.error('Error creating user profile with biometrics:', error);
         set({ isLoading: false });
         throw error;
       }
@@ -837,7 +838,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         return { mnemonic, account };
       } catch (error) {
-        console.error('Error showing mnemonic backup:', error);
+        logger.error('Error showing mnemonic backup:', error);
         throw error;
       }
     },
@@ -878,7 +879,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         });
         set({ userProfile: updatedProfile });
       } catch (error) {
-        console.error('Error marking mnemonic backup as complete:', error);
+        logger.error('Error marking mnemonic backup as complete:', error);
         throw error;
       }
     },
@@ -897,7 +898,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         const count = await sdk.profiles.getCount();
         return count > 0;
       } catch (error) {
-        console.error('Error checking for existing account:', error);
+        logger.error('Error checking for existing account:', error);
         return false;
       }
     },
@@ -910,7 +911,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         return await getActiveOrFirstProfile();
       } catch (error) {
-        console.error('Error getting existing account info:', error);
+        logger.error('Error getting existing account info:', error);
         return null;
       }
     },
@@ -923,7 +924,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         return await sdk.profiles.getAll();
       } catch (error) {
-        console.error('Error getting all accounts:', error);
+        logger.error('Error getting all accounts:', error);
         return [];
       }
     },
@@ -933,7 +934,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       const { userProfile } = state;
 
       if (!getSdk().isSessionOpen || !userProfile) {
-        console.warn(
+        logger.warn(
           'No session, user profile, or encryption key to persist, skipping persistence'
         );
         return;
@@ -942,7 +943,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         const sessionBlob = getSdk().getEncryptedSession();
         if (!sessionBlob) {
-          console.warn('Failed to get encrypted session');
+          logger.warn('Failed to get encrypted session');
           return;
         }
 
@@ -961,7 +962,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           set({ userProfile: updatedProfile });
         }
       } catch (error) {
-        console.error('Error persisting session:', error);
+        logger.error('Error persisting session:', error);
       }
     },
 
@@ -990,7 +991,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await getSdk().profiles.save(updatedProfile);
         set({ userProfile: updatedProfile });
       } catch (error) {
-        console.error('Error updating username:', error);
+        logger.error('Error updating username:', error);
         throw error;
       }
     },
@@ -1009,7 +1010,7 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
   try {
     await sdk.auth.publishPublicKey(sdk.publicKeys, sdk.userId, sdk.queries);
   } catch (error) {
-    console.error('Error publishing public key:', error);
+    logger.error('Error publishing public key:', error);
   }
 });
 
@@ -1038,7 +1039,7 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
       useAccountStoreBase.setState({ provider: null });
     }
   } catch (error) {
-    console.error('Error initializing provider:', error);
+    logger.error('Error initializing provider:', error);
   }
 });
 

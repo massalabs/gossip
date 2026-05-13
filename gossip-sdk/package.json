@@ -17,6 +17,10 @@
     "./sw": {
       "types": "./dist/sw.d.ts",
       "import": "./dist/sw.js"
+    },
+    "./utils/logs.js": {
+      "types": "./dist/utils/logs.d.ts",
+      "import": "./dist/utils/logs.js"
     }
   },
   "scripts": {

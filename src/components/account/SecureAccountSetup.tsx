@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shield, AlertTriangle, CheckCircle, Plus, Check } from 'react-feather';
@@ -48,7 +49,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       await initializeAccount(creds.username, creds.password);
       setCreatedAccounts(prev => [...prev, { username: creds.username }]);
     } catch (err) {
-      console.error('Error creating secure account:', err);
+      logger.error('Error creating secure account:', err);
       setError(err instanceof Error ? err.message : t('create.failed'));
     } finally {
       setIsCreating(false);
@@ -66,7 +67,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       await logout({ lockedByUser: false });
       await onComplete();
     } catch (err) {
-      console.error('Error finalizing setup:', err);
+      logger.error('Error finalizing setup:', err);
       setError(err instanceof Error ? err.message : t('create.failed'));
       setIsFinalizing(false);
     }
@@ -88,7 +89,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     try {
       await onComplete();
     } catch (err) {
-      console.error('Error completing setup:', err);
+      logger.error('Error completing setup:', err);
       setError(err instanceof Error ? err.message : t('create.failed'));
       setIsFinalizing(false);
     }

@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * MNS (Massa Name System) Service
  *
@@ -131,7 +132,7 @@ class MnsService {
         };
       }
 
-      console.error('Failed to resolve MNS domain:', message);
+      logger.error('Failed to resolve MNS domain:', message);
       return {
         success: false,
         error: 'Failed to resolve MNS domain. Please try again.',

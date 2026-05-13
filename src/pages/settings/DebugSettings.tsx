@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -48,7 +49,7 @@ const DebugSettings: React.FC = () => {
       }
       window.location.reload();
     } catch (error) {
-      console.error('Failed to reset all accounts:', error);
+      logger.error('Failed to reset all accounts:', error);
     }
   }, [resetAccount, gossip]);
 
@@ -56,7 +57,7 @@ const DebugSettings: React.FC = () => {
     try {
       await gossip.clearConversationTables();
     } catch (error) {
-      console.error('Failed to reset discussions and messages:', error);
+      logger.error('Failed to reset discussions and messages:', error);
     }
   }, [gossip]);
 

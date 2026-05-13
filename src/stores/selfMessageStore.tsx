@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
 import {
   Message,
@@ -55,7 +56,7 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
         return { messages: [...messages, ...optimistic] };
       });
     } catch (error) {
-      console.error('Failed to load self messages', error);
+      logger.error('Failed to load self messages', error);
     } finally {
       set({ isLoading: false });
     }
@@ -69,7 +70,7 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       const raw = await sdk.selfMessages.getReactions();
       set({ reactions: groupReactions(raw) });
     } catch (error) {
-      console.error('Failed to load self reactions', error);
+      logger.error('Failed to load self reactions', error);
     }
   },
 
@@ -109,7 +110,7 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
         ),
       }));
     } catch (error) {
-      console.error('Failed to send self message', error);
+      logger.error('Failed to send self message', error);
       set(state => ({
         messages: state.messages.filter(m => m !== optimistic),
       }));
@@ -138,7 +139,7 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     try {
       await sdk.selfMessages.editMessage(id, newContent);
     } catch (error) {
-      console.error('Failed to edit self message', error);
+      logger.error('Failed to edit self message', error);
       // Revert just this message in-place so concurrent optimistic sends
       // aren't wiped by a full reload.
       set(state => ({
@@ -165,7 +166,7 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     try {
       await sdk.selfMessages.deleteMessage(id);
     } catch (error) {
-      console.error('Failed to delete self message', error);
+      logger.error('Failed to delete self message', error);
       if (removed) {
         set(state => {
           const nextReactions = new Map(state.reactions);
@@ -206,7 +207,7 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
         ),
       }));
     } catch (error) {
-      console.error('Failed to send self reaction', error);
+      logger.error('Failed to send self reaction', error);
       set(state => ({
         reactions: decrementReaction(
           state.reactions,
@@ -235,7 +236,7 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     try {
       await sdk.selfMessages.removeReaction(reactionId);
     } catch (error) {
-      console.error('Failed to remove self reaction', error);
+      logger.error('Failed to remove self reaction', error);
       set(state => ({
         reactions: restoreReactionGroup(
           state.reactions,

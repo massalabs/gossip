@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { useAccountStore } from '../stores/accountStore';
@@ -16,12 +17,12 @@ export const useDiscussionList = () => {
           try {
             await gossip.contacts.updateName(discussion.contactUserId, newName);
           } catch (e) {
-            console.error('Failed to update contact name:', e);
+            logger.error('Failed to update contact name:', e);
           }
         }
         await gossip.discussions.accept(discussion);
       } catch (error) {
-        console.error('Failed to accept discussion:', error);
+        logger.error('Failed to accept discussion:', error);
         toast.error('Failed to accept contact request');
       }
     },
@@ -34,7 +35,7 @@ export const useDiscussionList = () => {
         if (userProfile?.userId == null) return;
         await gossip.contacts.delete(discussion.contactUserId);
       } catch (error) {
-        console.error('Failed to refuse discussion:', error);
+        logger.error('Failed to refuse discussion:', error);
       }
     },
     [userProfile?.userId, gossip]

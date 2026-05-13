@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useCallback, useEffect } from 'react';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
 import { useLocalStorage } from './useLocalStorage';
@@ -42,7 +43,7 @@ export function useVersionCheck() {
 
       window.location.reload();
     } catch (err) {
-      console.error('Clean failed:', err);
+      logger.error('Clean failed:', err);
       window.location.reload();
     } finally {
       setBuildId(APP_BUILD_ID);

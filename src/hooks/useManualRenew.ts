@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { restMessageProtocol } from '@massalabs/gossip-sdk';
@@ -14,22 +15,20 @@ export function useManualRenewDiscussion() {
   return useCallback(
     async (contactUserId: string): Promise<void> => {
       if (!userProfile?.userId || !gossip.isSessionOpen) {
-        console.warn(
-          'Cannot renew discussion: Services or session unavailable'
-        );
+        logger.warn('Cannot renew discussion: Services or session unavailable');
         return;
       }
 
       try {
         await restMessageProtocol.changeNode();
       } catch (error) {
-        console.error('Failed to change node:', error);
+        logger.error('Failed to change node:', error);
       }
 
       try {
         await gossip.discussions.renew(contactUserId);
       } catch (error) {
-        console.error(
+        logger.error(
           `Failed to renew discussion with ${contactUserId}:`,
           error
         );

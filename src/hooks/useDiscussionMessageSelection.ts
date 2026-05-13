@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useCallback, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
@@ -109,7 +110,7 @@ export const useDiscussionMessageSelection = ({
           : await gossip.messages.deleteMessage(message.id);
         if (!deleted) {
           failedMessageIds.push(message.id);
-          console.error('[multi-delete] deleteMessage returned false', {
+          logger.error('[multi-delete] deleteMessage returned false', {
             messageId: message.id,
           });
         } else {
@@ -117,7 +118,7 @@ export const useDiscussionMessageSelection = ({
         }
       } catch (error) {
         failedMessageIds.push(message.id);
-        console.error('[multi-delete] deleteMessage threw', {
+        logger.error('[multi-delete] deleteMessage threw', {
           messageId: message.id,
           error,
         });
@@ -125,7 +126,7 @@ export const useDiscussionMessageSelection = ({
     }
 
     if (failedMessageIds.length > 0) {
-      console.error('[multi-delete] partial failure summary', {
+      logger.error('[multi-delete] partial failure summary', {
         selectedCount: selectedMessages.length,
         deletedCount: deletedMessageIds.length,
         failedCount: failedMessageIds.length,

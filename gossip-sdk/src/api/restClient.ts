@@ -1,3 +1,4 @@
+import { logger } from '../utils/logs.js';
 /**
  * Base REST client with retry and timeout support.
  * Shared by RestMessageProtocol and RestAuthProtocol.
@@ -42,7 +43,7 @@ export class RestClient {
         return { success: true, data };
       } catch (error) {
         lastError = error as Error;
-        console.warn(`Request attempt ${attempt} failed:`, error);
+        logger.warn(`Request attempt ${attempt} failed:`, error);
 
         if (attempt < this.retryAttempts) {
           const delay = Math.pow(2, attempt) * 1000;

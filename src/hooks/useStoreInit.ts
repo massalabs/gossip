@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useDiscussionStore } from '../stores/discussionStore';
@@ -21,7 +22,7 @@ export function useStoreInit() {
       initDiscussionStore();
       // Initialize message store (async)
       initMessageStore().catch(error => {
-        console.error('Failed to initialize message store:', error);
+        logger.error('Failed to initialize message store:', error);
       });
     }
     // Note: getSdk().isSessionOpen is not reactive, but by the time userProfile

@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shield, Key, Check as CheckIcon, User, Plus } from 'react-feather';
@@ -37,7 +38,7 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
       const allProfiles = await getAllAccounts();
       setAccounts(allProfiles);
     } catch (error) {
-      console.error('Error loading accounts:', error);
+      logger.error('Error loading accounts:', error);
       setError(t('select.failed'));
     } finally {
       setIsLoading(false);
