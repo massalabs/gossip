@@ -4,7 +4,7 @@ import { Preferences } from '@capacitor/preferences';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { toast } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import {
   LOG_LIMIT_OPTIONS,
   type LogLimit,
