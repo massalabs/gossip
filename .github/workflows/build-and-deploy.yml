@@ -402,24 +402,36 @@ jobs:
         with:
           xcode-version: '26.0'
 
-      # The macos-26 runner image ships Xcode 26 but the iOS 26.0
-      # platform SDK is not always pre-installed. xcodebuild fails the
-      # archive with "iOS 26.0 is not installed. Please download and
-      # install the platform from Xcode > Settings > Components." when
-      # the SDK is missing. Keep the dev-side `runFirstLaunch` plus
-      # before/after SDK listing here; it is stricter than a bare
-      # `xcodebuild -downloadPlatform iOS`.
+      # The macos-26 runner image ships Xcode 26, but platform content can
+      # vary between images. Download the iOS platform only when the required
+      # SDKs are missing: `xcodebuild -downloadPlatform iOS` is flaky when the
+      # platform is already present.
       - name: Install and verify iOS 26 platform SDK
         run: |
+          set -euo pipefail
+
+          has_ios_26_sdks() {
+            xcodebuild -showsdks | grep -q "iphoneos26.0" &&
+            xcodebuild -showsdks | grep -q "iphonesimulator26.0"
+          }
+
           echo "Selected Xcode:"
           xcode-select -p
           xcodebuild -version
           echo "SDKs before install:"
           xcodebuild -showsdks || true
           sudo xcodebuild -runFirstLaunch
-          sudo xcodebuild -downloadPlatform iOS
+
+          if has_ios_26_sdks; then
+            echo "iOS 26 platform SDK is already installed; skipping download."
+          else
+            echo "iOS 26 platform SDK missing; downloading..."
+            sudo xcodebuild -downloadPlatform iOS
+          fi
+
           echo "SDKs after install:"
           xcodebuild -showsdks
+          has_ios_26_sdks
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
