@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import React, {
   useCallback,
   useEffect,
@@ -187,7 +188,7 @@ const DiscussionSettings: React.FC = () => {
         reconnectTimeoutRef.current = null;
       }, 2000);
     } catch (error) {
-      console.error('Failed to reset connection:', error);
+      logger.error('Failed to reset connection:', error);
     }
   }, [discussion?.contactUserId, manualRenewDiscussion]);
 

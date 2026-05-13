@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Contact } from '@massalabs/gossip-sdk';
@@ -207,7 +208,7 @@ export function useContactForm() {
           setUserId(prev => ({ ...prev, loading: false }));
           return;
         } catch (error) {
-          console.error('Failed to fetch public key:', error);
+          logger.error('Failed to fetch public key:', error);
           setUserId(prev => ({
             ...prev,
             error:
@@ -264,7 +265,7 @@ export function useContactForm() {
         setPublicKeys(publicKey);
         setUserId(prev => ({ ...prev, loading: false }));
       } catch (error) {
-        console.error('Failed to fetch public key:', error);
+        logger.error('Failed to fetch public key:', error);
         setUserId(prev => ({
           ...prev,
           error: 'Unable to load public key for this user ID. Please check it.',
@@ -436,7 +437,7 @@ export function useContactForm() {
         publicKeys
       );
       if (!result.success && result.error) {
-        console.error('Failed to add contact:', result.error);
+        logger.error('Failed to add contact:', result.error);
         setGeneralError('Failed to add contact. Please try again.');
         return;
       }
@@ -449,7 +450,7 @@ export function useContactForm() {
       try {
         await gossip.discussions.start(contact, payload);
       } catch (e) {
-        console.error(
+        logger.error(
           'Failed to initialize discussion after contact creation:',
           e
         );
@@ -457,7 +458,7 @@ export function useContactForm() {
 
       navigate(ROUTES.default());
     } catch (err) {
-      console.error(err);
+      logger.error(err);
       setGeneralError('Failed to add contact. Please try again.');
     } finally {
       setIsSubmitting(false);

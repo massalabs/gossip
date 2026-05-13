@@ -1,3 +1,4 @@
+import { logger } from './utils/logs.js';
 /**
  * GossipSdk - SDK with clean lifecycle API
  *
@@ -235,13 +236,13 @@ class GossipSdk {
   async init(options: GossipSdkInitOptions): Promise<GossipSdk> {
     if (this.state.status !== SdkStatus.UNINITIALIZED) {
       if (import.meta.env?.DEV) {
-        console.warn('[GossipSdk] Already initialized');
+        logger.warn('[GossipSdk] Already initialized');
       }
       return this;
     }
 
     if (import.meta.env?.DEV) {
-      console.log('[GossipSdk] Initializing SDK');
+      logger.info('[GossipSdk] Initializing SDK');
     }
 
     // Merge config with defaults
@@ -257,7 +258,7 @@ class GossipSdk {
     startWasmInitialization();
 
     if (import.meta.env?.DEV) {
-      console.log('[GossipSdk] Initializing SQLite');
+      logger.info('[GossipSdk] Initializing SQLite');
     }
     this._conn = await DatabaseConnection.create({ storage: options.storage });
 
@@ -267,7 +268,7 @@ class GossipSdk {
     }
 
     if (import.meta.env?.DEV) {
-      console.log('[GossipSdk] SQLite initialized');
+      logger.info('[GossipSdk] SQLite initialized');
     }
     // Create message protocol
     const messageProtocol = createMessageProtocol();
@@ -989,7 +990,7 @@ class GossipSdk {
    */
   private startPolling(): void {
     if (this.state.status !== SdkStatus.SESSION_OPEN) {
-      console.warn('[GossipSdk] Cannot start polling - no session open');
+      logger.warn('[GossipSdk] Cannot start polling - no session open');
       return;
     }
 
@@ -1066,9 +1067,10 @@ class GossipSdk {
     if (this.state.status !== SdkStatus.SESSION_OPEN) return;
 
     // A/B test escape hatch: skip the entire pipeline if the debug flag
-    // is set in the dev console. WARNING: if the app crashes/reloads
-    // while this is on, the session state is lost. Gated on DEV so that
-    // a production XSS cannot silently disable session persistence.
+    // is set from browser developer tools. WARNING: if the app
+    // crashes/reloads while this is on, the session state is lost. Gated
+    // on DEV so that a production XSS cannot silently disable session
+    // persistence.
     if (
       import.meta.env?.DEV &&
       typeof globalThis !== 'undefined' &&
@@ -1256,12 +1258,12 @@ class GossipSdk {
       }
 
       if (stuck.length > 0 && import.meta.env?.DEV) {
-        console.log(
+        logger.info(
           `[GossipSdk] Reset ${stuck.length} stuck SENDING message(s) to WAITING_SESSION for auto-retry`
         );
       }
     } catch (error) {
-      console.error('[GossipSdk] Failed to reset stuck messages:', error);
+      logger.error('[GossipSdk] Failed to reset stuck messages:', error);
     }
   }
 }

@@ -1,6 +1,7 @@
 import path from 'path';
 import { VitePWA } from 'vite-plugin-pwa';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+import { transformSync } from 'esbuild';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { ViteImageOptimizer } from 'vite-plugin-image-optimizer';
@@ -9,9 +10,92 @@ import mkcert from 'vite-plugin-mkcert';
 // @ts-expect-error — vite-plugin-cross-origin-isolation has no .d.ts
 import crossOriginIsolation from 'vite-plugin-cross-origin-isolation';
 
+const consoleCallPattern =
+  /(?:[A-Za-z_$][\w$]*\.)?console\.(?:log|debug|info|warn|error)\s*\(/g;
+
+function stripConsoleCalls(source: string): string {
+  let output = '';
+  let cursor = 0;
+
+  for (const match of source.matchAll(consoleCallPattern)) {
+    // RegExp match indices are present for matchAll results, but TS types them
+    // as optional in some lib versions.
+    if (match.index === undefined) continue;
+
+    const start = match.index;
+    let index = start + match[0].length;
+    let depth = 1;
+    let quote: string | null = null;
+
+    while (index < source.length && depth > 0) {
+      const char = source[index];
+      const prev = source[index - 1];
+
+      if (quote) {
+        if (char === quote && prev !== '\\') quote = null;
+      } else if (char === '"' || char === "'" || char === '`') {
+        quote = char;
+      } else if (char === '(') {
+        depth++;
+      } else if (char === ')') {
+        depth--;
+      }
+
+      index++;
+    }
+
+    output += source.slice(cursor, start);
+    output += 'void 0';
+    cursor = index;
+  }
+
+  output += source.slice(cursor);
+  return output;
+}
+
+function stripReleaseConsolePlugin(): Plugin {
+  const strip = (code: string): string => {
+    const transformed = transformSync(code, {
+      loader: 'js',
+      target: 'esnext',
+      format: 'esm',
+      drop: ['console', 'debugger'],
+      minify: true,
+    }).code;
+
+    return stripConsoleCalls(transformed);
+  };
+
+  return {
+    name: 'strip-release-console',
+    apply: 'build',
+    renderChunk(code) {
+      return {
+        code: strip(code),
+        map: null,
+      };
+    },
+    generateBundle(_options, bundle) {
+      for (const item of Object.values(bundle)) {
+        // Some worker/vendor JavaScript is emitted as assets and never reaches
+        // renderChunk. Strip only those assets here to avoid double-processing
+        // normal chunks while keeping the final dist logging audit strict.
+        if (
+          item.type === 'asset' &&
+          item.fileName.endsWith('.js') &&
+          typeof item.source === 'string'
+        ) {
+          item.source = strip(item.source);
+        }
+      }
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
+    stripReleaseConsolePlugin(),
     react(),
     tailwindcss(),
     mkcert(), // ← Enables HTTPS locally

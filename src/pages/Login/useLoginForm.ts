@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import { useState, useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -54,7 +55,7 @@ export function useLoginForm({
           throw new Error('Failed to load account');
         }
       } catch (error) {
-        console.error('Password authentication failed:', error);
+        logger.error('Password authentication failed:', error);
         onErrorChange?.(t('login.invalid_password'));
         setPassword('');
         if (window.location.pathname !== ROUTES.welcome()) {

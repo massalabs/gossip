@@ -1,3 +1,4 @@
+import { logger } from '../utils/logs.js';
 /**
  * SDK Polling Manager
  *
@@ -60,7 +61,7 @@ export class SdkPolling {
     this.callbacks = callbacks;
     this.eventEmitter = eventEmitter;
 
-    console.log('[SdkPolling] Starting polling', {
+    logger.info('[SdkPolling] Starting polling', {
       messagesIntervalMs: config.polling.messagesIntervalMs,
       announcementsIntervalMs: config.polling.announcementsIntervalMs,
       sessionRefreshIntervalMs: config.polling.sessionRefreshIntervalMs,

@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
-import { enableDebugLogger } from './utils/logger.ts';
+import { configureAppLogging, logger } from './utils/logger.ts';
 import { showInitError } from './utils/initError.ts';
 import { installSafariWorkerDedup } from './utils/safariWorkerDedup';
 import { createSdk } from './sdk';
@@ -85,22 +85,18 @@ window.addEventListener('load', () => {
       const state = JSON.parse(savedState);
       // If the page was refreshed recently (within 5 seconds), it was likely accidental
       if (Date.now() - state.timestamp < 5000) {
-        console.log('Page refresh detected, restoring state...');
+        logger.debug('Page refresh detected, restoring state...');
         // You could add logic here to restore the previous screen
       }
     } catch (e) {
-      console.log('Could not restore app state:', e);
+      logger.debug('Could not restore app state:', e);
     }
   }
 });
 
-// Only enable the debug logger in development to avoid persisting
-// potentially sensitive console output in production builds.
-// if (import.meta.env.DEV) {
-// We keep it during development phase
-// TODO - Remove this once we have a proper debug mode in settings
-enableDebugLogger();
-// }
+// Configure the shared app/SDK logger before creating the SDK so all
+// runtime logging uses the same sinks. Release builds configure no sinks.
+configureAppLogging();
 
 const isNative = Capacitor.isNativePlatform();
 
@@ -141,7 +137,7 @@ bootstrap()
     // detail for debugging; the user-facing showInitError() renders one
     // of two generic strings.
     if (import.meta.env.DEV) {
-      console.error('[Gossip] Failed to initialize:', error);
+      logger.error('[Gossip] Failed to initialize:', error);
     }
     showInitError(error);
   });

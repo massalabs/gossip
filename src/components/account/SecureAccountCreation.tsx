@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../../stores/accountStore';
@@ -46,7 +47,7 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
       setMainUsername(result.username);
       setStep('setup');
     } catch (err) {
-      console.error('Error creating account:', err);
+      logger.error('Error creating account:', err);
       setError(err instanceof Error ? err.message : t('create.failed'));
       setStep('form');
     }

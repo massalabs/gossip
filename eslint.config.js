@@ -36,6 +36,7 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
+      'no-console': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
@@ -71,6 +72,30 @@ export default tseslint.config(
             'ALLOWED-TRANSFER: <why>` above the call to silence this rule.',
         },
       ],
+    },
+  },
+  {
+    // Runtime logging boundaries: these are the only app source files allowed
+    // to call console.* directly, because they route shared logger events to
+    // platform-specific sinks.
+    files: ['src/utils/logger.ts', 'src/sw.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  {
+    // Non-runtime code may use console.* for test diagnostics, examples,
+    // scripts, and build/config output.
+    files: [
+      'test/**/*.{ts,tsx}',
+      'gossip-sdk/test/**/*.{ts,tsx}',
+      'gossip-sdk/examples/**/*.{ts,tsx}',
+      'gossip-sdk/scripts/**/*.{ts,tsx}',
+      '**/*.config.{ts,js}',
+      'scripts/**/*.{ts,js,mjs}',
+    ],
+    rules: {
+      'no-console': 'off',
     },
   },
   // Gossip SDK: enforce explicit .js extensions in relative imports

@@ -1,3 +1,4 @@
+import { logger } from './logs.js';
 /**
  * Discussion Utilities
  *
@@ -39,7 +40,7 @@ export async function updateDiscussionPin(
     await queries.discussions.updateById(discussionId, { pinned });
     return { success: true };
   } catch (e) {
-    console.error('updateDiscussionPin failed', e);
+    logger.error('updateDiscussionPin failed', e);
     return {
       success: false,
       message: 'Failed to update pin. Please try again.',
@@ -86,7 +87,7 @@ export async function updateDiscussionName(
 
     return { success: true, trimmedName: customName ?? undefined };
   } catch (e) {
-    console.error('updateDiscussionName failed', e);
+    logger.error('updateDiscussionName failed', e);
     return {
       success: false,
       reason: 'error',

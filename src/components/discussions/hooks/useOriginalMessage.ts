@@ -1,3 +1,4 @@
+import { logger } from '../../../utils/logger.ts';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Message, encodeUserId } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../../../hooks/useGossipSdk';
@@ -69,7 +70,7 @@ export function useOriginalMessage({
             setOriginalNotFound(true);
           }
         } catch (e) {
-          console.error('Error finding message by seeker:', e);
+          logger.error('Error finding message by seeker:', e);
           setDbOriginal(null);
           setOriginalNotFound(true);
         } finally {

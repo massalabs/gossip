@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -56,7 +57,7 @@ const Contact: React.FC = () => {
     try {
       return UserPublicKeys.from_bytes(contact.publicKeys);
     } catch (error) {
-      console.error('Failed to decode contact public keys', error);
+      logger.error('Failed to decode contact public keys', error);
       return null;
     }
   }, [contact]);
@@ -79,7 +80,7 @@ const Contact: React.FC = () => {
       }
       const result = await gossip.contacts.updateName(contact.userId, name);
       if (!result.success) {
-        console.error('Failed to update contact name:', result.message);
+        logger.error('Failed to update contact name:', result.message);
         setNameError(t('remove_modal.rename_failed'));
         return;
       }
@@ -109,7 +110,7 @@ const Contact: React.FC = () => {
     try {
       const result = await gossip.contacts.delete(contact.userId);
       if (!result.success) {
-        console.error('Failed to delete contact:', result.message);
+        logger.error('Failed to delete contact:', result.message);
         setDeleteError(t('remove_modal.failed'));
         setIsDeleting(false);
         return;
@@ -121,7 +122,7 @@ const Contact: React.FC = () => {
       // Navigate back to discussions
       navigate('/discussions');
     } catch (error) {
-      console.error('Error deleting contact:', error);
+      logger.error('Error deleting contact:', error);
       setDeleteError(t('remove_modal.failed'));
       setIsDeleting(false);
     }

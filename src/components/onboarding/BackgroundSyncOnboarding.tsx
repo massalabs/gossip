@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Battery, Zap } from 'react-feather';
@@ -35,7 +36,7 @@ const BackgroundSyncOnboarding: React.FC<Props> = ({
         await ForegroundSync.stop();
       }
     } catch (e) {
-      console.error('Foreground sync toggle failed:', e);
+      logger.error('Foreground sync toggle failed:', e);
       setEnabled(!next);
     }
   };

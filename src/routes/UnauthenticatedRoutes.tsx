@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import React from 'react';
 import { Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAccountStore } from '../stores/accountStore';
@@ -52,7 +53,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
         useAppStore.getState().setIsInitialized(false);
       }
     } catch (error) {
-      console.error('Failed to check existing accounts:', error);
+      logger.error('Failed to check existing accounts:', error);
       useAppStore.getState().setIsInitialized(false);
     }
   };

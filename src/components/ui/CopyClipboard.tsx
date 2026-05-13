@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Check, Copy } from 'react-feather';
 
@@ -35,7 +36,7 @@ const CopyClipboard: React.FC<CopyClipboardProps> = ({
       }
       timeoutRef.current = setTimeout(() => setIsCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      logger.error('Failed to copy:', err);
     }
   }, [text]);
 

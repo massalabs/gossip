@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * Notification Service
  *
@@ -85,7 +86,7 @@ export class NotificationService {
 
       this.nativePermissionInitialized = true;
     } catch (error) {
-      console.error(
+      logger.error(
         'Failed to initialize native notification permission status:',
         error
       );
@@ -267,7 +268,7 @@ export class NotificationService {
       });
     } catch (error) {
       // If anything goes wrong, log and fall back to browser-based notification
-      console.error(
+      logger.error(
         'Failed to show native notification, falling back to web notification:',
         error
       );
@@ -352,7 +353,7 @@ export class NotificationService {
 
         return this.permission;
       } catch (error) {
-        console.error(
+        logger.error(
           'Failed to request native notification permission:',
           error
         );
@@ -362,7 +363,7 @@ export class NotificationService {
 
     // Web / PWA path: use browser Notification API
     if (!('Notification' in window)) {
-      console.warn('This browser does not support notifications');
+      logger.warn('This browser does not support notifications');
       return this.permission;
     }
 
@@ -371,7 +372,7 @@ export class NotificationService {
       this.updatePermissionStatus();
       return this.permission;
     } catch (error) {
-      console.error('Failed to request notification permission:', error);
+      logger.error('Failed to request notification permission:', error);
       return this.permission;
     }
   }
@@ -408,7 +409,7 @@ export class NotificationService {
         }
       );
     } catch (error) {
-      console.error('Failed to show discussion notification:', error);
+      logger.error('Failed to show discussion notification:', error);
     }
   }
 
@@ -440,7 +441,7 @@ export class NotificationService {
         }
       );
     } catch (error) {
-      console.error('Failed to show new discussion notification:', error);
+      logger.error('Failed to show new discussion notification:', error);
     }
   }
 
@@ -586,7 +587,7 @@ export class NotificationService {
           notification.close();
         });
       } catch (error) {
-        console.error('Failed to clear notifications:', error);
+        logger.error('Failed to clear notifications:', error);
       }
     }
   }

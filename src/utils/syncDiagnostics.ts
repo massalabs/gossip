@@ -1,3 +1,4 @@
+import { logger } from './logger.ts';
 /**
  * Opt-in console diagnostics for background sync (web + native init path).
  * Enable: `localStorage.setItem('gossip-sync-diagnostics', '1')` then reload.
@@ -24,8 +25,8 @@ export function logSyncDiagnostics(
     return;
   }
   if (data !== undefined) {
-    console.info(`[GossipSync] ${message}`, data);
+    logger.info(`[GossipSync] ${message}`, data);
   } else {
-    console.info(`[GossipSync] ${message}`);
+    logger.info(`[GossipSync] ${message}`);
   }
 }

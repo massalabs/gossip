@@ -1,3 +1,4 @@
+import { logger } from './logs.js';
 /**
  * Contact Utilities
  *
@@ -81,7 +82,7 @@ export async function updateContactName(
 
     return { success: true, trimmedName: trimmed };
   } catch (e) {
-    console.error('updateContactName failed', e);
+    logger.error('updateContactName failed', e);
     return {
       success: false,
       reason: 'error',
@@ -150,7 +151,7 @@ export async function deleteContact(
 
     return { success: true };
   } catch (e) {
-    console.error('deleteContact failed', e);
+    logger.error('deleteContact failed', e);
     return {
       success: false,
       reason: 'error',
@@ -194,7 +195,7 @@ export async function addContact(
     );
     return { success: true, contact: newContact ?? undefined };
   } catch (error) {
-    console.error('Error adding contact:', error);
+    logger.error('Error adding contact:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

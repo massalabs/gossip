@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -54,7 +55,7 @@ export function useDiscussionActions({
         );
       } catch (error) {
         toast.error(t('failed_to_send'));
-        console.error('Failed to send message:', error);
+        logger.error('Failed to send message:', error);
       }
     },
     [
@@ -110,7 +111,7 @@ export function useDiscussionActions({
         await deleteMessage(contact.userId, message.id);
       } catch (error) {
         toast.error(t('failed_to_delete'));
-        console.error('Failed to delete message:', error);
+        logger.error('Failed to delete message:', error);
       }
     },
     [contact?.userId, deleteMessage, t]
@@ -135,7 +136,7 @@ export function useDiscussionActions({
         await editMessage(contact.userId, message.id, newContent);
       } catch (error) {
         toast.error(t('failed_to_edit'));
-        console.error('Failed to edit message:', error);
+        logger.error('Failed to edit message:', error);
       }
     },
     [contact?.userId, editMessage, t, setEditingMessage, setInputPrefill]

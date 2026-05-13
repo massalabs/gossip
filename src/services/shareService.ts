@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -242,7 +243,7 @@ export async function shareInvitation(
     } catch (error) {
       if (isShareCancellation(error)) return;
       // If Web Share API fails, fall back to clipboard
-      console.warn('Web Share API failed, falling back to clipboard:', error);
+      logger.warn('Web Share API failed, falling back to clipboard:', error);
     }
   }
 
