@@ -403,35 +403,19 @@ jobs:
           xcode-version: '26.0'
 
       # The macos-26 runner image ships Xcode 26, but platform content can
-      # vary between images. Download the iOS platform only when the required
-      # SDKs are missing: `xcodebuild -downloadPlatform iOS` is flaky when the
-      # platform is already present.
+      # vary between images. Do first-launch setup here and print SDKs for
+      # diagnostics; the real archive-destination check runs after pods and
+      # Capacitor sync, when the workspace is ready.
       - name: Install and verify iOS 26 platform SDK
         run: |
           set -euo pipefail
 
-          has_ios_26_sdks() {
-            xcodebuild -showsdks | grep -q "iphoneos26.0" &&
-            xcodebuild -showsdks | grep -q "iphonesimulator26.0"
-          }
-
           echo "Selected Xcode:"
           xcode-select -p
           xcodebuild -version
-          echo "SDKs before install:"
-          xcodebuild -showsdks || true
           sudo xcodebuild -runFirstLaunch
-
-          if has_ios_26_sdks; then
-            echo "iOS 26 platform SDK is already installed; skipping download."
-          else
-            echo "iOS 26 platform SDK missing; downloading..."
-            sudo xcodebuild -downloadPlatform iOS
-          fi
-
-          echo "SDKs after install:"
+          echo "Installed SDKs:"
           xcodebuild -showsdks
-          has_ios_26_sdks
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
@@ -448,6 +432,45 @@ jobs:
 
       - name: Sync Capacitor iOS
         run: npm run cap:sync:ios
+
+      # `xcodebuild -showsdks` can list iphoneos26.0 while archive destinations
+      # are still ineligible ("iOS 26.0 is not installed"). Validate the exact
+      # destination Fastlane uses, and only call the flaky platform downloader
+      # when Xcode cannot archive to generic iOS.
+      - name: Verify iOS archive destination
+        run: |
+          set -euo pipefail
+
+          can_archive_ios() {
+            xcodebuild \
+              -workspace ios/App/App.xcworkspace \
+              -scheme Gossip \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -showBuildSettings \
+              > /tmp/gossip-ios-destination-check.log 2>&1
+          }
+
+          if can_archive_ios; then
+            echo "generic/platform=iOS is available."
+            exit 0
+          fi
+
+          echo "generic/platform=iOS is not available before platform download."
+          cat /tmp/gossip-ios-destination-check.log
+          echo "Attempting to download/register iOS platform content..."
+
+          if ! sudo xcodebuild -downloadPlatform iOS; then
+            echo "xcodebuild -downloadPlatform iOS failed; verifying destination again before failing."
+          fi
+
+          if can_archive_ios; then
+            echo "generic/platform=iOS is available after platform download."
+          else
+            echo "generic/platform=iOS is still unavailable after platform download."
+            cat /tmp/gossip-ios-destination-check.log
+            exit 1
+          fi
 
       # Cache cargo registry/git + the secureStorage build dir between
       # runs (mirrors the Android job and rust-wasm.yml). Saves ~1 min
