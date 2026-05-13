@@ -18,6 +18,10 @@ function stripConsoleCalls(source: string): string {
   let cursor = 0;
 
   for (const match of source.matchAll(consoleCallPattern)) {
+    // RegExp match indices are present for matchAll results, but TS types them
+    // as optional in some lib versions.
+    if (match.index === undefined) continue;
+
     const start = match.index;
     let index = start + match[0].length;
     let depth = 1;
