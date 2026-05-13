@@ -77,9 +77,11 @@ function stripReleaseConsolePlugin(): Plugin {
     },
     generateBundle(_options, bundle) {
       for (const item of Object.values(bundle)) {
-        if (item.type === 'chunk') {
-          item.code = strip(item.code);
-        } else if (
+        // Some worker/vendor JavaScript is emitted as assets and never reaches
+        // renderChunk. Strip only those assets here to avoid double-processing
+        // normal chunks while keeping the final dist logging audit strict.
+        if (
+          item.type === 'asset' &&
           item.fileName.endsWith('.js') &&
           typeof item.source === 'string'
         ) {
