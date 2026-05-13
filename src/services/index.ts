@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * Service Instances
  *
@@ -45,11 +46,11 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
       if (!foreground) {
         try {
           await notificationService.showNewDiscussionNotification();
-          console.log('[SDK Event] New discussion request notification shown', {
+          logger.info('[SDK Event] New discussion request notification shown', {
             contactUserId: contact.userId,
           });
         } catch (error) {
-          console.error('[SDK Event] Failed to show notification:', error);
+          logger.error('[SDK Event] Failed to show notification:', error);
         }
       }
     }
@@ -80,7 +81,7 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
         message.contactUserId
       );
     } catch (error) {
-      console.error('[SDK Event] Failed to show message notification:', error);
+      logger.error('[SDK Event] Failed to show message notification:', error);
     }
   });
 
@@ -88,7 +89,7 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   gossip.on(
     SdkEventType.ERROR,
     ({ error, context }: { error: Error; context: string }) => {
-      console.error(`[SDK Error:${context}]`, error);
+      logger.error(`[SDK Error:${context}]`, error);
     }
   );
 }

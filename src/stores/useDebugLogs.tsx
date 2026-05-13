@@ -272,7 +272,6 @@ export const useDebugLogs = create<DebugStore>()(
             ) {
               return true; // Consider cancelled as "handled"
             }
-            console.error('Native share failed:', error);
             return false;
           }
         };

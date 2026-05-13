@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import React, { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import BaseModal from '../components/ui/BaseModal';
@@ -86,7 +87,7 @@ const Settings = (): React.ReactElement => {
       await resetAccount();
       navigate(ROUTES.default());
     } catch (error) {
-      console.error('Failed to reset account:', error);
+      logger.error('Failed to reset account:', error);
     }
   }, [resetAccount, navigate]);
 
@@ -94,7 +95,7 @@ const Settings = (): React.ReactElement => {
     try {
       await logout();
     } catch (error) {
-      console.error('Failed to lock app:', error);
+      logger.error('Failed to lock app:', error);
     }
   };
 
@@ -103,7 +104,7 @@ const Settings = (): React.ReactElement => {
       try {
         await updateUsername(newUsername);
       } catch (error) {
-        console.error('Failed to update username:', error);
+        logger.error('Failed to update username:', error);
         throw error;
       }
     },

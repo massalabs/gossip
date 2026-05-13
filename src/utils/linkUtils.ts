@@ -1,3 +1,4 @@
+import { logger } from './logger.ts';
 /**
  * Represents a segment of text that can be either plain text or a link
  */
@@ -235,7 +236,7 @@ export function openUrl(url: string): void {
   try {
     new URL(url);
   } catch {
-    console.warn('Invalid URL:', url);
+    logger.warn('Invalid URL:', url);
     return;
   }
 

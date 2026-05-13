@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState } from 'react';
 import { useAccountStore } from '../../stores/accountStore';
 import { useAppStore } from '../../stores/appStore';
@@ -30,7 +31,7 @@ const DevAccountPicker: React.FC<DevAccountPickerProps> = ({
       });
       useAppStore.getState().setIsInitialized(true);
     } catch (err) {
-      console.error('[dev] Failed to restore account:', err);
+      logger.error('[dev] Failed to restore account:', err);
       setError(
         `Failed to restore ${account.name}: ${err instanceof Error ? err.message : 'Unknown error'}`
       );

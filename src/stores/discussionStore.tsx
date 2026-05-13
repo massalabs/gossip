@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
 import { Contact, SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
@@ -146,7 +147,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           contacts: contactsList,
         });
       } catch (error) {
-        console.error('Discussion/contacts fetch error:', error);
+        logger.error('Discussion/contacts fetch error:', error);
       } finally {
         isFetching = false;
       }

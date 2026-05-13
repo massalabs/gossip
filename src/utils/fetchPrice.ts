@@ -1,3 +1,4 @@
+import { logger } from './logger.ts';
 interface PriceProvider {
   fetchPrice(base: string, quote: string): Promise<number | null>;
   fetchPrices(
@@ -18,7 +19,7 @@ abstract class BasePriceProvider implements PriceProvider {
 
         if (response.status === 429) {
           // Rate limit encountered, notify user and retry after delay
-          console.warn(
+          logger.warn(
             `Rate limit hit (HTTP 429) when fetching ${url}. Retrying in ${delay * attempt}ms (attempt ${attempt} of ${retries})`
           );
           await new Promise(resolve => setTimeout(resolve, delay * attempt));

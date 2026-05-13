@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
@@ -45,7 +46,7 @@ export function useProfileLoader() {
           useAppStore.getState().setIsInitialized(false);
         }
       } catch (error) {
-        console.error('Error loading user profile from SQLite:', error);
+        logger.error('Error loading user profile from SQLite:', error);
         useAppStore.getState().setIsInitialized(false);
       } finally {
         setLoading(false);

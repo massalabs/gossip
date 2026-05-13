@@ -36,6 +36,7 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
+      'no-console': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
@@ -71,6 +72,25 @@ export default tseslint.config(
             'ALLOWED-TRANSFER: <why>` above the call to silence this rule.',
         },
       ],
+    },
+  },
+  {
+    files: ['src/utils/logger.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  {
+    files: [
+      'test/**/*.{ts,tsx}',
+      'gossip-sdk/test/**/*.{ts,tsx}',
+      'gossip-sdk/examples/**/*.{ts,tsx}',
+      'gossip-sdk/scripts/**/*.{ts,tsx}',
+      '**/*.config.{ts,js}',
+      'scripts/**/*.{ts,js,mjs}',
+    ],
+    rules: {
+      'no-console': 'off',
     },
   },
   // Gossip SDK: enforce explicit .js extensions in relative imports

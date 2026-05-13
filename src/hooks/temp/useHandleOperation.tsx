@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import { useState, useCallback, useMemo } from 'react';
 import { Operation, OperationStatus } from '@massalabs/massa-web3';
 import { OperationError } from './types';
@@ -76,7 +77,7 @@ export function useHandleOperation(): UseHandleOperationResult {
           status === OperationStatus.Error ||
           status === OperationStatus.SpeculativeError
         ) {
-          console.error('Operation failed with status:', status);
+          logger.error('Operation failed with status:', status);
           const error = {
             message: 'Operation failed. Please try again.',
             status,
@@ -88,7 +89,7 @@ export function useHandleOperation(): UseHandleOperationResult {
         reset();
         return null;
       } catch (err) {
-        console.error('Operation error:', err);
+        logger.error('Operation error:', err);
         const error = {
           message: 'Operation failed. Please try again.',
         };

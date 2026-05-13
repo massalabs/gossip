@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * WebAuthn/FIDO2 utilities for biometric authentication and key generation
  */
@@ -51,7 +52,7 @@ export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
     const available = await pkc.isUserVerifyingPlatformAuthenticatorAvailable();
     return available;
   } catch (error) {
-    console.error('Error checking platform authenticator availability:', error);
+    logger.error('Error checking platform authenticator availability:', error);
     return false;
   }
 }
@@ -100,18 +101,18 @@ export async function isWebAuthnPrfSupported(): Promise<boolean> {
     // In this case we treat PRF as "unknown" and allow the flow; runtime
     // create/get checks still enforce PRF support before key derivation.
     if (capabilities?.passkeyPlatformAuthenticator === true) {
-      console.info(
+      logger.info(
         '[biometric][preflight] PRF capability unknown; allowing via platform passkey fallback'
       );
       return true;
     }
 
-    console.info(
+    logger.info(
       '[biometric][preflight] PRF capability not advertised by browser API'
     );
     return false;
   } catch (error) {
-    console.warn('[biometric][preflight] PRF capability check failed', error);
+    logger.warn('[biometric][preflight] PRF capability check failed', error);
     return false;
   }
 }
@@ -206,7 +207,7 @@ export async function createWebAuthnCredential(
       authMethod: 'webauthn',
     };
   } catch (error) {
-    console.error('Error creating WebAuthn credential:', error);
+    logger.error('Error creating WebAuthn credential:', error);
     throw new Error(
       `Failed to create biometric credential: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
@@ -293,7 +294,7 @@ export async function authenticateWithWebAuthn(
       encryptionKey,
     };
   } catch (error) {
-    console.error('Error authenticating with WebAuthn:', error);
+    logger.error('Error authenticating with WebAuthn:', error);
     throw new Error(
       `Biometric authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`
     );

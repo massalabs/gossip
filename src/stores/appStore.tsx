@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { NetworkName, Provider } from '@massalabs/massa-web3';
@@ -158,7 +159,7 @@ const useAppStoreBase = create<AppStoreState>()(
           const domainsWithSuffix = domains.map(domain => `${domain}.massa`);
           set({ mnsDomains: domainsWithSuffix });
         } catch (error) {
-          console.error('Error fetching MNS domains:', error);
+          logger.error('Error fetching MNS domains:', error);
           set({ mnsDomains: [] });
         }
       },

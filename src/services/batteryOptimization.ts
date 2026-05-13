@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * Battery Optimization Service
  *
@@ -161,7 +162,7 @@ class BatteryOptimizationService {
 
       return status;
     } catch (error) {
-      console.error('Failed to get battery optimization status:', error);
+      logger.error('Failed to get battery optimization status:', error);
       return this.cachedStatus;
     }
   }
@@ -285,7 +286,7 @@ class BatteryOptimizationService {
       await BatteryOptimizationPlugin.openBatteryOptimizationSettings();
       return true;
     } catch (error) {
-      console.error('Failed to open battery optimization settings:', error);
+      logger.error('Failed to open battery optimization settings:', error);
       return false;
     }
   }
@@ -302,7 +303,7 @@ class BatteryOptimizationService {
       await BatteryOptimizationPlugin.openAppSettings();
       return true;
     } catch (error) {
-      console.error('Failed to open app settings:', error);
+      logger.error('Failed to open app settings:', error);
       return false;
     }
   }
@@ -319,7 +320,7 @@ class BatteryOptimizationService {
       await BatteryOptimizationPlugin.openXiaomiAutoStartSettings();
       return true;
     } catch (error) {
-      console.error('Failed to open Xiaomi AutoStart settings:', error);
+      logger.error('Failed to open Xiaomi AutoStart settings:', error);
       return false;
     }
   }

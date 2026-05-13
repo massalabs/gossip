@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * Service Worker Setup
  *
@@ -64,7 +65,7 @@ async function registerAndStartSync(): Promise<void> {
       await handleExistingRegistration();
     }
   } catch (error) {
-    console.error('App: Error checking service worker registrations:', error);
+    logger.error('App: Error checking service worker registrations:', error);
   }
 }
 
@@ -88,16 +89,13 @@ async function registerServiceWorker(): Promise<void> {
       try {
         const response = await fetch(swUrl, { method: 'HEAD' });
         if (!response.ok) {
-          console.warn(
+          logger.warn(
             `Service worker at ${swUrl} returned status ${response.status}`
           );
           return;
         }
       } catch (fetchError) {
-        console.warn(
-          `Could not verify service worker at ${swUrl}:`,
-          fetchError
-        );
+        logger.warn(`Could not verify service worker at ${swUrl}:`, fetchError);
         // Continue anyway - registration will fail if file doesn't exist
       }
     }
@@ -110,11 +108,11 @@ async function registerServiceWorker(): Promise<void> {
 
     return;
   } catch (error) {
-    console.error(`Failed to register service worker at ${swUrl}:`, error);
+    logger.error(`Failed to register service worker at ${swUrl}:`, error);
   }
 
   // If we get here, all attempts failed
-  console.error(
+  logger.error(
     'App: Failed to register service worker. Sync will only work when app is open.'
   );
 }
@@ -134,7 +132,7 @@ async function handleExistingRegistration(): Promise<void> {
     // No need to send message - it's handled automatically
     await navigator.serviceWorker.ready;
   } catch (error) {
-    console.error('App: Error waiting for service worker ready:', error);
+    logger.error('App: Error waiting for service worker ready:', error);
   }
 }
 
@@ -163,7 +161,7 @@ async function initializeBackgroundSync(): Promise<void> {
     await initializeNetworkObserver();
   } catch (error) {
     // Only log truly unexpected errors (not periodic sync failures)
-    console.error('[App] Failed to initialize background sync service:', error);
+    logger.error('[App] Failed to initialize background sync service:', error);
   }
 }
 
@@ -180,16 +178,16 @@ async function initializeBackgroundSync(): Promise<void> {
  */
 async function initializeNetworkObserver(): Promise<void> {
   if (!networkObserverService.isAvailable()) {
-    console.log('[App] Network observer not available on this platform');
+    logger.info('[App] Network observer not available on this platform');
     return;
   }
 
   try {
     await networkObserverService.startObserving();
-    console.log('[App] Network observer initialized');
+    logger.info('[App] Network observer initialized');
   } catch (error) {
     // Non-critical - log and continue
-    console.error('[App] Failed to initialize network observer:', error);
+    logger.error('[App] Failed to initialize network observer:', error);
   }
 }
 

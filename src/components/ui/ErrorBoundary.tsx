@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle } from 'react-feather';
 import { GroupChatGraphic } from '../graphics';
@@ -23,7 +24,7 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    logger.error('ErrorBoundary caught an error:', error, errorInfo);
   }
 
   public render() {

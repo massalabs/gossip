@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Lock, Shield } from 'react-feather';
@@ -98,7 +99,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
 
       await onComplete();
     } catch (error) {
-      console.error('Error importing account:', error);
+      logger.error('Error importing account:', error);
       setError(t('import.failed'));
       setIsImporting(false);
     }

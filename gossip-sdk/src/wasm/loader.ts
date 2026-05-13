@@ -1,3 +1,4 @@
+import { logger } from '../utils/logs.js';
 /**
  * WASM Module Loader and Initialization Service
  *
@@ -76,7 +77,7 @@ export async function initializeWasm(): Promise<void> {
     } catch (error) {
       initError = error as Error;
       isInitializing = false;
-      console.error('[WASM] Failed to initialize WASM modules:', error);
+      logger.error('[WASM] Failed to initialize WASM modules:', error);
       throw error;
     }
   })();
@@ -106,6 +107,6 @@ export async function ensureWasmInitialized(): Promise<void> {
 export function startWasmInitialization(): void {
   // Fire and forget - start initialization in background
   initializeWasm().catch(error => {
-    console.error('[WASM] Background initialization error:', error);
+    logger.error('[WASM] Background initialization error:', error);
   });
 }

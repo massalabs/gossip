@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { Capacitor } from '@capacitor/core';
 import { SafeArea } from 'capacitor-plugin-safe-area';
 
@@ -64,6 +65,6 @@ export async function initSafeArea(): Promise<void> {
       applyInsets(insets);
     });
   } catch (error) {
-    console.error('[SafeArea] Failed to get insets:', error);
+    logger.error('[SafeArea] Failed to get insets:', error);
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import React, {
   useContext,
   useEffect,
@@ -310,7 +311,7 @@ const Discussion: React.FC = () => {
       toast.success(t('test_messages_sent', { count: TEST_MESSAGE_COUNT }));
     } catch (error) {
       toast.error(t('test_messages_failed'));
-      console.error('Failed to send test messages:', error);
+      logger.error('Failed to send test messages:', error);
     } finally {
       setIsSendingTestMessages(false);
     }
@@ -393,7 +394,7 @@ const Discussion: React.FC = () => {
           onReact={(message, emoji) => {
             if (!message.id) return;
             reactToMessage(contact.userId, emoji, message.id).catch(err => {
-              console.error('Failed to send reaction', err);
+              logger.error('Failed to send reaction', err);
             });
           }}
           getReactions={getReactions}
@@ -405,11 +406,11 @@ const Discussion: React.FC = () => {
           ) => {
             if (myReactionId || myReactionMessageId) {
               removeReaction(myReactionId, myReactionMessageId).catch(err => {
-                console.error('Failed to remove reaction', err);
+                logger.error('Failed to remove reaction', err);
               });
             } else if (message.id) {
               reactToMessage(contact.userId, emoji, message.id).catch(err => {
-                console.error('Failed to send reaction', err);
+                logger.error('Failed to send reaction', err);
               });
             }
           }}

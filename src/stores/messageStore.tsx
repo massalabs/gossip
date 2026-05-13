@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
 import {
   Message,
@@ -68,7 +69,7 @@ async function resolveReplyAndForward(
   if (forwardFromMessageId) {
     const orig = await getSdk().messages.get(forwardFromMessageId);
     if (!orig) {
-      console.warn('Forward target not found, sending as regular message');
+      logger.warn('Forward target not found, sending as regular message');
     } else if (!orig.messageId) {
       throw new Error('Cannot forward a message that has no messageId');
     } else if (orig.contactUserId === contactUserId) {
@@ -136,7 +137,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         };
       });
     } catch (error) {
-      console.error('Failed to load messages for contact:', error);
+      logger.error('Failed to load messages for contact:', error);
     }
   },
 
@@ -174,7 +175,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
         });
       } catch (error) {
-        console.error('Messages initial load error:', error);
+        logger.error('Messages initial load error:', error);
         set({ isInitializing: false });
         return;
       }
@@ -230,7 +231,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     try {
       const result = await getSdk().messages.send(optimisticMsg);
       if (!result.success || !result.message) {
-        console.error('Failed to send message:', result.error);
+        logger.error('Failed to send message:', result.error);
         markMessageFailed(set, storeId);
         return;
       }
@@ -251,7 +252,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       // genuinely flips to SENT, so the listener path is the
       // truth-aligned signal.
     } catch (error) {
-      console.error('Failed to send message:', error);
+      logger.error('Failed to send message:', error);
       markMessageFailed(set, storeId);
     }
   },
@@ -297,7 +298,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     try {
       await getSdk().messages.deleteMessage(messageId);
     } catch (error) {
-      console.error('Failed to delete message:', error);
+      logger.error('Failed to delete message:', error);
       rollbackReplace(set, contactUserId, messageId, original);
     }
   },
@@ -322,7 +323,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     try {
       await getSdk().messages.editMessage(messageId, newContent);
     } catch (error) {
-      console.error('Failed to edit message:', error);
+      logger.error('Failed to edit message:', error);
       rollbackReplace(set, contactUserId, messageId, original);
     }
   },
@@ -402,7 +403,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         };
       });
     } catch (error) {
-      console.error(error);
+      logger.error(error);
       // Remove the optimistic reaction on failure
       removeReactionFromState(set, contactUserId, r =>
         r.storeId ? r.storeId === reactionMsg.storeId : false

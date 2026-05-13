@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useCallback, useState } from 'react';
 import * as yaml from 'js-yaml';
 
@@ -56,7 +57,7 @@ export function useFileShareContact() {
         mimeType: 'text/yaml;charset=utf-8',
       });
     } catch (e) {
-      console.error('Failed to share file:', e);
+      logger.error('Failed to share file:', e);
       setFileState(prev => ({
         ...prev,
         error: 'Failed to share file. Please try again.',
@@ -87,7 +88,7 @@ export function useFileShareContact() {
           try {
             bytes = decodeFromBase64(data.userPubKeys);
           } catch (e) {
-            console.error('Invalid userPubKeys format:', e);
+            logger.error('Invalid userPubKeys format:', e);
             setFileState(prev => ({
               ...prev,
               error: 'Invalid contact file format. Please check the file.',
@@ -108,7 +109,7 @@ export function useFileShareContact() {
         setFileState(prev => ({ ...prev, fileContact: contact }));
         return contact;
       } catch (e) {
-        console.error('Failed to import file:', e);
+        logger.error('Failed to import file:', e);
         setFileState(prev => ({
           ...prev,
           error: 'Failed to import file. Please check the file format.',

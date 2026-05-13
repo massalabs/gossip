@@ -2,6 +2,7 @@ export * from './announcementPayload.js';
 export * from './base64.js';
 export * from './contacts.js';
 export * from './discussions.js';
+export * from './logs.js';
 export * from './queue.js';
 export * from './type.js';
 export * from './userId.js';

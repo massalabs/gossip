@@ -1,3 +1,4 @@
+import { logger } from './logger.ts';
 /**
  * Device Info Utilities
  *
@@ -104,7 +105,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
       isNative: true,
     };
   } catch (error) {
-    console.error('Failed to get device info:', error);
+    logger.error('Failed to get device info:', error);
     cachedDeviceInfo = {
       platform,
       manufacturer: 'unknown',

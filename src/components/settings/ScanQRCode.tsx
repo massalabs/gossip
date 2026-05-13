@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { parseInvite } from '../../utils/invite';
@@ -26,7 +27,7 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
       try {
         await PrivacyScreen.disable();
       } catch (error) {
-        console.warn('Failed to disable privacy screen:', error);
+        logger.warn('Failed to disable privacy screen:', error);
       }
     };
 
@@ -38,7 +39,7 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
         try {
           await PrivacyScreen.enable();
         } catch (error) {
-          console.warn('Failed to enable privacy screen:', error);
+          logger.warn('Failed to enable privacy screen:', error);
         }
       })();
     };
@@ -52,7 +53,7 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
       const { userId, name } = parseInvite(qrText);
       onScanSuccess(userId, name);
     } catch (error) {
-      console.error('Failed to parse QR code:', error);
+      logger.error('Failed to parse QR code:', error);
       toast.error(t('qr_parse_failed'));
     } finally {
       setIsProcessing(false);
@@ -61,7 +62,7 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
 
   const handleError = (err: string) => {
     if (!isQrScanCancelledMessage(err)) {
-      console.warn('[QRScan]', err);
+      logger.warn('[QRScan]', err);
       toast.error(t('qr_scan_failed'));
     }
     onBack();

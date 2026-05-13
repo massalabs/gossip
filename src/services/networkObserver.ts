@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * Network Observer Service
  *
@@ -88,12 +89,12 @@ class NetworkObserverService {
    */
   async startObserving(): Promise<void> {
     if (!this.isAvailable()) {
-      console.log('[NetworkObserver] Not available on this platform');
+      logger.info('[NetworkObserver] Not available on this platform');
       return;
     }
 
     if (this.isObserving) {
-      console.log('[NetworkObserver] Already observing');
+      logger.info('[NetworkObserver] Already observing');
       return;
     }
 
@@ -101,7 +102,7 @@ class NetworkObserverService {
     const availableListener = await NetworkObserver.addListener(
       'networkAvailable',
       data => {
-        console.log(
+        logger.info(
           `[NetworkObserver] Network available (reason: ${data.reason})`
         );
       }
@@ -111,7 +112,7 @@ class NetworkObserverService {
     const lostListener = await NetworkObserver.addListener(
       'networkLost',
       () => {
-        console.log('[NetworkObserver] Network lost');
+        logger.info('[NetworkObserver] Network lost');
       }
     );
     this.listeners.push(lostListener);
@@ -120,7 +121,7 @@ class NetworkObserverService {
     await NetworkObserver.startObserving();
     this.isObserving = true;
 
-    console.log('[NetworkObserver] Started observing network changes');
+    logger.info('[NetworkObserver] Started observing network changes');
   }
 
   /**
@@ -142,9 +143,9 @@ class NetworkObserverService {
       this.listeners = [];
       this.isObserving = false;
 
-      console.log('[NetworkObserver] Stopped observing network changes');
+      logger.info('[NetworkObserver] Stopped observing network changes');
     } catch (error) {
-      console.error('[NetworkObserver] Failed to stop observing:', error);
+      logger.error('[NetworkObserver] Failed to stop observing:', error);
     }
   }
 
@@ -154,14 +155,14 @@ class NetworkObserverService {
    */
   async triggerBackgroundSync(): Promise<void> {
     if (!this.isAvailable()) {
-      console.log(
+      logger.info(
         '[NetworkObserver] Background sync not available on this platform'
       );
       return;
     }
 
     await NetworkObserver.triggerBackgroundSync();
-    console.log('[NetworkObserver] Background sync triggered');
+    logger.info('[NetworkObserver] Background sync triggered');
   }
 
   /**
@@ -175,9 +176,9 @@ class NetworkObserverService {
 
     try {
       await NetworkObserver.acquireWakeLockForSync();
-      console.log('[NetworkObserver] Wake lock acquired');
+      logger.info('[NetworkObserver] Wake lock acquired');
     } catch (error) {
-      console.warn('[NetworkObserver] Failed to acquire wake lock:', error);
+      logger.warn('[NetworkObserver] Failed to acquire wake lock:', error);
     }
   }
 
@@ -192,9 +193,9 @@ class NetworkObserverService {
 
     try {
       await NetworkObserver.releaseWakeLock();
-      console.log('[NetworkObserver] Wake lock released');
+      logger.info('[NetworkObserver] Wake lock released');
     } catch (error) {
-      console.warn('[NetworkObserver] Failed to release wake lock:', error);
+      logger.warn('[NetworkObserver] Failed to release wake lock:', error);
     }
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from '../utils/logs.js';
 /**
  * Web worker that hosts the secure-storage WASM module and runs SQL on
  * the embedded sqlite-wasm-rs SQLite, routing main DB I/O through our
@@ -90,7 +91,7 @@ export class SecureStorageWorkerApi {
    * tick cannot overlap with itself, but the explicit `cover()` RPC
    * could be called concurrently by the SDK consumer).
    *
-   * PD-critical: errors are logged at `console.debug` only. Logging
+   * PD-critical: errors are logged at `logger.debug` only. Logging
    * at error level fingerprinted "secure-storage user with persistent
    * storage failure" in console history. Errors do not change the
    * scheduling cadence either: backing off would itself leak ("cover
@@ -108,7 +109,7 @@ export class SecureStorageWorkerApi {
       }
       await flushEncrypted();
     } catch (err) {
-      console.debug('[SecureStorage] cover traffic tick failed', err);
+      logger.debug('[SecureStorage] cover traffic tick failed', err);
     } finally {
       this.coverTickInProgress = false;
     }

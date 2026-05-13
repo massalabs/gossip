@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { Capacitor } from '@capacitor/core';
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import {
@@ -129,7 +130,7 @@ export async function removeEncryptionKey(
   try {
     await SecureStorage.remove(storageKey(userId), syncToiCloud);
   } catch (error) {
-    console.error('Failed to remove encryption key:', error);
+    logger.error('Failed to remove encryption key:', error);
   }
 }
 
@@ -147,13 +148,13 @@ export async function clearLoginBiometricCredentials(): Promise<void> {
     try {
       await SecureStorage.remove(BIOMETRIC_STORAGE_KEY);
     } catch (error) {
-      console.error('Failed to remove biometric storage key:', error);
+      logger.error('Failed to remove biometric storage key:', error);
     }
   }
   try {
     localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
   } catch (error) {
-    console.error('Failed to remove webauthn credential id:', error);
+    logger.error('Failed to remove webauthn credential id:', error);
   }
 }
 
@@ -169,7 +170,7 @@ export async function checkBiometricAvailability(): Promise<BiometricAvailabilit
         };
       }
     } catch (error) {
-      console.warn('Capacitor biometric not available:', error);
+      logger.warn('Capacitor biometric not available:', error);
     }
   }
 
@@ -186,7 +187,7 @@ export async function checkBiometricAvailability(): Promise<BiometricAvailabilit
           method: 'webauthn',
         };
       }
-      console.info(
+      logger.info(
         '[biometric][availability] WebAuthn unavailable after preflight',
         {
           platformAvailable,
@@ -194,7 +195,7 @@ export async function checkBiometricAvailability(): Promise<BiometricAvailabilit
         }
       );
     } catch (error) {
-      console.warn('WebAuthn not available:', error);
+      logger.warn('WebAuthn not available:', error);
     }
   }
 
@@ -239,7 +240,7 @@ export async function createCredential(
       },
     };
   } catch (error) {
-    console.error('Biometric credential creation failed:', error);
+    logger.error('Biometric credential creation failed:', error);
     return {
       success: false,
       error:
@@ -309,7 +310,7 @@ export async function authenticate(
 
     throw new Error(`Invalid or not available authentication method ${method}`);
   } catch (error) {
-    console.error('Biometric authentication failed:', error);
+    logger.error('Biometric authentication failed:', error);
     return { success: false, error: classifyError(error) };
   }
 }
@@ -348,7 +349,7 @@ export async function authenticateSecureLogin(
     const salt = await getBiometricSalt();
     return authenticate('webauthn', credentialId, salt);
   } catch (error) {
-    console.error('Biometric authentication failed:', error);
+    logger.error('Biometric authentication failed:', error);
     return { success: false, error: classifyError(error) };
   }
 }
