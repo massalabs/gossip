@@ -75,12 +75,17 @@ export default tseslint.config(
     },
   },
   {
+    // Runtime logging boundaries: these are the only app source files allowed
+    // to call console.* directly, because they route shared logger events to
+    // platform-specific sinks.
     files: ['src/utils/logger.ts', 'src/sw.ts'],
     rules: {
       'no-console': 'off',
     },
   },
   {
+    // Non-runtime code may use console.* for test diagnostics, examples,
+    // scripts, and build/config output.
     files: [
       'test/**/*.{ts,tsx}',
       'gossip-sdk/test/**/*.{ts,tsx}',
