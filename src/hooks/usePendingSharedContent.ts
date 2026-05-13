@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
@@ -46,7 +47,7 @@ export const usePendingSharedContent = () => {
           setPendingSharedContent(decodedText);
         }
       } catch (error) {
-        console.error('Failed to process pending shared content:', error);
+        logger.error('Failed to process pending shared content:', error);
       }
     };
 
@@ -60,7 +61,7 @@ export const usePendingSharedContent = () => {
           return true;
         }
       } catch (error) {
-        console.error('Failed to check pending share from storage:', error);
+        logger.error('Failed to check pending share from storage:', error);
       }
       return false;
     };

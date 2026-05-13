@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * BackgroundRunner Storage Service
  *
@@ -57,7 +58,7 @@ class BackgroundRunnerStorageService {
     try {
       await BackgroundRunnerStorage.set({ key, value });
     } catch (error) {
-      console.warn(
+      logger.warn(
         '[BackgroundRunnerStorage] Failed to write to BackgroundRunner storage:',
         error
       );

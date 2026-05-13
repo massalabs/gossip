@@ -1,3 +1,4 @@
+import { logger } from '../utils/logs.js';
 /**
  * BIP39 utilities for mnemonic generation, validation, and seed derivation
  * Using @scure/bip39 for browser compatibility
@@ -74,8 +75,8 @@ export async function accountFromMnemonic(
     const account = await Account.fromPrivateKey(pkey);
     return account;
   } catch (error) {
-    console.error('Error in accountFromMnemonic:', error);
-    console.error(
+    logger.error('Error in accountFromMnemonic:', error);
+    logger.error(
       'Error stack:',
       error instanceof Error ? error.stack : 'No stack'
     );

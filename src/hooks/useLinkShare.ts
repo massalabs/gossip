@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
@@ -36,7 +37,7 @@ export function useLinkShare(
         copiedLinkTimeoutRef.current = null;
       }, 2000);
     } catch (error) {
-      console.error('Failed to copy invitation link:', error);
+      logger.error('Failed to copy invitation link:', error);
       toast.error('Failed to copy invitation link. Please try again.');
     }
   }, [deepLinkUrl]);
@@ -46,7 +47,7 @@ export function useLinkShare(
       setIsSharingLink(true);
       await shareInvitation({ deepLinkUrl, contactName });
     } catch (error) {
-      console.error('Failed to share invitation link:', error);
+      logger.error('Failed to share invitation link:', error);
       toast.error('Failed to share invitation link. Please try again.');
     } finally {
       setIsSharingLink(false);

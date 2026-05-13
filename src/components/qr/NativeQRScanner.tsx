@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useEffect, useRef } from 'react';
 import {
   CapacitorBarcodeScanner,
@@ -37,10 +38,10 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
         if (normalized.isCancelled) {
           // Expected when the user leaves the scanner or the OS ends the session (e.g. custom ROMs).
           // Use debug level so logcat / dev-console are not noisy; full detail is still in the debug overlay.
-          console.debug(line, normalized);
+          logger.debug(line, normalized);
           onClose();
         } else {
-          console.warn(line, err);
+          logger.warn(line, err);
           onError(normalized.message);
         }
       }

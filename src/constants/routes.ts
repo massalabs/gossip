@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * Pure route builder — only one job: turn pattern + params → string
  *
@@ -33,7 +34,7 @@ const route = (pattern: string): RouteBuilder => {
     });
 
     if (missing.length > 0 && process.env.NODE_ENV !== 'production') {
-      console.warn(
+      logger.warn(
         `[routes] Missing required params for ${pattern}: ${missing.join(', ')}`
       );
     }

@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * iOS Background Refresh Service
  *
@@ -96,7 +97,7 @@ class BackgroundRefreshService {
       this.lastCheckTime = now;
       return status;
     } catch (error) {
-      console.error('Failed to get iOS background refresh status:', error);
+      logger.error('Failed to get iOS background refresh status:', error);
       return {
         backgroundRefreshStatus: 'unknown',
         isBackgroundRefreshEnabled: false,
@@ -127,7 +128,7 @@ class BackgroundRefreshService {
     try {
       return await BackgroundRefreshPlugin.getBackgroundRefreshStatus();
     } catch (error) {
-      console.error('Failed to get background refresh status:', error);
+      logger.error('Failed to get background refresh status:', error);
       return { status: 'unknown', isEnabled: false, userCanEnable: false };
     }
   }
@@ -160,7 +161,7 @@ class BackgroundRefreshService {
       await BackgroundRefreshPlugin.openSettings();
       return true;
     } catch (error) {
-      console.error('Failed to open iOS settings:', error);
+      logger.error('Failed to open iOS settings:', error);
       return false;
     }
   }

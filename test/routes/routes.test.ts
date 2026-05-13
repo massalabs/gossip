@@ -1,4 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+  configureLogging,
+  resetLoggingForTests,
+  setLogSinks,
+  type LogSink,
+} from '@massalabs/gossip-sdk/utils/logs.js';
 import { ROUTES } from '../../src/constants/routes';
 
 describe('Route Function - Static Routes', () => {
@@ -71,25 +77,30 @@ describe('Route Function - Dynamic Routes (Multiple Params)', () => {
 });
 
 describe('Route Function - Missing Params', () => {
-  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+  const emittedWarnings: unknown[] = [];
+  const testSink: LogSink = (level, message) => {
+    if (level === 'warn') {
+      emittedWarnings.push(message);
+    }
+  };
 
   beforeEach(() => {
-    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    emittedWarnings.length = 0;
+    configureLogging({ enabled: true, minLevel: 'debug', persist: false });
+    setLogSinks([testSink]);
   });
 
   afterEach(() => {
-    consoleWarnSpy.mockRestore();
+    resetLoggingForTests();
   });
 
   it('should warn when params are missing in non-production', () => {
     // In test environment, warnings should show (NODE_ENV !== 'production')
-    consoleWarnSpy.mockClear();
     ROUTES.contact({});
 
-    expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[routes] Missing required params for /contact/:userId: userId'
-    );
+    expect(emittedWarnings).toEqual([
+      '[routes] Missing required params for /contact/:userId: userId',
+    ]);
   });
 
   it('should not warn in production', () => {
@@ -98,7 +109,7 @@ describe('Route Function - Missing Params', () => {
 
     ROUTES.contact({});
 
-    expect(consoleWarnSpy).not.toHaveBeenCalled();
+    expect(emittedWarnings).toEqual([]);
 
     process.env.NODE_ENV = originalEnv;
   });
@@ -109,22 +120,18 @@ describe('Route Function - Missing Params', () => {
   });
 
   it('should warn about null params', () => {
-    consoleWarnSpy.mockClear();
     ROUTES.contact({ userId: null as unknown as string });
 
-    expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[routes] Missing required params for /contact/:userId: userId'
-    );
+    expect(emittedWarnings).toEqual([
+      '[routes] Missing required params for /contact/:userId: userId',
+    ]);
   });
 
   it('should warn about undefined params', () => {
-    consoleWarnSpy.mockClear();
     ROUTES.contact({ userId: undefined as unknown as string });
 
-    expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[routes] Missing required params for /contact/:userId: userId'
-    );
+    expect(emittedWarnings).toEqual([
+      '[routes] Missing required params for /contact/:userId: userId',
+    ]);
   });
 });

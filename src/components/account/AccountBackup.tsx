@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, AlertTriangle } from 'react-feather';
@@ -45,7 +46,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
       setBackupInfo(backupInfo);
       setPrivateKeyString(backupInfo.account.privateKey.toString());
     } catch (e) {
-      console.error('Error showing backup:', e);
+      logger.error('Error showing backup:', e);
       const message = t('backup.show_failed');
       setError(message);
       setPasswordError(message);

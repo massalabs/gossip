@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useCallback, useMemo, useState } from 'react';
 import { getProfileHead } from './profileHeads';
 import BaseModal from '../ui/BaseModal';
@@ -69,7 +70,7 @@ const UserProfileAvatar: React.FC<UserProfileAvatarProps> = ({
     try {
       await resetAccount();
     } catch (error) {
-      console.error('Failed to reset account from avatar tap:', error);
+      logger.error('Failed to reset account from avatar tap:', error);
     } finally {
       setIsDeleting(false);
       setIsModalOpen(false);

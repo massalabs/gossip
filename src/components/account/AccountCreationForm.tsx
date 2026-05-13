@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Capacitor } from '@capacitor/core';
@@ -170,7 +171,7 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
       setPassword('');
       setConfirmPassword('');
     } catch (err) {
-      console.error('Error creating account:', err);
+      logger.error('Error creating account:', err);
       const message = err instanceof Error ? err.message : '';
       const isPrfProviderError =
         message.includes(WEBAUTHN_PRF_UNSUPPORTED_ERROR_CODE) ||

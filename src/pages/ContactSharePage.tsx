@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import React, { useMemo } from 'react';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import ShareContact from '../components/settings/ShareContact';
@@ -17,7 +18,7 @@ const ContactSharePage: React.FC = () => {
     try {
       return UserPublicKeys.from_bytes(contact.publicKeys);
     } catch (error) {
-      console.error('Failed to decode contact public keys', error);
+      logger.error('Failed to decode contact public keys', error);
       return null;
     }
   }, [contact]);

@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../stores/appStore';
@@ -23,7 +24,7 @@ export const usePendingDeepLink = () => {
           state: pendingDeepLinkInfo,
         });
       } catch (error) {
-        console.error('Failed to retrieve pending deep link:', error);
+        logger.error('Failed to retrieve pending deep link:', error);
       } finally {
         setPendingDeepLinkInfo(null);
       }

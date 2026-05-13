@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import {
   type Message,
   MessageStatus,
@@ -281,7 +282,7 @@ export function createEventHandlers(
         };
       });
     } catch (error) {
-      console.error('Session event refetch error:', error);
+      logger.error('Session event refetch error:', error);
     }
   };
 

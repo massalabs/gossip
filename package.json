@@ -1,7 +1,7 @@
 {
   "name": "gossip",
   "private": true,
-  "version": "0.0.11",
+  "version": "0.0.12",
   "type": "module",
   "workspaces": [
     "gossip-sdk"
@@ -11,7 +11,7 @@
     "dev": "vite",
     "dev:host": "vite --host",
     "build:sdk": "cd gossip-sdk && npm run build",
-    "build": "npm run build:sdk && tsc -b && vite build",
+    "build": "npm run audit:logging && npm run build:sdk && tsc -b && vite build && npm run strip:logging:sw && npm run audit:logging:dist",
     "test": "vitest --silent='passed-only'",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
@@ -23,6 +23,9 @@
     "test:unit": "vitest --project=unit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "audit:logging": "node scripts/audit-logging.mjs source",
+    "audit:logging:dist": "node scripts/audit-logging.mjs dist",
+    "strip:logging:sw": "node scripts/strip-service-worker-console.mjs",
     "fmt": "prettier --write . && eslint . --fix",
     "fmt:check": "prettier --check . && eslint .",
     "preview": "vite preview",

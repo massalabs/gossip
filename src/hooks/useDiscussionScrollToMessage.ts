@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useCallback, useEffect, useRef, RefObject } from 'react';
 import { NavigateFunction } from 'react-router-dom';
 import { Discussion, GossipSdk, Message } from '@massalabs/gossip-sdk';
@@ -83,7 +84,7 @@ export const useDiscussionScrollToMessage = ({
       (async () => {
         const target = await gossip.messages.get(messageId);
         if (!target) {
-          console.warn(`Message with id ${messageId} not found in database`);
+          logger.warn(`Message with id ${messageId} not found in database`);
           return;
         }
 
@@ -100,7 +101,7 @@ export const useDiscussionScrollToMessage = ({
           discussion
         );
         if (virtualIndex === -1) {
-          console.warn(
+          logger.warn(
             `Message ${messageId} not found in current messages array. It may not be loaded yet.`
           );
           return;

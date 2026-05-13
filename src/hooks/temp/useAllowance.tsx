@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import { useCallback, useMemo, useState } from 'react';
 import { MRC20, Provider, Operation, Address } from '@massalabs/massa-web3';
 import { useHandleOperation } from './useHandleOperation';
@@ -84,7 +85,7 @@ export function useAllowance(options: UseAllowanceOptions) {
 
         setState(prev => ({ ...prev, isPending: false, error: null }));
       } catch (error) {
-        console.error(`Failed to ${operationType} allowance:`, error);
+        logger.error(`Failed to ${operationType} allowance:`, error);
         setState(prev => ({
           ...prev,
           error: {

@@ -12,7 +12,12 @@
 // IMPORTANT: Always call resolve() or reject() to let the OS know when
 // the background work is finished.
 
-/* global addEventListener, console, CapacitorNotifications, CapacitorKV, fetch */
+/* global addEventListener, CapacitorNotifications, CapacitorKV, fetch */
+
+function logDebug() {
+  // BackgroundRunner has no access to the app bundle or shared TS logger.
+  // Keep this as a no-op so release runners never emit protocol metadata.
+}
 
 // Keys used for BackgroundRunner storage (via CapacitorKV)
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
@@ -52,7 +57,7 @@ async function getActiveSeekers() {
     const seekers = JSON.parse(value);
     return seekers;
   } catch (err) {
-    console.log('[BackgroundSync] Failed to get active seekers:', String(err));
+    logDebug('[BackgroundSync] Failed to get active seekers:', String(err));
     return [];
   }
 }
@@ -82,7 +87,7 @@ async function getApiBaseUrl() {
       }
     }
   } catch (err) {
-    console.log(
+    logDebug(
       '[BackgroundSync] Failed to get API URL from storage:',
       String(err)
     );
@@ -160,10 +165,7 @@ async function removeSeekersWithMessages(currentSeekers, messages) {
     const updatedValue = JSON.stringify(remainingSeekers);
     await CapacitorKV.set(ACTIVE_SEEKERS_KEY, updatedValue);
   } catch (err) {
-    console.log(
-      '[BackgroundSync] Failed to update active seekers:',
-      String(err)
-    );
+    logDebug('[BackgroundSync] Failed to update active seekers:', String(err));
     // Silently ignore - don't fail the sync if we can't update seekers
   }
 }
@@ -182,7 +184,7 @@ async function getMinSyncIntervalMs() {
       return MIN_SYNC_INTERVAL_BALANCED_MS;
     }
   } catch (err) {
-    console.log('[BackgroundSync] Preset read failed:', String(err));
+    logDebug('[BackgroundSync] Preset read failed:', String(err));
   }
   return MIN_SYNC_INTERVAL_MAX_MS;
 }
@@ -227,7 +229,7 @@ async function fetchMessages(baseUrl, seekers) {
       body: requestBody,
     });
   } catch (fetchErr) {
-    console.log('[BackgroundSync] Fetch error:', String(fetchErr));
+    logDebug('[BackgroundSync] Fetch error:', String(fetchErr));
     throw fetchErr;
   }
 
@@ -235,7 +237,7 @@ async function fetchMessages(baseUrl, seekers) {
     const errorText = await response
       .text()
       .catch(() => 'Unable to read error body');
-    console.log(
+    logDebug(
       '[BackgroundSync] HTTP error:',
       response.status,
       errorText.substring(0, 100)
@@ -248,7 +250,7 @@ async function fetchMessages(baseUrl, seekers) {
     const responseText = await response.text();
     data = JSON.parse(responseText);
   } catch (parseErr) {
-    console.log('[BackgroundSync] Parse error:', String(parseErr));
+    logDebug('[BackgroundSync] Parse error:', String(parseErr));
     throw parseErr;
   }
 
@@ -290,10 +292,7 @@ async function showNewMessageNotification(messageCount) {
       },
     ]);
   } catch (err) {
-    console.log(
-      '[BackgroundSync] Failed to schedule notification:',
-      String(err)
-    );
+    logDebug('[BackgroundSync] Failed to schedule notification:', String(err));
   }
 }
 
@@ -330,7 +329,7 @@ async function acquireSyncLock() {
       !CapacitorKV?.get ||
       !CapacitorKV?.set
     ) {
-      console.log(
+      logDebug(
         '[BackgroundSync] CapacitorKV not available, assuming lock acquired'
       );
       // If CapacitorKV not available, assume lock acquired (allow sync to proceed)
@@ -359,7 +358,7 @@ async function acquireSyncLock() {
     await CapacitorKV.set(SYNC_LOCK_KEY, String(currentTime));
     return true;
   } catch (err) {
-    console.log('[BackgroundSync] Could not acquire sync lock:', String(err));
+    logDebug('[BackgroundSync] Could not acquire sync lock:', String(err));
     // If check fails, allow sync to proceed (better to sync than skip)
     return true;
   }
@@ -376,7 +375,7 @@ async function releaseSyncLock() {
 
     await CapacitorKV.remove(SYNC_LOCK_KEY);
   } catch (err) {
-    console.log('[BackgroundSync] Could not release sync lock:', String(err));
+    logDebug('[BackgroundSync] Could not release sync lock:', String(err));
   }
 }
 
@@ -387,7 +386,7 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
     // Acquire sync lock first to prevent concurrent executions
     lockAcquired = await acquireSyncLock();
     if (!lockAcquired) {
-      console.log(
+      logDebug(
         '[BackgroundSync] Sync lock is held, skipping sync (another sync is running)'
       );
       resolve();
@@ -396,7 +395,7 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
 
     // Check network connectivity
     if (!isNetworkAvailable()) {
-      console.log('[BackgroundSync] Network unavailable, skipping sync');
+      logDebug('[BackgroundSync] Network unavailable, skipping sync');
       resolve();
       return;
     }
@@ -412,7 +411,7 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
     const activeSeekers = await getActiveSeekers();
 
     if (activeSeekers.length === 0) {
-      console.log('[BackgroundSync] No active seekers, skipping sync');
+      logDebug('[BackgroundSync] No active seekers, skipping sync');
       resolve();
       return;
     }
@@ -425,7 +424,7 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
     try {
       messages = await fetchMessages(apiBaseUrl, activeSeekers);
     } catch (err) {
-      console.log('[BackgroundSync] Fetch failed:', String(err));
+      logDebug('[BackgroundSync] Fetch failed:', String(err));
       resolve();
       return;
     }
@@ -433,7 +432,7 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
     // If new messages were found, show a notification and remove seekers
     if (messages.length > 0) {
       await showNewMessageNotification(messages.length);
-      console.log(`[BackgroundSync] Found ${messages.length} new message(s)`);
+      logDebug(`[BackgroundSync] Found ${messages.length} new message(s)`);
 
       // Remove seekers that returned messages to avoid duplicate notifications
       await removeSeekersWithMessages(activeSeekers, messages);
@@ -444,7 +443,7 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
 
     resolve();
   } catch (error) {
-    console.log('[BackgroundSync] Task failed:', String(error));
+    logDebug('[BackgroundSync] Task failed:', String(error));
     reject(error);
   } finally {
     // Always release the lock when sync completes (success or failure)

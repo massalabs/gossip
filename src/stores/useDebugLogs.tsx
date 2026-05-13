@@ -4,7 +4,8 @@ import { Preferences } from '@capacitor/preferences';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { toast } from 'react-hot-toast';
+import { logger } from '@massalabs/gossip-sdk/utils/logs.js';
+import toast from 'react-hot-toast';
 import {
   LOG_LIMIT_OPTIONS,
   type LogLimit,
@@ -272,7 +273,7 @@ export const useDebugLogs = create<DebugStore>()(
             ) {
               return true; // Consider cancelled as "handled"
             }
-            console.error('Native share failed:', error);
+            logger.error('Native share failed:', error);
             return false;
           }
         };

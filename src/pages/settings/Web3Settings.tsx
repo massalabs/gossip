@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -26,7 +27,7 @@ const Web3Settings: React.FC = () => {
         const url = await resolveDeweb('mns.massa');
         setMnsUrl(url);
       } catch (error) {
-        console.error('Failed to resolve mns.massa:', error);
+        logger.error('Failed to resolve mns.massa:', error);
       }
     };
     resolveMnsLink();

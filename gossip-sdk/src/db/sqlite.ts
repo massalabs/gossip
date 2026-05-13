@@ -1,3 +1,4 @@
+import { logger } from '../utils/logs.js';
 /**
  * SQLite initialization module for the Gossip SDK.
  *
@@ -537,7 +538,7 @@ export class DatabaseConnection {
             this.state.nativePlugin = null;
             this.state.useNativePlugin = false;
             if (import.meta.env?.DEV) {
-              console.warn(
+              logger.warn(
                 '[secureStorage] native plugin unavailable, falling back to WASM worker'
               );
             }

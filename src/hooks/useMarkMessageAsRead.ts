@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import { useEffect, useRef } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import {
@@ -71,7 +72,7 @@ export function useMarkMessageAsRead(message: Message) {
               );
             }
           } catch (error) {
-            console.error('Failed to mark message as read:', error);
+            logger.error('Failed to mark message as read:', error);
             // Reset flag on error so it can be retried
             hasBeenMarkedAsReadRef.current = false;
           }

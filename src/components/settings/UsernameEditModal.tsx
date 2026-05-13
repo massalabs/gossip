@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import BaseModal from '../ui/BaseModal';
@@ -107,7 +108,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
         setIsValidating(false);
         return true;
       } catch (err) {
-        console.error('Username validation failed:', err);
+        logger.error('Username validation failed:', err);
         setError(t('edit_username_modal.username_check_failed'));
         setIsValidating(false);
         return false;
@@ -200,7 +201,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
       await onConfirmRef.current(trimmed);
       onCloseRef.current();
     } catch (err) {
-      console.error('Username update failed:', err);
+      logger.error('Username update failed:', err);
       setError(t('edit_username_modal.update_failed'));
     } finally {
       setIsSubmitting(false);

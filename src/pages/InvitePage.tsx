@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
@@ -55,7 +56,7 @@ export const InvitePage: React.FC = () => {
           try {
             fn();
           } catch (err) {
-            console.warn('Cleanup error before new native open attempt:', err);
+            logger.warn('Cleanup error before new native open attempt:', err);
           }
         });
         existingCleanups.clear();
@@ -82,7 +83,7 @@ export const InvitePage: React.FC = () => {
             try {
               fn();
             } catch (err) {
-              console.warn('Cleanup error after native open attempt:', err);
+              logger.warn('Cleanup error after native open attempt:', err);
             }
           });
           cleanups.clear();
@@ -164,7 +165,7 @@ export const InvitePage: React.FC = () => {
       await setPendingDeepLinkInfo(inviteData);
       navigate('/');
     } catch (err) {
-      console.error('Failed to process invite:', err);
+      logger.error('Failed to process invite:', err);
     }
   }, [userId, searchParams, setPendingDeepLinkInfo, navigate]);
 
@@ -208,7 +209,7 @@ export const InvitePage: React.FC = () => {
         try {
           fn();
         } catch (err) {
-          console.warn('Cleanup error:', err);
+          logger.warn('Cleanup error:', err);
         }
       });
       cleanupFunctions.clear();

@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Check, Copy } from 'react-feather';
 
@@ -73,7 +74,7 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
         });
       }, 2000);
     } catch (err) {
-      console.error('Failed to copy MNS domain:', err);
+      logger.error('Failed to copy MNS domain:', err);
     }
   }, []);
 
@@ -83,7 +84,7 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
       setIsCopiedUserId(true);
       setTimeout(() => setIsCopiedUserId(false), 2000);
     } catch (err) {
-      console.error('Failed to copy user ID:', err);
+      logger.error('Failed to copy user ID:', err);
     }
   }, [userId]);
 
@@ -137,7 +138,7 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
         onQRCodeGenerated?.(dataUrl);
       })
       .catch(err => {
-        console.error('Failed to generate QR:', err);
+        logger.error('Failed to generate QR:', err);
       });
 
     return () => {
