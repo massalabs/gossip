@@ -433,22 +433,26 @@ jobs:
       - name: Sync Capacitor iOS
         run: npm run cap:sync:ios
 
-      # `xcodebuild -showsdks` can list iphoneos26.0 while archive destinations
-      # are still ineligible ("iOS 26.0 is not installed"). Validate the exact
-      # destination Fastlane uses, and only call the flaky platform downloader
-      # when Xcode cannot archive to generic iOS.
+      # `xcodebuild -showsdks` and `xcodebuild -showBuildSettings` can succeed
+      # while archive destinations are still ineligible ("iOS 26.0 is not
+      # installed"). Inspect the destination resolver Fastlane depends on, and
+      # only call the flaky platform downloader when Xcode cannot archive to
+      # generic iOS.
       - name: Verify iOS archive destination
         run: |
           set -euo pipefail
 
           can_archive_ios() {
-            xcodebuild \
+            if ! xcodebuild \
               -workspace ios/App/App.xcworkspace \
               -scheme Gossip \
-              -configuration Release \
               -destination 'generic/platform=iOS' \
-              -showBuildSettings \
-              > /tmp/gossip-ios-destination-check.log 2>&1
+              -showdestinations \
+              > /tmp/gossip-ios-destination-check.log 2>&1; then
+              return 1
+            fi
+
+            ! grep -Eiq "Unable to find a destination matching|iOS [0-9.]+ is not installed" /tmp/gossip-ios-destination-check.log
           }
 
           if can_archive_ios; then
