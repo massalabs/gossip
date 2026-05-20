@@ -33,7 +33,6 @@ import PageLayout from './components/ui/Layout/PageLayout.tsx';
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
   const { isInitialized } = useAppStore();
-  const [showImport, setShowImport] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
   useStoreInit(); // Initialize all stores when user profile is available
@@ -76,10 +75,7 @@ const AppContent: React.FC = () => {
   if (!isInitialized && !inviteMatch) {
     return (
       <PageLayout>
-        <Onboarding
-          showImport={showImport}
-          onShowImportChange={setShowImport}
-        />
+        <Onboarding />
       </PageLayout>
     );
   }

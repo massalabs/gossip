@@ -1,16 +1,13 @@
 import { logger } from '../../utils/logger.ts';
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useAccountStore } from '../../stores/accountStore';
-import { useDevAutoLogin } from '../../hooks/useDevAutoLogin';
 import { ROUTES } from '../../constants/routes';
-import { UserProfile } from '@massalabs/gossip-sdk';
 
 interface UseLoginFormOptions {
   onAccountSelected: () => void;
   onErrorChange?: (error: string | null) => void;
-  accountInfo?: UserProfile | null;
   /** userId to include in the password login method */
   userId?: string;
 }
@@ -18,7 +15,6 @@ interface UseLoginFormOptions {
 export function useLoginForm({
   onAccountSelected,
   onErrorChange,
-  accountInfo,
   userId,
 }: UseLoginFormOptions) {
   const { t } = useTranslation('auth');
@@ -27,7 +23,6 @@ export function useLoginForm({
 
   const [isLoading, setIsLoading] = useState(false);
   const [password, setPassword] = useState('');
-  const [showAccountImport, setShowAccountImport] = useState(false);
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
   const handlePasswordAuth = useCallback(
@@ -76,23 +71,11 @@ export function useLoginForm({
     ]
   );
 
-  const devAutoLoginCallbacks = useMemo(
-    () => ({
-      onSuccess: onAccountSelected,
-      onError: (msg: string) => onErrorChange?.(msg),
-      setLoading: setIsLoading,
-    }),
-    [onAccountSelected, onErrorChange]
-  );
-  useDevAutoLogin(accountInfo ?? null, devAutoLoginCallbacks);
-
   return {
     isLoading,
     setIsLoading,
     password,
     setPassword,
-    showAccountImport,
-    setShowAccountImport,
     passwordInputRef,
     handlePasswordAuth,
     navigate,

@@ -1,18 +1,14 @@
 import React, { useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 
 interface ErrorDisplayProps {
   error: string | null;
-  onImport: () => void;
   onDismiss?: () => void;
 }
 
 export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
   error,
-  onImport,
   onDismiss,
 }) => {
-  const { t } = useTranslation('auth');
   const touchStartX = useRef(0);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -58,16 +54,6 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
-      <p className="text-xs text-muted-foreground mt-1">
-        {t('login.forgot_password_hint')}{' '}
-        <button
-          type="button"
-          onClick={onImport}
-          className="underline hover:text-foreground transition-colors"
-        >
-          {t('login.import_recovery_link')}
-        </button>
-      </p>
     </div>
   );
 };

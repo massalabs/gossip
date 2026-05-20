@@ -7,13 +7,9 @@ import Button from './ui/Button';
 
 interface OnboardingFlowProps {
   onComplete: () => void;
-  onImportMnemonic?: () => void;
 }
 
-const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
-  onComplete,
-  onImportMnemonic,
-}) => {
+const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) => {
   const { t } = useTranslation('onboarding');
   const [currentStep, setCurrentStep] = useState(0);
 
@@ -99,17 +95,6 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 <Zap />
                 {t('create_account')}
               </Button>
-              {onImportMnemonic && (
-                <Button
-                  onClick={onImportMnemonic}
-                  variant="outline"
-                  size="custom"
-                  fullWidth
-                  className="h-14 text-base font-medium rounded-full"
-                >
-                  {t('import_mnemonic')}
-                </Button>
-              )}
             </div>
           )}
 
