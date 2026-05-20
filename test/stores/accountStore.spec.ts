@@ -98,7 +98,7 @@ vi.mock('../../src/stores/selfMessageStore', () => ({
   },
 }));
 
-// ── Mocks needed by initializeAccount / restoreAccountFromMnemonic / initializeAccountWithBiometrics ──
+// ── Mocks needed by initializeAccount / initializeAccountWithBiometrics ──
 
 vi.mock('@massalabs/gossip-sdk', async () => {
   const actual = await vi.importActual<typeof import('@massalabs/gossip-sdk')>(
@@ -252,17 +252,6 @@ describe('AccountStore skipHistorical behavior', () => {
       .initializeAccount('testuser', 'password123');
 
     expect(skipHistoricalSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('restoreAccountFromMnemonic does NOT call skipHistorical()', async () => {
-    await useAccountStore
-      .getState()
-      .restoreAccountFromMnemonic('testuser', 'word '.repeat(24).trim(), {
-        useBiometrics: false,
-        password: 'password123',
-      });
-
-    expect(skipHistoricalSpy).not.toHaveBeenCalled();
   });
 
   it('initializeAccountWithBiometrics calls skipHistorical()', async () => {

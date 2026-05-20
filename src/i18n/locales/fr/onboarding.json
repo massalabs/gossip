@@ -12,7 +12,6 @@
     "description": "Créez votre compte en quelques secondes et commencez à communiquer en toute sécurité."
   },
   "create_account": "Créer un nouveau compte",
-  "import_mnemonic": "Importer depuis un mnémonique",
   "back": "Retour",
   "get_started_button": "Commencer",
   "next": "Suivant"

@@ -10,23 +10,16 @@ import Button from '../../components/ui/Button';
 import { ROUTES } from '../../constants/routes';
 import { LoginProps } from './types';
 import { useLoginForm } from './useLoginForm';
-import AccountImport from '../../components/account/AccountImport';
 import { PasswordForm } from './PasswordForm';
 import { ErrorDisplay } from './ErrorDisplay';
 import { LoginLayout } from './LoginLayout';
-import { useKeyboardStore } from '../../stores/keyboardStore';
 
 // ─────────────────────────────────────────────────────────────────
 // Secure-storage Login: password + biometric derived encryption key
 // ─────────────────────────────────────────────────────────────────
 
 export const SecureLogin: React.FC<LoginProps> = React.memo(
-  ({
-    onAccountSelected,
-    accountInfo,
-    persistentError = null,
-    onErrorChange,
-  }) => {
+  ({ onAccountSelected, persistentError = null, onErrorChange }) => {
     const { t } = useTranslation('auth');
     const loadAccount = useAccountStore(state => state.loadAccount);
     const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -34,22 +27,17 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       'capacitor' | 'webauthn' | 'none'
     >('none');
     const [biometricLoading, setBiometricLoading] = useState(false);
-    const [inputFocused, setInputFocused] = useState(false);
-    const keyboardOpen = useKeyboardStore(s => s.isVisible) || inputFocused;
 
     const {
       isLoading: passwordLoading,
       password,
       setPassword,
-      showAccountImport,
-      setShowAccountImport,
       passwordInputRef,
       handlePasswordAuth,
       navigate,
     } = useLoginForm({
       onAccountSelected,
       onErrorChange,
-      accountInfo,
     });
 
     useEffect(() => {
@@ -127,18 +115,6 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       passwordInputRef,
     ]);
 
-    if (showAccountImport) {
-      return (
-        <AccountImport
-          onBack={() => setShowAccountImport(false)}
-          onComplete={() => {
-            setShowAccountImport(false);
-            onAccountSelected();
-          }}
-        />
-      );
-    }
-
     return (
       <LoginLayout title={t('login.welcome')} subtitle="">
         <div
@@ -173,31 +149,13 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           isLoading={passwordLoading}
           disabled={biometricLoading}
           hasError={!!persistentError}
-          onFocusChange={setInputFocused}
           clearError={() => onErrorChange?.(null)}
         />
 
         <ErrorDisplay
           error={persistentError}
-          onImport={() => setShowAccountImport(true)}
           onDismiss={() => onErrorChange?.(null)}
         />
-
-        <div
-          className={`overflow-hidden transition-all duration-300 ${
-            keyboardOpen ? 'max-h-0 opacity-0' : 'max-h-40 opacity-100'
-          }`}
-        >
-          <Button
-            onClick={() => setShowAccountImport(true)}
-            variant="outline"
-            size="custom"
-            fullWidth
-            className="h-[51px] rounded-full text-sm"
-          >
-            {t('login.import_mnemonic')}
-          </Button>
-        </div>
       </LoginLayout>
     );
   }

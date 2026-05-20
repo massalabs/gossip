@@ -4,12 +4,10 @@ import Button from '../../components/ui/Button';
 
 interface LoginActionsProps {
   onCreateNewAccount: () => void;
-  onImport: () => void;
 }
 
 export const LoginActions: React.FC<LoginActionsProps> = ({
   onCreateNewAccount,
-  onImport,
 }) => {
   const { t } = useTranslation('auth');
 
@@ -23,15 +21,6 @@ export const LoginActions: React.FC<LoginActionsProps> = ({
         className="h-[51px] rounded-full text-sm"
       >
         {t('login.create_account')}
-      </Button>
-      <Button
-        onClick={onImport}
-        variant="outline"
-        size="custom"
-        fullWidth
-        className="h-[51px] rounded-full text-sm"
-      >
-        {t('login.import_mnemonic')}
       </Button>
     </div>
   );

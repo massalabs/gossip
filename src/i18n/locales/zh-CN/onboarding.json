@@ -12,7 +12,6 @@
     "description": "只需几秒钟即可创建账户，安全地与他人建立连接。"
   },
   "create_account": "创建新账户",
-  "import_mnemonic": "使用助记词导入",
   "back": "返回",
   "get_started_button": "开始使用",
   "next": "下一步"
