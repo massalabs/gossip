@@ -602,7 +602,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.0.15;
+				MARKETING_VERSION = 0.0.16;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\" -Xcc -fmodule-map-file=$(SRCROOT)/App/plugins/secureStorage/secureStorageFFI.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = net.ben.gossip;
@@ -658,7 +658,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.0.15;
+				MARKETING_VERSION = 0.0.16;
 				OTHER_SWIFT_FLAGS = "$(inherited) -Xcc -fmodule-map-file=$(SRCROOT)/App/plugins/secureStorage/secureStorageFFI.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = net.ben.gossip;
@@ -695,7 +695,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 0.0.15;
+				MARKETING_VERSION = 0.0.16;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID).GossipShareExtension";
@@ -737,7 +737,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 0.0.15;
+				MARKETING_VERSION = 0.0.16;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID).GossipShareExtension";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = net.ben.gossip.GossipShareExtension;
