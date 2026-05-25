@@ -6,7 +6,6 @@ import {
   encrypt,
   deriveKey,
   generateMnemonic,
-  validateMnemonic,
   EncryptionKey,
   generateNonce,
   encodeToBase64,
@@ -189,11 +188,6 @@ interface AccountState {
   ) => Promise<void>;
   initializeAccount: (username: string, password: string) => Promise<void>;
   loadAccount: (method: LoginMethod) => Promise<void>;
-  restoreAccountFromMnemonic: (
-    username: string,
-    mnemonic: string,
-    opts: { useBiometrics: boolean; password?: string }
-  ) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
   finalizeOnboarding: () => Promise<void>;
   resetAccount: () => Promise<void>;
@@ -454,28 +448,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         });
       } catch (error) {
         logger.error('Error creating user profile:', error);
-        set({ isLoading: false });
-        throw error;
-      }
-    },
-
-    restoreAccountFromMnemonic: async (
-      username: string,
-      mnemonic: string,
-      opts: { useBiometrics: boolean; password?: string }
-    ) => {
-      try {
-        set({ isLoading: true });
-        if (!validateMnemonic(mnemonic)) {
-          throw new Error('Invalid mnemonic phrase');
-        }
-        await setupAccount({
-          username,
-          mnemonic,
-          provisionOpts: opts,
-        });
-      } catch (error) {
-        logger.error('Error restoring account from mnemonic:', error);
         set({ isLoading: false });
         throw error;
       }

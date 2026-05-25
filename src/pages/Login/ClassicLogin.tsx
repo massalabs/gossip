@@ -8,7 +8,6 @@ import AccountSelection from '../../components/account/AccountSelection';
 import Button from '../../components/ui/Button';
 import { LoginProps } from './types';
 import { useLoginForm } from './useLoginForm';
-import AccountImport from '../../components/account/AccountImport';
 import { PasswordForm } from './PasswordForm';
 import { ErrorDisplay } from './ErrorDisplay';
 import { LoginActions } from './LoginActions';
@@ -51,13 +50,10 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
       setIsLoading,
       password,
       setPassword,
-      showAccountImport,
-      setShowAccountImport,
       handlePasswordAuth,
     } = useLoginForm({
       onAccountSelected,
       onErrorChange,
-      accountInfo: currentAccount,
       userId: currentAccount?.userId,
     });
 
@@ -183,18 +179,6 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
       );
     }
 
-    if (showAccountImport) {
-      return (
-        <AccountImport
-          onBack={() => setShowAccountImport(false)}
-          onComplete={() => {
-            setShowAccountImport(false);
-            onAccountSelected();
-          }}
-        />
-      );
-    }
-
     return (
       <LoginLayout
         title={displayUsername ? t('login.welcome_back') : t('login.welcome')}
@@ -244,7 +228,6 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
 
         <ErrorDisplay
           error={persistentError}
-          onImport={() => setShowAccountImport(true)}
           onDismiss={() => onErrorChange?.(null)}
         />
 
@@ -259,10 +242,7 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
             >
               {t('login.switch_account')}
             </Button>
-            <LoginActions
-              onCreateNewAccount={onCreateNewAccount}
-              onImport={() => setShowAccountImport(true)}
-            />
+            <LoginActions onCreateNewAccount={onCreateNewAccount} />
           </div>
         </div>
       </LoginLayout>
