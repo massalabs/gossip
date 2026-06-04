@@ -165,8 +165,12 @@ jobs:
       - name: Display build info
         run: |
           echo "📦 Building Android artifacts:"
-          echo "  • APK Debug (with sourcemaps)"
           echo "  • AAB Release (for Play Store)"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "  • APK Release (signed, for GitHub Release)"
+          else
+            echo "  • APK Debug (with sourcemaps)"
+          fi
 
       - name: Create keystore from secrets (Release only)
         run: |
@@ -184,7 +188,20 @@ jobs:
           echo "📦 Building signed Android App Bundle (Release)..."
           bundle exec fastlane build
 
+      - name: Build Android Release (APK)
+        if: github.event_name == 'release'
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ env.ANDROID_KEYSTORE_FILE }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: android
+        run: |
+          echo "📦 Building signed Android APK (Release)..."
+          ./gradlew assembleRelease
+
       - name: Build Android Debug (APK)
+        if: github.event_name != 'release'
         working-directory: android
         run: |
           echo "📦 Building Android APK (Debug with sourcemaps)..."
@@ -203,14 +220,21 @@ jobs:
             exit 1
           fi
 
-          # Check for Debug APK
-          if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
-            echo "✅ Android APK (Debug) built successfully!"
-            echo "📦 File: android/app/build/outputs/apk/debug/app-debug.apk"
-            ls -lh android/app/build/outputs/apk/debug/app-debug.apk
-            echo "🔍 Sourcemaps included in web build"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+            APK_KIND="Release"
           else
-            echo "❌ Expected Android APK (Debug) not found at android/app/build/outputs/apk/debug/app-debug.apk"
+            APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+            APK_KIND="Debug"
+          fi
+
+          # Check for APK
+          if [ -f "$APK_PATH" ]; then
+            echo "✅ Android APK ($APK_KIND) built successfully!"
+            echo "📦 File: $APK_PATH"
+            ls -lh "$APK_PATH"
+          else
+            echo "❌ Expected Android APK ($APK_KIND) not found at $APK_PATH"
             exit 1
           fi
 
@@ -225,10 +249,17 @@ jobs:
           echo "📦 Using version ${VERSION}${SUFFIX} for artifact names"
 
           # Copy APK with versioned name
-          if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
-            cp android/app/build/outputs/apk/debug/app-debug.apk \
-               android/app/build/outputs/apk/debug/gossip-android-apk-${VERSION}${SUFFIX}.apk
-            echo "✅ Created android/app/build/outputs/apk/debug/gossip-android-apk-${VERSION}${SUFFIX}.apk"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            APK_DIR="android/app/build/outputs/apk/release"
+            APK_SOURCE="${APK_DIR}/app-release.apk"
+          else
+            APK_DIR="android/app/build/outputs/apk/debug"
+            APK_SOURCE="${APK_DIR}/app-debug.apk"
+          fi
+
+          if [ -f "$APK_SOURCE" ]; then
+            cp "$APK_SOURCE" "${APK_DIR}/gossip-android-apk-${VERSION}${SUFFIX}.apk"
+            echo "✅ Created ${APK_DIR}/gossip-android-apk-${VERSION}${SUFFIX}.apk"
           fi
 
           # Copy AAB with versioned name
@@ -247,12 +278,14 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload APK artifact (Debug)
+      - name: Upload APK artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gossip-android-apk
-          path: android/app/build/outputs/apk/debug/gossip-android-apk-*.apk
+          path: |
+            android/app/build/outputs/apk/release/gossip-android-apk-*.apk
+            android/app/build/outputs/apk/debug/gossip-android-apk-*.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -363,7 +396,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: gossip-android-apk
-          path: android/app/build/outputs/apk/debug/
+          path: android/app/build/outputs/apk/release/
 
       - name: Attach Android assets to GitHub Release
         if: github.event_name == 'release'
@@ -371,7 +404,7 @@ jobs:
         with:
           files: |
             android/app/build/outputs/bundle/release/gossip-android-aab-*.aab
-            android/app/build/outputs/apk/debug/gossip-android-apk-*.apk
+            android/app/build/outputs/apk/release/gossip-android-apk-*.apk
 
   build-ios:
     needs: build-web
