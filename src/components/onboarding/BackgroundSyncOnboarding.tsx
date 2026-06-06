@@ -58,22 +58,22 @@ const BackgroundSyncOnboarding: React.FC<Props> = ({
       <div className="flex flex-col items-center text-center gap-4">
         <Battery className="w-12 h-12 text-foreground" />
         <h1 className="text-xl font-semibold text-foreground">
-          {t('background_sync_title')}
+          {t('create.background_sync_title')}
         </h1>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          {t('background_sync_description')}
+          {t('create.background_sync_description')}
         </p>
       </div>
 
       <div className="bg-card border border-border rounded-xl flex items-center gap-4 px-4 py-4">
         <Zap className="w-5 h-5 text-foreground shrink-0" />
         <span className="flex-1 text-sm font-medium text-foreground">
-          {t('background_sync_toggle')}
+          {t('create.background_sync_toggle')}
         </span>
         <Toggle
           checked={enabled}
           onChange={handleToggle}
-          ariaLabel={t('background_sync_toggle')}
+          ariaLabel={t('create.background_sync_toggle')}
         />
       </div>
 
@@ -86,7 +86,7 @@ const BackgroundSyncOnboarding: React.FC<Props> = ({
           fullWidth
           className="h-12 rounded-full text-sm font-medium"
         >
-          {t('background_sync_continue')}
+          {t('create.background_sync_continue')}
         </Button>
       </div>
     </PageLayout>
