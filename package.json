@@ -124,7 +124,7 @@
     "@types/varint": "^6.0.3",
     "@vite-pwa/assets-generator": "^0.2.6",
     "@vitejs/plugin-react": "^4.2.1",
-    "@vitest/browser": "^4.0.14",
+    "@vitest/browser": "^4.1.8",
     "@vitest/browser-playwright": "^4.0.14",
     "@vitest/coverage-v8": "^4.0.16",
     "@vitest/ui": "^4.0.14",
