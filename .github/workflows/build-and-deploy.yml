@@ -252,14 +252,19 @@ jobs:
           if [ "${{ github.event_name }}" = "release" ]; then
             APK_DIR="android/app/build/outputs/apk/release"
             APK_SOURCE="${APK_DIR}/app-release.apk"
+            APK_KIND="Release"
           else
             APK_DIR="android/app/build/outputs/apk/debug"
             APK_SOURCE="${APK_DIR}/app-debug.apk"
+            APK_KIND="Debug"
           fi
 
           if [ -f "$APK_SOURCE" ]; then
             cp "$APK_SOURCE" "${APK_DIR}/gossip-android-apk-${VERSION}${SUFFIX}.apk"
             echo "✅ Created ${APK_DIR}/gossip-android-apk-${VERSION}${SUFFIX}.apk"
+          else
+            echo "❌ Expected Android APK ($APK_KIND) not found at $APK_SOURCE"
+            exit 1
           fi
 
           # Copy AAB with versioned name
