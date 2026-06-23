@@ -66,7 +66,10 @@ export async function initializeWasm(): Promise<void> {
       } else {
         // Pre-fetch as ArrayBuffer so Safari doesn't choke on
         // chunked Transfer-Encoding during instantiateStreaming.
-        const gossipWasmUrl = new URL(WASM_PATH, import.meta.url).toString();
+        const gossipWasmUrl = new URL(
+          '../assets/generated/wasm/gossip_wasm_bg.wasm',
+          import.meta.url
+        ).toString();
         const resp = await fetch(gossipWasmUrl);
         const wasmBytes = await resp.arrayBuffer();
         await init(wasmBytes);
