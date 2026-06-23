@@ -396,7 +396,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: gossip-android-apk
-          path: android/app/build/outputs/apk/release/
+          path: .release-assets/android-apk
 
       - name: Attach Android assets to GitHub Release
         if: github.event_name == 'release'
@@ -404,7 +404,7 @@ jobs:
         with:
           files: |
             android/app/build/outputs/bundle/release/gossip-android-aab-*.aab
-            android/app/build/outputs/apk/release/gossip-android-apk-*.apk
+            .release-assets/android-apk/**/*.apk
 
   build-ios:
     needs: build-web
