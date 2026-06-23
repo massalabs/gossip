@@ -46,7 +46,9 @@ export default defineConfig({
           browser: {
             enabled: true,
             provider: playwright({
-              launchOptions: process.env.CI ? { channel: 'chrome' } : undefined,
+              ...(process.env.CI
+                ? { launchOptions: { channel: 'chrome' } }
+                : {}),
             }),
             headless: true,
             instances: [{ browser: 'chromium' }],
