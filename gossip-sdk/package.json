@@ -1,6 +1,6 @@
 {
   "name": "@massalabs/gossip-sdk",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Gossip SDK for automation, chatbot, and integration use cases",
   "type": "module",
   "main": "./dist/index.js",
