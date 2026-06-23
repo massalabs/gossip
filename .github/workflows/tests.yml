@@ -40,14 +40,20 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('**/package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 15
+        env:
+          DEBUG: pw:install
         run: npx playwright install --with-deps chromium
 
       - name: Install Playwright deps (cached)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 15
         run: npx playwright install-deps chromium
 
       - name: Run tests
