@@ -56,6 +56,10 @@ const COVER_TRAFFIC_NAMESPACES: &[u8] = &[DEFAULT_NAMESPACE, SESSION_BLOB_NAMESP
 struct VfsState {
     backend: RedbStorage,
     domain: String,
+    /// Absolute path the redb handle was opened at. Stored so a second
+    /// `init_native` can verify it targets the same store before reusing
+    /// the process-global handle (see `init_native`).
+    path: String,
     session: Option<UnlockedSession>,
     namespace_states: HashMap<u8, NamespaceState>,
     /// Per-file read/write/sync state for the SQLite main DB.
@@ -137,12 +141,39 @@ fn io_methods() -> &'static sqlite3_io_methods {
 
 /// Create state with redb backend.
 pub fn init_native(path: &str, domain: &str) -> Result<()> {
-    let storage = RedbStorage::open(Path::new(path))?;
+    // Take the state lock FIRST so the "already initialised?" check and the
+    // open below are atomic. The native VFS owns ONE process-global redb
+    // handle, and redb takes an exclusive OS lock at `Database::create`.
+    // Two Capacitor bridges in the same process (the main UI and the
+    // foreground-sync runtime) can each call initSecureStorage; without
+    // this the second one reopens storage.redb and redb fails with
+    // `DatabaseAlreadyOpen` -> surfaced as the STORAGE error. Locking
+    // across the open also closes the TOCTOU where both bridges see `None`.
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+
+    if let Some(existing) = guard.as_ref() {
+        if existing.domain == domain && existing.path == path {
+            // Idempotent: the same (domain, path) store is already open —
+            // reuse the global handle.
+            return Ok(());
+        }
+        // A different domain OR path on an already-open DB is genuine
+        // misuse: the single global handle cannot serve two stores. Surface
+        // the mismatch rather than silently reusing the wrong one (or
+        // reopening, which would just hit the redb lock anyway).
+        return Err(SecureStorageError::Storage(format!(
+            "already initialised for (domain '{}', path '{}'), \
+             cannot re-init for (domain '{}', path '{}')",
+            existing.domain, existing.path, domain, path
+        )));
+    }
+
+    let storage = RedbStorage::open(Path::new(path))?;
     *guard = Some(VfsState {
         backend: storage,
         domain: domain.to_string(),
+        path: path.to_string(),
         session: None,
         namespace_states: HashMap::new(),
         main_file: EncryptedFileCore::new(),
@@ -574,6 +605,7 @@ fn flush_pending_writes(st: &mut VfsState) -> Result<()> {
     let VfsState {
         backend,
         domain,
+        path: _,
         session,
         namespace_states,
         main_file,
@@ -1063,6 +1095,7 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
             let VfsState {
                 backend,
                 domain,
+                path: _,
                 session,
                 namespace_states,
                 main_file,
@@ -2070,6 +2103,73 @@ mod tests {
                 assert_eq!(val, "persisted");
                 drop(conn);
             }
+        });
+    }
+
+    #[test]
+    fn test_init_native_idempotent_reuses_open_store() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (dir, conn) = setup_native_vfs();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            conn.execute_batch(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);
+                 INSERT INTO t VALUES (1, 'before-reinit');",
+            )
+            .unwrap();
+
+            // Second init for the same (path, domain) while the process-global
+            // handle is still open — the notification-relaunch case (a fresh
+            // WebView re-runs initSecureStorage in a surviving process). Must
+            // reuse the handle, not reopen (redb would fail with
+            // DatabaseAlreadyOpen).
+            init_native(&path, "test").unwrap();
+
+            // The reuse must not disturb live state: the session stays
+            // unlocked (a forced lock here would kill the UI bridge's session
+            // in the two-bridges case) and the open connection keeps working.
+            assert!(is_unlocked().unwrap());
+            let val: String = conn
+                .query_row("SELECT val FROM t WHERE id = 1", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(val, "before-reinit");
+            conn.execute("INSERT INTO t VALUES (2, 'after-reinit')", [])
+                .unwrap();
+
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_init_native_rejects_mismatched_store() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            let dir_a = tempfile::tempdir().unwrap();
+            let dir_b = tempfile::tempdir().unwrap();
+            let path_a = dir_a.path().to_str().unwrap().to_string();
+            let path_b = dir_b.path().to_str().unwrap().to_string();
+
+            init_native(&path_a, "test").unwrap();
+
+            // The single global handle cannot serve two stores: a different
+            // path or domain is misuse and must surface, not silently swap
+            // the open store.
+            let err = init_native(&path_b, "test").expect_err("different path must be rejected");
+            assert!(
+                matches!(&err, SecureStorageError::Storage(msg) if msg.contains("already initialised")),
+                "expected mismatch error, got: {err}"
+            );
+            let err = init_native(&path_a, "other").expect_err("different domain must be rejected");
+            assert!(
+                matches!(&err, SecureStorageError::Storage(msg) if msg.contains("already initialised")),
+                "expected mismatch error, got: {err}"
+            );
+
+            // The failed calls must leave the original store untouched: the
+            // matching re-init still succeeds.
+            init_native(&path_a, "test").unwrap();
         });
     }
 }
