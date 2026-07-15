@@ -2,10 +2,10 @@
 
 > **Before publishing:** have French counsel review this Agreement before you
 > start collecting signatures. The fields in Schedule A and the Authorized
-> Employees list in Schedule B are to be completed by each signing corporation;
-> one operational item is still to be finalized — the location where
-> `cla-assistant.io` will store collected signatures (a separate private
-> `massalabs/cla` repository is recommended); see `CONTRIBUTING.md` § 1.
+> Employees list in Schedule B are to be completed by each signing corporation.
+> Signatures collected via `cla-assistant.io` are stored in the private
+> [`massalabs/cla`](https://github.com/massalabs/cla) repository; see
+> `CONTRIBUTING.md` § 1.
 
 ---
 
@@ -430,8 +430,7 @@ withdrawal of, its signature at any time by emailing info@massa.net.
 ---
 
 _The fields in Schedule A and the Authorized Employees list in Schedule B are
-completed by each signing corporation. Signature storage for
-`cla-assistant.io` is configured separately; one operational item is still to
-be finalized — the location where collected signatures are stored (a separate
-private `massalabs/cla` repository is recommended); see `CONTRIBUTING.md`
-§ 1._
+completed by each signing corporation. Signatures collected via
+`cla-assistant.io` are stored in the private
+[`massalabs/cla`](https://github.com/massalabs/cla) repository; see
+`CONTRIBUTING.md` § 1._

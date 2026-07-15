@@ -1,10 +1,9 @@
 # Individual Contributor License Agreement ("ICLA")
 
 > **Before publishing:** have French counsel review this Agreement before you
-> start collecting signatures. One operational item is still to be finalized:
-> the location where `cla-assistant.io` will store collected signatures (a
-> separate private `massalabs/cla` repository is recommended); see
-> `CONTRIBUTING.md` § 1.
+> start collecting signatures. Signatures collected via `cla-assistant.io` are
+> stored in the private [`massalabs/cla`](https://github.com/massalabs/cla)
+> repository; see `CONTRIBUTING.md` § 1.
 
 ---
 
@@ -342,7 +341,6 @@ signature at any time by emailing info@massa.net.
 
 ---
 
-_Signature storage for `cla-assistant.io` is configured separately; one
-operational item is still to be finalized — the location where collected
-signatures are stored (a separate private `massalabs/cla` repository is
-recommended); see `CONTRIBUTING.md` § 1._
+_Signatures collected via `cla-assistant.io` are stored in the private
+[`massalabs/cla`](https://github.com/massalabs/cla) repository; see
+`CONTRIBUTING.md` § 1._

@@ -43,17 +43,10 @@ adds the company's Authorized Employees to the list managed by
 
 ### Where your signature is stored
 
-<!-- Operational note (for the Maintainer, not part of the CLA terms):
-     confirm where cla-assistant.io will store collected signatures. The
-     recommended default is a separate private `massalabs/cla` repository;
-     alternatives are an orphan branch on `massalabs/gossip` or a private
-     gist owned by the Maintainer. Replace the paragraph below once decided,
-     then remove this comment. -->
-
-Signatures collected via `cla-assistant.io` are stored as a JSON file in a
-location to be confirmed by the Maintainer (recommended default: a separate
-private `massalabs/cla` repository). You can request a copy of, or withdrawal
-of, your signature at any time by emailing info@massa.net.
+Signatures collected via `cla-assistant.io` are stored as a JSON file in the
+private [`massalabs/cla`](https://github.com/massalabs/cla) repository. You can
+request a copy of, or withdrawal of, your signature at any time by emailing
+info@massa.net.
 
 ## 2. License of your contributions
 
@@ -158,9 +151,8 @@ golden rule: review the code, not the person.
 
 ---
 
-_One operational item for the Maintainer remains pending: the location where
-`cla-assistant.io` will store collected signatures (recommended default: a
-separate private `massalabs/cla` repository); see § 1 above. The CLA documents
-at `CLA/ICLA.md` and `CLA/CCLA.md` contain the authoritative legal terms; in
-the event of any inconsistency between this `CONTRIBUTING.md` and the CLAs,
-the CLAs control._
+_Signatures collected via `cla-assistant.io` are stored in the private
+[`massalabs/cla`](https://github.com/massalabs/cla) repository; see § 1 above.
+The CLA documents at `CLA/ICLA.md` and `CLA/CCLA.md` contain the authoritative
+legal terms; in the event of any inconsistency between this `CONTRIBUTING.md`
+and the CLAs, the CLAs control._
