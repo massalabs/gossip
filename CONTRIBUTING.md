@@ -39,14 +39,21 @@ adds the company's Authorized Employees to the list managed by
 `CLA/CCLA-Schedule-B-<corporation-short-name>.md` per Section 11.2 of the CCLA).
 
 > If you have questions about the CLA or about which one you should sign,
-> contact us at `<TODO — email address>`.
+> contact us at info@massa.net.
 
 ### Where your signature is stored
 
-Signatures collected via `cla-assistant.io` are stored as a JSON file in
-`<TODO — confirm storage location: a separate private 'massalabs/cla' repo is
-recommended>` `. You can request a copy of, or withdrawal of, your signature at
-any time by emailing `<TODO — email address>`.
+<!-- Operational note (for the Maintainer, not part of the CLA terms):
+     confirm where cla-assistant.io will store collected signatures. The
+     recommended default is a separate private `massalabs/cla` repository;
+     alternatives are an orphan branch on `massalabs/gossip` or a private
+     gist owned by the Maintainer. Replace the paragraph below once decided,
+     then remove this comment. -->
+
+Signatures collected via `cla-assistant.io` are stored as a JSON file in a
+location to be confirmed by the Maintainer (recommended default: a separate
+private `massalabs/cla` repository). You can request a copy of, or withdrawal
+of, your signature at any time by emailing info@massa.net.
 
 ## 2. License of your contributions
 
@@ -140,7 +147,7 @@ for examples).
 - For bugs and feature requests, open a GitHub issue. Include the platform
   (web / iOS / Android), the Gossip version, and clear reproduction steps.
 - For security-sensitive reports, do **not** open a public issue. Email us at
-  `<TODO — security email address>` with a description of the issue and an
+  `dv@massa.net` with a description of the issue and an
   attachment or link to a proof of concept if you have one.
 
 ## 6. Code of conduct
@@ -151,8 +158,9 @@ golden rule: review the code, not the person.
 
 ---
 
-_Throughout this document, items marked `<TODO ...>` will be filled in once the
-Maintainer confirms the email contact, the signature-storage repo, and the
-security contact. The CLA documents at `CLA/ICLA.md` and `CLA/CCLA.md` contain
-the authoritative legal terms; in the event of any inconsistency between this
-`CONTRIBUTING.md` and the CLAs, the CLAs control._
+_One operational item for the Maintainer remains pending: the location where
+`cla-assistant.io` will store collected signatures (recommended default: a
+separate private `massalabs/cla` repository); see § 1 above. The CLA documents
+at `CLA/ICLA.md` and `CLA/CCLA.md` contain the authoritative legal terms; in
+the event of any inconsistency between this `CONTRIBUTING.md` and the CLAs,
+the CLAs control._

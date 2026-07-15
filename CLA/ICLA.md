@@ -1,10 +1,10 @@
 # Individual Contributor License Agreement ("ICLA")
 
-> **TODO — confirm before publishing:** replace the `<TODO ...>` placeholders
-> below with the exact values requested for the Maintainer's registered legal
-> identity and governing-law court. Have French counsel review the final text
-> before you start collecting signatures. See `CONTRIBUTING.md` for the list of
-> open items.
+> **Before publishing:** have French counsel review this Agreement before you
+> start collecting signatures. One operational item is still to be finalized:
+> the location where `cla-assistant.io` will store collected signatures (a
+> separate private `massalabs/cla` repository is recommended); see
+> `CONTRIBUTING.md` § 1.
 
 ---
 
@@ -49,10 +49,10 @@ Section 4.3 below includes every original work of authorship You submit to the
 Project.
 
 1.4. **"Maintainer"** means the legal entity that owns and curates the Project,
-namely `<TODO — exact registered legal name of the MassaLabs entity>` (a French
-_société par actions simplifiée_), registered office at `<TODO — registered
-office address>`, RCS `<TODO — RCS / SIREN number>`, acting through its
-contributor relations channel at `<TODO — email address>`.
+namely **MASSA LABS**, a French _société par actions simplifiée_ (SAS),
+registered office at 226 Boulevard Voltaire, 75011 Paris, France, RCS Paris
+881 320 592 (SIREN 881 320 592, VAT FR 02 881 320 592), acting through its
+contributor relations channel at info@massa.net.
 
 1.5. **"Project"** means the software project "Gossip", hosted by the Maintainer
 on GitHub at `https://github.com/massalabs/gossip`, including all of its
@@ -297,7 +297,7 @@ provisions.
 10.2. **Jurisdiction.** Any dispute arising out of or in connection with this
 Agreement, including any question regarding its existence, validity, or
 termination, shall be submitted to the exclusive jurisdiction of the
-**competent courts of `<TODO — city>` (France)**, unless the Maintainer elects
+**competent courts of Paris (France)**, unless the Maintainer elects
 to submit the dispute to mediation or arbitration as provided in Section 10.3.
 
 10.3. **Mediation.** Before initiating court proceedings, the parties shall in
@@ -338,9 +338,11 @@ Signature (typed) : ________________________________________
 When You sign via `cla-assistant.io`, the equivalent of the fields above is
 collected by the assistant and stored as a JSON record (see `CONTRIBUTING.md`
 for the storage location). You can request a copy of, or withdrawal of, your
-signature at any time by emailing `<TODO — email address>`.
+signature at any time by emailing info@massa.net.
 
 ---
 
-_Items marked `<TODO ...>` must be replaced with the confirmed values before
-this Agreement is published and signatures are collected._
+_Signature storage for `cla-assistant.io` is configured separately; one
+operational item is still to be finalized — the location where collected
+signatures are stored (a separate private `massalabs/cla` repository is
+recommended); see `CONTRIBUTING.md` § 1._

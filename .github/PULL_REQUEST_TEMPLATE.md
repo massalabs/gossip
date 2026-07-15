@@ -21,7 +21,7 @@ Closes #<issue-number>
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
 - [ ] Refactor / chore / docs (no user-facing change)
-- [ ] Security-relevant (please also email `<TODO — security email address>` if you have not already)
+- [ ] Security-relevant (please also email `dv@massa.net` if you have not already)
 
 ## Component(s) affected
 

@@ -1,10 +1,11 @@
 # Corporate Contributor License Agreement ("CCLA")
 
-> **TODO — confirm before publishing:** replace the `<TODO ...>` placeholders
-> below with the confirmed values for the Maintainer's registered legal identity,
-> the signatory corporation's identity (in Schedule A), and the governing-law
-> court. Have French counsel review the final text before you start collecting
-> signatures. See `CONTRIBUTING.md` for the list of open items.
+> **Before publishing:** have French counsel review this Agreement before you
+> start collecting signatures. The fields in Schedule A and the Authorized
+> Employees list in Schedule B are to be completed by each signing corporation;
+> one operational item is still to be finalized — the location where
+> `cla-assistant.io` will store collected signatures (a separate private
+> `massalabs/cla` repository is recommended); see `CONTRIBUTING.md` § 1.
 
 ---
 
@@ -53,10 +54,10 @@ intentionally submitted to the Project, or (ii) any work the Maintainer
 explicitly marks as "**`Not a Contribution`**" in the record of its submission.
 
 1.4. **"Maintainer"** means the legal entity that owns and curates the Project,
-namely `<TODO — exact registered legal name of the MassaLabs entity>` (a French
-_société par actions simplifiée_), registered office at `<TODO — registered
-office address>`, RCS `<TODO — RCS / SIREN number>`, acting through its
-contributor relations channel at `<TODO — email address>`.
+namely **MASSA LABS**, a French _société par actions simplifiée_ (SAS),
+registered office at 226 Boulevard Voltaire, 75011 Paris, France, RCS Paris
+881 320 592 (SIREN 881 320 592, VAT FR 02 881 320 592), acting through its
+contributor relations channel at info@massa.net.
 
 1.5. **"Project"** means the software project "Gossip", hosted by the Maintainer
 on GitHub at `https://github.com/massalabs/gossip`, including all of its
@@ -314,7 +315,7 @@ provisions.
 10.2. **Jurisdiction.** Any dispute arising out of or in connection with this
 Agreement, including any question regarding its existence, validity, or
 termination, shall be submitted to the exclusive jurisdiction of the
-**competent courts of `<TODO — city>` (France)**, unless the Maintainer elects
+**competent courts of Paris (France)**, unless the Maintainer elects
 to submit the dispute to mediation or arbitration as provided in Section 10.3.
 
 10.3. **Mediation.** Before initiating court proceedings, the parties shall in
@@ -333,10 +334,10 @@ listed in **Schedule B** to this CCLA.
 
 11.2. **Amending Schedule B.** The Corporation may from time to time add to, or
 remove from, the list of Authorized Employees by submitting an updated
-Schedule B to the Maintainer — by email to `<TODO — email address>`, or by a
-pull request updating the file `CLA/CCLA-Schedule-B-<TODO — corporation short
-name>.md` in the Project repository, or by updating the corresponding list in
-`cla-assistant.io`. Such an amendment takes effect on the date recorded by the
+Schedule B to the Maintainer — by email to info@massa.net, or by a
+pull request updating the file
+`CLA/CCLA-Schedule-B-<corporation-short-name>.md` in the Project repository,
+or by updating the corresponding list in `cla-assistant.io`. Such an amendment takes effect on the date recorded by the
 Maintainer or by `cla-assistant.io` and does **not** require a new countersignature
 of this CCLA.
 
@@ -424,9 +425,13 @@ record (see `CONTRIBUTING.md` for the storage location). The Corporation may
 maintain Schedule B as a separate in-repo file or as an externally hosted list
 made available to the Maintainer; in either case the Corporation remains
 responsible for keeping it accurate. The Corporation can request a copy of, or
-withdrawal of, its signature at any time by emailing `<TODO — email address>`.
+withdrawal of, its signature at any time by emailing info@massa.net.
 
 ---
 
-_Items marked `<TODO ...>` must be replaced with the confirmed values before
-this Agreement is published and signatures are collected._
+_The fields in Schedule A and the Authorized Employees list in Schedule B are
+completed by each signing corporation. Signature storage for
+`cla-assistant.io` is configured separately; one operational item is still to
+be finalized — the location where collected signatures are stored (a separate
+private `massalabs/cla` repository is recommended); see `CONTRIBUTING.md`
+§ 1._
