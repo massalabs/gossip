@@ -428,6 +428,14 @@ Gossip prioritizes user privacy and security:
 - No data is transmitted to external servers
 - Built with modern security best practices
 
+## License
+
+Gossip is licensed under the **GNU Affero General Public License v3.0 or later** (AGPL-3.0-or-later). See the [`LICENSE`](LICENSE) file for the full text.
+
+This license applies to the application source, the `gossip-sdk` package (also see [`gossip-sdk/LICENSE`](gossip-sdk/LICENSE)), and the Rust crates under `wasm/` (see [`wasm/LICENSE`](wasm/LICENSE)).
+
+> Bundled fonts in `public/fonts/` remain under the **SIL Open Font License (OFL)** and are not relicensed.
+
 ## Roadmap
 
 - [ ] Real-time messaging implementation
