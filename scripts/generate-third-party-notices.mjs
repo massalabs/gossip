@@ -118,6 +118,11 @@ function npmPackages(lockRelativePath, excludedPaths = new Set()) {
   const lockDirectory = dirname(lockPath);
   const lock = readJson(lockPath);
   const packages = [];
+  const bundledPackageNames = new Set(
+    Object.values(lock.packages ?? {}).flatMap(entry =>
+      Array.isArray(entry.bundleDependencies) ? entry.bundleDependencies : []
+    )
+  );
 
   for (const [packagePath, entry] of Object.entries(lock.packages ?? {})) {
     if (!packagePath || entry.dev === true || excludedPaths.has(packagePath))
@@ -125,12 +130,19 @@ function npmPackages(lockRelativePath, excludedPaths = new Set()) {
     const name = entry.name ?? npmPackageName(packagePath);
     if (!name || !entry.version) continue;
 
-    const installedDirectory = findInstalledNpmPackage(
-      lockDirectory,
-      packagePath,
-      name,
-      entry.version
-    );
+    // npm versions differ on whether bundled packages also appear at the root.
+    // Without integrity, those root files cannot be tied to a locked artifact.
+    const installedDirectory =
+      entry.optional !== true ||
+      entry.integrity ||
+      !bundledPackageNames.has(name)
+        ? findInstalledNpmPackage(
+            lockDirectory,
+            packagePath,
+            name,
+            entry.version
+          )
+        : undefined;
     const installedManifest = installedDirectory
       ? readJson(join(installedDirectory, 'package.json'))
       : {};
