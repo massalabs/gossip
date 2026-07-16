@@ -1,158 +1,171 @@
 # Contributing to Gossip
 
-First of all — thank you for taking the time to contribute to **Gossip**! This
-document explains how to get your contribution accepted.
+Thank you for contributing to Gossip. This guide explains the legal and
+technical steps required for a contribution to be accepted.
 
-## 1. Sign the Gossip Contributor License Agreement (CLA)
+## Contributor License Agreements
 
-**Before your first pull request can be merged, you must sign the Gossip CLA.**
-There are two CLAs; you only need to sign one:
+Every human contributor must accept the
+[Individual Contributor License Agreement](./CLA/ICLA.md) (**ICLA**).
 
-- **Individual CLA (`CLA/ICLA.md`)** — sign this if you are contributing on your
-  own behalf (including as an independent contractor submitting your own
-  original work), and none of your contributions are subject to an employer's
-  rights.
-- **Corporate CLA (`CLA/CCLA.md`)** — sign this if your contributions are made
-  in the scope of your employment, or would be considered "work made for hire"
-  under applicable law, such that your employer (or its client) owns or controls
-  the copyright. Your employer (not you) signs the Corporate CLA, and adds you to
-  **Schedule B** as an Authorized Employee. Once your employer has signed, you do
-  **not** also need to sign the Individual CLA for contributions covered by the
-  Corporate CLA.
+If an employer owns or controls rights in a contribution, the employer must also
+enter into the [Corporate Contributor License Agreement](./CLA/CCLA.md)
+(**CCLA**) and privately designate the individual as a covered contributor. The
+CCLA supplements the individual's ICLA; it does not replace it.
+
+An employed contributor may proceed without a CCLA only if the contributor can
+truthfully make the ICLA's representations because the employer has specifically
+authorized all required grants or has waived or transferred its relevant rights.
+
+Questions about which agreement applies may be sent to `info@massa.net`.
 
 ### How to sign
 
-1. Open your first pull request against `massalabs/gossip` as you normally
-   would.
-2. The **cla-assistant** bot will automatically post a comment on your PR with
-   a one-click acceptance link for the relevant CLA.
-3. Click the link and complete the acceptance form. That single signature covers
-   all of your present and future contributions to the Project; you do not need
-   to re-sign on every PR.
-4. Once your signature is recorded, the bot will mark the CLA status as passing
-   on your PR (and on all your subsequent PRs).
+1. Open a pull request against `massalabs/gossip`.
+2. Follow the CLA instructions presented on the pull request or contact
+   `info@massa.net` if no automated instructions appear.
+3. Review the exact agreement version presented for acceptance.
+4. Provide the required identity information and make the unambiguous acceptance
+   requested by the signing process.
+5. Ensure that every identifiable human author or co-author of material in the
+   pull request has completed the required ICLA process.
 
-If you are signing the **Corporate CLA**, the same `cla-assistant` flow applies:
-an authorized officer of your company completes the acceptance form, and then
-adds the company's Authorized Employees to the list managed by
-`cla-assistant.io` (or by submitting a PR that updates
-`CLA/CCLA-Schedule-B-<corporation-short-name>.md` per Section 11.2 of the CCLA).
+A material CLA revision requires explicit re-acceptance before later
+Contributions can be accepted. Acceptance records remain linked to the exact
+agreement version or immutable repository revision that was accepted.
 
-> If you have questions about the CLA or about which one you should sign,
-> contact us at info@massa.net.
+For a CCLA, an authorized corporate representative must provide the corporation
+and authority information required by Schedule A. Completed CCLAs and
+designated-contributor schedules are private records and must not be submitted
+in a public pull request.
 
-### Where your signature is stored
+### Signature records and privacy
 
-Signatures collected via `cla-assistant.io` are stored as a JSON file in the
-private [`massalabs/cla`](https://github.com/massalabs/cla) repository. You can
-request a copy of, or withdrawal of, your signature at any time by emailing
-info@massa.net.
+MASSA LABS retains CLA records privately. Its designated private repository is
+`massalabs/cla`; contributors do not need access to that repository. The exact
+signing and storage providers used by the deployed workflow will be identified
+through the signing process and the
+[Contributor Privacy Notice](./CLA/PRIVACY.md).
 
-## 2. License of your contributions
+The privacy notice explains what data is collected, why it is processed, how
+long it is retained, and how to exercise applicable data-protection rights.
+Privacy requests may be sent to `info@massa.net`. A privacy request does not
+revoke copyright or patent licenses already granted under a CLA.
 
-By signing the CLA, you grant the Maintainer the rights needed to distribute
-your contributions under the **GNU Affero General Public License v3.0 or later**
-(`AGPL-3.0-or-later`) — the license under which Gossip is published (see
-[`LICENSE`](./LICENSE)) — and, where the Maintainer elects, under one or more
-additional or alternative licenses (for example, a commercial license). The
-broad grant is paired, per Section 7 of the ICLA / CCLA, with a
-**free-software-compatibility promise**: the Maintainer will always keep an
-AGPL / FSF-approved version of the Project available to the community.
+## License of Contributions
 
-## 3. Past contributors (retrospective signing)
+The CLA grants MASSA LABS the rights needed to use and distribute covered
+Contributions under the
+[GNU Affero General Public License, version 3 or later](./LICENSE)
+(`AGPL-3.0-or-later`) and under additional or alternative terms, including
+commercial terms.
 
-If you contributed to Gossip before the CLA was introduced, thank you. Your
-earlier contributions remain licensed under the AGPL-3.0-or-later terms under
-which they were submitted; that does not change. However, to enable the broad
-grant (including the patent grant and dual-licensing flexibility) for your
-already-merged code, the Maintainer asks that you now sign the CLA
-retrospectively using the same `cla-assistant.io` flow described above — your
-signature will, by its terms, cover all of your past as well as future
-contributions to the Project. If you would rather not, your past contributions
-will continue to be governed solely by the AGPL-3.0-or-later inbound license and
-nothing in the CLA will alter that.
+That broad grant is paired with the open-availability covenant in Section 7 of
+each CLA. In summary, while MASSA LABS or a transferee uses or licenses a
+Contribution under non-AGPL terms, an identifiable AGPL-3.0-or-later version of
+Gossip containing that Contribution must remain publicly available at no charge.
+The covenant does not require maintenance, feature parity, publication of
+proprietary additions, or inclusion of the Contribution in every later public
+version. The applicable CLA controls if this summary and the agreement differ.
 
-## 4. Contribution workflow
+Third-party material must be separately and conspicuously identified with its
+source and every known license or other restriction, as required by the ICLA and
+CCLA. Disclosure alone is insufficient: the submitter must be legally entitled
+to make the CLA grants. Material accepted separately under identified written
+terms remains outside the CLA.
 
-This section is a quick orientation. For full setup, build, and test
-instructions, see the [main `README.md`](./README.md).
+## Earlier Contributions
 
-### Setup
+An ICLA or CCLA may cover qualifying Contributions submitted before signature,
+but only when the signer owns or controls the rights needed to make the grant.
+An unsigned retrospective agreement does not bind a contributor.
+
+MASSA LABS may already own rights in work created by its employees or may have
+received rights under another agreement or license. The introduction of the CLA
+does not revoke or retroactively alter rights already granted for an earlier
+release.
+
+## Contribution Workflow
+
+### Set up the project
 
 ```bash
 git clone https://github.com/massalabs/gossip.git
 cd gossip
-npm run setup   # installs rust toolchain, wasm tooling, npm deps
-npm run dev     # web dev server at http://localhost:5173
+npm run setup
+npm run dev
 ```
 
-### Make your change
+### Make and verify a change
 
-1. Create a feature branch off `main` (or whatever the current default branch
-   is).
-2. Make your change. Keep commits focused and use clear commit messages
-   (imperative mood — e.g. `fix: handle empty contact list`, `feat(sdk): add
-contacts.list()`).
-3. Run the linters and tests before you push:
+1. Create a focused branch from `dev`.
+2. Make the change and add tests where appropriate.
+3. Run the relevant checks:
 
    ```bash
-   npm run fmt:check   # `npm run fmt` to auto-format
+   npm run fmt:check
    npm run lint
    npm run test:run
-   npm run build:sdk   # if you touched gossip-sdk/
+   npm run build:sdk  # if gossip-sdk/ or generated WASM was touched
    ```
 
-### Open a pull request
+4. For Rust changes, also run:
 
-Open the PR against `main` using the `PULL_REQUEST_TEMPLATE.md` checklist, and
-be sure the "I have signed the Gossip CLA" item is checked. New contributors
-will see the cla-assistant comment appear within a few moments of opening the
-PR.
+   ```bash
+   cargo fmt --manifest-path wasm/Cargo.toml --all -- --check
+   cargo clippy --manifest-path wasm/Cargo.toml --workspace --all-targets
+   cargo test --manifest-path wasm/Cargo.toml --workspace --all-targets
+   ```
+
+5. Open a pull request against `dev` and complete the pull-request template.
+
+### Generated files
+
+Generated WASM files under `gossip-sdk/src/assets/generated/` are committed SDK
+inputs. Regenerate them through the repository scripts; do not edit generated
+JavaScript, declarations, package metadata, or binaries manually.
+
+Run the following after a relevant Rust or Cargo metadata change:
+
+```bash
+npm run wasm:build
+```
 
 ### Code style
 
-- TypeScript / TSX / JavaScript is enforced by ESLint + Prettier. Configs live
-  in `eslint.config.js`, `.prettierrc.json`, and `.prettierignore`.
-- Rust (under `wasm/`) follows `rustfmt` defaults. Run
-  `cargo fmt --manifest-path wasm/Cargo.toml` and
-  `cargo clippy --manifest-path wasm/Cargo.toml` before pushing Rust changes.
-- Do **not** add license or copyright header comments to source files; the
-  Project relies on the `LICENSE` file at the repo root and per-component
-  `LICENSE` files (see `README.md` → "License"). This is consistent with the
-  existing codebase, which deliberately omits per-file SPDX headers.
+- TypeScript, TSX, and JavaScript are checked by ESLint and Prettier.
+- Rust follows `rustfmt` defaults and must pass Clippy.
+- Do not add per-file license or copyright headers. The project uses root and
+  component license files plus third-party notices.
 
-### Commit messages
+### Commit messages and automation
 
-Follow the short conventional-commits style already in use in the repo:
+Use the repository's concise conventional-commit style:
 
-```
+```text
 type(scope): short imperative subject
-
-optional body, wrapped at ~72 chars
 ```
 
-A `Co-authored-by:` trailer is welcome when pairing (and required for
-machine-generated content such as Copilot autofixes; see the existing commits
-for examples).
+`Co-authored-by:` trailers may be retained when collaboration or automation
+tools add them, but they are not required for machine-assisted work. Regardless
+of attribution metadata, the human submitter is responsible for reviewing the
+change and confirming that it satisfies the CLA's authorship, authority, and
+third-party disclosure requirements.
 
-## 5. Reporting issues and security
+## Bugs and Security Reports
 
-- For bugs and feature requests, open a GitHub issue. Include the platform
-  (web / iOS / Android), the Gossip version, and clear reproduction steps.
-- For security-sensitive reports, do **not** open a public issue. Email us at
-  `dv@massa.net` with a description of the issue and an
-  attachment or link to a proof of concept if you have one.
+Use GitHub issues for ordinary bugs and feature requests. Include the affected
+platform, Gossip version, and clear reproduction steps.
 
-## 6. Code of conduct
+Do not disclose a suspected vulnerability in a public issue. Send security
+reports to `dv@massa.net`, including a description and a proof of concept when
+available.
 
-Be respectful and constructive in issues, PRs, and review comments. Harassment,
-personal attacks, and disruptive behaviour will not be tolerated. We follow the
-golden rule: review the code, not the person.
+## Conduct
 
----
+Be respectful and constructive in issues, pull requests, and reviews. Focus
+criticism on the work rather than the person. Harassment, personal attacks, and
+disruptive behavior are not accepted.
 
-_Signatures collected via `cla-assistant.io` are stored in the private
-[`massalabs/cla`](https://github.com/massalabs/cla) repository; see § 1 above.
-The CLA documents at `CLA/ICLA.md` and `CLA/CCLA.md` contain the authoritative
-legal terms; in the event of any inconsistency between this `CONTRIBUTING.md`
-and the CLAs, the CLAs control._
+The [ICLA](./CLA/ICLA.md) and [CCLA](./CLA/CCLA.md) contain the authoritative
+legal terms. If this guide conflicts with an applicable CLA, the CLA controls.

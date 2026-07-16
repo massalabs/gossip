@@ -1,66 +1,68 @@
 <!--
-  Thanks for contributing to Gossip! Please take a moment to fill out this template.
-  New contributors: the cla-assistant bot will post a comment on this PR with a
-  one-click CLA acceptance link — see CONTRIBUTING.md (Section 1) for details.
+Thank you for contributing to Gossip. Complete the relevant sections below.
+See CONTRIBUTING.md for the contribution process and CLA requirements.
 -->
 
 ## Summary
 
-<!-- Briefly describe what this PR changes and why. Link any related issues: -->
+<!-- Explain what changed and why. Link related issues. -->
 
-Closes #<issue-number>
+Closes #
 
-## CLA
+## Contributor License Agreement
 
-- [ ] I have signed the **Gossip CLA** (Individual `CLA/ICLA.md` or Corporate `CLA/CCLA.md`), or my employer has signed the Corporate CLA and added me to Schedule B. See `CONTRIBUTING.md` § 1.
-  - New contributors: the `cla-assistant` bot will post a link on this PR; sign once and all your future PRs are covered.
+- [ ] I have accepted the Gossip ICLA, or I am a non-human account expressly
+      allowed by the maintainers.
+- [ ] If an employer owns or controls rights in my Contribution, the employer
+      has authorized all required grants, waived or transferred those rights, or
+      provided CCLA coverage.
+- [ ] Every identifiable human author or co-author of contributed material on
+      this pull request has completed the applicable CLA process.
 
-## Type of change
+See [CONTRIBUTING.md](../CONTRIBUTING.md) and the
+[Contributor Privacy Notice](../CLA/PRIVACY.md) for details.
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Refactor / chore / docs (no user-facing change)
-- [ ] Security-relevant (please also email `dv@massa.net` if you have not already)
+## Type of Change
 
-## Component(s) affected
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Refactor, maintenance, or documentation
+- [ ] Security-relevant change
 
-<!-- Check all that apply. Remove anything not relevant. -->
+## Components
 
-- [ ] Web app (`src/`)
-- [ ] `@massalabs/gossip-sdk` (`gossip-sdk/`)
-- [ ] Rust / WASM (`wasm/`)
+<!-- Check all that apply. -->
+
+- [ ] Web application (`src/`)
+- [ ] SDK (`gossip-sdk/`)
+- [ ] Rust or WASM (`wasm/`)
 - [ ] iOS (`ios/`)
 - [ ] Android (`android/`)
-- [ ] Tooling / CI / build (`scripts/`, `.github/workflows/`, build configs)
-- [ ] Documentation (`README.md`, `CONTRIBUTING.md`, `CLA/`, etc.)
+- [ ] Tooling, CI, or build configuration
+- [ ] Documentation or legal files
 
 ## Verification
 
-<!-- What did you run to verify your change? Linters, tests, build, manual steps. -->
+<!-- Check commands that were run and describe equivalent checks if needed. -->
 
 - [ ] `npm run fmt:check`
 - [ ] `npm run lint`
 - [ ] `npm run test:run`
-- [ ] `npm run build:sdk` (if `gossip-sdk/` or `wasm/` was touched)
-- [ ] `cargo fmt --manifest-path wasm/Cargo.toml` (if `wasm/` was touched)
-- [ ] `cargo clippy --manifest-path wasm/Cargo.toml` (if `wasm/` was touched)
-- [ ] Tested manually (describe below)
+- [ ] `npm run build:sdk` when SDK or WASM files changed
+- [ ] `cargo fmt --manifest-path wasm/Cargo.toml --all -- --check` when Rust changed
+- [ ] `cargo clippy --manifest-path wasm/Cargo.toml --workspace --all-targets` when Rust changed
+- [ ] `cargo test --manifest-path wasm/Cargo.toml --workspace --all-targets` when Rust changed
+- [ ] Manual testing described below
 
-### Manual test notes
+### Manual Test Notes
 
-<!-- If applicable: platform(s) tested (web/iOS/Android), scenarios, observations, screenshots. -->
+<!-- Include platforms, scenarios, observations, and screenshots where useful. -->
 
-## Breaking changes
+## Breaking Changes
 
-<!-- If this is a breaking change, describe what breaks and what consumers must do.
-     For SDK / public API changes, include a migration note. -->
+<!-- Describe affected users and migration steps, or write "None." -->
 
-## Additional notes
+## Additional Notes
 
-<!-- Anything else reviewers should know: performance implications, follow-up work,
-     dependency updates, etc. Remove this section if empty. -->
-
-## Screenshots / recordings
-
-<!-- For UI changes only. Remove this section if not applicable. -->
+<!-- Include security, performance, deployment, or follow-up considerations. -->
