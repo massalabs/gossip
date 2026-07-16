@@ -24,6 +24,8 @@
     "test:unit": "vitest --project=unit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "notices:generate": "node scripts/generate-third-party-notices.mjs",
+    "notices:check": "node scripts/generate-third-party-notices.mjs --check",
     "audit:logging": "node scripts/audit-logging.mjs source",
     "audit:logging:dist": "node scripts/audit-logging.mjs dist",
     "strip:logging:sw": "node scripts/strip-service-worker-console.mjs",

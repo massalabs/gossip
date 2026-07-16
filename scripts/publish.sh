@@ -7,6 +7,7 @@ npm pkg delete scripts.prepare || true
 # Install dependencies and build the project
 npm ci
 npm run build:sdk
+npm run notices:check
 
 cd gossip-sdk
 
@@ -21,4 +22,3 @@ else
   echo "Publishing ${PACKAGE_NAME}@${NEW_VERSION}"
   npm publish --access public
 fi
-

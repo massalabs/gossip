@@ -430,11 +430,11 @@ Gossip prioritizes user privacy and security:
 
 ## License
 
-Gossip is licensed under the **GNU Affero General Public License v3.0 or later** (AGPL-3.0-or-later). See the [`LICENSE`](LICENSE) file for the full text.
+MASSA LABS-owned Gossip source code is licensed under the **GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later`). See [`LICENSE`](LICENSE) for the full text.
 
-This license applies to the application source, the `gossip-sdk` package (also see [`gossip-sdk/LICENSE`](gossip-sdk/LICENSE)), and the Rust crates under `wasm/` (see [`wasm/LICENSE`](wasm/LICENSE)).
+This license applies to the application source, the `gossip-sdk` package (also see [`gossip-sdk/LICENSE`](gossip-sdk/LICENSE)), and MASSA LABS-owned Rust crates under `wasm/` (see [`wasm/LICENSE`](wasm/LICENSE)). Third-party components retain their own licenses; see [`public/THIRD_PARTY_NOTICES.txt`](public/THIRD_PARTY_NOTICES.txt).
 
-> Bundled fonts in `public/fonts/` remain under the **SIL Open Font License (OFL)** and are not relicensed.
+Bundled fonts remain under the **SIL Open Font License 1.1** and are not relicensed. See the notices for [Mozilla Headline](public/fonts/MozillaHeadline-OFL.txt) and [Roboto](public/fonts/Roboto-OFL.txt).
 
 ## Roadmap
 
