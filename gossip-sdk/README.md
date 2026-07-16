@@ -437,4 +437,4 @@ gossip-sdk/
 
 ## License
 
-MIT
+MASSA LABS-owned source in this package is licensed under the **GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later`). See [`LICENSE`](./LICENSE) for the full text. Bundled third-party components retain their own licenses; see [`THIRD_PARTY_NOTICES.txt`](./THIRD_PARTY_NOTICES.txt).

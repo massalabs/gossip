@@ -50,6 +50,9 @@ jobs:
           BINARYEN_CORES: 1
         run: npm run wasm:build
 
+      - name: Verify third-party notices
+        run: npm run notices:check
+
       - name: Verify generated files are up-to-date
         run: |
           # wasm-bindgen generates exports in non-deterministic order, so we need to check

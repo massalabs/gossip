@@ -2,6 +2,7 @@
   "name": "gossip-wasm",
   "type": "module",
   "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
   "files": [
     "gossip_wasm_bg.wasm",
     "gossip_wasm.js",

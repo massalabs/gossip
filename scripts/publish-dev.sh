@@ -7,6 +7,7 @@ npm pkg delete scripts.prepare || true
 # Install dependencies and build the project
 npm ci
 npm run build:sdk
+npm run notices:check
 
 cd gossip-sdk
 
@@ -19,4 +20,3 @@ sed -i "/version/s/dev.0/dev.$TIME/g" package.json
 
 # Publish the package
 npm publish --access public --tag dev
-
