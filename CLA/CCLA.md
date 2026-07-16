@@ -1,436 +1,338 @@
-# Corporate Contributor License Agreement ("CCLA")
+# Gossip Corporate Contributor License Agreement
 
-> **Before publishing:** have French counsel review this Agreement before you
-> start collecting signatures. The fields in Schedule A and the Authorized
-> Employees list in Schedule B are to be completed by each signing corporation.
-> Signatures collected via `cla-assistant.io` are stored in the private
-> [`massalabs/cla`](https://github.com/massalabs/cla) repository; see
-> `CONTRIBUTING.md` § 1.
+Version 1.0
 
----
+This agreement is based on the Apache Software Foundation's Corporate
+Contributor License Agreement form identified as revision `r190612`, but it has
+been modified for MASSA LABS. It is not affiliated with or endorsed by the
+Apache Software Foundation.
 
-Thank you for your interest in contributing to **Gossip** ("the Project").
+Thank you for your interest in contributing to Gossip. This Corporate
+Contributor License Agreement (the **"Agreement"**) is between the corporation
+or other legal entity accepting it (the **"Corporation"**) and **MASSA LABS**, a
+French _société par actions simplifiée_ (SAS), with its registered office at 226
+Boulevard Voltaire, 75011 Paris, France, registered with the Paris Trade and
+Companies Register under number 881 320 592 (SIREN 881 320 592) (**"MASSA
+LABS"**).
 
-This Corporate Contributor License Agreement (this "CCLA" or "Agreement") is
-between the corporation or other legal entity signing it (the "**Corporation**")
-and the **Maintainer**. The Corporation signs this CCLA so that Contributions
-made by its employees, contractors, or other personnel listed in **Schedule B**
-(each an "**Authorized Employee**") can be accepted by the Maintainer and
-distributed as part of the Project under the **GNU Affero General Public License
-v3.0 or later** ("AGPLv3-or-later") — and, where the Maintainer elects, under one
-or more additional or alternative licenses.
+This Agreement allows the Corporation to submit Contributions and to authorize
+Contributions submitted by its Designated Contributors. It supplements, and
+does not replace, the Individual Contributor License Agreement accepted by each
+individual contributor.
 
-If You are an individual contributing on Your own behalf (and not in the scope
-of any employment), do **not** sign this CCLA — sign the **Individual
-Contributor License Agreement** at `CLA/ICLA.md` instead.
-
-By signing this CCLA (which includes by countersigning and submitting it to
-the Maintainer, or by completing the electronic acceptance form presented by
-`cla-assistant.io`), the Corporation confirms that it has read and understood,
-and that it agrees to, the terms below.
-
----
+This Agreement is a framework for Contributions submitted before, on, or after
+the date on which the Corporation accepts it. The licenses for each future
+Contribution take effect separately when the Corporation or a Designated
+Contributor intentionally submits that Contribution. Except for the licenses and
+rights granted below, the Corporation retains all right, title, and interest it
+holds in those Contributions.
 
 ## 1. Definitions
 
-1.1. **"Affiliate"** of a party means any entity that directly or indirectly
-controls, is controlled by, or is under common control with that party, where
-"control" means the power to direct the management and policies of the entity
-whether through ownership of voting securities, by contract, or otherwise.
-
-1.2. **"Authorized Employee"** means an individual identified in **Schedule B**
-to this CCLA as authorized to submit Contributions to the Project on behalf of
-the Corporation, including any individual added to Schedule B after the
-effective date of this CCLA in accordance with Section 11.2 below.
-
-1.3. **"Contribution"** means any original work of authorship, including any
-modifications or additions to an existing work, that is intentionally submitted
-by an Authorized Employee of the Corporation to the Project. For the avoidance
-of doubt, "intentionally submitted" includes source code, object code, build
-files, tests, documentation, designs, specifications, issue reports, commit
-messages, pull request descriptions, and review comments. Contributions do **not**
-include (i) an Authorized Employee's personal communications that are not
-intentionally submitted to the Project, or (ii) any work the Maintainer
-explicitly marks as "**`Not a Contribution`**" in the record of its submission.
-
-1.4. **"Maintainer"** means the legal entity that owns and curates the Project,
-namely **MASSA LABS**, a French _société par actions simplifiée_ (SAS),
-registered office at 226 Boulevard Voltaire, 75011 Paris, France, RCS Paris
-881 320 592 (SIREN 881 320 592, VAT FR 02 881 320 592), acting through its
-contributor relations channel at info@massa.net.
-
-1.5. **"Project"** means the software project "Gossip", hosted by the Maintainer
-on GitHub at `https://github.com/massalabs/gossip`, including all of its
-components (the web application, the `@massalabs/gossip-sdk` package, and the
-Rust crates under `wasm/`) and any related repositories designated by the
-Maintainer as part of the Project.
-
-1.6. **"You"** / **"Your"** means the Corporation signing this CCLA.
-
----
-
-## 2. Copyright license
-
-2.1. The Corporation hereby grants to the Maintainer, and to its Affiliates and
-successors, a non-exclusive, worldwide, royalty-free, irrevocable, perpetual,
-sub-licensable (copyright) license to reproduce, prepare derivative works of,
-publicly display, publicly perform, and distribute the Contributions of its
-Authorized Employees and such derivative works.
-
-2.2. **License of the Project as a whole.** Without limiting the foregoing,
-this license includes the right for the Maintainer to incorporate the
-Contributions of Authorized Employees into the Project as a whole and to license
-the Project, including those Contributions, to downstream recipients:
-
-- (a) under the **GNU Affero General Public License v3.0 or any later
-  version** ("AGPLv3-or-later"); and/or
-- (b) under any other license the Maintainer chooses for the Project, now
-  or in the future, alone or in combination with AGPLv3-or-later (a
-  "dual-license" arrangement), including a commercial license.
-
-  2.3. The Maintainer may also distribute or make available the Project that
-  contains the Contributions of Authorized Employees through any medium, by any
-  means, and through any class of recipient (including as part of a commercial
-  offering), provided that, pursuant to Section 7 below, the Maintainer continues
-  to make available a version of the Project (including those Contributions)
-  under AGPLv3-or-later.
-
-  2.4. The Corporation retains ownership of the copyright in the Contributions
-  of its Authorized Employees, to the extent such ownership vests in the
-  Corporation under applicable law (including under any "work made for hire"
-  doctrine or equivalent rule). Nothing in this Agreement assigns copyright to the
-  Maintainer.
-
----
-
-## 3. Patent license
-
-3.1. **Grant.** The Corporation hereby grants to the Maintainer and to the
-recipients of software distributed by the Maintainer a non-exclusive,
-worldwide, royalty-free, irrevocable (except as stated in Section 3.2) patent
-license to make, have made, use, offer to sell, sell, import, and otherwise
-transfer the Contributions of its Authorized Employees, where such license
-applies only to those patent claims licensable by the Corporation that are
-**necessarily infringed** by the Contributions of its Authorized Employees
-alone or by their combination with the Project to which they were submitted.
-
-3.2. **Termination of retaliation.** If any entity institutes patent litigation
-against the Corporation or any other entity (including a cross-claim or
-counterclaim in a lawsuit) alleging that a Contribution, or the Project to which
-the Contribution was submitted, constitutes direct or contributory patent
-infringement, then any patent licenses granted to that entity under this
-Agreement for that Contribution or Project shall terminate as of the date such
-litigation is filed.
-
-3.3. **No obligation on your patents.** The Corporation is not required to
-grant any patent license for any Contribution that does not contain or use any
-of its patent claims. Nothing in this Agreement obligates the Corporation to
-license patents that it has not granted hereunder.
-
----
-
-## 4. Source of contribution and representations
-
-4.1. **Original authorship.** Except for any Contribution that an Authorized
-Employee identifies as third-party material under Section 4.2 below, each
-Contribution submitted by an Authorized Employee is an original work of
-authorship of that Authorized Employee (or, where applicable, owned by the
-Corporation under a "work made for hire" doctrine or equivalent rule), and the
-Corporation represents that it is legally entitled to grant the rights conveyed
-in Sections 2 and 3 above.
-
-4.2. **Third-party material.** If an Authorized Employee wishes to submit to
-the Project work that is **not** original work of authorship of the Corporation
-or the Authorized Employee, the Authorized Employee **must** clearly mark the
-Contribution as "submitted on behalf of a third-party contributor", must
-identify the complete details of its source and any license or other
-restriction (including, but not limited to, related patents and trademarks), and
-must represent that the Corporation has obtained the right to submit such
-third-party material on the contributor's behalf, and that the third party has
-been informed of, and consents to, the rights granted in this Agreement. Such
-third-party Contribution is **not** covered by the patent grant in Section 3
-unless the third party grants that right separately.
-
-4.3. **Representations.** The Corporation represents and warrants that:
-
-- (a) It has the legal power and authority to enter into this Agreement and
-  to grant the rights granted in Sections 2 and 3 above;
-- (b) Each Contribution submitted by an Authorized Employee is an original
-  work of authorship, except for contributions clearly identified as
-  third-party material under Section 4.2 above;
-- (c) Each such Contribution, and its submission, does not and will not
-  violate any agreement or obligation of the Corporation to a third party,
-  including without limitation any agreement, policy, or obligation with
-  respect to intellectual property;
-- (d) The Corporation has the authority to bind its Authorized Employees
-  through this CCLA, or, where such authority requires a separate
-  signature from each Authorized Employee, the Corporation will ensure
-  that each Authorized Employee signs the Individual CLA at `CLA/ICLA.md`,
-  and the Corporation will keep Schedule B up to date so that the
-  Maintainer can identify such individuals; and
-- (e) Each Contribution does not, and will not, knowingly infringe any
-  intellectual property right of any third party.
-
-  4.4. **Notice of third-party ownership.** The Corporation agrees to notify the
-  Maintainer promptly if it becomes aware that any Contribution is or may be
-  subject to intellectual property rights of any third party (other than the
-  Corporation or its Authorized Employees). The Maintainer may decline to merge
-  any such Contribution until the corresponding rights are cleared.
-
-  4.5. **No expectation of compensation.** The Corporation acknowledges that the
-  Maintainer is under no obligation to compensate the Corporation or its
-  Authorized Employees for any Contribution, and that no such expectation of
-  compensation is part of this Agreement.
-
----
-
-## 5. Disclaimer of warranty
-
-5.1. EXCEPT AS EXPRESSLY STATED IN THIS AGREEMENT, AND TO THE FULL EXTENT
-PERMITTED BY APPLICABLE LAW, THE CONTRIBUTIONS ARE PROVIDED ON AN "**AS IS**"
-BASIS WITHOUT ANY REPRESENTATIONS OR WARRANTIES OF ANY KIND, WHETHER EXPRESS,
-IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING WITHOUT LIMITATION ANY
-REPRESENTATION OR WARRANTY OF TITLE, NON-INFRINGEMENT, MERCHANTABILITY, OR
-FITNESS FOR A PARTICULAR PURPOSE.
-
-5.2. The Corporation is not required to provide any support for any
-Contribution, except as may be required by any separate agreement between the
-Corporation and the Maintainer.
-
----
-
-## 6. Limitation of liability
-
-6.1. TO THE FULL EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
-CORPORATION BE LIABLE TO THE MAINTAINER OR TO ANY OTHER PARTY FOR ANY DIRECT,
-INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES OF ANY KIND (INCLUDING
-LOST PROFITS OR LOST DATA) ARISING OUT OF THIS AGREEMENT OR THE USE OR
-DISTRIBUTION OF ANY CONTRIBUTION, EVEN IF THE CORPORATION HAS BEEN ADVISED OF
-THE POSSIBILITY OF SUCH DAMAGES.
-
-6.2. Nothing in this Agreement excludes or limits liability for: (a) death or
-personal injury caused by the Corporation's wilful misconduct or negligence;
-(b) fraud or fraudulent misrepresentation; or (c) any other liability that
-cannot be excluded or limited by applicable law.
-
----
-
-## 7. Free-software compatibility promise
-
-7.1. The Maintainer acknowledges that the Project's primary license is
-AGPLv3-or-later, and that the Corporation would not grant the broad rights in
-Sections 2 and 3 unless the Maintainer promised to keep a free-software version
-of the Project available. Accordingly, the Maintainer agrees that, whenever it
-distributes or makes available the Project (or a version of the Project that
-incorporates a Contribution of an Authorized Employee) under any license other
-than AGPLv3-or-later — for example, a commercial or proprietary license — the
-Maintainer will also, at the same time and without further charge, continue to
-distribute or make available a complete corresponding version of the Project,
-including those Contributions, under AGPLv3-or-later or under another license
-that is approved by the Free Software Foundation as a free-software license
-(see https://www.gnu.org/licenses/license-list.html).
-
-7.2. This promise is binding on the Maintainer and its successors in interest,
-and is intended for the Corporation's benefit as a third-party beneficiary. It
-does not, however, give the Corporation any right to enforce the Maintainer's
-choice of license or to require the Maintainer to maintain the Project.
-
----
-
-## 8. Notices and attribution
-
-8.1. The Corporation agrees that the Maintainer may record the identity of its
-Authorized Employees (including name, email address, GitHub username, and the
-git history of Contributions) as the authors of those Contributions, and may
-reproduce such attribution information in connection with the distribution of
-the Project.
-
-8.2. The Corporation agrees that the Maintainer may add notices, copyright
-lines, license headers, and similar metadata to the Contributions of its
-Authorized Employees as needed for the Project's record-keeping and
-license-compliance tooling.
-
-8.3. The Corporation agrees, on behalf of itself and its Authorized Employees,
-to waive any moral-rights claim (to the fullest extent permitted by applicable
-law) to prevent the Maintainer from doing any of the acts described in this
-Section, except where such waiver is not permitted, in which case the
-Corporation agrees that it and its Authorized Employees will not assert such
-moral rights against the Maintainer in a manner that would prevent the acts
-described above.
-
----
-
-## 9. General provisions
-
-9.1. **Entire agreement.** This Agreement is the entire agreement between the
-Corporation and the Maintainer concerning its subject matter, and supersedes
-any prior or contemporaneous understandings regarding that subject matter
-(including any version of the ICLA executed by an Authorized Employee in respect
-of the same Contributions, which is subsumed by this CCLA where this CCLA
-governs).
-
-9.2. **Severability.** If any provision of this Agreement is held to be
-unenforceable, that provision shall be modified to render it enforceable to
-the maximum extent permitted by law without altering the parties' intent, and
-the remaining provisions shall continue in full force and effect.
-
-9.3. **Amendment.** The Maintainer may publish revised versions of this CCLA
-from time to time. The version of the CCLA in effect at the time a Contribution
-is submitted governs that Contribution. For future Contributions, the
-Corporation agrees to be bound by the then-current version of the CCLA posted
-at `CLA/CCLA.md` in the Project repository; if the Corporation does not agree
-to a future version, it may direct its Authorized Employees to stop submitting
-Contributions at any time.
-
-9.4. **Assignment.** The Corporation may not assign or transfer this Agreement
-or its rights or obligations hereunder without the Maintainer's prior written
-consent. The Maintainer may assign this Agreement, in whole or in part, in
-connection with a merger, acquisition, reorganization, or sale of all or
-substantially all of its assets. This Agreement binds and benefits the parties
-and their respective successors and permitted assigns.
-
-9.5. **No waiver.** No failure or delay by either party in exercising any
-right under this Agreement shall waive that right, and no single or partial
-exercise of any right shall preclude any further exercise of that right.
-
-9.6. **Headings.** Section headings are for convenience only and do not affect
-the interpretation of this Agreement.
-
-9.7. **Counterparts and electronic signature.** This Agreement may be executed
-in counterparts and by electronic means (including the click-through acceptance
-form operated by `cla-assistant.io`). Each such electronic acceptance shall be
-deemed an original, and together shall constitute one and the same instrument.
-The Corporation's typed name in the acceptance form constitutes its signature,
-and the Corporation represents that the individual providing that typed name is
-authorized to bind the Corporation.
-
----
-
-## 10. Governing law and dispute resolution
-
-10.1. **Governing law.** This Agreement is governed by and construed in
-accordance with the laws of **France**, without regard to its conflict-of-laws
-provisions.
-
-10.2. **Jurisdiction.** Any dispute arising out of or in connection with this
-Agreement, including any question regarding its existence, validity, or
-termination, shall be submitted to the exclusive jurisdiction of the
-**competent courts of Paris (France)**, unless the Maintainer elects
-to submit the dispute to mediation or arbitration as provided in Section 10.3.
-
-10.3. **Mediation.** Before initiating court proceedings, the parties shall in
-good faith attempt to resolve the dispute by amicable mediation under the
-mediation rules of the **Centre de Médiation et d'Arbitrage de Paris (CMAP)**
-then in effect. If the dispute is not resolved within sixty (60) days of a
-written request for mediation, either party may bring the dispute before the
-courts of jurisdiction under Section 10.2.
-
----
-
-## 11. Authorized Employees (Schedule B)
-
-11.1. **Initial list.** The Corporation's initial Authorized Employees are
-listed in **Schedule B** to this CCLA.
-
-11.2. **Amending Schedule B.** The Corporation may from time to time add to, or
-remove from, the list of Authorized Employees by submitting an updated
-Schedule B to the Maintainer — by email to info@massa.net, or by a
-pull request updating the file
-`CLA/CCLA-Schedule-B-<corporation-short-name>.md` in the Project repository,
-or by updating the corresponding list in `cla-assistant.io`. Such an amendment takes effect on the date recorded by the
-Maintainer or by `cla-assistant.io` and does **not** require a new countersignature
-of this CCLA.
-
-11.3. **Coverage.** The rights granted in Sections 2 and 3 above cover only the
-Contributions of Authorized Employees. If an individual previously employed by the
-Corporation continues to contribute to the Project after leaving the Corporation
-(or after being removed from Schedule B), that individual's later Contributions
-are **not** covered by this CCLA and that individual must sign the Individual
-CLA at `CLA/ICLA.md` in respect of those later Contributions.
-
----
-
-## Schedule A — Corporation identity and authorization
-
-This Schedule A identifies the Corporation signing this CCLA and the individual
-who is authorized to bind it. **All fields must be completed.**
-
-```
-Corporation legal name           : ________________________________________
-Legal form                       : ________________________________________
-  (e.g. SAS, SASU, SARL, SA, ...)
-Registered office address        : ________________________________________
-                                  : ________________________________________
-                                  : ________________________________________
-RCS / SIREN number               : ________________________________________
-Country of incorporation         : ________________________________________
-VAT number (if applicable)       : ________________________________________
-Corporation contact email        : ________________________________________
-
-Authorized signatory
-  Full legal name                : ________________________________________
-  Title / position               : ________________________________________
-  Email address                  : ________________________________________
-  Phone (optional)               : ________________________________________
-  Authority to bind              : ________________________________________
-  (e.g. officer, director, duly   : ________________________________________
-  empowered by internal rules)
-
-Effective date                  : ________________________________________
-
-Corporation signature (typed)   : ________________________________________
-Signatory signature (typed)     : ________________________________________
+**"You"** (or **"Your"**) means the Corporation. It includes another entity
+controlled by the Corporation only to the extent that the Corporation has the
+legal authority to grant the rights in this Agreement for that entity. For this
+definition, **"control"** means the direct or indirect power to direct the
+entity's management or policies, whether by contract, ownership of at least
+fifty percent of its voting interests, or otherwise. A parent, sibling, or other
+commonly controlled entity is not covered unless it separately accepts this
+Agreement or the Corporation has documented authority to grant the relevant
+rights for that entity.
+
+**"Designated Contributor"** means an individual identified in the private
+schedule maintained under Section 9 whom You authorize to submit Contributions
+on Your behalf and for whose Contributions You own or control sufficient rights
+to make the grants in this Agreement.
+
+**"Contribution"** means any original work of authorship, including any
+modification or addition to an existing work, that You or a Designated
+Contributor intentionally submits to MASSA LABS for inclusion in, or
+documentation of, the Project. For this definition, **"submit"** means any
+electronic, verbal, or written communication sent to MASSA LABS or its
+representatives through source-code control systems, issue trackers, code-review
+systems, mailing lists, or other channels managed by or on behalf of MASSA LABS
+for discussing or improving the Project. A communication conspicuously marked or
+otherwise designated in writing as **"Not a Contribution"** is excluded.
+
+**"Project"** means the Gossip software project hosted at
+<https://github.com/massalabs/gossip>, including the application, the
+`@massalabs/gossip-sdk` package, and the Rust crates maintained in that
+repository. It also includes an official mirror or successor repository that
+continues the same Gossip project, but it does not include unrelated MASSA LABS
+projects.
+
+**"Alternative Licensing Authority"** means the authority to grant another
+person rights to a Contribution under terms other than AGPL-3.0-or-later,
+including by assignment, delegation, or sublicense of onward licensing
+authority. It does not include a fixed license to use or distribute particular
+copies without authority to grant additional non-AGPL rights.
+
+## 2. Grant of copyright license
+
+Subject to the terms and conditions of this Agreement, You hereby grant to MASSA
+LABS a worldwide, non-exclusive, no-charge, royalty-free, irrevocable,
+sublicensable copyright license, for the duration of the applicable copyright
+and related rights, to:
+
+- reproduce Your Contributions, permanently or temporarily, in whole or in
+  part, in source or object form, by any means and on any medium;
+- represent, publicly display, publicly perform, communicate, and make Your
+  Contributions available to the public by any means and on any medium;
+- adapt, modify, arrange, translate, and prepare derivative works of Your
+  Contributions, and exercise the preceding rights in those derivative works;
+  and
+- publish, distribute, license, sublicense, and otherwise make available Your
+  Contributions and those derivative works.
+
+To the extent that a Contribution is protected by sui generis database rights
+or equivalent rights that You own or control, You grant MASSA LABS the same
+scope of rights in that protected material. No trademark right is granted except
+as strictly necessary to preserve accurate authorship or attribution
+information.
+
+This grant permits MASSA LABS to include Your Contributions in the Project and
+to use, distribute, and license the Project and Your Contributions under the GNU
+Affero General Public License, version 3 or any later version
+(**"AGPL-3.0-or-later"**), and under additional or alternative terms, including
+proprietary or commercial terms, subject to Section 7.
+
+## 3. Grant of patent license
+
+Subject to the terms and conditions of this Agreement, You hereby grant to MASSA
+LABS and to recipients of the Project under a license authorized by MASSA LABS
+or a permitted holder of Alternative Licensing Authority a perpetual,
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated
+in this Section) patent license to make, have made, use, offer to sell, sell,
+import, and otherwise transfer the Project, where that license applies only to
+patent claims licensable by You that are necessarily infringed by Your
+Contribution alone or by combination of Your Contribution with the Project to
+which it was submitted.
+
+If any entity institutes patent litigation against You or any other entity,
+including a cross-claim or counterclaim, alleging that Your Contribution or the
+Project to which You contributed constitutes direct or contributory patent
+infringement, any patent licenses granted to that entity under this Agreement
+for that Contribution or Project terminate on the date the litigation is filed.
+
+## 4. Authority to contribute
+
+You represent that You have the legal power and authority to enter into this
+Agreement and to grant the licenses in it. You further represent that each
+individual identified as a Designated Contributor is authorized to submit
+Contributions on Your behalf and that You own or control sufficient rights in
+those Contributions to make the grants in this Agreement.
+
+Each Designated Contributor must separately accept the Gossip Individual
+Contributor License Agreement. This Agreement supplements that individual's
+representations and grants for Contributions in which You have rights.
+
+## 5. Original and third-party work
+
+You represent that each Contribution covered by this Agreement is Your original
+creation or the original creation of a Designated Contributor, except for work
+submitted separately on behalf of a third party as described below. You also
+represent that each submission includes complete details of every third-party
+license or other restriction, including related patent or trademark
+restrictions, of which You or the submitting Designated Contributor is aware and
+that is associated with any part of the Contribution.
+
+You or a Designated Contributor may submit work that is not an original creation
+only if You are legally entitled to make the grants in this Agreement for that
+work. It must be submitted separately from any other Contribution by identifying
+complete details of its source and every license or other restriction known to
+You or the submitter, and by conspicuously marking the work:
+
+> Submitted on behalf of a third party: [name the third party here]
+
+Disclosure alone does not grant MASSA LABS any right, establish that the work is
+compatible with the Project, or require MASSA LABS to accept it. Work for which
+You cannot make the grants in this Agreement remains outside Your Contributions,
+even if MASSA LABS accepts it separately, and is governed solely by the
+separately identified written terms.
+
+You agree to notify MASSA LABS promptly of any fact or circumstance of which You
+become aware that would make a representation in this Agreement inaccurate.
+
+## 6. Support and warranty
+
+You are not expected to provide support for Your Contributions except to the
+extent You choose to do so. You may provide support for free, for a fee, or not
+at all. Unless required by applicable law or agreed to in writing, You provide
+Your Contributions on an **"AS IS"** BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
+ANY KIND, express or implied, including, without limitation, any warranties or
+conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+PARTICULAR PURPOSE.
+
+## 7. Open availability when alternatively licensed
+
+If MASSA LABS or another holder of Alternative Licensing Authority uses,
+distributes, or licenses a Contribution, or a work incorporating it, under terms
+other than AGPL-3.0-or-later, or if a recipient authorized by that holder
+actually uses or distributes it under such terms, the holder will, for as long
+as that activity actually continues, make and keep publicly available at no
+charge an identifiable version of the Project containing that Contribution
+under AGPL-3.0-or-later.
+
+The available version must be identified by an immutable commit, tag, or
+equivalent version identifier. Its complete corresponding source must be
+publicly downloadable from a stable location and include the license notices and
+the Corresponding Source required by AGPL-3.0-or-later.
+
+The version made available under this Section need not be the latest version or
+have the same features as any alternatively licensed version. MASSA LABS is not
+required to maintain that version, publish future releases, publish every
+edition of the Project, or publish proprietary modifications or additions.
+MASSA LABS may remove or replace the Contribution in later public versions and
+continue alternative use, distribution, or licensing if an earlier version that
+contains the Contribution remains available as required above.
+
+While no non-AGPL use, distribution, or licensing activity described above is
+actually occurring, this Section does not require continued hosting. If such
+activity resumes, the availability obligation resumes at the same time.
+
+MASSA LABS or another holder may transfer Alternative Licensing Authority only
+if the transferee agrees in writing to assume the obligations in this Section.
+This requirement applies equally to a transfer to an affiliate, buyer, or
+successor. It does not apply to a customer or ordinary recipient that receives
+only the right to use or distribute a particular copy under identified license
+terms and receives no Alternative Licensing Authority. Recipients under
+AGPL-3.0-or-later do not assume this separate contractual obligation.
+
+This Section is a contractual obligation owed directly to You. You may enforce
+it using the remedies available under applicable law. It does not modify the
+AGPL, impose an additional restriction on AGPL recipients, or require MASSA LABS
+to continue developing the Project.
+
+## 8. Agreement versions and electronic acceptance
+
+This Agreement is effective when an authorized representative signs it or
+accepts it through an electronic process designated by MASSA LABS. An electronic
+acceptance is effective only if it identifies the Corporation and representative
+through a verified account or equivalent reliable method, records the
+representative's authority and an unambiguous act and timestamp of acceptance,
+is reliably linked to the representative, and is associated with the content
+hash or immutable repository revision of the exact Agreement accepted. MASSA
+LABS will preserve the integrity and accessibility of that evidence.
+
+MASSA LABS may publish revised versions of this Agreement, but a revision does
+not alter the terms governing Contributions covered by a version You accepted.
+For a material revision, MASSA LABS will publish the revised Agreement and
+prospectively identify and communicate a cutoff date no earlier than that
+publication date. The previous version will not apply to Contributions submitted
+after the cutoff. You must explicitly accept the revised version before MASSA
+LABS accepts a Contribution submitted after that cutoff. The previously accepted
+version continues to govern earlier Contributions.
+
+## 9. Designated Contributors
+
+You must provide and keep current a private schedule of Designated Contributors.
+Only Your verified corporate contact or another authorized representative may
+add or remove individuals. Each record must include the individual's full name,
+GitHub username, effective date, removal date when applicable, and the identity
+of the representative authorizing the change. MASSA LABS will retain an audit
+history rather than overwrite earlier authorizations.
+
+You must promptly notify MASSA LABS through its designated private method of a
+change to Your verified corporate contact or that contact's email address. MASSA
+LABS may require evidence that a replacement contact is authorized.
+
+An individual's Contributions are covered only to the extent that You owned or
+controlled sufficient rights when the Contribution was submitted. Removing an
+individual from the schedule does not revoke licenses already granted for
+covered Contributions, but later Contributions are not covered by this
+Agreement unless the individual is redesignated.
+
+Completed schedules and amendments must be delivered through the private method
+designated by MASSA LABS. They must not be submitted in a public pull request.
+
+## 10. General terms
+
+This Agreement is the entire agreement between You and MASSA LABS concerning
+its subject matter and supersedes prior understandings concerning that subject
+matter. If You later accept a revised version, that revised version does not
+supersede the version governing an earlier Contribution unless You and MASSA
+LABS expressly agree otherwise in writing.
+
+If any provision is held unenforceable, it will be modified only to the minimum
+extent necessary to make it enforceable while preserving the parties' intent,
+and the remaining provisions will continue in effect.
+
+A failure or delay in exercising a right under this Agreement does not waive
+that right. Section headings are for convenience and do not affect
+interpretation.
+
+MASSA LABS may assign this Agreement in connection with a merger,
+reorganization, or transfer of the Project or substantially all related assets
+only if the assignee assumes MASSA LABS's obligations under this Agreement,
+including Section 7. Subject to that requirement, this Agreement binds and
+benefits the parties and their permitted successors and assigns.
+
+Nothing in this Agreement waives or transfers a moral right that cannot lawfully
+be waived or transferred. The Corporation does not purport to waive a Designated
+Contributor's personal moral rights through this Agreement.
+
+## 11. Governing law and jurisdiction
+
+This Agreement is governed by French law. It does not deprive either party of
+any mandatory protection that cannot lawfully be waived.
+
+**TO THE EXTENT THAT BOTH PARTIES ACT AS MERCHANTS AND APPLICABLE LAW PERMITS AN
+ADVANCE AGREEMENT ON TERRITORIAL JURISDICTION, THE COMPETENT COURTS OF PARIS,
+FRANCE, HAVE EXCLUSIVE JURISDICTION. IN EVERY OTHER CASE, JURISDICTION IS
+DETERMINED BY THE MANDATORY RULES OF APPLICABLE LAW.**
+
+## 12. Personal data
+
+MASSA LABS processes personal data associated with this Agreement and the
+Contributions it covers as described in the
+[Contributor Privacy Notice](./PRIVACY.md). A privacy request does not revoke
+copyright or patent licenses already granted under this Agreement.
+
+## Schedule A - Corporation identity and signature
+
+The signing process must record the following information privately:
+
+```text
+Corporation legal name:       ______________________________________
+Legal form:                    ______________________________________
+Registered office address:    ______________________________________
+                               ______________________________________
+Registration number:          ______________________________________
+Country of incorporation:     ______________________________________
+Corporation contact:          ______________________________________
+Corporation contact email:    ______________________________________
+
+Authorized representative
+Full legal name:               ______________________________________
+Title:                         ______________________________________
+Email address:                 ______________________________________
+Authority to bind:             ______________________________________
+
+Agreement version:            ______________________________________
+Agreement revision
+or content hash:               ______________________________________
+Effective date:                ______________________________________
+Representative signature:     ______________________________________
 ```
 
----
+By signing, the representative confirms that the Corporation has read and
+accepted this Agreement and that the representative is authorized to bind it.
+MASSA LABS retains acceptance records privately for the purposes described in
+the Contributor Privacy Notice. Questions about this Agreement may be sent to
+`info@massa.net`.
 
-## Schedule B — Authorized Employees
+## Schedule B - Designated Contributors
 
-This Schedule B lists the individuals who are authorized to submit
-Contributions to the Project on behalf of the Corporation. The Corporation
-may update this list at any time as provided in Section 11.2.
+Completed schedules are private records. Use this template only through the
+private method designated by MASSA LABS:
 
-For each individual, the Corporation confirms that the individual is an employee,
-contractor, or other personnel whose Contributions to the Project would, under
-applicable law, vest in or be controlled by the Corporation, and that the
-individual has been informed of, and consents to, the rights granted in this CCLA.
+```text
+Corporation: _______________________________________________________
 
-> **Template format** — replace with the Corporation's actual list and keep it
-> up to date via Section 11.2. A pull request updating
-> `CLA/CCLA-Schedule-B-<corporation-short-name>.md` is the preferred amendment
-> mechanism for in-repo transparency.
-
-```
-| # | Full legal name        | GitHub username     | Email address        | Effective from |
-|---|------------------------|---------------------|----------------------|----------------|
-| 1 | <employee name>        | @github-handle      | <email>              | <date>         |
-| 2 | <employee name>        | @github-handle      | <email>              | <date>         |
-| 3 | <employee name>        | @github-handle      | <email>              | <date>         |
-| ... |                     |                     |                      |                |
+| Full legal name | GitHub username | Effective from | Effective to | Authorized by |
+| ---------------- | --------------- | -------------- | ------------ | ------------- |
+|                  |                 |                |              |               |
 ```
 
-**Amendment log:**
-
-```
-| Date        | Change                          | Requested by          | Acknowledged by  |
-|-------------|---------------------------------|-----------------------|------------------|
-| <date>      | Initial Schedule B              | <signatory>           | <maintainer>     |
-| <date>      | Added <employee>                | <signatory>           | <maintainer>     |
-| <date>      | Removed <employee>               | <signatory>           | <maintainer>     |
-```
-
-When the Corporation signs via `cla-assistant.io`, the equivalent of the
-Schedule A fields will be collected by the assistant and stored as a JSON
-record (see `CONTRIBUTING.md` for the storage location). The Corporation may
-maintain Schedule B as a separate in-repo file or as an externally hosted list
-made available to the Maintainer; in either case the Corporation remains
-responsible for keeping it accurate. The Corporation can request a copy of, or
-withdrawal of, its signature at any time by emailing info@massa.net.
-
----
-
-_The fields in Schedule A and the Authorized Employees list in Schedule B are
-completed by each signing corporation. Signatures collected via
-`cla-assistant.io` are stored in the private
-[`massalabs/cla`](https://github.com/massalabs/cla) repository; see
-`CONTRIBUTING.md` § 1._
+The Corporation must promptly report additions and removals through the private
+method designated by MASSA LABS.

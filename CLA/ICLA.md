@@ -1,346 +1,280 @@
-# Individual Contributor License Agreement ("ICLA")
+# Gossip Individual Contributor License Agreement
 
-> **Before publishing:** have French counsel review this Agreement before you
-> start collecting signatures. Signatures collected via `cla-assistant.io` are
-> stored in the private [`massalabs/cla`](https://github.com/massalabs/cla)
-> repository; see `CONTRIBUTING.md` § 1.
+Version 1.0
 
----
+This agreement is based on version 2.2 of the Apache Software Foundation's
+Individual Contributor License Agreement, but it has been modified for MASSA
+LABS. It is not affiliated with or endorsed by the Apache Software Foundation.
 
-Thank you for your interest in contributing to **Gossip** ("the Project").
+Thank you for your interest in contributing to Gossip. This Individual
+Contributor License Agreement (the **"Agreement"**) is between you and **MASSA
+LABS**, a French _société par actions simplifiée_ (SAS), with its registered
+office at 226 Boulevard Voltaire, 75011 Paris, France, registered with the Paris
+Trade and Companies Register under number 881 320 592 (SIREN 881 320 592)
+(**"MASSA LABS"**).
 
-In order for the Maintainer (as defined below) to accept your Contributions and
-distribute them as part of the Project under the **GNU Affero General Public
-License v3.0 or later** ("AGPLv3-or-later") — and, where the Maintainer elects,
-under one or more additional or alternative licenses — we need you to confirm
-that you have the legal right to grant the licenses set out in this Individual
-Contributor License Agreement (this "Agreement").
+This Agreement protects you, MASSA LABS, and users of Gossip by recording the
+rights granted with your Contributions. It does not prevent you from using your
+own Contributions for any other purpose.
 
-This Agreement is between **you** (the "Contributor") and the **Maintainer**.
-By signing this Agreement (which includes by clicking through the electronic
-acceptance form presented by `cla-assistant.io` on a pull request opened against
-the Project), you confirm that you have read and understood, and that you agree
-to, the terms below. If you do not agree, do not sign this Agreement and do not
-submit Contributions to the Project.
-
----
+This Agreement is a framework for Contributions submitted before, on, or after
+the date on which You accept it. The licenses for each future Contribution take
+effect separately when You intentionally submit that Contribution. Except for
+the licenses and rights granted below, You retain all right, title, and interest
+in Your Contributions.
 
 ## 1. Definitions
 
-1.1. **"Affiliate"** of a party means any entity that directly or indirectly
-controls, is controlled by, or is under common control with that party, where
-"control" means the power to direct the management and policies of the entity
-whether through ownership of voting securities, by contract, or otherwise.
+**"You"** (or **"Your"**) means the individual contributor who accepts this
+Agreement on their own behalf and grants only rights that the individual owns or
+is legally entitled to license. A corporation or other third-party rights owner
+must make its own grant through the Corporate Contributor License Agreement or
+another written agreement accepted by MASSA LABS.
 
-1.2. **"Contribution"** means any original work of authorship, including any
-modifications or additions to an existing work, that is intentionally submitted
-by You to the Project. For the avoidance of doubt, "intentionally submitted"
-means any work that You submit to the Maintainer for inclusion in the Project,
-including (without limitation) source code, object code, build files, tests,
-documentation, designs, specifications, issue reports, commit messages, pull
-request descriptions, and review comments. Contributions do **not** include
-(i) your personal communications that are not intentionally submitted to the
-Project, or (ii) any work the Maintainer explicitly marks as
-"**`Not a Contribution`**" in the record of its submission.
+**"Contribution"** means any original work of authorship, including any
+modification or addition to an existing work, that You intentionally submit to
+MASSA LABS for inclusion in, or documentation of, the Project. For this
+definition, **"submit"** means any electronic, verbal, or written communication
+sent to MASSA LABS or its representatives through source-code control systems,
+issue trackers, code-review systems, mailing lists, or other channels managed by
+or on behalf of MASSA LABS for discussing or improving the Project. A
+communication conspicuously marked or otherwise designated in writing by You as
+**"Not a Contribution"** is excluded.
 
-1.3. **"Contribution"** for the purposes of the **patent** representations in
-Section 4.3 below includes every original work of authorship You submit to the
-Project.
+**"Project"** means the Gossip software project hosted at
+<https://github.com/massalabs/gossip>, including the application, the
+`@massalabs/gossip-sdk` package, and the Rust crates maintained in that
+repository. It also includes an official mirror or successor repository that
+continues the same Gossip project, but it does not include unrelated MASSA LABS
+projects.
 
-1.4. **"Maintainer"** means the legal entity that owns and curates the Project,
-namely **MASSA LABS**, a French _société par actions simplifiée_ (SAS),
-registered office at 226 Boulevard Voltaire, 75011 Paris, France, RCS Paris
-881 320 592 (SIREN 881 320 592, VAT FR 02 881 320 592), acting through its
-contributor relations channel at info@massa.net.
+**"Alternative Licensing Authority"** means the authority to grant another
+person rights to a Contribution under terms other than AGPL-3.0-or-later,
+including by assignment, delegation, or sublicense of onward licensing
+authority. It does not include a fixed license to use or distribute particular
+copies without authority to grant additional non-AGPL rights.
 
-1.5. **"Project"** means the software project "Gossip", hosted by the Maintainer
-on GitHub at `https://github.com/massalabs/gossip`, including all of its
-components (the web application, the `@massalabs/gossip-sdk` package, and the
-Rust crates under `wasm/`) and any related repositories designated by the
-Maintainer as part of the Project.
+## 2. Grant of copyright license
 
-1.6. **"You"** / **"Your"** means the individual signing this Agreement on his
-or her own behalf. If your Contributions are made in the course of your
-employment, or if any Contribution is a "work made for hire" under applicable
-law, then **this ICLA does not grant any rights in that Contribution to the
-Maintainer** unless and until your employer has signed a **Corporate
-Contributor License Agreement** ("CCLA"). You agree to notify the Maintainer if
-any Contribution is or becomes subject to an employer's rights, and to direct
-your employer to execute the CCLA located at `CLA/CCLA.md`.
+Subject to the terms and conditions of this Agreement, You hereby grant to MASSA
+LABS a worldwide, non-exclusive, no-charge, royalty-free, irrevocable,
+sublicensable copyright license, for the duration of the applicable copyright
+and related rights, to:
 
----
+- reproduce Your Contributions, permanently or temporarily, in whole or in
+  part, in source or object form, by any means and on any medium;
+- represent, publicly display, publicly perform, communicate, and make Your
+  Contributions available to the public by any means and on any medium;
+- adapt, modify, arrange, translate, and prepare derivative works of Your
+  Contributions, and exercise the preceding rights in those derivative works;
+  and
+- publish, distribute, license, sublicense, and otherwise make available Your
+  Contributions and those derivative works.
 
-## 2. Copyright license
+To the extent that Your Contribution is protected by sui generis database rights
+or equivalent rights, You grant MASSA LABS the same scope of rights in that
+protected material. No trademark right is granted except as strictly necessary
+to preserve accurate authorship or attribution information.
 
-2.1. You hereby grant to the Maintainer, and to its Affiliates and successors,
-a non-exclusive, worldwide, royalty-free, irrevocable, perpetual, sub-licensable
-(copyright) license to reproduce, prepare derivative works of, publicly display,
-publicly perform, and distribute your Contributions and such derivative works.
+This grant permits MASSA LABS to include Your Contributions in the Project and
+to use, distribute, and license the Project and Your Contributions under the GNU
+Affero General Public License, version 3 or any later version
+(**"AGPL-3.0-or-later"**), and under additional or alternative terms, including
+proprietary or commercial terms, subject to Section 7.
 
-2.2. **License of the Project as a whole.** Without limiting the foregoing,
-this license includes the right for the Maintainer to incorporate your
-Contribution into the Project as a whole and to license the Project, including
-your Contribution, to downstream recipients:
+## 3. Grant of patent license
 
-- (a) under the **GNU Affero General Public License v3.0 or any later
-  version** ("AGPLv3-or-later"); and/or
-- (b) under any other license the Maintainer chooses for the Project, now
-  or in the future, alone or in combination with AGPLv3-or-later (a
-  "dual-license" arrangement), including a commercial license.
+Subject to the terms and conditions of this Agreement, You hereby grant to MASSA
+LABS and to recipients of the Project under a license authorized by MASSA LABS
+or a permitted holder of Alternative Licensing Authority a perpetual,
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated
+in this Section) patent license to make, have made, use, offer to sell, sell,
+import, and otherwise transfer the Project, where that license applies only to
+patent claims licensable by You that are necessarily infringed by Your
+Contribution alone or by combination of Your Contribution with the Project to
+which it was submitted.
 
-  2.3. The Maintainer may also distribute or make available the Project that
-  contains your Contribution through any medium, by any means, and through any
-  class of recipient (including as part of a commercial offering), provided that,
-  pursuant to Section 7 below, the Maintainer continues to make available a
-  version of the Project (including your Contribution) under AGPLv3-or-later.
+If any entity institutes patent litigation against You or any other entity,
+including a cross-claim or counterclaim, alleging that Your Contribution or the
+Project to which You contributed constitutes direct or contributory patent
+infringement, any patent licenses granted to that entity under this Agreement
+for that Contribution or Project terminate on the date the litigation is filed.
 
-  2.4. You retain ownership of the copyright in your Contribution. Nothing in
-  this Agreement assigns copyright to the Maintainer. You retain the right to use
-  your Contribution for your own purposes.
+## 4. Authority to contribute
 
----
+You represent that You are legally entitled to grant the licenses in this
+Agreement.
 
-## 3. Patent license
+If an employer has rights to intellectual property that includes Your
+Contributions, You represent that the employer has specifically authorized You
+to make all grants in this Agreement for those employer-controlled rights, has
+waived or transferred those rights sufficiently for You to make the grants, or
+has entered into a Corporate Contributor License Agreement with MASSA LABS
+covering those Contributions.
 
-3.1. **Grant.** You hereby grant to the Maintainer and to the recipients of
-software distributed by the Maintainer a non-exclusive, worldwide,
-royalty-free, irrevocable (except as stated in Section 3.3) patent license to
-make, have made, use, offer to sell, sell, import, and otherwise transfer the
-Contribution, where such license applies only to those patent claims licensable
-by You that are **necessarily infringed** by Your Contribution(s) alone or by
-their combination with the Project to which they were submitted. If any entity
-institutes patent litigation against You or any other entity (including a
-cross-claim or counterclaim in a lawsuit) alleging that your Contribution, or the
-Project to which you submitted the Contribution, constitutes direct or
-contributory patent infringement, then any patent licenses granted to that
-entity under this Agreement for that Contribution or Project shall terminate
-as of the date such litigation is filed.
+## 5. Original and third-party work
 
-3.2. **No obligation on your patents.** You are not required to grant any
-patent license for any Contribution that does not contain or use any of your
-patent claims. Nothing in this Agreement obligates You to license patents that
-You have not granted hereunder.
+You represent that each of Your Contributions is Your original creation, except
+for work submitted separately on behalf of a third party as described below.
+You also represent that Your submissions include complete details of every
+third-party license or other restriction, including related patent or trademark
+restrictions, of which You are personally aware and that is associated with any
+part of Your Contributions.
 
-3.3. **Termination of retaliation.** Notwithstanding the foregoing, if any
-entity institutes patent litigation against You alleging that your
-Contribution, or the Work to which you contributed, constitutes direct or
-contributory patent infringement, then any patent licenses granted to that
-entity under this Agreement for that Contribution or Work shall terminate as of
-the date such litigation is filed.
+You may submit work that is not Your original creation only if You are legally
+entitled to make the grants in this Agreement for that work. You must submit it
+separately from any other Contribution, identify complete details of its source
+and every license or other restriction of which You are personally aware, and
+conspicuously mark the work:
 
----
+> Submitted on behalf of a third party: [name the third party here]
 
-## 4. Source of contribution and representations
+Disclosure alone does not grant MASSA LABS any right, establish that the work is
+compatible with the Project, or require MASSA LABS to accept it. Work for which
+You cannot make the grants in this Agreement remains outside Your Contributions,
+even if MASSA LABS accepts it separately, and is governed solely by the
+separately identified written terms.
 
-4.1. **Original authorship.** Except for any Contribution that You identify
-under Section 4.3, each Contribution that You submit is Your original work of
-authorship, and You represent that You are legally entitled to grant the rights
-conveyed in Sections 2 and 3 above.
+You agree to notify MASSA LABS promptly of any fact or circumstance of which You
+become aware that would make a representation in this Agreement inaccurate.
 
-4.2. **Third-party material.** If You wish to submit to the Project work that
-is **not** Your original work of authorship, You **must** clearly mark the
-contribution as "submitted on behalf of a third-party contributor", You must
-identify the complete details of its source and any license or other
-restriction (including, but not limited to, related patents and trademarks) of
-which You are personally aware, and You represent that You have obtained the
-right to submit such third-party material on the contributor's behalf, and that
-the third-party has been informed of, and consents to, the rights granted in
-this Agreement. Such third-party Contribution is **not** covered by your patent
-grant in Section 3 unless the third party grants that right separately.
+## 6. Support and warranty
 
-4.3. **Representations.** You represent and warrant that:
+You are not expected to provide support for Your Contributions except to the
+extent You choose to do so. You may provide support for free, for a fee, or not
+at all. Unless required by applicable law or agreed to in writing, You provide
+Your Contributions on an **"AS IS"** BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
+ANY KIND, express or implied, including, without limitation, any warranties or
+conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+PARTICULAR PURPOSE.
 
-- (a) You have the legal right and capacity to enter into this Agreement;
-- (b) Each Contribution submitted by You is Your original work of authorship,
-  except for contributions clearly identified as third-party material
-  under Section 4.2 above;
-- (c) Each such Contribution, and its submission, does not and will not
-  violate any agreement or obligation of Yours to a third party, including
-  any employment agreement, contractor agreement, or any policy of an
-  entity by which You are or were engaged; and
-- (d) Your Contributions do not, and will not, knowingly infringe any
-  intellectual property right of any third party.
+## 7. Open availability when alternatively licensed
 
-  4.4. **Employed contributors.** If You are or have been employed and your
-  contributions are made in the scope of that employment, or if any of your
-  Contributions would, under applicable law, be considered a "work made for
-  hire", You must direct your employer to execute the **Corporate Contributor
-  License Agreement** at `CLA/CCLA.md` and to add You to the list of Authorized
-  Employees in Schedule B to that CCLA. The Maintainer may decline to merge any
-  Contribution that is, or appears to be, subject to third-party ownership rights
-  until the corresponding CCLA is on file.
+If MASSA LABS or another holder of Alternative Licensing Authority uses,
+distributes, or licenses a Contribution, or a work incorporating it, under terms
+other than AGPL-3.0-or-later, or if a recipient authorized by that holder
+actually uses or distributes it under such terms, the holder will, for as long
+as that activity actually continues, make and keep publicly available at no
+charge an identifiable version of the Project containing that Contribution
+under AGPL-3.0-or-later.
 
-  4.5. **No expectation of compensation.** You acknowledge that the Maintainer is
-  under no obligation to compensate You for any Contribution, and that no such
-  expectation of compensation is part of this Agreement.
+The available version must be identified by an immutable commit, tag, or
+equivalent version identifier. Its complete corresponding source must be
+publicly downloadable from a stable location and include the license notices and
+the Corresponding Source required by AGPL-3.0-or-later.
 
----
+The version made available under this Section need not be the latest version or
+have the same features as any alternatively licensed version. MASSA LABS is not
+required to maintain that version, publish future releases, publish every
+edition of the Project, or publish proprietary modifications or additions.
+MASSA LABS may remove or replace the Contribution in later public versions and
+continue alternative use, distribution, or licensing if an earlier version that
+contains the Contribution remains available as required above.
 
-## 5. Disclaimer of warranty
+While no non-AGPL use, distribution, or licensing activity described above is
+actually occurring, this Section does not require continued hosting. If such
+activity resumes, the availability obligation resumes at the same time.
 
-5.1. EXCEPT AS EXPRESSLY STATED IN THIS AGREEMENT, AND TO THE FULL EXTENT
-PERMITTED BY APPLICABLE LAW, YOUR CONTRIBUTIONS ARE PROVIDED ON AN "**AS IS**"
-BASIS WITHOUT ANY REPRESENTATIONS OR WARRANTIES OF ANY KIND, WHETHER EXPRESS,
-IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING WITHOUT LIMITATION ANY
-REPRESENTATION OR WARRANTY OF TITLE, NON-INFRINGEMENT, MERCHANTABILITY, OR
-FITNESS FOR A PARTICULAR PURPOSE.
+MASSA LABS or another holder may transfer Alternative Licensing Authority only
+if the transferee agrees in writing to assume the obligations in this Section.
+This requirement applies equally to a transfer to an affiliate, buyer, or
+successor. It does not apply to a customer or ordinary recipient that receives
+only the right to use or distribute a particular copy under identified license
+terms and receives no Alternative Licensing Authority. Recipients under
+AGPL-3.0-or-later do not assume this separate contractual obligation.
 
-5.2. You are not required to provide any support for Your Contributions, except
-as may be required by any separate agreement between You and the Maintainer.
+This Section is a contractual obligation owed directly to You. You may enforce
+it using the remedies available under applicable law. It does not modify the
+AGPL, impose an additional restriction on AGPL recipients, or require MASSA LABS
+to continue developing the Project.
 
----
+## 8. Agreement versions and electronic acceptance
 
-## 6. Limitation of liability
+This Agreement is effective when You sign it or accept it through an electronic
+process designated by MASSA LABS. An electronic acceptance is effective only if
+it identifies You through a verified account or equivalent reliable method,
+records an unambiguous act and timestamp of acceptance, is reliably linked to
+You, and is associated with the content hash or immutable repository revision of
+the exact Agreement You accepted. MASSA LABS will preserve the integrity and
+accessibility of that evidence.
 
-6.1. TO THE FULL EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL YOU BE
-LIABLE TO THE MAINTAINER OR TO ANY OTHER PARTY FOR ANY DIRECT, INDIRECT,
-SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES OF ANY KIND (INCLUDING LOST
-PROFITS OR LOST DATA) ARISING OUT OF THIS AGREEMENT OR THE USE OR DISTRIBUTION
-OF YOUR CONTRIBUTION, EVEN IF YOU HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH
-DAMAGES.
+MASSA LABS may publish revised versions of this Agreement, but a revision does
+not alter the terms governing Contributions covered by a version You accepted.
+For a material revision, MASSA LABS will publish the revised Agreement and
+prospectively identify and communicate a cutoff date no earlier than that
+publication date. The previous version will not apply to Contributions submitted
+after the cutoff. You must explicitly accept the revised version before MASSA
+LABS accepts a Contribution submitted after that cutoff. The previously accepted
+version continues to govern earlier Contributions.
 
-6.2. Nothing in this Agreement excludes or limits liability for: (a) death or
-personal injury caused by Your wilful misconduct or negligence; or (b) fraud
-or fraudulent misrepresentation; or (c) any other liability that cannot be
-excluded or limited by applicable law.
+## 9. General terms
 
----
+This Agreement is the entire agreement between You and MASSA LABS concerning
+its subject matter and supersedes prior understandings concerning that subject
+matter. If You later accept a revised version, that revised version does not
+supersede the version governing an earlier Contribution unless You and MASSA
+LABS expressly agree otherwise in writing.
 
-## 7. Free-software compatibility promise
+If any provision is held unenforceable, it will be modified only to the minimum
+extent necessary to make it enforceable while preserving the parties' intent,
+and the remaining provisions will continue in effect.
 
-7.1. The Maintainer acknowledges that the Project's primary license is
-AGPLv3-or-later, and that Contributors would not grant the broad rights in
-Sections 2 and 3 unless the Maintainer promised to keep a free-software version
-of the Project available. Accordingly, the Maintainer agrees that, whenever it
-distributes or makes available the Project (or a version of the Project that
-incorporates Your Contribution) under any license other than AGPLv3-or-later —
-for example, a commercial or proprietary license — the Maintainer will also,
-at the same time and without further charge, continue to distribute or make
-available a complete corresponding version of the Project, including Your
-Contribution, under AGPLv3-or-later or under another license that is approved
-by the Free Software Foundation as a free-software license
-(see https://www.gnu.org/licenses/license-list.html).
+A failure or delay in exercising a right under this Agreement does not waive
+that right. Section headings are for convenience and do not affect
+interpretation.
 
-7.2. This promise is binding on the Maintainer and its successors in interest,
-and is intended for Your benefit as a third-party beneficiary. It does not,
-however, give You any right to enforce the Maintainer's choice of license or
-to require the Maintainer to maintain the Project.
+MASSA LABS may assign this Agreement in connection with a merger,
+reorganization, or transfer of the Project or substantially all related assets
+only if the assignee assumes MASSA LABS's obligations under this Agreement,
+including Section 7. Subject to that requirement, this Agreement binds and
+benefits the parties and their permitted successors and assigns.
 
----
+Nothing in this Agreement waives or transfers a moral right that cannot lawfully
+be waived or transferred. To the extent permitted by applicable law, You consent
+to the modifications and modes of exploitation expressly authorized by Section
+2, subject to any mandatory moral rights that remain applicable.
 
-## 8. Notices and attribution
+MASSA LABS will preserve available authorship information in the Project's
+source-control history and will not knowingly attribute Your Contribution to
+another person. On request, MASSA LABS will use Your identified pseudonym or omit
+public attribution where reasonably practicable and legally permitted. This
+paragraph does not require attribution in every binary, display, or distribution
+when the customary source history or accompanying notices remain available.
 
-8.1. You agree that the Maintainer may record Your identity (including Your
-name, email address, GitHub username, and the git history of Your
-Contribution) as the author of Your Contribution, and may reproduce such
-attribution information in connection with the distribution of the Project.
+## 10. Governing law and jurisdiction
 
-8.2. You agree that the Maintainer may add notices, copyright lines, license
-headers, and similar metadata to Your Contributions as needed for the
-Project's record-keeping and license-compliance tooling.
+This Agreement is governed by French law. It does not deprive You of any
+mandatory protection that cannot lawfully be waived.
 
-8.3. You waive any moral-rights claim to prevent the Maintainer from doing any
-of the acts described in this Section, to the fullest extent permitted by
-applicable law, except where such waiver is not permitted, in which case You
-agree not to assert such moral rights against the Maintainer in a manner that
-would prevent the acts described above.
+**TO THE EXTENT THAT BOTH PARTIES ACT AS MERCHANTS AND APPLICABLE LAW PERMITS AN
+ADVANCE AGREEMENT ON TERRITORIAL JURISDICTION, THE COMPETENT COURTS OF PARIS,
+FRANCE, HAVE EXCLUSIVE JURISDICTION. IN EVERY OTHER CASE, JURISDICTION IS
+DETERMINED BY THE MANDATORY RULES OF APPLICABLE LAW.**
 
----
+## 11. Personal data
 
-## 9. General provisions
+MASSA LABS processes personal data associated with this Agreement and Your
+Contributions as described in the [Contributor Privacy Notice](./PRIVACY.md).
+A privacy request does not revoke copyright or patent licenses already granted
+under this Agreement.
 
-9.1. **Entire agreement.** This Agreement is the entire agreement between You
-and the Maintainer concerning its subject matter, and supersedes any prior or
-contemporaneous understandings regarding that subject matter.
+## Signature record
 
-9.2. **Severability.** If any provision of this Agreement is held to be
-unenforceable, that provision shall be modified to render it enforceable to the
-maximum extent permitted by law without altering the parties' intent, and the
-remaining provisions shall continue in full force and effect.
+The signing process must record the following information privately:
 
-9.3. **Amendment.** The Maintainer may publish revised versions of this ICLA
-from time to time. The version of the ICLA in effect at the time You submit a
-Contribution governs that Contribution. For future Contributions, You agree to
-be bound by the then-current version of the ICLA posted at `CLA/ICLA.md` in
-the Project repository; if You do not agree to a future version, You may stop
-submitting Contributions at any time.
-
-9.4. **Assignment.** You may not assign or transfer this Agreement or your
-rights or obligations hereunder without the Maintainer's prior written consent.
-The Maintainer may assign this Agreement, in whole or in part, in connection
-with a merger, acquisition, reorganization, or sale of all or substantially
-all of its assets. This Agreement binds and benefits the parties and their
-respective successors and permitted assigns.
-
-9.5. **No waiver.** No failure or delay by either party in exercising any
-right under this Agreement shall waive that right, and no single or partial
-exercise of any right shall preclude any further exercise of that right.
-
-9.6. **Headings.** Section headings are for convenience only and do not affect
-the interpretation of this Agreement.
-
-9.7. **Counterparts and electronic signature.** This Agreement may be executed
-in counterparts and by electronic means (including the click-through acceptance
-form operated by `cla-assistant.io`). Each such electronic acceptance shall be
-deemed an original, and together shall constitute one and the same instrument.
-Your typed name in the acceptance form constitutes your signature.
-
----
-
-## 10. Governing law and dispute resolution
-
-10.1. **Governing law.** This Agreement is governed by and construed in
-accordance with the laws of **France**, without regard to its conflict-of-laws
-provisions.
-
-10.2. **Jurisdiction.** Any dispute arising out of or in connection with this
-Agreement, including any question regarding its existence, validity, or
-termination, shall be submitted to the exclusive jurisdiction of the
-**competent courts of Paris (France)**, unless the Maintainer elects
-to submit the dispute to mediation or arbitration as provided in Section 10.3.
-
-10.3. **Mediation.** Before initiating court proceedings, the parties shall in
-good faith attempt to resolve the dispute by amicable mediation under the
-mediation rules of the **Centre de Médiation et d'Arbitrage de Paris (CMAP)**
-then in effect. If the dispute is not resolved within sixty (60) days of a
-written request for mediation, either party may bring the dispute before the
-courts of jurisdiction under Section 10.2.
-
-10.4. **Consumer protection.** Nothing in this Agreement deprives a Contributor
-who is a consumer under French law of the protection afforded to consumers by
-mandatory provisions of French law that cannot be derogated from by contract.
-
----
-
-## Schedule A — Signature
-
-Please complete **all** of the following fields. The Maintainer will use these
-to identify you as the author of your Contributions and to record your
-acceptance of this Agreement.
-
-```
-Full legal name   : ________________________________________
-Email address     : ________________________________________
-GitHub username   : ________________________________________
-Mailing address   : ________________________________________
-                  : ________________________________________
-                  : ________________________________________
-Country           : ________________________________________
-Date              : ________________________________________
-
-I have read and agree to the Gossip Individual Contributor License Agreement
-above, and I confirm that I am signing this Agreement on my own behalf.
-
-Signature (typed) : ________________________________________
+```text
+Full legal name:     ________________________________________________
+Email address:       ________________________________________________
+GitHub username:     ________________________________________________
+Country of residence: ______________________________________________
+Agreement version:  ________________________________________________
+Agreement revision
+or content hash:     ________________________________________________
+Date:               ________________________________________________
+Signature:          ________________________________________________
 ```
 
-When You sign via `cla-assistant.io`, the equivalent of the fields above is
-collected by the assistant and stored as a JSON record (see `CONTRIBUTING.md`
-for the storage location). You can request a copy of, or withdrawal of, your
-signature at any time by emailing info@massa.net.
-
----
-
-_Signatures collected via `cla-assistant.io` are stored in the private
-[`massalabs/cla`](https://github.com/massalabs/cla) repository; see
-`CONTRIBUTING.md` § 1._
+By signing, You confirm that You have read and accepted this Agreement and are
+signing on Your own behalf. MASSA LABS retains acceptance records privately for
+the purposes described in the Contributor Privacy Notice. Questions about this
+Agreement may be sent to `info@massa.net`.
