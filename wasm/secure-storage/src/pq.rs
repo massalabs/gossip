@@ -96,24 +96,24 @@ pub fn pq_encrypt(pk: &PqPublicKey, message: &[u8; PQ_MSG_SIZE]) -> Vec<u8> {
 /// Ring-LWE always decrypts — it is the AEAD layer above that detects
 /// tampering. The returned bytes may be garbage if the ciphertext was
 /// modified.
-#[must_use]
-pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Zeroizing<Vec<u8>> {
+pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Result<Zeroizing<Vec<u8>>> {
     let ctx = &NTT_CTX;
-    let ct = pq_rerand::serialize::deserialize_slot(ciphertext);
+    let ct = pq_rerand::serialize::deserialize_slot(ciphertext)
+        .ok_or(SecureStorageError::CorruptedBlock)?;
     let coeffs = Zeroizing::new(pq_rerand::decrypt::decrypt_slot(ctx, &sk.0, &ct));
-    Zeroizing::new(pq_rerand::encoding::decode(&coeffs))
+    Ok(Zeroizing::new(pq_rerand::encoding::decode(&coeffs)))
 }
 
 /// Re-randomize a ciphertext block using only the public key.
 ///
 /// The decrypted plaintext is unchanged but the ciphertext bytes differ.
-#[must_use]
-pub fn pq_rerand(pk: &PqPublicKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Vec<u8> {
+pub fn pq_rerand(pk: &PqPublicKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Result<Vec<u8>> {
     let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;
-    let ct = pq_rerand::serialize::deserialize_slot(ciphertext);
+    let ct = pq_rerand::serialize::deserialize_slot(ciphertext)
+        .ok_or(SecureStorageError::CorruptedBlock)?;
     let ct_new = pq_rerand::rerandomize::rerandomize_slot(&mut rng, ctx, &pk.0, &ct);
-    pq_rerand::serialize::serialize_slot(&ct_new)
+    Ok(pq_rerand::serialize::serialize_slot(&ct_new))
 }
 
 impl PqPublicKey {
@@ -174,7 +174,7 @@ mod tests {
         let ct = pq_encrypt(&pk, &msg);
         assert_eq!(ct.len(), PQ_CT_SIZE);
         let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-        let decrypted = pq_decrypt(&sk, ct_arr);
+        let decrypted = pq_decrypt(&sk, ct_arr).unwrap();
         assert_eq!(*decrypted, msg);
     }
 
@@ -186,9 +186,9 @@ mod tests {
         msg[PQ_MSG_SIZE - 1] = 0xFF;
         let ct = pq_encrypt(&pk, &msg);
         let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-        let ct2 = pq_rerand(&pk, ct_arr);
+        let ct2 = pq_rerand(&pk, ct_arr).unwrap();
         let ct2_arr: &[u8; PQ_CT_SIZE] = ct2.as_slice().try_into().unwrap();
-        let decrypted = pq_decrypt(&sk, ct2_arr);
+        let decrypted = pq_decrypt(&sk, ct2_arr).unwrap();
         assert_eq!(*decrypted, msg);
     }
 
@@ -200,10 +200,10 @@ mod tests {
         let mut ct = pq_encrypt(&pk, &msg);
         for _ in 0..10 {
             let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-            ct = pq_rerand(&pk, ct_arr);
+            ct = pq_rerand(&pk, ct_arr).unwrap();
         }
         let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-        let decrypted = pq_decrypt(&sk, ct_arr);
+        let decrypted = pq_decrypt(&sk, ct_arr).unwrap();
         assert_eq!(*decrypted, msg);
     }
 
@@ -213,8 +213,17 @@ mod tests {
         let msg = [0u8; PQ_MSG_SIZE];
         let ct = pq_encrypt(&pk, &msg);
         let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-        let ct2 = pq_rerand(&pk, ct_arr);
+        let ct2 = pq_rerand(&pk, ct_arr).unwrap();
         assert_ne!(ct, ct2);
+    }
+
+    #[test]
+    fn malformed_ciphertext_is_rejected() {
+        let (pk, sk) = pq_keygen();
+        let ciphertext = [u8::MAX; PQ_CT_SIZE];
+
+        assert!(pq_decrypt(&sk, &ciphertext).is_err());
+        assert!(pq_rerand(&pk, &ciphertext).is_err());
     }
 
     #[test]

@@ -241,7 +241,8 @@ fn rerandomize_block_across_all_slots<S: BlockStorage + KeypairStorage>(
             create_cover_block(&cur_pk, &cur_aad_root)
         } else {
             match storage.read_block(cur_session, namespace, block_index) {
-                Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
+                Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct)
+                    .unwrap_or_else(|_| create_cover_block(&cur_pk, &cur_aad_root)),
                 Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
             }
         };

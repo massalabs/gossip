@@ -97,7 +97,8 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
                 encrypt_block(&session.pq_rerand_pk, &aead_sk, &aad_root, plaintext)
             } else {
                 match &p.existing {
-                    Some(cur_ct) => rerandomize_block(&p.pk, cur_ct),
+                    Some(cur_ct) => rerandomize_block(&p.pk, cur_ct)
+                        .unwrap_or_else(|_| create_cover_block(&p.pk, &p.aad_root)),
                     None => create_cover_block(&p.pk, &p.aad_root),
                 }
             };
@@ -495,7 +496,8 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
                 create_cover_block(&cur_pk, &cur_aad_root)
             } else {
                 match storage.read_block(cur_session, namespace, b) {
-                    Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
+                    Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct)
+                        .unwrap_or_else(|_| create_cover_block(&cur_pk, &cur_aad_root)),
                     Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
                 }
             };
