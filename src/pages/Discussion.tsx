@@ -50,10 +50,11 @@ const Discussion: React.FC = () => {
 
   const locationState = location.state as {
     prefilledMessage?: string;
-    forwardFromMessageId?: number;
+    forwardFromMessageIds?: number[];
     scrollToMessageId?: number;
   } | null;
   const prefilledMessage = locationState?.prefilledMessage;
+  const initialForwardFromMessageIds = locationState?.forwardFromMessageIds;
 
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
@@ -94,16 +95,16 @@ const Discussion: React.FC = () => {
   });
 
   const {
-    forwardFromMessageId,
+    forwardFromMessageIds,
     forwardPreviewText,
     forwardPreviewMode,
     clearForward,
   } = useForwardPreview({
     gossip,
-    contact: contact ?? undefined,
-    initialForwardFromMessageId: locationState?.forwardFromMessageId,
+    initialForwardFromMessageIds,
     setReplyingTo,
   });
+  const isForwarding = forwardFromMessageIds.length > 0;
 
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const defaultRetentionDuration = useAppStore(s => s.defaultRetentionDuration);
@@ -131,6 +132,7 @@ const Discussion: React.FC = () => {
   const {
     selectedMessageIds,
     isSelecting,
+    selectedMessages,
     canDeleteSelected,
     outgoingSentCount,
     handleToggleSelect,
@@ -147,6 +149,7 @@ const Discussion: React.FC = () => {
     handleSendMessage,
     handleReplyToMessage,
     handleForwardMessage,
+    handleForwardMessages,
     handleEditMessage,
     handleDeleteMessage,
     handleCancelReply,
@@ -157,12 +160,17 @@ const Discussion: React.FC = () => {
     contact: contact ?? undefined,
     isSelecting,
     t,
-    forwardFromMessageId,
+    forwardFromMessageIds,
     setReplyingTo,
     setEditingMessage,
     setInputPrefill,
     clearForward,
   });
+
+  const handleForwardSelected = useCallback(() => {
+    handleForwardMessages(selectedMessages);
+    handleClearSelection();
+  }, [handleForwardMessages, selectedMessages, handleClearSelection]);
 
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -341,6 +349,7 @@ const Discussion: React.FC = () => {
             canDeleteSelected,
             onClearSelection: handleClearSelection,
             onCopySelected: handleCopySelected,
+            onForwardSelected: handleForwardSelected,
             onDeleteSelected: handleDeleteSelected,
           }}
           search={{
@@ -369,9 +378,10 @@ const Discussion: React.FC = () => {
           onSend={handleSendMessage}
           replyingTo={replyingTo}
           onCancelReply={handleCancelReply}
-          initialValue={forwardFromMessageId ? undefined : inputPrefill}
-          forwardPreview={forwardFromMessageId ? forwardPreviewText : null}
+          initialValue={isForwarding ? undefined : inputPrefill}
+          forwardPreview={isForwarding ? forwardPreviewText : null}
           forwardMode={forwardPreviewMode}
+          forwardCount={forwardFromMessageIds.length}
           onCancelForward={clearForward}
           onFocus={handleInputFocus}
           editingMessage={editingMessage}

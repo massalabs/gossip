@@ -60,7 +60,7 @@ vi.mock('../../src/stores/appStore', () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       setPendingSharedContent: vi.fn(),
-      setPendingForwardMessageId: vi.fn(),
+      setPendingForwardMessageIds: vi.fn(),
     }),
 }));
 
@@ -94,7 +94,7 @@ interface HarnessProps {
   setEditingMessage: (msg: Message | null) => void;
   setInputPrefill: (text: string | undefined) => void;
   clearForward: () => void;
-  forwardFromMessageId?: number;
+  forwardFromMessageIds?: number[];
 }
 
 function renderHook(container: HTMLDivElement, props: HarnessProps): HookRef {
@@ -108,7 +108,7 @@ function renderHook(container: HTMLDivElement, props: HarnessProps): HookRef {
       contact: { userId: 'contact-1' },
       isSelecting: false,
       t: translate,
-      forwardFromMessageId: props.forwardFromMessageId,
+      forwardFromMessageIds: props.forwardFromMessageIds ?? [],
       setReplyingTo: props.setReplyingTo,
       setEditingMessage: props.setEditingMessage,
       setInputPrefill: props.setInputPrefill,
@@ -165,7 +165,7 @@ describe('useDiscussionActions.handleSendMessage', () => {
       setEditingMessage,
       setInputPrefill,
       clearForward,
-      forwardFromMessageId: 42,
+      forwardFromMessageIds: [42],
     });
 
     let sendPromise!: Promise<void>;
@@ -186,6 +186,38 @@ describe('useDiscussionActions.handleSendMessage', () => {
       resolveSend();
       await sendPromise;
     });
+  });
+
+  it('sends each pending forward id as a separate message on Send', async () => {
+    sendMessageMock.mockResolvedValue(undefined);
+
+    const ref = renderHook(container, {
+      setReplyingTo: vi.fn(),
+      setEditingMessage: vi.fn(),
+      setInputPrefill: vi.fn(),
+      clearForward: vi.fn(),
+      forwardFromMessageIds: [10, 20],
+    });
+
+    await act(async () => {
+      await ref.current!.handleSendMessage('caption');
+    });
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock).toHaveBeenNthCalledWith(
+      1,
+      'contact-1',
+      'caption',
+      undefined,
+      10
+    );
+    expect(sendMessageMock).toHaveBeenNthCalledWith(
+      2,
+      'contact-1',
+      '',
+      undefined,
+      20
+    );
   });
 
   it('clears editing/prefill synchronously in handleConfirmEdit, before editMessage resolves', async () => {

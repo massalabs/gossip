@@ -8,6 +8,8 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  encodeUserId,
+  SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
 import { recomputeFullCache } from '../../src/stores/messageStore.helpers';
 
@@ -37,6 +39,9 @@ const mockSdk = {
     findMessageByMsgId: vi.fn(async () => undefined as Message | undefined),
     deleteMessage: vi.fn(async () => true),
     editMessage: vi.fn(async () => true),
+  },
+  selfMessages: {
+    get: vi.fn(async () => undefined as unknown as Message | undefined),
   },
   discussions: {
     list: vi.fn(async () => []),
@@ -344,5 +349,95 @@ describe('MessageStore reactions', () => {
       useMessageStore.getState().reactionsByContact.get(contactUserId) ?? [];
     expect(remainingReactions).toHaveLength(1);
     expect(remainingReactions[0].id).toBe(incomingReaction.id);
+  });
+});
+
+describe('MessageStore forward resolution', () => {
+  const contactUserId = encodeUserId(new Uint8Array(32).fill(7));
+
+  beforeEach(() => {
+    listeners.clear();
+    useMessageStore.setState({
+      messagesByContact: new Map(),
+      reactionsByContact: new Map(),
+      reactionGroupsCache: new Map(),
+      currentContactUserId: null,
+      cleanupFn: null,
+      isInitializing: false,
+    } as unknown as ReturnType<(typeof useMessageStore)['getState']>);
+    mockSdk.isSessionOpen = true;
+    mockSdk.messages.send.mockClear();
+    mockSdk.messages.get.mockReset();
+    mockSdk.selfMessages.get.mockReset();
+    useMessageStore.getState().init();
+  });
+
+  afterEach(() => {
+    useMessageStore.getState().cleanup();
+  });
+
+  it('keeps same-conversation explicit Forward as forwardOf (not replyTo)', async () => {
+    const originalMsgId = new Uint8Array(12).fill(9);
+    mockSdk.messages.get.mockResolvedValue({
+      id: 42,
+      content: 'original text',
+      contactUserId,
+      messageId: originalMsgId,
+      ownerUserId: 'test-user-id',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(),
+    } satisfies Message);
+
+    await useMessageStore
+      .getState()
+      .sendMessage(contactUserId, '', undefined, 42);
+
+    expect(mockSdk.messages.send).toHaveBeenCalledTimes(1);
+    const sent = mockSdk.messages.send.mock.calls[0][0] as Message;
+    expect(sent.replyTo).toBeUndefined();
+    expect(sent.forwardOf).toEqual({
+      originalContent: 'original text',
+      originalContactId: expect.any(Uint8Array),
+    });
+    expect(sent.forwardOf!.originalContactId).toEqual(
+      new Uint8Array(32).fill(7)
+    );
+  });
+
+  it('forwards Notes → conversation without throwing on SELF_CONTACT_ID', async () => {
+    mockSdk.messages.get.mockResolvedValue({
+      id: 77,
+      content: 'ciphertext-or-placeholder',
+      contactUserId: SELF_CONTACT_ID,
+      ownerUserId: 'test-user-id',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+    } satisfies Message);
+    mockSdk.selfMessages.get.mockResolvedValue({
+      id: 77,
+      content: 'decrypted notes text',
+      contactUserId: SELF_CONTACT_ID,
+      ownerUserId: 'test-user-id',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+    } satisfies Message);
+
+    await expect(
+      useMessageStore.getState().sendMessage(contactUserId, '', undefined, 77)
+    ).resolves.toBeUndefined();
+
+    expect(mockSdk.selfMessages.get).toHaveBeenCalledWith(77);
+    expect(mockSdk.messages.send).toHaveBeenCalledTimes(1);
+    const sent = mockSdk.messages.send.mock.calls[0][0] as Message;
+    expect(sent.replyTo).toBeUndefined();
+    expect(sent.forwardOf).toEqual({
+      originalContent: 'decrypted notes text',
+    });
   });
 });

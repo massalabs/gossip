@@ -5,6 +5,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  decodeUserId,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
@@ -27,7 +28,10 @@ interface SelfMessageStore {
   isSending: boolean;
   loadMessages: () => Promise<void>;
   loadReactions: () => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (
+    content: string,
+    forwardFromMessageId?: number
+  ) => Promise<void>;
   editMessage: (id: number, newContent: string) => Promise<void>;
   deleteMessage: (id: number) => Promise<void>;
   sendReaction: (emoji: string, messageDbId: number) => Promise<void>;
@@ -74,14 +78,32 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     }
   },
 
-  sendMessage: async (content: string) => {
+  sendMessage: async (content: string, forwardFromMessageId?: number) => {
     const trimmed = content.trim();
-    if (!trimmed) return;
+    const isForward = forwardFromMessageId != null;
+    if (!trimmed && !isForward) return;
 
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
     const userProfile = useAccountStore.getState().userProfile;
     if (!userProfile?.userId) return;
+
+    let forwardOf: Message['forwardOf'];
+    if (forwardFromMessageId != null) {
+      const orig = await sdk.messages.get(forwardFromMessageId);
+      if (!orig) {
+        logger.warn('Forward target not found, sending as regular message');
+      } else {
+        try {
+          forwardOf = {
+            originalContent: orig.content,
+            originalContactId: decodeUserId(orig.contactUserId),
+          };
+        } catch {
+          forwardOf = { originalContent: orig.content };
+        }
+      }
+    }
 
     set({ isSending: true });
 
@@ -98,12 +120,13 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       status: MessageStatus.SENT,
       timestamp: new Date(),
       messageId: localMessageId,
+      forwardOf,
     };
     set(state => ({ messages: [...state.messages, optimistic] }));
     set({ isSending: false });
 
     try {
-      const message = await sdk.selfMessages.send(trimmed);
+      const message = await sdk.selfMessages.send(trimmed, { forwardOf });
       set(state => ({
         messages: state.messages.map(m =>
           m === optimistic ? { ...message, messageId: localMessageId } : m

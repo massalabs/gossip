@@ -49,9 +49,9 @@ const Discussions: React.FC = () => {
   }, [userId, username]);
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
-  const pendingForwardMessageId = useAppStore(s => s.pendingForwardMessageId);
-  const setPendingForwardMessageId = useAppStore(
-    s => s.setPendingForwardMessageId
+  const pendingForwardMessageIds = useAppStore(s => s.pendingForwardMessageIds);
+  const setPendingForwardMessageIds = useAppStore(
+    s => s.setPendingForwardMessageIds
   );
   const discussions = useDiscussionStore(s => s.discussions);
   const filter = useDiscussionStore(s => s.filter);
@@ -79,13 +79,13 @@ const Discussions: React.FC = () => {
       }, 600);
 
       if (contactUserId === SELF_CONTACT_ID) {
-        if (pendingForwardMessageId != null) {
+        if (pendingForwardMessageIds.length > 0) {
           navigate(ROUTES.selfDiscussion(), {
-            state: { forwardFromMessageId: pendingForwardMessageId },
+            state: { forwardFromMessageIds: pendingForwardMessageIds },
             replace: false,
           });
           setPendingSharedContent(null);
-          setPendingForwardMessageId(null);
+          setPendingForwardMessageIds([]);
         } else {
           navigate(ROUTES.selfDiscussion());
         }
@@ -93,8 +93,8 @@ const Discussions: React.FC = () => {
       }
       if (pendingSharedContent) {
         const state =
-          pendingForwardMessageId != null
-            ? { forwardFromMessageId: pendingForwardMessageId }
+          pendingForwardMessageIds.length > 0
+            ? { forwardFromMessageIds: pendingForwardMessageIds }
             : { prefilledMessage: pendingSharedContent };
 
         navigate(ROUTES.discussion({ userId: contactUserId }), {
@@ -102,7 +102,7 @@ const Discussions: React.FC = () => {
           replace: false,
         });
         setPendingSharedContent(null);
-        setPendingForwardMessageId(null);
+        setPendingForwardMessageIds([]);
       } else {
         navigate(ROUTES.discussion({ userId: contactUserId }));
       }
@@ -110,16 +110,16 @@ const Discussions: React.FC = () => {
     [
       navigate,
       pendingSharedContent,
-      pendingForwardMessageId,
+      pendingForwardMessageIds,
       setPendingSharedContent,
-      setPendingForwardMessageId,
+      setPendingForwardMessageIds,
     ]
   );
 
   const handleCancelShare = useCallback(() => {
     setPendingSharedContent(null);
-    setPendingForwardMessageId(null);
-  }, [setPendingSharedContent, setPendingForwardMessageId]);
+    setPendingForwardMessageIds([]);
+  }, [setPendingSharedContent, setPendingForwardMessageIds]);
 
   const {
     query: searchQuery,

@@ -42,9 +42,9 @@ interface AppStoreState {
   // Pending shared content from other apps
   pendingSharedContent: string | null;
   setPendingSharedContent: (content: string | null) => void;
-  // Pending forward message id (used during discussion selection)
-  pendingForwardMessageId: number | null;
-  setPendingForwardMessageId: (messageId: number | null) => void;
+  // Pending forward message ids (used during discussion selection; order = send order)
+  pendingForwardMessageIds: number[];
+  setPendingForwardMessageIds: (messageIds: number[]) => void;
   // MNS support enabled/disabled
   mnsEnabled: boolean;
   setMnsEnabled: (enabled: boolean) => void;
@@ -112,10 +112,10 @@ const useAppStoreBase = create<AppStoreState>()(
       setPendingSharedContent: (content: string | null) => {
         set({ pendingSharedContent: content });
       },
-      // Pending forward message id
-      pendingForwardMessageId: null,
-      setPendingForwardMessageId: (messageId: number | null) => {
-        set({ pendingForwardMessageId: messageId });
+      // Pending forward message ids
+      pendingForwardMessageIds: [],
+      setPendingForwardMessageIds: (messageIds: number[]) => {
+        set({ pendingForwardMessageIds: messageIds });
       },
       // MNS support (disabled by default)
       mnsEnabled: false,

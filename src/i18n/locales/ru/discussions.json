@@ -13,6 +13,7 @@
   "message_input": {
     "replying_to": "Ответ для",
     "forwarding": "Пересылка сообщения",
+    "forwarding_count": "Пересылка {{count}} сообщений",
     "editing": "Редактирование сообщения",
     "placeholder": "Введите сообщение",
     "cancel_reply": "Отменить ответ",
@@ -47,6 +48,7 @@
   },
   "selection": {
     "clear": "Очистить выбор",
+    "forward_messages": "Переслать выбранные сообщения",
     "copy_messages": "Копировать выбранные сообщения",
     "delete_messages": "Удалить выбранные сообщения"
   },

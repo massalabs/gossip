@@ -13,6 +13,7 @@
   "message_input": {
     "replying_to": "回复",
     "forwarding": "转发消息",
+    "forwarding_count": "转发 {{count}} 条消息",
     "editing": "编辑消息",
     "placeholder": "输入消息",
     "cancel_reply": "取消回复",
@@ -47,6 +48,7 @@
   },
   "selection": {
     "clear": "清除选择",
+    "forward_messages": "转发所选消息",
     "copy_messages": "复制所选消息",
     "delete_messages": "删除所选消息"
   },

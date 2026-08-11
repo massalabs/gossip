@@ -6,6 +6,7 @@ import {
   MessageStatus,
   MessageType,
   decodeUserId,
+  SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
@@ -44,8 +45,8 @@ const createStoreId = (): string => {
 
 /**
  * Resolve the optional replyTo / forwardOf fields for a new outgoing message.
- * A forward to the same contact collapses into a reply (quoting that contact's
- * own message). A forward to a different contact stays a forward.
+ * Explicit forwards always produce forwardOf (including same-conversation
+ * forwards). Replies are only created via replyToId.
  */
 async function resolveReplyAndForward(
   contactUserId: string,
@@ -67,13 +68,19 @@ async function resolveReplyAndForward(
   }
 
   if (forwardFromMessageId) {
-    const orig = await getSdk().messages.get(forwardFromMessageId);
+    let orig = await getSdk().messages.get(forwardFromMessageId);
+    // Notes store ciphertext in the shared messages table; decrypt via selfMessages.
+    if (orig?.contactUserId === SELF_CONTACT_ID) {
+      orig = (await getSdk().selfMessages.get(forwardFromMessageId)) ?? orig;
+    }
+
     if (!orig) {
       logger.warn('Forward target not found, sending as regular message');
+    } else if (orig.contactUserId === SELF_CONTACT_ID) {
+      // Notes → conversation: no protocol messageId / bech32 contact id.
+      forwardOf = { originalContent: orig.content };
     } else if (!orig.messageId) {
       throw new Error('Cannot forward a message that has no messageId');
-    } else if (orig.contactUserId === contactUserId) {
-      replyTo = { originalMsgId: orig.messageId };
     } else {
       forwardOf = {
         originalContent: orig.content,

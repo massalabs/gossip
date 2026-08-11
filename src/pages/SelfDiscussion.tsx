@@ -9,7 +9,7 @@ import React, {
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Clock, Settings } from 'react-feather';
-import { MessageDirection, Message } from '@massalabs/gossip-sdk';
+import { MessageDirection, Message, MessageType } from '@massalabs/gossip-sdk';
 import BackButton from '../components/ui/BackButton';
 import MessageList, {
   MessageListHandle,
@@ -17,20 +17,17 @@ import MessageList, {
 import MessageInput from '../components/discussions/MessageInput';
 import DiscussionLayout from '../components/ui/Layout/DiscussionLayout';
 import { useSelfMessageStore } from '../stores/selfMessageStore';
-import { getSdk } from '../stores/sdkStore';
+import { useAppStore } from '../stores/appStore';
 import { ROUTES } from '../constants/routes';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useGossipSdk } from '../hooks/useGossipSdk';
+import { useForwardPreview } from '../hooks/useForwardPreview';
 import SelectionHeader from '../components/discussions/SelectionHeader';
 import { useRetentionPolicy } from '../hooks/useRetentionPolicy';
 import { useKeyboardStore } from '../stores/keyboardStore';
 import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
 import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useUiStore } from '../stores/uiStore';
-
-// Module-level guard so a given forward id is processed once across remounts
-// (StrictMode, route animation, back/forward nav).
-const handledForwardIds = new Set<number>();
 
 const RETENTION_OPTIONS: {
   labelKey: string;
@@ -114,31 +111,65 @@ const SelfDiscussion: React.FC = () => {
     retentionInfo,
   } = useRetentionPolicy(t);
 
-  const forwardFromMessageId = (
-    location.state as { forwardFromMessageId?: number } | undefined
-  )?.forwardFromMessageId;
+  const locationState = location.state as {
+    forwardFromMessageIds?: number[];
+  } | null;
+  const initialForwardFromMessageIds = locationState?.forwardFromMessageIds;
 
-  // Prefill the MessageInput with the forwarded content instead of sending
-  // immediately — user reviews/edits and hits send to confirm.
-  const [forwardDraft, setForwardDraft] = useState<string | undefined>(
-    undefined
+  const {
+    forwardFromMessageIds,
+    forwardPreviewText,
+    forwardPreviewMode,
+    clearForward,
+  } = useForwardPreview({
+    gossip,
+    initialForwardFromMessageIds,
+    setReplyingTo,
+  });
+  const isForwarding = forwardFromMessageIds.length > 0;
+
+  const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
+  const setPendingForwardMessageIds = useAppStore(
+    s => s.setPendingForwardMessageIds
   );
 
-  useEffect(() => {
-    if (forwardFromMessageId == null) return;
-    if (handledForwardIds.has(forwardFromMessageId)) return;
-    handledForwardIds.add(forwardFromMessageId);
+  const handleForwardMessages = useCallback(
+    (msgs: Message[]) => {
+      const eligible = msgs
+        .filter(
+          m => m.id != null && m.id !== 0 && m.type !== MessageType.DELETED
+        )
+        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      if (eligible.length === 0) return;
+      setPendingSharedContent(eligible[0].content);
+      setPendingForwardMessageIds(eligible.map(m => m.id!));
+      navigate(ROUTES.discussions(), { replace: true });
+    },
+    [navigate, setPendingForwardMessageIds, setPendingSharedContent]
+  );
 
-    const idToForward = forwardFromMessageId;
-    navigate(ROUTES.selfDiscussion(), { replace: true, state: {} });
+  const handleForwardMessage = useCallback(
+    (message: Message) => {
+      handleForwardMessages([message]);
+    },
+    [handleForwardMessages]
+  );
 
-    void (async () => {
-      const msg = await getSdk().messages.get(idToForward);
-      if (msg?.content) {
-        setForwardDraft(msg.content);
+  const handleSend = useCallback(
+    async (content: string) => {
+      const idsToForward = [...forwardFromMessageIds];
+      setReplyingTo(null);
+      clearForward();
+      if (idsToForward.length === 0) {
+        await sendMessage(content);
+        return;
       }
-    })();
-  }, [forwardFromMessageId, navigate]);
+      for (let i = 0; i < idsToForward.length; i++) {
+        await sendMessage(i === 0 ? content : '', idsToForward[i]);
+      }
+    },
+    [forwardFromMessageIds, sendMessage, clearForward]
+  );
 
   useEffect(() => {
     void loadMessages();
@@ -156,6 +187,7 @@ const SelfDiscussion: React.FC = () => {
 
   const {
     selectedMessageIds,
+    selectedMessages,
     isSelecting,
     handleToggleSelect,
     handleClearSelection,
@@ -172,11 +204,17 @@ const SelfDiscussion: React.FC = () => {
     },
   });
 
+  const handleForwardSelected = useCallback(() => {
+    handleForwardMessages(selectedMessages);
+    handleClearSelection();
+  }, [handleForwardMessages, selectedMessages, handleClearSelection]);
+
   const header = isSelecting ? (
     <SelectionHeader
       count={selectedMessageIds.size}
       onClear={handleClearSelection}
       onCopy={handleCopySelected}
+      onForward={handleForwardSelected}
       onDelete={handleDeleteSelected}
       canDelete={canDeleteSelected}
     />
@@ -259,11 +297,13 @@ const SelfDiscussion: React.FC = () => {
         <MessageInput
           disabled={isSelecting}
           isSelecting={isSelecting}
-          initialValue={editingMessage?.content ?? forwardDraft}
+          initialValue={editingMessage?.content ?? undefined}
+          forwardPreview={isForwarding ? forwardPreviewText : null}
+          forwardMode={forwardPreviewMode}
+          forwardCount={forwardFromMessageIds.length}
+          onCancelForward={clearForward}
           onSend={content => {
-            void sendMessage(content);
-            setReplyingTo(null);
-            setForwardDraft(undefined);
+            void handleSend(content);
           }}
           replyingTo={replyingTo}
           onCancelReply={() => setReplyingTo(null)}
@@ -305,12 +345,14 @@ const SelfDiscussion: React.FC = () => {
             onEdit={message => {
               setEditingMessage(message);
               setReplyingTo(null);
+              clearForward();
             }}
             onDelete={message => {
               if (message.id != null) {
                 void deleteMessage(message.id);
               }
             }}
+            onForward={handleForwardMessage}
             getReactions={getReactions}
             onReact={(message, emoji) => {
               if (message.id != null) {
