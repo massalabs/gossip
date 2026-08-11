@@ -116,6 +116,7 @@ describe('SelfDiscussion forward to self notes', () => {
     latestForwardPreview = undefined;
     latestForwardCount = undefined;
     mockLocationState = { forwardFromMessageIds: [42] };
+    mockGetSelfMessage.mockResolvedValue(undefined);
     mockGetMessage.mockResolvedValue({
       id: 42,
       content: 'Forwarded note content',
@@ -127,14 +128,52 @@ describe('SelfDiscussion forward to self notes', () => {
     mockSetSelfRetentionPolicy.mockResolvedValue(undefined);
   });
 
-  it('shows forward preview banner without auto-sending', async () => {
+  it('shows conversation forward preview from messages.get content', async () => {
     render(<SelfDiscussion />);
     await act(async () => {});
     await act(async () => {});
 
+    expect(mockGetSelfMessage).toHaveBeenCalledWith(42);
     expect(mockGetMessage).toHaveBeenCalledWith(42);
     expect(mockSendSelfMessage).not.toHaveBeenCalled();
     expect(latestForwardPreview).toBe('Forwarded note content');
+    expect(latestForwardCount).toBe(1);
+  });
+
+  it('previews Conv→Notes empty-content notes via nested forwardOf.originalContent', async () => {
+    mockGetSelfMessage.mockResolvedValue({
+      id: 42,
+      content: '',
+      contactUserId: '__self__',
+      forwardOf: {
+        originalContent: 'original conversation message',
+      },
+    });
+
+    render(<SelfDiscussion />);
+    await act(async () => {});
+    await act(async () => {});
+
+    expect(mockGetSelfMessage).toHaveBeenCalledWith(42);
+    expect(mockGetMessage).not.toHaveBeenCalled();
+    expect(latestForwardPreview).toBe('original conversation message');
+    expect(latestForwardCount).toBe(1);
+  });
+
+  it('previews user-authored Notes via content', async () => {
+    mockGetSelfMessage.mockResolvedValue({
+      id: 42,
+      content: 'my personal note',
+      contactUserId: '__self__',
+    });
+
+    render(<SelfDiscussion />);
+    await act(async () => {});
+    await act(async () => {});
+
+    expect(mockGetSelfMessage).toHaveBeenCalledWith(42);
+    expect(mockGetMessage).not.toHaveBeenCalled();
+    expect(latestForwardPreview).toBe('my personal note');
     expect(latestForwardCount).toBe(1);
   });
 

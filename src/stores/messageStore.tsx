@@ -68,17 +68,30 @@ async function resolveReplyAndForward(
   }
 
   if (forwardFromMessageId) {
-    let orig = await getSdk().messages.get(forwardFromMessageId);
-    // Notes store ciphertext in the shared messages table; decrypt via selfMessages.
-    if (orig?.contactUserId === SELF_CONTACT_ID) {
-      orig = (await getSdk().selfMessages.get(forwardFromMessageId)) ?? orig;
-    }
+    // Notes are owned by SelfMessageService (encrypted forwardOf). Probe that
+    // path first so ciphertext never hits MessageService's plaintext JSON parser.
+    const orig =
+      (await getSdk().selfMessages.get(forwardFromMessageId)) ??
+      (await getSdk().messages.get(forwardFromMessageId));
 
     if (!orig) {
       logger.warn('Forward target not found, sending as regular message');
     } else if (orig.contactUserId === SELF_CONTACT_ID) {
-      // Notes → conversation: no protocol messageId / bech32 contact id.
-      forwardOf = { originalContent: orig.content };
+      // Notes have no peer contactUserId; cite the owner's public user id so
+      // MESSAGE_TYPE_FORWARD still carries a valid 32-byte citedContactId.
+      // Conv→Notes may leave content empty and store the body in forwardOf.
+      const { userProfile } = useAccountStore.getState();
+      if (!userProfile?.userId) {
+        throw new Error('Cannot forward Notes without an owner user id');
+      }
+      const nestedOriginal = orig.forwardOf?.originalContent;
+      forwardOf = {
+        originalContent:
+          typeof nestedOriginal === 'string' && nestedOriginal.length > 0
+            ? nestedOriginal
+            : orig.content,
+        originalContactId: decodeUserId(userProfile.userId),
+      };
     } else if (!orig.messageId) {
       throw new Error('Cannot forward a message that has no messageId');
     } else {
@@ -161,6 +174,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         const msgMap = new Map<string, StoreMessage[]>();
         const rxnMap = new Map<string, StoreMessage[]>();
         for (const d of discussions) {
+          // Notes are owned by SelfMessageService / selfMessageStore.
+          if (d.contactUserId === SELF_CONTACT_ID) continue;
           const msgs = await sdk.messages.getVisibleMessages(d.contactUserId);
           const rxns = await sdk.messages.getReactions(d.contactUserId);
           if (msgs.length > 0) {

@@ -12,6 +12,10 @@ import {
   SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
 import { recomputeFullCache } from '../../src/stores/messageStore.helpers';
+import {
+  serializeForwardMessage,
+  deserializeMessage,
+} from '../../gossip-sdk/src/utils/messageSerialization';
 
 // ---------------------------------------------------------------------------
 // Mock SDK with event emitter so optimistic sends flow through the store
@@ -63,13 +67,17 @@ vi.mock('../../src/stores/sdkStore', () => ({
   getSdk: () => mockSdk,
 }));
 
-vi.mock('../../src/stores/accountStore', () => ({
-  useAccountStore: {
-    getState: vi.fn(() => ({
-      userProfile: { userId: 'test-user-id' },
-    })),
-  },
-}));
+vi.mock('../../src/stores/accountStore', async () => {
+  const { encodeUserId } = await import('@massalabs/gossip-sdk');
+  const ownerUserId = encodeUserId(new Uint8Array(32).fill(1));
+  return {
+    useAccountStore: {
+      getState: vi.fn(() => ({
+        userProfile: { userId: ownerUserId },
+      })),
+    },
+  };
+});
 
 describe('MessageStore reactions', () => {
   const contactUserId = 'contact-1';
@@ -378,6 +386,7 @@ describe('MessageStore forward resolution', () => {
 
   it('keeps same-conversation explicit Forward as forwardOf (not replyTo)', async () => {
     const originalMsgId = new Uint8Array(12).fill(9);
+    mockSdk.selfMessages.get.mockResolvedValue(undefined);
     mockSdk.messages.get.mockResolvedValue({
       id: 42,
       content: 'original text',
@@ -394,6 +403,8 @@ describe('MessageStore forward resolution', () => {
       .getState()
       .sendMessage(contactUserId, '', undefined, 42);
 
+    expect(mockSdk.selfMessages.get).toHaveBeenCalledWith(42);
+    expect(mockSdk.messages.get).toHaveBeenCalledWith(42);
     expect(mockSdk.messages.send).toHaveBeenCalledTimes(1);
     const sent = mockSdk.messages.send.mock.calls[0][0] as Message;
     expect(sent.replyTo).toBeUndefined();
@@ -406,22 +417,70 @@ describe('MessageStore forward resolution', () => {
     );
   });
 
-  it('forwards Notes → conversation without throwing on SELF_CONTACT_ID', async () => {
+  it('keeps Conversation → Conversation forward with peer originalContactId', async () => {
+    const peerContactUserId = encodeUserId(new Uint8Array(32).fill(8));
+    const originalMsgId = new Uint8Array(12).fill(4);
+    mockSdk.selfMessages.get.mockResolvedValue(undefined);
     mockSdk.messages.get.mockResolvedValue({
-      id: 77,
-      content: 'ciphertext-or-placeholder',
-      contactUserId: SELF_CONTACT_ID,
-      ownerUserId: 'test-user-id',
+      id: 55,
+      content: 'from another chat',
+      contactUserId: peerContactUserId,
+      messageId: originalMsgId,
+      ownerUserId: 'peer-owner',
       type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
       timestamp: new Date(),
     } satisfies Message);
+
+    await useMessageStore
+      .getState()
+      .sendMessage(contactUserId, 'note', undefined, 55);
+
+    const sent = mockSdk.messages.send.mock.calls[0][0] as Message;
+    expect(sent.replyTo).toBeUndefined();
+    expect(sent.forwardOf?.originalContent).toBe('from another chat');
+    expect(sent.forwardOf?.originalContactId).toEqual(
+      new Uint8Array(32).fill(8)
+    );
+  });
+
+  it('keeps Reply via replyToId unchanged (replyTo, not forwardOf)', async () => {
+    const originalMsgId = new Uint8Array(12).fill(5);
+    mockSdk.messages.get.mockResolvedValue({
+      id: 99,
+      content: 'quoted',
+      contactUserId,
+      messageId: originalMsgId,
+      ownerUserId: 'test-user-id',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(),
+    } satisfies Message);
+
+    await useMessageStore
+      .getState()
+      .sendMessage(contactUserId, 'reply body', 99);
+
+    const sent = mockSdk.messages.send.mock.calls[0][0] as Message;
+    expect(sent.forwardOf).toBeUndefined();
+    expect(sent.replyTo).toEqual({ originalMsgId });
+    expect(mockSdk.selfMessages.get).not.toHaveBeenCalled();
+  });
+
+  it('forwards user-authored Notes → conversation via selfMessages only (no plaintext JSON parse)', async () => {
+    const ownerUserId = encodeUserId(new Uint8Array(32).fill(1));
+    const ownerContactId = new Uint8Array(32).fill(1);
+    // Simulate MessageService throwing if encrypted Notes forwardOf were parsed.
+    mockSdk.messages.get.mockImplementation(async () => {
+      throw new Error('encrypted Notes forwardOf must not hit MessageService');
+    });
     mockSdk.selfMessages.get.mockResolvedValue({
       id: 77,
       content: 'decrypted notes text',
       contactUserId: SELF_CONTACT_ID,
-      ownerUserId: 'test-user-id',
+      ownerUserId,
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
@@ -433,11 +492,118 @@ describe('MessageStore forward resolution', () => {
     ).resolves.toBeUndefined();
 
     expect(mockSdk.selfMessages.get).toHaveBeenCalledWith(77);
+    expect(mockSdk.messages.get).not.toHaveBeenCalled();
     expect(mockSdk.messages.send).toHaveBeenCalledTimes(1);
     const sent = mockSdk.messages.send.mock.calls[0][0] as Message;
     expect(sent.replyTo).toBeUndefined();
     expect(sent.forwardOf).toEqual({
       originalContent: 'decrypted notes text',
+      originalContactId: ownerContactId,
     });
+
+    // Existing FORWARD wire format must round-trip for old and new clients.
+    const messageId = new Uint8Array(12).fill(3);
+    const wire = serializeForwardMessage(
+      sent.forwardOf!.originalContent!,
+      sent.content,
+      messageId,
+      sent.forwardOf!.originalContactId
+    );
+    const decoded = deserializeMessage(wire);
+    expect(decoded.forwardOf?.originalContent).toBe('decrypted notes text');
+    expect(decoded.forwardOf?.originalContactId).toEqual(ownerContactId);
+  });
+
+  it('re-forwards Conv→Notes (empty composer) using nested forwardOf.originalContent', async () => {
+    const ownerUserId = encodeUserId(new Uint8Array(32).fill(1));
+    const ownerContactId = new Uint8Array(32).fill(1);
+    const peerContactId = new Uint8Array(32).fill(7);
+    // After reload, selfMessages.get returns decrypted Note: empty content,
+    // body only in forwardOf (as stored by Conv→Notes with no composer text).
+    mockSdk.messages.get.mockImplementation(async () => {
+      throw new Error('encrypted Notes forwardOf must not hit MessageService');
+    });
+    mockSdk.selfMessages.get.mockResolvedValue({
+      id: 88,
+      content: '',
+      contactUserId: SELF_CONTACT_ID,
+      ownerUserId,
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      forwardOf: {
+        originalContent: 'original conversation message',
+        originalContactId: peerContactId,
+      },
+    } satisfies Message);
+
+    await expect(
+      useMessageStore.getState().sendMessage(contactUserId, '', undefined, 88)
+    ).resolves.toBeUndefined();
+
+    expect(mockSdk.selfMessages.get).toHaveBeenCalledWith(88);
+    expect(mockSdk.messages.get).not.toHaveBeenCalled();
+    const sent = mockSdk.messages.send.mock.calls[0][0] as Message;
+    expect(sent.replyTo).toBeUndefined();
+    expect(sent.forwardOf?.originalContent).toBe(
+      'original conversation message'
+    );
+    expect(sent.forwardOf?.originalContactId).toEqual(ownerContactId);
+
+    const messageId = new Uint8Array(12).fill(6);
+    const wire = serializeForwardMessage(
+      sent.forwardOf!.originalContent!,
+      sent.content,
+      messageId,
+      sent.forwardOf!.originalContactId
+    );
+    const decoded = deserializeMessage(wire);
+    expect(decoded.forwardOf?.originalContent).toBe(
+      'original conversation message'
+    );
+    expect(decoded.forwardOf?.originalContent?.length).toBeGreaterThan(0);
+    expect(decoded.forwardOf?.originalContactId).toEqual(ownerContactId);
+  });
+
+  it('skips SELF_CONTACT_ID on init so encrypted Notes forwardOf never hits MessageService', async () => {
+    useMessageStore.getState().cleanup();
+    listeners.clear();
+    useMessageStore.setState({
+      messagesByContact: new Map(),
+      reactionsByContact: new Map(),
+      reactionGroupsCache: new Map(),
+      currentContactUserId: null,
+      cleanupFn: null,
+      isInitializing: false,
+    } as unknown as ReturnType<(typeof useMessageStore)['getState']>);
+
+    mockSdk.discussions.list.mockResolvedValue([
+      { contactUserId: SELF_CONTACT_ID },
+      { contactUserId },
+    ]);
+    mockSdk.messages.getVisibleMessages.mockImplementation(
+      async (id: string) => {
+        if (id === SELF_CONTACT_ID) {
+          throw new Error(
+            'getVisibleMessages(SELF) must not run after Conv→Notes'
+          );
+        }
+        return [];
+      }
+    );
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await expect(useMessageStore.getState().init()).resolves.toBeUndefined();
+
+    expect(mockSdk.messages.getVisibleMessages).toHaveBeenCalledWith(
+      contactUserId
+    );
+    expect(mockSdk.messages.getVisibleMessages).not.toHaveBeenCalledWith(
+      SELF_CONTACT_ID
+    );
+    expect(mockSdk.messages.getReactions).not.toHaveBeenCalledWith(
+      SELF_CONTACT_ID
+    );
   });
 });

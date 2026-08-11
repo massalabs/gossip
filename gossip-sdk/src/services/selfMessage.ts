@@ -120,6 +120,28 @@ export class SelfMessageService {
     }
   }
 
+  /** Encrypt forwardOf JSON for at-rest storage (same AEAD as content). */
+  private async encryptForwardOf(
+    forwardOf: Message['forwardOf']
+  ): Promise<string | null> {
+    const json = this.serializeForwardOf(forwardOf);
+    if (!json) return null;
+    return this.encryptContent(json);
+  }
+
+  /** Decrypt forwardOf from DB; null/empty stays undefined (legacy Notes rows). */
+  private async decryptForwardOf(
+    stored: string | null | undefined
+  ): Promise<Message['forwardOf']> {
+    if (!stored) return undefined;
+    try {
+      const json = await this.decryptContent(stored);
+      return this.deserializeForwardOf(json);
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Get a self-message by DB id with decrypted content. */
   async get(id: number): Promise<Message | undefined> {
     const row = await this.queries.messages.getById(id);
@@ -135,7 +157,7 @@ export class SelfMessageService {
         direction: MessageDirection.OUTGOING,
         status: row.status,
         timestamp: row.timestamp,
-        forwardOf: this.deserializeForwardOf(row.forwardOf as string | null),
+        forwardOf: await this.decryptForwardOf(row.forwardOf as string | null),
         metadata: row.metadata
           ? (JSON.parse(row.metadata as string) as Record<string, unknown>)
           : undefined,
@@ -152,6 +174,7 @@ export class SelfMessageService {
     const encryptedContent = await this.encryptContent(content);
     const now = new Date();
     const forwardOf = options?.forwardOf;
+    const encryptedForwardOf = await this.encryptForwardOf(forwardOf);
 
     const id = await this.queries.messages.insert({
       ownerUserId: this.ownerUserId,
@@ -161,7 +184,7 @@ export class SelfMessageService {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: now,
-      forwardOf: this.serializeForwardOf(forwardOf),
+      forwardOf: encryptedForwardOf,
     });
 
     const discussion = await this.queries.discussions.getByOwnerAndContact(
@@ -211,7 +234,9 @@ export class SelfMessageService {
           direction: MessageDirection.OUTGOING,
           status: row.status,
           timestamp: row.timestamp,
-          forwardOf: this.deserializeForwardOf(row.forwardOf as string | null),
+          forwardOf: await this.decryptForwardOf(
+            row.forwardOf as string | null
+          ),
         });
       } catch {
         // Skip messages that cannot be decrypted

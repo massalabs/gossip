@@ -24,12 +24,13 @@ import ThreeDotMenu, { MenuItem } from '../components/ui/ThreeDotMenu';
 import { ROUTES } from '../constants/routes';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';
-import { SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
+import { SessionStatus } from '@massalabs/gossip-sdk';
 import { useOnlineStore } from '../stores/useOnlineStore';
 import { useSwipeFilter } from '../hooks/useSwipeFilter';
 import { useUiStore } from '../stores/uiStore';
 import { prewarmShareQR } from '../components/settings/shareContactQrCache';
 import { generateDeepLinkUrl } from '../utils/invite';
+import { resolveDiscussionSelectDestination } from '../utils/discussionSelectDestination';
 
 const Discussions: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -78,33 +79,24 @@ const Discussions: React.FC = () => {
         isNavigatingRef.current = false;
       }, 600);
 
-      if (contactUserId === SELF_CONTACT_ID) {
-        if (pendingForwardMessageIds.length > 0) {
-          navigate(ROUTES.selfDiscussion(), {
-            state: { forwardFromMessageIds: pendingForwardMessageIds },
-            replace: false,
-          });
-          setPendingSharedContent(null);
-          setPendingForwardMessageIds([]);
-        } else {
-          navigate(ROUTES.selfDiscussion());
-        }
-        return;
-      }
-      if (pendingSharedContent) {
-        const state =
-          pendingForwardMessageIds.length > 0
-            ? { forwardFromMessageIds: pendingForwardMessageIds }
-            : { prefilledMessage: pendingSharedContent };
-
-        navigate(ROUTES.discussion({ userId: contactUserId }), {
-          state,
+      const destination = resolveDiscussionSelectDestination(
+        contactUserId,
+        pendingForwardMessageIds,
+        pendingSharedContent
+      );
+      if (destination.state) {
+        navigate(destination.path, {
+          state: destination.state,
           replace: false,
         });
-        setPendingSharedContent(null);
-        setPendingForwardMessageIds([]);
       } else {
-        navigate(ROUTES.discussion({ userId: contactUserId }));
+        navigate(destination.path);
+      }
+      if (destination.clearPendingSharedContent) {
+        setPendingSharedContent(null);
+      }
+      if (destination.clearPendingForwardIds) {
+        setPendingForwardMessageIds([]);
       }
     },
     [
