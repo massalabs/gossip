@@ -97,6 +97,12 @@ describe('message serialization', () => {
       'Just forwarding this'
     );
   });
+
+  it('rejects a forward with no forwarded content', () => {
+    expect(() =>
+      serializeForwardMessage('', '', messageId, originalContactId)
+    ).toThrow('forwardedContent must not be empty');
+  });
 });
 
 describe('Deserialization Failure Handling', () => {
