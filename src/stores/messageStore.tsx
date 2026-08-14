@@ -32,6 +32,7 @@ import {
   patchReactionCache,
 } from './messageStore.helpers';
 import { createEventHandlers } from './messageStore.events';
+import { getForwardSourceContent } from '../utils/messages';
 
 const createStoreId = (): string => {
   if (
@@ -49,7 +50,6 @@ const createStoreId = (): string => {
  * forwards). Replies are only created via replyToId.
  */
 async function resolveReplyAndForward(
-  contactUserId: string,
   replyToId: number | undefined,
   forwardFromMessageId: number | undefined
 ): Promise<{
@@ -67,7 +67,7 @@ async function resolveReplyAndForward(
     replyTo = { originalMsgId: orig.messageId };
   }
 
-  if (forwardFromMessageId) {
+  if (forwardFromMessageId != null) {
     // Notes are owned by SelfMessageService (encrypted forwardOf). Probe that
     // path first so ciphertext never hits MessageService's plaintext JSON parser.
     const orig =
@@ -75,8 +75,15 @@ async function resolveReplyAndForward(
       (await getSdk().messages.get(forwardFromMessageId));
 
     if (!orig) {
-      logger.warn('Forward target not found, sending as regular message');
-    } else if (orig.contactUserId === SELF_CONTACT_ID) {
+      throw new Error('Forward target not found');
+    }
+
+    const originalContent = getForwardSourceContent(orig);
+    if (!originalContent) {
+      throw new Error('Cannot forward a message with no visible content');
+    }
+
+    if (orig.contactUserId === SELF_CONTACT_ID) {
       // Notes have no peer contactUserId; cite the owner's public user id so
       // MESSAGE_TYPE_FORWARD still carries a valid 32-byte citedContactId.
       // Conv→Notes may leave content empty and store the body in forwardOf.
@@ -84,19 +91,15 @@ async function resolveReplyAndForward(
       if (!userProfile?.userId) {
         throw new Error('Cannot forward Notes without an owner user id');
       }
-      const nestedOriginal = orig.forwardOf?.originalContent;
       forwardOf = {
-        originalContent:
-          typeof nestedOriginal === 'string' && nestedOriginal.length > 0
-            ? nestedOriginal
-            : orig.content,
+        originalContent,
         originalContactId: decodeUserId(userProfile.userId),
       };
     } else if (!orig.messageId) {
       throw new Error('Cannot forward a message that has no messageId');
     } else {
       forwardOf = {
-        originalContent: orig.content,
+        originalContent,
         originalContactId: decodeUserId(orig.contactUserId),
       };
     }
@@ -216,7 +219,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     forwardFromMessageId?
   ) => {
     const { userProfile } = useAccountStore.getState();
-    const isForward = !!forwardFromMessageId;
+    const isForward = forwardFromMessageId != null;
     if (
       !userProfile?.userId ||
       (!content.trim() && !isForward) ||
@@ -225,7 +228,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       return;
 
     const { replyTo, forwardOf } = await resolveReplyAndForward(
-      contactUserId,
       replyToId,
       forwardFromMessageId
     );

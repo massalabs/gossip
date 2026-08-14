@@ -35,3 +35,17 @@ export function hasUnreadMessages(messages: Message[]): boolean {
       message.status === MessageStatus.DELIVERED
   );
 }
+
+/**
+ * Flatten the text a user can see in a message bubble for forwarding.
+ * Forwarded messages render their cited body before the optional comment, so
+ * re-forwarding must preserve both rather than forwarding only `content`.
+ */
+export function getForwardSourceContent(
+  message: Pick<Message, 'content' | 'forwardOf'>
+): string {
+  const parts = [message.forwardOf?.originalContent, message.content].filter(
+    (part): part is string => typeof part === 'string' && part.length > 0
+  );
+  return parts.join('\n\n');
+}

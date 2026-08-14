@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { GossipSdk } from '@massalabs/gossip-sdk';
+import { getForwardSourceContent } from '../utils/messages';
 
 interface UseForwardPreviewParams {
   gossip: GossipSdk;
@@ -15,13 +16,10 @@ async function loadForwardSourceContent(
   // parse of encrypted Notes forwardOf.
   const selfMsg = await gossip.selfMessages.get(messageId);
   if (selfMsg) {
-    const nested = selfMsg.forwardOf?.originalContent;
-    return typeof nested === 'string' && nested.length > 0
-      ? nested
-      : selfMsg.content;
+    return getForwardSourceContent(selfMsg) || null;
   }
   const row = await gossip.messages.get(messageId);
-  return row?.content ?? null;
+  return row ? getForwardSourceContent(row) || null : null;
 }
 
 export function useForwardPreview({
