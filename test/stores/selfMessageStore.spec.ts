@@ -4,6 +4,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  encodeUserId,
 } from '@massalabs/gossip-sdk';
 
 let resolveGetMessages: ((messages: Message[]) => void) | null = null;
@@ -11,7 +12,11 @@ let resolveSend: ((message: Message) => void) | null = null;
 
 const mockSdk = {
   isSessionOpen: true,
+  messages: {
+    get: vi.fn(async () => undefined as Message | undefined),
+  },
   selfMessages: {
+    get: vi.fn(async () => undefined as Message | undefined),
     getMessages: vi.fn(
       () =>
         new Promise<Message[]>(resolve => {
@@ -75,6 +80,10 @@ beforeEach(() => {
   resolveGetMessages = null;
   resolveSend = null;
   vi.clearAllMocks();
+  mockSdk.messages.get.mockReset();
+  mockSdk.messages.get.mockResolvedValue(undefined);
+  mockSdk.selfMessages.get.mockReset();
+  mockSdk.selfMessages.get.mockResolvedValue(undefined);
 });
 
 describe('selfMessageStore.loadMessages', () => {
@@ -140,5 +149,70 @@ describe('selfMessageStore.sendMessage + concurrent loadMessages', () => {
     const final = useSelfMessageStore.getState().messages;
     expect(final).toHaveLength(1);
     expect(final[0].id).toBe(42);
+  });
+});
+
+describe('selfMessageStore forwarding', () => {
+  it('forwards Note -> Note from decrypted selfMessages content', async () => {
+    mockSdk.selfMessages.get.mockResolvedValue(
+      makeMessage({ id: 77, content: 'decrypted note' })
+    );
+    mockSdk.messages.get.mockRejectedValue(
+      new Error('encrypted Notes must not use messages.get')
+    );
+    mockSdk.selfMessages.send.mockResolvedValueOnce(
+      makeMessage({
+        id: 78,
+        content: '',
+        forwardOf: { originalContent: 'decrypted note' },
+      })
+    );
+
+    await useSelfMessageStore.getState().sendMessage('', 77);
+
+    expect(mockSdk.selfMessages.get).toHaveBeenCalledWith(77);
+    expect(mockSdk.messages.get).not.toHaveBeenCalled();
+    expect(mockSdk.selfMessages.send).toHaveBeenCalledWith('', {
+      forwardOf: { originalContent: 'decrypted note' },
+    });
+  });
+});
+
+describe('selfMessageStore forwarded-message flattening', () => {
+  it('preserves cited content and comment for DM -> Note', async () => {
+    const peerId = encodeUserId(new Uint8Array(32).fill(7));
+    mockSdk.selfMessages.get.mockResolvedValue(undefined);
+    mockSdk.messages.get.mockResolvedValue(
+      makeMessage({
+        id: 80,
+        contactUserId: peerId,
+        content: 'comment',
+        forwardOf: { originalContent: 'cited body' },
+      })
+    );
+    mockSdk.selfMessages.send.mockResolvedValueOnce(
+      makeMessage({ id: 81, content: '' })
+    );
+
+    await useSelfMessageStore.getState().sendMessage('', 80);
+
+    expect(mockSdk.selfMessages.send).toHaveBeenCalledWith('', {
+      forwardOf: {
+        originalContent: 'cited body\n\ncomment',
+        originalContactId: new Uint8Array(32).fill(7),
+      },
+    });
+  });
+
+  it('fails closed when the source no longer exists', async () => {
+    mockSdk.selfMessages.get.mockResolvedValue(undefined);
+    mockSdk.messages.get.mockResolvedValue(undefined);
+
+    await expect(
+      useSelfMessageStore.getState().sendMessage('', 999)
+    ).rejects.toThrow('Forward target not found');
+
+    expect(mockSdk.selfMessages.send).not.toHaveBeenCalled();
+    expect(useSelfMessageStore.getState().messages).toHaveLength(0);
   });
 });

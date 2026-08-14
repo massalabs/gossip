@@ -28,6 +28,8 @@ import { useKeyboardStore } from '../stores/keyboardStore';
 import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
 import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useUiStore } from '../stores/uiStore';
+import toast from 'react-hot-toast';
+import { logger } from '../utils/logger';
 
 const RETENTION_OPTIONS: {
   labelKey: string;
@@ -164,11 +166,16 @@ const SelfDiscussion: React.FC = () => {
         await sendMessage(content);
         return;
       }
-      for (let i = 0; i < idsToForward.length; i++) {
-        await sendMessage(i === 0 ? content : '', idsToForward[i]);
+      try {
+        for (let i = 0; i < idsToForward.length; i++) {
+          await sendMessage(i === 0 ? content : '', idsToForward[i]);
+        }
+      } catch (error) {
+        toast.error(t('failed_to_send'));
+        logger.error('Failed to forward self message:', error);
       }
     },
-    [forwardFromMessageIds, sendMessage, clearForward]
+    [forwardFromMessageIds, sendMessage, clearForward, t]
   );
 
   useEffect(() => {

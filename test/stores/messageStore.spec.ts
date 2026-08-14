@@ -606,4 +606,74 @@ describe('MessageStore forward resolution', () => {
       SELF_CONTACT_ID
     );
   });
+
+  it('re-forwards a forward-only DM with a non-empty wire payload', async () => {
+    const originalMsgId = new Uint8Array(12).fill(4);
+    mockSdk.selfMessages.get.mockResolvedValue(undefined);
+    mockSdk.messages.get.mockResolvedValue({
+      id: 90,
+      content: '',
+      contactUserId,
+      messageId: originalMsgId,
+      ownerUserId: 'test-user-id',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(),
+      forwardOf: { originalContent: 'cited body' },
+    } satisfies Message);
+
+    await useMessageStore
+      .getState()
+      .sendMessage(contactUserId, '', undefined, 90);
+
+    const sent = mockSdk.messages.send.mock.calls[0][0] as Message;
+    expect(sent.forwardOf?.originalContent).toBe('cited body');
+    const wire = serializeForwardMessage(
+      sent.forwardOf!.originalContent!,
+      sent.content,
+      new Uint8Array(12).fill(6),
+      sent.forwardOf!.originalContactId
+    );
+    expect(deserializeMessage(wire).forwardOf?.originalContent).toBe(
+      'cited body'
+    );
+  });
+
+  it('preserves a forwarded DM cited body and comment', async () => {
+    mockSdk.selfMessages.get.mockResolvedValue(undefined);
+    mockSdk.messages.get.mockResolvedValue({
+      id: 91,
+      content: 'comment',
+      contactUserId,
+      messageId: new Uint8Array(12).fill(5),
+      ownerUserId: 'test-user-id',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(),
+      forwardOf: { originalContent: 'cited body' },
+    } satisfies Message);
+
+    await useMessageStore
+      .getState()
+      .sendMessage(contactUserId, '', undefined, 91);
+
+    const sent = mockSdk.messages.send.mock.calls[0][0] as Message;
+    expect(sent.forwardOf?.originalContent).toBe('cited body\n\ncomment');
+  });
+
+  it('fails closed when a forward source no longer exists', async () => {
+    mockSdk.selfMessages.get.mockResolvedValue(undefined);
+    mockSdk.messages.get.mockResolvedValue(undefined);
+
+    await expect(
+      useMessageStore.getState().sendMessage(contactUserId, '', undefined, 999)
+    ).rejects.toThrow('Forward target not found');
+
+    expect(mockSdk.messages.send).not.toHaveBeenCalled();
+    expect(
+      useMessageStore.getState().getMessagesForContact(contactUserId)
+    ).toHaveLength(0);
+  });
 });

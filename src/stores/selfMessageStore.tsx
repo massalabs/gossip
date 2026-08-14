@@ -6,6 +6,7 @@ import {
   MessageStatus,
   MessageType,
   decodeUserId,
+  SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
@@ -20,6 +21,7 @@ import {
   restoreReactionGroup,
   type ReactionsMap,
 } from './selfMessageStore.helpers';
+import { getForwardSourceContent } from '../utils/messages';
 
 interface SelfMessageStore {
   messages: Message[];
@@ -90,18 +92,29 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
 
     let forwardOf: Message['forwardOf'];
     if (forwardFromMessageId != null) {
-      const orig = await sdk.messages.get(forwardFromMessageId);
+      const orig =
+        (await sdk.selfMessages.get(forwardFromMessageId)) ??
+        (await sdk.messages.get(forwardFromMessageId));
       if (!orig) {
-        logger.warn('Forward target not found, sending as regular message');
-      } else {
-        try {
-          forwardOf = {
-            originalContent: orig.content,
-            originalContactId: decodeUserId(orig.contactUserId),
-          };
-        } catch {
-          forwardOf = { originalContent: orig.content };
-        }
+        throw new Error('Forward target not found');
+      }
+
+      const originalContent = getForwardSourceContent(orig);
+      if (!originalContent) {
+        throw new Error('Cannot forward a message with no visible content');
+      }
+
+      const originalContactUserId =
+        orig.contactUserId === SELF_CONTACT_ID
+          ? userProfile.userId
+          : orig.contactUserId;
+      try {
+        forwardOf = {
+          originalContent,
+          originalContactId: decodeUserId(originalContactUserId),
+        };
+      } catch {
+        forwardOf = { originalContent };
       }
     }
 

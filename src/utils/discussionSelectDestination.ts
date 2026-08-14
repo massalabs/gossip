@@ -12,6 +12,13 @@ export interface DiscussionSelectDestination {
   clearPendingSharedContent: boolean;
 }
 
+export function hasPendingDiscussionSelection(
+  pendingForwardMessageIds: number[],
+  pendingSharedContent: string | null
+): boolean {
+  return pendingForwardMessageIds.length > 0 || !!pendingSharedContent;
+}
+
 /**
  * Pure destination-routing decision for selecting a discussion from the list.
  * Pending forward IDs always take priority over pending shared content
