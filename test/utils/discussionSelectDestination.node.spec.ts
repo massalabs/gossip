@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../../src/constants/routes';
-import { resolveDiscussionSelectDestination } from '../../src/utils/discussionSelectDestination';
+import {
+  hasPendingDiscussionSelection,
+  resolveDiscussionSelectDestination,
+} from '../../src/utils/discussionSelectDestination';
 
 describe('resolveDiscussionSelectDestination', () => {
   const contactUserId = 'contact-user-id';
@@ -55,5 +58,16 @@ describe('resolveDiscussionSelectDestination', () => {
       clearPendingForwardIds: true,
       clearPendingSharedContent: true,
     });
+  });
+});
+
+describe('hasPendingDiscussionSelection', () => {
+  it('stays active for forward-only messages with empty top-level content', () => {
+    expect(hasPendingDiscussionSelection([42], '')).toBe(true);
+  });
+
+  it('is inactive when neither a forward nor shared content is pending', () => {
+    expect(hasPendingDiscussionSelection([], null)).toBe(false);
+    expect(hasPendingDiscussionSelection([], '')).toBe(false);
   });
 });

@@ -30,7 +30,10 @@ import { useSwipeFilter } from '../hooks/useSwipeFilter';
 import { useUiStore } from '../stores/uiStore';
 import { prewarmShareQR } from '../components/settings/shareContactQrCache';
 import { generateDeepLinkUrl } from '../utils/invite';
-import { resolveDiscussionSelectDestination } from '../utils/discussionSelectDestination';
+import {
+  hasPendingDiscussionSelection,
+  resolveDiscussionSelectDestination,
+} from '../utils/discussionSelectDestination';
 
 const Discussions: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -53,6 +56,10 @@ const Discussions: React.FC = () => {
   const pendingForwardMessageIds = useAppStore(s => s.pendingForwardMessageIds);
   const setPendingForwardMessageIds = useAppStore(
     s => s.setPendingForwardMessageIds
+  );
+  const hasPendingDestinationSelection = hasPendingDiscussionSelection(
+    pendingForwardMessageIds,
+    pendingSharedContent
   );
   const discussions = useDiscussionStore(s => s.discussions);
   const filter = useDiscussionStore(s => s.filter);
@@ -235,8 +242,8 @@ const Discussions: React.FC = () => {
       contentClassName="px-2 pb-4 flex flex-col"
       onScrollContainerRef={setScrollContainer}
     >
-      {/* Show banner when there's pending shared content */}
-      {pendingSharedContent && (
+      {/* Show banner while selecting a share/forward destination. */}
+      {hasPendingDestinationSelection && (
         <div className="mx-2 mb-4 p-4 bg-accent/50 border border-border rounded-lg">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
