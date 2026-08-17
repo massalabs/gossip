@@ -152,6 +152,34 @@ of attribution metadata, the human submitter is responsible for reviewing the
 change and confirming that it satisfies the CLA's authorship, authority, and
 third-party disclosure requirements.
 
+## Core Development Principles
+
+When modifying Gossip, especially messaging, cryptographic, SDK, or storage-related code, consider these three core principles:
+
+### Encoding and backward compatibility
+
+Changes to wire formats, APIs, SDK interfaces, or persistent storage should preserve backward compatibility whenever possible.
+Before changing an existing format or interface, consider how existing clients, applications, and stored data will behave.
+
+### Security
+
+Preserve Gossip's existing security properties, including:
+
+* Post-Quantum Cryptography (PQC)
+* Perfect Forward Secrecy (PFS)
+* Post-Compromise Security (PCS)
+* Plausible deniability
+* Encryption at rest
+* Message authentication and integrity
+
+Do not introduce new plaintext representations of data that was previously protected by encryption, or bypass existing cryptographic protections.
+
+### Usability and maintainability
+
+Verify the complete user flow, including edge cases and compatibility with existing behavior.
+Prefer the smallest implementation that correctly satisfies the requirement. Reuse existing code where appropriate and avoid unnecessary duplication, refactoring, or complexity.
+Before considering a message-related change complete, explicitly evaluate **encoding / backward compatibility, security, and usability**.
+
 ## Bugs and Security Reports
 
 Use GitHub issues for ordinary bugs and feature requests. Include the affected
