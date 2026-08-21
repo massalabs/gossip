@@ -93,9 +93,10 @@ pub fn pq_encrypt(pk: &PqPublicKey, message: &[u8; PQ_MSG_SIZE]) -> Vec<u8> {
 
 /// Decrypt a ciphertext block back to the original message.
 ///
-/// Ring-LWE always decrypts — it is the AEAD layer above that detects
-/// tampering. The returned bytes may be garbage if the ciphertext was
-/// modified.
+/// Rejects ciphertexts whose serialized coefficients are noncanonical.
+/// Canonically encoded tampering may still decrypt to arbitrary message
+/// bytes; the AEAD layer above authenticates those bytes. Both failures
+/// surface as [`SecureStorageError::CorruptedBlock`].
 pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Result<Zeroizing<Vec<u8>>> {
     let ctx = &NTT_CTX;
     let ct = pq_rerand::serialize::deserialize_slot(ciphertext)
@@ -117,6 +118,12 @@ pub fn pq_rerand(pk: &PqPublicKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Result<Vec<
 }
 
 impl PqPublicKey {
+    // Persistence compatibility boundary: pq-rerand serializes public keys in
+    // its internal NTT representation. Revision 9a5a48b is the baseline for
+    // persisted storage; an earlier NTT layout cannot be used directly with it.
+    // Before bumping pq-rerand again, verify a persisted 9a5a48b key fixture can
+    // still encrypt and rerandomize, or add an explicitly versioned migration.
+
     /// Serialized byte size of a public key.
     #[must_use]
     pub const fn byte_size() -> usize {
