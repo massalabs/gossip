@@ -48,8 +48,7 @@ pub struct PqSecretKey(pq_rerand::keygen::SecretKey);
 
 impl Zeroize for PqSecretKey {
     fn zeroize(&mut self) {
-        self.0.s_t.zeroize();
-        self.0.s_q2.zeroize();
+        self.0.zeroize();
     }
 }
 
@@ -247,6 +246,17 @@ mod tests {
         let bytes = sk.to_bytes();
         let sk2 = PqSecretKey::from_bytes(&bytes).unwrap();
         assert_eq!(*sk.to_bytes(), *sk2.to_bytes());
+    }
+
+    #[test]
+    fn explicit_sk_zeroize_clears_all_representations() {
+        let (_pk, mut sk) = pq_keygen();
+        sk.zeroize();
+
+        assert!(sk.0.s_t.iter().all(|&value| value == 0));
+        assert!(sk.0.s_q2.iter().all(|&value| value == 0));
+        assert!(sk.0.s_ntt_t.iter().all(|&value| value == 0));
+        assert!(sk.0.s_ntt_q2.iter().all(|&value| value == 0));
     }
 
     #[test]
