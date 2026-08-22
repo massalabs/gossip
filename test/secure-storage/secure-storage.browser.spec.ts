@@ -97,6 +97,45 @@ describe('secure storage pipeline', () => {
     await conn.close();
   }, 120_000);
 
+  it('keeps all three slots distinct and discoverable by password', async () => {
+    const domain = 'vitest-all-slots';
+    const accounts = [
+      { slot: 0, password: 'alice-password', userId: 'gossip1alice' },
+      { slot: 1, password: 'decoy-password', userId: 'gossip1decoy' },
+      { slot: 2, password: 'backup-password', userId: 'gossip1backup' },
+    ];
+    const now = new Date();
+
+    const writer = await DatabaseConnection.create(config(domain));
+    for (const account of accounts) {
+      await writer.secureStorageCreate(account.slot, account.password);
+      await writer.db.insert(userProfile).values({
+        userId: account.userId,
+        username: account.userId,
+        status: 'online',
+        lastSeen: now,
+        createdAt: now,
+        updatedAt: now,
+        security: 'classic',
+        session: new Uint8Array([account.slot]),
+      });
+      await writer.secureStorageFlush();
+      await writer.secureStorageLock();
+    }
+    await writer.close();
+
+    const reader = await DatabaseConnection.create(config(domain));
+    for (const account of accounts) {
+      expect(await reader.secureStorageUnlock(account.password)).toBe(true);
+      const rows = await reader.db
+        .select({ userId: userProfile.userId })
+        .from(userProfile);
+      expect(rows).toEqual([{ userId: account.userId }]);
+      await reader.secureStorageLock();
+    }
+    await reader.close();
+  }, 120_000);
+
   it('data persists across close/reopen', async () => {
     const password = 'test-persist';
     const domain = 'vitest-persist';

@@ -389,6 +389,49 @@ describe('AccountStore secure-storage account provisioning', () => {
     });
   });
 
+  it('allocates all onboarding accounts to distinct secure-storage slots', async () => {
+    const sdk = makeSdkMock();
+    const allocations: Array<{ slot: number; password: string }> = [];
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async (slot, password) => {
+      allocations.push({ slot, password });
+      sdk.storageState = 'unlocked';
+    });
+    sdk.openSession.mockImplementation(async () => {
+      sdk.isSessionOpen = true;
+    });
+    sdk.closeSession.mockImplementation(async () => {
+      sdk.isSessionOpen = false;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    getSdkMock.mockReturnValue(sdk);
+
+    try {
+      await useAccountStore
+        .getState()
+        .initializeAccount('alice', 'alice-password');
+      await useAccountStore
+        .getState()
+        .initializeAccount('decoy', 'decoy-password');
+      await useAccountStore
+        .getState()
+        .initializeAccount('backup', 'backup-password');
+
+      expect(allocations.map(({ slot }) => slot).sort()).toEqual([0, 1, 2]);
+      expect(allocations.map(({ password }) => password)).toEqual([
+        'alice-password',
+        'decoy-password',
+        'backup-password',
+      ]);
+      expect(sdk.secureStorageLock).toHaveBeenCalledTimes(2);
+    } finally {
+      await useAccountStore.getState().logout();
+    }
+  });
+
   it('destroys a newly allocated slot when account persistence fails', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
