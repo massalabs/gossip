@@ -56,6 +56,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   );
   const [addingAccount, setAddingAccount] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [lockRecoveryPending, setLockRecoveryPending] = useState(false);
   const [showICloudModal, setShowICloudModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +85,22 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     setStagedAccounts(previous => [...previous, account]);
     setAddingAccount(false);
     setError(null);
+  };
+
+  const lockPersistedAccountsAndComplete = async () => {
+    setIsFinalizing(true);
+    setLockRecoveryPending(false);
+    try {
+      await logout({ lockedByUser: false });
+      await onComplete();
+    } catch (logoutError) {
+      logger.error(
+        'Failed to lock persisted onboarding accounts:',
+        logoutError
+      );
+      setLockRecoveryPending(true);
+      setIsFinalizing(false);
+    }
   };
 
   const finalizeAccounts = async (syncToICloud = false) => {
@@ -160,8 +177,10 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
 
     if (stagedAccounts.length > 1) {
       // Multiple isolated accounts cannot remain selected implicitly. Return to
-      // login and let the supplied password discover the intended slot.
-      await logout({ lockedByUser: false });
+      // login and let the supplied password discover the intended slot. If
+      // locking fails, never rerun persistence with already-wiped credentials.
+      await lockPersistedAccountsAndComplete();
+      return;
     }
     await onComplete();
   };
@@ -173,6 +192,32 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     }
     void finalizeAccounts(false);
   };
+
+  if (lockRecoveryPending) {
+    return (
+      <PageLayout
+        header={<PageHeader title={t('secure_setup.lock_failed_title')} />}
+        className="app-max-w mx-auto"
+        contentClassName="p-4 flex flex-col justify-center"
+      >
+        <div className="text-center space-y-6">
+          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto" />
+          <p className="text-sm text-muted-foreground">
+            {t('secure_setup.lock_failed')}
+          </p>
+          <Button
+            onClick={() => void lockPersistedAccountsAndComplete()}
+            variant="primary"
+            size="custom"
+            fullWidth
+            className="h-12 rounded-full text-sm font-medium"
+          >
+            {t('secure_setup.retry_lock')}
+          </Button>
+        </div>
+      </PageLayout>
+    );
+  }
 
   if (addingAccount) {
     return (

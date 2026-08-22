@@ -295,6 +295,47 @@ describe('SecureAccountSetup', () => {
     }
   });
 
+  it('retries only locking when logout fails after account persistence', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const onComplete = vi.fn();
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+    mocks.logout
+      .mockRejectedValueOnce(new Error('lock failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={onComplete}
+        onRestart={vi.fn()}
+      />
+    );
+    await addAccount('decoy', 'decoy-password');
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.done' })
+    );
+
+    await expect
+      .element(page.getByText('secure_setup.lock_failed', { exact: true }))
+      .toBeInTheDocument();
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(mocks.initializeAccount).toHaveBeenCalledTimes(2);
+    for (const staged of mocks.stagedAccounts) {
+      expect(staged.passwordBytes.every(byte => byte === 0)).toBe(true);
+    }
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.retry_lock' })
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.logout).toHaveBeenCalledTimes(2);
+      expect(onComplete).toHaveBeenCalledOnce();
+    });
+    expect(mocks.initializeAccount).toHaveBeenCalledTimes(2);
+    expect(mocks.configureBiometricLogin).not.toHaveBeenCalled();
+  });
+
   it('stops account entry at the three-slot maximum', async () => {
     const account = stageAccount('alice', 'alice-password');
     mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
