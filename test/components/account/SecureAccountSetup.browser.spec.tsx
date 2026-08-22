@@ -6,6 +6,7 @@ import SecureAccountSetup from '../../../src/components/account/SecureAccountSet
 import { stageAccount } from '../../../src/components/account/stagedAccount';
 
 const mocks = vi.hoisted(() => ({
+  platform: 'web',
   checkBiometricAvailability: vi.fn(),
   configureBiometricLogin: vi.fn(),
   initializeAccount: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
-    getPlatform: () => 'web',
+    getPlatform: () => mocks.platform,
   },
 }));
 
@@ -49,9 +50,34 @@ vi.mock('../../../src/stores/accountStore', () => ({
     }),
 }));
 
+async function addAccount(username: string, password: string) {
+  await userEvent.click(
+    page.getByRole('button', { name: 'secure_setup.add_account' })
+  );
+  await userEvent.fill(
+    page.getByPlaceholder('create.enter_username'),
+    username
+  );
+  await userEvent.fill(
+    page.getByPlaceholder('create.enter_password'),
+    password
+  );
+  await userEvent.fill(
+    page.getByPlaceholder('create.confirm_password'),
+    password
+  );
+  await userEvent.click(
+    page.getByRole('button', { name: 'secure_setup.create_account' })
+  );
+  await userEvent.click(
+    page.getByRole('button', { name: 'create.password_confirm_validate' })
+  );
+}
+
 describe('SecureAccountSetup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.platform = 'web';
     mocks.checkBiometricAvailability.mockResolvedValue({
       available: true,
       method: 'webauthn',
@@ -177,5 +203,158 @@ describe('SecureAccountSetup', () => {
     });
     expect(mocks.initializeAccount).not.toHaveBeenCalled();
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('restarts after the first persistence failure and wipes credentials', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const onComplete = vi.fn();
+    const onRestart = vi.fn();
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+    mocks.initializeAccount.mockRejectedValue(new Error('first failed'));
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={onComplete}
+        onRestart={onRestart}
+      />
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.logout).toHaveBeenCalledWith({ lockedByUser: false });
+      expect(onRestart).toHaveBeenCalledWith('first failed');
+    });
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(mocks.initializeAccount).toHaveBeenCalledTimes(1);
+    expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('routes to login after a later persistence failure', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const onComplete = vi.fn();
+    const onRestart = vi.fn();
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+    mocks.initializeAccount
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('second failed'));
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={onComplete}
+        onRestart={onRestart}
+      />
+    );
+    await addAccount('decoy', 'decoy-password');
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.done' })
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.logout).toHaveBeenCalledWith({ lockedByUser: false });
+      expect(onComplete).toHaveBeenCalledOnce();
+    });
+    expect(onRestart).not.toHaveBeenCalled();
+    expect(mocks.initializeAccount).toHaveBeenCalledTimes(2);
+    expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('stops account entry at the three-slot maximum', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+    await addAccount('decoy', 'decoy-password');
+    await addAccount('backup', 'backup-password');
+
+    await expect
+      .element(page.getByText('secure_setup.max_reached'))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole('button', { name: 'secure_setup.add_account' }))
+      .not.toBeInTheDocument();
+  });
+
+  it('rejects a duplicate staged password before persistence', async () => {
+    const account = stageAccount('alice', 'shared-password');
+    const fillSpy = vi.spyOn(Uint8Array.prototype, 'fill');
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+    await addAccount('decoy', 'shared-password');
+
+    await expect
+      .element(page.getByText('secure_setup.password_in_use'))
+      .toBeInTheDocument();
+    expect(mocks.initializeAccount).not.toHaveBeenCalled();
+    expect(fillSpy).toHaveBeenCalledWith(0);
+    fillSpy.mockRestore();
+  });
+
+  it.each([
+    ['biometric_setup.icloud_local', false],
+    ['biometric_setup.icloud_enable', true],
+  ] as const)('forwards iOS Keychain choice %s', async (choice, sync) => {
+    const account = stageAccount('alice', 'alice-password');
+    mocks.platform = 'ios';
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+    await userEvent.click(page.getByRole('button', { name: 'alice' }));
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+    await userEvent.click(page.getByRole('button', { name: choice }));
+
+    await vi.waitFor(() => {
+      expect(mocks.configureBiometricLogin).toHaveBeenCalledWith(
+        'alice-password',
+        sync
+      );
+      expect(mocks.initializeAccount).toHaveBeenCalledOnce();
+    });
+  });
+
+  it('cancels iOS Keychain choice without configuring or persisting', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    mocks.platform = 'ios';
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+    await userEvent.click(page.getByRole('button', { name: 'alice' }));
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+    await userEvent.keyboard('{Escape}');
+
+    await expect
+      .element(page.getByText('biometric_setup.icloud_title'))
+      .not.toBeInTheDocument();
+    expect(mocks.configureBiometricLogin).not.toHaveBeenCalled();
+    expect(mocks.initializeAccount).not.toHaveBeenCalled();
   });
 });
