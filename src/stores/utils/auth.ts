@@ -3,12 +3,56 @@ import {
   validateMnemonic,
   decrypt,
   deriveKey,
+  encrypt,
+  generateNonce,
   UserProfile,
 } from '@massalabs/gossip-sdk';
 
 export interface AuthResult {
   mnemonic: string;
   encryptionKey: EncryptionKey;
+}
+
+export async function createPasswordSecurity(
+  mnemonic: string,
+  password: string
+): Promise<{
+  security: UserProfile['security'];
+  encryptionKey: EncryptionKey;
+}> {
+  if (!mnemonic) {
+    throw new Error('Mnemonic is required for account creation');
+  }
+
+  const salt = (await generateNonce()).to_bytes();
+  const encryptionKey = await deriveKey(password, salt);
+
+  try {
+    const { encryptedData: encryptedMnemonic } = await encrypt(
+      mnemonic,
+      encryptionKey,
+      salt
+    );
+    return {
+      security: {
+        authMethod: 'password',
+        encKeySalt: salt,
+        mnemonicBackup: {
+          encryptedMnemonic,
+          createdAt: new Date(),
+          backedUp: false,
+        },
+      },
+      encryptionKey,
+    };
+  } catch (error) {
+    const pointer = (encryptionKey as unknown as { __wbg_ptr?: number })
+      .__wbg_ptr;
+    if (pointer === undefined || pointer !== 0) {
+      encryptionKey.free();
+    }
+    throw error;
+  }
 }
 
 export async function auth(

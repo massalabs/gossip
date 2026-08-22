@@ -182,6 +182,22 @@ vi.mock('../../src/stores/utils/getAccount', () => ({
 
 vi.mock('../../src/stores/utils/auth', () => ({
   auth: authSpy,
+  createPasswordSecurity: vi.fn(async () => ({
+    security: {
+      authMethod: 'password',
+      encKeySalt: new Uint8Array(16),
+      mnemonicBackup: {
+        encryptedMnemonic: new Uint8Array(0),
+        createdAt: new Date(),
+        backedUp: false,
+      },
+    },
+    encryptionKey: {
+      type: 'mock-key',
+      __wbg_ptr: 1,
+      free: vi.fn(),
+    },
+  })),
 }));
 
 describe('AccountStore classic password discovery', () => {

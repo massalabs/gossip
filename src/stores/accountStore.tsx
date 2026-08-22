@@ -2,13 +2,7 @@ import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
 import { encodeUserId, UserProfile } from '@massalabs/gossip-sdk';
 
-import {
-  encrypt,
-  deriveKey,
-  generateMnemonic,
-  EncryptionKey,
-  generateNonce,
-} from '@massalabs/gossip-sdk';
+import { generateMnemonic, EncryptionKey } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
 import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
@@ -24,7 +18,7 @@ import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
 
 import { getActiveOrFirstProfile } from './utils/getAccount';
-import { auth } from './utils/auth';
+import { auth, createPasswordSecurity } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
 import { useSelfMessageStore } from './selfMessageStore';
@@ -44,41 +38,6 @@ function freeEncryptionKey(key: EncryptionKey): void {
   if (pointer === undefined || pointer !== 0) {
     key.free();
   }
-}
-
-// Build the password-protected security blob and in-memory key.
-async function buildSecurityFromPassword(
-  mnemonic: string | undefined,
-  password: string
-): Promise<{
-  security: UserProfile['security'];
-  encryptionKey: EncryptionKey;
-}> {
-  const salt = (await generateNonce()).to_bytes();
-  const key = await deriveKey(password, salt);
-
-  if (!mnemonic) {
-    throw new Error('Mnemonic is required for account creation');
-  }
-
-  const { encryptedData: encryptedMnemonic } = await encrypt(
-    mnemonic,
-    key,
-    salt
-  );
-  const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
-    encryptedMnemonic,
-    createdAt: new Date(),
-    backedUp: false,
-  };
-
-  const security: UserProfile['security'] = {
-    authMethod: 'password',
-    encKeySalt: salt,
-    mnemonicBackup,
-  };
-
-  return { security, encryptionKey: key };
 }
 
 interface AccountState {
@@ -227,7 +186,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       throw new Error('Password is required');
     }
 
-    const { encryptionKey, security } = await buildSecurityFromPassword(
+    const { encryptionKey, security } = await createPasswordSecurity(
       mnemonic,
       password
     );
