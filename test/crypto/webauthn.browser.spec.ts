@@ -42,8 +42,11 @@ describe('WebAuthn biometric credential creation', () => {
     const prfSalt = new Uint8Array(32).fill(9);
 
     await createWebAuthnCredential(prfSalt);
+    await createWebAuthnCredential(prfSalt);
 
     const options = createSpy.mock.calls[0][0] as CredentialCreationOptions;
+    const secondOptions = createSpy.mock
+      .calls[1][0] as CredentialCreationOptions;
     const publicKey = options.publicKey;
     expect(publicKey).toBeDefined();
     expect(publicKey?.rp).toEqual({
@@ -52,7 +55,15 @@ describe('WebAuthn biometric credential creation', () => {
     });
     expect(publicKey?.user.name).toBe('Gossip biometric login');
     expect(publicKey?.user.displayName).toBe('Gossip biometric login');
-    expect(new Uint8Array(publicKey?.user.id as ArrayBuffer)).toHaveLength(32);
+    const firstUserHandle = new Uint8Array(publicKey?.user.id as ArrayBuffer);
+    const secondUserHandle = new Uint8Array(
+      secondOptions.publicKey?.user.id as ArrayBuffer
+    );
+    expect(firstUserHandle).toHaveLength(32);
+    expect(secondUserHandle).toHaveLength(32);
+    expect(Array.from(firstUserHandle)).not.toEqual(
+      Array.from(secondUserHandle)
+    );
     expect(publicKey?.authenticatorSelection).toEqual(
       expect.objectContaining({
         authenticatorAttachment: 'platform',
