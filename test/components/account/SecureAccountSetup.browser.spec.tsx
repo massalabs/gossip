@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   configureBiometricLogin: vi.fn(),
   initializeAccount: vi.fn(),
   logout: vi.fn(),
+  stagedAccounts: [] as Array<{ passwordBytes: Uint8Array }>,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -41,6 +42,22 @@ vi.mock('../../../src/services/biometricService', () => ({
   checkBiometricAvailability: mocks.checkBiometricAvailability,
   configureBiometricLogin: mocks.configureBiometricLogin,
 }));
+
+vi.mock('../../../src/components/account/stagedAccount', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../../src/components/account/stagedAccount')
+  >('../../../src/components/account/stagedAccount');
+  return {
+    ...actual,
+    stageAccount: (
+      ...args: Parameters<typeof actual.stageAccount>
+    ): ReturnType<typeof actual.stageAccount> => {
+      const account = actual.stageAccount(...args);
+      mocks.stagedAccounts.push(account);
+      return account;
+    },
+  };
+});
 
 vi.mock('../../../src/stores/accountStore', () => ({
   useAccountStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -78,6 +95,7 @@ describe('SecureAccountSetup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.platform = 'web';
+    mocks.stagedAccounts.length = 0;
     mocks.checkBiometricAvailability.mockResolvedValue({
       available: true,
       method: 'webauthn',
@@ -249,6 +267,7 @@ describe('SecureAccountSetup', () => {
       />
     );
     await addAccount('decoy', 'decoy-password');
+    await addAccount('backup', 'backup-password');
     await userEvent.click(
       page.getByRole('button', { name: 'secure_setup.done' })
     );
@@ -259,7 +278,14 @@ describe('SecureAccountSetup', () => {
     });
     expect(onRestart).not.toHaveBeenCalled();
     expect(mocks.initializeAccount).toHaveBeenCalledTimes(2);
-    expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
+    expect(mocks.initializeAccount).not.toHaveBeenCalledWith(
+      'backup',
+      'backup-password'
+    );
+    expect(mocks.stagedAccounts).toHaveLength(3);
+    for (const staged of mocks.stagedAccounts) {
+      expect(staged.passwordBytes.every(byte => byte === 0)).toBe(true);
+    }
   });
 
   it('stops account entry at the three-slot maximum', async () => {

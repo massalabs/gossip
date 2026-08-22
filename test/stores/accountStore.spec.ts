@@ -432,6 +432,62 @@ describe('AccountStore secure-storage account provisioning', () => {
     }
   });
 
+  it('releases a slot after post-open persistence failure so retry can reuse it', async () => {
+    const sdk = makeSdkMock();
+    const allocatedSlots: number[] = [];
+    const randomSpy = vi
+      .spyOn(crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+        if (array instanceof Uint8Array) array[0] = 0;
+        return array;
+      });
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async slot => {
+      allocatedSlots.push(slot);
+      sdk.storageState = 'unlocked';
+    });
+    sdk.openSession.mockImplementation(async () => {
+      sdk.isSessionOpen = true;
+    });
+    sdk.closeSession.mockImplementation(async () => {
+      sdk.isSessionOpen = false;
+    });
+    sdk.secureStorageDestroy.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.profiles.createOrUpdate
+      .mockRejectedValueOnce(new Error('profile persistence failed'))
+      .mockResolvedValueOnce(mockProfile());
+    getSdkMock.mockReturnValue(sdk);
+
+    try {
+      await expect(
+        useAccountStore.getState().initializeAccount('alice', 'alice-password')
+      ).rejects.toThrow('profile persistence failed');
+
+      expect(sdk.closeSession).toHaveBeenCalledOnce();
+      expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
+      expect(sdk.closeSession.mock.invocationCallOrder[0]).toBeLessThan(
+        sdk.secureStorageDestroy.mock.invocationCallOrder[0]
+      );
+      expect(sdk.storageState).toBe('locked');
+
+      await useAccountStore
+        .getState()
+        .initializeAccount('alice', 'alice-password');
+
+      expect(allocatedSlots).toEqual([0, 0]);
+      expect(sdk.profiles.createOrUpdate).toHaveBeenCalledTimes(2);
+    } finally {
+      randomSpy.mockRestore();
+      await useAccountStore.getState().logout();
+    }
+  });
+
   it('destroys a newly allocated slot when account persistence fails', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
