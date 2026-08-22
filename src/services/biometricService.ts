@@ -50,6 +50,10 @@ export interface BiometricSetupResult {
   error?: string;
 }
 
+export interface BiometricSetupTransactionResult extends BiometricSetupResult {
+  rollback?: () => Promise<void>;
+}
+
 interface WebAuthnPasswordPayload {
   version: 1;
   salt: string;
@@ -126,50 +130,41 @@ async function storeNativePassword(
   await SecureStorage.set(BIOMETRIC_STORAGE_KEY, password, true, syncToICloud);
 }
 
+async function restoreNativePasswords(
+  previousLocal: string | null,
+  previousCloud: string | null,
+  isIOS: boolean
+): Promise<void> {
+  await removeNativePassword(false);
+  if (isIOS) await removeNativePassword(true);
+  if (previousLocal) await storeNativePassword(previousLocal, false);
+  if (isIOS && previousCloud) await storeNativePassword(previousCloud, true);
+}
+
 async function replaceNativePassword(
   password: string,
   syncToICloud: boolean
-): Promise<void> {
+): Promise<() => Promise<void>> {
   const isIOS = Capacitor.getPlatform() === 'ios';
-  if (!isIOS) {
-    const previous = await readNativePassword(false);
-    try {
-      await removeNativePassword(false);
-      await storeNativePassword(password, false);
-    } catch (error) {
-      if (previous) {
-        try {
-          await storeNativePassword(previous, false);
-        } catch (rollbackError) {
-          logger.error(
-            'Failed to restore previous biometric credential:',
-            rollbackError
-          );
-        }
-      }
-      throw error;
-    }
-    return;
-  }
-
-  // The selected location is discoverable before a profile is known by probing
-  // local and synchronizable Keychain namespaces. Keep exactly one entry so the
-  // lookup cannot return an older password from the other namespace.
-  const [previousLocal, previousCloud] = await Promise.all([
-    readNativePassword(false),
-    readNativePassword(true),
-  ]);
+  const [previousLocal, previousCloud] = isIOS
+    ? await Promise.all([readNativePassword(false), readNativePassword(true)])
+    : [await readNativePassword(false), null];
+  const rollback = () =>
+    restoreNativePasswords(previousLocal, previousCloud, isIOS);
 
   try {
+    // The selected location is discoverable before a profile is known by
+    // probing local and synchronizable Keychain namespaces. Keep exactly one
+    // entry so lookup cannot return an older password from another namespace.
     await removeNativePassword(false);
-    await removeNativePassword(true);
-    await storeNativePassword(password, syncToICloud);
+    if (isIOS) await removeNativePassword(true);
+    await storeNativePassword(password, isIOS ? syncToICloud : false);
+    return rollback;
   } catch (error) {
     // Best-effort rollback avoids silently losing a previously working global
     // credential when replacement storage fails after authentication.
     try {
-      if (previousLocal) await storeNativePassword(previousLocal, false);
-      if (previousCloud) await storeNativePassword(previousCloud, true);
+      await rollback();
     } catch (rollbackError) {
       logger.error(
         'Failed to restore previous biometric credential:',
@@ -205,7 +200,25 @@ function parseWebAuthnPayload(raw: string | null): WebAuthnPasswordPayload {
   return value as WebAuthnPasswordPayload;
 }
 
-async function storeWebAuthnPassword(password: string): Promise<void> {
+function restoreWebAuthnPassword(
+  credentialId: string | null,
+  payload: string | null
+): void {
+  if (payload === null) {
+    localStorage.removeItem(WEBAUTHN_PASSWORD_KEY);
+  } else {
+    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, payload);
+  }
+  if (credentialId === null) {
+    localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
+  } else {
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
+  }
+}
+
+async function storeWebAuthnPassword(
+  password: string
+): Promise<() => Promise<void>> {
   const prfSalt = await getBiometricSalt();
   const { credentialId, encryptionKey } =
     await createWebAuthnCredential(prfSalt);
@@ -231,17 +244,11 @@ async function storeWebAuthnPassword(password: string): Promise<void> {
     try {
       localStorage.setItem(WEBAUTHN_PASSWORD_KEY, JSON.stringify(payload));
       localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
+      return async () => {
+        restoreWebAuthnPassword(previousCredentialId, previousPayload);
+      };
     } catch (error) {
-      if (previousPayload === null) {
-        localStorage.removeItem(WEBAUTHN_PASSWORD_KEY);
-      } else {
-        localStorage.setItem(WEBAUTHN_PASSWORD_KEY, previousPayload);
-      }
-      if (previousCredentialId === null) {
-        localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
-      } else {
-        localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, previousCredentialId);
-      }
+      restoreWebAuthnPassword(previousCredentialId, previousPayload);
       throw error;
     }
   } finally {
@@ -323,10 +330,10 @@ export async function checkBiometricAvailability(): Promise<BiometricAvailabilit
   return { available: false, biometryType: 'none', method: 'none' };
 }
 
-export async function configureBiometricLogin(
+export async function configureBiometricLoginWithRollback(
   password: string,
   syncToICloud = false
-): Promise<BiometricSetupResult> {
+): Promise<BiometricSetupTransactionResult> {
   if (!password.trim()) {
     return { success: false, error: 'Password is required' };
   }
@@ -334,13 +341,13 @@ export async function configureBiometricLogin(
   try {
     if (isCapacitorAvailable()) {
       await authenticateNative('Authenticate to enable biometric login');
-      await replaceNativePassword(password, syncToICloud);
-      return { success: true };
+      const rollback = await replaceNativePassword(password, syncToICloud);
+      return { success: true, rollback };
     }
 
     if (isWebAuthnSupported()) {
-      await storeWebAuthnPassword(password);
-      return { success: true };
+      const rollback = await storeWebAuthnPassword(password);
+      return { success: true, rollback };
     }
 
     throw new Error('Biometric authentication is not available');
@@ -351,6 +358,17 @@ export async function configureBiometricLogin(
       error: classifyError(error),
     };
   }
+}
+
+export async function configureBiometricLogin(
+  password: string,
+  syncToICloud = false
+): Promise<BiometricSetupResult> {
+  const { success, error } = await configureBiometricLoginWithRollback(
+    password,
+    syncToICloud
+  );
+  return error === undefined ? { success } : { success, error };
 }
 
 function classifyError(error: unknown): string {

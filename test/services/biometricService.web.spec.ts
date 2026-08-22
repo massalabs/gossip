@@ -55,6 +55,7 @@ vi.mock('@massalabs/gossip-sdk', () => ({
 import {
   authenticateBiometricLogin,
   configureBiometricLogin,
+  configureBiometricLoginWithRollback,
 } from '../../src/services/biometricService';
 
 const encryptionKey = {
@@ -94,6 +95,26 @@ describe('WebAuthn biometric password storage', () => {
       ciphertext: expect.any(String),
     });
     expect(mocks.free).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns an opaque rollback that restores the previous credential pair', async () => {
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'previous-credential');
+    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, 'previous-payload');
+
+    const result = await configureBiometricLoginWithRollback('new-password');
+
+    expect(result.success).toBe(true);
+    expect(result.rollback).toEqual(expect.any(Function));
+    expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBe(
+      'credential-handle'
+    );
+    await result.rollback?.();
+    expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBe(
+      'previous-credential'
+    );
+    expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(
+      'previous-payload'
+    );
   });
 
   it('restores the previous credential pair after a partial storage write', async () => {

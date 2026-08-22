@@ -68,6 +68,7 @@ vi.mock('../../src/crypto/webauthn', () => ({
 import {
   authenticateBiometricLogin,
   configureBiometricLogin,
+  configureBiometricLoginWithRollback,
 } from '../../src/services/biometricService';
 
 describe('native biometric password storage', () => {
@@ -115,6 +116,42 @@ describe('native biometric password storage', () => {
     expect(mocks.set).toHaveBeenCalledWith(
       BIOMETRIC_STORAGE_KEY,
       'cloud-password',
+      true,
+      true
+    );
+  });
+
+  it('returns an opaque rollback that restores both iOS credential locations', async () => {
+    mocks.get
+      .mockResolvedValueOnce('previous-local')
+      .mockResolvedValueOnce('previous-cloud');
+
+    const result = await configureBiometricLoginWithRollback(
+      'new-password',
+      true
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.rollback).toEqual(expect.any(Function));
+    await result.rollback?.();
+    expect(mocks.set).toHaveBeenNthCalledWith(
+      1,
+      BIOMETRIC_STORAGE_KEY,
+      'new-password',
+      true,
+      true
+    );
+    expect(mocks.set).toHaveBeenNthCalledWith(
+      2,
+      BIOMETRIC_STORAGE_KEY,
+      'previous-local',
+      true,
+      false
+    );
+    expect(mocks.set).toHaveBeenNthCalledWith(
+      3,
+      BIOMETRIC_STORAGE_KEY,
+      'previous-cloud',
       true,
       true
     );

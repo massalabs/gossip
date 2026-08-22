@@ -13,7 +13,7 @@ import {
 import { useAccountStore } from '../../stores/accountStore';
 import {
   checkBiometricAvailability,
-  configureBiometricLogin,
+  configureBiometricLoginWithRollback,
 } from '../../services/biometricService';
 import { MAX_SECURE_ACCOUNTS } from '../../config/features';
 import PageHeader from '../ui/PageHeader';
@@ -92,17 +92,19 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
 
     let persistedAccounts = 0;
     let failure: unknown;
+    let rollbackBiometric: (() => Promise<void>) | undefined;
 
     try {
       if (selectedBiometricIndex !== null) {
         const selected = stagedAccounts[selectedBiometricIndex];
-        const result = await configureBiometricLogin(
+        const result = await configureBiometricLoginWithRollback(
           readStagedPassword(selected),
           syncToICloud
         );
         if (!result.success) {
           throw new Error(result.error || 'Biometric setup failed');
         }
+        rollbackBiometric = result.rollback;
       }
 
       for (const account of stagedAccounts) {
@@ -112,6 +114,24 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     } catch (caught) {
       failure = caught;
       logger.error('Error finalizing secure account setup:', caught);
+
+      // Replacement happens before persistence so biometric cancellation never
+      // leaves committed accounts. Restore the prior singleton credential if
+      // persistence failed before the selected account reached its commit point.
+      if (
+        rollbackBiometric &&
+        selectedBiometricIndex !== null &&
+        persistedAccounts <= selectedBiometricIndex
+      ) {
+        try {
+          await rollbackBiometric();
+        } catch (rollbackError) {
+          logger.error(
+            'Failed to restore biometric login after onboarding error:',
+            rollbackError
+          );
+        }
+      }
     } finally {
       // The wipe happens before routing or rendering another interactive screen
       // and covers successful persistence, biometric cancellation, and every

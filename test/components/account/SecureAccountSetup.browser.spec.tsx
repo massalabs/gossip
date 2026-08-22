@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   platform: 'web',
   checkBiometricAvailability: vi.fn(),
   configureBiometricLogin: vi.fn(),
+  rollbackBiometric: vi.fn(),
   initializeAccount: vi.fn(),
   logout: vi.fn(),
   stagedAccounts: [] as Array<{ passwordBytes: Uint8Array }>,
@@ -40,7 +41,7 @@ vi.mock('@massalabs/gossip-sdk', async () => {
 
 vi.mock('../../../src/services/biometricService', () => ({
   checkBiometricAvailability: mocks.checkBiometricAvailability,
-  configureBiometricLogin: mocks.configureBiometricLogin,
+  configureBiometricLoginWithRollback: mocks.configureBiometricLogin,
 }));
 
 vi.mock('../../../src/components/account/stagedAccount', async () => {
@@ -100,7 +101,11 @@ describe('SecureAccountSetup', () => {
       available: true,
       method: 'webauthn',
     });
-    mocks.configureBiometricLogin.mockResolvedValue({ success: true });
+    mocks.rollbackBiometric.mockResolvedValue(undefined);
+    mocks.configureBiometricLogin.mockResolvedValue({
+      success: true,
+      rollback: mocks.rollbackBiometric,
+    });
     mocks.initializeAccount.mockResolvedValue(undefined);
     mocks.logout.mockResolvedValue(undefined);
   });
@@ -227,7 +232,6 @@ describe('SecureAccountSetup', () => {
     const account = stageAccount('alice', 'alice-password');
     const onComplete = vi.fn();
     const onRestart = vi.fn();
-    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
     mocks.initializeAccount.mockRejectedValue(new Error('first failed'));
 
     await render(
@@ -237,11 +241,13 @@ describe('SecureAccountSetup', () => {
         onRestart={onRestart}
       />
     );
+    await userEvent.click(page.getByRole('button', { name: 'alice' }));
     await userEvent.click(
       page.getByRole('button', { name: 'secure_setup.skip' })
     );
 
     await vi.waitFor(() => {
+      expect(mocks.rollbackBiometric).toHaveBeenCalledOnce();
       expect(mocks.logout).toHaveBeenCalledWith({ lockedByUser: false });
       expect(onRestart).toHaveBeenCalledWith('first failed');
     });
@@ -254,7 +260,6 @@ describe('SecureAccountSetup', () => {
     const account = stageAccount('alice', 'alice-password');
     const onComplete = vi.fn();
     const onRestart = vi.fn();
-    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
     mocks.initializeAccount
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('second failed'));
@@ -268,11 +273,13 @@ describe('SecureAccountSetup', () => {
     );
     await addAccount('decoy', 'decoy-password');
     await addAccount('backup', 'backup-password');
+    await userEvent.click(page.getByRole('button', { name: 'backup' }));
     await userEvent.click(
       page.getByRole('button', { name: 'secure_setup.done' })
     );
 
     await vi.waitFor(() => {
+      expect(mocks.rollbackBiometric).toHaveBeenCalledOnce();
       expect(mocks.logout).toHaveBeenCalledWith({ lockedByUser: false });
       expect(onComplete).toHaveBeenCalledOnce();
     });
