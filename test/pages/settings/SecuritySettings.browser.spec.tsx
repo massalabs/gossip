@@ -5,6 +5,7 @@ import { page, userEvent } from 'vitest/browser';
 import SecuritySettings from '../../../src/pages/settings/SecuritySettings';
 
 const mocks = vi.hoisted(() => ({
+  platform: 'web',
   configureBiometricLogin: vi.fn(),
   navigate: vi.fn(),
   setAutoLockTimeout: vi.fn(),
@@ -31,7 +32,7 @@ vi.mock('react-router-dom', async () => {
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
-    getPlatform: () => 'web',
+    getPlatform: () => mocks.platform,
   },
 }));
 
@@ -53,6 +54,7 @@ vi.mock('../../../src/stores/accountStore', () => ({
 describe('SecuritySettings biometric setup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.platform = 'web';
     mocks.configureBiometricLogin.mockResolvedValue(undefined);
   });
 
@@ -84,6 +86,63 @@ describe('SecuritySettings biometric setup', () => {
       .element(page.getByText('security.biometric_success'))
       .toBeVisible();
     await expect.element(setup).toBeInTheDocument();
+  });
+
+  it.each([
+    ['biometric_setup.icloud_local', false],
+    ['biometric_setup.icloud_enable', true],
+  ] as const)('forwards iOS Keychain choice %s', async (choice, sync) => {
+    mocks.platform = 'ios';
+    await render(<SecuritySettings />);
+
+    await userEvent.click(
+      page.getByRole('button', {
+        name: 'security.biometric_use_for_account',
+      })
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('security.biometric_password_placeholder'),
+      'current-password'
+    );
+    await userEvent.click(
+      page.getByRole('button', {
+        name: 'security.biometric_password_continue',
+      })
+    );
+    await userEvent.click(page.getByRole('button', { name: choice }));
+
+    await vi.waitFor(() => {
+      expect(mocks.configureBiometricLogin).toHaveBeenCalledWith(
+        'current-password',
+        sync
+      );
+    });
+  });
+
+  it('clears the pending password when iOS Keychain choice is cancelled', async () => {
+    mocks.platform = 'ios';
+    await render(<SecuritySettings />);
+
+    const setup = page.getByRole('button', {
+      name: 'security.biometric_use_for_account',
+    });
+    await userEvent.click(setup);
+    await userEvent.fill(
+      page.getByPlaceholder('security.biometric_password_placeholder'),
+      'current-password'
+    );
+    await userEvent.click(
+      page.getByRole('button', {
+        name: 'security.biometric_password_continue',
+      })
+    );
+    await userEvent.keyboard('{Escape}');
+
+    expect(mocks.configureBiometricLogin).not.toHaveBeenCalled();
+    await userEvent.click(setup);
+    await expect
+      .element(page.getByPlaceholder('security.biometric_password_placeholder'))
+      .toHaveValue('');
   });
 
   it('shows a generic password error without exposing credential ownership', async () => {

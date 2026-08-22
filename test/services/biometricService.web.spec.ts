@@ -96,6 +96,40 @@ describe('WebAuthn biometric password storage', () => {
     expect(mocks.free).toHaveBeenCalledTimes(1);
   });
 
+  it('restores the previous credential pair after a partial storage write', async () => {
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'previous-credential');
+    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, 'previous-payload');
+    const originalSetItem = Storage.prototype.setItem;
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(function (key: string, value: string) {
+        if (
+          key === WEBAUTHN_CREDENTIAL_ID_KEY &&
+          value === 'credential-handle'
+        ) {
+          throw new Error('credential write failed');
+        }
+        originalSetItem.call(this, key, value);
+      });
+
+    try {
+      const result = await configureBiometricLogin('new-password');
+
+      expect(result).toEqual({
+        success: false,
+        error: 'credential write failed',
+      });
+      expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBe(
+        'previous-credential'
+      );
+      expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(
+        'previous-payload'
+      );
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
   it('uses WebAuthn PRF output to recover only the password', async () => {
     await configureBiometricLogin('account-password');
     mocks.free.mockClear();

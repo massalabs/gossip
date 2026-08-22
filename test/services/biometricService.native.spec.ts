@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BIOMETRIC_STORAGE_KEY } from '../../src/constants/biometric';
 
 const mocks = vi.hoisted(() => ({
+  platform: 'ios',
   authenticate: vi.fn(),
   checkBiometry: vi.fn(),
   get: vi.fn(),
@@ -12,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     isNativePlatform: () => true,
-    getPlatform: () => 'ios',
+    getPlatform: () => mocks.platform,
   },
 }));
 
@@ -72,6 +73,7 @@ import {
 describe('native biometric password storage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.platform = 'ios';
     mocks.authenticate.mockResolvedValue(undefined);
     mocks.get.mockResolvedValue(null);
     mocks.remove.mockResolvedValue(false);
@@ -113,6 +115,84 @@ describe('native biometric password storage', () => {
     expect(mocks.set).toHaveBeenCalledWith(
       BIOMETRIC_STORAGE_KEY,
       'cloud-password',
+      true,
+      true
+    );
+  });
+
+  it('restores the local credential when Android replacement fails', async () => {
+    mocks.platform = 'android';
+    mocks.get.mockResolvedValue('previous-password');
+    mocks.set
+      .mockRejectedValueOnce(new Error('replacement failed'))
+      .mockResolvedValueOnce(undefined);
+
+    const result = await configureBiometricLogin('new-password', false);
+
+    expect(result).toEqual({ success: false, error: 'replacement failed' });
+    expect(mocks.set).toHaveBeenNthCalledWith(
+      1,
+      BIOMETRIC_STORAGE_KEY,
+      'new-password',
+      true,
+      false
+    );
+    expect(mocks.set).toHaveBeenNthCalledWith(
+      2,
+      BIOMETRIC_STORAGE_KEY,
+      'previous-password',
+      true,
+      false
+    );
+  });
+
+  it('restores both iOS Keychain locations when replacement fails', async () => {
+    mocks.get
+      .mockResolvedValueOnce('previous-local')
+      .mockResolvedValueOnce('previous-cloud');
+    mocks.set
+      .mockRejectedValueOnce(new Error('replacement failed'))
+      .mockResolvedValue(undefined);
+
+    const result = await configureBiometricLogin('new-password', true);
+
+    expect(result).toEqual({ success: false, error: 'replacement failed' });
+    expect(mocks.set).toHaveBeenNthCalledWith(
+      2,
+      BIOMETRIC_STORAGE_KEY,
+      'previous-local',
+      true,
+      false
+    );
+    expect(mocks.set).toHaveBeenNthCalledWith(
+      3,
+      BIOMETRIC_STORAGE_KEY,
+      'previous-cloud',
+      true,
+      true
+    );
+  });
+
+  it('restores iOS credentials when removal fails partway through', async () => {
+    mocks.get
+      .mockResolvedValueOnce('previous-local')
+      .mockResolvedValueOnce('previous-cloud');
+    mocks.remove
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('removal failed'));
+
+    const result = await configureBiometricLogin('new-password', true);
+
+    expect(result).toEqual({ success: false, error: 'removal failed' });
+    expect(mocks.set).toHaveBeenCalledWith(
+      BIOMETRIC_STORAGE_KEY,
+      'previous-local',
+      true,
+      false
+    );
+    expect(mocks.set).toHaveBeenCalledWith(
+      BIOMETRIC_STORAGE_KEY,
+      'previous-cloud',
       true,
       true
     );
