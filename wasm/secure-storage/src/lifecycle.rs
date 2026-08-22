@@ -241,9 +241,10 @@ fn rerandomize_block_across_all_slots<S: BlockStorage + KeypairStorage>(
             create_cover_block(&cur_pk, &cur_aad_root)
         } else {
             match storage.read_block(cur_session, namespace, block_index) {
-                // Keeping malformed bytes would leave one slot unchanged and
-                // expose an asymmetric snapshot diff. Fresh cover preserves the
-                // all-slot update pattern and heals corruption for future ticks.
+                // Noncanonical ciphertext has no recoverable plaintext through
+                // the current format. Keeping it would leave one slot unchanged;
+                // aborting would let that slot block cover/destroy work for every
+                // session. Fresh cover preserves all-slot symmetry and progress.
                 Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct)
                     .unwrap_or_else(|_| create_cover_block(&cur_pk, &cur_aad_root)),
                 Err(_) => create_cover_block(&cur_pk, &cur_aad_root),

@@ -4,10 +4,10 @@ use secureStorage::BLOCK_SIZE;
 use secureStorage::SecureStorageError;
 use secureStorage::storage::{BlockStorage, KeypairStorage, MemoryStorage};
 use secureStorage::{
-    DEFAULT_NAMESPACE, NamespaceState, PLAINTEXT_SIZE, SESSION_COUNT, SessionIndex,
+    DEFAULT_NAMESPACE, NamespaceState, PLAINTEXT_SIZE, PqPublicKey, SESSION_COUNT, SessionIndex,
     allocate_session, cover_traffic_tick, decrypt_session_data_block, get_global_block_count,
-    load_namespace_state, provision_storage, read_session_data, shrink_session_data,
-    unlock_session, write_session_data,
+    load_namespace_state, provision_storage, read_session_data, read_session_version_and_pk,
+    rerandomize_block, shrink_session_data, unlock_session, write_session_data,
 };
 
 const DOMAIN: &str = "e2e-test";
@@ -184,9 +184,47 @@ fn e2e_cover_traffic_preserves_data() {
     });
 }
 
-/// Scenario 5: Corruption heals on write.
+fn snapshot_block(storage: &MemoryStorage, block_index: u64) -> Vec<[u8; BLOCK_SIZE]> {
+    (0..SESSION_COUNT as u8)
+        .map(|index| {
+            let session = SessionIndex::new(index).unwrap();
+            *storage.read_block(session, NS, block_index).unwrap()
+        })
+        .collect()
+}
+
+fn assert_all_slots_changed(
+    storage: &MemoryStorage,
+    block_index: u64,
+    previous: &[[u8; BLOCK_SIZE]],
+) {
+    for (index, previous_block) in previous.iter().enumerate() {
+        let current = storage
+            .read_block(SessionIndex::new(index as u8).unwrap(), NS, block_index)
+            .unwrap();
+        assert_ne!(
+            &*current, previous_block,
+            "session {index} block {block_index} must change"
+        );
+    }
+}
+
+fn assert_block_is_rerandomizable(
+    storage: &MemoryStorage,
+    session: SessionIndex,
+    block_index: u64,
+) {
+    let (_, public_key_bytes) = read_session_version_and_pk(storage, session).unwrap();
+    let public_key = PqPublicKey::from_bytes(&public_key_bytes).unwrap();
+    let ciphertext = storage.read_block(session, NS, block_index).unwrap();
+
+    rerandomize_block(&public_key, &ciphertext)
+        .expect("recovered block must contain canonical ciphertext coefficients");
+}
+
+/// Scenario 5: A malformed slot is replaced instead of blocking another session's write.
 #[test]
-fn e2e_corruption_heals_on_write() {
+fn e2e_malformed_ciphertext_is_replaced_on_write() {
     run(|| {
         let mut storage = MemoryStorage::new();
         provision_storage(&mut storage).unwrap();
@@ -206,12 +244,17 @@ fn e2e_corruption_heals_on_write() {
         )
         .unwrap();
 
-        // Corrupt a block of another session (session 1, block 0)
-        let s1 = SessionIndex::new(1).unwrap();
-        let corrupted = Box::new([0xFF; secureStorage::BLOCK_SIZE]);
-        storage.write_block(s1, NS, 0, &corrupted).unwrap();
+        // This slot's plaintext is already unavailable because its coefficients
+        // are noncanonical. The active session must still be able to write while
+        // every slot changes to preserve snapshot symmetry.
+        let corrupted_session = SessionIndex::new(1).unwrap();
+        let corrupted = Box::new([0xFF; BLOCK_SIZE]);
+        storage
+            .write_block(corrupted_session, NS, 0, &corrupted)
+            .unwrap();
+        let before = snapshot_block(&storage, 0);
 
-        // Write at the same block index — should heal the corrupted block via cover
+        // Writing at the same index replaces the unreadable bytes with valid cover.
         write_session_data(
             &mut storage,
             DOMAIN,
@@ -223,13 +266,75 @@ fn e2e_corruption_heals_on_write() {
         )
         .unwrap();
 
-        // Our data should still be readable
         let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 5).unwrap();
         assert_eq!(&*result, b"world");
+        assert_all_slots_changed(&storage, 0, &before);
+        assert_block_is_rerandomizable(&storage, corrupted_session, 0);
+    });
+}
 
-        // Session 1's block should be a valid ciphertext (rerandomized or cover)
-        let s1_block = storage.read_block(s1, NS, 0).unwrap();
-        assert_ne!(*s1_block, [0xFF; secureStorage::BLOCK_SIZE]);
+/// A malformed slot cannot block cover traffic for every session.
+#[test]
+fn e2e_malformed_ciphertext_is_replaced_during_cover_traffic() {
+    run(|| {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let slot = SessionIndex::new(0).unwrap();
+        let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+        let mut ns_state = NamespaceState::empty();
+        let data = b"genuine data survives cover recovery";
+        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, data).unwrap();
+
+        // Cover traffic cannot recover this noncanonical block's plaintext, but
+        // replacing it prevents one slot from blocking masking for every session.
+        let corrupted_session = SessionIndex::new(1).unwrap();
+        storage
+            .write_block(corrupted_session, NS, 0, &[0xFF; BLOCK_SIZE])
+            .unwrap();
+        let before = snapshot_block(&storage, 0);
+
+        cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
+
+        let result =
+            read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, data.len()).unwrap();
+        assert_eq!(&*result, data);
+        assert_all_slots_changed(&storage, 0, &before);
+        assert_block_is_rerandomizable(&storage, corrupted_session, 0);
+    });
+}
+
+/// A malformed slot cannot block another session's shrink operation.
+#[test]
+fn e2e_malformed_ciphertext_is_replaced_during_shrink() {
+    run(|| {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let slot = SessionIndex::new(0).unwrap();
+        let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+        let mut ns_state = NamespaceState::empty();
+        let data: Vec<u8> = (0..PLAINTEXT_SIZE * 3)
+            .map(|index| (index % 256) as u8)
+            .collect();
+        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &data).unwrap();
+
+        let freed_block = 1;
+        // The malformed block is already unreadable. Shrinking the active session
+        // must replace it with cover so every slot changes and the operation can
+        // make progress without leaking which session initiated it.
+        let corrupted_session = SessionIndex::new(1).unwrap();
+        storage
+            .write_block(corrupted_session, NS, freed_block, &[0xFF; BLOCK_SIZE])
+            .unwrap();
+        let before = snapshot_block(&storage, freed_block);
+
+        shrink_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 10).unwrap();
+
+        let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 10).unwrap();
+        assert_eq!(&*result, &data[..10]);
+        assert_all_slots_changed(&storage, freed_block, &before);
+        assert_block_is_rerandomizable(&storage, corrupted_session, freed_block);
     });
 }
 

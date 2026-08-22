@@ -97,9 +97,10 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
                 encrypt_block(&session.pq_rerand_pk, &aead_sk, &aad_root, plaintext)
             } else {
                 match &p.existing {
-                    // Do not preserve malformed bytes: every slot must change at
-                    // this index. Fresh cover heals the block while preserving
-                    // snapshot symmetry and forward progress.
+                    // Noncanonical ciphertext has no recoverable plaintext through
+                    // the current format. Keeping it would break all-slot symmetry;
+                    // aborting would let one session block writes by another. Fresh
+                    // cover preserves privacy and cross-session progress.
                     Some(cur_ct) => rerandomize_block(&p.pk, cur_ct)
                         .unwrap_or_else(|_| create_cover_block(&p.pk, &p.aad_root)),
                     None => create_cover_block(&p.pk, &p.aad_root),
@@ -499,9 +500,10 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
                 create_cover_block(&cur_pk, &cur_aad_root)
             } else {
                 match storage.read_block(cur_session, namespace, b) {
-                    // Preserving an invalid block would make this slot the only
-                    // unchanged one. Replace it with cover so the shrink remains
-                    // snapshot-symmetric and cannot be blocked by corruption.
+                    // Noncanonical ciphertext has no recoverable plaintext through
+                    // the current format. Keeping it would make this slot the only
+                    // unchanged one; aborting would let it block another session's
+                    // shrink. Fresh cover preserves symmetry and progress.
                     Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct)
                         .unwrap_or_else(|_| create_cover_block(&cur_pk, &cur_aad_root)),
                     Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
