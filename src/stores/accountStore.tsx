@@ -101,7 +101,7 @@ interface AccountState {
   setLoading: (loading: boolean) => void;
 
   // Mnemonic backup methods
-  showBackup: (password?: string) => Promise<{
+  showBackup: (password: string) => Promise<{
     mnemonic: string;
     account: Account;
   }>;
@@ -716,7 +716,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     },
 
     showBackup: async (
-      password?: string
+      password: string
     ): Promise<{
       mnemonic: string;
       account: Account;
