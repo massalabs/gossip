@@ -11,6 +11,7 @@ import {
 } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
+import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
 
 import {
   Provider,
@@ -92,6 +93,10 @@ interface AccountState {
   loadAccount: (method: LoginMethod) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
   finalizeOnboarding: () => Promise<void>;
+  configureBiometricLogin: (
+    password: string,
+    syncToICloud?: boolean
+  ) => Promise<void>;
   resetAccount: () => Promise<void>;
   setLoading: (loading: boolean) => void;
 
@@ -690,6 +695,24 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       const updated = { ...userProfile, lastSeen: new Date() };
       await sdk.profiles.save(updated);
       set({ userProfile: updated });
+    },
+
+    configureBiometricLogin: async (password: string, syncToICloud = false) => {
+      const profile = get().userProfile;
+      if (!profile || !getSdk().isSessionOpen) {
+        throw new Error('No authenticated user');
+      }
+
+      // Verify against the active profile before replacing the singleton. This
+      // action intentionally does not inspect which account the existing
+      // credential opens, so Settings cannot become an association oracle.
+      const verified = await auth(profile, password);
+      freeEncryptionKey(verified.encryptionKey);
+
+      const result = await storeBiometricPassword(password, syncToICloud);
+      if (!result.success) {
+        throw new Error(result.error || 'Biometric setup failed');
+      }
     },
 
     showBackup: async (

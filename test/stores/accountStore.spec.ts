@@ -4,6 +4,7 @@ import { useAccountStore } from '../../src/stores/accountStore';
 // Shared spy so individual test suites can assert on it
 const skipHistoricalSpy = vi.fn();
 const authSpy = vi.hoisted(() => vi.fn());
+const configureBiometricSpy = vi.hoisted(() => vi.fn());
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
@@ -160,6 +161,10 @@ vi.mock('../../src/crypto/webauthn', () => ({
   isWebAuthnSupported: vi.fn(() => false),
 }));
 
+vi.mock('../../src/services/biometricService', () => ({
+  configureBiometricLogin: configureBiometricSpy,
+}));
+
 vi.mock('../../src/stores/appStore', () => ({
   useAppStore: {
     getState: () => ({
@@ -246,6 +251,66 @@ describe('AccountStore classic password discovery', () => {
     expect(useAccountStore.getState().userProfile?.userId).toBe(
       'second-user-id'
     );
+  });
+});
+
+describe('AccountStore biometric settings', () => {
+  beforeEach(() => {
+    authSpy.mockReset();
+    configureBiometricSpy.mockReset();
+    configureBiometricSpy.mockResolvedValue({ success: true });
+    getSdkMock.mockImplementation(makeSdkMock);
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  afterEach(() => {
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  it('verifies the active account password before replacing biometrics', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile();
+    const free = vi.fn();
+    sdk.isSessionOpen = true;
+    getSdkMock.mockReturnValue(sdk);
+    useAccountStore.setState({ userProfile: profile });
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free },
+    });
+
+    await useAccountStore
+      .getState()
+      .configureBiometricLogin('current-password', true);
+
+    expect(authSpy).toHaveBeenCalledWith(profile, 'current-password');
+    expect(free).toHaveBeenCalledOnce();
+    expect(configureBiometricSpy).toHaveBeenCalledWith(
+      'current-password',
+      true
+    );
+  });
+
+  it('does not replace biometrics when password verification fails', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSessionOpen = true;
+    getSdkMock.mockReturnValue(sdk);
+    useAccountStore.setState({ userProfile: mockProfile() });
+    authSpy.mockRejectedValue(new Error('Authentication failed'));
+
+    await expect(
+      useAccountStore.getState().configureBiometricLogin('wrong-password')
+    ).rejects.toThrow('Authentication failed');
+
+    expect(configureBiometricSpy).not.toHaveBeenCalled();
   });
 });
 
