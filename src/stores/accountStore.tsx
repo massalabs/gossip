@@ -8,11 +8,9 @@ import {
   generateMnemonic,
   EncryptionKey,
   generateNonce,
-  encodeToBase64,
 } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
-import { isWebAuthnSupported } from '../crypto/webauthn';
 
 import {
   Provider,
@@ -34,10 +32,11 @@ import {
   fetchMnsDomainsIfEnabled,
 } from './utils/accountHelpers';
 
-export type LoginMethod =
-  | { type: 'password'; password: string; userId?: string }
-  | { type: 'biometric'; userId?: string }
-  | { type: 'encryptionKey'; encryptionKey: EncryptionKey };
+export type LoginMethod = {
+  type: 'password';
+  password: string;
+  userId?: string;
+};
 
 // Build the password-protected security blob and in-memory key.
 async function buildSecurityFromPassword(
@@ -79,8 +78,6 @@ interface AccountState {
   encryptionKey: EncryptionKey | null;
   isLoading: boolean;
   lockedByUser: boolean;
-  webauthnSupported: boolean;
-  platformAuthenticatorAvailable: boolean;
   account: Account | null;
   evmAddress: string | null;
   provider: Provider | null;
@@ -225,6 +222,34 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       password
     );
 
+    // Passwords must identify exactly one account because the global biometric
+    // credential deliberately stores no profile ID. Secure storage checks this
+    // by probing slots below; classic storage checks existing profiles here.
+    if (!sdk.isSecureStorage) {
+      const profiles = await sdk.profiles.getAll();
+      for (const profile of profiles) {
+        try {
+          const existing = await auth(profile, password);
+          const pointer = (
+            existing.encryptionKey as unknown as { __wbg_ptr?: number }
+          ).__wbg_ptr;
+          if (pointer === undefined || pointer !== 0) {
+            existing.encryptionKey.free();
+          }
+          throw new Error('Password already in use by another account');
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === 'Password already in use by another account'
+          ) {
+            throw error;
+          }
+          // Authentication failure means this password belongs to neither
+          // this profile nor its mnemonic backup; continue checking.
+        }
+      }
+    }
+
     // Secure-storage mode: create the slot with the user's password before
     // any DB access. Queries created by openSession need the backend unlocked.
     if (sdk.isSecureStorage) {
@@ -300,8 +325,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     encryptionKey: null,
     isLoading: true,
     lockedByUser: false,
-    webauthnSupported: isWebAuthnSupported(),
-    platformAuthenticatorAvailable: false,
     account: null,
     evmAddress: null,
     provider: null,
@@ -337,71 +360,48 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // session before re-opening.
         await cleanupSession();
 
-        // Secure-storage mode: unlock the slot FIRST. Profile queries
-        // fail (DB locked) until we provide the secret, so we can't
-        // fetch the profile before this. Password path uses the
-        // user-typed password; encryptionKey path uses the biometric-
-        // derived key bytes, which were computed outside of the DB
-        // (WebAuthn PRF / Capacitor Keychain) so no profile lookup is
-        // needed to get them. The legacy 'biometric' branch is used
-        // only by ClassicLogin (non-secure-storage), which can still
-        // read the profile without unlocking.
+        // Secure-storage mode: unlock the slot first. Profile queries fail
+        // while the database is locked, so manual and biometric login both
+        // supply a password and let native slot probing discover the match.
         const sdk = getSdk();
         if (sdk.storageState === 'locked') {
-          const secret =
-            method.type === 'password'
-              ? method.password
-              : method.type === 'encryptionKey'
-                ? encodeToBase64(method.encryptionKey.to_bytes())
-                : null;
-          if (!secret) {
-            throw new Error(
-              'Secure storage requires password or encryption-key login'
-            );
-          }
-          const ok = await sdk.secureStorageUnlock(secret);
+          const ok = await sdk.secureStorageUnlock(method.password);
           if (!ok) {
             throw new Error('Secure storage unlock failed');
           }
           unlockedThisCall = true;
         }
 
-        const userId =
-          method.type !== 'encryptionKey' ? method.userId : undefined;
-        let profile: UserProfile | null;
-        if (userId) {
-          profile = await getSdk().profiles.get(userId);
-        } else {
+        let profile: UserProfile | null = null;
+        let authResult: Awaited<ReturnType<typeof auth>> | null = null;
+
+        if (method.userId) {
+          profile = await sdk.profiles.get(method.userId);
+        } else if (sdk.isSecureStorage) {
           profile = await getActiveOrFirstProfile();
+        } else {
+          // A global biometric credential contains only a password, never an
+          // account ID. Probe classic profiles in memory and retain only the
+          // matching result so classic and secure-storage login share the same
+          // account-association privacy model.
+          const profiles = await sdk.profiles.getAll();
+          for (const candidate of profiles) {
+            try {
+              authResult = await auth(candidate, method.password);
+              profile = candidate;
+              break;
+            } catch {
+              // Wrong profile for this password; keep probing.
+            }
+          }
         }
 
         if (!profile) {
-          throw new Error('No user profile found');
+          throw new Error('No user profile found for this password');
         }
 
-        let mnemonic: string;
-        let encryptionKey: EncryptionKey;
-
-        switch (method.type) {
-          case 'password': {
-            const result = await auth(profile, method.password);
-            mnemonic = result.mnemonic;
-            encryptionKey = result.encryptionKey;
-            break;
-          }
-          case 'biometric': {
-            const result = await auth(profile);
-            mnemonic = result.mnemonic;
-            encryptionKey = result.encryptionKey;
-            break;
-          }
-          case 'encryptionKey': {
-            const result = await auth(profile, undefined, method.encryptionKey);
-            mnemonic = result.mnemonic;
-            encryptionKey = result.encryptionKey;
-            break;
-          }
-        }
+        authResult ??= await auth(profile, method.password);
+        const { mnemonic, encryptionKey } = authResult;
 
         const { account, evmAddress } =
           await deriveAccountFromMnemonic(mnemonic);
@@ -515,6 +515,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
 
+        // Deliberately preserve the global biometric credential for every
+        // backend. Inspecting or clearing it here would reveal whether it
+        // belonged to this account and could disable biometric login for a
+        // different account. A credential for the destroyed account instead
+        // fails generically until explicitly replaced from another account.
         if (sdk.isSecureStorage) {
           // Atomic destroy: rotates the slot's keypair to a dummy and
           // overwrites every block of [SQL_NAMESPACE, SESSION_BLOB_NAMESPACE]
@@ -543,11 +548,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
             }
             throw e;
           }
-          // Deliberately preserve the global biometric credential. Inspecting
-          // or clearing it here would reveal whether it belonged to this
-          // account and could disable biometric login for another account.
-          // A credential for the destroyed account instead fails generically
-          // until the user explicitly replaces it from another account.
         } else {
           // wa-sqlite (non-secure-storage) path: shared SQL DB, no
           // per-slot ciphertext to wipe. Clear rows the old way.

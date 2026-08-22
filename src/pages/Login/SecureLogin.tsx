@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../../stores/accountStore';
 import {
   checkBiometricAvailability,
-  authenticateSecureLogin,
+  authenticateBiometricLogin,
 } from '../../services/biometricService';
 import Button from '../../components/ui/Button';
 import { ROUTES } from '../../constants/routes';
@@ -15,7 +15,7 @@ import { ErrorDisplay } from './ErrorDisplay';
 import { LoginLayout } from './LoginLayout';
 
 // ─────────────────────────────────────────────────────────────────
-// Secure-storage Login: password + biometric derived encryption key
+// Secure-storage Login: manual or biometric-recovered account password
 // ─────────────────────────────────────────────────────────────────
 
 export const SecureLogin: React.FC<LoginProps> = React.memo(
@@ -65,15 +65,15 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       onErrorChange?.(null);
 
       try {
-        const result = await authenticateSecureLogin(biometricMethod);
+        const result = await authenticateBiometricLogin(biometricMethod);
 
-        if (!result.success || !result.data?.encryptionKey) {
+        if (!result.success || !result.data?.password) {
           throw new Error(result.error || 'Biometric authentication failed');
         }
 
         await loadAccount({
-          type: 'encryptionKey',
-          encryptionKey: result.data.encryptionKey,
+          type: 'password',
+          password: result.data.password,
         });
 
         const state = useAccountStore.getState();
@@ -83,19 +83,11 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           throw new Error('Failed to load account');
         }
       } catch (error) {
-        // PD: the previous version auto-purged `BIOMETRIC_STORAGE_KEY`
-        // when the OS biometric prompt succeeded but `secureStorageUnlock`
-        // returned false, on the assumption "credential must be stale".
-        // The assumption is wrong:
-        //   1. Slot probing means a valid credential for a wiped slot
-        //      legitimately fails — purging it is permanent and breaks
-        //      the button forever, even after the user reinstalls.
-        //   2. We can't (and shouldn't, by PD) tell from the login
-        //      screen whether the selected account uses biometric — so
-        //      we can't decide on the user's behalf that the credential
-        //      is "stale". Leave it alone.
-        // If the user wants to remove a stale credential they can do so
-        // explicitly from settings; we never silently nuke it here.
+        // Never purge the singleton credential after login failure. It may
+        // reference a deliberately deleted account, and pre-profile login
+        // cannot determine that without creating an account-association oracle.
+        // Leave replacement to an explicit setup action in an authenticated
+        // account.
         logger.error('Biometric authentication failed:', error);
         onErrorChange?.(t('login.biometric_failed_use_password'));
         if (window.location.pathname !== ROUTES.welcome()) {

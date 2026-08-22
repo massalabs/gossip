@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useAccountStore } from '../../src/stores/accountStore';
 
 // Shared spy so individual test suites can assert on it
 const skipHistoricalSpy = vi.fn();
+const authSpy = vi.hoisted(() => vi.fn());
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
@@ -25,6 +26,8 @@ const makeSdkMock = () => ({
     publishPublicKey: vi.fn(async () => {}),
   },
   profiles: {
+    get: vi.fn(async () => null),
+    getAll: vi.fn(async () => []),
     getCount: vi.fn(async () => 0),
     save: vi.fn(async () => {}),
     createOrUpdate: vi.fn(async () => ({
@@ -168,11 +171,78 @@ vi.mock('../../src/stores/utils/getAccount', () => ({
 }));
 
 vi.mock('../../src/stores/utils/auth', () => ({
-  auth: vi.fn(async () => ({
-    mnemonic: 'word '.repeat(24).trim(),
-    encryptionKey: {},
-  })),
+  auth: authSpy,
 }));
+
+describe('AccountStore classic password discovery', () => {
+  beforeEach(() => {
+    getSdkMock.mockImplementation(makeSdkMock);
+    authSpy.mockReset();
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  afterEach(() => {
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  it('rejects duplicate passwords that would make discovery ambiguous', async () => {
+    const sdk = makeSdkMock();
+    const free = vi.fn();
+    sdk.storageState = 'unlocked';
+    sdk.profiles.getAll.mockResolvedValue([mockProfile()]);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free },
+    });
+
+    await expect(
+      useAccountStore.getState().initializeAccount('second', 'shared-password')
+    ).rejects.toThrow('Password already in use by another account');
+
+    expect(free).toHaveBeenCalledOnce();
+    expect(sdk.openSession).not.toHaveBeenCalled();
+  });
+
+  it('probes profiles when a global biometric password has no user ID', async () => {
+    const first = mockProfile();
+    const second = {
+      ...mockProfile(),
+      userId: 'second-user-id',
+      username: 'second',
+    };
+    const encryptionKey = { type: 'mock-key' };
+    const sdk = makeSdkMock();
+    sdk.storageState = 'unlocked';
+    sdk.profiles.getAll.mockResolvedValue([first, second]);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy
+      .mockRejectedValueOnce(new Error('wrong profile'))
+      .mockResolvedValueOnce({
+        mnemonic: 'word '.repeat(24).trim(),
+        encryptionKey,
+      });
+
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'global-password',
+    });
+
+    expect(authSpy).toHaveBeenNthCalledWith(1, first, 'global-password');
+    expect(authSpy).toHaveBeenNthCalledWith(2, second, 'global-password');
+    expect(useAccountStore.getState().userProfile?.userId).toBe(
+      'second-user-id'
+    );
+  });
+});
 
 describe('AccountStore session cleanup', () => {
   beforeEach(() => {
@@ -223,6 +293,10 @@ describe('AccountStore logout lockedByUser', () => {
 describe('AccountStore skipHistorical behavior', () => {
   beforeEach(() => {
     skipHistoricalSpy.mockClear();
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: {},
+    });
     getSdkMock.mockImplementation(makeSdkMock);
   });
 

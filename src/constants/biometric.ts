@@ -1,5 +1,5 @@
 /**
- * Fixed salt for biometric key derivation (WebAuthn PRF).
+ * Fixed salt for WebAuthn PRF key derivation.
  * Derived at build time from a tagged string — not a secret, just a domain separator.
  * Changing the tag invalidates all existing biometric credentials.
  */
@@ -16,14 +16,22 @@ export async function getBiometricSalt(): Promise<Uint8Array> {
 }
 
 /**
- * Fixed Secure Storage key for Capacitor biometric secure-login discovery.
- * Intentionally singleton for PD: secure login must not expose account or
- * slot inventory, so only one secure-storage account may use biometrics.
+ * Fixed Secure Storage key for the singleton native biometric login password.
+ * The stored value contains only a password, never an account/profile/slot
+ * identifier, so normal login discovers the account without an association
+ * oracle.
  */
 export const BIOMETRIC_STORAGE_KEY = 'gossip-biometric';
 
 /**
- * Fixed localStorage key for the WebAuthn secure-login credential ID.
- * Singleton for the same PD reason as BIOMETRIC_STORAGE_KEY.
+ * Fixed localStorage key for the singleton WebAuthn credential ID.
+ * This is an authenticator handle, not a Gossip account identifier.
  */
 export const WEBAUTHN_CREDENTIAL_ID_KEY = 'gossip-webauthn-credential-id';
+
+/**
+ * Fixed localStorage key for the password encrypted by the WebAuthn PRF key.
+ * The versioned payload contains only ciphertext and cryptographic metadata;
+ * it never identifies an account/profile/secure-storage slot.
+ */
+export const WEBAUTHN_PASSWORD_KEY = 'gossip-webauthn-password';

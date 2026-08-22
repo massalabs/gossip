@@ -3,18 +3,17 @@ import {
   validateMnemonic,
   decrypt,
   deriveKey,
+  UserProfile,
 } from '@massalabs/gossip-sdk';
-import { authenticate } from '../../services/biometricService';
-import { UserProfile } from '@massalabs/gossip-sdk';
 
 export interface AuthResult {
   mnemonic: string;
   encryptionKey: EncryptionKey;
 }
+
 export async function auth(
   profile: UserProfile,
-  password?: string,
-  providedEncryptionKey?: EncryptionKey
+  password?: string
 ): Promise<AuthResult> {
   const salt = profile.security.encKeySalt;
   if (!salt || salt.length < 8) {
@@ -22,44 +21,11 @@ export async function auth(
       'Account is missing encryption key salt. Please re-authenticate and re-create your account after updating the app.'
     );
   }
-
-  let encryptionKey: EncryptionKey;
-
-  if (providedEncryptionKey) {
-    // Key already derived (e.g., from SecureLogin biometric flow)
-    encryptionKey = providedEncryptionKey;
-  } else if (password) {
-    encryptionKey = await deriveKey(password, salt);
-  } else {
-    // Biometric authentication (capacitor or webauthn)
-    const authMethod = profile.security.authMethod;
-    if (!authMethod || authMethod === 'password') {
-      throw new Error('Password is required for password authentication');
-    }
-
-    const userIdOrCredentialId =
-      authMethod === 'capacitor'
-        ? profile.userId
-        : profile.security.webauthn?.credentialId;
-
-    const syncFromiCloud = profile.security.iCloudSync ?? false;
-
-    const authResult = await authenticate(
-      authMethod,
-      userIdOrCredentialId,
-      salt,
-      syncFromiCloud
-    );
-
-    if (
-      !authResult.success ||
-      !authResult.data ||
-      !authResult.data.encryptionKey
-    ) {
-      throw new Error(authResult.error || 'Biometric authentication failed');
-    }
-    encryptionKey = authResult.data.encryptionKey;
+  if (!password) {
+    throw new Error('Password is required for authentication');
   }
+
+  const encryptionKey = await deriveKey(password, salt);
 
   try {
     const mnemonic = await decrypt(
@@ -72,11 +38,13 @@ export async function auth(
       throw new Error('Failed to validate mnemonic');
     }
 
-    return {
-      mnemonic,
-      encryptionKey,
-    };
+    return { mnemonic, encryptionKey };
   } catch (error) {
+    const pointer = (encryptionKey as unknown as { __wbg_ptr?: number })
+      .__wbg_ptr;
+    if (pointer === undefined || pointer !== 0) {
+      encryptionKey.free();
+    }
     throw new Error(
       `Authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
