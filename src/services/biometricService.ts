@@ -102,9 +102,11 @@ async function authenticateNative(reason: string): Promise<void> {
 async function readNativePassword(
   syncFromICloud: boolean
 ): Promise<string | null> {
+  // Passwords are opaque strings. Date coercion would turn an ISO-looking
+  // password into a Date and make a valid stored credential unreadable.
   const value = await SecureStorage.get(
     BIOMETRIC_STORAGE_KEY,
-    true,
+    false,
     syncFromICloud
   );
   return typeof value === 'string' && value.length > 0 ? value : null;

@@ -120,9 +120,12 @@ describe('native biometric password storage', () => {
     );
   });
 
-  it('restores the local credential when Android replacement fails', async () => {
+  it('restores an ISO-looking local credential when Android replacement fails', async () => {
+    const previousPassword = '2025-01-01T00:00:00.000Z';
     mocks.platform = 'android';
-    mocks.get.mockResolvedValue('previous-password');
+    mocks.get.mockImplementation(async (_key, convertDate) =>
+      convertDate ? new Date(previousPassword) : previousPassword
+    );
     mocks.set
       .mockRejectedValueOnce(new Error('replacement failed'))
       .mockResolvedValueOnce(undefined);
@@ -140,7 +143,7 @@ describe('native biometric password storage', () => {
     expect(mocks.set).toHaveBeenNthCalledWith(
       2,
       BIOMETRIC_STORAGE_KEY,
-      'previous-password',
+      previousPassword,
       true,
       false
     );
@@ -198,6 +201,19 @@ describe('native biometric password storage', () => {
     );
   });
 
+  it('reads an ISO-looking password without date coercion', async () => {
+    const password = '2025-01-01T00:00:00.000Z';
+    mocks.get.mockImplementation(async (_key, convertDate, syncFromICloud) => {
+      if (syncFromICloud) return null;
+      return convertDate ? new Date(password) : password;
+    });
+
+    const result = await authenticateBiometricLogin('capacitor');
+
+    expect(mocks.get).toHaveBeenCalledWith(BIOMETRIC_STORAGE_KEY, false, false);
+    expect(result).toEqual({ success: true, data: { password } });
+  });
+
   it('finds a pre-profile password in the selected iCloud location', async () => {
     mocks.get
       .mockResolvedValueOnce(null)
@@ -211,13 +227,13 @@ describe('native biometric password storage', () => {
     expect(mocks.get).toHaveBeenNthCalledWith(
       1,
       BIOMETRIC_STORAGE_KEY,
-      true,
+      false,
       false
     );
     expect(mocks.get).toHaveBeenNthCalledWith(
       2,
       BIOMETRIC_STORAGE_KEY,
-      true,
+      false,
       true
     );
     expect(result).toEqual({
