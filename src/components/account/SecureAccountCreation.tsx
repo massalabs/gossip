@@ -22,8 +22,7 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
   onBack,
 }) => {
   const { t } = useTranslation('auth');
-  const { initializeAccount, initializeAccountWithBiometrics } =
-    useAccountStore();
+  const initializeAccount = useAccountStore(state => state.initializeAccount);
   const [step, setStep] = useState<Step>('form');
   const [error, setError] = useState<string | null>(null);
   const [mainUsername, setMainUsername] = useState('');
@@ -32,18 +31,8 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
     setError(null);
 
     try {
-      if (result.useBiometrics) {
-        // Form stays visible while OS biometric prompt overlays.
-        // AccountCreationForm shows a button spinner via its own isCreating state.
-        await initializeAccountWithBiometrics(
-          result.username,
-          result.iCloudSync
-        );
-      } else {
-        // Password: show full-screen loading immediately
-        setStep('creating');
-        await initializeAccount(result.username, result.password!);
-      }
+      setStep('creating');
+      await initializeAccount(result.username, result.password);
       setMainUsername(result.username);
       setStep('setup');
     } catch (err) {

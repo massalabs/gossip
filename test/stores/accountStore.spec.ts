@@ -3,7 +3,6 @@ import { useAccountStore } from '../../src/stores/accountStore';
 
 // Shared spy so individual test suites can assert on it
 const skipHistoricalSpy = vi.fn();
-const hasExistingCredentialSpy = vi.hoisted(() => vi.fn(async () => false));
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
@@ -98,7 +97,7 @@ vi.mock('../../src/stores/selfMessageStore', () => ({
   },
 }));
 
-// ── Mocks needed by initializeAccount / initializeAccountWithBiometrics ──
+// ── Mocks needed by initializeAccount ──
 
 vi.mock('@massalabs/gossip-sdk', async () => {
   const actual = await vi.importActual<typeof import('@massalabs/gossip-sdk')>(
@@ -151,25 +150,6 @@ vi.mock('@massalabs/massa-web3', async () => {
 
 vi.mock('../../src/crypto/webauthn', () => ({
   isWebAuthnSupported: vi.fn(() => false),
-}));
-
-vi.mock('../../src/services/biometricService', () => ({
-  checkBiometricAvailability: vi.fn(async () => ({
-    available: true,
-    biometryType: 'none',
-  })),
-  createCredential: vi.fn(async () => ({
-    success: true,
-    data: {
-      credentialId: 'mock-cred-id',
-      encryptionKey: {
-        type: 'mock-key',
-        to_bytes: vi.fn(() => new Uint8Array([1, 2, 3])),
-      },
-      authMethod: 'webauthn',
-    },
-  })),
-  hasExistingCredential: hasExistingCredentialSpy,
 }));
 
 vi.mock('../../src/stores/appStore', () => ({
@@ -252,41 +232,6 @@ describe('AccountStore skipHistorical behavior', () => {
       .initializeAccount('testuser', 'password123');
 
     expect(skipHistoricalSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('initializeAccountWithBiometrics calls skipHistorical()', async () => {
-    await useAccountStore
-      .getState()
-      .initializeAccountWithBiometrics('testuser');
-
-    expect(skipHistoricalSpy).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('AccountStore secure-storage biometric singleton', () => {
-  beforeEach(() => {
-    hasExistingCredentialSpy.mockReset();
-    hasExistingCredentialSpy.mockResolvedValue(false);
-    getSdkMock.mockImplementation(makeSdkMock);
-    useAccountStore.setState({
-      userProfile: null,
-      encryptionKey: null,
-      isLoading: false,
-    });
-  });
-
-  it('rejects a second biometric secure-storage account', async () => {
-    const sdk = makeSdkMock();
-    sdk.isSecureStorage = true;
-    sdk.storageState = 'locked';
-    getSdkMock.mockReturnValue(sdk);
-    hasExistingCredentialSpy.mockResolvedValue(true);
-
-    await expect(
-      useAccountStore.getState().initializeAccountWithBiometrics('testuser')
-    ).rejects.toThrow('Only one biometric secure-storage account is allowed');
-
-    expect(sdk.secureStorageCreate).not.toHaveBeenCalled();
   });
 });
 

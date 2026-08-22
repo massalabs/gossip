@@ -13,15 +13,10 @@ const ClassicAccountCreation: React.FC<ClassicAccountCreationProps> = ({
   onComplete,
   onBack,
 }) => {
-  const { initializeAccount, initializeAccountWithBiometrics } =
-    useAccountStore();
+  const initializeAccount = useAccountStore(state => state.initializeAccount);
 
   const handleSubmit = async (result: AccountCreationResult) => {
-    if (result.useBiometrics) {
-      await initializeAccountWithBiometrics(result.username, result.iCloudSync);
-    } else {
-      await initializeAccount(result.username, result.password!);
-    }
+    await initializeAccount(result.username, result.password);
     await onComplete();
   };
 

@@ -13,17 +13,7 @@ import {
 import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
 import { isWebAuthnSupported } from '../crypto/webauthn';
-import {
-  checkBiometricAvailability,
-  createCredential,
-  clearLoginBiometricCredentials,
-  hasExistingCredential,
-} from '../services/biometricService';
-import {
-  BIOMETRIC_STORAGE_KEY,
-  getBiometricSalt,
-  WEBAUTHN_CREDENTIAL_ID_KEY,
-} from '../constants/biometric';
+
 import {
   Provider,
   Account,
@@ -49,34 +39,7 @@ export type LoginMethod =
   | { type: 'biometric'; userId?: string }
   | { type: 'encryptionKey'; encryptionKey: EncryptionKey };
 
-type accountProvisionResult = {
-  encryptionKey: EncryptionKey;
-  security: UserProfile['security'];
-};
-
-async function provisionAccount(
-  username: string,
-  mnemonic: string | undefined,
-  userIdBytes: Uint8Array,
-  opts: { useBiometrics: boolean; password?: string; iCloudSync?: boolean }
-): Promise<accountProvisionResult> {
-  if (opts.useBiometrics) {
-    return await buildSecurityFromBiometrics(
-      mnemonic,
-      username,
-      userIdBytes,
-      opts.iCloudSync ?? false
-    );
-  } else {
-    const password = opts.password?.trim();
-    if (!password) {
-      throw new Error('Password is required');
-    }
-    return await buildSecurityFromPassword(mnemonic, password);
-  }
-}
-
-// Helpers to build security blobs and in-memory keys
+// Build the password-protected security blob and in-memory key.
 async function buildSecurityFromPassword(
   mnemonic: string | undefined,
   password: string
@@ -111,67 +74,6 @@ async function buildSecurityFromPassword(
   return { security, encryptionKey: key };
 }
 
-async function buildSecurityFromBiometrics(
-  mnemonic: string | undefined,
-  username: string,
-  userIdBytes: Uint8Array,
-  iCloudSync = false
-): Promise<{
-  security: UserProfile['security'];
-  encryptionKey: EncryptionKey;
-}> {
-  if (!mnemonic) {
-    throw new Error('Mnemonic is required for account creation');
-  }
-
-  // WebAuthn PRF needs the fixed biometric salt; Capacitor ignores it.
-  // Mnemonic encryption uses a separate random salt.
-  const prfSalt = await getBiometricSalt();
-  const encSalt = (await generateNonce()).to_bytes();
-
-  const credentialResult = await createCredential(
-    `Gossip:${username}`,
-    userIdBytes,
-    prfSalt,
-    iCloudSync
-  );
-
-  if (!credentialResult.success || !credentialResult.data) {
-    throw new Error(
-      credentialResult.error || 'Failed to create biometric credential'
-    );
-  }
-
-  const { credentialId, encryptionKey, authMethod } = credentialResult.data;
-
-  // Persist WebAuthn credential ID for login discovery
-  if (credentialId) {
-    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
-  }
-
-  const { encryptedData } = await encrypt(mnemonic, encryptionKey, encSalt);
-
-  const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
-    encryptedMnemonic: encryptedData,
-    createdAt: new Date(),
-    backedUp: false,
-  };
-
-  const security: UserProfile['security'] = {
-    authMethod,
-    webauthn: credentialId
-      ? {
-          credentialId,
-        }
-      : undefined,
-    iCloudSync,
-    encKeySalt: encSalt,
-    mnemonicBackup,
-  };
-
-  return { security, encryptionKey };
-}
-
 interface AccountState {
   userProfile: UserProfile | null;
   encryptionKey: EncryptionKey | null;
@@ -182,10 +84,6 @@ interface AccountState {
   account: Account | null;
   evmAddress: string | null;
   provider: Provider | null;
-  initializeAccountWithBiometrics: (
-    username: string,
-    iCloudSync?: boolean
-  ) => Promise<void>;
   initializeAccount: (username: string, password: string) => Promise<void>;
   loadAccount: (method: LoginMethod) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
@@ -301,20 +199,14 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   interface SetupAccountParams {
     username: string;
     mnemonic: string;
-    provisionOpts: {
-      useBiometrics: boolean;
-      password?: string;
-      iCloudSync?: boolean;
-    };
-    extraState?: Partial<AccountState>;
+    password: string;
     skipHistorical?: boolean;
   }
 
   const setupAccount = async ({
     username,
     mnemonic,
-    provisionOpts,
-    extraState = {},
+    password,
     skipHistorical = false,
   }: SetupAccountParams): Promise<void> => {
     await cleanupSession();
@@ -324,39 +216,19 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     const userId = encodeUserId(userIdBytes);
 
     const sdk = getSdk();
-    if (sdk.isSecureStorage && provisionOpts.useBiometrics) {
-      // SecureLogin intentionally has one fixed biometric discovery
-      // credential for PD: the login screen must not expose an account or
-      // slot inventory. A second biometric account would overwrite that
-      // singleton and make the earlier biometric slot unreachable.
-      const hasBiometricAccount = await hasExistingCredential(
-        BIOMETRIC_STORAGE_KEY
-      );
-      if (hasBiometricAccount) {
-        throw new Error('Only one biometric secure-storage account is allowed');
-      }
+    if (!password.trim()) {
+      throw new Error('Password is required');
     }
 
-    const { encryptionKey, security } = await provisionAccount(
-      username,
+    const { encryptionKey, security } = await buildSecurityFromPassword(
       mnemonic,
-      userIdBytes,
-      provisionOpts
+      password
     );
 
-    // Secure-storage mode: create the slot with the user's credential
-    // before any DB access. Queries created by openSession need the
-    // backend unlocked. In the password path we use the password
-    // directly; in the biometric path we use the biometric-derived
-    // encryption key bytes (base64'd) - deterministic, so a later
-    // unlock with the same biometric yields the same secret.
+    // Secure-storage mode: create the slot with the user's password before
+    // any DB access. Queries created by openSession need the backend unlocked.
     if (sdk.isSecureStorage) {
-      const secret = provisionOpts.useBiometrics
-        ? encodeToBase64(encryptionKey.to_bytes())
-        : (provisionOpts.password ?? '');
-      if (!secret) {
-        throw new Error('Secure storage requires a password or biometric key');
-      }
+      const secret = password;
       // Reject duplicate passwords across slots. The KDF takes only
       // (domain, password) — no slot index — so the same password on
       // two slots would derive the same wrap key and unlock both. The
@@ -417,7 +289,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       account,
       evmAddress,
       isLoading: false,
-      ...extraState,
     });
 
     fetchMnsDomainsIfEnabled(profile, get().provider);
@@ -443,7 +314,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await setupAccount({
           username,
           mnemonic,
-          provisionOpts: { useBiometrics: false, password },
+          password,
           skipHistorical: true,
         });
       } catch (error) {
@@ -672,11 +543,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
             }
             throw e;
           }
-          // Drop the SecureLogin-discovery credentials. Without this,
-          // the biometric button reappears for the deleted account but
-          // the slot's wrap key has been rotated → unlock fails and the
-          // user dead-ends on the password screen with no password.
-          await clearLoginBiometricCredentials();
+          // Deliberately preserve the global biometric credential. Inspecting
+          // or clearing it here would reveal whether it belonged to this
+          // account and could disable biometric login for another account.
+          // A credential for the destroyed account instead fails generically
+          // until the user explicitly replaces it from another account.
         } else {
           // wa-sqlite (non-secure-storage) path: shared SQL DB, no
           // per-slot ciphertext to wipe. Clear rows the old way.
@@ -741,9 +612,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // skips the side-effects normally tied to login (lastSeen update).
       // Patch those onto the existing session — we can't re-run the full
       // `loadAccount` path because the secure-storage slot was wrapped
-      // with the user's auth credential (password or biometric-derived
-      // bytes), and `finalizeOnboarding` doesn't have access to it after
-      // setupAccount drops it from scope.
+      // with the user's password, and `finalizeOnboarding` doesn't have
+      // access to it after setupAccount drops it from scope.
       //
       // Multi-account flows that already called `logout` (handleFinalize)
       // hit the no-op branch: `userProfile` is null and the user is on
@@ -759,37 +629,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       const updated = { ...userProfile, lastSeen: new Date() };
       await sdk.profiles.save(updated);
       set({ userProfile: updated });
-    },
-
-    initializeAccountWithBiometrics: async (
-      username: string,
-      iCloudSync = false
-    ) => {
-      try {
-        set({ isLoading: true });
-
-        const availability = await checkBiometricAvailability();
-        if (!availability.available) {
-          throw new Error(
-            'Biometric authentication is not available on this device'
-          );
-        }
-
-        const mnemonic = generateMnemonic(256);
-        await setupAccount({
-          username,
-          mnemonic,
-          provisionOpts: { useBiometrics: true, iCloudSync },
-          skipHistorical: true,
-          extraState: {
-            platformAuthenticatorAvailable: availability.available,
-          },
-        });
-      } catch (error) {
-        logger.error('Error creating user profile with biometrics:', error);
-        set({ isLoading: false });
-        throw error;
-      }
     },
 
     showBackup: async (
