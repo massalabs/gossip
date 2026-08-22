@@ -264,14 +264,20 @@ async function retrieveWebAuthnPassword(): Promise<string> {
     credentialId,
     prfSalt
   );
-  const encryptionSalt = decodeFromBase64(payload.salt);
-  const ciphertext = decodeFromBase64(payload.ciphertext);
+  let encryptionSalt: Uint8Array | undefined;
+  let ciphertext: Uint8Array | undefined;
 
   try {
+    try {
+      encryptionSalt = decodeFromBase64(payload.salt);
+      ciphertext = decodeFromBase64(payload.ciphertext);
+    } catch {
+      throw new Error('Stored biometric password is invalid');
+    }
     return await decrypt(ciphertext, encryptionSalt, encryptionKey);
   } finally {
-    encryptionSalt.fill(0);
-    ciphertext.fill(0);
+    encryptionSalt?.fill(0);
+    ciphertext?.fill(0);
     freeEncryptionKey(encryptionKey);
   }
 }

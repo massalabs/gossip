@@ -146,4 +146,32 @@ describe('WebAuthn biometric password storage', () => {
     });
     expect(mocks.free).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ['salt', '%%%invalid%%%', btoa('ciphertext')],
+    ['ciphertext', btoa('encryption-salt'), '%%%invalid%%%'],
+  ])(
+    'cleans up the acquired key when the stored %s is malformed',
+    async (_field, salt, ciphertext) => {
+      localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'credential-handle');
+      localStorage.setItem(
+        WEBAUTHN_PASSWORD_KEY,
+        JSON.stringify({ version: 1, salt, ciphertext })
+      );
+      const fillSpy = vi.spyOn(Uint8Array.prototype, 'fill');
+
+      const result = await authenticateBiometricLogin('webauthn');
+
+      expect(result).toEqual({
+        success: false,
+        error: 'Stored biometric password is invalid',
+      });
+      expect(mocks.decrypt).not.toHaveBeenCalled();
+      expect(mocks.free).toHaveBeenCalledTimes(1);
+      if (_field === 'ciphertext') {
+        expect(fillSpy).toHaveBeenCalledWith(0);
+      }
+      fillSpy.mockRestore();
+    }
+  );
 });
