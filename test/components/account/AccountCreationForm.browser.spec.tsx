@@ -30,6 +30,7 @@ vi.mock('../../../src/stores/accountStore', () => ({
 vi.mock('../../../src/services/biometricService', () => ({
   checkBiometricAvailability: vi.fn(async () => ({ available: false })),
   configureBiometricLogin: vi.fn(),
+  configureBiometricLoginWithRollback: vi.fn(),
 }));
 
 vi.mock('@massalabs/gossip-sdk', async () => {
