@@ -16,6 +16,7 @@ const makeSdkMock = () => ({
   secureStorageUnlock: vi.fn(async () => false),
   secureStorageLock: vi.fn(async () => {}),
   secureStorageCreate: vi.fn(async () => {}),
+  secureStorageDestroy: vi.fn(async () => {}),
   openSession: vi.fn(async () => {}),
   getEncryptedSession: vi.fn(() => new Uint8Array(0)),
   persistSessionBlob: vi.fn(async () => {}),
@@ -125,7 +126,11 @@ vi.mock('@massalabs/gossip-sdk', async () => {
     generateNonce: vi.fn(async () => ({
       to_bytes: () => new Uint8Array(16),
     })),
-    deriveKey: vi.fn(async () => ({ type: 'mock-key' })),
+    deriveKey: vi.fn(async () => ({
+      type: 'mock-key',
+      __wbg_ptr: 1,
+      free: vi.fn(),
+    })),
     encrypt: vi.fn(async () => ({ encryptedData: new Uint8Array(0) })),
   };
 });
@@ -306,6 +311,38 @@ describe('AccountStore skipHistorical behavior', () => {
       .initializeAccount('testuser', 'password123');
 
     expect(skipHistoricalSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AccountStore secure-storage account provisioning', () => {
+  beforeEach(() => {
+    getSdkMock.mockImplementation(makeSdkMock);
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  it('destroys a newly allocated slot when account persistence fails', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+    });
+    sdk.secureStorageDestroy.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.openSession.mockRejectedValue(new Error('session setup failed'));
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore.getState().initializeAccount('testuser', 'password123')
+    ).rejects.toThrow('session setup failed');
+
+    expect(sdk.secureStorageCreate).toHaveBeenCalledOnce();
+    expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
   });
 });
 

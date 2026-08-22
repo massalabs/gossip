@@ -1,5 +1,6 @@
 import React from 'react';
-import { Check, Info } from 'react-feather';
+import { useTranslation } from 'react-i18next';
+import { AlertTriangle, Check } from 'react-feather';
 import BaseModal from './BaseModal';
 import Button from './Button';
 
@@ -14,70 +15,64 @@ const ICloudSyncModal: React.FC<ICloudSyncModalProps> = ({
   onClose,
   onConfirm,
 }) => {
-  const handleEnable = () => {
-    onConfirm(true);
-    onClose();
-  };
+  const { t } = useTranslation('auth');
 
-  const handleDisable = () => {
-    onConfirm(false);
+  const handleConfirm = (enableSync: boolean) => {
+    onConfirm(enableSync);
     onClose();
   };
 
   return (
-    <BaseModal isOpen={isOpen} onClose={onClose} title="iCloud Keychain Sync">
+    <BaseModal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={t('biometric_setup.icloud_title')}
+    >
       <div className="space-y-4">
-        <div className="space-y-3">
-          <p className="text-sm text-foreground">
-            Would you like to sync your account credentials with iCloud
-            Keychain?
+        <p className="text-sm text-foreground">
+          {t('biometric_setup.icloud_prompt')}
+        </p>
+
+        <div className="bg-muted rounded-lg p-4 space-y-2">
+          <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <Check className="w-4 h-4 text-success" aria-hidden="true" />
+            {t('biometric_setup.icloud_benefit_title')}
+          </h4>
+          <p className="text-xs text-muted-foreground">
+            {t('biometric_setup.icloud_benefit')}
           </p>
+        </div>
 
-          <div className="bg-muted rounded-lg p-4 space-y-2">
-            <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Check className="w-4 h-4 text-success" aria-hidden="true" />
-              Benefits
-            </h4>
-            <ul className="text-xs text-muted-foreground space-y-1 ml-6">
-              <li>• Access your account from all your Apple devices</li>
-              <li>• Automatic backup to iCloud</li>
-              <li>• Seamless sync across iPhone, iPad, and Mac</li>
-            </ul>
-          </div>
-
-          <div className="bg-muted rounded-lg p-4 space-y-2">
-            <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Info
-                className="w-4 h-4 text-muted-foreground"
-                aria-hidden="true"
-              />
-              Note
-            </h4>
-            <p className="text-xs text-muted-foreground">
-              iCloud Keychain must be enabled on your device for sync to work.
-              Your credentials are encrypted and secure.
+        <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+          <div className="flex items-start gap-2">
+            <AlertTriangle
+              className="w-4 h-4 text-amber-500 shrink-0 mt-0.5"
+              aria-hidden="true"
+            />
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              {t('biometric_setup.icloud_warning')}
             </p>
           </div>
         </div>
 
         <div className="flex flex-col gap-2 pt-2">
           <Button
-            onClick={handleEnable}
+            onClick={() => handleConfirm(true)}
             variant="primary"
             size="custom"
             fullWidth
             className="h-11 rounded-xl text-sm font-medium"
           >
-            Enable iCloud Sync
+            {t('biometric_setup.icloud_enable')}
           </Button>
           <Button
-            onClick={handleDisable}
+            onClick={() => handleConfirm(false)}
             variant="outline"
             size="custom"
             fullWidth
             className="h-11 rounded-xl text-sm font-medium"
           >
-            Keep Local Only
+            {t('biometric_setup.icloud_local')}
           </Button>
         </div>
       </div>

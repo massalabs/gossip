@@ -1,98 +1,157 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, AlertTriangle, CheckCircle, Plus, Check } from 'react-feather';
+import { Capacitor } from '@capacitor/core';
+import {
+  Shield,
+  AlertTriangle,
+  CheckCircle,
+  Circle,
+  Plus,
+  Check,
+} from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
+import {
+  checkBiometricAvailability,
+  configureBiometricLogin,
+} from '../../services/biometricService';
 import { MAX_SECURE_ACCOUNTS } from '../../config/features';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
+import ICloudSyncModal from '../ui/ICloudSyncModal';
 import { PrivacyGraphic } from '../graphics';
 import SecureAccountForm from './SecureAccountForm';
-
-interface CreatedAccount {
-  username: string;
-}
+import {
+  readStagedPassword,
+  stageAccount,
+  stagedPasswordsEqual,
+  StagedAccount,
+  wipeStagedAccounts,
+} from './stagedAccount';
 
 interface SecureAccountSetupProps {
-  mainUsername: string;
+  initialAccount: StagedAccount;
   onComplete: () => void | Promise<void>;
+  onRestart: (message: string) => void;
 }
 
 const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
-  mainUsername,
+  initialAccount,
   onComplete,
+  onRestart,
 }) => {
   const { t } = useTranslation('auth');
-  const { initializeAccount, logout } = useAccountStore();
+  const initializeAccount = useAccountStore(state => state.initializeAccount);
+  const logout = useAccountStore(state => state.logout);
 
-  const [createdAccounts, setCreatedAccounts] = useState<CreatedAccount[]>([
-    { username: mainUsername },
+  const [stagedAccounts, setStagedAccounts] = useState<StagedAccount[]>([
+    initialAccount,
   ]);
+  const [selectedBiometricIndex, setSelectedBiometricIndex] = useState<
+    number | null
+  >(null);
+  const [biometricAvailable, setBiometricAvailable] = useState<boolean | null>(
+    null
+  );
   const [addingAccount, setAddingAccount] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [showICloudModal, setShowICloudModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const remainingSlots = MAX_SECURE_ACCOUNTS - createdAccounts.length;
+  useEffect(() => {
+    checkBiometricAvailability()
+      .then(({ available }) => setBiometricAvailable(available))
+      .catch(() => setBiometricAvailable(false));
+  }, []);
+
+  const remainingSlots = MAX_SECURE_ACCOUNTS - stagedAccounts.length;
   const canAddMore = remainingSlots > 0;
 
-  const handleAddAccount = async (creds: {
-    username: string;
-    password: string;
-  }) => {
-    setAddingAccount(false);
-    setIsCreating(true);
-    setError(null);
+  const handleAddAccount = (creds: { username: string; password: string }) => {
+    const account = stageAccount(creds.username, creds.password);
+    const collides = stagedAccounts.some(existing =>
+      stagedPasswordsEqual(existing, account)
+    );
 
-    try {
-      await initializeAccount(creds.username, creds.password);
-      setCreatedAccounts(prev => [...prev, { username: creds.username }]);
-    } catch (err) {
-      logger.error('Error creating secure account:', err);
-      setError(err instanceof Error ? err.message : t('create.failed'));
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
-  const handleFinalize = async () => {
-    setIsFinalizing(true);
-    setError(null);
-
-    try {
-      // Multi-account: close the current session so the user picks an
-      // account from SecureLogin. `finalizeOnboarding` (run in
-      // onComplete) is a no-op when no encryption key is left in state.
-      await logout({ lockedByUser: false });
-      await onComplete();
-    } catch (err) {
-      logger.error('Error finalizing setup:', err);
-      setError(err instanceof Error ? err.message : t('create.failed'));
-      setIsFinalizing(false);
-    }
-  };
-
-  const handleSkip = async () => {
-    if (createdAccounts.length > 1) {
-      // Multiple accounts created — finalize (logout + redirect to login)
-      await handleFinalize();
+    if (collides) {
+      account.passwordBytes.fill(0);
+      setAddingAccount(false);
+      setError(t('secure_setup.password_in_use'));
       return;
     }
 
-    // Only main account — stay authenticated. `onComplete` runs
-    // finalizeOnboarding which closes the onboarding session and
-    // re-runs the proper login path so polling, lastSeen, etc. are
-    // wired the same as a cold-start login.
+    setStagedAccounts(previous => [...previous, account]);
+    setAddingAccount(false);
+    setError(null);
+  };
+
+  const finalizeAccounts = async (syncToICloud = false) => {
     setIsFinalizing(true);
     setError(null);
+
+    let persistedAccounts = 0;
+    let failure: unknown;
+
     try {
-      await onComplete();
-    } catch (err) {
-      logger.error('Error completing setup:', err);
-      setError(err instanceof Error ? err.message : t('create.failed'));
-      setIsFinalizing(false);
+      if (selectedBiometricIndex !== null) {
+        const selected = stagedAccounts[selectedBiometricIndex];
+        const result = await configureBiometricLogin(
+          readStagedPassword(selected),
+          syncToICloud
+        );
+        if (!result.success) {
+          throw new Error(result.error || 'Biometric setup failed');
+        }
+      }
+
+      for (const account of stagedAccounts) {
+        await initializeAccount(account.username, readStagedPassword(account));
+        persistedAccounts += 1;
+      }
+    } catch (caught) {
+      failure = caught;
+      logger.error('Error finalizing secure account setup:', caught);
+    } finally {
+      // The wipe happens before routing or rendering another interactive screen
+      // and covers successful persistence, biometric cancellation, and every
+      // account-creation failure path.
+      wipeStagedAccounts(stagedAccounts);
     }
+
+    if (failure) {
+      try {
+        await logout({ lockedByUser: false });
+      } catch (logoutError) {
+        logger.error('Failed to lock after onboarding error:', logoutError);
+      }
+
+      if (persistedAccounts > 0) {
+        // At least one account reached the commit point. Route to login rather
+        // than presenting wiped staged credentials as retryable input.
+        await onComplete();
+      } else {
+        onRestart(
+          failure instanceof Error ? failure.message : t('create.failed')
+        );
+      }
+      return;
+    }
+
+    if (stagedAccounts.length > 1) {
+      // Multiple isolated accounts cannot remain selected implicitly. Return to
+      // login and let the supplied password discover the intended slot.
+      await logout({ lockedByUser: false });
+    }
+    await onComplete();
+  };
+
+  const handleFinalize = () => {
+    if (selectedBiometricIndex !== null && Capacitor.getPlatform() === 'ios') {
+      setShowICloudModal(true);
+      return;
+    }
+    void finalizeAccounts(false);
   };
 
   if (addingAccount) {
@@ -104,25 +163,25 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     );
   }
 
-  if (isCreating || isFinalizing) {
+  if (isFinalizing) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
         <div className="text-center">
           <PrivacyGraphic size={120} loading={true} />
           <p className="text-sm text-muted-foreground mt-4">
-            {isFinalizing ? t('secure_setup.finalizing') : t('create.creating')}
+            {t('secure_setup.finalizing')}
           </p>
         </div>
       </div>
     );
   }
 
-  const hasAdditionalAccounts = createdAccounts.length > 1;
+  const hasAdditionalAccounts = stagedAccounts.length > 1;
 
   return (
     <PageLayout
       header={
-        <PageHeader title={t('secure_setup.title')} onBack={handleSkip} />
+        <PageHeader title={t('secure_setup.title')} onBack={handleFinalize} />
       }
       className="app-max-w mx-auto"
       contentClassName="p-4"
@@ -130,9 +189,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       {hasAdditionalAccounts ? (
         <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 mb-6">
           <div className="flex items-start gap-3">
-            <div className="shrink-0 mt-0.5">
-              <Shield className="h-5 w-5 text-blue-500" />
-            </div>
+            <Shield className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
             <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
               {t('secure_setup.info')}
             </p>
@@ -141,9 +198,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       ) : (
         <div className="p-4 border rounded-lg bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 mb-6">
           <div className="flex items-start gap-3">
-            <div className="shrink-0 mt-0.5">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
-            </div>
+            <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
             <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed">
               {t('secure_setup.warning_create_more')}
             </p>
@@ -152,15 +207,69 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       )}
 
       <div className="mb-6">
-        {createdAccounts.map((acc, idx) => (
-          <div key={idx} className="flex items-center py-3 px-2">
+        {stagedAccounts.map((account, index) => (
+          <div key={index} className="flex items-center py-3 px-2">
             <CheckCircle className="w-4 h-4 text-green-500 mr-3 shrink-0" />
             <span className="text-sm text-foreground font-medium">
-              {acc.username}
+              {account.username}
             </span>
           </div>
         ))}
       </div>
+
+      {biometricAvailable && (
+        <div className="bg-card border border-border rounded-xl p-4 mb-6 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">
+              {t('biometric_setup.title')}
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              {t('biometric_setup.onboarding_info')}
+            </p>
+          </div>
+          <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              {t('biometric_setup.onboarding_warning')}
+            </p>
+          </div>
+          <p className="text-sm font-medium text-foreground">
+            {t('biometric_setup.select_account')}
+          </p>
+          <div className="space-y-1">
+            {stagedAccounts.map((account, index) => {
+              const selected = selectedBiometricIndex === index;
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={() =>
+                    setSelectedBiometricIndex(selected ? null : index)
+                  }
+                  className="w-full flex items-center gap-3 rounded-lg px-3 py-3 text-left hover:bg-muted transition-colors"
+                  aria-pressed={selected}
+                >
+                  {selected ? (
+                    <CheckCircle className="w-5 h-5 text-primary shrink-0" />
+                  ) : (
+                    <Circle className="w-5 h-5 text-muted-foreground shrink-0" />
+                  )}
+                  <span className="text-sm font-medium text-foreground">
+                    {account.username}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {biometricAvailable === false && (
+        <div className="bg-card rounded-lg p-4 mb-6 border border-border">
+          <p className="text-muted-foreground text-sm">
+            {t('create.biometric_not_supported')}
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="p-4 mb-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -186,29 +295,27 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
           </p>
         )}
 
-        {hasAdditionalAccounts ? (
-          <Button
-            onClick={handleFinalize}
-            variant="primary"
-            size="custom"
-            fullWidth
-            className="h-12 rounded-full text-sm font-medium gap-2"
-          >
-            <Check className="w-4 h-4" />
-            {t('secure_setup.done')}
-          </Button>
-        ) : (
-          <Button
-            onClick={handleSkip}
-            variant="outline"
-            size="custom"
-            fullWidth
-            className="h-12 rounded-full text-sm font-medium"
-          >
-            {t('secure_setup.skip')}
-          </Button>
-        )}
+        <Button
+          onClick={handleFinalize}
+          variant={hasAdditionalAccounts ? 'primary' : 'outline'}
+          size="custom"
+          fullWidth
+          className="h-12 rounded-full text-sm font-medium gap-2"
+        >
+          {hasAdditionalAccounts && <Check className="w-4 h-4" />}
+          {hasAdditionalAccounts
+            ? t('secure_setup.done')
+            : t('secure_setup.skip')}
+        </Button>
       </div>
+
+      <ICloudSyncModal
+        isOpen={showICloudModal}
+        onClose={() => setShowICloudModal(false)}
+        onConfirm={syncToICloud => {
+          void finalizeAccounts(syncToICloud);
+        }}
+      />
     </PageLayout>
   );
 };

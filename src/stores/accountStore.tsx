@@ -38,6 +38,13 @@ export type LoginMethod = {
   userId?: string;
 };
 
+function freeEncryptionKey(key: EncryptionKey): void {
+  const pointer = (key as unknown as { __wbg_ptr?: number }).__wbg_ptr;
+  if (pointer === undefined || pointer !== 0) {
+    key.free();
+  }
+}
+
 // Build the password-protected security blob and in-memory key.
 async function buildSecurityFromPassword(
   mnemonic: string | undefined,
@@ -153,9 +160,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     // Guard against double-free: closeSession() may have already freed it,
     // leaving __wbg_ptr === 0 which would pass a null pointer to WASM.
     const key = get().encryptionKey;
-    if (key && (key as unknown as { __wbg_ptr: number }).__wbg_ptr !== 0) {
-      key.free();
-    }
+    if (key) freeEncryptionKey(key);
     return {
       account: null,
       evmAddress: null,
@@ -236,6 +241,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           if (pointer === undefined || pointer !== 0) {
             existing.encryptionKey.free();
           }
+          freeEncryptionKey(encryptionKey);
           throw new Error('Password already in use by another account');
         } catch (error) {
           if (
@@ -249,6 +255,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         }
       }
     }
+
+    let allocatedSlot: number | null = null;
 
     // Secure-storage mode: create the slot with the user's password before
     // any DB access. Queries created by openSession need the backend unlocked.
@@ -264,6 +272,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         const collides = await sdk.secureStorageUnlock(secret);
         if (collides) {
           await sdk.secureStorageLock();
+          freeEncryptionKey(encryptionKey);
           throw new Error('Password already in use by another account');
         }
         // unlock returned false → state stays 'locked', nothing to undo.
@@ -275,48 +284,100 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // earlier account). The in-memory `onboardingAllocatedSlots`
       // set guards against that.
       const slot = pickFreeSlot();
-      await sdk.secureStorageCreate(slot, secret);
-      onboardingAllocatedSlots.add(slot);
+      allocatedSlot = slot;
+      try {
+        await sdk.secureStorageCreate(slot, secret);
+        onboardingAllocatedSlots.add(slot);
+      } catch (error) {
+        if (sdk.storageState === 'unlocked') {
+          try {
+            await sdk.secureStorageDestroy();
+          } catch (destroyError) {
+            logger.error(
+              'Failed to destroy interrupted secure account:',
+              destroyError
+            );
+          }
+        }
+        freeEncryptionKey(encryptionKey);
+        throw error;
+      }
     }
 
-    await sdk.openSession({
-      mnemonic,
-      encryptionKey,
-      onPersist: createOnPersist(userId),
-      // Don't poll during onboarding — we may open the session just to
-      // write the profile and then close it again to create another
-      // account in a different slot. Polling is re-enabled on the real
-      // login (loadAccount), which defaults to `autoStartPolling: true`.
-      autoStartPolling: false,
-    });
+    let sessionOpened = false;
+    try {
+      await sdk.openSession({
+        mnemonic,
+        encryptionKey,
+        onPersist: createOnPersist(userId),
+        // Don't poll during onboarding — we may open the session just to
+        // write the profile and then close it again to create another
+        // account in a different slot. Polling is re-enabled on the real
+        // login (loadAccount), which defaults to `autoStartPolling: true`.
+        autoStartPolling: false,
+      });
+      sessionOpened = true;
 
-    const session = sdk.getEncryptedSession();
-    let profileSession = session;
-    if (sdk.usesSessionBlobNamespace) {
-      await sdk.persistSessionBlob(session);
-      profileSession = new Uint8Array(0);
+      const session = sdk.getEncryptedSession();
+      let profileSession = session;
+      if (sdk.usesSessionBlobNamespace) {
+        await sdk.persistSessionBlob(session);
+        profileSession = new Uint8Array(0);
+      }
+
+      const profile = await sdk.profiles.createOrUpdate(
+        username,
+        encodeUserId(userIdBytes),
+        security,
+        profileSession
+      );
+
+      if (skipHistorical) {
+        await getSdk().announcements.skipHistorical();
+      }
+
+      set({
+        userProfile: profile,
+        encryptionKey,
+        account,
+        evmAddress,
+        isLoading: false,
+      });
+
+      fetchMnsDomainsIfEnabled(profile, get().provider);
+    } catch (error) {
+      // Account provisioning is a commit point for staged onboarding. If any
+      // later write fails, destroy the newly allocated secure slot so a retry
+      // cannot leave an unreachable partial account or overwrite it after the
+      // in-memory slot reservation is cleared.
+      if (sdk.isSessionOpen) {
+        try {
+          await sdk.closeSession();
+        } catch (closeError) {
+          logger.error('Failed to close partial account session:', closeError);
+        }
+      } else if (!sessionOpened) {
+        freeEncryptionKey(encryptionKey);
+      }
+
+      if (allocatedSlot !== null && sdk.storageState === 'unlocked') {
+        try {
+          await sdk.secureStorageDestroy();
+          onboardingAllocatedSlots.delete(allocatedSlot);
+        } catch (destroyError) {
+          logger.error(
+            'Failed to destroy partial secure account:',
+            destroyError
+          );
+          try {
+            await sdk.secureStorageLock();
+          } catch (lockError) {
+            logger.error('Failed to lock partial secure account:', lockError);
+          }
+        }
+      }
+      throw error;
     }
-
-    const profile = await sdk.profiles.createOrUpdate(
-      username,
-      encodeUserId(userIdBytes),
-      security,
-      profileSession
-    );
-
-    if (skipHistorical) {
-      await getSdk().announcements.skipHistorical();
-    }
-
-    set({
-      userProfile: profile,
-      encryptionKey,
-      account,
-      evmAddress,
-      isLoading: false,
-    });
-
-    fetchMnsDomainsIfEnabled(profile, get().provider);
   };
 
   return {
