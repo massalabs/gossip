@@ -223,6 +223,40 @@ describe('SecureAccountSetup', () => {
     );
   });
 
+  it('finishes pending rollback before wiping after unmount', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    mocks.rollbackBiometric
+      .mockRejectedValueOnce(new Error('restore unavailable'))
+      .mockResolvedValueOnce(undefined);
+    mocks.configureBiometricLogin.mockResolvedValue({
+      success: false,
+      error: 'replacement failed',
+      rollback: mocks.rollbackBiometric,
+    });
+    const rendered = await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+
+    await userEvent.click(page.getByRole('button', { name: 'alice' }));
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+    await expect
+      .element(page.getByText('secure_setup.cleanup_failed', { exact: true }))
+      .toBeInTheDocument();
+    expect(account.passwordBytes.some(byte => byte !== 0)).toBe(true);
+
+    await rendered.unmount();
+    await vi.waitFor(() => {
+      expect(mocks.rollbackBiometric).toHaveBeenCalledTimes(2);
+      expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
+    });
+  });
+
   it('keeps biometric account selection mutually exclusive', async () => {
     const account = stageAccount('alice', 'alice-password');
 

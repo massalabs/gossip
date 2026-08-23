@@ -72,6 +72,8 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const stagedAccountsRef = useRef<StagedAccount[]>([initialAccount]);
   const mounted = useRef(false);
   const activeCredentialOperations = useRef(0);
+  const unmountedRecoveryRunning = useRef(false);
+  const continueUnmountedCleanup = useRef<() => void>(() => {});
   const [selectedBiometricIndex, setSelectedBiometricIndex] = useState<
     number | null
   >(null);
@@ -101,7 +103,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       // credentials from the still-mounted component.
       queueMicrotask(() => {
         if (!mounted.current && activeCredentialOperations.current === 0) {
-          wipeStagedAccounts(stagedAccountsRef.current);
+          continueUnmountedCleanup.current();
         }
       });
     };
@@ -116,7 +118,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     } finally {
       activeCredentialOperations.current -= 1;
       if (!mounted.current && activeCredentialOperations.current === 0) {
-        wipeStagedAccounts(stagedAccountsRef.current);
+        continueUnmountedCleanup.current();
       }
     }
   };
@@ -175,7 +177,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
         const attemptedIndexes = recovery.pendingAccountIndexes;
         const result = await rollbackInitializedAccounts(
           attemptedIndexes.map(index =>
-            readStagedPassword(stagedAccounts[index])
+            readStagedPassword(stagedAccountsRef.current[index])
           )
         );
         recovery.pendingAccountIndexes = result.failedPasswordIndexes.map(
@@ -222,10 +224,31 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     }
 
     failureRecovery.current = null;
-    wipeStagedAccounts(stagedAccounts);
+    wipeStagedAccounts(stagedAccountsRef.current);
     const appState = useAppStore.getState();
     appState.setIsInitialized(!appState.secureAccountCreationAllowed);
     onRestart(t('secure_setup.batch_failed'));
+  };
+
+  const finishCleanupAfterUnmount = async () => {
+    if (mounted.current || unmountedRecoveryRunning.current) return;
+    unmountedRecoveryRunning.current = true;
+    try {
+      while (!mounted.current && failureRecovery.current) {
+        await retryFailureRecovery(failureRecovery.current);
+        if (failureRecovery.current) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      if (!mounted.current && activeCredentialOperations.current === 0) {
+        wipeStagedAccounts(stagedAccountsRef.current);
+      }
+    } finally {
+      unmountedRecoveryRunning.current = false;
+    }
+  };
+  continueUnmountedCleanup.current = () => {
+    void finishCleanupAfterUnmount();
   };
 
   const finalizeAccounts = async (syncToICloud = false) => {
