@@ -10,13 +10,23 @@ export async function deriveAccountFromMnemonic(mnemonic: string): Promise<{
   massaAddress: string;
 }> {
   const keys = await generateUserKeys(mnemonic);
-  const account = await Account.fromPrivateKey(
-    PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
-  );
-  const userIdBytes = keys.public_keys().derive_id();
-  const evmAddress = keys.evm_address();
-  const massaAddress = keys.massa_address();
-  return { account, userIdBytes, evmAddress, massaAddress };
+  const secretKeys = keys.secret_keys();
+  const publicKeys = keys.public_keys();
+  const massaSecretKey = secretKeys.massa_secret_key;
+  try {
+    const account = await Account.fromPrivateKey(
+      PrivateKey.fromBytes(massaSecretKey)
+    );
+    const userIdBytes = publicKeys.derive_id();
+    const evmAddress = keys.evm_address();
+    const massaAddress = keys.massa_address();
+    return { account, userIdBytes, evmAddress, massaAddress };
+  } finally {
+    massaSecretKey.fill(0);
+    secretKeys.free();
+    publicKeys.free();
+    keys.free();
+  }
 }
 
 export function fetchMnsDomainsIfEnabled(

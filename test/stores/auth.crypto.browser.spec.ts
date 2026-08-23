@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EncryptionKey, generateMnemonic } from '@massalabs/gossip-sdk';
+import {
+  EncryptionKey,
+  generateMnemonic,
+  SessionModule,
+  UserKeys,
+  UserPublicKeys,
+  UserSecretKeys,
+} from '@massalabs/gossip-sdk';
 import {
   auth,
   createPasswordSecurity,
@@ -39,8 +46,17 @@ describe('profile password encryption integration', () => {
     const mnemonic = await generateMnemonic();
     const password = 'RAM preflight password 2026!';
 
+    const userKeysFree = vi.spyOn(UserKeys.prototype, 'free');
+    const publicKeysFree = vi.spyOn(UserPublicKeys.prototype, 'free');
+    const secretKeysFree = vi.spyOn(UserSecretKeys.prototype, 'free');
+    const sessionDispose = vi.spyOn(SessionModule.prototype, 'dispose');
+
     const prepared = await preparePasswordAccount(mnemonic, password);
 
+    expect(userKeysFree).toHaveBeenCalledTimes(2);
+    expect(publicKeysFree).toHaveBeenCalledTimes(2);
+    expect(secretKeysFree).toHaveBeenCalledTimes(2);
+    expect(sessionDispose).toHaveBeenCalledTimes(2);
     expect(new TextDecoder().decode(prepared.mnemonicBytes)).toBe(mnemonic);
     expect(prepared.encryptedSession.byteLength).toBeGreaterThan(0);
     const authenticated = await auth(buildProfile(prepared.security), password);
@@ -56,6 +72,11 @@ describe('profile password encryption integration', () => {
         byte => byte === 0
       )
     ).toBe(true);
+
+    userKeysFree.mockRestore();
+    publicKeysFree.mockRestore();
+    secretKeysFree.mockRestore();
+    sessionDispose.mockRestore();
   });
 
   it('rejects missing and wrong passwords and frees a failed derived key', async () => {

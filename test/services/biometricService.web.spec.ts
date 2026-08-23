@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   decrypt: vi.fn(),
   encrypt: vi.fn(),
   free: vi.fn(),
+  generateNonce: vi.fn(),
 }));
 
 vi.mock('@capacitor/core', () => ({
@@ -44,9 +45,7 @@ vi.mock('../../src/crypto/webauthn', () => ({
 vi.mock('@massalabs/gossip-sdk', () => ({
   decrypt: mocks.decrypt,
   encrypt: mocks.encrypt,
-  generateNonce: vi.fn(async () => ({
-    to_bytes: () => new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
-  })),
+  generateNonce: mocks.generateNonce,
   encodeToBase64: (value: Uint8Array) => btoa(String.fromCharCode(...value)),
   decodeFromBase64: (value: string) =>
     Uint8Array.from(atob(value), character => character.charCodeAt(0)),
@@ -76,6 +75,9 @@ describe('WebAuthn biometric password storage', () => {
       encryptedData: new Uint8Array([9, 8, 7]),
     });
     mocks.decrypt.mockResolvedValue('account-password');
+    mocks.generateNonce.mockResolvedValue({
+      to_bytes: () => new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+    });
   });
 
   it('stores an encrypted password without passing an account identifier', async () => {
@@ -95,6 +97,16 @@ describe('WebAuthn biometric password storage', () => {
       ciphertext: expect.any(String),
     });
     expect(mocks.free).toHaveBeenCalledTimes(1);
+  });
+
+  it('frees the acquired key when nonce generation fails', async () => {
+    mocks.generateNonce.mockRejectedValue(new Error('nonce failed'));
+
+    const result = await configureBiometricLogin('account-password');
+
+    expect(result).toEqual({ success: false, error: 'nonce failed' });
+    expect(mocks.free).toHaveBeenCalledOnce();
+    expect(mocks.encrypt).not.toHaveBeenCalled();
   });
 
   it('returns an opaque rollback that restores the previous credential pair', async () => {

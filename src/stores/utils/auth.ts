@@ -80,16 +80,20 @@ export async function preparePasswordAccount(
   password: string
 ): Promise<PreparedPasswordAccount> {
   const mnemonicBytes = new TextEncoder().encode(mnemonic);
-  const { security, encryptionKey } = await createPasswordSecurity(
-    mnemonic,
-    password
-  );
+  let security: UserProfile['security'] | undefined;
+  let encryptionKey: EncryptionKey | undefined;
   let authenticatedKey: EncryptionKey | undefined;
   let encryptedSession: Uint8Array | undefined;
+  let initialKeys: Awaited<ReturnType<typeof generateUserKeys>> | undefined;
+  let reopenedKeys: Awaited<ReturnType<typeof generateUserKeys>> | undefined;
   let initialSession: SessionModule | undefined;
   let reopenedSession: SessionModule | undefined;
 
   try {
+    ({ security, encryptionKey } = await createPasswordSecurity(
+      mnemonic,
+      password
+    ));
     // Prove the password decrypts the exact in-RAM identity before any account
     // data reaches durable storage.
     const authenticated = await auth({ security } as UserProfile, password);
@@ -98,16 +102,20 @@ export async function preparePasswordAccount(
       throw new Error('Prepared account mnemonic mismatch');
     }
 
-    const initialKeys = await generateUserKeys(mnemonic);
+    initialKeys = await generateUserKeys(mnemonic);
     initialSession = new SessionModule(initialKeys);
+    initialKeys.free();
+    initialKeys = undefined;
     encryptedSession = initialSession.toEncryptedBlob(encryptionKey);
-    initialSession.cleanup();
+    initialSession.dispose();
     initialSession = undefined;
 
     // Lock/reopen the exact encrypted session in RAM with the independently
     // derived password key. The validation serialization is immediately wiped.
-    const reopenedKeys = await generateUserKeys(authenticated.mnemonic);
+    reopenedKeys = await generateUserKeys(authenticated.mnemonic);
     reopenedSession = new SessionModule(reopenedKeys);
+    reopenedKeys.free();
+    reopenedKeys = undefined;
     reopenedSession.load(encryptedSession, authenticatedKey);
     const validationBlob = reopenedSession.toEncryptedBlob(authenticatedKey);
     validationBlob.fill(0);
@@ -116,13 +124,15 @@ export async function preparePasswordAccount(
   } catch (error) {
     mnemonicBytes.fill(0);
     encryptedSession?.fill(0);
-    security.encKeySalt.fill(0);
-    security.mnemonicBackup.encryptedMnemonic.fill(0);
+    security?.encKeySalt.fill(0);
+    security?.mnemonicBackup.encryptedMnemonic.fill(0);
     throw error;
   } finally {
-    initialSession?.cleanup();
-    reopenedSession?.cleanup();
-    freeEncryptionKey(encryptionKey);
+    initialKeys?.free();
+    reopenedKeys?.free();
+    initialSession?.dispose();
+    reopenedSession?.dispose();
+    if (encryptionKey) freeEncryptionKey(encryptionKey);
     if (authenticatedKey) freeEncryptionKey(authenticatedKey);
   }
 }

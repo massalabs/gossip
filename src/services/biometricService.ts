@@ -222,9 +222,10 @@ async function storeWebAuthnPassword(
   const prfSalt = await getBiometricSalt();
   const { credentialId, encryptionKey } =
     await createWebAuthnCredential(prfSalt);
-  const encryptionSalt = (await generateNonce()).to_bytes();
+  let encryptionSalt: Uint8Array | undefined;
 
   try {
+    encryptionSalt = (await generateNonce()).to_bytes();
     const { encryptedData } = await encrypt(
       password,
       encryptionKey,
@@ -252,7 +253,7 @@ async function storeWebAuthnPassword(
       throw error;
     }
   } finally {
-    encryptionSalt.fill(0);
+    encryptionSalt?.fill(0);
     freeEncryptionKey(encryptionKey);
   }
 }

@@ -49,7 +49,7 @@ import {
   startWasmInitialization,
   ensureWasmInitialized,
 } from './wasm/loader.js';
-import { generateUserKeys, UserKeys } from './wasm/userKeys.js';
+import { generateUserKeys } from './wasm/userKeys.js';
 import { SessionModule } from './wasm/session.js';
 import {
   EncryptionKey,
@@ -156,7 +156,6 @@ type SdkStateSessionOpen = {
   messageProtocol: IMessageProtocol;
   config: SdkConfig;
   session: SessionModule;
-  userKeys: UserKeys;
   encryptionKey?: EncryptionKey;
   onPersist?: (
     encryptedBlob: Uint8Array,
@@ -370,13 +369,20 @@ class GossipSdk {
     // the state dirty and schedules the actual write. See the
     // `_persistDirty`/`flushPersist` machinery below and `closeSession`
     // for the synchronous drain.
-    const session = new SessionModule(
-      userKeys,
-      async () => {
-        this.handleSessionPersist();
-      },
-      options.sessionConfig
-    );
+    let session: SessionModule;
+    try {
+      session = new SessionModule(
+        userKeys,
+        async () => {
+          this.handleSessionPersist();
+        },
+        options.sessionConfig
+      );
+    } finally {
+      // SessionModule extracts independent key wrappers; the combined bundle
+      // contains a second serialized copy of the secret identity material.
+      userKeys.free();
+    }
 
     // Restore existing session state if provided
     if (options.encryptedSession) {
@@ -474,7 +480,6 @@ class GossipSdk {
       messageProtocol,
       config,
       session,
-      userKeys,
       encryptionKey,
       onPersist: options.onPersist,
     };
