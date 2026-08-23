@@ -21,6 +21,11 @@ type FaultProxy = {
   clearIndexedDbFaultsForTesting(): Promise<void>;
   retryFailedCoverNowForTesting(): Promise<boolean>;
   stopPeriodicCoverForTesting(): Promise<void>;
+  exec(
+    sql: string,
+    params?: unknown[],
+    inTransaction?: boolean
+  ): Promise<unknown>;
 };
 
 type RawSnapshot = Map<string, Uint8Array>;
@@ -121,12 +126,18 @@ function expectCoverChangedEverySlot(
 
 async function expectBaselineData(
   connection: DatabaseConnection,
-  expectedNamespaceData: Uint8Array
+  expectedNamespaceData: Uint8Array,
+  expectedUsername = 'durable after generic flush retry'
 ): Promise<void> {
   const rows = await connection.db
-    .select({ userId: userProfile.userId })
+    .select({
+      userId: userProfile.userId,
+      username: userProfile.username,
+    })
     .from(userProfile);
-  expect(rows).toEqual([{ userId: 'gossip1durablebaseline' }]);
+  expect(rows).toEqual([
+    { userId: 'gossip1durablebaseline', username: expectedUsername },
+  ]);
   expect(
     Array.from(
       await connection.secureStorageReadNamespaceData(
@@ -171,7 +182,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     const rejectedPassword = 'rejected-password';
     const recoveryRejectedPassword = 'recovery-rejected-password';
     const namespaceData = new Uint8Array([7, 6, 5, 4, 3, 2, 1]);
-    const connection = await openConnection(domain);
+    let connection = await openConnection(domain);
     await testProxy(connection).stopPeriodicCoverForTesting();
 
     await connection.secureStorageCreate(0, baselinePassword);
@@ -221,6 +232,25 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     await cover;
     expect(await unlock).toBe(true);
     expect(settlementOrder).toEqual(['cover', 'unlock']);
+    await expectBaselineData(connection, namespaceData, 'durable baseline');
+
+    await testProxy(connection).exec(
+      'UPDATE userProfile SET username = ? WHERE userId = ?',
+      ['durable after generic flush retry', 'gossip1durablebaseline'],
+      true
+    );
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+    });
+    await expect(connection.secureStorageFlush()).rejects.toThrow();
+    await connection.secureStorageFlush();
+    await connection.secureStorageLock();
+    await connection.close();
+    openConnections.delete(connection);
+
+    connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    expect(await connection.secureStorageUnlock(baselinePassword)).toBe(true);
     await expectBaselineData(connection, namespaceData);
     await connection.secureStorageLock();
 

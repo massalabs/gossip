@@ -345,14 +345,32 @@ describe('SecureStorageWorkerApi password cleanup', () => {
       (
         api as unknown as { durableRecoveryRequired: boolean }
       ).durableRecoveryRequired = true;
+      let finishEarlierCover!: () => void;
+      wasmMock.flushEncrypted
+        .mockReturnValueOnce(
+          new Promise<void>(resolve => {
+            finishEarlierCover = resolve;
+          })
+        )
+        .mockResolvedValueOnce(undefined);
 
-      await run(api);
+      const earlierCover = api.cover();
+      await vi.waitFor(() =>
+        expect(wasmMock.coverTrafficTick).toHaveBeenCalled()
+      );
+      const mutation = run(api);
+      await Promise.resolve();
+      expect(mutate).not.toHaveBeenCalled();
+
+      finishEarlierCover();
+      await earlierCover;
+      await mutation;
 
       expect(wasmMock.reloadDurableStorage).toHaveBeenCalledOnce();
       expect(mutate).toHaveBeenCalledOnce();
-      expect(
-        wasmMock.reloadDurableStorage.mock.invocationCallOrder[0]
-      ).toBeLessThan(mutate.mock.invocationCallOrder[0]);
+      expect(wasmMock.flushEncrypted.mock.invocationCallOrder[0]).toBeLessThan(
+        mutate.mock.invocationCallOrder[0]
+      );
     }
   );
 
