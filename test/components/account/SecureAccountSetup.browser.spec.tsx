@@ -161,6 +161,68 @@ describe('SecureAccountSetup', () => {
     mocks.logout.mockResolvedValue(undefined);
   });
 
+  it('wipes staged passwords after an idle unmount', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const rendered = await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+
+    await rendered.unmount();
+
+    await vi.waitFor(() =>
+      expect(account.passwordBytes.every(byte => byte === 0)).toBe(true)
+    );
+  });
+
+  it('defers unmount wiping until in-flight finalization releases credentials', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    let releasePreparation!: () => void;
+    mocks.preparePasswordAccount.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          releasePreparation = () =>
+            resolve({
+              mnemonicBytes: new Uint8Array([1]),
+              security: {
+                authMethod: 'password',
+                encKeySalt: new Uint8Array([2]),
+                mnemonicBackup: {
+                  encryptedMnemonic: new Uint8Array([3]),
+                  createdAt: new Date(),
+                  backedUp: false,
+                },
+              },
+              encryptedSession: new Uint8Array([4]),
+            });
+        })
+    );
+    const rendered = await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+    await vi.waitFor(() =>
+      expect(mocks.preparePasswordAccount).toHaveBeenCalledOnce()
+    );
+    await rendered.unmount();
+    expect(account.passwordBytes.some(byte => byte !== 0)).toBe(true);
+
+    releasePreparation();
+    await vi.waitFor(() =>
+      expect(account.passwordBytes.every(byte => byte === 0)).toBe(true)
+    );
+  });
+
   it('keeps biometric account selection mutually exclusive', async () => {
     const account = stageAccount('alice', 'alice-password');
 

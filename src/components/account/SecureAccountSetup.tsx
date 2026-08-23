@@ -69,6 +69,9 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const [stagedAccounts, setStagedAccounts] = useState<StagedAccount[]>([
     initialAccount,
   ]);
+  const stagedAccountsRef = useRef<StagedAccount[]>([initialAccount]);
+  const mounted = useRef(false);
+  const activeCredentialOperations = useRef(0);
   const [selectedBiometricIndex, setSelectedBiometricIndex] = useState<
     number | null
   >(null);
@@ -83,11 +86,40 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const [showICloudModal, setShowICloudModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  stagedAccountsRef.current = stagedAccounts;
+
   useEffect(() => {
+    mounted.current = true;
     checkBiometricAvailability()
       .then(({ available }) => setBiometricAvailable(available))
       .catch(() => setBiometricAvailable(false));
+
+    return () => {
+      mounted.current = false;
+      // React StrictMode immediately replays effects in development. Delay the
+      // ownership check by one microtask so that simulated cleanup cannot wipe
+      // credentials from the still-mounted component.
+      queueMicrotask(() => {
+        if (!mounted.current && activeCredentialOperations.current === 0) {
+          wipeStagedAccounts(stagedAccountsRef.current);
+        }
+      });
+    };
   }, []);
+
+  const runCredentialOperation = async <T,>(
+    operation: () => Promise<T>
+  ): Promise<T> => {
+    activeCredentialOperations.current += 1;
+    try {
+      return await operation();
+    } finally {
+      activeCredentialOperations.current -= 1;
+      if (!mounted.current && activeCredentialOperations.current === 0) {
+        wipeStagedAccounts(stagedAccountsRef.current);
+      }
+    }
+  };
 
   const remainingSlots = MAX_SECURE_ACCOUNTS - stagedAccounts.length;
   const canAddMore = remainingSlots > 0;
@@ -105,7 +137,11 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       return;
     }
 
-    setStagedAccounts(previous => [...previous, account]);
+    setStagedAccounts(previous => {
+      const next = [...previous, account];
+      stagedAccountsRef.current = next;
+      return next;
+    });
     setAddingAccount(false);
     setError(null);
   };
@@ -280,7 +316,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       setShowICloudModal(true);
       return;
     }
-    void finalizeAccounts(false);
+    void runCredentialOperation(() => finalizeAccounts(false));
   };
 
   if (failureRecoveryPending) {
@@ -301,7 +337,9 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
             fullWidth
             loading={isFinalizing}
             disabled={isFinalizing}
-            onClick={() => void retryFailureRecovery()}
+            onClick={() =>
+              void runCredentialOperation(() => retryFailureRecovery())
+            }
           >
             {t('secure_setup.retry_cleanup')}
           </Button>
@@ -323,7 +361,9 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
             {t('secure_setup.lock_failed')}
           </p>
           <Button
-            onClick={() => void lockPersistedAccountsAndComplete()}
+            onClick={() =>
+              void runCredentialOperation(lockPersistedAccountsAndComplete)
+            }
             variant="primary"
             size="custom"
             fullWidth
@@ -495,7 +535,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
         isOpen={showICloudModal}
         onClose={() => setShowICloudModal(false)}
         onConfirm={syncToICloud => {
-          void finalizeAccounts(syncToICloud);
+          void runCredentialOperation(() => finalizeAccounts(syncToICloud));
         }}
       />
     </PageLayout>
