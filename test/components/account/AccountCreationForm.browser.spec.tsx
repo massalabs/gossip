@@ -72,6 +72,12 @@ describe('AccountCreationForm mandatory password', () => {
     await render(<AccountCreationForm onSubmit={onSubmit} />);
 
     const submit = page.getByRole('button', { name: 'create.title' });
+    await expect
+      .element(page.getByText('create.unique_password_title'))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText('create.unique_password_warning'))
+      .toBeInTheDocument();
     await expect.element(submit).toBeDisabled();
 
     await userEvent.fill(

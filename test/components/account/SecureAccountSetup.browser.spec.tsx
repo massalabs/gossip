@@ -81,6 +81,12 @@ async function addAccount(username: string, password: string) {
   await userEvent.click(
     page.getByRole('button', { name: 'secure_setup.add_account' })
   );
+  await expect
+    .element(page.getByText('create.unique_password_title'))
+    .toBeInTheDocument();
+  await expect
+    .element(page.getByText('create.unique_password_warning'))
+    .toBeInTheDocument();
   await userEvent.fill(
     page.getByPlaceholder('create.enter_username'),
     username

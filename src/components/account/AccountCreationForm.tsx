@@ -12,6 +12,7 @@ import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
 import PasswordConfirmModal from './PasswordConfirmModal';
+import PrivacyNotice from './PrivacyNotice';
 import { scrollFieldIntoView } from '../../utils/scrollFieldIntoView';
 
 export interface AccountCreationResult {
@@ -183,6 +184,13 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
               disabled={isCreating}
             />
           </FormFieldRow>
+
+          <PrivacyNotice
+            tone="warning"
+            title={t('create.unique_password_title')}
+            content={t('create.unique_password_warning')}
+            className="mb-3"
+          />
 
           <FormFieldRow
             label={t('create.password')}

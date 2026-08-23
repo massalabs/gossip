@@ -12,6 +12,7 @@ import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
 import { scrollFieldIntoView } from '../../utils/scrollFieldIntoView';
 import PasswordConfirmModal from './PasswordConfirmModal';
+import PrivacyNotice from './PrivacyNotice';
 
 interface SecureAccountFormProps {
   onSubmit: (creds: { username: string; password: string }) => void;
@@ -111,6 +112,11 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
           </div>
 
           <div className="space-y-2">
+            <PrivacyNotice
+              tone="warning"
+              title={t('create.unique_password_title')}
+              content={t('create.unique_password_warning')}
+            />
             <div>
               <label className="block text-sm font-medium text-foreground mb-1.5">
                 {t('create.password')}
