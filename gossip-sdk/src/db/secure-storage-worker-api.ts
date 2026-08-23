@@ -80,7 +80,18 @@ interface QueuedLifecycleOperation {
   reject: (reason: unknown) => void;
 }
 
-type QueuedStorageOperation = QueuedCoverOperation | QueuedLifecycleOperation;
+interface QueuedSqlOperation {
+  kind: 'sql';
+  continuesTransaction: boolean;
+  operation: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (reason: unknown) => void;
+}
+
+type QueuedStorageOperation =
+  | QueuedCoverOperation
+  | QueuedLifecycleOperation
+  | QueuedSqlOperation;
 
 function errorWithCause(message: string, cause: unknown): Error {
   const error = new Error(message) as Error & { cause?: unknown };
@@ -105,6 +116,7 @@ export class SecureStorageWorkerApi {
   private durableRecoveryPromise: Promise<void> | null = null;
   private closeRequested = false;
   private closePromise: Promise<void> | null = null;
+  private sqlTransactionActive = false;
 
   private async recoverDurableStorage(): Promise<void> {
     if (this.durableRecoveryPromise) {
@@ -156,6 +168,25 @@ export class SecureStorageWorkerApi {
     });
   }
 
+  private enqueueSqlOperation<T>(
+    continuesTransaction: boolean,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    if (this.closeRequested && !continuesTransaction) {
+      return Promise.reject(new Error('Secure storage worker is closing'));
+    }
+    return new Promise<T>((resolve, reject) => {
+      this.operationQueue.push({
+        kind: 'sql',
+        continuesTransaction,
+        operation,
+        resolve: value => resolve(value as T),
+        reject,
+      });
+      this.pumpOperationQueue();
+    });
+  }
+
   protected pumpOperationQueue(): void {
     if (this.operationPumpActive || this.coverRetryTimerId !== null) return;
     void this.drainOperationQueue();
@@ -166,7 +197,17 @@ export class SecureStorageWorkerApi {
     this.operationPumpActive = true;
     try {
       while (this.operationQueue.length > 0) {
-        const queued = this.operationQueue[0];
+        let queuedIndex = 0;
+        if (this.sqlTransactionActive) {
+          queuedIndex = this.operationQueue.findIndex(
+            queued => queued.kind === 'sql' && queued.continuesTransaction
+          );
+          // BEGIN already owns the durable boundary. Later cover/lifecycle
+          // work stays queued while continuation SQL advances the same
+          // transaction to COMMIT or ROLLBACK.
+          if (queuedIndex === -1) return;
+        }
+        const queued = this.operationQueue[queuedIndex];
         if (queued.kind === 'cover') {
           const persisted = await this.runCoverPassAttempt();
           if (!persisted) {
@@ -178,7 +219,7 @@ export class SecureStorageWorkerApi {
           continue;
         }
 
-        this.operationQueue.shift();
+        this.operationQueue.splice(queuedIndex, 1);
         try {
           queued.resolve(await queued.operation());
         } catch (error) {
@@ -469,26 +510,38 @@ export class SecureStorageWorkerApi {
     params: unknown[] = [],
     inTransaction: boolean = false
   ): Promise<ExecResult> {
-    const result = execSql(sql, params);
-    const rows = result.rows as unknown[][];
-    const lastInsertRowId = result.lastInsertRowId;
-    result.free();
-
     const trimmed = sql.trimStart();
-    const isCommit = /^COMMIT\b/i.test(trimmed);
-    if (isCommit) {
-      await flushEncrypted();
-    } else if (!inTransaction) {
-      if (
-        /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
-          trimmed
-        )
-      ) {
-        await flushEncrypted();
-      }
-    }
+    const beginsTransaction = /^BEGIN\b/i.test(trimmed);
+    const endsTransaction = /^(COMMIT|ROLLBACK)\b/i.test(trimmed);
 
-    return { rows, lastInsertRowId };
+    return this.enqueueSqlOperation(inTransaction, async () => {
+      await this.ensureDurableStorageRecovered();
+      const result = execSql(sql, params);
+      const rows = result.rows as unknown[][];
+      const lastInsertRowId = result.lastInsertRowId;
+      result.free();
+
+      // Set ownership only after SQLite accepts BEGIN. Release it as soon as
+      // SQLite accepts COMMIT/ROLLBACK; this operation still owns the queue
+      // until its required flush finishes or rejects.
+      if (beginsTransaction) this.sqlTransactionActive = true;
+      if (endsTransaction) this.sqlTransactionActive = false;
+
+      const isCommit = /^COMMIT\b/i.test(trimmed);
+      if (isCommit) {
+        await flushEncrypted();
+      } else if (!inTransaction) {
+        if (
+          /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
+            trimmed
+          )
+        ) {
+          await flushEncrypted();
+        }
+      }
+
+      return { rows, lastInsertRowId };
+    });
   }
 
   /** Apply and flush one complete cover pass, serialized with lifecycle work. */

@@ -41,6 +41,11 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     vi.resetAllMocks();
     wasmMock.flushEncrypted.mockResolvedValue(undefined);
     wasmMock.reloadDurableStorage.mockResolvedValue(undefined);
+    wasmMock.execSql.mockReturnValue({
+      rows: [],
+      lastInsertRowId: 0,
+      free: vi.fn(),
+    });
   });
 
   it('reloads durable state and zeroes the password when allocation throws', async () => {
@@ -300,6 +305,88 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await cover;
     await flush;
     expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps SQL behind earlier cover work', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    let finishCover!: () => void;
+    wasmMock.flushEncrypted
+      .mockReturnValueOnce(
+        new Promise<void>(resolve => {
+          finishCover = resolve;
+        })
+      )
+      .mockResolvedValueOnce(undefined);
+
+    const cover = api.cover();
+    await vi.waitFor(() =>
+      expect(wasmMock.coverTrafficTick).toHaveBeenCalled()
+    );
+    const sql = api.exec('UPDATE userProfile SET username = ?', ['later']);
+    await Promise.resolve();
+    expect(wasmMock.execSql).not.toHaveBeenCalled();
+
+    finishCover();
+    await cover;
+    await sql;
+    expect(wasmMock.execSql).toHaveBeenCalledOnce();
+  });
+
+  it('keeps SQL behind a failed cover retry', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    wasmMock.flushEncrypted
+      .mockRejectedValueOnce(new Error('cover flush failed'))
+      .mockResolvedValue(undefined);
+    const internals = api as unknown as {
+      coverRetryTimerId: ReturnType<typeof setTimeout> | null;
+      pumpOperationQueue: () => void;
+    };
+
+    const cover = api.cover();
+    const sql = api.exec('UPDATE userProfile SET username = ?', ['later']);
+    await vi.waitFor(() => expect(internals.coverRetryTimerId).not.toBeNull());
+    expect(wasmMock.execSql).not.toHaveBeenCalled();
+
+    clearTimeout(internals.coverRetryTimerId!);
+    internals.coverRetryTimerId = null;
+    internals.pumpOperationQueue();
+    await cover;
+    await sql;
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(3);
+    expect(wasmMock.execSql).toHaveBeenCalledOnce();
+  });
+
+  it('keeps cover and lifecycle work outside a SQL transaction', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+
+    await api.exec('BEGIN IMMEDIATE');
+    const cover = api.cover();
+    const close = api.close();
+    await Promise.resolve();
+    expect(wasmMock.coverTrafficTick).not.toHaveBeenCalled();
+    expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
+
+    await api.exec('INSERT INTO userProfile VALUES (?)', ['inside'], true);
+    expect(wasmMock.coverTrafficTick).not.toHaveBeenCalled();
+    expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
+    await api.exec('COMMIT', [], true);
+    await cover;
+    await close;
+
+    expect(wasmMock.execSql.mock.calls.map(([sql]) => sql)).toEqual([
+      'BEGIN IMMEDIATE',
+      'INSERT INTO userProfile VALUES (?)',
+      'COMMIT',
+    ]);
+    expect(wasmMock.coverTrafficTick).toHaveBeenCalledBefore(
+      wasmMock.closeDatabase
+    );
   });
 
   it('allows an explicitly rejected generic flush to be retried', async () => {
