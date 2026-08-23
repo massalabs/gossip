@@ -220,10 +220,12 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
           readStagedPassword(selected),
           syncToICloud
         );
+        // A failed replacement can still carry a retry closure when restoring
+        // the previous singleton credential was incomplete.
+        rollbackBiometric = result.rollback;
         if (!result.success) {
           throw new Error(result.error || 'Biometric setup failed');
         }
-        rollbackBiometric = result.rollback;
       }
 
       for (const [index, account] of stagedAccounts.entries()) {

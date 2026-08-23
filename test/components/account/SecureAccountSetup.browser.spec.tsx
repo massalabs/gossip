@@ -268,6 +268,48 @@ describe('SecureAccountSetup', () => {
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
   });
 
+  it('retains cleanup recovery when failed biometric setup needs restoration', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const onRestart = vi.fn();
+    mocks.rollbackBiometric
+      .mockRejectedValueOnce(new Error('restore still unavailable'))
+      .mockResolvedValueOnce(undefined);
+    mocks.configureBiometricLogin.mockResolvedValue({
+      success: false,
+      error: 'replacement failed',
+      rollback: mocks.rollbackBiometric,
+    });
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={onRestart}
+      />
+    );
+    await userEvent.click(page.getByRole('button', { name: 'alice' }));
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+
+    await expect
+      .element(page.getByText('secure_setup.cleanup_failed', { exact: true }))
+      .toBeInTheDocument();
+    expect(account.passwordBytes.some(byte => byte !== 0)).toBe(true);
+    expect(mocks.initializePreparedAccount).not.toHaveBeenCalled();
+    expect(mocks.logout).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.retry_cleanup' })
+    );
+    await vi.waitFor(() => {
+      expect(mocks.rollbackBiometric).toHaveBeenCalledTimes(2);
+      expect(mocks.logout).toHaveBeenCalledOnce();
+      expect(onRestart).toHaveBeenCalledWith('secure_setup.batch_failed');
+    });
+    expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
+  });
+
   it('persists nothing when any RAM preflight fails', async () => {
     const account = stageAccount('alice', 'alice-password');
     const onRestart = vi.fn();

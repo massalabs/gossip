@@ -60,6 +60,22 @@ interface WebAuthnPasswordPayload {
   ciphertext: string;
 }
 
+class BiometricRestorationRequiredError extends Error {
+  declare readonly originalError: unknown;
+  declare readonly rollback: () => Promise<void>;
+
+  constructor(originalError: unknown, rollback: () => Promise<void>) {
+    super('Previous biometric credential restoration is required');
+    this.name = 'BiometricRestorationRequiredError';
+    // Keep the recovery closure and underlying error out of enumerable log
+    // payloads: native rollback may close over the previous password.
+    Object.defineProperties(this, {
+      originalError: { value: originalError },
+      rollback: { value: rollback },
+    });
+  }
+}
+
 const isNative = Capacitor.isNativePlatform();
 
 function isCapacitorAvailable(): boolean {
@@ -170,6 +186,7 @@ async function replaceNativePassword(
         'Failed to restore previous biometric credential:',
         rollbackError
       );
+      throw new BiometricRestorationRequiredError(error, rollback);
     }
     throw error;
   }
@@ -242,14 +259,23 @@ async function storeWebAuthnPassword(
     );
     const previousPayload = localStorage.getItem(WEBAUTHN_PASSWORD_KEY);
 
+    const rollback = async () => {
+      restoreWebAuthnPassword(previousCredentialId, previousPayload);
+    };
     try {
       localStorage.setItem(WEBAUTHN_PASSWORD_KEY, JSON.stringify(payload));
       localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
-      return async () => {
-        restoreWebAuthnPassword(previousCredentialId, previousPayload);
-      };
+      return rollback;
     } catch (error) {
-      restoreWebAuthnPassword(previousCredentialId, previousPayload);
+      try {
+        await rollback();
+      } catch (rollbackError) {
+        logger.error(
+          'Failed to restore previous WebAuthn credential:',
+          rollbackError
+        );
+        throw new BiometricRestorationRequiredError(error, rollback);
+      }
       throw error;
     }
   } finally {
@@ -354,6 +380,13 @@ export async function configureBiometricLoginWithRollback(
     throw new Error('Biometric authentication is not available');
   } catch (error) {
     logger.error('Biometric credential setup failed:', error);
+    if (error instanceof BiometricRestorationRequiredError) {
+      return {
+        success: false,
+        error: classifyError(error.originalError),
+        rollback: error.rollback,
+      };
+    }
     return {
       success: false,
       error: classifyError(error),
