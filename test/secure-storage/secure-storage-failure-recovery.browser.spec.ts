@@ -127,7 +127,7 @@ function expectCoverChangedEverySlot(
 async function expectBaselineData(
   connection: DatabaseConnection,
   expectedNamespaceData: Uint8Array,
-  expectedUsername = 'durable after generic flush retry'
+  expectedUsername = 'durable after rejected lock retry'
 ): Promise<void> {
   const rows = await connection.db
     .select({
@@ -244,6 +244,30 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     });
     await expect(connection.secureStorageFlush()).rejects.toThrow();
     await connection.secureStorageFlush();
+    await connection.secureStorageLock();
+    await connection.close();
+    openConnections.delete(connection);
+
+    connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    expect(await connection.secureStorageUnlock(baselinePassword)).toBe(true);
+    await expectBaselineData(
+      connection,
+      namespaceData,
+      'durable after generic flush retry'
+    );
+    await testProxy(connection).exec(
+      'UPDATE userProfile SET username = ? WHERE userId = ?',
+      ['durable after rejected lock retry', 'gossip1durablebaseline'],
+      true
+    );
+    const beforeRejectedLock = await snapshotSecureStorage();
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+    });
+    await expect(connection.secureStorageLock()).rejects.toThrow();
+    expect(connection.storageState).toBe('unlocked');
+    expectSnapshotsEqual(beforeRejectedLock, await snapshotSecureStorage());
     await connection.secureStorageLock();
     await connection.close();
     openConnections.delete(connection);
