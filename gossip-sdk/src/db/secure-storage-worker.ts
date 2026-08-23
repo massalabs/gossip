@@ -209,10 +209,11 @@ export class SecureStorageWorkerApi {
 
   /**
    * Attempt one full cover pass over every configured namespace and make it
-   * durable. A failed pass is discarded by reloading the last IndexedDB
-   * snapshot and remains at the head of the FIFO for a fresh retry at the same
-   * random 10-30 second cadence. It never resolves early or lets a later
-   * allocation overtake unpersisted cover work.
+   * durable. A failed pass remains at the head of the FIFO for a fresh retry at
+   * the same random 10-30 second cadence. The VFS restores a rejected flush's
+   * drained writes to pending state; retrying the complete pass avoids replacing
+   * the shared cache while an unrelated SQL flush may still be in flight. The
+   * request never resolves early or lets allocation overtake unpersisted work.
    *
    * Each Rust tick picks a random block index from the current namespace layout
    * and rerandomizes it across every session slot in shuffled order. Therefore
@@ -244,15 +245,6 @@ export class SecureStorageWorkerApi {
       return true;
     } catch (error) {
       logger.debug('[SecureStorage] cover traffic tick failed', error);
-      this.durableRecoveryRequired = true;
-      try {
-        await this.recoverDurableStorage();
-      } catch (recoveryError) {
-        logger.debug(
-          '[SecureStorage] durable cover recovery failed',
-          recoveryError
-        );
-      }
       return false;
     } finally {
       if (this.coverTickPromise === tick) this.coverTickPromise = null;

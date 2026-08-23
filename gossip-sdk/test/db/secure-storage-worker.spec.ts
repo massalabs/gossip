@@ -177,7 +177,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     const create = api.create(0, new Uint8Array([1, 2, 3]));
 
     await vi.waitFor(() => expect(internals.coverRetryTimerId).not.toBeNull());
-    expect(wasmMock.reloadDurableStorage).toHaveBeenCalledOnce();
+    expect(wasmMock.reloadDurableStorage).not.toHaveBeenCalled();
     expect(wasmMock.allocateSession).not.toHaveBeenCalled();
 
     clearTimeout(internals.coverRetryTimerId!);
