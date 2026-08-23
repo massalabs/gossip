@@ -712,7 +712,15 @@ class GossipSdk {
     return state.session.userId;
   }
 
-  /** User's public keys. Throws if no session is open. */
+  /**
+   * User's public keys, borrowed from the active session.
+   *
+   * The returned WASM wrapper remains valid only until `closeSession()` or
+   * `destroy()` begins disposing that session. Callers must not retain or use
+   * it after logout and must not free it themselves.
+   *
+   * @throws If no session is open.
+   */
   get publicKeys(): UserPublicKeys {
     const state = this.requireSession();
     return state.session.ourPk;
