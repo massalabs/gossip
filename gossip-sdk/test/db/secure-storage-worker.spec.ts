@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { COVER_TRAFFIC_NAMESPACES } from '../../src/db/secure-storage-namespaces';
+import type { SecureStorageWorkerApi } from '../../src/db/secure-storage-worker';
 
 const wasmMock = vi.hoisted(() => ({
   init: vi.fn(),
@@ -273,6 +274,87 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await expect(api.unlock(new Uint8Array([2]))).resolves.toBe(false);
     expect(wasmMock.reloadDurableStorage).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps generic flush behind earlier cover work', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    let finishCover!: () => void;
+    wasmMock.flushEncrypted
+      .mockReturnValueOnce(
+        new Promise<void>(resolve => {
+          finishCover = resolve;
+        })
+      )
+      .mockResolvedValueOnce(undefined);
+
+    const cover = api.cover();
+    await vi.waitFor(() =>
+      expect(wasmMock.coverTrafficTick).toHaveBeenCalled()
+    );
+    const flush = api.flush();
+    await Promise.resolve();
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledOnce();
+
+    finishCover();
+    await cover;
+    await flush;
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows an explicitly rejected generic flush to be retried', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    wasmMock.flushEncrypted
+      .mockRejectedValueOnce(new Error('flush failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(api.flush()).rejects.toThrow('flush failed');
+    await expect(api.flush()).resolves.toBeUndefined();
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [
+      'write',
+      (api: {
+        writeNamespaceData: SecureStorageWorkerApi['writeNamespaceData'];
+      }) => api.writeNamespaceData(1, 0, new Uint8Array([1])),
+      wasmMock.writeNamespaceData,
+    ],
+    [
+      'clear',
+      (api: { clearNamespace: SecureStorageWorkerApi['clearNamespace'] }) =>
+        api.clearNamespace(1),
+      wasmMock.clearNamespace,
+    ],
+    [
+      'replace',
+      (api: {
+        replaceNamespaceData: SecureStorageWorkerApi['replaceNamespaceData'];
+      }) => api.replaceNamespaceData(1, new Uint8Array([2])),
+      wasmMock.clearNamespace,
+    ],
+  ])(
+    'recovers durable state before namespace %s',
+    async (_name, run, mutate) => {
+      const { SecureStorageWorkerApi } =
+        await import('../../src/db/secure-storage-worker');
+      const api = new SecureStorageWorkerApi();
+      (
+        api as unknown as { durableRecoveryRequired: boolean }
+      ).durableRecoveryRequired = true;
+
+      await run(api);
+
+      expect(wasmMock.reloadDurableStorage).toHaveBeenCalledOnce();
+      expect(mutate).toHaveBeenCalledOnce();
+      expect(
+        wasmMock.reloadDurableStorage.mock.invocationCallOrder[0]
+      ).toBeLessThan(mutate.mock.invocationCallOrder[0]);
+    }
+  );
 
   it('recovers rejected lifecycle state before a generic flush', async () => {
     const { SecureStorageWorkerApi } =

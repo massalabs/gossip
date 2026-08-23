@@ -508,8 +508,11 @@ export class SecureStorageWorkerApi {
     offset: number,
     data: Uint8Array
   ): Promise<void> {
-    writeNamespaceData(namespace, offset, data);
-    await flushEncrypted();
+    return this.enqueueLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      writeNamespaceData(namespace, offset, data);
+      await flushEncrypted();
+    });
   }
 
   readNamespaceData(
@@ -525,8 +528,11 @@ export class SecureStorageWorkerApi {
   }
 
   async clearNamespace(namespace: number): Promise<void> {
-    clearNamespace(namespace);
-    await flushEncrypted();
+    return this.enqueueLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      clearNamespace(namespace);
+      await flushEncrypted();
+    });
   }
 
   /**
@@ -548,9 +554,12 @@ export class SecureStorageWorkerApi {
     namespace: number,
     data: Uint8Array
   ): Promise<void> {
-    clearNamespace(namespace);
-    writeNamespaceData(namespace, 0, data);
-    await flushEncrypted();
+    return this.enqueueLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      clearNamespace(namespace);
+      writeNamespaceData(namespace, 0, data);
+      await flushEncrypted();
+    });
   }
 
   async flush(): Promise<void> {
