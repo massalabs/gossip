@@ -671,6 +671,41 @@ describe('AccountStore secure-storage account provisioning', () => {
     expect(useAccountStore.getState().userProfile).toBeNull();
   });
 
+  it('continues reverse rollback after one destroy fails and re-locks', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.secureStorageDestroy
+      .mockRejectedValueOnce(new Error('decoy destroy failed'))
+      .mockImplementationOnce(async () => {
+        sdk.storageState = 'locked';
+      });
+    getSdkMock.mockReturnValue(sdk);
+
+    const result = await useAccountStore
+      .getState()
+      .rollbackInitializedAccounts(['alice-password', 'decoy-password']);
+
+    expect(result).toEqual({
+      failedPasswordIndexes: [1],
+      lockFailed: false,
+    });
+    expect(sdk.secureStorageUnlock.mock.calls).toEqual([
+      ['decoy-password'],
+      ['alice-password'],
+    ]);
+    expect(sdk.secureStorageDestroy).toHaveBeenCalledTimes(2);
+    expect(sdk.secureStorageLock).toHaveBeenCalledOnce();
+    expect(sdk.storageState).toBe('locked');
+  });
+
   it('treats an undiscoverable batch password as already rolled back', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
