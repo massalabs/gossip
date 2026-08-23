@@ -28,6 +28,7 @@ vi.mock('../../src/stores/utils/accountHelpers', () => ({
     massaAddress: 'AU1test',
   })),
   fetchMnsDomainsIfEnabled: vi.fn(),
+  wipeAccountPrivateKey: vi.fn(),
 }));
 
 vi.mock('../../src/stores/discussionStore', () => ({
@@ -46,6 +47,8 @@ vi.mock('../../src/stores/selfMessageStore', () => ({
 
 import { useAccountStore } from '../../src/stores/accountStore';
 import { useAppStore } from '../../src/stores/appStore';
+import { shouldInitializeSecureStorage } from '../../src/hooks/useProfileLoader';
+import { STORAGE_KEYS } from '../../src/utils/localStorage';
 import {
   createPasswordSecurity,
   preparePasswordAccount,
@@ -56,6 +59,40 @@ const secureStorageWasmUrl = new URL(
   secureStorageWasmUrlRaw,
   window.location.href
 ).href;
+
+const persistedAppStore = useAppStore as typeof useAppStore & {
+  persist: { rehydrate: () => Promise<void> };
+};
+
+async function rehydrateCreationGrant(
+  persistedValue: string,
+  expected: boolean
+): Promise<void> {
+  useAppStore.setState({ secureAccountCreationAllowed: !expected });
+  localStorage.setItem(STORAGE_KEYS.APP_STORE, persistedValue);
+  await persistedAppStore.persist.rehydrate();
+  expect(useAppStore.getState().secureAccountCreationAllowed).toBe(expected);
+}
+
+async function destroySdkWorker(sdk: GossipSdk): Promise<void> {
+  await sdk.destroy();
+  // Let the browser observe Worker.terminate()/IDB connection release before a
+  // fresh SDK worker opens the same database.
+  await new Promise(resolve => setTimeout(resolve, 0));
+}
+
+async function reopenSecureStorage(domain: string): Promise<GossipSdk> {
+  const reopened = new GossipSdk();
+  await reopened.init({
+    protocolBaseUrl: 'http://127.0.0.1:1',
+    storage: {
+      type: 'secureStorage',
+      domain,
+      secureStorageWasmUrl,
+    },
+  });
+  return reopened;
+}
 
 async function clearSecureStorageIdb(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -123,29 +160,21 @@ describe('secure biometric account-store login integration', () => {
 
   afterEach(async () => {
     const sdk = mocks.sdk;
-    if (sdk?.isSessionOpen) {
-      await sdk.closeSession();
-    }
-    if (sdk?.storageState === 'unlocked') {
-      await sdk.secureStorageLock();
-    }
-    const connection = (
-      sdk as unknown as { _conn?: { close: () => Promise<void> } }
-    )?._conn;
-    await connection?.close();
+    if (sdk) await destroySdkWorker(sdk);
     mocks.sdk = null;
     useAppStore.getState().setSecureAccountCreationAllowed(false);
     await clearSecureStorageIdb();
   }, 60_000);
 
-  it('persists a prepared identity, wipes its source, and reopens it normally', async () => {
+  it('preserves a completed account and revoked grant across real relaunch', async () => {
+    const domain = 'account-store-prepared-integration';
     const sdk = new GossipSdk();
     mocks.sdk = sdk;
     await sdk.init({
       protocolBaseUrl: 'http://127.0.0.1:1',
       storage: {
         type: 'secureStorage',
-        domain: 'account-store-prepared-integration',
+        domain,
         secureStorageWasmUrl,
       },
     });
@@ -175,16 +204,40 @@ describe('secure biometric account-store login integration', () => {
       'prepared-alice'
     );
     expect(sdk.userId).toBe(stableUserId);
+
+    await useAccountStore.getState().logout({ lockedByUser: false });
+    useAppStore.getState().setSecureAccountCreationAllowed(false);
+    const persistedValue = localStorage.getItem(STORAGE_KEYS.APP_STORE);
+    if (!persistedValue) throw new Error('persisted revoked grant missing');
+    await destroySdkWorker(sdk);
+    const reopened = await reopenSecureStorage(domain);
+    mocks.sdk = reopened;
+    await rehydrateCreationGrant(persistedValue, false);
+
+    expect(reopened.storageState).toBe('locked');
+    expect(
+      shouldInitializeSecureStorage(
+        reopened.storageState,
+        useAppStore.getState().secureAccountCreationAllowed
+      )
+    ).toBe(true);
+    await expect(
+      useAccountStore
+        .getState()
+        .initializeAccount('unauthorized', 'unauthorized-password')
+    ).rejects.toThrow('Secure account creation is not currently authorized');
+    expect(await reopened.secureStorageUnlock('prepared-password')).toBe(true);
   }, 180_000);
 
-  it('makes every committed batch password undiscoverable after rollback', async () => {
+  it('keeps a completed rollback authorized after a real backend relaunch', async () => {
+    const domain = 'account-store-rollback-integration';
     const sdk = new GossipSdk();
     mocks.sdk = sdk;
     await sdk.init({
       protocolBaseUrl: 'http://127.0.0.1:1',
       storage: {
         type: 'secureStorage',
-        domain: 'account-store-rollback-integration',
+        domain,
         secureStorageWasmUrl,
       },
     });
@@ -217,6 +270,23 @@ describe('secure biometric account-store login integration', () => {
     expect(sdk.storageState).toBe('locked');
     expect(await sdk.secureStorageUnlock('alice-password')).toBe(false);
     expect(await sdk.secureStorageUnlock('decoy-password')).toBe(false);
+
+    const persistedValue = localStorage.getItem(STORAGE_KEYS.APP_STORE);
+    if (!persistedValue) throw new Error('persisted creation grant missing');
+    await destroySdkWorker(sdk);
+    const reopened = await reopenSecureStorage(domain);
+    mocks.sdk = reopened;
+    await rehydrateCreationGrant(persistedValue, true);
+
+    expect(reopened.storageState).toBe('locked');
+    expect(
+      shouldInitializeSecureStorage(
+        reopened.storageState,
+        useAppStore.getState().secureAccountCreationAllowed
+      )
+    ).toBe(false);
+    expect(await reopened.secureStorageUnlock('alice-password')).toBe(false);
+    expect(await reopened.secureStorageUnlock('decoy-password')).toBe(false);
   }, 180_000);
 
   it('discovers the matching locked slot by password and re-locks an empty slot', async () => {
