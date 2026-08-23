@@ -20,6 +20,7 @@ type FaultProxy = {
   injectIndexedDbFaultsForTesting(plan: FaultPlan): Promise<void>;
   clearIndexedDbFaultsForTesting(): Promise<void>;
   retryFailedCoverNowForTesting(): Promise<boolean>;
+  stopPeriodicCoverForTesting(): Promise<void>;
 };
 
 type RawSnapshot = Map<string, Uint8Array>;
@@ -85,14 +86,14 @@ async function snapshotSecureStorage(): Promise<RawSnapshot> {
   }
 }
 
-function expectSameEntry(
-  before: RawSnapshot,
-  after: RawSnapshot,
-  key: string
+function expectSnapshotsEqual(
+  expected: RawSnapshot,
+  actual: RawSnapshot
 ): void {
-  expect(Array.from(after.get(key) ?? [])).toEqual(
-    Array.from(before.get(key) ?? [])
-  );
+  expect(new Set(actual.keys())).toEqual(new Set(expected.keys()));
+  for (const [key, value] of expected) {
+    expect(Array.from(actual.get(key) ?? []), key).toEqual(Array.from(value));
+  }
 }
 
 function expectCoverChangedEverySlot(
@@ -171,6 +172,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     const recoveryRejectedPassword = 'recovery-rejected-password';
     const namespaceData = new Uint8Array([7, 6, 5, 4, 3, 2, 1]);
     const connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
 
     await connection.secureStorageCreate(0, baselinePassword);
     const now = new Date();
@@ -232,45 +234,84 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       connection.secureStorageCreate(1, rejectedPassword)
     ).rejects.toThrow();
     const afterRejectedCreate = await snapshotSecureStorage();
-    expectSameEntry(afterCover, afterRejectedCreate, 's:1:kp');
+    expectSnapshotsEqual(afterCover, afterRejectedCreate);
     expect(await connection.secureStorageUnlock(rejectedPassword)).toBe(false);
     expect(await connection.secureStorageUnlock(baselinePassword)).toBe(true);
     await expectBaselineData(connection, namespaceData);
     await connection.secureStorageLock();
 
+    const beforeRecoveryRejected = await snapshotSecureStorage();
     await testProxy(connection).injectIndexedDbFaultsForTesting({
       readwrite: 1,
-      readonly: 3,
+      readonly: 6,
     });
     await expect(
       connection.secureStorageCreate(1, recoveryRejectedPassword)
     ).rejects.toThrow('recovery-required');
+    await expect(
+      connection.secureStorageWriteNamespaceData(
+        SESSION_BLOB_NAMESPACE,
+        0,
+        new Uint8Array([99])
+      )
+    ).rejects.toThrow();
+    await expect(
+      connection.secureStorageClearNamespace(SESSION_BLOB_NAMESPACE)
+    ).rejects.toThrow();
+    await expect(
+      connection.secureStorageReplaceNamespaceData(
+        SESSION_BLOB_NAMESPACE,
+        new Uint8Array([98])
+      )
+    ).rejects.toThrow();
     await expect(connection.secureStorageFlush()).rejects.toThrow();
     await expect(connection.close()).rejects.toThrow();
     await connection.close();
     openConnections.delete(connection);
 
     const afterGuardedClose = await snapshotSecureStorage();
-    expectSameEntry(afterCover, afterGuardedClose, 's:1:kp');
+    expectSnapshotsEqual(beforeRecoveryRejected, afterGuardedClose);
 
     const reopened = await openConnection(domain);
-    try {
-      expect(await reopened.secureStorageUnlock(rejectedPassword)).toBe(false);
-      expect(await reopened.secureStorageUnlock(recoveryRejectedPassword)).toBe(
-        false
-      );
-      expect(await reopened.secureStorageUnlock(baselinePassword)).toBe(true);
-      await expectBaselineData(reopened, namespaceData);
-      await reopened.secureStorageLock();
-    } finally {
-      await reopened.close();
-      openConnections.delete(reopened);
-    }
-
-    const afterRelaunch = await snapshotSecureStorage();
-    expect(new Set(afterRelaunch.keys())).toEqual(
+    await testProxy(reopened).stopPeriodicCoverForTesting();
+    const afterRelaunchCover = await snapshotSecureStorage();
+    expect(new Set(afterRelaunchCover.keys())).toEqual(
       new Set(afterGuardedClose.keys())
     );
-    expectCoverChangedEverySlot(afterGuardedClose, afterRelaunch);
+    expectCoverChangedEverySlot(afterGuardedClose, afterRelaunchCover);
+
+    expect(await reopened.secureStorageUnlock(rejectedPassword)).toBe(false);
+    expect(await reopened.secureStorageUnlock(recoveryRejectedPassword)).toBe(
+      false
+    );
+    expect(await reopened.secureStorageUnlock(baselinePassword)).toBe(true);
+    await expectBaselineData(reopened, namespaceData);
+
+    const beforeRejectedDestroy = await snapshotSecureStorage();
+    await testProxy(reopened).injectIndexedDbFaultsForTesting({ readwrite: 1 });
+    await expect(
+      reopened.secureStorageDestroy([...COVER_TRAFFIC_NAMESPACES])
+    ).rejects.toThrow();
+    const afterRejectedDestroy = await snapshotSecureStorage();
+    expectSnapshotsEqual(beforeRejectedDestroy, afterRejectedDestroy);
+
+    expect(await reopened.secureStorageUnlock(baselinePassword)).toBe(true);
+    await expectBaselineData(reopened, namespaceData);
+    await reopened.secureStorageLock();
+    await reopened.close();
+    openConnections.delete(reopened);
+
+    const destroyRelaunch = await openConnection(domain);
+    await testProxy(destroyRelaunch).stopPeriodicCoverForTesting();
+    try {
+      expect(await destroyRelaunch.secureStorageUnlock(baselinePassword)).toBe(
+        true
+      );
+      await expectBaselineData(destroyRelaunch, namespaceData);
+      await destroyRelaunch.secureStorageLock();
+    } finally {
+      await destroyRelaunch.close();
+      openConnections.delete(destroyRelaunch);
+    }
   }, 180_000);
 });
