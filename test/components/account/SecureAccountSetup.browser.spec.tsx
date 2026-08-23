@@ -5,6 +5,20 @@ import { page, userEvent } from 'vitest/browser';
 import SecureAccountSetup from '../../../src/components/account/SecureAccountSetup';
 import { stageAccount } from '../../../src/components/account/stagedAccount';
 import { useAppStore } from '../../../src/stores/appStore';
+import { STORAGE_KEYS } from '../../../src/utils/localStorage';
+
+const persistedAppStore = useAppStore as typeof useAppStore & {
+  persist: { rehydrate: () => Promise<void> };
+};
+
+async function rehydrateCreationGrant(expected: boolean): Promise<void> {
+  const persistedValue = localStorage.getItem(STORAGE_KEYS.APP_STORE);
+  if (!persistedValue) throw new Error('persisted app state missing');
+  useAppStore.setState({ secureAccountCreationAllowed: !expected });
+  localStorage.setItem(STORAGE_KEYS.APP_STORE, persistedValue);
+  await persistedAppStore.persist.rehydrate();
+  expect(useAppStore.getState().secureAccountCreationAllowed).toBe(expected);
+}
 
 const mocks = vi.hoisted(() => ({
   IncompleteOnboardingSlotCleanupError: class extends Error {},
@@ -236,6 +250,7 @@ describe('SecureAccountSetup', () => {
       expect(onComplete).toHaveBeenCalledOnce();
     });
     expect(useAppStore.getState().secureAccountCreationAllowed).toBe(false);
+    await rehydrateCreationGrant(false);
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
   });
 
@@ -380,6 +395,8 @@ describe('SecureAccountSetup', () => {
     });
     expect(onComplete).not.toHaveBeenCalled();
     expect(mocks.initializePreparedAccount).toHaveBeenCalledTimes(1);
+    expect(useAppStore.getState().secureAccountCreationAllowed).toBe(true);
+    await rehydrateCreationGrant(true);
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
   });
 
