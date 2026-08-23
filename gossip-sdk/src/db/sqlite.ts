@@ -23,7 +23,12 @@ import { runMigrations } from './migrate.js';
 import { execStatements } from './exec-utils.js';
 import type { SecureStorageWorkerProxy } from './secure-storage-worker.js';
 import type { SecureStorageNativePlugin } from './secure-storage-native.js';
+import {
+  requiresSecureStorageRecovery,
+  SecureStorageRecoveryRequiredError,
+} from './secure-storage-errors.js';
 import { SESSION_COUNT } from './secure-storage-namespaces.js';
+export { SecureStorageRecoveryRequiredError } from './secure-storage-errors.js';
 export {
   SQL_NAMESPACE,
   SESSION_BLOB_NAMESPACE,
@@ -694,11 +699,21 @@ export class DatabaseConnection {
       } else {
         // Transfer the buffer so no intermediate copy lingers in the
         // MessagePort queue. After transfer, pwBytes is detached.
-        await this.requireSecureProxy().create(
-          slot,
-          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block, which already handles the detached state.
-          Comlink.transfer(pwBytes, [pwBytes.buffer])
-        );
+        try {
+          await this.requireSecureProxy().create(
+            slot,
+            // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block, which already handles the detached state.
+            Comlink.transfer(pwBytes, [pwBytes.buffer])
+          );
+        } catch (error) {
+          if (requiresSecureStorageRecovery(error)) {
+            // Worker allocation remains unlocked until caller-driven cleanup,
+            // or until the worker can reload the last durable snapshot.
+            this.state.storageState = 'unlocked';
+            throw new SecureStorageRecoveryRequiredError(error);
+          }
+          throw error;
+        }
       }
     } finally {
       // Zero the plaintext password on every exit path, including when
@@ -769,10 +784,17 @@ export class DatabaseConnection {
     // that is mid-lock.
     this.state.drizzleDb = null;
     this.state.storageState = 'locked';
-    if (this.state.useNativePlugin) {
-      await this.requireNativePlugin().lockSession();
-    } else {
-      await this.requireSecureProxy().lock();
+    try {
+      if (this.state.useNativePlugin) {
+        await this.requireNativePlugin().lockSession();
+      } else {
+        await this.requireSecureProxy().lock();
+      }
+    } catch (error) {
+      // Access remains blocked because Drizzle was cleared, but the underlying
+      // session may still hold keys. Preserve a retryable lifecycle state.
+      this.state.storageState = 'unlocked';
+      throw error;
     }
   }
 
@@ -792,10 +814,20 @@ export class DatabaseConnection {
   async secureStorageDestroy(namespaces: number[]): Promise<void> {
     this.state.drizzleDb = null;
     this.state.storageState = 'locked';
-    if (this.state.useNativePlugin) {
-      await this.requireNativePlugin().destroySession({ namespaces });
-    } else {
-      await this.requireSecureProxy().destroy(Uint8Array.from(namespaces));
+    try {
+      if (this.state.useNativePlugin) {
+        await this.requireNativePlugin().destroySession({ namespaces });
+      } else {
+        await this.requireSecureProxy().destroy(Uint8Array.from(namespaces));
+      }
+    } catch (error) {
+      // Native lifecycle failures leave the original session available for a
+      // retry. The worker path reloads durable state and is already locked.
+      if (this.state.useNativePlugin) this.state.storageState = 'unlocked';
+      if (requiresSecureStorageRecovery(error)) {
+        throw new SecureStorageRecoveryRequiredError(error);
+      }
+      throw error;
     }
   }
 

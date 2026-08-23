@@ -4,6 +4,14 @@ export function initSecureStorage(domain: string, backend: string): Promise<void
 export function idbHasData(): Promise<boolean>;
 export function provisionStorage(): void;
 export function allocateSession(slot: number, password: Uint8Array): void;
+/**
+ * Discard pending IDB mutations and reload the last committed snapshot.
+ *
+ * Called by the worker when an allocation or destruction transaction rejects.
+ * This prevents a later cover-traffic flush from durably carrying the failed
+ * lifecycle operation. The recovered state is always locked.
+ */
+export function reloadDurableStorage(): Promise<void>;
 export function flushEncrypted(): Promise<void>;
 export function openDatabase(): void;
 export function closeDatabase(): void;
@@ -83,6 +91,7 @@ export interface InitOutput {
   readonly openDatabase: () => [number, number];
   readonly provisionStorage: () => [number, number];
   readonly readNamespaceData: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly reloadDurableStorage: () => any;
   readonly unlockSession: (a: number, b: number) => [number, number, number];
   readonly writeNamespaceData: (a: number, b: number, c: number, d: number) => [number, number];
   readonly __wbg_wbg_rayon_poolbuilder_free: (a: number, b: number) => void;
@@ -110,11 +119,11 @@ export interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
+  readonly closure51_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+  readonly closure98_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure664_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (a: number, b: number) => void;
-  readonly closure38_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
-  readonly closure95_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure661_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure717_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure720_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

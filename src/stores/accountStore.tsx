@@ -1,6 +1,10 @@
 import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
-import { encodeUserId, UserProfile } from '@massalabs/gossip-sdk';
+import {
+  encodeUserId,
+  UserProfile,
+  SecureStorageRecoveryRequiredError,
+} from '@massalabs/gossip-sdk';
 
 import { generateMnemonic, EncryptionKey } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
@@ -327,17 +331,46 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await sdk.secureStorageCreate(slot, secret);
         onboardingAllocatedSlots.add(slot);
       } catch (error) {
-        if (sdk.storageState === 'unlocked') {
-          try {
+        let cleanupIncomplete =
+          error instanceof SecureStorageRecoveryRequiredError;
+
+        try {
+          if (sdk.storageState === 'unlocked') {
             await sdk.secureStorageDestroy();
-          } catch (destroyError) {
+            cleanupIncomplete = false;
+          }
+        } catch (destroyError) {
+          cleanupIncomplete = true;
+          logger.error(
+            'Failed to destroy interrupted secure account:',
+            destroyError
+          );
+        }
+
+        // A rejected lifecycle RPC may have committed or rolled back before
+        // its response was lost. Probe with the known in-flight password: a
+        // miss proves the tentative slot is already absent.
+        if (cleanupIncomplete && sdk.storageState === 'locked') {
+          try {
+            const unlocked = await sdk.secureStorageUnlock(secret);
+            if (!unlocked) {
+              cleanupIncomplete = false;
+            } else {
+              await sdk.secureStorageDestroy();
+              cleanupIncomplete = false;
+            }
+          } catch (cleanupError) {
             logger.error(
-              'Failed to destroy interrupted secure account:',
-              destroyError
+              'Failed to verify interrupted secure account cleanup:',
+              cleanupError
             );
           }
         }
+
         freeEncryptionKey(encryptionKey);
+        if (cleanupIncomplete) {
+          throw new IncompleteOnboardingSlotCleanupError(error);
+        }
         throw error;
       }
     }
@@ -509,11 +542,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
               await sdk.secureStorageLock();
             }
             const unlocked = await sdk.secureStorageUnlock(passwords[index]);
-            if (!unlocked) {
-              throw new Error(
-                'Failed to unlock an onboarding account for rollback'
-              );
-            }
+            // The prior destroy may have committed while its response was
+            // lost. A known batch password that no longer discovers a slot
+            // already satisfies the rollback invariant.
+            if (!unlocked) continue;
             await sdk.secureStorageDestroy();
           } catch (error) {
             failedPasswordIndexes.push(index);

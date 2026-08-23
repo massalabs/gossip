@@ -14,6 +14,7 @@ import { logger } from '../utils/logs.js';
  */
 
 import * as Comlink from 'comlink';
+import { SECURE_STORAGE_RECOVERY_REQUIRED } from './secure-storage-errors.js';
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — generated WASM module path resolved at build time
@@ -26,6 +27,7 @@ import init, {
   lockSession,
   coverTrafficTick,
   flushEncrypted,
+  reloadDurableStorage,
   openDatabase,
   closeDatabase,
   execSql,
@@ -66,6 +68,12 @@ export interface ExecResult {
   lastInsertRowId: number;
 }
 
+function errorWithCause(message: string, cause: unknown): Error {
+  const error = new Error(message) as Error & { cause?: unknown };
+  error.cause = cause;
+  return error;
+}
+
 function randomCoverInterval(): number {
   // crypto.getRandomValues so a weak Math.random stream cannot predict
   // tick timing and correlate cover with real activity (PD).
@@ -77,6 +85,32 @@ function randomCoverInterval(): number {
 export class SecureStorageWorkerApi {
   private coverTimerId: ReturnType<typeof setTimeout> | null = null;
   private coverTickInProgress = false;
+  private durableRecoveryRequired = false;
+
+  private async recoverDurableStorage(): Promise<void> {
+    await reloadDurableStorage();
+    this.durableRecoveryRequired = false;
+  }
+
+  private async ensureDurableStorageRecovered(): Promise<void> {
+    if (this.durableRecoveryRequired) await this.recoverDurableStorage();
+  }
+
+  private async recoverRejectedLifecycleOperation(
+    operation: 'create' | 'destroy',
+    operationError: unknown
+  ): Promise<never> {
+    this.durableRecoveryRequired = true;
+    try {
+      await this.recoverDurableStorage();
+    } catch (recoveryError) {
+      throw errorWithCause(
+        `${SECURE_STORAGE_RECOVERY_REQUIRED} ${operation} failed and durable state could not be reloaded`,
+        { operationError, recoveryError }
+      );
+    }
+    throw operationError;
+  }
 
   /**
    * Run one cover-traffic pass over every cover namespace and flush.
@@ -101,7 +135,7 @@ export class SecureStorageWorkerApi {
    * interval regardless of success/failure.
    */
   private async runCoverTick(): Promise<void> {
-    if (this.coverTickInProgress) return;
+    if (this.coverTickInProgress || this.durableRecoveryRequired) return;
     this.coverTickInProgress = true;
     try {
       for (const ns of COVER_TRAFFIC_NAMESPACES) {
@@ -198,13 +232,27 @@ export class SecureStorageWorkerApi {
    * underlying DB is open and durable.
    */
   async create(slot: number, password: Uint8Array): Promise<void> {
+    await this.ensureDurableStorageRecovered();
     try {
       allocateSession(slot, password);
     } finally {
       password.fill(0);
     }
-    await flushEncrypted();
-    openDatabase();
+    try {
+      await flushEncrypted();
+    } catch (error) {
+      return this.recoverRejectedLifecycleOperation('create', error);
+    }
+    try {
+      openDatabase();
+    } catch (error) {
+      // The allocation is already durable and remains unlocked for immediate
+      // caller-driven destruction. Mark it as requiring cleanup explicitly.
+      throw errorWithCause(
+        `${SECURE_STORAGE_RECOVERY_REQUIRED} created storage could not be opened`,
+        error
+      );
+    }
   }
 
   /**
@@ -217,6 +265,7 @@ export class SecureStorageWorkerApi {
    * resolves.
    */
   async unlock(password: Uint8Array): Promise<boolean> {
+    await this.ensureDurableStorageRecovered();
     let ok: boolean;
     try {
       ok = unlockSession(password);
@@ -230,6 +279,7 @@ export class SecureStorageWorkerApi {
   }
 
   async lock(): Promise<void> {
+    await this.ensureDurableStorageRecovered();
     closeDatabase();
     await flushEncrypted();
     lockSession();
@@ -254,9 +304,14 @@ export class SecureStorageWorkerApi {
    * and the namespaces no longer hold the user's encrypted data.
    */
   async destroy(namespaces: Uint8Array): Promise<void> {
-    closeDatabase();
-    destroySession(namespaces);
-    await flushEncrypted();
+    await this.ensureDurableStorageRecovered();
+    try {
+      closeDatabase();
+      destroySession(namespaces);
+      await flushEncrypted();
+    } catch (error) {
+      return this.recoverRejectedLifecycleOperation('destroy', error);
+    }
   }
 
   /**

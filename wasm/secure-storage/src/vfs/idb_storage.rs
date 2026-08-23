@@ -155,6 +155,18 @@ impl IdbBlockStorage {
         has_any_data(&db).await
     }
 
+    /// Discard every pending in-memory mutation and reload the last durable
+    /// IndexedDB snapshot. Lifecycle operations use this after a rejected
+    /// transaction so cover traffic cannot later commit a failed allocation or
+    /// destruction.
+    pub async fn reload_durable(&self) -> std::result::Result<(), JsValue> {
+        let entries = load_all_entries(&self.db).await?;
+        let entries_iter = entries.iter().map(|(k, v)| (k.as_str(), v.as_slice()));
+        let (state, _skipped) = IdbStorageState::from_entries(entries_iter);
+        *self.state.borrow_mut() = state;
+        Ok(())
+    }
+
     /// Persist all pending puts and deletes to IDB in a single atomic
     /// transaction.
     ///

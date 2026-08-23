@@ -3,6 +3,7 @@ import {
   IncompleteOnboardingSlotCleanupError,
   useAccountStore,
 } from '../../src/stores/accountStore';
+import { SecureStorageRecoveryRequiredError } from '@massalabs/gossip-sdk';
 
 // Shared spy so individual test suites can assert on it
 const skipHistoricalSpy = vi.fn();
@@ -456,6 +457,25 @@ describe('AccountStore secure-storage account provisioning', () => {
     }
   });
 
+  it('retains the in-flight password when rejected creation cleanup is unproved', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      throw new SecureStorageRecoveryRequiredError(
+        new Error('create recovery failed')
+      );
+    });
+    sdk.secureStorageDestroy.mockRejectedValue(new Error('destroy failed'));
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore.getState().initializeAccount('alice', 'alice-password')
+    ).rejects.toBeInstanceOf(IncompleteOnboardingSlotCleanupError);
+    expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
+  });
+
   it('does not overwrite hidden slots without a first-install creation grant', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
@@ -490,7 +510,7 @@ describe('AccountStore secure-storage account provisioning', () => {
     expect(useAccountStore.getState().userProfile).toBeNull();
   });
 
-  it('attempts every batch rollback even when one account cannot be destroyed', async () => {
+  it('treats an undiscoverable batch password as already rolled back', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
     sdk.storageState = 'locked';
@@ -504,7 +524,7 @@ describe('AccountStore secure-storage account provisioning', () => {
       .rollbackInitializedAccounts(['alice-password', 'decoy-password']);
 
     expect(result).toEqual({
-      failedPasswordIndexes: [1],
+      failedPasswordIndexes: [],
       lockFailed: false,
     });
 

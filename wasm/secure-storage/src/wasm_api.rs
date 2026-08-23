@@ -375,6 +375,42 @@ pub fn clear_namespace(namespace: u8) -> Result<(), JsValue> {
     })
 }
 
+/// Discard pending IDB mutations and reload the last committed snapshot.
+///
+/// Called by the worker when an allocation or destruction transaction rejects.
+/// This prevents a later cover-traffic flush from durably carrying the failed
+/// lifecycle operation. The recovered state is always locked.
+#[wasm_bindgen(js_name = reloadDurableStorage)]
+pub async fn reload_durable_storage() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+
+    // Same program-lifetime pointer invariant as `flush_encrypted` below: the
+    // backend is initialized once and never moved or replaced.
+    let idb_ptr: Option<*const IdbBlockStorage> = with_app_state(|app| {
+        let state = app.state.borrow();
+        Ok(match &state.backend {
+            Backend::Idb(idb) => Some(idb as *const _),
+            Backend::Memory(_) => None,
+        })
+    })?;
+
+    let Some(ptr) = idb_ptr else {
+        return Err(JsValue::from_str(
+            "reloadDurableStorage is only available for IndexedDB storage",
+        ));
+    };
+
+    // SAFETY: the backend lives in the leaked AppState and is never moved.
+    unsafe { &*ptr }.reload_durable().await?;
+
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        state.session = None;
+        state.namespace_states.clear();
+        Ok(())
+    })
+}
+
 #[wasm_bindgen(js_name = flushEncrypted)]
 pub async fn flush_encrypted() -> Result<(), JsValue> {
     // We need a &IdbBlockStorage across the .await of persist_dirty().
