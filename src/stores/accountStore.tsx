@@ -305,8 +305,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           throw error;
         }
         if (collides) {
-          await sdk.secureStorageLock();
-          freeEncryptionKey(encryptionKey);
+          try {
+            await sdk.secureStorageLock();
+          } finally {
+            // The candidate key is still caller-owned. A rejected re-lock must
+            // not strand it while the existing slot remains retryably unlocked.
+            freeEncryptionKey(encryptionKey);
+          }
           throw new Error('Password already in use by another account');
         }
         // unlock returned false → state stays 'locked', nothing to undo.

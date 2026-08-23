@@ -622,6 +622,34 @@ describe('AccountStore secure-storage account provisioning', () => {
     expect(sdk.secureStorageCreate).not.toHaveBeenCalled();
   });
 
+  it('frees the candidate key when collision re-locking fails', async () => {
+    const sdk = makeSdkMock();
+    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
+    const prepared = {
+      mnemonicBytes: new TextEncoder().encode('word '.repeat(24).trim()),
+      security: mockProfile().security,
+      encryptedSession: new Uint8Array([1, 2, 3]),
+    };
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockResolvedValue(true);
+    sdk.secureStorageLock.mockRejectedValue(new Error('lock failed'));
+    authSpy.mockResolvedValue({
+      mnemonic: new TextDecoder().decode(prepared.mnemonicBytes),
+      encryptionKey,
+    });
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore
+        .getState()
+        .initializePreparedAccount('alice', 'existing-password', prepared)
+    ).rejects.toThrow('lock failed');
+
+    expect(encryptionKey.free).toHaveBeenCalledOnce();
+    expect(sdk.secureStorageCreate).not.toHaveBeenCalled();
+  });
+
   it('destroys every committed batch account in reverse order', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
