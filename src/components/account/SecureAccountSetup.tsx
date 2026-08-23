@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Capacitor } from '@capacitor/core';
 import {
@@ -10,7 +10,11 @@ import {
   Plus,
   Check,
 } from 'react-feather';
-import { useAccountStore } from '../../stores/accountStore';
+import {
+  IncompleteOnboardingSlotCleanupError,
+  useAccountStore,
+} from '../../stores/accountStore';
+import { useAppStore } from '../../stores/appStore';
 import {
   checkBiometricAvailability,
   configureBiometricLoginWithRollback,
@@ -35,6 +39,12 @@ import {
   StagedAccount,
   wipeStagedAccounts,
 } from './stagedAccount';
+
+interface FailureRecovery {
+  pendingAccountIndexes: number[];
+  rollbackBiometric?: () => Promise<void>;
+  biometricRestored: boolean;
+}
 
 interface SecureAccountSetupProps {
   initialAccount: StagedAccount;
@@ -68,6 +78,8 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const [addingAccount, setAddingAccount] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [lockRecoveryPending, setLockRecoveryPending] = useState(false);
+  const [failureRecoveryPending, setFailureRecoveryPending] = useState(false);
+  const failureRecovery = useRef<FailureRecovery | null>(null);
   const [showICloudModal, setShowICloudModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,6 +115,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     setLockRecoveryPending(false);
     try {
       await logout({ lockedByUser: false });
+      useAppStore.getState().setSecureAccountCreationAllowed(false);
       await onComplete();
     } catch (logoutError) {
       logger.error(
@@ -114,12 +127,78 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     }
   };
 
+  const retryFailureRecovery = async (recovery = failureRecovery.current) => {
+    if (!recovery) return;
+
+    setIsFinalizing(true);
+    setFailureRecoveryPending(false);
+    let incomplete = false;
+
+    if (recovery.pendingAccountIndexes.length > 0) {
+      try {
+        const attemptedIndexes = recovery.pendingAccountIndexes;
+        const result = await rollbackInitializedAccounts(
+          attemptedIndexes.map(index =>
+            readStagedPassword(stagedAccounts[index])
+          )
+        );
+        recovery.pendingAccountIndexes = result.failedPasswordIndexes.map(
+          index => attemptedIndexes[index]
+        );
+        incomplete =
+          result.lockFailed || recovery.pendingAccountIndexes.length > 0;
+      } catch (rollbackError) {
+        incomplete = true;
+        logger.error(
+          'Failed to roll back onboarding account batch:',
+          rollbackError
+        );
+      }
+    }
+
+    if (!recovery.biometricRestored && recovery.rollbackBiometric) {
+      try {
+        await recovery.rollbackBiometric();
+        recovery.biometricRestored = true;
+      } catch (rollbackError) {
+        incomplete = true;
+        logger.error(
+          'Failed to restore biometric login after onboarding error:',
+          rollbackError
+        );
+      }
+    }
+
+    if (!incomplete) {
+      try {
+        await logout({ lockedByUser: false });
+      } catch (logoutError) {
+        incomplete = true;
+        logger.error('Failed to lock after onboarding error:', logoutError);
+      }
+    }
+
+    if (incomplete) {
+      failureRecovery.current = recovery;
+      setFailureRecoveryPending(true);
+      setIsFinalizing(false);
+      return;
+    }
+
+    failureRecovery.current = null;
+    wipeStagedAccounts(stagedAccounts);
+    const appState = useAppStore.getState();
+    appState.setIsInitialized(!appState.secureAccountCreationAllowed);
+    onRestart(t('secure_setup.batch_failed'));
+  };
+
   const finalizeAccounts = async (syncToICloud = false) => {
     setIsFinalizing(true);
     setError(null);
 
     const preparedAccounts: PreparedPasswordAccount[] = [];
     let persistedAccounts = 0;
+    let currentPersistenceIndex: number | null = null;
     let failure: unknown;
     let rollbackBiometric: (() => Promise<void>) | undefined;
 
@@ -148,58 +227,47 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       }
 
       for (const [index, account] of stagedAccounts.entries()) {
+        currentPersistenceIndex = index;
         await initializePreparedAccount(
           account.username,
           readStagedPassword(account),
           preparedAccounts[index]
         );
         persistedAccounts += 1;
+        currentPersistenceIndex = null;
       }
     } catch (caught) {
       failure = caught;
       logger.error('Error finalizing secure account setup:', caught);
 
-      if (persistedAccounts > 0) {
-        try {
-          await rollbackInitializedAccounts(
-            stagedAccounts.slice(0, persistedAccounts).map(readStagedPassword)
-          );
-        } catch (rollbackError) {
-          logger.error(
-            'Failed to roll back onboarding account batch:',
-            rollbackError
-          );
-        }
+      const pendingAccountIndexes = Array.from(
+        { length: persistedAccounts },
+        (_, index) => index
+      );
+      if (
+        caught instanceof IncompleteOnboardingSlotCleanupError &&
+        currentPersistenceIndex !== null
+      ) {
+        pendingAccountIndexes.push(currentPersistenceIndex);
       }
 
-      if (rollbackBiometric) {
-        try {
-          await rollbackBiometric();
-        } catch (rollbackError) {
-          logger.error(
-            'Failed to restore biometric login after onboarding error:',
-            rollbackError
-          );
-        }
-      }
-
-      try {
-        await logout({ lockedByUser: false });
-      } catch (logoutError) {
-        logger.error('Failed to lock after onboarding error:', logoutError);
-      }
+      failureRecovery.current = {
+        pendingAccountIndexes,
+        rollbackBiometric,
+        biometricRestored: rollbackBiometric === undefined,
+      };
     } finally {
       for (const prepared of preparedAccounts) {
         wipePreparedPasswordAccount(prepared);
       }
-      wipeStagedAccounts(stagedAccounts);
     }
 
     if (failure) {
-      onRestart(t('secure_setup.batch_failed'));
+      await retryFailureRecovery();
       return;
     }
 
+    wipeStagedAccounts(stagedAccounts);
     // Every account, including a single-account batch, returns to login. Only a
     // real post-onboarding unlock may publish that stable account's public key.
     await lockPersistedAccountsAndComplete();
@@ -212,6 +280,33 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     }
     void finalizeAccounts(false);
   };
+
+  if (failureRecoveryPending) {
+    return (
+      <PageLayout
+        header={<PageHeader title={t('secure_setup.cleanup_failed_title')} />}
+        className="app-max-w mx-auto"
+        contentClassName="p-4 flex flex-col justify-center"
+      >
+        <div className="text-center space-y-6">
+          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto" />
+          <p className="text-sm text-muted-foreground">
+            {t('secure_setup.cleanup_failed')}
+          </p>
+          <Button
+            type="button"
+            variant="primary"
+            fullWidth
+            loading={isFinalizing}
+            disabled={isFinalizing}
+            onClick={() => void retryFailureRecovery()}
+          >
+            {t('secure_setup.retry_cleanup')}
+          </Button>
+        </div>
+      </PageLayout>
+    );
+  }
 
   if (lockRecoveryPending) {
     return (

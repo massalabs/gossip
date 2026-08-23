@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { useAccountStore } from '../../src/stores/accountStore';
+import {
+  IncompleteOnboardingSlotCleanupError,
+  useAccountStore,
+} from '../../src/stores/accountStore';
 
 // Shared spy so individual test suites can assert on it
 const skipHistoricalSpy = vi.fn();
 const authSpy = vi.hoisted(() => vi.fn());
 const configureBiometricSpy = vi.hoisted(() => vi.fn());
+const appState = vi.hoisted(() => ({ secureAccountCreationAllowed: true }));
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
@@ -115,10 +119,13 @@ vi.mock('@massalabs/gossip-sdk', async () => {
     generateUserKeys: vi.fn(async () => ({
       secret_keys: () => ({
         massa_secret_key: new Uint8Array(32),
+        free: vi.fn(),
       }),
       public_keys: () => ({
         derive_id: () => new Uint8Array(32),
+        free: vi.fn(),
       }),
+      free: vi.fn(),
       evm_address: () => '0x9858EfFD232B4033E47d90003D41EC34EcaEda94',
       massa_address: () =>
         'AU1CKrPb3a1Aj3JJkeTuHJoMswGVDSdgg1ynK7QMMMKHVYjinBfq',
@@ -169,6 +176,7 @@ vi.mock('../../src/stores/appStore', () => ({
   useAppStore: {
     getState: () => ({
       mnsEnabled: false,
+      secureAccountCreationAllowed: appState.secureAccountCreationAllowed,
       setIsInitialized: vi.fn(),
       fetchMnsDomains: vi.fn(async () => {}),
       networkName: 'mainnet',
@@ -398,6 +406,7 @@ describe('AccountStore skipHistorical behavior', () => {
 describe('AccountStore secure-storage account provisioning', () => {
   beforeEach(() => {
     authSpy.mockReset();
+    appState.secureAccountCreationAllowed = true;
     getSdkMock.mockImplementation(makeSdkMock);
     useAccountStore.setState({
       userProfile: null,
@@ -447,6 +456,19 @@ describe('AccountStore secure-storage account provisioning', () => {
     }
   });
 
+  it('does not overwrite hidden slots without a first-install creation grant', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    appState.secureAccountCreationAllowed = false;
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore.getState().initializeAccount('alice', 'alice-password')
+    ).rejects.toThrow('Secure account creation is not currently authorized');
+    expect(sdk.secureStorageCreate).not.toHaveBeenCalled();
+  });
+
   it('destroys every committed batch account in reverse order', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
@@ -454,9 +476,11 @@ describe('AccountStore secure-storage account provisioning', () => {
     sdk.secureStorageUnlock.mockResolvedValue(true);
     getSdkMock.mockReturnValue(sdk);
 
-    await useAccountStore
+    const result = await useAccountStore
       .getState()
       .rollbackInitializedAccounts(['alice-password', 'decoy-password']);
+
+    expect(result).toEqual({ failedPasswordIndexes: [], lockFailed: false });
 
     expect(sdk.secureStorageUnlock.mock.calls).toEqual([
       ['decoy-password'],
@@ -475,11 +499,14 @@ describe('AccountStore secure-storage account provisioning', () => {
       .mockResolvedValueOnce(true);
     getSdkMock.mockReturnValue(sdk);
 
-    await expect(
-      useAccountStore
-        .getState()
-        .rollbackInitializedAccounts(['alice-password', 'decoy-password'])
-    ).rejects.toThrow('Failed to completely roll back');
+    const result = await useAccountStore
+      .getState()
+      .rollbackInitializedAccounts(['alice-password', 'decoy-password']);
+
+    expect(result).toEqual({
+      failedPasswordIndexes: [1],
+      lockFailed: false,
+    });
 
     expect(sdk.secureStorageUnlock.mock.calls).toEqual([
       ['decoy-password'],
@@ -529,6 +556,87 @@ describe('AccountStore secure-storage account provisioning', () => {
     } finally {
       await useAccountStore.getState().logout();
     }
+  });
+
+  it('marks the in-flight slot for recovery when immediate cleanup fails', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+    });
+    sdk.openSession.mockImplementation(async () => {
+      sdk.isSessionOpen = true;
+    });
+    sdk.profiles.createOrUpdate.mockRejectedValue(
+      new Error('profile persistence failed')
+    );
+    sdk.closeSession.mockRejectedValue(new Error('close failed'));
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore.getState().initializeAccount('alice', 'alice-password')
+    ).rejects.toBeInstanceOf(IncompleteOnboardingSlotCleanupError);
+
+    expect(sdk.secureStorageDestroy).not.toHaveBeenCalled();
+    expect(sdk.storageState).toBe('unlocked');
+
+    sdk.closeSession.mockImplementation(async () => {
+      sdk.isSessionOpen = false;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageDestroy.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    await useAccountStore
+      .getState()
+      .rollbackInitializedAccounts(['alice-password']);
+  });
+
+  it('marks the in-flight slot for recovery when immediate destroy fails', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+    });
+    sdk.openSession.mockImplementation(async () => {
+      sdk.isSessionOpen = true;
+    });
+    sdk.profiles.createOrUpdate.mockRejectedValue(
+      new Error('profile persistence failed')
+    );
+    sdk.closeSession.mockImplementation(async () => {
+      sdk.isSessionOpen = false;
+    });
+    sdk.secureStorageDestroy.mockRejectedValue(new Error('destroy failed'));
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore.getState().initializeAccount('alice', 'alice-password')
+    ).rejects.toBeInstanceOf(IncompleteOnboardingSlotCleanupError);
+
+    expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
+
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageDestroy.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    await useAccountStore
+      .getState()
+      .rollbackInitializedAccounts(['alice-password']);
   });
 
   it('releases a slot after post-open persistence failure so retry can reuse it', async () => {

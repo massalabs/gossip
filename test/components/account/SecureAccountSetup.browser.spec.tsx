@@ -4,8 +4,10 @@ import { render } from 'vitest-browser-react';
 import { page, userEvent } from 'vitest/browser';
 import SecureAccountSetup from '../../../src/components/account/SecureAccountSetup';
 import { stageAccount } from '../../../src/components/account/stagedAccount';
+import { useAppStore } from '../../../src/stores/appStore';
 
 const mocks = vi.hoisted(() => ({
+  IncompleteOnboardingSlotCleanupError: class extends Error {},
   platform: 'web',
   checkBiometricAvailability: vi.fn(),
   configureBiometricLogin: vi.fn(),
@@ -64,6 +66,8 @@ vi.mock('../../../src/components/account/stagedAccount', async () => {
 });
 
 vi.mock('../../../src/stores/accountStore', () => ({
+  IncompleteOnboardingSlotCleanupError:
+    mocks.IncompleteOnboardingSlotCleanupError,
   useAccountStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       initializePreparedAccount: mocks.initializePreparedAccount,
@@ -112,6 +116,7 @@ describe('SecureAccountSetup', () => {
     vi.clearAllMocks();
     mocks.platform = 'web';
     mocks.stagedAccounts.length = 0;
+    useAppStore.getState().setSecureAccountCreationAllowed(true);
     mocks.checkBiometricAvailability.mockResolvedValue({
       available: true,
       method: 'webauthn',
@@ -135,7 +140,10 @@ describe('SecureAccountSetup', () => {
       encryptedSession: new Uint8Array([4]),
     }));
     mocks.initializePreparedAccount.mockResolvedValue(undefined);
-    mocks.rollbackInitializedAccounts.mockResolvedValue(undefined);
+    mocks.rollbackInitializedAccounts.mockResolvedValue({
+      failedPasswordIndexes: [],
+      lockFailed: false,
+    });
     mocks.logout.mockResolvedValue(undefined);
   });
 
@@ -227,6 +235,7 @@ describe('SecureAccountSetup', () => {
       );
       expect(onComplete).toHaveBeenCalledOnce();
     });
+    expect(useAppStore.getState().secureAccountCreationAllowed).toBe(false);
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
   });
 
@@ -255,6 +264,7 @@ describe('SecureAccountSetup', () => {
       expect(onRestart).toHaveBeenCalledWith('secure_setup.batch_failed');
     });
     expect(mocks.initializePreparedAccount).not.toHaveBeenCalled();
+    expect(useAppStore.getState().secureAccountCreationAllowed).toBe(true);
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
   });
 
@@ -371,6 +381,135 @@ describe('SecureAccountSetup', () => {
     for (const staged of mocks.stagedAccounts) {
       expect(staged.passwordBytes.every(byte => byte === 0)).toBe(true);
     }
+  });
+
+  it('retains credentials and retries only the slots left after incomplete rollback', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const onRestart = vi.fn();
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+    mocks.initializePreparedAccount
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new mocks.IncompleteOnboardingSlotCleanupError('second failed')
+      );
+    mocks.rollbackInitializedAccounts.mockResolvedValueOnce({
+      failedPasswordIndexes: [1],
+      lockFailed: false,
+    });
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={onRestart}
+      />
+    );
+    await addAccount('decoy', 'decoy-password');
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.done' })
+    );
+
+    await expect
+      .element(page.getByText('secure_setup.cleanup_failed', { exact: true }))
+      .toBeInTheDocument();
+    expect(mocks.rollbackInitializedAccounts).toHaveBeenNthCalledWith(1, [
+      'alice-password',
+      'decoy-password',
+    ]);
+    expect(onRestart).not.toHaveBeenCalled();
+    for (const staged of mocks.stagedAccounts) {
+      expect(staged.passwordBytes.some(byte => byte !== 0)).toBe(true);
+    }
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.retry_cleanup' })
+    );
+    await vi.waitFor(() => {
+      expect(mocks.rollbackInitializedAccounts).toHaveBeenNthCalledWith(2, [
+        'decoy-password',
+      ]);
+      expect(onRestart).toHaveBeenCalledWith('secure_setup.batch_failed');
+    });
+    for (const staged of mocks.stagedAccounts) {
+      expect(staged.passwordBytes.every(byte => byte === 0)).toBe(true);
+    }
+  });
+
+  it('retains credentials until prior biometric restoration can be retried', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const onRestart = vi.fn();
+    mocks.initializePreparedAccount.mockRejectedValue(
+      new Error('first failed')
+    );
+    mocks.rollbackBiometric
+      .mockRejectedValueOnce(new Error('biometric restore failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={onRestart}
+      />
+    );
+    await userEvent.click(page.getByRole('button', { name: 'alice' }));
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+
+    await expect
+      .element(page.getByText('secure_setup.cleanup_failed', { exact: true }))
+      .toBeInTheDocument();
+    expect(mocks.logout).not.toHaveBeenCalled();
+    expect(account.passwordBytes.some(byte => byte !== 0)).toBe(true);
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.retry_cleanup' })
+    );
+    await vi.waitFor(() => {
+      expect(mocks.rollbackBiometric).toHaveBeenCalledTimes(2);
+      expect(mocks.logout).toHaveBeenCalledOnce();
+      expect(onRestart).toHaveBeenCalledWith('secure_setup.batch_failed');
+    });
+    expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('retains credentials until failure-path locking can be retried', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const onRestart = vi.fn();
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+    mocks.initializePreparedAccount.mockRejectedValue(
+      new Error('first failed')
+    );
+    mocks.logout
+      .mockRejectedValueOnce(new Error('lock failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={onRestart}
+      />
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+
+    await expect
+      .element(page.getByText('secure_setup.cleanup_failed', { exact: true }))
+      .toBeInTheDocument();
+    expect(account.passwordBytes.some(byte => byte !== 0)).toBe(true);
+    expect(onRestart).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.retry_cleanup' })
+    );
+    await vi.waitFor(() => {
+      expect(mocks.logout).toHaveBeenCalledTimes(2);
+      expect(onRestart).toHaveBeenCalledWith('secure_setup.batch_failed');
+    });
+    expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
   });
 
   it('retries only locking when logout fails after account persistence', async () => {

@@ -36,6 +36,10 @@ interface AppStoreState {
   // App initialization state (whether app has checked for existing accounts)
   isInitialized: boolean;
   setIsInitialized: (value: boolean) => void;
+  // Durable authorization to continue first-install secure account creation
+  // after provision-only dummy storage or a complete onboarding rollback.
+  secureAccountCreationAllowed: boolean;
+  setSecureAccountCreationAllowed: (value: boolean) => void;
   // Pending deep link
   pendingDeepLinkInfo: ParsedInvite | null;
   setPendingDeepLinkInfo: (value: ParsedInvite | null) => void;
@@ -101,6 +105,10 @@ const useAppStoreBase = create<AppStoreState>()(
       isInitialized: false,
       setIsInitialized: (value: boolean) => {
         set({ isInitialized: value });
+      },
+      secureAccountCreationAllowed: false,
+      setSecureAccountCreationAllowed: (value: boolean) => {
+        set({ secureAccountCreationAllowed: value });
       },
       // Pending deep link
       pendingDeepLinkInfo: null,
@@ -173,6 +181,7 @@ const useAppStoreBase = create<AppStoreState>()(
         debugOverlayVisible: state.debugOverlayVisible,
         debugButtonPosition: state.debugButtonPosition,
         isInitialized: state.isInitialized,
+        secureAccountCreationAllowed: state.secureAccountCreationAllowed,
         networkName: state.networkName,
         mnsEnabled: state.mnsEnabled,
         mnsDomains: state.mnsDomains,

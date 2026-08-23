@@ -6,6 +6,13 @@ import { getSdk } from '../stores/sdkStore';
 
 const PROFILE_LOAD_DELAY_MS = 100;
 
+export function shouldInitializeSecureStorage(
+  storageState: 'empty' | 'locked' | 'unlocked' | null,
+  accountCreationAllowed: boolean
+): boolean {
+  return storageState === 'locked' && !accountCreationAllowed;
+}
+
 /**
  * Hook to load user profile from SQLite on app start
  */
@@ -22,17 +29,28 @@ export function useProfileLoader() {
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
         );
 
-        // Secure-storage: the SDK has no open session at boot, so any
-        // profile query would throw "SDK not initialized". We decide
-        // the initial route purely from `storageState`:
-        //   - 'locked' → existing data, go to SecureLogin.
-        //   - 'empty'  → fresh install, go to onboarding (create account).
-        // Profile hydration happens later, after login/signup.
+        // Secure-storage provisioning writes dummy slots even before an
+        // account exists, so a later boot reports `locked` for both a real
+        // account and a first-install flow that was cancelled or completely
+        // rolled back. Preserve a dedicated first-install creation grant to
+        // keep that dummy-only state reachable as onboarding. The grant starts
+        // only from the backend's authoritative `empty` state and is revoked
+        // after a complete account batch, so clearing unrelated app state can
+        // never authorize overwriting unknown hidden slots.
+        // Profile hydration still happens later, after login/signup.
         const sdk = getSdk();
         if (sdk.isSecureStorage) {
-          useAppStore
-            .getState()
-            .setIsInitialized(sdk.storageState === 'locked');
+          const appState = useAppStore.getState();
+          if (sdk.storageState === 'empty') {
+            appState.setSecureAccountCreationAllowed(true);
+          }
+          appState.setIsInitialized(
+            shouldInitializeSecureStorage(
+              sdk.storageState,
+              sdk.storageState === 'empty' ||
+                appState.secureAccountCreationAllowed
+            )
+          );
           return;
         }
 

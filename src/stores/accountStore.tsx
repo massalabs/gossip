@@ -37,6 +37,23 @@ export type LoginMethod = {
   userId?: string;
 };
 
+export interface OnboardingRollbackResult {
+  failedPasswordIndexes: number[];
+  lockFailed: boolean;
+}
+
+export class IncompleteOnboardingSlotCleanupError extends Error {
+  readonly originalCause: unknown;
+
+  constructor(cause: unknown) {
+    super(
+      cause instanceof Error ? cause.message : 'Account persistence failed'
+    );
+    this.name = 'IncompleteOnboardingSlotCleanupError';
+    this.originalCause = cause;
+  }
+}
+
 function freeEncryptionKey(key: EncryptionKey): void {
   const pointer = (key as unknown as { __wbg_ptr?: number }).__wbg_ptr;
   if (pointer === undefined || pointer !== 0) {
@@ -58,7 +75,9 @@ interface AccountState {
     password: string,
     prepared: PreparedPasswordAccount
   ) => Promise<void>;
-  rollbackInitializedAccounts: (passwords: readonly string[]) => Promise<void>;
+  rollbackInitializedAccounts: (
+    passwords: readonly string[]
+  ) => Promise<OnboardingRollbackResult>;
   loadAccount: (method: LoginMethod) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
   finalizeOnboarding: () => Promise<void>;
@@ -261,6 +280,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     // Secure-storage mode: create the slot with the user's password before
     // any DB access. Queries created by openSession need the backend unlocked.
     if (sdk.isSecureStorage) {
+      if (
+        sdk.storageState !== 'empty' &&
+        !useAppStore.getState().secureAccountCreationAllowed
+      ) {
+        freeEncryptionKey(encryptionKey);
+        throw new Error('Secure account creation is not currently authorized');
+      }
       const secret = password;
       // Reject duplicate passwords across slots. The KDF takes only
       // (domain, password) — no slot index — so the same password on
@@ -362,6 +388,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       fetchMnsDomainsIfEnabled(profile, get().provider);
     } catch (error) {
       tentativeOnboardingUserIds.delete(userId);
+      let sessionClosed = !sdk.isSessionOpen;
+      let allocatedSlotRemoved = allocatedSlot === null;
+
       // Account provisioning is a commit point for staged onboarding. If any
       // later write fails, destroy the newly allocated secure slot so a retry
       // cannot leave an unreachable partial account or overwrite it after the
@@ -369,6 +398,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       if (sdk.isSessionOpen) {
         try {
           await sdk.closeSession();
+          sessionClosed = true;
         } catch (closeError) {
           logger.error('Failed to close partial account session:', closeError);
         }
@@ -376,21 +406,37 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         freeEncryptionKey(encryptionKey);
       }
 
-      if (allocatedSlot !== null && sdk.storageState === 'unlocked') {
+      if (allocatedSlot !== null && sessionClosed) {
         try {
+          if (sdk.storageState === 'locked') {
+            const unlocked = await sdk.secureStorageUnlock(password);
+            if (!unlocked) {
+              throw new Error('Failed to reopen partial onboarding account');
+            }
+          }
+          if (sdk.storageState !== 'unlocked') {
+            throw new Error('Partial onboarding account is not unlocked');
+          }
           await sdk.secureStorageDestroy();
           onboardingAllocatedSlots.delete(allocatedSlot);
+          allocatedSlotRemoved = true;
         } catch (destroyError) {
           logger.error(
             'Failed to destroy partial secure account:',
             destroyError
           );
           try {
-            await sdk.secureStorageLock();
+            if (sdk.storageState === 'unlocked') {
+              await sdk.secureStorageLock();
+            }
           } catch (lockError) {
             logger.error('Failed to lock partial secure account:', lockError);
           }
         }
+      }
+
+      if (!allocatedSlotRemoved) {
+        throw new IncompleteOnboardingSlotCleanupError(error);
       }
       throw error;
     }
@@ -445,41 +491,58 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     rollbackInitializedAccounts: async passwords => {
       const sdk = getSdk();
-      const failures: unknown[] = [];
+      const failedPasswordIndexes: number[] = [];
+      let lockFailed = false;
 
       try {
         await cleanupSession();
       } catch (error) {
-        failures.push(error);
+        logger.error('Failed to close onboarding session for rollback:', error);
+        lockFailed = true;
+        failedPasswordIndexes.push(...passwords.map((_, index) => index));
       }
 
-      for (const password of [...passwords].reverse()) {
-        try {
-          if (sdk.storageState === 'unlocked') {
-            await sdk.secureStorageLock();
+      if (!lockFailed) {
+        for (let index = passwords.length - 1; index >= 0; index -= 1) {
+          try {
+            if (sdk.storageState === 'unlocked') {
+              await sdk.secureStorageLock();
+            }
+            const unlocked = await sdk.secureStorageUnlock(passwords[index]);
+            if (!unlocked) {
+              throw new Error(
+                'Failed to unlock an onboarding account for rollback'
+              );
+            }
+            await sdk.secureStorageDestroy();
+          } catch (error) {
+            failedPasswordIndexes.push(index);
+            logger.error('Failed to destroy an onboarding account:', error);
+            try {
+              if (sdk.storageState === 'unlocked') {
+                await sdk.secureStorageLock();
+              }
+            } catch (lockError) {
+              lockFailed = true;
+              logger.error(
+                'Failed to lock an onboarding account after rollback error:',
+                lockError
+              );
+            }
           }
-          const unlocked = await sdk.secureStorageUnlock(password);
-          if (!unlocked) {
-            throw new Error(
-              'Failed to unlock an onboarding account for rollback'
-            );
-          }
-          await sdk.secureStorageDestroy();
-        } catch (error) {
-          failures.push(error);
-          logger.error('Failed to destroy an onboarding account:', error);
         }
       }
 
-      onboardingAllocatedSlots.clear();
-      tentativeOnboardingUserIds.clear();
+      if (failedPasswordIndexes.length === 0 && !lockFailed) {
+        onboardingAllocatedSlots.clear();
+        tentativeOnboardingUserIds.clear();
+      }
       set(clearAccountState());
 
-      if (failures.length > 0) {
-        throw new Error(
-          `Failed to completely roll back the onboarding account batch (${failures.length} errors)`
-        );
-      }
+      return {
+        failedPasswordIndexes: failedPasswordIndexes.sort((a, b) => a - b),
+        lockFailed,
+      };
     },
 
     loadAccount: async (method: LoginMethod) => {
