@@ -197,6 +197,12 @@ class GossipSdk {
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
 
+  private createProfileService(queries: Queries): ProfileService {
+    return new ProfileService(queries, async userId => {
+      await this._auth?.persistPendingPublicationTimestamp(userId, queries);
+    });
+  }
+
   // Public-key publication is session-scoped. One immediate attempt is
   // followed by due-time refreshes; failed attempts retry and the browser's
   // online event triggers an immediate opportunity.
@@ -292,7 +298,9 @@ class GossipSdk {
 
     // Create services that don't need a session
     this._auth = new AuthService(createAuthProtocol());
-    this._profile = this._queries ? new ProfileService(this._queries) : null;
+    this._profile = this._queries
+      ? this.createProfileService(this._queries)
+      : null;
 
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -840,7 +848,7 @@ class GossipSdk {
     await conn.secureStorageCreate(slot, password);
     if (!this._queries) {
       this._queries = new Queries(conn);
-      this._profile = new ProfileService(this._queries);
+      this._profile = this.createProfileService(this._queries);
     }
   }
 
@@ -861,7 +869,7 @@ class GossipSdk {
     const ok = await conn.secureStorageUnlock(password);
     if (ok && !this._queries) {
       this._queries = new Queries(conn);
-      this._profile = new ProfileService(this._queries);
+      this._profile = this.createProfileService(this._queries);
     }
     return ok;
   }

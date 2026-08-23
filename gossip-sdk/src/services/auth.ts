@@ -78,6 +78,25 @@ export class AuthService {
     return publication;
   }
 
+  async persistPendingPublicationTimestamp(
+    userId: string,
+    queries: Queries
+  ): Promise<boolean> {
+    const pendingTimestamp = this.pendingTimestampPersistence.get(userId);
+    if (pendingTimestamp === undefined) return false;
+
+    const updated = await queries.userProfiles.updateById(userId, {
+      lastPublicKeyPush: new Date(pendingTimestamp),
+    });
+    if (
+      updated &&
+      this.pendingTimestampPersistence.get(userId) === pendingTimestamp
+    ) {
+      this.pendingTimestampPersistence.delete(userId);
+    }
+    return updated;
+  }
+
   private async performPublicKeyPublication(
     publicKeyBytes: Uint8Array,
     userId: string,
@@ -100,15 +119,17 @@ export class AuthService {
           durablePublicationTime === undefined ||
           durablePublicationTime < pendingTimestamp
         ) {
-          const updated = await queries.userProfiles.updateById(userId, {
-            // Persist the actual confirmed POST time, not the later retry time.
-            // This timestamp is local scheduling metadata and is never sent to
-            // the auth server or Agraphon bulletin.
-            lastPublicKeyPush: new Date(pendingTimestamp),
-          });
+          // Persist the actual confirmed POST time, not the later retry time.
+          // This timestamp is local scheduling metadata and is never sent to
+          // the auth server or Agraphon bulletin.
+          const updated = await this.persistPendingPublicationTimestamp(
+            userId,
+            queries
+          );
           if (!updated) return PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS;
-        }
-        if (this.pendingTimestampPersistence.get(userId) === pendingTimestamp) {
+        } else if (
+          this.pendingTimestampPersistence.get(userId) === pendingTimestamp
+        ) {
           this.pendingTimestampPersistence.delete(userId);
         }
       }
@@ -123,13 +144,11 @@ export class AuthService {
     const publishedAt = Date.now();
     this.successfulPublicationTimes.set(userId, publishedAt);
     this.pendingTimestampPersistence.set(userId, publishedAt);
-    const updated = await queries.userProfiles.updateById(userId, {
-      lastPublicKeyPush: new Date(publishedAt),
-    });
+    const updated = await this.persistPendingPublicationTimestamp(
+      userId,
+      queries
+    );
     if (!updated) return PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS;
-    if (this.pendingTimestampPersistence.get(userId) === publishedAt) {
-      this.pendingTimestampPersistence.delete(userId);
-    }
     return PUBLIC_KEY_REPUBLISH_INTERVAL_MS;
   }
 }

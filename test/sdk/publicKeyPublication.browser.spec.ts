@@ -18,7 +18,7 @@ describe('browser public-key reconnect publication', () => {
   beforeEach(() => {
     sdk = new GossipSdk();
     postPublicKey = vi.fn();
-    updatePublicKeyTimestamp = vi.fn().mockResolvedValue(undefined);
+    updatePublicKeyTimestamp = vi.fn().mockResolvedValue(true);
     const auth = new AuthService({
       fetchPublicKeyByUserId: vi.fn(),
       postPublicKey,
@@ -179,27 +179,30 @@ describe('durable public-key publication timestamp', () => {
       .mockName('real profile timestamp update');
     firstInternals._queries.userProfiles.updateById = update;
 
-    await first.openSession({ mnemonic, autoStartPolling: false });
-    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-    await expect(update.mock.results[0].value).resolves.toBe(false);
-    expect(firstPost).toHaveBeenCalledOnce();
+    const publicationTime = Date.now();
+    let currentTime = publicationTime;
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
+    let confirmedAt: number | undefined;
+    try {
+      await first.openSession({ mnemonic, autoStartPolling: false });
+      await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+      await expect(update.mock.results[0].value).resolves.toBe(false);
+      expect(firstPost).toHaveBeenCalledOnce();
 
-    await first.profiles.save(
-      userProfile().userId(first.userId).username('publisher').build()
-    );
-    window.dispatchEvent(new Event('online'));
-    await vi.waitFor(async () => {
+      currentTime += 5 * 60 * 1000;
+      await first.profiles.save(
+        userProfile().userId(first.userId).username('publisher').build()
+      );
+      expect(update).toHaveBeenCalledTimes(2);
       const saved = await firstInternals._queries.userProfiles.getById(
         first.userId
       );
-      expect(saved?.lastPublicKeyPush).toBeInstanceOf(Date);
-    });
-    const saved = await firstInternals._queries.userProfiles.getById(
-      first.userId
-    );
-    const confirmedAt = saved?.lastPublicKeyPush?.getTime();
-    expect(confirmedAt).toBeTypeOf('number');
-    expect(firstPost).toHaveBeenCalledOnce();
+      confirmedAt = saved?.lastPublicKeyPush?.getTime();
+      expect(confirmedAt).toBe(publicationTime);
+      expect(firstPost).toHaveBeenCalledOnce();
+    } finally {
+      now.mockRestore();
+    }
 
     await first.closeSession();
     await first.secureStorageLock();

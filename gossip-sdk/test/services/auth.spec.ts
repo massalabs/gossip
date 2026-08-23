@@ -287,11 +287,11 @@ describe('AuthService', () => {
 
     it('retains a confirmed timestamp until its profile row exists', async () => {
       const publicationTime = new Date('2026-08-24T14:00:00.000Z');
+      const retryTime = new Date('2026-08-24T14:05:00.000Z');
+      let currentTime = publicationTime.getTime();
       await queries.userProfiles.delete(testUserId);
       const update = vi.spyOn(queries.userProfiles, 'updateById');
-      const now = vi
-        .spyOn(Date, 'now')
-        .mockReturnValue(publicationTime.getTime());
+      const now = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
 
       try {
         await authService.publishPublicKey(testPublicKeys, testUserId, queries);
@@ -301,6 +301,7 @@ describe('AuthService', () => {
         await queries.userProfiles.insert(
           makeUserProfileRow({ userId: testUserId })
         );
+        currentTime = retryTime.getTime();
         await authService.publishPublicKey(testPublicKeys, testUserId, queries);
 
         expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledOnce();
