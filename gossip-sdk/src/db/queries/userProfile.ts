@@ -73,11 +73,14 @@ export class UserProfileQueries {
   async updateById(
     userId: string,
     data: Partial<UserProfileInsert>
-  ): Promise<void> {
-    await this.conn.db
+  ): Promise<boolean> {
+    const updated = await this.conn.db
       .update(schema.userProfile)
       .set(data)
-      .where(eq(schema.userProfile.userId, userId));
+      .where(eq(schema.userProfile.userId, userId))
+      .returning({ userId: schema.userProfile.userId })
+      .get();
+    return updated !== undefined;
   }
 
   async getByUsernameLower(

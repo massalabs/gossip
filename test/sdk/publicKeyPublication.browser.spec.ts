@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GossipSdk, SdkEventType, SdkStatus } from '@massalabs/gossip-sdk';
+import {
+  generateMnemonic,
+  GossipSdk,
+  SdkEventType,
+  SdkStatus,
+} from '@massalabs/gossip-sdk';
+import { SECURE_STORAGE_IDB_NAME } from '@massalabs/gossip-sdk/db/secure-storage-namespaces';
+import secureStorageWasmUrlRaw from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
 import { AuthService } from '../../gossip-sdk/src/services/auth';
+import { userProfile } from '../helpers/factories/userProfile';
 
 describe('browser public-key reconnect publication', () => {
   let sdk: GossipSdk;
@@ -106,4 +114,125 @@ describe('browser public-key reconnect publication', () => {
       removeListener.mockRestore();
     }
   });
+});
+
+const secureStorageWasmUrl = new URL(
+  secureStorageWasmUrlRaw,
+  window.location.href
+).href;
+
+async function clearSecureStorageIdb(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(SECURE_STORAGE_IDB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () =>
+      reject(new Error('secure-storage IndexedDB deletion was blocked'));
+  });
+}
+
+describe('durable public-key publication timestamp', () => {
+  beforeEach(async () => {
+    await clearSecureStorageIdb();
+  }, 60_000);
+
+  afterEach(async () => {
+    await clearSecureStorageIdb();
+  }, 60_000);
+
+  it('persists a pre-profile confirmation without reposting after relaunch', async () => {
+    const domain = 'publication-before-profile';
+    const password = 'publication-password';
+    const mnemonic = await generateMnemonic();
+    const firstPost = vi.fn().mockResolvedValue('published');
+    const first = new GossipSdk();
+    await first.init({
+      protocolBaseUrl: 'http://127.0.0.1:1',
+      storage: {
+        type: 'secureStorage',
+        domain,
+        secureStorageWasmUrl,
+      },
+    });
+    await first.secureStorageCreate(0, password);
+
+    const firstInternals = first as unknown as {
+      _auth: AuthService;
+      _queries: {
+        userProfiles: {
+          getById: (userId: string) => Promise<{
+            lastPublicKeyPush: Date | null;
+          } | null>;
+          updateById: ReturnType<typeof vi.fn>;
+        };
+      };
+    };
+    firstInternals._auth = new AuthService({
+      fetchPublicKeyByUserId: vi.fn(),
+      postPublicKey: firstPost,
+    });
+    const originalUpdate = firstInternals._queries.userProfiles.updateById.bind(
+      firstInternals._queries.userProfiles
+    );
+    const update = vi
+      .fn(originalUpdate)
+      .mockName('real profile timestamp update');
+    firstInternals._queries.userProfiles.updateById = update;
+
+    await first.openSession({ mnemonic, autoStartPolling: false });
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    await expect(update.mock.results[0].value).resolves.toBe(false);
+    expect(firstPost).toHaveBeenCalledOnce();
+
+    await first.profiles.save(
+      userProfile().userId(first.userId).username('publisher').build()
+    );
+    window.dispatchEvent(new Event('online'));
+    await vi.waitFor(async () => {
+      const saved = await firstInternals._queries.userProfiles.getById(
+        first.userId
+      );
+      expect(saved?.lastPublicKeyPush).toBeInstanceOf(Date);
+    });
+    const saved = await firstInternals._queries.userProfiles.getById(
+      first.userId
+    );
+    const confirmedAt = saved?.lastPublicKeyPush?.getTime();
+    expect(confirmedAt).toBeTypeOf('number');
+    expect(firstPost).toHaveBeenCalledOnce();
+
+    await first.closeSession();
+    await first.secureStorageLock();
+    await first.destroy();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const secondPost = vi.fn().mockResolvedValue('duplicate');
+    const second = new GossipSdk();
+    try {
+      await second.init({
+        protocolBaseUrl: 'http://127.0.0.1:1',
+        storage: {
+          type: 'secureStorage',
+          domain,
+          secureStorageWasmUrl,
+        },
+      });
+      expect(await second.secureStorageUnlock(password)).toBe(true);
+      const secondInternals = second as unknown as { _auth: AuthService };
+      secondInternals._auth = new AuthService({
+        fetchPublicKeyByUserId: vi.fn(),
+        postPublicKey: secondPost,
+      });
+      await second.openSession({ mnemonic, autoStartPolling: false });
+      await new Promise(resolve => requestAnimationFrame(resolve));
+
+      expect(secondPost).not.toHaveBeenCalled();
+      expect(
+        (await second.profiles.get(second.userId))?.lastPublicKeyPush?.getTime()
+      ).toBe(confirmedAt);
+    } finally {
+      await second.destroy();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }, 180_000);
 });

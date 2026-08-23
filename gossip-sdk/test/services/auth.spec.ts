@@ -285,6 +285,34 @@ describe('AuthService', () => {
       }
     });
 
+    it('retains a confirmed timestamp until its profile row exists', async () => {
+      const publicationTime = new Date('2026-08-24T14:00:00.000Z');
+      await queries.userProfiles.delete(testUserId);
+      const update = vi.spyOn(queries.userProfiles, 'updateById');
+      const now = vi
+        .spyOn(Date, 'now')
+        .mockReturnValue(publicationTime.getTime());
+
+      try {
+        await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+        expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledOnce();
+        await expect(update.mock.results[0].value).resolves.toBe(false);
+
+        await queries.userProfiles.insert(
+          makeUserProfileRow({ userId: testUserId })
+        );
+        await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+
+        expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledOnce();
+        expect(update).toHaveBeenCalledTimes(2);
+        const profile = await queries.userProfiles.getById(testUserId);
+        expect(profile?.lastPublicKeyPush).toEqual(publicationTime);
+      } finally {
+        now.mockRestore();
+        update.mockRestore();
+      }
+    });
+
     it('retries the post when server success was not confirmed', async () => {
       vi.mocked(mockAuthProtocol.postPublicKey)
         .mockRejectedValueOnce(new Error('network failed'))

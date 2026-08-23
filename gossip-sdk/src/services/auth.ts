@@ -11,6 +11,7 @@ import { IAuthProtocol } from '../api/authProtocol.js';
 import type { Queries } from '../db/queries/index.js';
 
 export const PUBLIC_KEY_REPUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS = 60 * 1000;
 
 export class AuthService {
   private publicationInFlight = new Map<string, Promise<number>>();
@@ -99,12 +100,13 @@ export class AuthService {
           durablePublicationTime === undefined ||
           durablePublicationTime < pendingTimestamp
         ) {
-          await queries.userProfiles.updateById(userId, {
+          const updated = await queries.userProfiles.updateById(userId, {
             // Persist the actual confirmed POST time, not the later retry time.
             // This timestamp is local scheduling metadata and is never sent to
             // the auth server or Agraphon bulletin.
             lastPublicKeyPush: new Date(pendingTimestamp),
           });
+          if (!updated) return PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS;
         }
         if (this.pendingTimestampPersistence.get(userId) === pendingTimestamp) {
           this.pendingTimestampPersistence.delete(userId);
@@ -121,9 +123,10 @@ export class AuthService {
     const publishedAt = Date.now();
     this.successfulPublicationTimes.set(userId, publishedAt);
     this.pendingTimestampPersistence.set(userId, publishedAt);
-    await queries.userProfiles.updateById(userId, {
+    const updated = await queries.userProfiles.updateById(userId, {
       lastPublicKeyPush: new Date(publishedAt),
     });
+    if (!updated) return PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS;
     if (this.pendingTimestampPersistence.get(userId) === publishedAt) {
       this.pendingTimestampPersistence.delete(userId);
     }
