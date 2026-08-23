@@ -14,6 +14,7 @@ import {
   wipePreparedPasswordAccount,
 } from '../../src/stores/utils/auth';
 import { userProfile } from '../helpers/factories/userProfile';
+import { deriveAccountFromMnemonic } from '../../src/stores/utils/accountHelpers';
 
 function buildProfile(
   security: Awaited<ReturnType<typeof createPasswordSecurity>>['security']
@@ -24,6 +25,20 @@ function buildProfile(
 }
 
 describe('profile password encryption integration', () => {
+  it('keeps a generated account signing key after transient derivation cleanup', async () => {
+    const mnemonic = await generateMnemonic();
+    const message = crypto.getRandomValues(new Uint8Array(32));
+    const { account } = await deriveAccountFromMnemonic(mnemonic);
+
+    try {
+      const signature = await account.sign(message);
+      await expect(account.verify(message, signature)).resolves.toBe(true);
+    } finally {
+      message.fill(0);
+      account.privateKey.toBytes().fill(0);
+    }
+  });
+
   it('round-trips account creation security through login and backup authentication', async () => {
     const mnemonic = await generateMnemonic();
     const password = 'real profile password 2026!';
