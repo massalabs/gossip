@@ -1,10 +1,12 @@
 /* eslint-disable react-refresh/only-export-components -- test-only iframe harness exports its runner */
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 import { generateMnemonic, GossipSdk } from '@massalabs/gossip-sdk';
 import SecureAccountSetup from '../../src/components/account/SecureAccountSetup';
 import { stageAccount } from '../../src/components/account/stagedAccount';
 import { useProfileLoader } from '../../src/hooks/useProfileLoader';
+import { UnauthenticatedRoutes } from '../../src/routes/UnauthenticatedRoutes';
 import { useAccountStore } from '../../src/stores/accountStore';
 import { useAppStore } from '../../src/stores/appStore';
 import { useSdkStore } from '../../src/stores/sdkStore';
@@ -87,6 +89,28 @@ async function mountStartupLoader(): Promise<void> {
   await waitFor(() => !useAccountStore.getState().isLoading);
   root.unmount();
   mount.remove();
+}
+
+async function renderProductionLoginRoute(): Promise<boolean> {
+  const mount = document.createElement('div');
+  document.body.append(mount);
+  const root = createRoot(mount);
+  root.render(
+    <MemoryRouter initialEntries={['/']}>
+      <UnauthenticatedRoutes
+        existingAccountInfo={null}
+        loginError={null}
+        onLoginErrorChange={() => {}}
+      />
+    </MemoryRouter>
+  );
+  try {
+    await waitFor(() => mount.querySelector('input[type="password"]') !== null);
+    return true;
+  } finally {
+    root.unmount();
+    mount.remove();
+  }
 }
 
 /** Prepare and completely roll back two accounts in the first page context. */
@@ -296,7 +320,9 @@ export async function verifyRevokedGrantAfterRelaunch(
     persistedStore.persist.hasHydrated() &&
     !useAppStore.getState().secureAccountCreationAllowed;
   const routedToLogin =
-    grantStayedRevoked && useAppStore.getState().isInitialized;
+    grantStayedRevoked &&
+    useAppStore.getState().isInitialized &&
+    (await renderProductionLoginRoute());
   try {
     const replacementPasswordStillUnlocks = await sdk.secureStorageUnlock(
       input.replacementPassword
