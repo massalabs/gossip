@@ -41,7 +41,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     wasmMock.reloadDurableStorage.mockResolvedValue(undefined);
   });
 
-  it('zeroes create password bytes when allocation throws', async () => {
+  it('reloads durable state and zeroes the password when allocation throws', async () => {
     const { SecureStorageWorkerApi } =
       await import('../../src/db/secure-storage-worker');
     const api = new SecureStorageWorkerApi();
@@ -53,6 +53,70 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await expect(api.create(0, password)).rejects.toThrow('allocate failed');
 
     expect(Array.from(password)).toEqual([0, 0, 0]);
+    expect(wasmMock.reloadDurableStorage).toHaveBeenCalledOnce();
+  });
+
+  it('waits for an active cover flush before allocation starts', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    let finishCover!: () => void;
+    const activeCover = new Promise<void>(resolve => {
+      finishCover = resolve;
+    });
+    wasmMock.flushEncrypted
+      .mockReturnValueOnce(activeCover)
+      .mockResolvedValueOnce(undefined);
+
+    const cover = (
+      api as unknown as { runCoverTick: () => Promise<void> }
+    ).runCoverTick();
+    await vi.waitFor(() =>
+      expect(wasmMock.coverTrafficTick).toHaveBeenCalled()
+    );
+    const create = api.create(0, new Uint8Array([1, 2, 3]));
+    await Promise.resolve();
+    expect(wasmMock.allocateSession).not.toHaveBeenCalled();
+
+    finishCover();
+    await cover;
+    await create;
+    expect(wasmMock.allocateSession).toHaveBeenCalledOnce();
+  });
+
+  it('applies cover traffic deferred during allocation', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    let finishCreate!: () => void;
+    const createFlush = new Promise<void>(resolve => {
+      finishCreate = resolve;
+    });
+    wasmMock.flushEncrypted
+      .mockReturnValueOnce(createFlush)
+      .mockResolvedValueOnce(undefined);
+
+    const create = api.create(0, new Uint8Array([4, 5, 6]));
+    await vi.waitFor(() =>
+      expect(wasmMock.allocateSession).toHaveBeenCalledOnce()
+    );
+    expect(
+      (
+        api as unknown as {
+          lifecycleOperationInProgress: boolean;
+        }
+      ).lifecycleOperationInProgress
+    ).toBe(true);
+    const deferredCover = (
+      api as unknown as { runCoverTick: () => Promise<void> }
+    ).runCoverTick();
+    expect(wasmMock.coverTrafficTick).not.toHaveBeenCalled();
+
+    finishCreate();
+    await create;
+    await deferredCover;
+    expect(wasmMock.coverTrafficTick).toHaveBeenCalled();
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
   });
 
   it('reloads durable state after a rejected create flush', async () => {

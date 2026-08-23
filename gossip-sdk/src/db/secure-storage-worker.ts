@@ -84,7 +84,11 @@ function randomCoverInterval(): number {
 
 export class SecureStorageWorkerApi {
   private coverTimerId: ReturnType<typeof setTimeout> | null = null;
-  private coverTickInProgress = false;
+  private coverTickPromise: Promise<void> | null = null;
+  private coverTickPending = false;
+  private coverTickPendingResolvers: Array<() => void> = [];
+  private lifecycleOperationInProgress = false;
+  private lifecycleTail: Promise<void> = Promise.resolve();
   private durableRecoveryRequired = false;
 
   private async recoverDurableStorage(): Promise<void> {
@@ -93,7 +97,51 @@ export class SecureStorageWorkerApi {
   }
 
   private async ensureDurableStorageRecovered(): Promise<void> {
-    if (this.durableRecoveryRequired) await this.recoverDurableStorage();
+    if (!this.durableRecoveryRequired) return;
+    await this.recoverDurableStorage();
+    if (!this.lifecycleOperationInProgress) {
+      await this.applyDeferredCoverTick();
+    }
+  }
+
+  private async applyDeferredCoverTick(): Promise<void> {
+    if (
+      !this.coverTickPending ||
+      this.durableRecoveryRequired ||
+      this.lifecycleOperationInProgress
+    ) {
+      return;
+    }
+    this.coverTickPending = false;
+    const pendingResolvers = this.coverTickPendingResolvers.splice(0);
+    try {
+      await this.runCoverTick();
+    } finally {
+      for (const resolve of pendingResolvers) resolve();
+    }
+  }
+
+  private async runLifecycleOperation<T>(
+    operation: () => Promise<T>
+  ): Promise<T> {
+    let release!: () => void;
+    const previous = this.lifecycleTail;
+    this.lifecycleTail = new Promise<void>(resolve => {
+      release = resolve;
+    });
+
+    await previous;
+    try {
+      // A reload must never replace the IDB cache while a drained cover
+      // snapshot is still committing/restoring asynchronously.
+      while (this.coverTickPromise) await this.coverTickPromise;
+      this.lifecycleOperationInProgress = true;
+      return await operation();
+    } finally {
+      this.lifecycleOperationInProgress = false;
+      await this.applyDeferredCoverTick();
+      release();
+    }
   }
 
   private async recoverRejectedLifecycleOperation(
@@ -135,17 +183,31 @@ export class SecureStorageWorkerApi {
    * interval regardless of success/failure.
    */
   private async runCoverTick(): Promise<void> {
-    if (this.coverTickInProgress || this.durableRecoveryRequired) return;
-    this.coverTickInProgress = true;
-    try {
-      for (const ns of COVER_TRAFFIC_NAMESPACES) {
-        coverTrafficTick(ns);
+    if (this.coverTickPromise) return;
+    if (this.lifecycleOperationInProgress || this.durableRecoveryRequired) {
+      // Do not drop the due cover pass. It is applied after lifecycle recovery
+      // reaches a durable state; until then flushing could commit partial data.
+      this.coverTickPending = true;
+      return new Promise<void>(resolve => {
+        this.coverTickPendingResolvers.push(resolve);
+      });
+    }
+
+    const tick = (async () => {
+      try {
+        for (const ns of COVER_TRAFFIC_NAMESPACES) {
+          coverTrafficTick(ns);
+        }
+        await flushEncrypted();
+      } catch (err) {
+        logger.debug('[SecureStorage] cover traffic tick failed', err);
       }
-      await flushEncrypted();
-    } catch (err) {
-      logger.debug('[SecureStorage] cover traffic tick failed', err);
+    })();
+    this.coverTickPromise = tick;
+    try {
+      await tick;
     } finally {
-      this.coverTickInProgress = false;
+      if (this.coverTickPromise === tick) this.coverTickPromise = null;
     }
   }
 
@@ -232,27 +294,41 @@ export class SecureStorageWorkerApi {
    * underlying DB is open and durable.
    */
   async create(slot: number, password: Uint8Array): Promise<void> {
-    await this.ensureDurableStorageRecovered();
-    try {
-      allocateSession(slot, password);
-    } finally {
-      password.fill(0);
-    }
-    try {
-      await flushEncrypted();
-    } catch (error) {
-      return this.recoverRejectedLifecycleOperation('create', error);
-    }
-    try {
-      openDatabase();
-    } catch (error) {
-      // The allocation is already durable and remains unlocked for immediate
-      // caller-driven destruction. Mark it as requiring cleanup explicitly.
-      throw errorWithCause(
-        `${SECURE_STORAGE_RECOVERY_REQUIRED} created storage could not be opened`,
-        error
-      );
-    }
+    return this.runLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      let allocationFailed = false;
+      let allocationError: unknown;
+      try {
+        allocateSession(slot, password);
+      } catch (error) {
+        allocationFailed = true;
+        allocationError = error;
+      } finally {
+        // Wipe before any async durable-recovery work begins.
+        password.fill(0);
+      }
+      if (allocationFailed) {
+        return this.recoverRejectedLifecycleOperation(
+          'create',
+          allocationError
+        );
+      }
+      try {
+        await flushEncrypted();
+      } catch (error) {
+        return this.recoverRejectedLifecycleOperation('create', error);
+      }
+      try {
+        openDatabase();
+      } catch (error) {
+        // The allocation is already durable and remains unlocked for immediate
+        // caller-driven destruction. Mark it as requiring cleanup explicitly.
+        throw errorWithCause(
+          `${SECURE_STORAGE_RECOVERY_REQUIRED} created storage could not be opened`,
+          error
+        );
+      }
+    });
   }
 
   /**
@@ -304,14 +380,16 @@ export class SecureStorageWorkerApi {
    * and the namespaces no longer hold the user's encrypted data.
    */
   async destroy(namespaces: Uint8Array): Promise<void> {
-    await this.ensureDurableStorageRecovered();
-    try {
-      closeDatabase();
-      destroySession(namespaces);
-      await flushEncrypted();
-    } catch (error) {
-      return this.recoverRejectedLifecycleOperation('destroy', error);
-    }
+    return this.runLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      try {
+        closeDatabase();
+        destroySession(namespaces);
+        await flushEncrypted();
+      } catch (error) {
+        return this.recoverRejectedLifecycleOperation('destroy', error);
+      }
+    });
   }
 
   /**
@@ -356,19 +434,9 @@ export class SecureStorageWorkerApi {
     return { rows, lastInsertRowId };
   }
 
-  /**
-   * Drive cover traffic on a single namespace. Defaults to rerandomizing
-   * every namespace participating in the cover-traffic rotation so callers
-   * don't accidentally leave a namespace untouched (see PD review).
-   */
-  cover(namespace?: number): void {
-    if (namespace === undefined) {
-      for (const ns of COVER_TRAFFIC_NAMESPACES) {
-        coverTrafficTick(ns);
-      }
-    } else {
-      coverTrafficTick(namespace);
-    }
+  /** Apply and flush one complete cover pass, serialized with lifecycle work. */
+  async cover(): Promise<void> {
+    await this.runCoverTick();
   }
 
   // ── Generic namespace data storage ─────────────────────────────
