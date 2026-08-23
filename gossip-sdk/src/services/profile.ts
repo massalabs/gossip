@@ -39,7 +39,18 @@ export class ProfileService {
   }
 
   async save(profile: UserProfile): Promise<void> {
-    await this.queries.userProfiles.upsert(userProfileToRow(profile));
+    const row = userProfileToRow(profile);
+    const existing = await this.queries.userProfiles.getById(profile.userId);
+    // Publication updates this operational timestamp independently of profile
+    // UI state. Never let a stale full-profile save clear or move it backward.
+    if (
+      existing?.lastPublicKeyPush &&
+      (!row.lastPublicKeyPush ||
+        existing.lastPublicKeyPush > row.lastPublicKeyPush)
+    ) {
+      row.lastPublicKeyPush = existing.lastPublicKeyPush;
+    }
+    await this.queries.userProfiles.upsert(row);
   }
 
   delete(userId: string): Promise<void> {

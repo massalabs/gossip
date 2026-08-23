@@ -12,6 +12,7 @@ import { GossipSdk } from '../../src/gossip';
 import { clearAllTables, getTestStorageConfig } from '../testDb';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { MockMessageProtocol } from '../mocks';
+import { PUBLIC_KEY_REPUBLISH_INTERVAL_MS } from '../../src/services/auth';
 import {
   configureLogging,
   resetLoggingForTests,
@@ -129,11 +130,11 @@ describe('GossipSdk lifecycle', () => {
         sdk.openSession({
           mnemonic: generateMnemonic(),
           autoStartPolling: false,
-          publishPublicKey: false,
         })
       ).rejects.toThrow('database reset failed');
 
       expect(sdk.isSessionOpen).toBe(false);
+      expect(postPublicKey).not.toHaveBeenCalled();
       expect(publicFree).toHaveBeenCalledOnce();
       expect(secretFree).toHaveBeenCalledOnce();
       expect(encryptionFree).toHaveBeenCalledOnce();
@@ -178,6 +179,33 @@ describe('GossipSdk lifecycle', () => {
     await sdk.closeSession();
     await sdk.openSession({ mnemonic, autoStartPolling: false });
     await vi.waitFor(() => expect(postPublicKey).toHaveBeenCalledOnce());
+  });
+
+  it('retries failed publication and republishes when refresh is due', async () => {
+    await sdk.init({ storage: getTestStorageConfig() });
+    await sdk.openSession({
+      mnemonic: generateMnemonic(),
+      autoStartPolling: false,
+      publishPublicKey: false,
+    });
+    postPublicKey
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue('ok');
+    vi.useFakeTimers();
+
+    try {
+      sdk.startPublicKeyPublication();
+      await vi.waitFor(() => expect(postPublicKey).toHaveBeenCalledOnce());
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.waitFor(() => expect(postPublicKey).toHaveBeenCalledTimes(2));
+
+      await vi.advanceTimersByTimeAsync(PUBLIC_KEY_REPUBLISH_INTERVAL_MS);
+      await vi.waitFor(() => expect(postPublicKey).toHaveBeenCalledTimes(3));
+    } finally {
+      await sdk.closeSession();
+      vi.useRealTimers();
+    }
   });
 
   it('restores encrypted session when provided', async () => {

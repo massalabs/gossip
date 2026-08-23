@@ -122,7 +122,6 @@ interface AccountState {
 // randomly-picked free slot.
 const SECURE_SLOT_COUNT = 3;
 const onboardingAllocatedSlots = new Set<number>();
-const tentativeOnboardingUserIds = new Set<string>();
 
 function pickFreeSlot(): number {
   const free: number[] = [];
@@ -376,7 +375,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     }
 
     let sessionOpened = false;
-    if (!publishPublicKey) tentativeOnboardingUserIds.add(userId);
     try {
       await sdk.openSession({
         mnemonic,
@@ -420,7 +418,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
       fetchMnsDomainsIfEnabled(profile, get().provider);
     } catch (error) {
-      tentativeOnboardingUserIds.delete(userId);
       let sessionClosed = !sdk.isSessionOpen;
       let allocatedSlotRemoved = allocatedSlot === null;
 
@@ -567,7 +564,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
       if (failedPasswordIndexes.length === 0 && !lockFailed) {
         onboardingAllocatedSlots.clear();
-        tentativeOnboardingUserIds.clear();
       }
       set(clearAccountState());
 
@@ -672,6 +668,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           encryptedSession,
           encryptionKey,
           onPersist: createOnPersist(profile.userId),
+          // Start only after the app's lastSeen profile save below commits, so
+          // its full upsert cannot race the publication timestamp update.
+          publishPublicKey: false,
         });
 
         const lastSeen = new Date();
@@ -680,6 +679,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           lastSeen,
         };
         await getSdk().profiles.save(updatedProfile);
+        sdk.startPublicKeyPublication();
 
         useAppStore.getState().setIsInitialized(true);
         set({
@@ -821,7 +821,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
         onboardingAllocatedSlots.clear();
-        tentativeOnboardingUserIds.clear();
 
         set({
           ...clearAccountState(),
@@ -1056,23 +1055,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
   };
-});
-
-useAccountStoreBase.subscribe(async (state, prevState) => {
-  const current = state.userProfile;
-  const previous = prevState.userProfile;
-
-  const sdk = getSdk();
-  if (!current || !sdk.isSessionOpen) return;
-  if (tentativeOnboardingUserIds.has(current.userId)) return;
-  if (current === previous) return;
-  if (previous && current.userId === previous.userId) return;
-
-  try {
-    await sdk.auth.publishPublicKey(sdk.publicKeys, sdk.userId, sdk.queries);
-  } catch (error) {
-    logger.error('Error publishing public key:', error);
-  }
 });
 
 // Subscribe to account changes to initialize provider

@@ -10,9 +10,11 @@ import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 import { IAuthProtocol } from '../api/authProtocol.js';
 import type { Queries } from '../db/queries/index.js';
 
-const REPUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const PUBLIC_KEY_REPUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export class AuthService {
+  private publicationInFlight = new Map<string, Promise<number>>();
+
   constructor(public authProtocol: IAuthProtocol) {}
 
   /**
@@ -41,7 +43,7 @@ export class AuthService {
     publicKeys: UserPublicKeys,
     userId: string,
     queries: Queries
-  ): Promise<void> {
+  ): Promise<number> {
     // Snapshot before the first await so logout can deterministically dispose
     // the live WASM wrapper without racing an in-flight publication.
     return this.publishPublicKeyBytes(
@@ -51,15 +53,38 @@ export class AuthService {
     );
   }
 
-  async publishPublicKeyBytes(
+  publishPublicKeyBytes(
     publicKeyBytes: Uint8Array,
     userId: string,
     queries: Queries
-  ): Promise<void> {
+  ): Promise<number> {
+    const existing = this.publicationInFlight.get(userId);
+    if (existing) return existing;
+
+    const publication = this.performPublicKeyPublication(
+      publicKeyBytes,
+      userId,
+      queries
+    ).finally(() => {
+      if (this.publicationInFlight.get(userId) === publication) {
+        this.publicationInFlight.delete(userId);
+      }
+    });
+    this.publicationInFlight.set(userId, publication);
+    return publication;
+  }
+
+  private async performPublicKeyPublication(
+    publicKeyBytes: Uint8Array,
+    userId: string,
+    queries: Queries
+  ): Promise<number> {
     const profile = await queries.userProfiles.getById(userId);
     if (profile?.lastPublicKeyPush) {
       const elapsed = Date.now() - profile.lastPublicKeyPush.getTime();
-      if (elapsed < REPUBLISH_INTERVAL_MS) return;
+      if (elapsed < PUBLIC_KEY_REPUBLISH_INTERVAL_MS) {
+        return PUBLIC_KEY_REPUBLISH_INTERVAL_MS - elapsed;
+      }
     }
 
     await this.authProtocol.postPublicKey(encodeToBase64(publicKeyBytes));
@@ -67,6 +92,7 @@ export class AuthService {
     await queries.userProfiles.updateById(userId, {
       lastPublicKeyPush: new Date(),
     });
+    return PUBLIC_KEY_REPUBLISH_INTERVAL_MS;
   }
 }
 

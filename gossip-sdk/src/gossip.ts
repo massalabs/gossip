@@ -59,7 +59,10 @@ import { AnnouncementService } from './services/announcement.js';
 import { DiscussionService } from './services/discussion.js';
 import { MessageService } from './services/message.js';
 import { RefreshService } from './services/refresh.js';
-import { AuthService } from './services/auth.js';
+import {
+  AuthService,
+  PUBLIC_KEY_REPUBLISH_INTERVAL_MS,
+} from './services/auth.js';
 import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
 import { SelfMessageService } from './services/selfMessage.js';
@@ -193,6 +196,15 @@ class GossipSdk {
   private _refresh: RefreshService | null = null;
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
+
+  // Public-key publication is session-scoped. One immediate attempt is
+  // followed by due-time refreshes; failed attempts retry and the browser's
+  // online event triggers an immediate opportunity.
+  private static readonly PUBLIC_KEY_PUBLICATION_RETRY_MS = 60_000;
+  private _publicKeyPublicationTimer: ReturnType<typeof setTimeout> | null =
+    null;
+  private _publicKeyOnlineHandler: (() => void) | null = null;
+  private _publicKeyPublicationGeneration = 0;
 
   // ─── Session persist debouncer ──────────────────────────────────
   //
@@ -493,24 +505,16 @@ class GossipSdk {
         this.startPolling();
       }
 
-      // Publish only after every fallible session-opening step has committed.
-      // AuthService snapshots the public bytes synchronously, so immediate
-      // logout may dispose the live identity wrappers safely.
+      // Start publication only after every fallible session-opening step has
+      // committed. Tentative onboarding explicitly opts out and the app starts
+      // it after its own profile save has committed.
       if (options.publishPublicKey !== false) {
-        this._auth!.publishPublicKey(
-          session.ourPk,
-          session.userIdEncoded,
-          queries
-        ).catch(err => {
-          this.eventEmitter.emit(SdkEventType.ERROR, {
-            error: err instanceof Error ? err : new Error(String(err)),
-            context: 'publishPublicKey',
-          });
-        });
+        this.startPublicKeyPublication();
       }
       committed = true;
     } catch (error) {
       if (!committed) {
+        this.stopPublicKeyPublication();
         this.pollingManager.stop();
         session?.dispose();
         if (ownsEncryptionKey) encryptionKey?.free();
@@ -536,6 +540,92 @@ class GossipSdk {
   }
 
   /**
+   * Start the session-scoped public-key publisher after consumer-side login
+   * persistence has committed. Safe to call more than once: prior timers and
+   * listeners are replaced, while AuthService coalesces any in-flight post.
+   */
+  startPublicKeyPublication(): void {
+    const state = this.requireSession();
+    this.stopPublicKeyPublication();
+
+    const generation = this._publicKeyPublicationGeneration;
+    const publicKeyBytes = new Uint8Array(state.session.ourPk.to_bytes());
+    const userId = state.session.userIdEncoded;
+    const queries = this._queries!;
+
+    const schedule = (delayMs: number) => {
+      if (
+        generation !== this._publicKeyPublicationGeneration ||
+        this.state.status !== SdkStatus.SESSION_OPEN
+      ) {
+        return;
+      }
+      if (this._publicKeyPublicationTimer !== null) {
+        clearTimeout(this._publicKeyPublicationTimer);
+      }
+      const delay = Number.isFinite(delayMs)
+        ? Math.max(0, delayMs)
+        : PUBLIC_KEY_REPUBLISH_INTERVAL_MS;
+      this._publicKeyPublicationTimer = setTimeout(() => {
+        this._publicKeyPublicationTimer = null;
+        void publish();
+      }, delay);
+    };
+
+    const publish = async () => {
+      if (
+        generation !== this._publicKeyPublicationGeneration ||
+        this.state.status !== SdkStatus.SESSION_OPEN ||
+        this.state.session.userIdEncoded !== userId
+      ) {
+        return;
+      }
+
+      try {
+        const nextDelay = await this._auth!.publishPublicKeyBytes(
+          publicKeyBytes,
+          userId,
+          queries
+        );
+        schedule(nextDelay);
+      } catch (error) {
+        this.eventEmitter.emit(SdkEventType.ERROR, {
+          error: error instanceof Error ? error : new Error(String(error)),
+          context: 'publishPublicKey',
+        });
+        schedule(GossipSdk.PUBLIC_KEY_PUBLICATION_RETRY_MS);
+      }
+    };
+
+    this._publicKeyOnlineHandler = () => {
+      if (this._publicKeyPublicationTimer !== null) {
+        clearTimeout(this._publicKeyPublicationTimer);
+        this._publicKeyPublicationTimer = null;
+      }
+      void publish();
+    };
+    if (typeof globalThis.addEventListener === 'function') {
+      globalThis.addEventListener('online', this._publicKeyOnlineHandler);
+    }
+    void publish();
+  }
+
+  private stopPublicKeyPublication(): void {
+    this._publicKeyPublicationGeneration += 1;
+    if (this._publicKeyPublicationTimer !== null) {
+      clearTimeout(this._publicKeyPublicationTimer);
+      this._publicKeyPublicationTimer = null;
+    }
+    if (
+      this._publicKeyOnlineHandler &&
+      typeof globalThis.removeEventListener === 'function'
+    ) {
+      globalThis.removeEventListener('online', this._publicKeyOnlineHandler);
+    }
+    this._publicKeyOnlineHandler = null;
+  }
+
+  /**
    * Close the current session (logout).
    * The database connection is kept open so a new session can be opened.
    * Call `destroy()` to release the database connection entirely.
@@ -545,7 +635,8 @@ class GossipSdk {
       return;
     }
 
-    // Stop polling first
+    // Stop session-scoped background work first.
+    this.stopPublicKeyPublication();
     this.pollingManager.stop();
 
     // Drain any pending session persist before tearing down state.

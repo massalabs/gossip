@@ -22,7 +22,8 @@ import { encodeUserId } from '../../src/utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
 import { ensureWasmInitialized } from '../../src/wasm';
 import { clearAllTables, getTestQueries } from '../testDb';
-import type { Queries } from '../../src/db/queries';
+import { ProfileService } from '../../src/services/profile';
+import { rowToUserProfile, type Queries } from '../../src/db/queries';
 import { makeUserProfileRow } from '../helpers/factories';
 
 function createMockAuthProtocol(
@@ -193,10 +194,31 @@ describe('AuthService', () => {
       );
     });
 
+    it('coalesces concurrent publication attempts for the same user', async () => {
+      await Promise.all([
+        authService.publishPublicKey(testPublicKeys, testUserId, queries),
+        authService.publishPublicKey(testPublicKeys, testUserId, queries),
+      ]);
+
+      expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledOnce();
+    });
+
     it('should update lastPublicKeyPush after publishing', async () => {
       vi.mocked(mockAuthProtocol.postPublicKey).mockResolvedValue('hash123');
 
       await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+
+      const profile = await queries.userProfiles.getById(testUserId);
+      expect(profile?.lastPublicKeyPush).toBeTruthy();
+    });
+
+    it('preserves the publication timestamp across a stale profile save', async () => {
+      const staleRow = await queries.userProfiles.getById(testUserId);
+      if (!staleRow) throw new Error('test profile missing');
+      const staleProfile = rowToUserProfile(staleRow);
+
+      await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+      await new ProfileService(queries).save(staleProfile);
 
       const profile = await queries.userProfiles.getById(testUserId);
       expect(profile?.lastPublicKeyPush).toBeTruthy();

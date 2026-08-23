@@ -24,6 +24,7 @@ const makeSdkMock = () => ({
   secureStorageCreate: vi.fn(async () => {}),
   secureStorageDestroy: vi.fn(async () => {}),
   openSession: vi.fn(async () => {}),
+  startPublicKeyPublication: vi.fn(),
   getEncryptedSession: vi.fn(() => new Uint8Array(0)),
   persistSessionBlob: vi.fn(async () => {}),
   userId: 'mock-user-id',
@@ -276,6 +277,10 @@ describe('AccountStore classic password discovery', () => {
     expect(useAccountStore.getState().userProfile?.userId).toBe(
       'second-user-id'
     );
+    expect(sdk.openSession).toHaveBeenCalledWith(
+      expect.objectContaining({ publishPublicKey: false })
+    );
+    expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
   });
 });
 
