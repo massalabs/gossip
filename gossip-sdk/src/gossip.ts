@@ -131,6 +131,12 @@ export interface OpenSessionOptions {
    * authenticated.
    */
   autoStartPolling?: boolean;
+  /**
+   * Publish the session public key while opening. Defaults to `true`.
+   * Set to `false` only for tentative in-memory/onboarding sessions whose
+   * identity must not become externally visible before a later durable commit.
+   */
+  publishPublicKey?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -438,18 +444,22 @@ class GossipSdk {
     );
     await this._selfMessage.ensureDiscussionExists();
 
-    // Publish gossip ID (public key) on messageProtocol so the user is discoverable.
+    // Publish gossip ID (public key) on messageProtocol so the user is
+    // discoverable. Tentative onboarding sessions explicitly suppress this;
+    // their stable identity publishes on the first real post-onboarding login.
     // Non-blocking: login must succeed even when the API is unreachable.
-    this._auth!.publishPublicKey(
-      session.ourPk,
-      session.userIdEncoded,
-      queries
-    ).catch(err => {
-      this.eventEmitter.emit(SdkEventType.ERROR, {
-        error: err instanceof Error ? err : new Error(String(err)),
-        context: 'publishPublicKey',
+    if (options.publishPublicKey !== false) {
+      this._auth!.publishPublicKey(
+        session.ourPk,
+        session.userIdEncoded,
+        queries
+      ).catch(err => {
+        this.eventEmitter.emit(SdkEventType.ERROR, {
+          error: err instanceof Error ? err : new Error(String(err)),
+          context: 'publishPublicKey',
+        });
       });
-    });
+    }
     // Now set refreshService on services (circular dependency resolved via setter)
     this._discussion.setRefreshService(this._refresh);
     this._announcement.setRefreshService(this._refresh);

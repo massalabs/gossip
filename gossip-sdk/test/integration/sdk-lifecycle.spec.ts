@@ -22,10 +22,12 @@ vi.mock('../../src/api/messageProtocol', () => ({
   createMessageProtocol: () => new MockMessageProtocol(),
 }));
 
+const postPublicKey = vi.hoisted(() => vi.fn().mockResolvedValue('ok'));
+
 vi.mock('../../src/api/authProtocol', () => ({
   createAuthProtocol: () => ({
     fetchPublicKeyByUserId: vi.fn().mockRejectedValue(new Error('not found')),
-    postPublicKey: vi.fn().mockResolvedValue('ok'),
+    postPublicKey,
   }),
 }));
 
@@ -83,6 +85,23 @@ describe('GossipSdk lifecycle', () => {
     await sdk.closeSession();
     expect(sdk.isSessionOpen).toBe(false);
     expect(() => sdk.messages).toThrow('No session open');
+  });
+
+  it('can defer public-key publication until a later real login', async () => {
+    const mnemonic = generateMnemonic();
+    await sdk.init({ storage: getTestStorageConfig() });
+
+    await sdk.openSession({
+      mnemonic,
+      autoStartPolling: false,
+      publishPublicKey: false,
+    });
+    await Promise.resolve();
+    expect(postPublicKey).not.toHaveBeenCalled();
+
+    await sdk.closeSession();
+    await sdk.openSession({ mnemonic, autoStartPolling: false });
+    await vi.waitFor(() => expect(postPublicKey).toHaveBeenCalledOnce());
   });
 
   it('restores encrypted session when provided', async () => {
