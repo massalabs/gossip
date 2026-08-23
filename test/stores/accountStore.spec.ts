@@ -397,12 +397,95 @@ describe('AccountStore skipHistorical behavior', () => {
 
 describe('AccountStore secure-storage account provisioning', () => {
   beforeEach(() => {
+    authSpy.mockReset();
     getSdkMock.mockImplementation(makeSdkMock);
     useAccountStore.setState({
       userProfile: null,
       encryptionKey: null,
       isLoading: false,
     });
+  });
+
+  it('persists a prepared session without publishing its tentative key', async () => {
+    const sdk = makeSdkMock();
+    const mnemonic = 'word '.repeat(24).trim();
+    const encryptedSession = new Uint8Array([4, 5, 6]);
+    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
+    const prepared = {
+      mnemonicBytes: new TextEncoder().encode(mnemonic),
+      security: mockProfile().security,
+      encryptedSession,
+    };
+    authSpy.mockResolvedValue({ mnemonic, encryptionKey });
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+    });
+    sdk.openSession.mockImplementation(async () => {
+      sdk.isSessionOpen = true;
+    });
+    getSdkMock.mockReturnValue(sdk);
+
+    try {
+      await useAccountStore
+        .getState()
+        .initializePreparedAccount('alice', 'alice-password', prepared);
+      await Promise.resolve();
+
+      expect(sdk.openSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mnemonic,
+          encryptedSession,
+          encryptionKey,
+          publishPublicKey: false,
+        })
+      );
+      expect(sdk.auth.publishPublicKey).not.toHaveBeenCalled();
+    } finally {
+      await useAccountStore.getState().logout();
+    }
+  });
+
+  it('destroys every committed batch account in reverse order', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockResolvedValue(true);
+    getSdkMock.mockReturnValue(sdk);
+
+    await useAccountStore
+      .getState()
+      .rollbackInitializedAccounts(['alice-password', 'decoy-password']);
+
+    expect(sdk.secureStorageUnlock.mock.calls).toEqual([
+      ['decoy-password'],
+      ['alice-password'],
+    ]);
+    expect(sdk.secureStorageDestroy).toHaveBeenCalledTimes(2);
+    expect(useAccountStore.getState().userProfile).toBeNull();
+  });
+
+  it('attempts every batch rollback even when one account cannot be destroyed', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore
+        .getState()
+        .rollbackInitializedAccounts(['alice-password', 'decoy-password'])
+    ).rejects.toThrow('Failed to completely roll back');
+
+    expect(sdk.secureStorageUnlock.mock.calls).toEqual([
+      ['decoy-password'],
+      ['alice-password'],
+    ]);
+    expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
   });
 
   it('allocates all onboarding accounts to distinct secure-storage slots', async () => {

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EncryptionKey, generateMnemonic } from '@massalabs/gossip-sdk';
-import { auth, createPasswordSecurity } from '../../src/stores/utils/auth';
+import {
+  auth,
+  createPasswordSecurity,
+  preparePasswordAccount,
+  wipePreparedPasswordAccount,
+} from '../../src/stores/utils/auth';
 import { userProfile } from '../helpers/factories/userProfile';
 
 function buildProfile(
@@ -28,6 +33,29 @@ describe('profile password encryption integration', () => {
 
     created.encryptionKey.free();
     authenticated.encryptionKey.free();
+  });
+
+  it('preflights an encrypted session entirely in RAM and wipes it', async () => {
+    const mnemonic = await generateMnemonic();
+    const password = 'RAM preflight password 2026!';
+
+    const prepared = await preparePasswordAccount(mnemonic, password);
+
+    expect(new TextDecoder().decode(prepared.mnemonicBytes)).toBe(mnemonic);
+    expect(prepared.encryptedSession.byteLength).toBeGreaterThan(0);
+    const authenticated = await auth(buildProfile(prepared.security), password);
+    expect(authenticated.mnemonic).toBe(mnemonic);
+    authenticated.encryptionKey.free();
+
+    wipePreparedPasswordAccount(prepared);
+    expect(prepared.mnemonicBytes.every(byte => byte === 0)).toBe(true);
+    expect(prepared.encryptedSession.every(byte => byte === 0)).toBe(true);
+    expect(prepared.security.encKeySalt.every(byte => byte === 0)).toBe(true);
+    expect(
+      prepared.security.mnemonicBackup.encryptedMnemonic.every(
+        byte => byte === 0
+      )
+    ).toBe(true);
   });
 
   it('rejects missing and wrong passwords and frees a failed derived key', async () => {

@@ -15,6 +15,7 @@ import {
   checkBiometricAvailability,
   configureBiometricLoginWithRollback,
 } from '../../services/biometricService';
+import { generateMnemonic } from '@massalabs/gossip-sdk';
 import { MAX_SECURE_ACCOUNTS } from '../../config/features';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/Layout/PageLayout';
@@ -22,6 +23,11 @@ import Button from '../ui/Button';
 import ICloudSyncModal from '../ui/ICloudSyncModal';
 import { PrivacyGraphic } from '../graphics';
 import SecureAccountForm from './SecureAccountForm';
+import {
+  preparePasswordAccount,
+  type PreparedPasswordAccount,
+  wipePreparedPasswordAccount,
+} from '../../stores/utils/auth';
 import {
   readStagedPassword,
   stageAccount,
@@ -42,7 +48,12 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   onRestart,
 }) => {
   const { t } = useTranslation('auth');
-  const initializeAccount = useAccountStore(state => state.initializeAccount);
+  const initializePreparedAccount = useAccountStore(
+    state => state.initializePreparedAccount
+  );
+  const rollbackInitializedAccounts = useAccountStore(
+    state => state.rollbackInitializedAccounts
+  );
   const logout = useAccountStore(state => state.logout);
 
   const [stagedAccounts, setStagedAccounts] = useState<StagedAccount[]>([
@@ -107,11 +118,23 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     setIsFinalizing(true);
     setError(null);
 
+    const preparedAccounts: PreparedPasswordAccount[] = [];
     let persistedAccounts = 0;
     let failure: unknown;
     let rollbackBiometric: (() => Promise<void>) | undefined;
 
     try {
+      // Nothing reaches durable account storage until every confirmed password
+      // has decrypted and reopened its exact generated identity/session in RAM.
+      for (const account of stagedAccounts) {
+        preparedAccounts.push(
+          await preparePasswordAccount(
+            generateMnemonic(256),
+            readStagedPassword(account)
+          )
+        );
+      }
+
       if (selectedBiometricIndex !== null) {
         const selected = stagedAccounts[selectedBiometricIndex];
         const result = await configureBiometricLoginWithRollback(
@@ -124,22 +147,32 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
         rollbackBiometric = result.rollback;
       }
 
-      for (const account of stagedAccounts) {
-        await initializeAccount(account.username, readStagedPassword(account));
+      for (const [index, account] of stagedAccounts.entries()) {
+        await initializePreparedAccount(
+          account.username,
+          readStagedPassword(account),
+          preparedAccounts[index]
+        );
         persistedAccounts += 1;
       }
     } catch (caught) {
       failure = caught;
       logger.error('Error finalizing secure account setup:', caught);
 
-      // Replacement happens before persistence so biometric cancellation never
-      // leaves committed accounts. Restore the prior singleton credential if
-      // persistence failed before the selected account reached its commit point.
-      if (
-        rollbackBiometric &&
-        selectedBiometricIndex !== null &&
-        persistedAccounts <= selectedBiometricIndex
-      ) {
+      if (persistedAccounts > 0) {
+        try {
+          await rollbackInitializedAccounts(
+            stagedAccounts.slice(0, persistedAccounts).map(readStagedPassword)
+          );
+        } catch (rollbackError) {
+          logger.error(
+            'Failed to roll back onboarding account batch:',
+            rollbackError
+          );
+        }
+      }
+
+      if (rollbackBiometric) {
         try {
           await rollbackBiometric();
         } catch (rollbackError) {
@@ -149,40 +182,27 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
           );
         }
       }
+
+      try {
+        await logout({ lockedByUser: false });
+      } catch (logoutError) {
+        logger.error('Failed to lock after onboarding error:', logoutError);
+      }
     } finally {
-      // The wipe happens before routing or rendering another interactive screen
-      // and covers successful persistence, biometric cancellation, and every
-      // account-creation failure path.
+      for (const prepared of preparedAccounts) {
+        wipePreparedPasswordAccount(prepared);
+      }
       wipeStagedAccounts(stagedAccounts);
     }
 
     if (failure) {
-      if (persistedAccounts > 0) {
-        // At least one account reached the commit point. Lock before routing to
-        // login; a failure must enter lock-only recovery rather than exposing
-        // the last open session or retrying with wiped staged credentials.
-        await lockPersistedAccountsAndComplete();
-      } else {
-        try {
-          await logout({ lockedByUser: false });
-        } catch (logoutError) {
-          logger.error('Failed to lock after onboarding error:', logoutError);
-        }
-        onRestart(
-          failure instanceof Error ? failure.message : t('create.failed')
-        );
-      }
+      onRestart(t('secure_setup.batch_failed'));
       return;
     }
 
-    if (stagedAccounts.length > 1) {
-      // Multiple isolated accounts cannot remain selected implicitly. Return to
-      // login and let the supplied password discover the intended slot. If
-      // locking fails, never rerun persistence with already-wiped credentials.
-      await lockPersistedAccountsAndComplete();
-      return;
-    }
-    await onComplete();
+    // Every account, including a single-account batch, returns to login. Only a
+    // real post-onboarding unlock may publish that stable account's public key.
+    await lockPersistedAccountsAndComplete();
   };
 
   const handleFinalize = () => {

@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => ({
   checkBiometricAvailability: vi.fn(),
   configureBiometricLogin: vi.fn(),
   rollbackBiometric: vi.fn(),
-  initializeAccount: vi.fn(),
+  initializePreparedAccount: vi.fn(),
+  rollbackInitializedAccounts: vi.fn(),
+  preparePasswordAccount: vi.fn(),
+  wipePreparedPasswordAccount: vi.fn(),
   logout: vi.fn(),
   stagedAccounts: [] as Array<{ passwordBytes: Uint8Array }>,
 }));
@@ -63,9 +66,15 @@ vi.mock('../../../src/components/account/stagedAccount', async () => {
 vi.mock('../../../src/stores/accountStore', () => ({
   useAccountStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      initializeAccount: mocks.initializeAccount,
+      initializePreparedAccount: mocks.initializePreparedAccount,
+      rollbackInitializedAccounts: mocks.rollbackInitializedAccounts,
       logout: mocks.logout,
     }),
+}));
+
+vi.mock('../../../src/stores/utils/auth', () => ({
+  preparePasswordAccount: mocks.preparePasswordAccount,
+  wipePreparedPasswordAccount: mocks.wipePreparedPasswordAccount,
 }));
 
 async function addAccount(username: string, password: string) {
@@ -106,7 +115,21 @@ describe('SecureAccountSetup', () => {
       success: true,
       rollback: mocks.rollbackBiometric,
     });
-    mocks.initializeAccount.mockResolvedValue(undefined);
+    mocks.preparePasswordAccount.mockImplementation(async () => ({
+      mnemonicBytes: new Uint8Array([1]),
+      security: {
+        authMethod: 'password',
+        encKeySalt: new Uint8Array([2]),
+        mnemonicBackup: {
+          encryptedMnemonic: new Uint8Array([3]),
+          createdAt: new Date(),
+          backedUp: false,
+        },
+      },
+      encryptedSession: new Uint8Array([4]),
+    }));
+    mocks.initializePreparedAccount.mockResolvedValue(undefined);
+    mocks.rollbackInitializedAccounts.mockResolvedValue(undefined);
     mocks.logout.mockResolvedValue(undefined);
   });
 
@@ -159,7 +182,7 @@ describe('SecureAccountSetup', () => {
         'decoy-password',
         false
       );
-      expect(mocks.initializeAccount).toHaveBeenCalledTimes(2);
+      expect(mocks.initializePreparedAccount).toHaveBeenCalledTimes(2);
       expect(mocks.logout).toHaveBeenCalledWith({ lockedByUser: false });
     });
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
@@ -191,9 +214,10 @@ describe('SecureAccountSetup', () => {
         'alice-password',
         false
       );
-      expect(mocks.initializeAccount).toHaveBeenCalledWith(
+      expect(mocks.initializePreparedAccount).toHaveBeenCalledWith(
         'alice',
-        'alice-password'
+        'alice-password',
+        expect.any(Object)
       );
       expect(onComplete).toHaveBeenCalledOnce();
     });
@@ -222,17 +246,62 @@ describe('SecureAccountSetup', () => {
     );
 
     await vi.waitFor(() => {
-      expect(onRestart).toHaveBeenCalledWith('cancelled');
+      expect(onRestart).toHaveBeenCalledWith('secure_setup.batch_failed');
     });
-    expect(mocks.initializeAccount).not.toHaveBeenCalled();
+    expect(mocks.initializePreparedAccount).not.toHaveBeenCalled();
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('persists nothing when any RAM preflight fails', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const onRestart = vi.fn();
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+    mocks.preparePasswordAccount
+      .mockResolvedValueOnce({
+        mnemonicBytes: new Uint8Array([1]),
+        security: {
+          authMethod: 'password',
+          encKeySalt: new Uint8Array([2]),
+          mnemonicBackup: {
+            encryptedMnemonic: new Uint8Array([3]),
+            createdAt: new Date(),
+            backedUp: false,
+          },
+        },
+        encryptedSession: new Uint8Array([4]),
+      })
+      .mockRejectedValueOnce(new Error('RAM verification failed'));
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={onRestart}
+      />
+    );
+    await addAccount('decoy', 'decoy-password');
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.done' })
+    );
+
+    await vi.waitFor(() => {
+      expect(onRestart).toHaveBeenCalledWith('secure_setup.batch_failed');
+    });
+    expect(mocks.initializePreparedAccount).not.toHaveBeenCalled();
+    expect(mocks.configureBiometricLogin).not.toHaveBeenCalled();
+    expect(mocks.wipePreparedPasswordAccount).toHaveBeenCalledOnce();
+    for (const staged of mocks.stagedAccounts) {
+      expect(staged.passwordBytes.every(byte => byte === 0)).toBe(true);
+    }
   });
 
   it('restarts after the first persistence failure and wipes credentials', async () => {
     const account = stageAccount('alice', 'alice-password');
     const onComplete = vi.fn();
     const onRestart = vi.fn();
-    mocks.initializeAccount.mockRejectedValue(new Error('first failed'));
+    mocks.initializePreparedAccount.mockRejectedValue(
+      new Error('first failed')
+    );
 
     await render(
       <SecureAccountSetup
@@ -249,23 +318,20 @@ describe('SecureAccountSetup', () => {
     await vi.waitFor(() => {
       expect(mocks.rollbackBiometric).toHaveBeenCalledOnce();
       expect(mocks.logout).toHaveBeenCalledWith({ lockedByUser: false });
-      expect(onRestart).toHaveBeenCalledWith('first failed');
+      expect(onRestart).toHaveBeenCalledWith('secure_setup.batch_failed');
     });
     expect(onComplete).not.toHaveBeenCalled();
-    expect(mocks.initializeAccount).toHaveBeenCalledTimes(1);
+    expect(mocks.initializePreparedAccount).toHaveBeenCalledTimes(1);
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
   });
 
-  it('requires lock-only recovery after later persistence and lock failures', async () => {
+  it('rolls back the entire batch after a later persistence failure', async () => {
     const account = stageAccount('alice', 'alice-password');
     const onComplete = vi.fn();
     const onRestart = vi.fn();
-    mocks.initializeAccount
+    mocks.initializePreparedAccount
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('second failed'));
-    mocks.logout
-      .mockRejectedValueOnce(new Error('lock failed'))
-      .mockResolvedValueOnce(undefined);
 
     await render(
       <SecureAccountSetup
@@ -276,31 +342,25 @@ describe('SecureAccountSetup', () => {
     );
     await addAccount('decoy', 'decoy-password');
     await addAccount('backup', 'backup-password');
-    await userEvent.click(page.getByRole('button', { name: 'backup' }));
+    await userEvent.click(page.getByRole('button', { name: 'alice' }));
     await userEvent.click(
       page.getByRole('button', { name: 'secure_setup.done' })
     );
 
-    await expect
-      .element(page.getByText('secure_setup.lock_failed', { exact: true }))
-      .toBeInTheDocument();
-    expect(mocks.rollbackBiometric).toHaveBeenCalledOnce();
-    expect(mocks.logout).toHaveBeenCalledOnce();
-    expect(onComplete).not.toHaveBeenCalled();
-    expect(onRestart).not.toHaveBeenCalled();
-
-    await userEvent.click(
-      page.getByRole('button', { name: 'secure_setup.retry_lock' })
-    );
     await vi.waitFor(() => {
-      expect(mocks.logout).toHaveBeenCalledTimes(2);
-      expect(onComplete).toHaveBeenCalledOnce();
+      expect(mocks.rollbackInitializedAccounts).toHaveBeenCalledWith([
+        'alice-password',
+      ]);
+      expect(mocks.rollbackBiometric).toHaveBeenCalledOnce();
+      expect(onRestart).toHaveBeenCalledWith('secure_setup.batch_failed');
     });
-    expect(mocks.initializeAccount).toHaveBeenCalledTimes(2);
-    expect(mocks.initializeAccount).not.toHaveBeenCalledWith(
-      'backup',
-      'backup-password'
-    );
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(mocks.initializePreparedAccount).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.initializePreparedAccount.mock.calls.some(
+        ([username]) => username === 'backup'
+      )
+    ).toBe(false);
     expect(mocks.stagedAccounts).toHaveLength(3);
     for (const staged of mocks.stagedAccounts) {
       expect(staged.passwordBytes.every(byte => byte === 0)).toBe(true);
@@ -331,7 +391,7 @@ describe('SecureAccountSetup', () => {
       .element(page.getByText('secure_setup.lock_failed', { exact: true }))
       .toBeInTheDocument();
     expect(onComplete).not.toHaveBeenCalled();
-    expect(mocks.initializeAccount).toHaveBeenCalledTimes(2);
+    expect(mocks.initializePreparedAccount).toHaveBeenCalledTimes(2);
     for (const staged of mocks.stagedAccounts) {
       expect(staged.passwordBytes.every(byte => byte === 0)).toBe(true);
     }
@@ -344,7 +404,7 @@ describe('SecureAccountSetup', () => {
       expect(mocks.logout).toHaveBeenCalledTimes(2);
       expect(onComplete).toHaveBeenCalledOnce();
     });
-    expect(mocks.initializeAccount).toHaveBeenCalledTimes(2);
+    expect(mocks.initializePreparedAccount).toHaveBeenCalledTimes(2);
     expect(mocks.configureBiometricLogin).not.toHaveBeenCalled();
   });
 
@@ -386,7 +446,7 @@ describe('SecureAccountSetup', () => {
     await expect
       .element(page.getByText('secure_setup.password_in_use'))
       .toBeInTheDocument();
-    expect(mocks.initializeAccount).not.toHaveBeenCalled();
+    expect(mocks.initializePreparedAccount).not.toHaveBeenCalled();
     expect(fillSpy).toHaveBeenCalledWith(0);
     fillSpy.mockRestore();
   });
@@ -416,7 +476,7 @@ describe('SecureAccountSetup', () => {
         'alice-password',
         sync
       );
-      expect(mocks.initializeAccount).toHaveBeenCalledOnce();
+      expect(mocks.initializePreparedAccount).toHaveBeenCalledOnce();
     });
   });
 
@@ -441,6 +501,6 @@ describe('SecureAccountSetup', () => {
       .element(page.getByText('biometric_setup.icloud_title'))
       .not.toBeInTheDocument();
     expect(mocks.configureBiometricLogin).not.toHaveBeenCalled();
-    expect(mocks.initializeAccount).not.toHaveBeenCalled();
+    expect(mocks.initializePreparedAccount).not.toHaveBeenCalled();
   });
 });

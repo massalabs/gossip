@@ -18,7 +18,11 @@ import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
 
 import { getActiveOrFirstProfile } from './utils/getAccount';
-import { auth, createPasswordSecurity } from './utils/auth';
+import {
+  auth,
+  createPasswordSecurity,
+  type PreparedPasswordAccount,
+} from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
 import { useSelfMessageStore } from './selfMessageStore';
@@ -49,6 +53,12 @@ interface AccountState {
   evmAddress: string | null;
   provider: Provider | null;
   initializeAccount: (username: string, password: string) => Promise<void>;
+  initializePreparedAccount: (
+    username: string,
+    password: string,
+    prepared: PreparedPasswordAccount
+  ) => Promise<void>;
+  rollbackInitializedAccounts: (passwords: readonly string[]) => Promise<void>;
   loadAccount: (method: LoginMethod) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
   finalizeOnboarding: () => Promise<void>;
@@ -89,6 +99,7 @@ interface AccountState {
 // randomly-picked free slot.
 const SECURE_SLOT_COUNT = 3;
 const onboardingAllocatedSlots = new Set<number>();
+const tentativeOnboardingUserIds = new Set<string>();
 
 function pickFreeSlot(): number {
   const free: number[] = [];
@@ -167,6 +178,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     mnemonic: string;
     password: string;
     skipHistorical?: boolean;
+    prepared?: PreparedPasswordAccount;
+    publishPublicKey?: boolean;
   }
 
   const setupAccount = async ({
@@ -174,6 +187,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     mnemonic,
     password,
     skipHistorical = false,
+    prepared,
+    publishPublicKey = true,
   }: SetupAccountParams): Promise<void> => {
     await cleanupSession();
 
@@ -186,16 +201,37 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       throw new Error('Password is required');
     }
 
-    const { encryptionKey, security } = await createPasswordSecurity(
-      mnemonic,
-      password
-    );
+    let encryptionKey: EncryptionKey;
+    let security: UserProfile['security'];
+    if (prepared) {
+      const recovered = await auth(
+        { security: prepared.security } as UserProfile,
+        password
+      );
+      if (recovered.mnemonic !== mnemonic) {
+        freeEncryptionKey(recovered.encryptionKey);
+        throw new Error('Prepared account identity mismatch');
+      }
+      encryptionKey = recovered.encryptionKey;
+      security = prepared.security;
+    } else {
+      ({ encryptionKey, security } = await createPasswordSecurity(
+        mnemonic,
+        password
+      ));
+    }
 
     // Passwords must identify exactly one account because the global biometric
     // credential deliberately stores no profile ID. Secure storage checks this
     // by probing slots below; classic storage checks existing profiles here.
     if (!sdk.isSecureStorage) {
-      const profiles = await sdk.profiles.getAll();
+      let profiles: UserProfile[];
+      try {
+        profiles = await sdk.profiles.getAll();
+      } catch (error) {
+        freeEncryptionKey(encryptionKey);
+        throw error;
+      }
       for (const profile of profiles) {
         try {
           const existing = await auth(profile, password);
@@ -233,7 +269,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // other becomes effectively unreachable. `storageState === 'empty'`
       // means no slot has ever been allocated, so the check is moot.
       if (sdk.storageState === 'locked') {
-        const collides = await sdk.secureStorageUnlock(secret);
+        let collides: boolean;
+        try {
+          collides = await sdk.secureStorageUnlock(secret);
+        } catch (error) {
+          freeEncryptionKey(encryptionKey);
+          throw error;
+        }
         if (collides) {
           await sdk.secureStorageLock();
           freeEncryptionKey(encryptionKey);
@@ -247,7 +289,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // previously-allocated slot (that would silently overwrite the
       // earlier account). The in-memory `onboardingAllocatedSlots`
       // set guards against that.
-      const slot = pickFreeSlot();
+      let slot: number;
+      try {
+        slot = pickFreeSlot();
+      } catch (error) {
+        freeEncryptionKey(encryptionKey);
+        throw error;
+      }
       allocatedSlot = slot;
       try {
         await sdk.secureStorageCreate(slot, secret);
@@ -269,9 +317,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     }
 
     let sessionOpened = false;
+    if (!publishPublicKey) tentativeOnboardingUserIds.add(userId);
     try {
       await sdk.openSession({
         mnemonic,
+        encryptedSession: prepared?.encryptedSession,
         encryptionKey,
         onPersist: createOnPersist(userId),
         // Don't poll during onboarding — we may open the session just to
@@ -279,6 +329,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // account in a different slot. Polling is re-enabled on the real
         // login (loadAccount), which defaults to `autoStartPolling: true`.
         autoStartPolling: false,
+        publishPublicKey,
       });
       sessionOpened = true;
 
@@ -310,6 +361,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
       fetchMnsDomainsIfEnabled(profile, get().provider);
     } catch (error) {
+      tentativeOnboardingUserIds.delete(userId);
       // Account provisioning is a commit point for staged onboarding. If any
       // later write fails, destroy the newly allocated secure slot so a retry
       // cannot leave an unreachable partial account or overwrite it after the
@@ -369,6 +421,64 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         logger.error('Error creating user profile:', error);
         set({ isLoading: false });
         throw error;
+      }
+    },
+
+    initializePreparedAccount: async (username, password, prepared) => {
+      try {
+        set({ isLoading: true });
+        const mnemonic = new TextDecoder().decode(prepared.mnemonicBytes);
+        await setupAccount({
+          username,
+          mnemonic,
+          password,
+          skipHistorical: true,
+          prepared,
+          publishPublicKey: false,
+        });
+      } catch (error) {
+        logger.error('Error persisting prepared user profile:', error);
+        set({ isLoading: false });
+        throw error;
+      }
+    },
+
+    rollbackInitializedAccounts: async passwords => {
+      const sdk = getSdk();
+      const failures: unknown[] = [];
+
+      try {
+        await cleanupSession();
+      } catch (error) {
+        failures.push(error);
+      }
+
+      for (const password of [...passwords].reverse()) {
+        try {
+          if (sdk.storageState === 'unlocked') {
+            await sdk.secureStorageLock();
+          }
+          const unlocked = await sdk.secureStorageUnlock(password);
+          if (!unlocked) {
+            throw new Error(
+              'Failed to unlock an onboarding account for rollback'
+            );
+          }
+          await sdk.secureStorageDestroy();
+        } catch (error) {
+          failures.push(error);
+          logger.error('Failed to destroy an onboarding account:', error);
+        }
+      }
+
+      onboardingAllocatedSlots.clear();
+      tentativeOnboardingUserIds.clear();
+      set(clearAccountState());
+
+      if (failures.length > 0) {
+        throw new Error(
+          `Failed to completely roll back the onboarding account batch (${failures.length} errors)`
+        );
       }
     },
 
@@ -616,6 +726,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
         onboardingAllocatedSlots.clear();
+        tentativeOnboardingUserIds.clear();
 
         set({
           ...clearAccountState(),
@@ -858,6 +969,7 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
 
   const sdk = getSdk();
   if (!current || !sdk.isSessionOpen) return;
+  if (tentativeOnboardingUserIds.has(current.userId)) return;
   if (current === previous) return;
   if (previous && current.userId === previous.userId) return;
 
