@@ -221,10 +221,18 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     );
     expect(wasmMock.coverTrafficTick).not.toHaveBeenCalled();
 
-    wasmMock.unlockSession.mockReturnValue(false);
-    await expect(api.unlock(new Uint8Array([1]))).resolves.toBe(false);
+    const internals = api as unknown as {
+      coverRetryTimerId: ReturnType<typeof setTimeout> | null;
+      pumpOperationQueue: () => void;
+    };
+    await vi.waitFor(() => expect(internals.coverRetryTimerId).not.toBeNull());
+    clearTimeout(internals.coverRetryTimerId!);
+    internals.coverRetryTimerId = null;
+    internals.pumpOperationQueue();
     await cover;
 
+    wasmMock.unlockSession.mockReturnValue(false);
+    await expect(api.unlock(new Uint8Array([1]))).resolves.toBe(false);
     expect(wasmMock.reloadDurableStorage).toHaveBeenCalledTimes(3);
     expect(wasmMock.coverTrafficTick.mock.calls.map(([ns]) => ns)).toEqual(
       COVER_TRAFFIC_NAMESPACES
@@ -264,6 +272,171 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     wasmMock.unlockSession.mockReturnValue(false);
     await expect(api.unlock(new Uint8Array([2]))).resolves.toBe(false);
     expect(wasmMock.reloadDurableStorage).toHaveBeenCalledTimes(2);
+  });
+
+  it('recovers rejected lifecycle state before a generic flush', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const { SECURE_STORAGE_RECOVERY_REQUIRED } =
+      await import('../../src/db/secure-storage-errors');
+    const api = new SecureStorageWorkerApi();
+    wasmMock.flushEncrypted
+      .mockRejectedValueOnce(new Error('allocation flush failed'))
+      .mockResolvedValueOnce(undefined);
+    wasmMock.reloadDurableStorage
+      .mockRejectedValueOnce(new Error('reload failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(api.create(0, new Uint8Array([1]))).rejects.toThrow(
+      SECURE_STORAGE_RECOVERY_REQUIRED
+    );
+    await api.flush();
+
+    expect(wasmMock.reloadDurableStorage).toHaveBeenCalledTimes(2);
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
+    expect(
+      wasmMock.reloadDurableStorage.mock.invocationCallOrder[1]
+    ).toBeLessThan(wasmMock.flushEncrypted.mock.invocationCallOrder[1]);
+  });
+
+  it('waits for create to finish before locking', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    let finishCreate!: () => void;
+    wasmMock.flushEncrypted
+      .mockReturnValueOnce(
+        new Promise<void>(resolve => {
+          finishCreate = resolve;
+        })
+      )
+      .mockResolvedValueOnce(undefined);
+
+    const create = api.create(0, new Uint8Array([1]));
+    await vi.waitFor(() =>
+      expect(wasmMock.allocateSession).toHaveBeenCalledOnce()
+    );
+    const lock = api.lock();
+    await Promise.resolve();
+    expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
+
+    finishCreate();
+    await create;
+    await lock;
+
+    expect(wasmMock.openDatabase).toHaveBeenCalledBefore(
+      wasmMock.closeDatabase
+    );
+    expect(wasmMock.lockSession).toHaveBeenCalledOnce();
+  });
+
+  it('waits for accepted cover work before unlocking', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    let finishCover!: () => void;
+    wasmMock.flushEncrypted.mockReturnValueOnce(
+      new Promise<void>(resolve => {
+        finishCover = resolve;
+      })
+    );
+    wasmMock.unlockSession.mockReturnValue(false);
+
+    const cover = api.cover();
+    await vi.waitFor(() =>
+      expect(wasmMock.coverTrafficTick).toHaveBeenCalled()
+    );
+    const unlock = api.unlock(new Uint8Array([1]));
+    await Promise.resolve();
+    expect(wasmMock.unlockSession).not.toHaveBeenCalled();
+
+    finishCover();
+    await cover;
+    await expect(unlock).resolves.toBe(false);
+  });
+
+  it('drains accepted cover work before closing', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    let finishCover!: () => void;
+    wasmMock.flushEncrypted
+      .mockReturnValueOnce(
+        new Promise<void>(resolve => {
+          finishCover = resolve;
+        })
+      )
+      .mockResolvedValueOnce(undefined);
+
+    const cover = api.cover();
+    await vi.waitFor(() =>
+      expect(wasmMock.coverTrafficTick).toHaveBeenCalled()
+    );
+    const close = api.close();
+    await Promise.resolve();
+    expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
+    await expect(api.cover()).rejects.toThrow(
+      'Secure storage worker is closing'
+    );
+
+    finishCover();
+    await cover;
+    await close;
+    expect(wasmMock.closeDatabase).toHaveBeenCalledOnce();
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps close behind a failed cover retry', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    wasmMock.flushEncrypted
+      .mockRejectedValueOnce(new Error('cover flush failed'))
+      .mockResolvedValue(undefined);
+    const internals = api as unknown as {
+      coverRetryTimerId: ReturnType<typeof setTimeout> | null;
+      pumpOperationQueue: () => void;
+    };
+
+    const cover = api.cover();
+    const close = api.close();
+    await vi.waitFor(() => expect(internals.coverRetryTimerId).not.toBeNull());
+    expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
+
+    clearTimeout(internals.coverRetryTimerId!);
+    internals.coverRetryTimerId = null;
+    internals.pumpOperationQueue();
+    await cover;
+    await close;
+
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(3);
+    expect(wasmMock.closeDatabase).toHaveBeenCalledOnce();
+  });
+
+  it('recovers rejected lifecycle state before closing and permits retry', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const { SECURE_STORAGE_RECOVERY_REQUIRED } =
+      await import('../../src/db/secure-storage-errors');
+    const api = new SecureStorageWorkerApi();
+    wasmMock.flushEncrypted
+      .mockRejectedValueOnce(new Error('allocation flush failed'))
+      .mockResolvedValue(undefined);
+    wasmMock.reloadDurableStorage
+      .mockRejectedValueOnce(new Error('first reload failed'))
+      .mockRejectedValueOnce(new Error('close reload failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(api.create(0, new Uint8Array([1]))).rejects.toThrow(
+      SECURE_STORAGE_RECOVERY_REQUIRED
+    );
+    await expect(api.close()).rejects.toThrow('close reload failed');
+    expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
+
+    await api.close();
+    expect(wasmMock.reloadDurableStorage).toHaveBeenCalledTimes(3);
+    expect(wasmMock.closeDatabase).toHaveBeenCalledOnce();
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
   });
 
   it('reloads durable state after a rejected destroy flush', async () => {

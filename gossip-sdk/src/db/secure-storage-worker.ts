@@ -99,11 +99,12 @@ function randomCoverInterval(): number {
 export class SecureStorageWorkerApi {
   private coverTimerId: ReturnType<typeof setTimeout> | null = null;
   private coverRetryTimerId: ReturnType<typeof setTimeout> | null = null;
-  private coverTickPromise: Promise<void> | null = null;
   private operationQueue: QueuedStorageOperation[] = [];
   private operationPumpActive = false;
   private durableRecoveryRequired = false;
   private durableRecoveryPromise: Promise<void> | null = null;
+  private closeRequested = false;
+  private closePromise: Promise<void> | null = null;
 
   private async recoverDurableStorage(): Promise<void> {
     if (this.durableRecoveryPromise) {
@@ -137,7 +138,13 @@ export class SecureStorageWorkerApi {
     this.pumpOperationQueue();
   }
 
-  private runLifecycleOperation<T>(operation: () => Promise<T>): Promise<T> {
+  private enqueueLifecycleOperation<T>(
+    operation: () => Promise<T>,
+    allowDuringClose = false
+  ): Promise<T> {
+    if (this.closeRequested && !allowDuringClose) {
+      return Promise.reject(new Error('Secure storage worker is closing'));
+    }
     return new Promise<T>((resolve, reject) => {
       this.operationQueue.push({
         kind: 'lifecycle',
@@ -233,25 +240,24 @@ export class SecureStorageWorkerApi {
       return false;
     }
 
-    const tick = (async () => {
+    try {
       for (const ns of COVER_TRAFFIC_NAMESPACES) {
         coverTrafficTick(ns);
       }
       await flushEncrypted();
-    })();
-    this.coverTickPromise = tick;
-    try {
-      await tick;
       return true;
     } catch (error) {
       logger.debug('[SecureStorage] cover traffic tick failed', error);
       return false;
-    } finally {
-      if (this.coverTickPromise === tick) this.coverTickPromise = null;
     }
   }
 
-  private runCoverTick(): Promise<void> {
+  private runCoverTick(skipWhenClosing = false): Promise<void> {
+    if (this.closeRequested) {
+      return skipWhenClosing
+        ? Promise.resolve()
+        : Promise.reject(new Error('Secure storage worker is closing'));
+    }
     return new Promise<void>(resolve => {
       this.operationQueue.push({ kind: 'cover', resolve });
       this.pumpOperationQueue();
@@ -264,7 +270,7 @@ export class SecureStorageWorkerApi {
     // not leave two concurrent schedules running.
     this.stopCoverTraffic();
     const tick = async () => {
-      await this.runCoverTick();
+      await this.runCoverTick(true);
       // Only re-arm if stopCoverTraffic() didn't run during the tick.
       if (this.coverTimerId !== null) {
         this.coverTimerId = setTimeout(tick, randomCoverInterval());
@@ -277,13 +283,6 @@ export class SecureStorageWorkerApi {
     if (this.coverTimerId !== null) {
       clearTimeout(this.coverTimerId);
       this.coverTimerId = null;
-    }
-  }
-
-  private stopCoverRetry(): void {
-    if (this.coverRetryTimerId !== null) {
-      clearTimeout(this.coverRetryTimerId);
-      this.coverRetryTimerId = null;
     }
   }
 
@@ -348,7 +347,7 @@ export class SecureStorageWorkerApi {
    * underlying DB is open and durable.
    */
   async create(slot: number, password: Uint8Array): Promise<void> {
-    return this.runLifecycleOperation(async () => {
+    return this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
       let allocationFailed = false;
       let allocationError: unknown;
@@ -395,24 +394,28 @@ export class SecureStorageWorkerApi {
    * resolves.
    */
   async unlock(password: Uint8Array): Promise<boolean> {
-    await this.ensureDurableStorageRecovered();
-    let ok: boolean;
-    try {
-      ok = unlockSession(password);
-    } finally {
-      password.fill(0);
-    }
-    if (ok) {
-      openDatabase();
-    }
-    return ok;
+    return this.enqueueLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      let ok: boolean;
+      try {
+        ok = unlockSession(password);
+      } finally {
+        password.fill(0);
+      }
+      if (ok) {
+        openDatabase();
+      }
+      return ok;
+    });
   }
 
   async lock(): Promise<void> {
-    await this.ensureDurableStorageRecovered();
-    closeDatabase();
-    await flushEncrypted();
-    lockSession();
+    return this.enqueueLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      closeDatabase();
+      await flushEncrypted();
+      lockSession();
+    });
   }
 
   /**
@@ -434,7 +437,7 @@ export class SecureStorageWorkerApi {
    * and the namespaces no longer hold the user's encrypted data.
    */
   async destroy(namespaces: Uint8Array): Promise<void> {
-    return this.runLifecycleOperation(async () => {
+    return this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
       try {
         closeDatabase();
@@ -551,14 +554,35 @@ export class SecureStorageWorkerApi {
   }
 
   async flush(): Promise<void> {
-    await flushEncrypted();
+    return this.enqueueLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      await flushEncrypted();
+    });
   }
 
   async close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+
+    // Prevent the periodic callback and public cover calls from admitting new
+    // work, but retain the retry timer for already accepted cover requests.
+    // Close enters at the FIFO tail and cannot complete until every earlier
+    // request has reached a durable boundary.
     this.stopCoverTraffic();
-    this.stopCoverRetry();
-    closeDatabase();
-    await flushEncrypted();
+    this.closeRequested = true;
+    const closeOperation = this.enqueueLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      closeDatabase();
+      await flushEncrypted();
+    }, true);
+    this.closePromise = closeOperation;
+    try {
+      await closeOperation;
+    } catch (error) {
+      // Keep cover admission stopped, but allow an explicit close retry after
+      // storage recovery becomes available.
+      if (this.closePromise === closeOperation) this.closePromise = null;
+      throw error;
+    }
   }
 }
 
