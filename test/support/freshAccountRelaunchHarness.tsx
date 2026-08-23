@@ -2,6 +2,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { generateMnemonic, GossipSdk } from '@massalabs/gossip-sdk';
+import SecureAccountSetup from '../../src/components/account/SecureAccountSetup';
+import { stageAccount } from '../../src/components/account/stagedAccount';
 import { useProfileLoader } from '../../src/hooks/useProfileLoader';
 import { useAccountStore } from '../../src/stores/accountStore';
 import { useAppStore } from '../../src/stores/appStore';
@@ -39,6 +41,21 @@ export interface FreshRelaunchResult {
   replacementUsername: string | undefined;
   replacementReopened: boolean;
   stableUserId: boolean;
+  grantRevoked: boolean;
+  persistedRevokedAppStore: string;
+}
+
+export interface RevokedGrantRelaunchInput {
+  domain: string;
+  secureStorageWasmUrl: string;
+  persistedAppStore: string;
+  replacementPassword: string;
+}
+
+export interface RevokedGrantRelaunchResult {
+  grantStayedRevoked: boolean;
+  routedToLogin: boolean;
+  replacementPasswordStillUnlocks: boolean;
 }
 
 function StartupLoader(): null {
@@ -46,8 +63,11 @@ function StartupLoader(): null {
   return null;
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 10_000;
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 10_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
     if (Date.now() >= deadline) {
       throw new Error('fresh startup loader did not settle');
@@ -174,19 +194,51 @@ export async function runFreshAccountRelaunchScenario(
     }
   }
 
-  const replacement = await preparePasswordAccount(
-    await generateMnemonic(),
+  const stagedReplacement = stageAccount(
+    'replacement',
     input.replacementPassword
   );
+  const mount = document.createElement('div');
+  document.body.append(mount);
+  const root = createRoot(mount);
+  let completed = false;
+  let restartError: string | null = null;
+  root.render(
+    <SecureAccountSetup
+      initialAccount={stagedReplacement}
+      onComplete={() => {
+        completed = true;
+      }}
+      onRestart={message => {
+        restartError = message;
+      }}
+    />
+  );
+
   try {
-    await useAccountStore
-      .getState()
-      .initializePreparedAccount(
-        'replacement',
-        input.replacementPassword,
-        replacement
-      );
+    await waitFor(() => mount.querySelectorAll('button').length >= 2);
+    const buttons = mount.querySelectorAll('button');
+    buttons[buttons.length - 1].click();
+    await waitFor(() => {
+      if (restartError) throw new Error(restartError);
+      return completed;
+    }, 60_000);
+
+    const grantRevoked = !useAppStore.getState().secureAccountCreationAllowed;
+    const persistedRevokedAppStore = localStorage.getItem(
+      STORAGE_KEYS.APP_STORE
+    );
+    if (!persistedRevokedAppStore) {
+      throw new Error('persisted revoked grant missing');
+    }
+
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: input.replacementPassword,
+    });
     const replacementUserId = sdk.userId;
+    const replacementUsername =
+      useAccountStore.getState().userProfile?.username;
     await useAccountStore.getState().logout({ lockedByUser: false });
     await useAccountStore.getState().loadAccount({
       type: 'password',
@@ -197,16 +249,65 @@ export async function runFreshAccountRelaunchScenario(
       routedToOnboarding,
       grantRehydrated,
       rejectedPasswordsStayedRejected,
-      replacementUsername: useAccountStore.getState().userProfile?.username,
+      replacementUsername,
       replacementReopened:
         useAccountStore.getState().userProfile?.username === 'replacement',
       stableUserId: sdk.userId === replacementUserId,
+      grantRevoked,
+      persistedRevokedAppStore,
     };
   } finally {
+    root.unmount();
+    mount.remove();
     if (sdk.isSessionOpen) {
       await useAccountStore.getState().logout({ lockedByUser: false });
     }
-    wipePreparedPasswordAccount(replacement);
+    await sdk.destroy();
+  }
+}
+
+/** Verify revoked authorization from a third, independently loaded page. */
+export async function verifyRevokedGrantAfterRelaunch(
+  input: RevokedGrantRelaunchInput
+): Promise<RevokedGrantRelaunchResult> {
+  const persistedStore = useAppStore as typeof useAppStore & {
+    persist: { rehydrate: () => Promise<void>; hasHydrated: () => boolean };
+  };
+  useAppStore.setState({
+    isInitialized: false,
+    secureAccountCreationAllowed: true,
+  });
+  localStorage.setItem(STORAGE_KEYS.APP_STORE, input.persistedAppStore);
+  await persistedStore.persist.rehydrate();
+
+  const sdk = new GossipSdk();
+  await sdk.init({
+    protocolBaseUrl: 'http://127.0.0.1:1',
+    storage: {
+      type: 'secureStorage',
+      domain: input.domain,
+      secureStorageWasmUrl: input.secureStorageWasmUrl,
+    },
+  });
+  useSdkStore.getState().setSdk(sdk);
+  await mountStartupLoader();
+
+  const grantStayedRevoked =
+    persistedStore.persist.hasHydrated() &&
+    !useAppStore.getState().secureAccountCreationAllowed;
+  const routedToLogin =
+    grantStayedRevoked && useAppStore.getState().isInitialized;
+  try {
+    const replacementPasswordStillUnlocks = await sdk.secureStorageUnlock(
+      input.replacementPassword
+    );
+    if (replacementPasswordStillUnlocks) await sdk.secureStorageLock();
+    return {
+      grantStayedRevoked,
+      routedToLogin,
+      replacementPasswordStillUnlocks,
+    };
+  } finally {
     await sdk.destroy();
   }
 }

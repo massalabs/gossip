@@ -97,13 +97,29 @@ describe('secure account reload with fresh application modules', () => {
         replacementPassword: 'fresh-replacement-password',
       })
     );
-    expect(relaunched).toEqual({
+    expect(relaunched).toMatchObject({
       routedToOnboarding: true,
       grantRehydrated: true,
       rejectedPasswordsStayedRejected: true,
       replacementUsername: 'replacement',
       replacementReopened: true,
       stableUserId: true,
+      grantRevoked: true,
+    });
+    expect(relaunched.persistedRevokedAppStore).toBeTypeOf('string');
+
+    const revokedRelaunch = await withFreshPage(harness =>
+      harness.verifyRevokedGrantAfterRelaunch({
+        domain,
+        secureStorageWasmUrl,
+        persistedAppStore: relaunched.persistedRevokedAppStore,
+        replacementPassword: 'fresh-replacement-password',
+      })
+    );
+    expect(revokedRelaunch).toEqual({
+      grantStayedRevoked: true,
+      routedToLogin: true,
+      replacementPasswordStillUnlocks: true,
     });
   }, 180_000);
 });
