@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { COVER_TRAFFIC_NAMESPACES } from '../../src/db/secure-storage-namespaces';
 
 const wasmMock = vi.hoisted(() => ({
   init: vi.fn(),
@@ -100,13 +101,6 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await vi.waitFor(() =>
       expect(wasmMock.allocateSession).toHaveBeenCalledOnce()
     );
-    expect(
-      (
-        api as unknown as {
-          lifecycleOperationInProgress: boolean;
-        }
-      ).lifecycleOperationInProgress
-    ).toBe(true);
     const deferredCover = (
       api as unknown as { runCoverTick: () => Promise<void> }
     ).runCoverTick();
@@ -115,7 +109,126 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     finishCreate();
     await create;
     await deferredCover;
-    expect(wasmMock.coverTrafficTick).toHaveBeenCalled();
+    expect(wasmMock.coverTrafficTick.mock.calls.map(([ns]) => ns)).toEqual(
+      COVER_TRAFFIC_NAMESPACES
+    );
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
+  });
+
+  it('applies every concurrent cover request as its own durable pass', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    let finishFirst!: () => void;
+    let finishSecond!: () => void;
+    const firstFlush = new Promise<void>(resolve => {
+      finishFirst = resolve;
+    });
+    const secondFlush = new Promise<void>(resolve => {
+      finishSecond = resolve;
+    });
+    wasmMock.flushEncrypted
+      .mockReturnValueOnce(firstFlush)
+      .mockReturnValueOnce(secondFlush);
+
+    const internals = api as unknown as {
+      runCoverTick: () => Promise<void>;
+    };
+    const first = internals.runCoverTick();
+    const second = internals.runCoverTick();
+    await vi.waitFor(() =>
+      expect(wasmMock.flushEncrypted).toHaveBeenCalledOnce()
+    );
+
+    finishFirst();
+    await first;
+    await vi.waitFor(() =>
+      expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2)
+    );
+    let secondSettled = false;
+    void second.then(() => {
+      secondSettled = true;
+    });
+    await Promise.resolve();
+    expect(secondSettled).toBe(false);
+
+    finishSecond();
+    await second;
+    expect(wasmMock.coverTrafficTick.mock.calls.map(([ns]) => ns)).toEqual([
+      ...COVER_TRAFFIC_NAMESPACES,
+      ...COVER_TRAFFIC_NAMESPACES,
+    ]);
+  });
+
+  it('persists a failed pre-allocation cover pass before allocating', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const api = new SecureStorageWorkerApi();
+    wasmMock.flushEncrypted
+      .mockRejectedValueOnce(new Error('cover flush failed'))
+      .mockResolvedValue(undefined);
+
+    const internals = api as unknown as {
+      runCoverTick: () => Promise<void>;
+      coverRetryTimerId: ReturnType<typeof setTimeout> | null;
+      pumpOperationQueue: () => void;
+    };
+    const cover = internals.runCoverTick();
+    const create = api.create(0, new Uint8Array([1, 2, 3]));
+
+    await vi.waitFor(() => expect(internals.coverRetryTimerId).not.toBeNull());
+    expect(wasmMock.reloadDurableStorage).toHaveBeenCalledOnce();
+    expect(wasmMock.allocateSession).not.toHaveBeenCalled();
+
+    clearTimeout(internals.coverRetryTimerId!);
+    internals.coverRetryTimerId = null;
+    internals.pumpOperationQueue();
+    await cover;
+    await create;
+
+    expect(wasmMock.allocateSession).toHaveBeenCalledOnce();
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps cover queued across failed allocation recovery', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker');
+    const { SECURE_STORAGE_RECOVERY_REQUIRED } =
+      await import('../../src/db/secure-storage-errors');
+    const api = new SecureStorageWorkerApi();
+    let rejectFirstReload!: (reason: Error) => void;
+    const firstReload = new Promise<void>((_resolve, reject) => {
+      rejectFirstReload = reject;
+    });
+    wasmMock.flushEncrypted.mockRejectedValueOnce(new Error('flush failed'));
+    wasmMock.reloadDurableStorage
+      .mockReturnValueOnce(firstReload)
+      .mockRejectedValueOnce(new Error('reload still failed'))
+      .mockResolvedValue(undefined);
+
+    const create = api.create(0, new Uint8Array([7, 8, 9]));
+    await vi.waitFor(() =>
+      expect(wasmMock.reloadDurableStorage).toHaveBeenCalledOnce()
+    );
+    const cover = (
+      api as unknown as { runCoverTick: () => Promise<void> }
+    ).runCoverTick();
+    rejectFirstReload(new Error('reload failed'));
+
+    await expect(create).rejects.toThrow(SECURE_STORAGE_RECOVERY_REQUIRED);
+    await vi.waitFor(() =>
+      expect(wasmMock.reloadDurableStorage).toHaveBeenCalledTimes(2)
+    );
+    expect(wasmMock.coverTrafficTick).not.toHaveBeenCalled();
+
+    wasmMock.unlockSession.mockReturnValue(false);
+    await expect(api.unlock(new Uint8Array([1]))).resolves.toBe(false);
+    await cover;
+
+    expect(wasmMock.reloadDurableStorage).toHaveBeenCalledTimes(3);
+    expect(wasmMock.coverTrafficTick.mock.calls.map(([ns]) => ns)).toEqual(
+      COVER_TRAFFIC_NAMESPACES
+    );
     expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
   });
 

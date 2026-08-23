@@ -68,6 +68,20 @@ export interface ExecResult {
   lastInsertRowId: number;
 }
 
+interface QueuedCoverOperation {
+  kind: 'cover';
+  resolve: () => void;
+}
+
+interface QueuedLifecycleOperation {
+  kind: 'lifecycle';
+  operation: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (reason: unknown) => void;
+}
+
+type QueuedStorageOperation = QueuedCoverOperation | QueuedLifecycleOperation;
+
 function errorWithCause(message: string, cause: unknown): Error {
   const error = new Error(message) as Error & { cause?: unknown };
   error.cause = cause;
@@ -84,64 +98,97 @@ function randomCoverInterval(): number {
 
 export class SecureStorageWorkerApi {
   private coverTimerId: ReturnType<typeof setTimeout> | null = null;
+  private coverRetryTimerId: ReturnType<typeof setTimeout> | null = null;
   private coverTickPromise: Promise<void> | null = null;
-  private coverTickPending = false;
-  private coverTickPendingResolvers: Array<() => void> = [];
-  private lifecycleOperationInProgress = false;
-  private lifecycleTail: Promise<void> = Promise.resolve();
+  private operationQueue: QueuedStorageOperation[] = [];
+  private operationPumpActive = false;
   private durableRecoveryRequired = false;
+  private durableRecoveryPromise: Promise<void> | null = null;
 
   private async recoverDurableStorage(): Promise<void> {
-    await reloadDurableStorage();
-    this.durableRecoveryRequired = false;
+    if (this.durableRecoveryPromise) {
+      await this.durableRecoveryPromise;
+      return;
+    }
+
+    const recovery = (async () => {
+      await reloadDurableStorage();
+      this.durableRecoveryRequired = false;
+    })();
+    this.durableRecoveryPromise = recovery;
+    try {
+      await recovery;
+    } finally {
+      if (this.durableRecoveryPromise === recovery) {
+        this.durableRecoveryPromise = null;
+      }
+    }
   }
 
   private async ensureDurableStorageRecovered(): Promise<void> {
     if (!this.durableRecoveryRequired) return;
     await this.recoverDurableStorage();
-    if (!this.lifecycleOperationInProgress) {
-      await this.applyDeferredCoverTick();
+    // A foreground recovery should not leave safe queued cover work waiting for
+    // a stale retry timer. Resume the FIFO immediately after the durable reload.
+    if (this.coverRetryTimerId !== null) {
+      clearTimeout(this.coverRetryTimerId);
+      this.coverRetryTimerId = null;
     }
+    this.pumpOperationQueue();
   }
 
-  private async applyDeferredCoverTick(): Promise<void> {
-    if (
-      !this.coverTickPending ||
-      this.durableRecoveryRequired ||
-      this.lifecycleOperationInProgress
-    ) {
-      return;
-    }
-    this.coverTickPending = false;
-    const pendingResolvers = this.coverTickPendingResolvers.splice(0);
-    try {
-      await this.runCoverTick();
-    } finally {
-      for (const resolve of pendingResolvers) resolve();
-    }
-  }
-
-  private async runLifecycleOperation<T>(
-    operation: () => Promise<T>
-  ): Promise<T> {
-    let release!: () => void;
-    const previous = this.lifecycleTail;
-    this.lifecycleTail = new Promise<void>(resolve => {
-      release = resolve;
+  private runLifecycleOperation<T>(operation: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.operationQueue.push({
+        kind: 'lifecycle',
+        operation,
+        resolve: value => resolve(value as T),
+        reject,
+      });
+      this.pumpOperationQueue();
     });
+  }
 
-    await previous;
+  private pumpOperationQueue(): void {
+    if (this.operationPumpActive || this.coverRetryTimerId !== null) return;
+    void this.drainOperationQueue();
+  }
+
+  private async drainOperationQueue(): Promise<void> {
+    if (this.operationPumpActive) return;
+    this.operationPumpActive = true;
     try {
-      // A reload must never replace the IDB cache while a drained cover
-      // snapshot is still committing/restoring asynchronously.
-      while (this.coverTickPromise) await this.coverTickPromise;
-      this.lifecycleOperationInProgress = true;
-      return await operation();
+      while (this.operationQueue.length > 0) {
+        const queued = this.operationQueue[0];
+        if (queued.kind === 'cover') {
+          const persisted = await this.runCoverPassAttempt();
+          if (!persisted) {
+            this.scheduleCoverRetry();
+            return;
+          }
+          this.operationQueue.shift();
+          queued.resolve();
+          continue;
+        }
+
+        this.operationQueue.shift();
+        try {
+          queued.resolve(await queued.operation());
+        } catch (error) {
+          queued.reject(error);
+        }
+      }
     } finally {
-      this.lifecycleOperationInProgress = false;
-      await this.applyDeferredCoverTick();
-      release();
+      this.operationPumpActive = false;
     }
+  }
+
+  private scheduleCoverRetry(): void {
+    if (this.coverRetryTimerId !== null) return;
+    this.coverRetryTimerId = setTimeout(() => {
+      this.coverRetryTimerId = null;
+      this.pumpOperationQueue();
+    }, randomCoverInterval());
   }
 
   private async recoverRejectedLifecycleOperation(
@@ -161,54 +208,62 @@ export class SecureStorageWorkerApi {
   }
 
   /**
-   * Run one cover-traffic pass over every cover namespace and flush.
-   * Each `coverTrafficTick(ns)` picks a random block index and
-   * rerandomizes it across ALL session slots (real + dummies) in
-   * shuffled order, see `lifecycle::cover_traffic_tick` in the Rust
-   * core; the TS side just drives the schedule.
+   * Attempt one full cover pass over every configured namespace and make it
+   * durable. A failed pass is discarded by reloading the last IndexedDB
+   * snapshot and remains at the head of the FIFO for a fresh retry at the same
+   * random 10-30 second cadence. It never resolves early or lets a later
+   * allocation overtake unpersisted cover work.
    *
-   * Re-entrancy guard: a second call while the first is still in
-   * `flushEncrypted()` silently no-ops (defense in depth; with the
-   * single-shot setTimeout used by `startCoverTraffic` the recurring
-   * tick cannot overlap with itself, but the explicit `cover()` RPC
-   * could be called concurrently by the SDK consumer).
+   * Each Rust tick picks a random block index from the current namespace layout
+   * and rerandomizes it across every session slot in shuffled order. Therefore
+   * a pass queued during allocation runs only after the allocation commit and
+   * naturally observes the post-allocation layout; no allocated slot is
+   * special-cased in a way that would bias the cover distribution.
    *
-   * PD-critical: errors are logged at `logger.debug` only. Logging
-   * at error level fingerprinted "secure-storage user with persistent
-   * storage failure" in console history. Errors do not change the
-   * scheduling cadence either: backing off would itself leak ("cover
-   * slows down => user has problems with their slot"), and stopping
-   * after N retries would resolve the most damaging PD ambiguity
-   * ("user exists at all"). The schedule keeps the same 10-30s random
-   * interval regardless of success/failure.
+   * PD-critical failures remain debug-only. Error-level logging or stopping
+   * after a fixed retry count would reveal persistent storage failures and could
+   * distinguish whether a real session exists.
    */
-  private async runCoverTick(): Promise<void> {
-    if (this.coverTickPromise) return;
-    if (this.lifecycleOperationInProgress || this.durableRecoveryRequired) {
-      // Do not drop the due cover pass. It is applied after lifecycle recovery
-      // reaches a durable state; until then flushing could commit partial data.
-      this.coverTickPending = true;
-      return new Promise<void>(resolve => {
-        this.coverTickPendingResolvers.push(resolve);
-      });
+  private async runCoverPassAttempt(): Promise<boolean> {
+    try {
+      await this.ensureDurableStorageRecovered();
+    } catch (error) {
+      logger.debug('[SecureStorage] durable cover recovery failed', error);
+      return false;
     }
 
     const tick = (async () => {
-      try {
-        for (const ns of COVER_TRAFFIC_NAMESPACES) {
-          coverTrafficTick(ns);
-        }
-        await flushEncrypted();
-      } catch (err) {
-        logger.debug('[SecureStorage] cover traffic tick failed', err);
+      for (const ns of COVER_TRAFFIC_NAMESPACES) {
+        coverTrafficTick(ns);
       }
+      await flushEncrypted();
     })();
     this.coverTickPromise = tick;
     try {
       await tick;
+      return true;
+    } catch (error) {
+      logger.debug('[SecureStorage] cover traffic tick failed', error);
+      this.durableRecoveryRequired = true;
+      try {
+        await this.recoverDurableStorage();
+      } catch (recoveryError) {
+        logger.debug(
+          '[SecureStorage] durable cover recovery failed',
+          recoveryError
+        );
+      }
+      return false;
     } finally {
       if (this.coverTickPromise === tick) this.coverTickPromise = null;
     }
+  }
+
+  private runCoverTick(): Promise<void> {
+    return new Promise<void>(resolve => {
+      this.operationQueue.push({ kind: 'cover', resolve });
+      this.pumpOperationQueue();
+    });
   }
 
   private startCoverTraffic(): void {
@@ -230,6 +285,13 @@ export class SecureStorageWorkerApi {
     if (this.coverTimerId !== null) {
       clearTimeout(this.coverTimerId);
       this.coverTimerId = null;
+    }
+  }
+
+  private stopCoverRetry(): void {
+    if (this.coverRetryTimerId !== null) {
+      clearTimeout(this.coverRetryTimerId);
+      this.coverRetryTimerId = null;
     }
   }
 
@@ -502,6 +564,7 @@ export class SecureStorageWorkerApi {
 
   async close(): Promise<void> {
     this.stopCoverTraffic();
+    this.stopCoverRetry();
     closeDatabase();
     await flushEncrypted();
   }

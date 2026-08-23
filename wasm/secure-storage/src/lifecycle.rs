@@ -497,6 +497,45 @@ mod tests {
         });
     }
 
+    #[test]
+    fn cover_tick_rerandomizes_post_allocation_block_zero() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            let allocated = SessionIndex::new(1).unwrap();
+            allocate_session(&mut storage, DOMAIN, allocated, b"pw").unwrap();
+            assert_eq!(
+                crate::write::get_global_block_count(&storage, NS).unwrap(),
+                1
+            );
+
+            let before: Vec<_> = (0..SESSION_COUNT as u8)
+                .map(|i| {
+                    storage
+                        .read_block(SessionIndex::new(i).unwrap(), NS, 0)
+                        .unwrap()
+                })
+                .collect();
+
+            cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
+
+            for i in 0..SESSION_COUNT as u8 {
+                let after = storage
+                    .read_block(SessionIndex::new(i).unwrap(), NS, 0)
+                    .unwrap();
+                assert_ne!(
+                    *after, *before[i as usize],
+                    "slot {i} block 0 must be rerandomized after allocation"
+                );
+            }
+
+            let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
+            let ns_state = load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            assert_eq!(ns_state.total_data_length, 0);
+        });
+    }
+
     // --- commit 16: cover_traffic_tick ---
 
     #[test]
