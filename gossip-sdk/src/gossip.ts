@@ -329,178 +329,209 @@ class GossipSdk {
       );
     }
 
-    // Derive encryption key from mnemonic when not provided
-    const encryptionKey =
-      options.encryptionKey ??
-      (await generateEncryptionKeyFromSeed(
-        options.mnemonic,
-        new Uint8Array(32).fill(0)
-      ));
+    const initializedState = this.state;
+    const ownsEncryptionKey = options.encryptionKey === undefined;
+    let encryptionKey: EncryptionKey | undefined;
+    let session: SessionModule | undefined;
+    let committed = false;
 
-    const { messageProtocol } = this.state;
-
-    // Ensure WASM is ready
-    await ensureWasmInitialized();
-
-    // Validate that encryptedSession can be decrypted with the provided key
-    if (options.encryptedSession) {
-      try {
-        const sessionManager = SessionManagerWrapper.from_encrypted_blob(
-          options.encryptedSession,
-          encryptionKey
-        );
-        // We only create this wrapper for validation, free it immediately
-        sessionManager.free();
-      } catch {
-        throw new Error(
-          '[GossipSdk] Failed to load encrypted session. Please provide a valid encryptedSession and encryptionKey.'
-        );
-      }
-    }
-
-    // Generate keys from mnemonic
-    const userKeys = await generateUserKeys(options.mnemonic);
-
-    // Create session with persistence callback.
-    //
-    // The callback is awaited by the session module before each network
-    // send. We coalesce persists into a 500 ms-debounced background flush
-    // so the await resolves instantly: `handleSessionPersist` only marks
-    // the state dirty and schedules the actual write. See the
-    // `_persistDirty`/`flushPersist` machinery below and `closeSession`
-    // for the synchronous drain.
-    let session: SessionModule;
     try {
-      session = new SessionModule(
-        userKeys,
-        async () => {
-          this.handleSessionPersist();
-        },
-        options.sessionConfig
-      );
-    } finally {
-      // SessionModule extracts independent key wrappers; the combined bundle
-      // contains a second serialized copy of the secret identity material.
-      userKeys.free();
-    }
+      // Derive encryption key from mnemonic when not provided.
+      encryptionKey =
+        options.encryptionKey ??
+        (await generateEncryptionKeyFromSeed(
+          options.mnemonic,
+          new Uint8Array(32).fill(0)
+        ));
 
-    // Restore existing session state if provided
-    if (options.encryptedSession) {
-      session.load(options.encryptedSession, encryptionKey);
-    }
+      const { messageProtocol } = initializedState;
 
-    // Get config from initialized state
-    const { config } = this.state;
+      // Ensure WASM is ready
+      await ensureWasmInitialized();
 
-    // Create services with config (refreshService will be set after creation)
-    const queries = this._queries!;
+      // Validate that encryptedSession can be decrypted with the provided key
+      if (options.encryptedSession) {
+        try {
+          const sessionManager = SessionManagerWrapper.from_encrypted_blob(
+            options.encryptedSession,
+            encryptionKey
+          );
+          // We only create this wrapper for validation, free it immediately
+          sessionManager.free();
+        } catch {
+          throw new Error(
+            '[GossipSdk] Failed to load encrypted session. Please provide a valid encryptedSession and encryptionKey.'
+          );
+        }
+      }
 
-    this._announcement = new AnnouncementService(
-      messageProtocol,
-      session,
-      this.eventEmitter,
-      config,
-      queries
-    );
+      // Generate keys from mnemonic
+      const userKeys = await generateUserKeys(options.mnemonic);
 
-    this._discussion = new DiscussionService(
-      this._announcement,
-      session,
-      this.eventEmitter,
-      queries
-    );
+      // Create session with persistence callback.
+      //
+      // The callback is awaited by the session module before each network
+      // send. We coalesce persists into a 500 ms-debounced background flush
+      // so the await resolves instantly: `handleSessionPersist` only marks
+      // the state dirty and schedules the actual write. See the
+      // `_persistDirty`/`flushPersist` machinery below and `closeSession`
+      // for the synchronous drain.
+      try {
+        session = new SessionModule(
+          userKeys,
+          async () => {
+            this.handleSessionPersist();
+          },
+          options.sessionConfig
+        );
+      } finally {
+        // SessionModule extracts independent key wrappers; the combined bundle
+        // contains a second serialized copy of the secret identity material.
+        userKeys.free();
+      }
 
-    this._message = new MessageService(
-      messageProtocol,
-      session,
-      this.eventEmitter,
-      config,
-      queries
-    );
-    // Wire the immediate-persist callback so the send hot path can
-    // run the session-blob persist in parallel with the network write
-    // (see `MessageService.processSendQueueForContact`). Done as a
-    // setter rather than a constructor arg to avoid a circular
-    // dependency on `this` during MessageService construction.
-    this._message.setPersistFlusher(() => this.awaitPendingPersist());
+      // Restore existing session state if provided
+      if (options.encryptedSession) {
+        session.load(options.encryptedSession, encryptionKey);
+      }
 
-    // Same plumbing for the incoming-announcement path: forces the
-    // session-blob persist between the Rust state mutation and the
-    // SQL inserts so a crash in between can't leave an orphan
-    // Discussion. See `AnnouncementService._processIncomingAnnouncement`
-    // for rationale.
-    this._announcement.setPersistFlusher(() => this.awaitPendingPersist());
+      // Get config from initialized state
+      const { config } = this.state;
 
-    this._discussion.setMessageService(this._message);
+      // Create services with config (refreshService will be set after creation)
+      const queries = this._queries!;
 
-    this._refresh = new RefreshService(
-      this._message,
-      this._discussion,
-      this._announcement,
-      session,
-      this.eventEmitter,
-      queries,
-      this.config
-    );
-
-    this._selfMessage = new SelfMessageService(
-      queries,
-      session.userIdEncoded,
-      encryptionKey
-    );
-    await this._selfMessage.ensureDiscussionExists();
-
-    // Publish gossip ID (public key) on messageProtocol so the user is
-    // discoverable. Tentative onboarding sessions explicitly suppress this;
-    // their stable identity publishes on the first real post-onboarding login.
-    // Non-blocking: login must succeed even when the API is unreachable.
-    if (options.publishPublicKey !== false) {
-      this._auth!.publishPublicKey(
-        session.ourPk,
-        session.userIdEncoded,
+      this._announcement = new AnnouncementService(
+        messageProtocol,
+        session,
+        this.eventEmitter,
+        config,
         queries
-      ).catch(err => {
-        this.eventEmitter.emit(SdkEventType.ERROR, {
-          error: err instanceof Error ? err : new Error(String(err)),
-          context: 'publishPublicKey',
+      );
+
+      this._discussion = new DiscussionService(
+        this._announcement,
+        session,
+        this.eventEmitter,
+        queries
+      );
+
+      this._message = new MessageService(
+        messageProtocol,
+        session,
+        this.eventEmitter,
+        config,
+        queries
+      );
+      // Wire the immediate-persist callback so the send hot path can
+      // run the session-blob persist in parallel with the network write
+      // (see `MessageService.processSendQueueForContact`). Done as a
+      // setter rather than a constructor arg to avoid a circular
+      // dependency on `this` during MessageService construction.
+      this._message.setPersistFlusher(() => this.awaitPendingPersist());
+
+      // Same plumbing for the incoming-announcement path: forces the
+      // session-blob persist between the Rust state mutation and the
+      // SQL inserts so a crash in between can't leave an orphan
+      // Discussion. See `AnnouncementService._processIncomingAnnouncement`
+      // for rationale.
+      this._announcement.setPersistFlusher(() => this.awaitPendingPersist());
+
+      this._discussion.setMessageService(this._message);
+
+      this._refresh = new RefreshService(
+        this._message,
+        this._discussion,
+        this._announcement,
+        session,
+        this.eventEmitter,
+        queries,
+        this.config
+      );
+
+      this._selfMessage = new SelfMessageService(
+        queries,
+        session.userIdEncoded,
+        encryptionKey
+      );
+      await this._selfMessage.ensureDiscussionExists();
+
+      // Now set refreshService on services (circular dependency resolved via setter)
+      this._discussion.setRefreshService(this._refresh);
+      this._announcement.setRefreshService(this._refresh);
+
+      // Reset any messages stuck in SENDING status to WAITING_SESSION
+      // This handles app crash/close during message send
+      await this.resetStuckSendingMessages(session.userIdEncoded);
+
+      // Update SDK state to reflect the newly opened session.
+      this.state = {
+        status: SdkStatus.SESSION_OPEN,
+        messageProtocol,
+        config,
+        session,
+        encryptionKey,
+        onPersist: options.onPersist,
+      };
+
+      // Wire up cross-service dependencies
+      this._contact = new ContactService(
+        session,
+        queries,
+        this._auth!,
+        this.eventEmitter
+      );
+      this._message.setQueueManager(this.messageQueues);
+      this._discussion.setAuthService(this._auth!);
+
+      // Auto-start polling if enabled in config AND the caller didn't opt
+      // out via `autoStartPolling: false`. The opt-out is used by the app
+      // during multi-account onboarding, where we open each account's
+      // session just long enough to write its profile — polling during
+      // that window would race with session switches.
+      if (config.polling.enabled && options.autoStartPolling !== false) {
+        this.startPolling();
+      }
+
+      // Publish only after every fallible session-opening step has committed.
+      // AuthService snapshots the public bytes synchronously, so immediate
+      // logout may dispose the live identity wrappers safely.
+      if (options.publishPublicKey !== false) {
+        this._auth!.publishPublicKey(
+          session.ourPk,
+          session.userIdEncoded,
+          queries
+        ).catch(err => {
+          this.eventEmitter.emit(SdkEventType.ERROR, {
+            error: err instanceof Error ? err : new Error(String(err)),
+            context: 'publishPublicKey',
+          });
         });
-      });
-    }
-    // Now set refreshService on services (circular dependency resolved via setter)
-    this._discussion.setRefreshService(this._refresh);
-    this._announcement.setRefreshService(this._refresh);
-
-    // Reset any messages stuck in SENDING status to WAITING_SESSION
-    // This handles app crash/close during message send
-    await this.resetStuckSendingMessages(session.userIdEncoded);
-
-    // Update SDK state to reflect the newly opened session.
-    this.state = {
-      status: SdkStatus.SESSION_OPEN,
-      messageProtocol,
-      config,
-      session,
-      encryptionKey,
-      onPersist: options.onPersist,
-    };
-
-    // Wire up cross-service dependencies
-    this._contact = new ContactService(
-      session,
-      queries,
-      this._auth!,
-      this.eventEmitter
-    );
-    this._message.setQueueManager(this.messageQueues);
-    this._discussion.setAuthService(this._auth!);
-
-    // Auto-start polling if enabled in config AND the caller didn't opt
-    // out via `autoStartPolling: false`. The opt-out is used by the app
-    // during multi-account onboarding, where we open each account's
-    // session just long enough to write its profile — polling during
-    // that window would race with session switches.
-    if (config.polling.enabled && options.autoStartPolling !== false) {
-      this.startPolling();
+      }
+      committed = true;
+    } catch (error) {
+      if (!committed) {
+        this.pollingManager.stop();
+        session?.dispose();
+        if (ownsEncryptionKey) encryptionKey?.free();
+        this._announcement = null;
+        this._discussion = null;
+        this._message = null;
+        this._refresh = null;
+        this._contact = null;
+        this._selfMessage = null;
+        this.messageQueues.clear();
+        if (this._persistTimer !== null) {
+          clearTimeout(this._persistTimer);
+          this._persistTimer = null;
+        }
+        this._persistDirty = false;
+        this._persistInFlight = false;
+        this._persistInFlightPromise = null;
+        this._persistBackoffMs = 0;
+        this.state = initializedState;
+      }
+      throw error;
     }
   }
 
@@ -527,8 +558,8 @@ class GossipSdk {
     // that final state.
     await this.flushSessionPersistSync();
 
-    // Cleanup session
-    this.state.session.cleanup();
+    // Cleanup the manager and both identity-key wrappers deterministically.
+    this.state.session.dispose();
 
     // Free the encryption key WASM object to zero its memory before dropping
     this.state.encryptionKey?.free();

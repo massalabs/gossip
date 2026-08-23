@@ -51,14 +51,32 @@ export class SessionModule {
     onPersist?: () => Promise<void>,
     config?: SessionConfig
   ) {
-    this.ourPk = userKeys.public_keys();
-    this.ourSk = userKeys.secret_keys();
-    this.userId = copyOut(this.ourPk.derive_id());
-    this.userIdEncoded = encodeUserId(this.userId);
+    let ourPk: UserPublicKeys | undefined;
+    let ourSk: UserSecretKeys | undefined;
+    let sessionManager: SessionManagerWrapper | undefined;
+    try {
+      ourPk = userKeys.public_keys();
+      ourSk = userKeys.secret_keys();
+      const userId = copyOut(ourPk.derive_id());
+      const userIdEncoded = encodeUserId(userId);
 
-    const sessionConfig = config ?? SessionConfig.new_default();
-    this.sessionManager = new SessionManagerWrapper(sessionConfig);
-    this.onPersist = onPersist;
+      // SessionManagerWrapper consumes the SessionConfig WASM wrapper.
+      sessionManager = new SessionManagerWrapper(
+        config ?? SessionConfig.new_default()
+      );
+
+      this.ourPk = ourPk;
+      this.ourSk = ourSk;
+      this.userId = userId;
+      this.userIdEncoded = userIdEncoded;
+      this.sessionManager = sessionManager;
+      this.onPersist = onPersist;
+    } catch (error) {
+      sessionManager?.free();
+      if (ourSk) freeWasm(ourSk);
+      if (ourPk) freeWasm(ourPk);
+      throw error;
+    }
   }
 
   /**

@@ -37,8 +37,22 @@ export class AuthService {
    * @param userId - Bech32-encoded userId
    * @param queries - Database queries
    */
-  async publishPublicKey(
+  publishPublicKey(
     publicKeys: UserPublicKeys,
+    userId: string,
+    queries: Queries
+  ): Promise<void> {
+    // Snapshot before the first await so logout can deterministically dispose
+    // the live WASM wrapper without racing an in-flight publication.
+    return this.publishPublicKeyBytes(
+      new Uint8Array(publicKeys.to_bytes()),
+      userId,
+      queries
+    );
+  }
+
+  async publishPublicKeyBytes(
+    publicKeyBytes: Uint8Array,
     userId: string,
     queries: Queries
   ): Promise<void> {
@@ -48,9 +62,7 @@ export class AuthService {
       if (elapsed < REPUBLISH_INTERVAL_MS) return;
     }
 
-    await this.authProtocol.postPublicKey(
-      encodeToBase64(publicKeys.to_bytes())
-    );
+    await this.authProtocol.postPublicKey(encodeToBase64(publicKeyBytes));
 
     await queries.userProfiles.updateById(userId, {
       lastPublicKeyPush: new Date(),

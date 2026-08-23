@@ -6,7 +6,8 @@
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { type EncryptionKey } from '../../src/wasm/encryption';
+import { EncryptionKey } from '../../src/wasm/encryption';
+import { UserPublicKeys, UserSecretKeys } from '../../src/wasm/bindings';
 import { GossipSdk } from '../../src/gossip';
 import { clearAllTables, getTestStorageConfig } from '../testDb';
 import { generateMnemonic } from '../../src/crypto/bip39';
@@ -85,6 +86,81 @@ describe('GossipSdk lifecycle', () => {
     await sdk.closeSession();
     expect(sdk.isSessionOpen).toBe(false);
     expect(() => sdk.messages).toThrow('No session open');
+  });
+
+  it('disposes identity wrappers and its derived key on normal close', async () => {
+    await sdk.init({ storage: getTestStorageConfig() });
+    const publicFree = vi.spyOn(UserPublicKeys.prototype, 'free');
+    const secretFree = vi.spyOn(UserSecretKeys.prototype, 'free');
+    const encryptionFree = vi.spyOn(EncryptionKey.prototype, 'free');
+
+    try {
+      await sdk.openSession({
+        mnemonic: generateMnemonic(),
+        autoStartPolling: false,
+        publishPublicKey: false,
+      });
+      await sdk.closeSession();
+
+      expect(publicFree).toHaveBeenCalledOnce();
+      expect(secretFree).toHaveBeenCalledOnce();
+      expect(encryptionFree).toHaveBeenCalledOnce();
+    } finally {
+      publicFree.mockRestore();
+      secretFree.mockRestore();
+      encryptionFree.mockRestore();
+    }
+  });
+
+  it('disposes constructed identity state when session opening rejects', async () => {
+    await sdk.init({ storage: getTestStorageConfig() });
+    const publicFree = vi.spyOn(UserPublicKeys.prototype, 'free');
+    const secretFree = vi.spyOn(UserSecretKeys.prototype, 'free');
+    const encryptionFree = vi.spyOn(EncryptionKey.prototype, 'free');
+    const internals = sdk as unknown as {
+      resetStuckSendingMessages: (userId: string) => Promise<void>;
+    };
+    const reset = vi
+      .spyOn(internals, 'resetStuckSendingMessages')
+      .mockRejectedValue(new Error('database reset failed'));
+
+    try {
+      await expect(
+        sdk.openSession({
+          mnemonic: generateMnemonic(),
+          autoStartPolling: false,
+          publishPublicKey: false,
+        })
+      ).rejects.toThrow('database reset failed');
+
+      expect(sdk.isSessionOpen).toBe(false);
+      expect(publicFree).toHaveBeenCalledOnce();
+      expect(secretFree).toHaveBeenCalledOnce();
+      expect(encryptionFree).toHaveBeenCalledOnce();
+    } finally {
+      reset.mockRestore();
+      publicFree.mockRestore();
+      secretFree.mockRestore();
+      encryptionFree.mockRestore();
+    }
+  });
+
+  it('frees an internally derived key when session validation rejects', async () => {
+    await sdk.init({ storage: getTestStorageConfig() });
+    const encryptionFree = vi.spyOn(EncryptionKey.prototype, 'free');
+
+    try {
+      await expect(
+        sdk.openSession({
+          mnemonic: generateMnemonic(),
+          encryptedSession: new Uint8Array([1, 2, 3]),
+          autoStartPolling: false,
+        })
+      ).rejects.toThrow('Failed to load encrypted session');
+      expect(encryptionFree).toHaveBeenCalledOnce();
+    } finally {
+      encryptionFree.mockRestore();
+    }
   });
 
   it('can defer public-key publication until a later real login', async () => {
