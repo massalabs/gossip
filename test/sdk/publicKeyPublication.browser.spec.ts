@@ -5,10 +5,12 @@ import { AuthService } from '../../gossip-sdk/src/services/auth';
 describe('browser public-key reconnect publication', () => {
   let sdk: GossipSdk;
   let postPublicKey: ReturnType<typeof vi.fn>;
+  let updatePublicKeyTimestamp: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     sdk = new GossipSdk();
     postPublicKey = vi.fn();
+    updatePublicKeyTimestamp = vi.fn().mockResolvedValue(undefined);
     const auth = new AuthService({
       fetchPublicKeyByUserId: vi.fn(),
       postPublicKey,
@@ -16,7 +18,7 @@ describe('browser public-key reconnect publication', () => {
     const queries = {
       userProfiles: {
         getById: vi.fn().mockResolvedValue(null),
-        updateById: vi.fn().mockResolvedValue(undefined),
+        updateById: updatePublicKeyTimestamp,
       },
     };
     const internals = sdk as unknown as {
@@ -40,6 +42,28 @@ describe('browser public-key reconnect publication', () => {
 
   afterEach(async () => {
     if (sdk.isSessionOpen) await sdk.closeSession();
+  });
+
+  it('retries timestamp persistence online without repeating a confirmed post', async () => {
+    updatePublicKeyTimestamp.mockRejectedValueOnce(
+      new Error('timestamp persistence failed')
+    );
+    const publicationFailed = new Promise<void>(resolve => {
+      sdk.on(SdkEventType.ERROR, event => {
+        if (event.context === 'publishPublicKey') resolve();
+      });
+    });
+
+    sdk.startPublicKeyPublication();
+    await publicationFailed;
+    expect(postPublicKey).toHaveBeenCalledOnce();
+    expect(updatePublicKeyTimestamp).toHaveBeenCalledOnce();
+
+    window.dispatchEvent(new Event('online'));
+    await vi.waitFor(() =>
+      expect(updatePublicKeyTimestamp).toHaveBeenCalledTimes(2)
+    );
+    expect(postPublicKey).toHaveBeenCalledOnce();
   });
 
   it('retries on online once and removes the listener on close', async () => {

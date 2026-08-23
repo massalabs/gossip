@@ -14,6 +14,8 @@ export const PUBLIC_KEY_REPUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export class AuthService {
   private publicationInFlight = new Map<string, Promise<number>>();
+  private successfulPublicationTimes = new Map<string, number>();
+  private pendingTimestampPersistence = new Map<string, number>();
 
   constructor(public authProtocol: IAuthProtocol) {}
 
@@ -81,18 +83,50 @@ export class AuthService {
     queries: Queries
   ): Promise<number> {
     const profile = await queries.userProfiles.getById(userId);
-    if (profile?.lastPublicKeyPush) {
-      const elapsed = Date.now() - profile.lastPublicKeyPush.getTime();
-      if (elapsed < PUBLIC_KEY_REPUBLISH_INTERVAL_MS) {
-        return PUBLIC_KEY_REPUBLISH_INTERVAL_MS - elapsed;
+    const durablePublicationTime = profile?.lastPublicKeyPush?.getTime();
+    const inMemoryPublicationTime = this.successfulPublicationTimes.get(userId);
+    const lastPublicationTime = Math.max(
+      durablePublicationTime ?? Number.NEGATIVE_INFINITY,
+      inMemoryPublicationTime ?? Number.NEGATIVE_INFINITY
+    );
+    const now = Date.now();
+    const elapsed = now - lastPublicationTime;
+
+    if (elapsed < PUBLIC_KEY_REPUBLISH_INTERVAL_MS) {
+      const pendingTimestamp = this.pendingTimestampPersistence.get(userId);
+      if (pendingTimestamp !== undefined) {
+        if (
+          durablePublicationTime === undefined ||
+          durablePublicationTime < pendingTimestamp
+        ) {
+          await queries.userProfiles.updateById(userId, {
+            // Persist the actual confirmed POST time, not the later retry time.
+            // This timestamp is local scheduling metadata and is never sent to
+            // the auth server or Agraphon bulletin.
+            lastPublicKeyPush: new Date(pendingTimestamp),
+          });
+        }
+        if (this.pendingTimestampPersistence.get(userId) === pendingTimestamp) {
+          this.pendingTimestampPersistence.delete(userId);
+        }
       }
+      return PUBLIC_KEY_REPUBLISH_INTERVAL_MS - Math.max(0, elapsed);
     }
 
     await this.authProtocol.postPublicKey(encodeToBase64(publicKeyBytes));
 
+    // Record confirmed server success before the fallible local timestamp
+    // update. Timers and online events still invoke this method, but while the
+    // marker is current they retry only persistence instead of POSTing again.
+    const publishedAt = Date.now();
+    this.successfulPublicationTimes.set(userId, publishedAt);
+    this.pendingTimestampPersistence.set(userId, publishedAt);
     await queries.userProfiles.updateById(userId, {
-      lastPublicKeyPush: new Date(),
+      lastPublicKeyPush: new Date(publishedAt),
     });
+    if (this.pendingTimestampPersistence.get(userId) === publishedAt) {
+      this.pendingTimestampPersistence.delete(userId);
+    }
     return PUBLIC_KEY_REPUBLISH_INTERVAL_MS;
   }
 }
