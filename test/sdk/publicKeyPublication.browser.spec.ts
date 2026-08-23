@@ -144,7 +144,17 @@ describe('durable public-key publication timestamp', () => {
     const domain = 'publication-before-profile';
     const password = 'publication-password';
     const mnemonic = await generateMnemonic();
-    const firstPost = vi.fn().mockResolvedValue('published');
+    let resolveFirstPost!: (value: string) => void;
+    let markFirstPostStarted!: () => void;
+    const firstPostStarted = new Promise<void>(resolve => {
+      markFirstPostStarted = resolve;
+    });
+    const firstPost = vi.fn(() => {
+      markFirstPostStarted();
+      return new Promise<string>(resolve => {
+        resolveFirstPost = resolve;
+      });
+    });
     const first = new GossipSdk();
     await first.init({
       protocolBaseUrl: 'http://127.0.0.1:1',
@@ -179,19 +189,31 @@ describe('durable public-key publication timestamp', () => {
       .mockName('real profile timestamp update');
     firstInternals._queries.userProfiles.updateById = update;
 
-    const publicationTime = Date.now();
-    let currentTime = publicationTime;
+    const postStartTime = 1_700_000_000_000;
+    const publicationTime = postStartTime + 60_000;
+    let currentTime = postStartTime;
     const now = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
     let confirmedAt: number | undefined;
     try {
       await first.openSession({ mnemonic, autoStartPolling: false });
+      await firstPostStarted;
+      expect(update).not.toHaveBeenCalled();
+      currentTime = publicationTime;
+      resolveFirstPost('published');
       await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
       await expect(update.mock.results[0].value).resolves.toBe(false);
       expect(firstPost).toHaveBeenCalledOnce();
 
       currentTime += 5 * 60 * 1000;
-      await first.profiles.save(
-        userProfile().userId(first.userId).username('publisher').build()
+      const profile = userProfile()
+        .userId(first.userId)
+        .username('publisher')
+        .build();
+      await first.profiles.createOrUpdate(
+        profile.username,
+        profile.userId,
+        profile.security,
+        profile.session
       );
       expect(update).toHaveBeenCalledTimes(2);
       const saved = await firstInternals._queries.userProfiles.getById(

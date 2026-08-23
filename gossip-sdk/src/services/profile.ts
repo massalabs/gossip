@@ -89,6 +89,7 @@ export class ProfileService {
         updatedAt: new Date(),
       };
       await this.queries.userProfiles.upsert(userProfileToRow(updatedProfile));
+      await this.onProfileSaved?.(updatedProfile.userId);
       return updatedProfile;
     }
 
@@ -103,6 +104,7 @@ export class ProfileService {
       updatedAt: new Date(),
     };
     await this.queries.userProfiles.upsert(userProfileToRow(newProfile));
+    await this.onProfileSaved?.(newProfile.userId);
     return newProfile;
   }
 }
