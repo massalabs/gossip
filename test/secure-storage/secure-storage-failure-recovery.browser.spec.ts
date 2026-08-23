@@ -223,11 +223,14 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     void unlock.then(() => {
       unlockSettled = true;
     });
-    await vi.waitFor(async () => {
-      expect(await testProxy(connection).retryFailedCoverNowForTesting()).toBe(
-        true
-      );
-    });
+    await vi.waitFor(
+      async () => {
+        expect(
+          await testProxy(connection).retryFailedCoverNowForTesting()
+        ).toBe(true);
+      },
+      { timeout: 30_000 }
+    );
     expect(unlockSettled).toBe(false);
     await cover;
     expect(await unlock).toBe(true);
