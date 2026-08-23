@@ -28,7 +28,7 @@
   },
   "scripts": {
     "prebuild": "rimraf dist",
-    "build": "tsc && npm run copy:wasm",
+    "build": "tsc && npm run copy:wasm && npm run audit:production-worker",
     "copy:wasm": "mkdir -p dist/assets/generated/wasm dist/assets/generated/wasm-secureStorage && cp -R src/assets/generated/wasm/. dist/assets/generated/wasm/ && cp -R src/assets/generated/wasm-secureStorage/. dist/assets/generated/wasm-secureStorage/",
     "audit:production-worker": "node scripts/audit-production-worker.mjs",
     "test": "vitest",
