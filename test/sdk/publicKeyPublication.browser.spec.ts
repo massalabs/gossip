@@ -26,7 +26,7 @@ describe('browser public-key reconnect publication', () => {
     const queries = {
       userProfiles: {
         getById: vi.fn().mockResolvedValue(null),
-        updateById: updatePublicKeyTimestamp,
+        updateLastPublicKeyPushMax: updatePublicKeyTimestamp,
       },
     };
     const internals = sdk as unknown as {
@@ -140,101 +140,28 @@ describe('durable public-key publication timestamp', () => {
     await clearSecureStorageIdb();
   }, 60_000);
 
-  it('persists a pre-profile confirmation without reposting after relaunch', async () => {
-    const domain = 'publication-before-profile';
-    const password = 'publication-password';
-    const mnemonic = await generateMnemonic();
-    let resolveFirstPost!: (value: string) => void;
-    let markFirstPostStarted!: () => void;
-    const firstPostStarted = new Promise<void>(resolve => {
-      markFirstPostStarted = resolve;
-    });
-    const firstPost = vi.fn(() => {
-      markFirstPostStarted();
-      return new Promise<string>(resolve => {
-        resolveFirstPost = resolve;
+  it.each([
+    ['missing', false],
+    ['existing', true],
+  ])(
+    'persists a confirmation through a %s profile without reposting after relaunch',
+    async (_profileState, existingProfile) => {
+      const domain = `publication-before-${existingProfile ? 'existing' : 'missing'}-profile`;
+      const password = 'publication-password';
+      const mnemonic = await generateMnemonic();
+      let resolveFirstPost!: (value: string) => void;
+      let markFirstPostStarted!: () => void;
+      const firstPostStarted = new Promise<void>(resolve => {
+        markFirstPostStarted = resolve;
       });
-    });
-    const first = new GossipSdk();
-    await first.init({
-      protocolBaseUrl: 'http://127.0.0.1:1',
-      storage: {
-        type: 'secureStorage',
-        domain,
-        secureStorageWasmUrl,
-      },
-    });
-    await first.secureStorageCreate(0, password);
-
-    const firstInternals = first as unknown as {
-      _auth: AuthService;
-      _queries: {
-        userProfiles: {
-          getById: (userId: string) => Promise<{
-            lastPublicKeyPush: Date | null;
-          } | null>;
-          updateById: ReturnType<typeof vi.fn>;
-        };
-      };
-    };
-    firstInternals._auth = new AuthService({
-      fetchPublicKeyByUserId: vi.fn(),
-      postPublicKey: firstPost,
-    });
-    const originalUpdate = firstInternals._queries.userProfiles.updateById.bind(
-      firstInternals._queries.userProfiles
-    );
-    const update = vi
-      .fn(originalUpdate)
-      .mockName('real profile timestamp update');
-    firstInternals._queries.userProfiles.updateById = update;
-
-    const postStartTime = 1_700_000_000_000;
-    const publicationTime = postStartTime + 60_000;
-    let currentTime = postStartTime;
-    const now = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
-    let confirmedAt: number | undefined;
-    try {
-      await first.openSession({ mnemonic, autoStartPolling: false });
-      await firstPostStarted;
-      expect(update).not.toHaveBeenCalled();
-      currentTime = publicationTime;
-      resolveFirstPost('published');
-      await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-      await expect(update.mock.results[0].value).resolves.toBe(false);
-      expect(firstPost).toHaveBeenCalledOnce();
-
-      currentTime += 5 * 60 * 1000;
-      const profile = userProfile()
-        .userId(first.userId)
-        .username('publisher')
-        .build();
-      await first.profiles.createOrUpdate(
-        profile.username,
-        profile.userId,
-        profile.security,
-        profile.session
-      );
-      expect(update).toHaveBeenCalledTimes(2);
-      const saved = await firstInternals._queries.userProfiles.getById(
-        first.userId
-      );
-      confirmedAt = saved?.lastPublicKeyPush?.getTime();
-      expect(confirmedAt).toBe(publicationTime);
-      expect(firstPost).toHaveBeenCalledOnce();
-    } finally {
-      now.mockRestore();
-    }
-
-    await first.closeSession();
-    await first.secureStorageLock();
-    await first.destroy();
-    await new Promise(resolve => setTimeout(resolve, 0));
-
-    const secondPost = vi.fn().mockResolvedValue('duplicate');
-    const second = new GossipSdk();
-    try {
-      await second.init({
+      const firstPost = vi.fn(() => {
+        markFirstPostStarted();
+        return new Promise<string>(resolve => {
+          resolveFirstPost = resolve;
+        });
+      });
+      const first = new GossipSdk();
+      await first.init({
         protocolBaseUrl: 'http://127.0.0.1:1',
         storage: {
           type: 'secureStorage',
@@ -242,22 +169,129 @@ describe('durable public-key publication timestamp', () => {
           secureStorageWasmUrl,
         },
       });
-      expect(await second.secureStorageUnlock(password)).toBe(true);
-      const secondInternals = second as unknown as { _auth: AuthService };
-      secondInternals._auth = new AuthService({
-        fetchPublicKeyByUserId: vi.fn(),
-        postPublicKey: secondPost,
-      });
-      await second.openSession({ mnemonic, autoStartPolling: false });
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await first.secureStorageCreate(0, password);
 
-      expect(secondPost).not.toHaveBeenCalled();
-      expect(
-        (await second.profiles.get(second.userId))?.lastPublicKeyPush?.getTime()
-      ).toBe(confirmedAt);
-    } finally {
-      await second.destroy();
+      const firstInternals = first as unknown as {
+        _auth: AuthService;
+        _queries: {
+          userProfiles: {
+            getById: (userId: string) => Promise<{
+              lastPublicKeyPush: Date | null;
+            } | null>;
+            updateLastPublicKeyPushMax: ReturnType<typeof vi.fn>;
+          };
+        };
+      };
+      firstInternals._auth = new AuthService({
+        fetchPublicKeyByUserId: vi.fn(),
+        postPublicKey: firstPost,
+      });
+      const originalUpdate =
+        firstInternals._queries.userProfiles.updateLastPublicKeyPushMax.bind(
+          firstInternals._queries.userProfiles
+        );
+      const update = vi
+        .fn(originalUpdate)
+        .mockName('real profile timestamp update');
+      if (existingProfile) update.mockResolvedValueOnce(false);
+      firstInternals._queries.userProfiles.updateLastPublicKeyPushMax = update;
+
+      if (existingProfile) {
+        await first.openSession({
+          mnemonic,
+          autoStartPolling: false,
+          publishPublicKey: false,
+        });
+        await first.profiles.save(
+          userProfile()
+            .userId(first.userId)
+            .username('existing publisher')
+            .build()
+        );
+        await first.closeSession();
+      }
+
+      const postStartTime = Date.now();
+      const publicationTime = postStartTime + 60_000;
+      let currentTime = postStartTime;
+      const now = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
+      let confirmedAt: number | undefined;
+      try {
+        await first.openSession({ mnemonic, autoStartPolling: false });
+        await firstPostStarted;
+        expect(update).not.toHaveBeenCalled();
+        currentTime = publicationTime;
+        resolveFirstPost('published');
+        await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+        await expect(update.mock.results[0].value).resolves.toBe(false);
+        expect(firstPost).toHaveBeenCalledOnce();
+
+        currentTime += 5 * 60 * 1000;
+        const profile = userProfile()
+          .userId(first.userId)
+          .username('publisher')
+          .build();
+        await first.profiles.createOrUpdate(
+          profile.username,
+          profile.userId,
+          profile.security,
+          profile.session
+        );
+        expect(update).toHaveBeenCalledTimes(2);
+        const saved = await firstInternals._queries.userProfiles.getById(
+          first.userId
+        );
+        confirmedAt = saved?.lastPublicKeyPush?.getTime();
+        expect(confirmedAt).toBe(publicationTime);
+        expect(firstPost).toHaveBeenCalledOnce();
+      } finally {
+        now.mockRestore();
+      }
+
+      await first.closeSession();
+      await first.secureStorageLock();
+      await first.destroy();
       await new Promise(resolve => setTimeout(resolve, 0));
-    }
-  }, 180_000);
+
+      const secondPost = vi.fn().mockResolvedValue('duplicate');
+      const second = new GossipSdk();
+      try {
+        await second.init({
+          protocolBaseUrl: 'http://127.0.0.1:1',
+          storage: {
+            type: 'secureStorage',
+            domain,
+            secureStorageWasmUrl,
+          },
+        });
+        expect(await second.secureStorageUnlock(password)).toBe(true);
+        const secondInternals = second as unknown as {
+          _auth: AuthService;
+          _queries: Parameters<AuthService['publishPublicKey']>[2];
+        };
+        secondInternals._auth = new AuthService({
+          fetchPublicKeyByUserId: vi.fn(),
+          postPublicKey: secondPost,
+        });
+        await second.openSession({ mnemonic, autoStartPolling: false });
+        await secondInternals._auth.publishPublicKey(
+          second.publicKeys,
+          second.userId,
+          secondInternals._queries
+        );
+
+        expect(secondPost).not.toHaveBeenCalled();
+        expect(
+          (
+            await second.profiles.get(second.userId)
+          )?.lastPublicKeyPush?.getTime()
+        ).toBe(confirmedAt);
+        expect(secondPost).not.toHaveBeenCalled();
+      } finally {
+        await second.destroy();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    },
+    180_000
+  );
 });

@@ -85,9 +85,10 @@ export class AuthService {
     const pendingTimestamp = this.pendingTimestampPersistence.get(userId);
     if (pendingTimestamp === undefined) return false;
 
-    const updated = await queries.userProfiles.updateById(userId, {
-      lastPublicKeyPush: new Date(pendingTimestamp),
-    });
+    const updated = await queries.userProfiles.updateLastPublicKeyPushMax(
+      userId,
+      new Date(pendingTimestamp)
+    );
     if (
       updated &&
       this.pendingTimestampPersistence.get(userId) === pendingTimestamp

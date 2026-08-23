@@ -83,6 +83,27 @@ export class UserProfileQueries {
     return updated !== undefined;
   }
 
+  async updateLastPublicKeyPushMax(
+    userId: string,
+    candidate: Date
+  ): Promise<boolean> {
+    const candidateMs = candidate.getTime();
+    const current = schema.userProfile.lastPublicKeyPush;
+    const updated = await this.conn.db
+      .update(schema.userProfile)
+      .set({
+        lastPublicKeyPush: sql`CASE
+          WHEN ${current} IS NULL OR ${current} < ${candidateMs}
+            THEN ${candidateMs}
+          ELSE ${current}
+        END`,
+      })
+      .where(eq(schema.userProfile.userId, userId))
+      .returning({ userId: schema.userProfile.userId })
+      .get();
+    return updated !== undefined;
+  }
+
   async getByUsernameLower(
     username: string
   ): Promise<{ userId: string } | undefined> {

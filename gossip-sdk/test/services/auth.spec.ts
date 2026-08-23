@@ -258,11 +258,12 @@ describe('AuthService', () => {
 
     it('retries timestamp persistence without repeating a successful post', async () => {
       const publicationTime = new Date('2026-08-24T13:00:00.000Z');
-      const originalUpdate = queries.userProfiles.updateById.bind(
-        queries.userProfiles
-      );
+      const originalUpdate =
+        queries.userProfiles.updateLastPublicKeyPushMax.bind(
+          queries.userProfiles
+        );
       const update = vi
-        .spyOn(queries.userProfiles, 'updateById')
+        .spyOn(queries.userProfiles, 'updateLastPublicKeyPushMax')
         .mockRejectedValueOnce(new Error('timestamp persistence failed'))
         .mockImplementation(originalUpdate);
       const now = vi
@@ -290,7 +291,10 @@ describe('AuthService', () => {
       const retryTime = new Date('2026-08-24T14:05:00.000Z');
       let currentTime = publicationTime.getTime();
       await queries.userProfiles.delete(testUserId);
-      const update = vi.spyOn(queries.userProfiles, 'updateById');
+      const update = vi.spyOn(
+        queries.userProfiles,
+        'updateLastPublicKeyPushMax'
+      );
       const now = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
 
       try {
@@ -308,6 +312,34 @@ describe('AuthService', () => {
         expect(update).toHaveBeenCalledTimes(2);
         const profile = await queries.userProfiles.getById(testUserId);
         expect(profile?.lastPublicKeyPush).toEqual(publicationTime);
+      } finally {
+        now.mockRestore();
+        update.mockRestore();
+      }
+    });
+
+    it('does not let older pending persistence move durable time backward', async () => {
+      const olderTime = new Date('2026-08-24T14:00:00.000Z');
+      const newerTime = new Date('2026-08-24T15:00:00.000Z');
+      const update = vi
+        .spyOn(queries.userProfiles, 'updateLastPublicKeyPushMax')
+        .mockRejectedValueOnce(new Error('timestamp persistence failed'));
+      const now = vi.spyOn(Date, 'now').mockReturnValue(olderTime.getTime());
+
+      try {
+        await expect(
+          authService.publishPublicKey(testPublicKeys, testUserId, queries)
+        ).rejects.toThrow('timestamp persistence failed');
+        await queries.userProfiles.updateById(testUserId, {
+          lastPublicKeyPush: newerTime,
+        });
+
+        await expect(
+          authService.persistPendingPublicationTimestamp(testUserId, queries)
+        ).resolves.toBe(true);
+        expect(
+          (await queries.userProfiles.getById(testUserId))?.lastPublicKeyPush
+        ).toEqual(newerTime);
       } finally {
         now.mockRestore();
         update.mockRestore();
