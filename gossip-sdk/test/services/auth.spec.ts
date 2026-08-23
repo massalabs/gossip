@@ -212,16 +212,37 @@ describe('AuthService', () => {
       expect(profile?.lastPublicKeyPush).toBeTruthy();
     });
 
-    it('preserves the publication timestamp across a stale profile save', async () => {
+    it('atomically preserves publication during a concurrent stale save', async () => {
       const staleRow = await queries.userProfiles.getById(testUserId);
       if (!staleRow) throw new Error('test profile missing');
       const staleProfile = rowToUserProfile(staleRow);
+      const originalUpsert = queries.userProfiles.upsert.bind(
+        queries.userProfiles
+      );
+      let releaseUpsert!: () => void;
+      const upsertGate = new Promise<void>(resolve => {
+        releaseUpsert = resolve;
+      });
+      const upsert = vi
+        .spyOn(queries.userProfiles, 'upsert')
+        .mockImplementation(async values => {
+          await upsertGate;
+          await originalUpsert(values);
+        });
 
-      await authService.publishPublicKey(testPublicKeys, testUserId, queries);
-      await new ProfileService(queries).save(staleProfile);
+      try {
+        const staleSave = new ProfileService(queries).save(staleProfile);
+        await vi.waitFor(() => expect(upsert).toHaveBeenCalledOnce());
+        await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+        releaseUpsert();
+        await staleSave;
 
-      const profile = await queries.userProfiles.getById(testUserId);
-      expect(profile?.lastPublicKeyPush).toBeTruthy();
+        const profile = await queries.userProfiles.getById(testUserId);
+        expect(profile?.lastPublicKeyPush).toBeTruthy();
+      } finally {
+        releaseUpsert();
+        upsert.mockRestore();
+      }
     });
 
     it('should skip publishing if published less than 24h ago', async () => {

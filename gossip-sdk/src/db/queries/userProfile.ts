@@ -141,12 +141,25 @@ export class UserProfileQueries {
 
   async upsert(values: UserProfileInsert): Promise<void> {
     const { userId: _, ...rest } = values;
+    const currentPush = schema.userProfile.lastPublicKeyPush;
+    const incomingPush = sql.raw('excluded."lastPublicKeyPush"');
     await this.conn.db
       .insert(schema.userProfile)
       .values(values)
       .onConflictDoUpdate({
         target: schema.userProfile.userId,
-        set: rest,
+        set: {
+          ...rest,
+          // Publication and UI profile saves are independent. Preserve the
+          // newest operational timestamp in the conflict statement itself so
+          // no read/upsert interleaving can clear or move it backward.
+          lastPublicKeyPush: sql`CASE
+            WHEN ${currentPush} IS NULL THEN ${incomingPush}
+            WHEN ${incomingPush} IS NULL THEN ${currentPush}
+            WHEN ${currentPush} >= ${incomingPush} THEN ${currentPush}
+            ELSE ${incomingPush}
+          END`,
+        },
       });
   }
 }
