@@ -32,7 +32,7 @@ describe('AccountBackup password gate', () => {
       .mockRejectedValueOnce(new Error('Authentication failed'))
       .mockResolvedValueOnce({
         mnemonic,
-        account: { privateKey: { toString: () => 'test-private-key' } },
+        privateKey: 'test-private-key',
       });
     await render(<AccountBackup onBack={vi.fn()} />);
 

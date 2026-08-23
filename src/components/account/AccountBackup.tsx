@@ -8,7 +8,6 @@ import PageLayout from '../ui/Layout/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
-import { Account } from '@massalabs/massa-web3';
 
 interface AccountBackupProps {
   onBack: () => void;
@@ -24,7 +23,6 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
   const [passwordError, setPasswordError] = useState('');
   const [backupInfo, setBackupInfo] = useState<{
     mnemonic: string;
-    account: Account;
   } | null>(null);
   const [privateKeyString, setPrivateKeyString] = useState<string | null>(null);
 
@@ -38,9 +36,9 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
         setPasswordError(t('backup.password_required'));
         return;
       }
-      const backupInfo = await showBackup(password);
-      setBackupInfo(backupInfo);
-      setPrivateKeyString(backupInfo.account.privateKey.toString());
+      const backup = await showBackup(password);
+      setBackupInfo({ mnemonic: backup.mnemonic });
+      setPrivateKeyString(backup.privateKey);
     } catch (e) {
       logger.error('Error showing backup:', e);
       const message = t('backup.show_failed');

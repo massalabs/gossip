@@ -33,6 +33,7 @@ import { useSelfMessageStore } from './selfMessageStore';
 import {
   deriveAccountFromMnemonic,
   fetchMnsDomainsIfEnabled,
+  wipeAccountPrivateKey,
 } from './utils/accountHelpers';
 
 export type LoginMethod = {
@@ -95,7 +96,7 @@ interface AccountState {
   // Mnemonic backup methods
   showBackup: (password: string) => Promise<{
     mnemonic: string;
-    account: Account;
+    privateKey: string;
   }>;
   getMnemonicBackupInfo: () => { createdAt: Date; backedUp: boolean } | null;
   markMnemonicBackupComplete: () => Promise<void>;
@@ -156,7 +157,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     // Free the WASM EncryptionKey to zero its memory before dropping.
     // Guard against double-free: closeSession() may have already freed it,
     // leaving __wbg_ptr === 0 which would pass a null pointer to WASM.
-    const key = get().encryptionKey;
+    const current = get();
+    wipeAccountPrivateKey(current.account);
+    const key = current.encryptionKey;
     if (key) freeEncryptionKey(key);
     return {
       account: null,
@@ -213,10 +216,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     publishPublicKey = true,
   }: SetupAccountParams): Promise<void> => {
     await cleanupSession();
-
-    const { account, userIdBytes, evmAddress } =
-      await deriveAccountFromMnemonic(mnemonic);
-    const userId = encodeUserId(userIdBytes);
 
     const sdk = getSdk();
     if (!password.trim()) {
@@ -375,7 +374,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     }
 
     let sessionOpened = false;
+    let derivedAccount: Account | undefined;
+    let accountTransferred = false;
     try {
+      const derived = await deriveAccountFromMnemonic(mnemonic);
+      derivedAccount = derived.account;
+      const userId = encodeUserId(derived.userIdBytes);
+
       await sdk.openSession({
         mnemonic,
         encryptedSession: prepared?.encryptedSession,
@@ -399,7 +404,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
       const profile = await sdk.profiles.createOrUpdate(
         username,
-        encodeUserId(userIdBytes),
+        userId,
         security,
         profileSession
       );
@@ -408,13 +413,15 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await getSdk().announcements.skipHistorical();
       }
 
+      wipeAccountPrivateKey(get().account);
       set({
         userProfile: profile,
         encryptionKey,
-        account,
-        evmAddress,
+        account: derivedAccount,
+        evmAddress: derived.evmAddress,
         isLoading: false,
       });
+      accountTransferred = true;
 
       fetchMnsDomainsIfEnabled(profile, get().provider);
     } catch (error) {
@@ -469,6 +476,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         throw new IncompleteOnboardingSlotCleanupError(error);
       }
       throw error;
+    } finally {
+      if (!accountTransferred) wipeAccountPrivateKey(derivedAccount);
     }
   };
 
@@ -575,6 +584,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     loadAccount: async (method: LoginMethod) => {
       let unlockedThisCall = false;
+      let callerOwnedEncryptionKey: EncryptionKey | null = null;
+      let derivedAccount: Account | null = null;
+      let accountTransferred = false;
+      let sessionOpenedThisCall = false;
       try {
         set({ isLoading: true });
 
@@ -628,9 +641,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         authResult ??= await auth(profile, method.password);
         const { mnemonic, encryptionKey } = authResult;
+        callerOwnedEncryptionKey = encryptionKey;
 
-        const { account, evmAddress } =
-          await deriveAccountFromMnemonic(mnemonic);
+        const derived = await deriveAccountFromMnemonic(mnemonic);
+        derivedAccount = derived.account;
 
         // Prefer the secure-storage namespace blob when available; fall
         // back to the SQL profile column on the wa-sqlite backend. When
@@ -672,6 +686,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           // its full upsert cannot race the publication timestamp update.
           publishPublicKey: false,
         });
+        sessionOpenedThisCall = true;
+        callerOwnedEncryptionKey = null;
 
         const lastSeen = new Date();
         const updatedProfile = {
@@ -682,17 +698,32 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         sdk.startPublicKeyPublication();
 
         useAppStore.getState().setIsInitialized(true);
+        wipeAccountPrivateKey(get().account);
         set({
           userProfile: updatedProfile,
-          account,
-          evmAddress,
+          account: derivedAccount,
+          evmAddress: derived.evmAddress,
           encryptionKey,
           isLoading: false,
           lockedByUser: false,
         });
+        accountTransferred = true;
 
         fetchMnsDomainsIfEnabled(updatedProfile, get().provider);
       } catch (error) {
+        const sdk = getSdk();
+        if (sessionOpenedThisCall && sdk.isSessionOpen) {
+          try {
+            await sdk.closeSession();
+          } catch (closeError) {
+            logger.error('Failed to close rejected login session:', closeError);
+          }
+        } else if (callerOwnedEncryptionKey) {
+          freeEncryptionKey(callerOwnedEncryptionKey);
+          callerOwnedEncryptionKey = null;
+        }
+        if (!accountTransferred) wipeAccountPrivateKey(derivedAccount);
+
         // If we unlocked the slot during this call but failed before
         // openSession, re-lock so the next attempt re-probes from
         // 'locked'. Without this, an attempt that lands on a deleted
@@ -701,7 +732,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // login skips the unlock step (state-machine guard) and keeps
         // reading the wrong slot until the app is restarted.
         if (unlockedThisCall) {
-          const sdk = getSdk();
           if (sdk.isSecureStorage && sdk.storageState === 'unlocked') {
             try {
               if (sdk.isSessionOpen) {
@@ -883,7 +913,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       password: string
     ): Promise<{
       mnemonic: string;
-      account: Account;
+      privateKey: string;
     }> => {
       try {
         const state = get();
@@ -892,10 +922,21 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           throw new Error('No authenticated user');
         }
 
-        const { mnemonic } = await auth(profile, password);
-        const { account } = await deriveAccountFromMnemonic(mnemonic);
-
-        return { mnemonic, account };
+        const authenticated = await auth(profile, password);
+        let backupAccount: Account | undefined;
+        try {
+          const derived = await deriveAccountFromMnemonic(
+            authenticated.mnemonic
+          );
+          backupAccount = derived.account;
+          return {
+            mnemonic: authenticated.mnemonic,
+            privateKey: backupAccount.privateKey.toString(),
+          };
+        } finally {
+          wipeAccountPrivateKey(backupAccount);
+          freeEncryptionKey(authenticated.encryptionKey);
+        }
       } catch (error) {
         logger.error('Error showing mnemonic backup:', error);
         throw error;

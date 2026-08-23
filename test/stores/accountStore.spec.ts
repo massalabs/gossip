@@ -4,12 +4,14 @@ import {
   useAccountStore,
 } from '../../src/stores/accountStore';
 import { SecureStorageRecoveryRequiredError } from '@massalabs/gossip-sdk';
+import type { Account } from '@massalabs/massa-web3';
 
 // Shared spy so individual test suites can assert on it
 const skipHistoricalSpy = vi.fn();
 const authSpy = vi.hoisted(() => vi.fn());
 const configureBiometricSpy = vi.hoisted(() => vi.fn());
 const appState = vi.hoisted(() => ({ secureAccountCreationAllowed: true }));
+const derivedAccountKeys = vi.hoisted(() => [] as Uint8Array[]);
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
@@ -26,6 +28,7 @@ const makeSdkMock = () => ({
   openSession: vi.fn(async () => {}),
   startPublicKeyPublication: vi.fn(),
   getEncryptedSession: vi.fn(() => new Uint8Array(0)),
+  readSessionBlob: vi.fn(async () => null),
   persistSessionBlob: vi.fn(async () => {}),
   userId: 'mock-user-id',
   publicKeys: {},
@@ -156,9 +159,14 @@ vi.mock('@massalabs/massa-web3', async () => {
   return {
     ...actual,
     Account: {
-      fromPrivateKey: vi.fn(async () => ({
-        address: { toString: () => 'AU1mock' },
-      })),
+      fromPrivateKey: vi.fn(async () => {
+        const bytes = new Uint8Array([1, 2, 3]);
+        derivedAccountKeys.push(bytes);
+        return {
+          address: { toString: () => 'AU1mock' },
+          privateKey: { toBytes: () => bytes, toString: () => 'P1test' },
+        };
+      }),
     },
     PrivateKey: {
       fromBytes: vi.fn(() => ({})),
@@ -209,6 +217,10 @@ vi.mock('../../src/stores/utils/auth', () => ({
     },
   })),
 }));
+
+beforeEach(() => {
+  derivedAccountKeys.length = 0;
+});
 
 describe('AccountStore classic password discovery', () => {
   beforeEach(() => {
@@ -282,6 +294,87 @@ describe('AccountStore classic password discovery', () => {
     );
     expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
   });
+
+  it('frees caller-owned keys and derived accounts before session open', async () => {
+    const sdk = makeSdkMock();
+    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
+    sdk.storageState = 'unlocked';
+    sdk.usesSessionBlobNamespace = true;
+    sdk.profiles.get.mockResolvedValue(mockProfile());
+    sdk.readSessionBlob.mockRejectedValue(new Error('blob read failed'));
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey,
+    });
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: 'mock-user-id',
+      })
+    ).rejects.toThrow('blob read failed');
+
+    expect(encryptionKey.free).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('frees caller-owned keys when SDK session opening rejects', async () => {
+    const sdk = makeSdkMock();
+    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
+    sdk.storageState = 'unlocked';
+    sdk.profiles.get.mockResolvedValue(mockProfile());
+    sdk.openSession.mockRejectedValue(new Error('open failed'));
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey,
+    });
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: 'mock-user-id',
+      })
+    ).rejects.toThrow('open failed');
+
+    expect(encryptionKey.free).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('closes SDK-owned keys when finalization fails after session open', async () => {
+    const sdk = makeSdkMock();
+    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
+    sdk.storageState = 'unlocked';
+    sdk.profiles.get.mockResolvedValue(mockProfile());
+    sdk.openSession.mockImplementation(async () => {
+      sdk.isSessionOpen = true;
+    });
+    sdk.profiles.save.mockRejectedValue(new Error('profile save failed'));
+    sdk.closeSession.mockImplementation(async () => {
+      sdk.isSessionOpen = false;
+      encryptionKey.free();
+    });
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey,
+    });
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: 'mock-user-id',
+      })
+    ).rejects.toThrow('profile save failed');
+
+    expect(sdk.closeSession).toHaveBeenCalledOnce();
+    expect(encryptionKey.free).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
+  });
 });
 
 describe('AccountStore biometric settings', () => {
@@ -342,6 +435,26 @@ describe('AccountStore biometric settings', () => {
 
     expect(configureBiometricSpy).not.toHaveBeenCalled();
   });
+
+  it('serializes and wipes the temporary backup account key', async () => {
+    const sdk = makeSdkMock();
+    const encryptionFree = vi.fn();
+    sdk.isSessionOpen = true;
+    getSdkMock.mockReturnValue(sdk);
+    useAccountStore.setState({ userProfile: mockProfile() });
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free: encryptionFree },
+    });
+
+    const backup = await useAccountStore
+      .getState()
+      .showBackup('account-password');
+
+    expect(backup.privateKey).toBe('P1test');
+    expect(encryptionFree).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
+  });
 });
 
 describe('AccountStore session cleanup', () => {
@@ -349,6 +462,21 @@ describe('AccountStore session cleanup', () => {
     discussionCleanup.mockClear();
     messageCleanup.mockClear();
     selfClearMessages.mockClear();
+  });
+
+  it('wipes the active Massa signing key on logout', async () => {
+    const privateKeyBytes = new Uint8Array([7, 8, 9]);
+    getSdkMock.mockImplementation(makeSdkMock);
+    useAccountStore.setState({
+      account: {
+        privateKey: { toBytes: () => privateKeyBytes },
+      } as unknown as Account,
+    });
+
+    await useAccountStore.getState().logout();
+
+    expect(Array.from(privateKeyBytes)).toEqual([0, 0, 0]);
+    expect(useAccountStore.getState().account).toBeNull();
   });
 
   it('clears discussion, message, and selfMessage stores on logout', async () => {
@@ -739,6 +867,7 @@ describe('AccountStore secure-storage account provisioning', () => {
 
     expect(sdk.secureStorageCreate).toHaveBeenCalledOnce();
     expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
   });
 });
 
