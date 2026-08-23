@@ -30,7 +30,7 @@ import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
 import PageLayout from './components/ui/Layout/PageLayout.tsx';
 
-const AppContent: React.FC = () => {
+export const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
   const { isInitialized } = useAppStore();
   const [loginError, setLoginError] = useState<string | null>(null);

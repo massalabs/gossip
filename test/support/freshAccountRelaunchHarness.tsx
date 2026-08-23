@@ -3,10 +3,10 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { generateMnemonic, GossipSdk } from '@massalabs/gossip-sdk';
+import { AppContent } from '../../src/App';
 import SecureAccountSetup from '../../src/components/account/SecureAccountSetup';
 import { stageAccount } from '../../src/components/account/stagedAccount';
 import { useProfileLoader } from '../../src/hooks/useProfileLoader';
-import { UnauthenticatedRoutes } from '../../src/routes/UnauthenticatedRoutes';
 import { useAccountStore } from '../../src/stores/accountStore';
 import { useAppStore } from '../../src/stores/appStore';
 import { useSdkStore } from '../../src/stores/sdkStore';
@@ -91,25 +91,29 @@ async function mountStartupLoader(): Promise<void> {
   mount.remove();
 }
 
-async function renderProductionLoginRoute(): Promise<boolean> {
+async function mountProductionAppUntilLogin(): Promise<() => void> {
   const mount = document.createElement('div');
   document.body.append(mount);
   const root = createRoot(mount);
+  useAccountStore.getState().setLoading(true);
   root.render(
     <MemoryRouter initialEntries={['/']}>
-      <UnauthenticatedRoutes
-        existingAccountInfo={null}
-        loginError={null}
-        onLoginErrorChange={() => {}}
-      />
+      <AppContent />
     </MemoryRouter>
   );
   try {
-    await waitFor(() => mount.querySelector('input[type="password"]') !== null);
-    return true;
-  } finally {
+    await waitFor(
+      () => mount.querySelector('input[type="password"]') !== null,
+      30_000
+    );
+    return () => {
+      root.unmount();
+      mount.remove();
+    };
+  } catch (error) {
     root.unmount();
     mount.remove();
+    throw error;
   }
 }
 
@@ -314,16 +318,14 @@ export async function verifyRevokedGrantAfterRelaunch(
     },
   });
   useSdkStore.getState().setSdk(sdk);
-  await mountStartupLoader();
-
-  const grantStayedRevoked =
-    persistedStore.persist.hasHydrated() &&
-    !useAppStore.getState().secureAccountCreationAllowed;
-  const routedToLogin =
-    grantStayedRevoked &&
-    useAppStore.getState().isInitialized &&
-    (await renderProductionLoginRoute());
+  let unmountApp = () => {};
   try {
+    unmountApp = await mountProductionAppUntilLogin();
+    const grantStayedRevoked =
+      persistedStore.persist.hasHydrated() &&
+      !useAppStore.getState().secureAccountCreationAllowed;
+    const routedToLogin =
+      grantStayedRevoked && useAppStore.getState().isInitialized;
     const replacementPasswordStillUnlocks = await sdk.secureStorageUnlock(
       input.replacementPassword
     );
@@ -334,6 +336,7 @@ export async function verifyRevokedGrantAfterRelaunch(
       replacementPasswordStillUnlocks,
     };
   } finally {
+    unmountApp();
     await sdk.destroy();
   }
 }
