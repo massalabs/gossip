@@ -157,17 +157,17 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     }
 
     if (failure) {
-      try {
-        await logout({ lockedByUser: false });
-      } catch (logoutError) {
-        logger.error('Failed to lock after onboarding error:', logoutError);
-      }
-
       if (persistedAccounts > 0) {
-        // At least one account reached the commit point. Route to login rather
-        // than presenting wiped staged credentials as retryable input.
-        await onComplete();
+        // At least one account reached the commit point. Lock before routing to
+        // login; a failure must enter lock-only recovery rather than exposing
+        // the last open session or retrying with wiped staged credentials.
+        await lockPersistedAccountsAndComplete();
       } else {
+        try {
+          await logout({ lockedByUser: false });
+        } catch (logoutError) {
+          logger.error('Failed to lock after onboarding error:', logoutError);
+        }
         onRestart(
           failure instanceof Error ? failure.message : t('create.failed')
         );

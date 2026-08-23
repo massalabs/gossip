@@ -256,13 +256,16 @@ describe('SecureAccountSetup', () => {
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
   });
 
-  it('routes to login after a later persistence failure', async () => {
+  it('requires lock-only recovery after later persistence and lock failures', async () => {
     const account = stageAccount('alice', 'alice-password');
     const onComplete = vi.fn();
     const onRestart = vi.fn();
     mocks.initializeAccount
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('second failed'));
+    mocks.logout
+      .mockRejectedValueOnce(new Error('lock failed'))
+      .mockResolvedValueOnce(undefined);
 
     await render(
       <SecureAccountSetup
@@ -278,12 +281,21 @@ describe('SecureAccountSetup', () => {
       page.getByRole('button', { name: 'secure_setup.done' })
     );
 
+    await expect
+      .element(page.getByText('secure_setup.lock_failed', { exact: true }))
+      .toBeInTheDocument();
+    expect(mocks.rollbackBiometric).toHaveBeenCalledOnce();
+    expect(mocks.logout).toHaveBeenCalledOnce();
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(onRestart).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.retry_lock' })
+    );
     await vi.waitFor(() => {
-      expect(mocks.rollbackBiometric).toHaveBeenCalledOnce();
-      expect(mocks.logout).toHaveBeenCalledWith({ lockedByUser: false });
+      expect(mocks.logout).toHaveBeenCalledTimes(2);
       expect(onComplete).toHaveBeenCalledOnce();
     });
-    expect(onRestart).not.toHaveBeenCalled();
     expect(mocks.initializeAccount).toHaveBeenCalledTimes(2);
     expect(mocks.initializeAccount).not.toHaveBeenCalledWith(
       'backup',
