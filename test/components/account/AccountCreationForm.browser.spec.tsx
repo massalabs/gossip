@@ -20,6 +20,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../../../src/stores/accountStore', () => ({
+  IncompleteOnboardingSlotCleanupError: class extends Error {},
   useAccountStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       initializeAccount: mocks.initializeAccount,
