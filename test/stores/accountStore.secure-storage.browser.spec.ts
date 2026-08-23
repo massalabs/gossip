@@ -287,6 +287,41 @@ describe('secure biometric account-store login integration', () => {
     ).toBe(false);
     expect(await reopened.secureStorageUnlock('alice-password')).toBe(false);
     expect(await reopened.secureStorageUnlock('decoy-password')).toBe(false);
+
+    const replacement = await preparePasswordAccount(
+      await generateMnemonic(),
+      'replacement-password'
+    );
+    try {
+      await useAccountStore
+        .getState()
+        .initializePreparedAccount(
+          'replacement',
+          'replacement-password',
+          replacement
+        );
+      const replacementUserId = reopened.userId;
+      expect(useAccountStore.getState().userProfile?.username).toBe(
+        'replacement'
+      );
+
+      await useAccountStore.getState().logout({ lockedByUser: false });
+      expect(reopened.storageState).toBe('locked');
+      await useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'replacement-password',
+      });
+
+      expect(useAccountStore.getState().userProfile?.username).toBe(
+        'replacement'
+      );
+      expect(reopened.userId).toBe(replacementUserId);
+    } finally {
+      if (reopened.isSessionOpen) {
+        await useAccountStore.getState().logout({ lockedByUser: false });
+      }
+      wipePreparedPasswordAccount(replacement);
+    }
   }, 180_000);
 
   it('discovers the matching locked slot by password and re-locks an empty slot', async () => {
