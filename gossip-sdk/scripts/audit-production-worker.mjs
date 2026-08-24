@@ -1,7 +1,11 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('../dist/', import.meta.url);
+const defaultRoot = fileURLToPath(new URL('../dist/', import.meta.url));
+const distPath = process.argv[2]
+  ? resolve(process.cwd(), process.argv[2])
+  : defaultRoot;
 const forbidden = [
   'injectIndexedDbFaultsForTesting',
   'clearIndexedDbFaultsForTesting',
@@ -22,9 +26,14 @@ async function files(directory) {
   return nested.flat();
 }
 
-const distPath = root.pathname;
 const artifacts = await files(distPath);
+const productionWorkers = artifacts.filter(artifact =>
+  /^secure-storage-worker(?:[-.].*)?\.js$/.test(basename(artifact))
+);
 const violations = [];
+if (productionWorkers.length === 0) {
+  violations.push('no production secure-storage worker artifact was found');
+}
 for (const artifact of artifacts) {
   if (!/\.(?:js|d\.ts)$/.test(artifact)) continue;
   const content = await readFile(artifact, 'utf8');
@@ -41,6 +50,6 @@ if (violations.length > 0) {
   process.exitCode = 1;
 } else {
   console.log(
-    'Production secure-storage worker contains no test fault controls.'
+    `Production secure-storage worker contains no test fault controls (${relative(process.cwd(), distPath)}).`
   );
 }
