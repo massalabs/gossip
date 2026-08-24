@@ -417,11 +417,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         security,
         profileSession
       );
+      const accountSettings = await sdk.queries.accountSettings.create(userId);
 
       if (skipHistorical) {
         await getSdk().announcements.skipHistorical();
       }
 
+      useAppStore.getState().hydrateAccountSettings(accountSettings);
       wipeAccountPrivateKey(get().account);
       set({
         userProfile: profile,
@@ -583,6 +585,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       if (failedPasswordIndexes.length === 0 && !lockFailed) {
         onboardingAllocatedSlots.clear();
       }
+      useAppStore.getState().resetAccountSettings();
       set(clearAccountState());
 
       return {
@@ -647,7 +650,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (!profile) {
           throw new Error('No user profile found for this password');
         }
-
         authResult ??= await auth(profile, method.password);
         const { mnemonic, encryptionKey } = authResult;
         callerOwnedEncryptionKey = encryptionKey;
@@ -660,6 +662,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (encodeUserId(derived.userIdBytes) !== profile.userId) {
           throw new Error('Authenticated profile identity mismatch');
         }
+        const accountSettings = await sdk.queries.accountSettings.getOrCreate(
+          profile.userId
+        );
 
         // Prefer the secure-storage namespace blob when available; fall
         // back to the SQL profile column on the wa-sqlite backend. When
@@ -715,6 +720,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         useAppStore.getState().setIsInitialized(true);
         wipeAccountPrivateKey(get().account);
+        useAppStore.getState().hydrateAccountSettings(accountSettings);
         set({
           userProfile: updatedProfile,
           account: derivedAccount,
@@ -840,6 +846,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
             logger.error('Error clearing account data:', e);
           }
           useAppStore.getState().setIsInitialized(nbAccounts > 0);
+          useAppStore.getState().resetAccountSettings();
           set(clearAccountState());
           return;
         }
@@ -849,6 +856,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // accounts (PD by design). Default to the login screen — if no
         // slot unlocks, the user can fall through to onboarding via
         // the import button.
+        useAppStore.getState().resetAccountSettings();
         set(clearAccountState());
         useAppStore.getState().setIsInitialized(true);
       } catch (error) {
@@ -867,6 +875,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
         onboardingAllocatedSlots.clear();
+        useAppStore.getState().resetAccountSettings();
 
         set({
           ...clearAccountState(),

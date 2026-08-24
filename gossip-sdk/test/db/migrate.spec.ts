@@ -8,6 +8,14 @@ import {
 } from '../../src/db/migrate';
 import { MIGRATIONS } from '../../src/db/generated-migrations';
 
+const removeIdempotentCreateClause = (statement: string) =>
+  statement
+    .replace(/^(\s*CREATE\s+TABLE\s+)IF\s+NOT\s+EXISTS\s+/i, '$1')
+    .replace(
+      /^(\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+)IF\s+NOT\s+EXISTS\s+/i,
+      '$1'
+    );
+
 const ledgerRows = (migrations: typeof MIGRATIONS) =>
   migrations.map(migration => [
     migration.idx,
@@ -119,9 +127,9 @@ describe('runMigrations', () => {
     for (let index = 0; index < pending.length; index++) {
       const calls = transactionExecutors[index].mock.calls;
       expect(calls).toHaveLength(pending[index].statements.length + 1);
-      expect(calls.slice(0, -1).map(([sql]) => sql)).toEqual(
-        pending[index].statements
-      );
+      expect(
+        calls.slice(0, -1).map(([sql]) => removeIdempotentCreateClause(sql))
+      ).toEqual(pending[index].statements);
       expect(calls.at(-1)?.[0]).toContain('INSERT INTO _migrations');
       expect(calls.at(-1)?.[1]?.[0]).toBe(pending[index].idx);
       for (const statement of pending[index].statements) {
@@ -178,16 +186,23 @@ describe('runMigrations', () => {
         'utf8'
       )
     ) as { id: string };
-    const latestSnapshot = JSON.parse(
+    const previousSnapshot = JSON.parse(
       readFileSync(
         new URL('../../drizzle/meta/0005_snapshot.json', import.meta.url),
+        'utf8'
+      )
+    ) as { id: string; prevId: string };
+    expect(previousSnapshot.prevId).toBe(initialSnapshot.id);
+    const latestSnapshot = JSON.parse(
+      readFileSync(
+        new URL('../../drizzle/meta/0006_snapshot.json', import.meta.url),
         'utf8'
       )
     ) as {
       prevId: string;
       tables: Record<string, { columns: Record<string, unknown> }>;
     };
-    expect(latestSnapshot.prevId).toBe(initialSnapshot.id);
+    expect(latestSnapshot.prevId).toBe(previousSnapshot.id);
     expect(Object.keys(latestSnapshot.tables.messages.columns)).toEqual(
       expect.arrayContaining(['editOf', 'reactionOf'])
     );
@@ -199,6 +214,12 @@ describe('runMigrations', () => {
         'mutedNotifications',
       ])
     );
+    expect(Object.keys(latestSnapshot.tables.accountSettings.columns)).toEqual([
+      'userId',
+      'formatVersion',
+      'mnsEnabled',
+      'defaultRetentionDuration',
+    ]);
   });
 
   it('does no transaction work for the complete known prefix', async () => {

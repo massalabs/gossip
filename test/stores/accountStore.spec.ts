@@ -33,7 +33,22 @@ const makeSdkMock = () => ({
   persistSessionBlob: vi.fn(async () => {}),
   userId: 'mock-user-id',
   publicKeys: {},
-  queries: {},
+  queries: {
+    accountSettings: {
+      create: vi.fn(async (userId: string) => ({
+        userId,
+        formatVersion: 1,
+        mnsEnabled: false,
+        defaultRetentionDuration: 2592000,
+      })),
+      getOrCreate: vi.fn(async (userId: string) => ({
+        userId,
+        formatVersion: 1,
+        mnsEnabled: false,
+        defaultRetentionDuration: 2592000,
+      })),
+    },
+  },
   auth: {
     publishPublicKey: vi.fn(async () => {}),
   },
@@ -204,6 +219,8 @@ vi.mock('../../src/stores/appStore', () => ({
       mnsEnabled: false,
       secureAccountCreationAllowed: appState.secureAccountCreationAllowed,
       setIsInitialized: vi.fn(),
+      hydrateAccountSettings: vi.fn(),
+      resetAccountSettings: vi.fn(),
       fetchMnsDomains: vi.fn(async () => {}),
       networkName: 'mainnet',
     }),

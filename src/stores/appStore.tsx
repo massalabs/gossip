@@ -6,7 +6,7 @@ import { createSelectors } from './utils/createSelectors';
 import { STORAGE_KEYS } from '../utils/localStorage';
 import { ParsedInvite } from '../utils/invite';
 import { mnsService } from '../services/mns';
-import { UserProfile } from '@massalabs/gossip-sdk';
+import { type AccountSettingsV1, UserProfile } from '@massalabs/gossip-sdk';
 
 // Debug console button position
 interface DebugButtonPosition {
@@ -49,9 +49,13 @@ interface AppStoreState {
   // Pending forward message id (used during discussion selection)
   pendingForwardMessageId: number | null;
   setPendingForwardMessageId: (messageId: number | null) => void;
+  // Active encrypted account-settings owner (runtime-only).
+  activeAccountSettingsUserId: string | null;
+  accountSettingsGeneration: number;
+  mnsRequestGeneration: number;
   // MNS support enabled/disabled
   mnsEnabled: boolean;
-  setMnsEnabled: (enabled: boolean) => void;
+  setMnsEnabled: (enabled: boolean) => Promise<void>;
   // MNS domains cache
   mnsDomains: string[];
   setMnsDomains: (domains: string[]) => void;
@@ -61,7 +65,9 @@ interface AppStoreState {
   ) => Promise<void>;
   // Default retention duration for new discussions (seconds), null = off
   defaultRetentionDuration: number | null;
-  setDefaultRetentionDuration: (duration: number | null) => void;
+  setDefaultRetentionDuration: (duration: number | null) => Promise<void>;
+  hydrateAccountSettings: (settings: AccountSettingsV1) => void;
+  resetAccountSettings: () => void;
   // Auto-lock timeout (seconds), null = disabled
   autoLockTimeout: number | null;
   setAutoLockTimeout: (timeout: number | null) => void;
@@ -125,14 +131,29 @@ const useAppStoreBase = create<AppStoreState>()(
       setPendingForwardMessageId: (messageId: number | null) => {
         set({ pendingForwardMessageId: messageId });
       },
+      // Per-account encrypted settings (runtime defaults until login).
+      activeAccountSettingsUserId: null,
+      accountSettingsGeneration: 0,
+      mnsRequestGeneration: 0,
       // MNS support (disabled by default)
       mnsEnabled: false,
-      setMnsEnabled: (enabled: boolean) => {
-        set({ mnsEnabled: enabled });
-        // If disabling, clear cache
-        if (!enabled) {
-          set({ mnsDomains: [] });
-        }
+      setMnsEnabled: async (enabled: boolean) => {
+        const userId = get().activeAccountSettingsUserId;
+        if (!userId) throw new Error('No active account settings');
+        const { getSdk } = await import('./sdkStore');
+        const settings = await getSdk().queries.accountSettings.update(userId, {
+          mnsEnabled: enabled,
+        });
+        if (get().activeAccountSettingsUserId !== userId) return;
+        set(state => ({
+          mnsEnabled: settings.mnsEnabled,
+          ...(!settings.mnsEnabled
+            ? {
+                mnsDomains: [],
+                mnsRequestGeneration: state.mnsRequestGeneration + 1,
+              }
+            : {}),
+        }));
       },
       // MNS domains cache
       mnsDomains: [],
@@ -141,8 +162,37 @@ const useAppStoreBase = create<AppStoreState>()(
       },
       // Default retention duration for new discussions (1 month = 2592000s)
       defaultRetentionDuration: 2592000,
-      setDefaultRetentionDuration: (duration: number | null) => {
-        set({ defaultRetentionDuration: duration });
+      setDefaultRetentionDuration: async (duration: number | null) => {
+        const userId = get().activeAccountSettingsUserId;
+        if (!userId) throw new Error('No active account settings');
+        const { getSdk } = await import('./sdkStore');
+        const settings = await getSdk().queries.accountSettings.update(userId, {
+          defaultRetentionDuration: duration,
+        });
+        if (get().activeAccountSettingsUserId !== userId) return;
+        set({
+          defaultRetentionDuration: settings.defaultRetentionDuration,
+        });
+      },
+      hydrateAccountSettings: settings => {
+        set(state => ({
+          activeAccountSettingsUserId: settings.userId,
+          accountSettingsGeneration: state.accountSettingsGeneration + 1,
+          mnsRequestGeneration: state.mnsRequestGeneration + 1,
+          mnsEnabled: settings.mnsEnabled,
+          defaultRetentionDuration: settings.defaultRetentionDuration,
+          mnsDomains: [],
+        }));
+      },
+      resetAccountSettings: () => {
+        set(state => ({
+          activeAccountSettingsUserId: null,
+          accountSettingsGeneration: state.accountSettingsGeneration + 1,
+          mnsRequestGeneration: state.mnsRequestGeneration + 1,
+          mnsEnabled: false,
+          defaultRetentionDuration: 2592000,
+          mnsDomains: [],
+        }));
       },
       // Auto-lock timeout (disabled by default)
       autoLockTimeout: null,
@@ -154,27 +204,52 @@ const useAppStoreBase = create<AppStoreState>()(
         provider: Provider | null
       ) => {
         const state = get();
-
-        if (!state.mnsEnabled || !userProfile?.userId || !provider) {
-          set({ mnsDomains: [] });
+        const userId = state.activeAccountSettingsUserId;
+        const accountGeneration = state.accountSettingsGeneration;
+        if (!userId || userProfile?.userId !== userId) return;
+        if (!state.mnsEnabled || !provider) {
+          set(current => ({
+            mnsDomains: [],
+            mnsRequestGeneration: current.mnsRequestGeneration + 1,
+          }));
           return;
         }
+        const requestGeneration = state.mnsRequestGeneration + 1;
+        set({ mnsRequestGeneration: requestGeneration });
 
-        try {
-          const domains = await mnsService.getDomainsFromGossipId(
-            userProfile.userId
+        const requestIsCurrent = () => {
+          const current = get();
+          return (
+            current.activeAccountSettingsUserId === userId &&
+            current.accountSettingsGeneration === accountGeneration &&
+            current.mnsRequestGeneration === requestGeneration &&
+            current.mnsEnabled
           );
+        };
+        try {
+          const domains = await mnsService.getDomainsFromGossipId(userId);
           const domainsWithSuffix = domains.map(domain => `${domain}.massa`);
-          set({ mnsDomains: domainsWithSuffix });
+          if (requestIsCurrent()) set({ mnsDomains: domainsWithSuffix });
         } catch (error) {
           logger.error('Error fetching MNS domains:', error);
-          set({ mnsDomains: [] });
+          if (requestIsCurrent()) set({ mnsDomains: [] });
         }
       },
     }),
     {
       name: STORAGE_KEYS.APP_STORE,
+      version: 1,
       storage: createJSONStorage(() => localStorage),
+      migrate: persisted => {
+        if (typeof persisted !== 'object' || persisted === null) return {};
+        const localState = {
+          ...(persisted as Record<string, unknown>),
+        };
+        delete localState.mnsEnabled;
+        delete localState.mnsDomains;
+        delete localState.defaultRetentionDuration;
+        return localState;
+      },
       partialize: state => ({
         tosAccepted: state.tosAccepted,
         showDebugOption: state.showDebugOption,
@@ -183,10 +258,7 @@ const useAppStoreBase = create<AppStoreState>()(
         isInitialized: state.isInitialized,
         secureAccountCreationAllowed: state.secureAccountCreationAllowed,
         networkName: state.networkName,
-        mnsEnabled: state.mnsEnabled,
-        mnsDomains: state.mnsDomains,
         disableNativeScreenshot: state.disableNativeScreenshot,
-        defaultRetentionDuration: state.defaultRetentionDuration,
         autoLockTimeout: state.autoLockTimeout,
       }),
     }

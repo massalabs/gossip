@@ -5,6 +5,7 @@
  * pending announcements, and contact deletion cleanup.
  */
 
+import { eq } from 'drizzle-orm';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   DiscussionDirection,
@@ -481,5 +482,59 @@ describe('Session Blob Round-Trip', () => {
     const profile = rowToUserProfile(row!);
     expect(profile.session.length).toBe(15_000);
     expect(profile.session.every(b => b === 4)).toBe(true);
+  });
+});
+
+describe('Account settings', () => {
+  beforeEach(clearAllTables);
+
+  it('creates encrypted per-account defaults and updates them durably', async () => {
+    const created = await q().accountSettings.create('gossip1settings');
+    expect(created).toEqual({
+      userId: 'gossip1settings',
+      formatVersion: 1,
+      mnsEnabled: false,
+      defaultRetentionDuration: 2_592_000,
+    });
+
+    await q().accountSettings.update('gossip1settings', {
+      mnsEnabled: true,
+      defaultRetentionDuration: null,
+    });
+    await expect(
+      q().accountSettings.getOrCreate('gossip1settings')
+    ).resolves.toEqual({
+      userId: 'gossip1settings',
+      formatVersion: 1,
+      mnsEnabled: true,
+      defaultRetentionDuration: null,
+    });
+  });
+
+  it('targets one account and rejects missing or unknown-version rows before writes', async () => {
+    await expect(
+      q().accountSettings.update('gossip1missing', { mnsEnabled: true })
+    ).rejects.toThrow('row is missing');
+
+    await q().accountSettings.create('gossip1first');
+    await q().accountSettings.create('gossip1second');
+    await q().accountSettings.update('gossip1first', { mnsEnabled: true });
+    await expect(
+      q().accountSettings.get('gossip1second')
+    ).resolves.toMatchObject({ mnsEnabled: false });
+
+    await db()
+      .update(schema.accountSettings)
+      .set({ formatVersion: 2 })
+      .where(eq(schema.accountSettings.userId, 'gossip1first'));
+    await expect(
+      q().accountSettings.update('gossip1first', { mnsEnabled: false })
+    ).rejects.toThrow('Unsupported account settings format');
+    const raw = await db()
+      .select()
+      .from(schema.accountSettings)
+      .where(eq(schema.accountSettings.userId, 'gossip1first'))
+      .get();
+    expect(raw?.mnsEnabled).toBe(true);
   });
 });

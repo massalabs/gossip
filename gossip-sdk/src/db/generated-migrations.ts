@@ -86,4 +86,13 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'ALTER TABLE `discussions` ADD COLUMN `mutedNotifications` integer NOT NULL DEFAULT 0;',
     ],
   },
+  {
+    idx: 6,
+    tag: '0006_odd_titania',
+    when: 1787602604377,
+    digest: '821d55b096de5046d368b8a50307dea1981fff62d1c22a4a69f8b4567784313b',
+    statements: [
+      'CREATE TABLE `accountSettings` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`formatVersion` integer DEFAULT 1 NOT NULL,\n\t`mnsEnabled` integer DEFAULT false NOT NULL,\n\t`defaultRetentionDuration` integer DEFAULT 2592000\n);',
+    ],
+  },
 ];

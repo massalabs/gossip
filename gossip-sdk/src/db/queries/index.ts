@@ -1,4 +1,5 @@
 import type { DatabaseConnection } from '../sqlite.js';
+import { AccountSettingsQueries } from './accountSettings.js';
 import { ContactQueries } from './contacts.js';
 import { DiscussionQueries } from './discussions.js';
 import { MessageQueries } from './messages.js';
@@ -7,6 +8,7 @@ import { AnnouncementCursorQueries } from './announcementCursors.js';
 import { PendingAnnouncementQueries } from './pendingAnnouncements.js';
 import { ActiveSeekerQueries } from './activeSeekers.js';
 
+export type { AccountSettingsV1 } from './accountSettings.js';
 export type { ContactRow } from './contacts.js';
 export type { DiscussionRow } from './discussions.js';
 export type { MessageRow, MessageInsert } from './messages.js';
@@ -21,6 +23,7 @@ export type { PendingAnnouncementRow } from './pendingAnnouncements.js';
  * all database access goes through the correct connection.
  */
 export class Queries {
+  readonly accountSettings: AccountSettingsQueries;
   readonly contacts: ContactQueries;
   readonly discussions: DiscussionQueries;
   readonly messages: MessageQueries;
@@ -30,6 +33,7 @@ export class Queries {
   readonly activeSeekers: ActiveSeekerQueries;
 
   constructor(readonly conn: DatabaseConnection) {
+    this.accountSettings = new AccountSettingsQueries(conn);
     this.contacts = new ContactQueries(conn);
     this.discussions = new DiscussionQueries(conn);
     this.messages = new MessageQueries(conn);
