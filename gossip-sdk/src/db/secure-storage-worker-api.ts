@@ -512,7 +512,11 @@ export class SecureStorageWorkerApi {
   ): Promise<ExecResult> {
     const trimmed = sql.trimStart();
     const beginsTransaction = /^BEGIN\b/i.test(trimmed);
-    const endsTransaction = /^(COMMIT|ROLLBACK)\b/i.test(trimmed);
+    const isCommit = /^COMMIT\b/i.test(trimmed);
+    const isFullRollback = /^ROLLBACK(?:\s+TRANSACTION)?\s*;?\s*$/i.test(
+      trimmed
+    );
+    const endsTransaction = isCommit || isFullRollback;
 
     return this.enqueueSqlOperation(inTransaction, async () => {
       await this.ensureDurableStorageRecovered();
@@ -527,7 +531,6 @@ export class SecureStorageWorkerApi {
       if (beginsTransaction) this.sqlTransactionActive = true;
       if (endsTransaction) this.sqlTransactionActive = false;
 
-      const isCommit = /^COMMIT\b/i.test(trimmed);
       if (isCommit) {
         await flushEncrypted();
       } else if (!inTransaction) {

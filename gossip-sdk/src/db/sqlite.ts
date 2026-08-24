@@ -184,7 +184,9 @@ export function classifyStatement(sql: string): StatementKind {
   const trimmed = sql.trimStart();
   if (/^BEGIN\b/i.test(trimmed)) return 'begin';
   if (/^COMMIT\b/i.test(trimmed)) return 'commit';
-  if (/^ROLLBACK\b/i.test(trimmed)) return 'rollback';
+  if (/^ROLLBACK(?:\s+TRANSACTION)?\s*;?\s*$/i.test(trimmed)) {
+    return 'rollback';
+  }
   if (
     /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
       trimmed

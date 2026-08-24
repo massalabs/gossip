@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  classifyStatement,
   DatabaseConnection,
   SecureStorageRecoveryRequiredError,
 } from '../../src/db/sqlite';
@@ -75,6 +76,15 @@ describe('DatabaseConnection secure lifecycle recovery', () => {
       connection.secureStorageCreate(0, 'test-password')
     ).rejects.toBeInstanceOf(SecureStorageRecoveryRequiredError);
     expect(connection.storageState).toBe('unlocked');
+  });
+});
+
+describe('DatabaseConnection transaction classification', () => {
+  it('keeps savepoint rollback inside the outer transaction', () => {
+    expect(classifyStatement('ROLLBACK TO SAVEPOINT sp_0')).toBe('other');
+    expect(classifyStatement('ROLLBACK TRANSACTION TO sp_0')).toBe('other');
+    expect(classifyStatement('ROLLBACK')).toBe('rollback');
+    expect(classifyStatement('ROLLBACK TRANSACTION;')).toBe('rollback');
   });
 });
 

@@ -389,6 +389,41 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     );
   });
 
+  it('retains outer transaction ownership through savepoint rollback', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+
+    await api.exec('BEGIN IMMEDIATE');
+    const cover = api.cover();
+    const close = api.close();
+    await api.exec('SAVEPOINT sp_0', [], true);
+    await api.exec('INSERT INTO userProfile VALUES (?)', ['nested'], true);
+    await api.exec('ROLLBACK TO SAVEPOINT sp_0', [], true);
+    await Promise.resolve();
+    expect(wasmMock.coverTrafficTick).not.toHaveBeenCalled();
+    expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
+
+    await api.exec('RELEASE SAVEPOINT sp_0', [], true);
+    expect(wasmMock.coverTrafficTick).not.toHaveBeenCalled();
+    expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
+    await api.exec('COMMIT', [], true);
+    await cover;
+    await close;
+
+    expect(wasmMock.execSql.mock.calls.map(([sql]) => sql)).toEqual([
+      'BEGIN IMMEDIATE',
+      'SAVEPOINT sp_0',
+      'INSERT INTO userProfile VALUES (?)',
+      'ROLLBACK TO SAVEPOINT sp_0',
+      'RELEASE SAVEPOINT sp_0',
+      'COMMIT',
+    ]);
+    expect(wasmMock.coverTrafficTick).toHaveBeenCalledBefore(
+      wasmMock.closeDatabase
+    );
+  });
+
   it('allows an explicitly rejected generic flush to be retried', async () => {
     const { SecureStorageWorkerApi } =
       await import('../../src/db/secure-storage-worker-api');
