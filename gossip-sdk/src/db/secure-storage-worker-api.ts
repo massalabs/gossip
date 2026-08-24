@@ -162,7 +162,7 @@ export class SecureStorageWorkerApi {
   }
 
   private async recoverRejectedSqlBoundary(
-    operation: 'commit' | 'rollback',
+    operation: 'commit' | 'rollback' | 'mutation',
     operationError: unknown
   ): Promise<never> {
     this.sqlTransactionPoisoned = true;
@@ -604,7 +604,15 @@ export class SecureStorageWorkerApi {
             trimmed
           )
         ) {
-          await flushEncrypted();
+          try {
+            await flushEncrypted();
+          } catch (error) {
+            // The autocommit statement already changed SQLite and its pending
+            // VFS pages. A rejected durable flush must restore the last durable
+            // image before later work can persist a mutation whose promise
+            // rejected.
+            return this.recoverRejectedSqlBoundary('mutation', error);
+          }
         }
       }
 

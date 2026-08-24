@@ -480,6 +480,30 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     expect(wasmMock.closeDatabase).toHaveBeenCalledOnce();
   });
 
+  it('resets a rejected autocommit mutation before later durable work', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    const flushError = new Error('mutation flush failed');
+    wasmMock.flushEncrypted
+      .mockRejectedValueOnce(flushError)
+      .mockResolvedValue(undefined);
+
+    await expect(
+      api.exec('INSERT INTO userProfile VALUES (?)', ['rejected'])
+    ).rejects.toBe(flushError);
+    const cover = api.cover();
+    await cover;
+    await api.exec('UPDATE userProfile SET username = ?', ['durable']);
+
+    expect(wasmMock.resetSqlDatabaseToDurable).toHaveBeenCalledOnce();
+    expect(wasmMock.resetSqlDatabaseToDurable).toHaveBeenCalledBefore(
+      wasmMock.coverTrafficTick
+    );
+    expect(wasmMock.execSql).toHaveBeenCalledTimes(2);
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps poisoned SQL cleanup retryable after reset rejection', async () => {
     const { SecureStorageWorkerApi } =
       await import('../../src/db/secure-storage-worker-api');

@@ -218,6 +218,61 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     }
   }, 120_000);
 
+  it('discards a rejected autocommit mutation before retry or relaunch', async () => {
+    const domain = 'rejected-autocommit-recovery';
+    const password = 'autocommit-password';
+    const userId = 'gossip1autocommitbaseline';
+    const now = new Date();
+    let connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    await connection.secureStorageCreate(0, password);
+    await connection.db.insert(userProfile).values({
+      userId,
+      username: 'durable baseline',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+      security: '{}',
+      session: new Uint8Array([1, 2, 3]),
+    });
+
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+    });
+    await expect(
+      connection.db
+        .update(userProfile)
+        .set({ username: 'rejected autocommit value' })
+    ).rejects.toThrow();
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable baseline' }]);
+
+    await connection.secureStorageLock();
+    await connection.close();
+    openConnections.delete(connection);
+    connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable baseline' }]);
+
+    await connection.db
+      .update(userProfile)
+      .set({ username: 'durable retry value' });
+    await connection.secureStorageLock();
+    await connection.close();
+    openConnections.delete(connection);
+    connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable retry value' }]);
+  }, 120_000);
+
   it('retries a real poisoned SQL reset before lifecycle cleanup', async () => {
     const domain = 'poisoned-sql-reset-recovery';
     const password = 'poisoned-sql-password';
