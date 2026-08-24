@@ -153,7 +153,6 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     setLockRecoveryPending(false);
     try {
       await logout({ lockedByUser: false });
-      useAppStore.getState().setSecureAccountCreationAllowed(false);
       await onComplete();
     } catch (logoutError) {
       logger.error(
@@ -328,6 +327,9 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       return;
     }
 
+    // Revoke creation before fallible logout/locking. A detected lock failure
+    // must never leave durable accounts alongside overwrite authorization.
+    useAppStore.getState().setSecureAccountCreationAllowed(false);
     wipeStagedAccounts(stagedAccounts);
     // Every account, including a single-account batch, returns to login. Only a
     // real post-onboarding unlock may publish that stable account's public key.

@@ -690,6 +690,8 @@ describe('SecureAccountSetup', () => {
     await expect
       .element(page.getByText('secure_setup.lock_failed', { exact: true }))
       .toBeInTheDocument();
+    expect(useAppStore.getState().secureAccountCreationAllowed).toBe(false);
+    await rehydrateCreationGrant(false);
     expect(onComplete).not.toHaveBeenCalled();
     expect(mocks.initializePreparedAccount).toHaveBeenCalledTimes(2);
     for (const staged of mocks.stagedAccounts) {

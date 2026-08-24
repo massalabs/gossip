@@ -3,8 +3,17 @@ import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { getSdk } from '../stores/sdkStore';
+import type { GossipSdk } from '@massalabs/gossip-sdk';
 
 const PROFILE_LOAD_DELAY_MS = 100;
+
+export function establishFirstInstallCreationGrant(
+  sdk: Pick<GossipSdk, 'isSecureStorage' | 'storageState'>
+): void {
+  if (sdk.isSecureStorage && sdk.storageState === 'empty') {
+    useAppStore.getState().setSecureAccountCreationAllowed(true);
+  }
+}
 
 export function shouldInitializeSecureStorage(
   storageState: 'empty' | 'locked' | 'unlocked' | null,
@@ -24,6 +33,11 @@ export function useProfileLoader() {
       try {
         setLoading(true);
 
+        // Persist first-install authorization before the UI delay. Bootstrap
+        // also calls this immediately after SDK initialization, before React
+        // mounts, to minimize the unavoidable cross-store process-kill window.
+        establishFirstInstallCreationGrant(getSdk());
+
         // Add a small delay to ensure database is ready
         await new Promise(resolve =>
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
@@ -41,9 +55,6 @@ export function useProfileLoader() {
         const sdk = getSdk();
         if (sdk.isSecureStorage) {
           const appState = useAppStore.getState();
-          if (sdk.storageState === 'empty') {
-            appState.setSecureAccountCreationAllowed(true);
-          }
           appState.setIsInitialized(
             shouldInitializeSecureStorage(
               sdk.storageState,

@@ -7,6 +7,7 @@ import { showInitError } from './utils/initError.ts';
 import { installSafariWorkerDedup } from './utils/safariWorkerDedup';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
+import { establishFirstInstallCreationGrant } from './hooks/useProfileLoader';
 import { protocolConfig } from './config/protocol';
 import { SECURE_STORAGE_ENABLED } from './config/features';
 import { Capacitor } from '@capacitor/core';
@@ -122,6 +123,7 @@ async function bootstrap() {
 bootstrap()
   .then(sdk => {
     useSdkStore.getState().setSdk(sdk);
+    establishFirstInstallCreationGrant(sdk);
 
     createRoot(document.getElementById('root')!).render(
       <StrictMode>
