@@ -19,10 +19,12 @@
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::mem::size_of;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, Once, OnceLock};
 use std::time::Duration;
 
@@ -53,9 +55,48 @@ const COVER_TRAFFIC_NAMESPACES: &[u8] = &[DEFAULT_NAMESPACE, SESSION_BLOB_NAMESP
 
 // ── State ────────────────────────────────────────────────────────────
 
+const PORTABLE_EXPORT_SPOOL: &str = ".portable-export.tmp";
+const PORTABLE_IMPORT_SPOOL: &str = ".portable-import.tmp";
+pub const MAX_PORTABLE_BRIDGE_CHUNK_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum PortableTransferKind {
+    Export,
+    Import,
+}
+
+enum PortableTransfer {
+    Export {
+        file: File,
+        path: PathBuf,
+    },
+    Import {
+        file: File,
+        path: PathBuf,
+        bytes: u64,
+    },
+}
+
+impl PortableTransfer {
+    fn kind(&self) -> PortableTransferKind {
+        match self {
+            Self::Export { .. } => PortableTransferKind::Export,
+            Self::Import { .. } => PortableTransferKind::Import,
+        }
+    }
+
+    fn path(&self) -> &Path {
+        match self {
+            Self::Export { path, .. } | Self::Import { path, .. } => path,
+        }
+    }
+}
+
 struct VfsState {
     backend: RedbStorage,
+    base_path: PathBuf,
     domain: String,
+    transfer: Option<PortableTransfer>,
     session: Option<UnlockedSession>,
     namespace_states: HashMap<u8, NamespaceState>,
     /// Per-file read/write/sync state for the SQLite main DB.
@@ -73,6 +114,13 @@ impl VfsState {
             .get(&DEFAULT_NAMESPACE)
             .copied()
             .unwrap_or_default()
+    }
+
+    fn require_transfer_idle(&self) -> Result<()> {
+        if self.transfer.is_some() {
+            return Err(SecureStorageError::PortableTransferInProgress);
+        }
+        Ok(())
     }
 }
 
@@ -137,12 +185,23 @@ fn io_methods() -> &'static sqlite3_io_methods {
 
 /// Create state with redb backend.
 pub fn init_native(path: &str, domain: &str) -> Result<()> {
-    let storage = RedbStorage::open(Path::new(path))?;
+    let base_path = PathBuf::from(path);
+    fs::create_dir_all(&base_path)?;
+    for spool in [PORTABLE_EXPORT_SPOOL, PORTABLE_IMPORT_SPOOL] {
+        match fs::remove_file(base_path.join(spool)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let storage = RedbStorage::open(&base_path)?;
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = Some(VfsState {
         backend: storage,
+        base_path,
         domain: domain.to_string(),
+        transfer: None,
         session: None,
         namespace_states: HashMap::new(),
         main_file: EncryptedFileCore::new(),
@@ -221,6 +280,7 @@ pub fn has_data() -> Result<bool> {
     let st = guard
         .as_ref()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     st.backend.has_data()
 }
 
@@ -231,6 +291,7 @@ pub fn provision() -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     if let Err(e) = crate::provision_storage(&mut st.backend) {
         st.backend.discard_pending();
         return Err(e);
@@ -249,6 +310,7 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     // Flush pending writes to the CURRENT session before switching.
     // Otherwise the `main_file` reset below would drop data that was
     // buffered but not yet synced to redb - e.g. during multi-account
@@ -279,6 +341,7 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     match crate::unlock_session(&st.backend, &st.domain, password) {
         Ok(session) => {
             let sql_state =
@@ -316,6 +379,7 @@ pub fn destroy_session(namespaces: &[u8]) -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+    st.require_transfer_idle()?;
     let session = st
         .session
         .as_ref()
@@ -368,6 +432,7 @@ pub fn lock() -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     let flush_result = if st.session.is_some() {
         flush_pending_writes(st)
     } else {
@@ -387,7 +452,180 @@ pub fn is_unlocked() -> Result<bool> {
     let st = guard
         .as_ref()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     Ok(st.session.is_some())
+}
+
+fn require_locked_for_transfer(st: &VfsState) -> Result<()> {
+    st.require_transfer_idle()?;
+    if st.session.is_some() {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    }
+    Ok(())
+}
+
+/// Flush a canonical snapshot to a bounded spool and open it for chunked reads.
+pub fn begin_portable_export() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    require_locked_for_transfer(st)?;
+
+    let path = st.base_path.join(PORTABLE_EXPORT_SPOOL);
+    let result = (|| {
+        let file = File::create(&path)?;
+        let mut file = st.backend.export_portable(file)?;
+        file.flush()?;
+        file.sync_all()?;
+        drop(file);
+        let file = File::open(&path)?;
+        st.transfer = Some(PortableTransfer::Export {
+            file,
+            path: path.clone(),
+        });
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(path);
+    }
+    result
+}
+
+/// Read the next export chunk. `None` is the canonical end-of-stream marker.
+pub fn read_portable_export_chunk(max_bytes: usize) -> Result<Option<Vec<u8>>> {
+    if max_bytes == 0 || max_bytes > MAX_PORTABLE_BRIDGE_CHUNK_BYTES {
+        return Err(SecureStorageError::OutOfBounds);
+    }
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let Some(PortableTransfer::Export { file, .. }) = st.transfer.as_mut() else {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    };
+
+    let mut bytes = vec![0_u8; max_bytes];
+    let count = file.read(&mut bytes)?;
+    if count == 0 {
+        return Ok(None);
+    }
+    bytes.truncate(count);
+    Ok(Some(bytes))
+}
+
+/// Finish or abort the current export and remove its spool.
+pub fn finish_portable_export() -> Result<()> {
+    finish_portable_transfer(PortableTransferKind::Export)
+}
+
+pub fn begin_portable_import() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    require_locked_for_transfer(st)?;
+
+    let path = st.base_path.join(PORTABLE_IMPORT_SPOOL);
+    let file = File::create(&path)?;
+    st.transfer = Some(PortableTransfer::Import {
+        file,
+        path,
+        bytes: 0,
+    });
+    Ok(())
+}
+
+pub fn push_portable_import_chunk(data: &[u8]) -> Result<()> {
+    if data.is_empty() || data.len() > MAX_PORTABLE_BRIDGE_CHUNK_BYTES {
+        return Err(SecureStorageError::OutOfBounds);
+    }
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let Some(PortableTransfer::Import { file, bytes, .. }) = st.transfer.as_mut() else {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    };
+    let next = bytes
+        .checked_add(data.len() as u64)
+        .ok_or(SecureStorageError::Overflow)?;
+    if next > crate::MAX_PORTABLE_ARCHIVE_BYTES {
+        return Err(SecureStorageError::PortableArchiveTooLarge);
+    }
+    file.write_all(data)?;
+    *bytes = next;
+    Ok(())
+}
+
+/// Validate and atomically install the completed import spool.
+pub fn finish_portable_import() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let Some(PortableTransfer::Import {
+        mut file,
+        path,
+        bytes: _,
+    }) = st.transfer.take()
+    else {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    };
+
+    let result = (|| {
+        file.flush()?;
+        file.sync_all()?;
+        drop(file);
+        let input = File::open(&path)?;
+        st.backend.import_portable(input)?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(path);
+    result
+}
+
+/// Abort either transfer direction and delete its temporary spool.
+pub fn abort_portable_transfer() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let Some(transfer) = st.transfer.take() else {
+        return Ok(());
+    };
+    let path = transfer.path().to_path_buf();
+    drop(transfer);
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn finish_portable_transfer(expected: PortableTransferKind) -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let Some(transfer) = st.transfer.take() else {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    };
+    if transfer.kind() != expected {
+        st.transfer = Some(transfer);
+        return Err(SecureStorageError::PortableTransferInProgress);
+    }
+    let path = transfer.path().to_path_buf();
+    drop(transfer);
+    let _ = fs::remove_file(path);
+    Ok(())
 }
 
 // ── Cover-traffic scheduler ─────────────────────────────────────────
@@ -423,6 +661,9 @@ fn random_cover_interval_ms() -> u64 {
 /// for the process; stopping it on lock would itself leak activity
 /// (scheduler silence = "user just locked"), so we keep it running.
 fn ensure_cover_scheduler() {
+    if cfg!(test) {
+        return;
+    }
     SCHEDULER.get_or_init(|| {
         let spawn_result = std::thread::Builder::new()
             .name("secure-storage-cover".into())
@@ -496,6 +737,7 @@ pub fn flush() -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     flush_pending_writes(st)
 }
 
@@ -520,6 +762,15 @@ fn commit_pending_backend_writes() -> Result<()> {
 /// capacity (~15 844 bytes ≈ 3.86 pages per block); only ~25 % of
 /// pages straddle a block boundary vs ~50 % at 8192.
 pub fn open_db() -> Result<rusqlite::Connection> {
+    {
+        let guard = state_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        let st = guard
+            .as_ref()
+            .ok_or_else(|| SecureStorageError::NotInitialized)?;
+        st.require_transfer_idle()?;
+    }
     let conn = rusqlite::Connection::open_with_flags_and_vfs(
         "main.db",
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -577,6 +828,7 @@ fn flush_pending_writes(st: &mut VfsState) -> Result<()> {
         session,
         namespace_states,
         main_file,
+        ..
     } = st;
     let session = session
         .as_ref()
@@ -605,6 +857,7 @@ pub fn write_namespace_data(namespace: u8, offset: u64, data: &[u8]) -> Result<(
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     let session = st
         .session
         .as_ref()
@@ -639,6 +892,7 @@ pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     let session = st
         .session
         .as_ref()
@@ -687,6 +941,7 @@ pub fn replace_namespace_data(namespace: u8, data: &[u8]) -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     let session = st
         .session
         .as_ref()
@@ -734,6 +989,7 @@ pub fn clear_namespace(namespace: u8) -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     let session = st
         .session
         .as_ref()
@@ -759,6 +1015,7 @@ pub fn namespace_data_length(namespace: u8) -> Result<u64> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
     let session = st
         .session
         .as_ref()
@@ -1066,6 +1323,7 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
                 session,
                 namespace_states,
                 main_file,
+                ..
             } = st;
             let session = match session.as_ref() {
                 Some(s) => s,
@@ -1239,6 +1497,37 @@ mod tests {
         allocate(0, b"password").unwrap();
         let conn = open_db().unwrap();
         (dir, conn)
+    }
+
+    #[test]
+    fn portable_spools_stream_without_exposing_partial_imports() {
+        let _guard = test_mutex().lock().unwrap();
+        reset_state();
+        let dir = tempfile::tempdir().unwrap();
+        init_native(dir.path().to_str().unwrap(), "test").unwrap();
+        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+
+        begin_portable_import().unwrap();
+        for chunk in fixture.chunks(8192) {
+            push_portable_import_chunk(chunk).unwrap();
+        }
+        assert!(matches!(
+            has_data(),
+            Err(SecureStorageError::PortableTransferInProgress)
+        ));
+        finish_portable_import().unwrap();
+        assert!(has_data().unwrap());
+        assert!(!dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
+
+        begin_portable_export().unwrap();
+        let mut exported = Vec::new();
+        while let Some(chunk) = read_portable_export_chunk(4096).unwrap() {
+            exported.extend_from_slice(&chunk);
+        }
+        finish_portable_export().unwrap();
+        assert_eq!(exported, fixture);
+        assert!(!dir.path().join(PORTABLE_EXPORT_SPOOL).exists());
+        reset_state();
     }
 
     #[test]

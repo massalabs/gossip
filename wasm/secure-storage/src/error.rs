@@ -27,6 +27,9 @@ pub enum SecureStorageError {
     #[error("portable backup checksum mismatch")]
     PortableChecksumMismatch,
 
+    #[error("portable backup transfer in progress")]
+    PortableTransferInProgress,
+
     #[error("corrupted data")]
     CorruptedBlock,
 
@@ -73,6 +76,7 @@ impl SecureStorageError {
             Self::InvalidPortableArchive => "INVALID_PORTABLE_ARCHIVE",
             Self::PortableArchiveTooLarge => "PORTABLE_ARCHIVE_TOO_LARGE",
             Self::PortableChecksumMismatch => "PORTABLE_CHECKSUM_MISMATCH",
+            Self::PortableTransferInProgress => "PORTABLE_TRANSFER_IN_PROGRESS",
             Self::CorruptedBlock => "CORRUPTED_DATA",
             Self::InvalidSessionIndex(_) => "INVALID_SESSION_INDEX",
             Self::Overflow => "OVERFLOW",
