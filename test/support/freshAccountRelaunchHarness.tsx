@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { generateMnemonic, GossipSdk } from '@massalabs/gossip-sdk';
 import { AppContent } from '../../src/App';
+import i18n from '../../src/i18n';
 import SecureAccountSetup from '../../src/components/account/SecureAccountSetup';
 import { stageAccount } from '../../src/components/account/stagedAccount';
 import { useProfileLoader } from '../../src/hooks/useProfileLoader';
@@ -102,10 +103,19 @@ async function mountProductionAppUntilLogin(): Promise<() => void> {
     </MemoryRouter>
   );
   try {
-    await waitFor(
-      () => mount.querySelector('input[type="password"]') !== null,
-      30_000
-    );
+    await waitFor(() => {
+      const loginLabel = i18n.t('login.login', { ns: 'auth' });
+      const usernamePlaceholder = i18n.t('create.enter_username', {
+        ns: 'auth',
+      });
+      const loginAction = Array.from(mount.querySelectorAll('button')).some(
+        button => button.textContent?.trim() === loginLabel
+      );
+      const onboardingUsername = Array.from(
+        mount.querySelectorAll('input')
+      ).some(input => input.placeholder === usernamePlaceholder);
+      return loginAction && !onboardingUsername;
+    }, 30_000);
     return () => {
       root.unmount();
       mount.remove();
