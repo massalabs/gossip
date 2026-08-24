@@ -22,6 +22,7 @@ type FaultProxy = {
   clearIndexedDbFaultsForTesting(): Promise<void>;
   retryFailedCoverNowForTesting(): Promise<boolean>;
   stopPeriodicCoverForTesting(): Promise<void>;
+  cover(): Promise<void>;
   rejectNextSqlRollbackForTesting(): Promise<void>;
   exec(
     sql: string,
@@ -271,6 +272,105 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     await expect(
       connection.db.select({ username: userProfile.username }).from(userProfile)
     ).resolves.toEqual([{ username: 'durable retry value' }]);
+  }, 120_000);
+
+  it('recovers public nested transactions through the real worker stack', async () => {
+    const domain = 'public-transaction-recovery';
+    const password = 'public-transaction-password';
+    const now = new Date();
+    let connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    await connection.secureStorageCreate(0, password);
+    await connection.db.insert(userProfile).values({
+      userId: 'gossip1publictransaction',
+      username: 'durable baseline',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+      security: '{}',
+      session: new Uint8Array([5, 6, 7]),
+    });
+
+    let coverSettled = false;
+    let lockSettled = false;
+    let queuedCover!: Promise<void>;
+    let queuedLock!: Promise<void>;
+    await connection.db.transaction(async outer => {
+      await outer.update(userProfile).set({ username: 'durable outer value' });
+      queuedCover = testProxy(connection).cover();
+      queuedLock = connection.secureStorageLock();
+      void queuedCover.then(() => {
+        coverSettled = true;
+      });
+      void queuedLock.then(() => {
+        lockSettled = true;
+      });
+
+      await expect(
+        outer.transaction(async inner => {
+          await inner
+            .update(userProfile)
+            .set({ username: 'rolled back inner value' });
+          throw new Error('rollback inner savepoint');
+        })
+      ).rejects.toThrow('rollback inner savepoint');
+      await expect(
+        outer.select({ username: userProfile.username }).from(userProfile)
+      ).resolves.toEqual([{ username: 'durable outer value' }]);
+      await Promise.resolve();
+      expect(coverSettled).toBe(false);
+      expect(lockSettled).toBe(false);
+    });
+    await queuedCover;
+    await queuedLock;
+
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable outer value' }]);
+
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+    });
+    await expect(
+      connection.db.transaction(async tx => {
+        await tx
+          .update(userProfile)
+          .set({ username: 'rejected public commit' });
+      })
+    ).rejects.toThrow();
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable outer value' }]);
+
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readonly: 1,
+    });
+    await testProxy(connection).rejectNextSqlRollbackForTesting();
+    await expect(
+      connection.db.transaction(async tx => {
+        await tx
+          .update(userProfile)
+          .set({ username: 'rejected public rollback' });
+        throw new Error('abort public transaction');
+      })
+    ).rejects.toThrow('abort public transaction');
+
+    await connection.db.transaction(async tx => {
+      await tx
+        .update(userProfile)
+        .set({ username: 'durable recovered transaction' });
+    });
+    await connection.secureStorageLock();
+    await connection.close();
+    openConnections.delete(connection);
+    connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable recovered transaction' }]);
   }, 120_000);
 
   it('retries a real poisoned SQL reset before lifecycle cleanup', async () => {
