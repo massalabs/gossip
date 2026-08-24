@@ -18,7 +18,9 @@ function rawConnection(): RawConnection {
 
 type LifecycleProxy = {
   create: ReturnType<typeof vi.fn>;
+  unlock: ReturnType<typeof vi.fn>;
   lock: ReturnType<typeof vi.fn>;
+  destroy: ReturnType<typeof vi.fn>;
 };
 
 function lifecycleConnection(proxy: LifecycleProxy): DatabaseConnection {
@@ -43,12 +45,38 @@ function lifecycleConnection(proxy: LifecycleProxy): DatabaseConnection {
 }
 
 describe('DatabaseConnection secure lifecycle recovery', () => {
+  it('re-locks when post-unlock migration validation rejects', async () => {
+    const unlock = vi.fn().mockResolvedValue(true);
+    const lock = vi.fn().mockResolvedValue(undefined);
+    const connection = lifecycleConnection({
+      create: vi.fn(),
+      unlock,
+      lock,
+      destroy: vi.fn(),
+    });
+    const finalizeError = new Error('Unsupported database migration history');
+    (connection as unknown as { finalize: () => Promise<void> }).finalize = vi
+      .fn()
+      .mockRejectedValue(finalizeError);
+
+    await expect(connection.secureStorageUnlock('password')).rejects.toBe(
+      finalizeError
+    );
+    expect(lock).toHaveBeenCalledOnce();
+    expect(connection.storageState).toBe('locked');
+  });
+
   it('keeps a rejected underlying lock retryable', async () => {
     const lock = vi
       .fn()
       .mockRejectedValueOnce(new Error('flush failed'))
       .mockResolvedValueOnce(undefined);
-    const connection = lifecycleConnection({ create: vi.fn(), lock });
+    const connection = lifecycleConnection({
+      create: vi.fn(),
+      unlock: vi.fn(),
+      lock,
+      destroy: vi.fn(),
+    });
     const state = connection as unknown as {
       state: { storageState: string };
     };
@@ -64,13 +92,38 @@ describe('DatabaseConnection secure lifecycle recovery', () => {
     expect(connection.storageState).toBe('locked');
   });
 
+  it('destroys a new slot when post-create migration validation rejects', async () => {
+    const finalizeError = new Error('Unsupported database migration history');
+    const destroy = vi.fn().mockResolvedValue(undefined);
+    const connection = lifecycleConnection({
+      create: vi.fn().mockResolvedValue(undefined),
+      unlock: vi.fn(),
+      lock: vi.fn(),
+      destroy,
+    });
+    (connection as unknown as { finalize: () => Promise<void> }).finalize = vi
+      .fn()
+      .mockRejectedValue(finalizeError);
+
+    await expect(
+      connection.secureStorageCreate(0, 'test-password')
+    ).rejects.toBe(finalizeError);
+    expect(destroy).toHaveBeenCalledWith(Uint8Array.from([0, 1]));
+    expect(connection.storageState).toBe('locked');
+  });
+
   it('surfaces worker allocation recovery as a typed error', async () => {
     const create = vi
       .fn()
       .mockRejectedValue(
         new Error(`${SECURE_STORAGE_RECOVERY_REQUIRED} reload failed`)
       );
-    const connection = lifecycleConnection({ create, lock: vi.fn() });
+    const connection = lifecycleConnection({
+      create,
+      unlock: vi.fn(),
+      lock: vi.fn(),
+      destroy: vi.fn(),
+    });
 
     await expect(
       connection.secureStorageCreate(0, 'test-password')

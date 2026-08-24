@@ -5,6 +5,7 @@ export interface EmbeddedMigration {
   idx: number;
   tag: string;
   when: number;
+  digest: string;
   statements: string[];
 }
 
@@ -13,6 +14,7 @@ export const MIGRATIONS: EmbeddedMigration[] = [
     idx: 0,
     tag: '0000_nifty_molly_hayes',
     when: 1730000000000,
+    digest: 'fd923d7e049b0ea3c2d30f032f627914f907e2bd1ca717aec6d72bf5d7fa3870',
     statements: [
       'CREATE TABLE `activeSeekers` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`seeker` blob NOT NULL\n);',
       'CREATE INDEX `active_seekers_seeker_idx` ON `activeSeekers` (`seeker`);',
@@ -46,12 +48,14 @@ export const MIGRATIONS: EmbeddedMigration[] = [
     idx: 1,
     tag: '0001_messages_edit_of',
     when: 1740000000000,
+    digest: '87b19f5fd0c63b859811cb1d208f415eeca388738e93ffc5699c8dc28d6c4e20',
     statements: ['ALTER TABLE `messages` ADD COLUMN `editOf` text;'],
   },
   {
     idx: 2,
     tag: '0002_discussions_pinned',
     when: 1741000000000,
+    digest: '11703d7e0abf570b470db911caba648ad0af396a81b11ff925f286d4f5ef41d5',
     statements: [
       'ALTER TABLE `discussions` ADD COLUMN `pinned` integer NOT NULL DEFAULT 0;',
     ],
@@ -60,12 +64,14 @@ export const MIGRATIONS: EmbeddedMigration[] = [
     idx: 3,
     tag: '0003_messages_reaction_of',
     when: 1742000000000,
+    digest: '1a7e1bd05e8a6abedb8cde2e14748f130a423e64d50f39963eec5a187381f3e0',
     statements: ['ALTER TABLE `messages` ADD COLUMN `reactionOf` text;'],
   },
   {
     idx: 4,
     tag: '0004_discussions_retention',
     when: 1743000000000,
+    digest: '5f8754e0ef047ce40e5c31916794a13bdf08f76c17f3d0119fbf055f2aa7bb62',
     statements: [
       'ALTER TABLE `discussions` ADD COLUMN `messageRetentionDuration` integer;',
       'ALTER TABLE `discussions` ADD COLUMN `retentionPolicySetAt` integer;',
@@ -75,6 +81,7 @@ export const MIGRATIONS: EmbeddedMigration[] = [
     idx: 5,
     tag: '0005_discussions_muted',
     when: 1744000000000,
+    digest: '6228606f146c11964ce136331170760847db7908115bb06ace9b78044160564c',
     statements: [
       'ALTER TABLE `discussions` ADD COLUMN `mutedNotifications` integer NOT NULL DEFAULT 0;',
     ],

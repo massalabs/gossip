@@ -32,7 +32,11 @@ import {
   TOP_LEVEL_SAVEPOINT_ERROR,
   type StatementKind,
 } from './sql-statement.js';
-import { SESSION_COUNT } from './secure-storage-namespaces.js';
+import {
+  SESSION_BLOB_NAMESPACE,
+  SESSION_COUNT,
+  SQL_NAMESPACE,
+} from './secure-storage-namespaces.js';
 export { SecureStorageRecoveryRequiredError } from './secure-storage-errors.js';
 export {
   SQL_NAMESPACE,
@@ -626,6 +630,40 @@ export class DatabaseConnection {
     this.state.drizzleDb = this.createDrizzleInstance();
   }
 
+  private async finalizeUnlockedStorage(
+    recoveryRequiredAfterLock = false
+  ): Promise<void> {
+    try {
+      await this.finalize();
+    } catch (finalizeError) {
+      if (recoveryRequiredAfterLock) {
+        try {
+          await this.secureStorageDestroy([
+            SQL_NAMESPACE,
+            SESSION_BLOB_NAMESPACE,
+          ]);
+        } catch (destroyError) {
+          const combined = new Error(
+            'Failed to finalize and destroy new secure storage'
+          ) as Error & { errors: unknown[] };
+          combined.errors = [finalizeError, destroyError];
+          throw new SecureStorageRecoveryRequiredError(combined);
+        }
+        throw finalizeError;
+      }
+      try {
+        await this.secureStorageLock();
+      } catch (lockError) {
+        const combined = new Error(
+          'Failed to finalize and re-lock secure storage'
+        ) as Error & { errors: unknown[] };
+        combined.errors = [finalizeError, lockError];
+        throw new SecureStorageRecoveryRequiredError(combined);
+      }
+      throw finalizeError;
+    }
+  }
+
   private requireSecureProxy(): SecureStorageWorkerProxy {
     if (!this.state.secureProxy) {
       throw new Error('secure storage not initialized');
@@ -716,7 +754,7 @@ export class DatabaseConnection {
       }
     }
     this.state.storageState = 'unlocked';
-    await this.finalize();
+    await this.finalizeUnlockedStorage(true);
   }
 
   async secureStorageUnlock(password: string): Promise<boolean> {
@@ -763,7 +801,7 @@ export class DatabaseConnection {
     }
     if (!ok) return false;
     this.state.storageState = 'unlocked';
-    await this.finalize();
+    await this.finalizeUnlockedStorage();
     return true;
   }
 
