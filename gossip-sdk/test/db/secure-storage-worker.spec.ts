@@ -55,14 +55,26 @@ describe('SecureStorageWorkerApi password cleanup', () => {
       await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     const password = new Uint8Array([1, 2, 3]);
+    let finishRecovery!: () => void;
     wasmMock.allocateSession.mockImplementation(() => {
       throw new Error('allocate failed');
     });
+    wasmMock.reloadDurableStorage.mockReturnValueOnce(
+      new Promise<void>(resolve => {
+        finishRecovery = resolve;
+      })
+    );
 
-    await expect(api.create(0, password)).rejects.toThrow('allocate failed');
-
+    const rejection = expect(api.create(0, password)).rejects.toThrow(
+      'allocate failed'
+    );
+    await vi.waitFor(() =>
+      expect(wasmMock.reloadDurableStorage).toHaveBeenCalledOnce()
+    );
     expect(Array.from(password)).toEqual([0, 0, 0]);
-    expect(wasmMock.reloadDurableStorage).toHaveBeenCalledOnce();
+
+    finishRecovery();
+    await rejection;
   });
 
   it.each([
@@ -162,10 +174,12 @@ describe('SecureStorageWorkerApi password cleanup', () => {
       .mockReturnValueOnce(createFlush)
       .mockResolvedValueOnce(undefined);
 
-    const create = api.create(0, new Uint8Array([4, 5, 6]));
+    const password = new Uint8Array([4, 5, 6]);
+    const create = api.create(0, password);
     await vi.waitFor(() =>
       expect(wasmMock.allocateSession).toHaveBeenCalledOnce()
     );
+    expect(Array.from(password)).toEqual([0, 0, 0]);
     const deferredCover = (
       api as unknown as { runCoverTick: () => Promise<void> }
     ).runCoverTick();
