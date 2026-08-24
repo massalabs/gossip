@@ -86,13 +86,12 @@ describe('WebAuthn biometric password storage', () => {
     expect(result).toEqual({ success: true });
     expect(mocks.createWebAuthnCredential).toHaveBeenCalledTimes(1);
     expect(mocks.createWebAuthnCredential.mock.calls[0]).toHaveLength(1);
-    expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBe(
-      'credential-handle'
-    );
+    expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBeNull();
     expect(
       JSON.parse(localStorage.getItem(WEBAUTHN_PASSWORD_KEY) ?? '{}')
     ).toEqual({
       version: 1,
+      credentialId: 'credential-handle',
       salt: expect.any(String),
       ciphertext: expect.any(String),
     });
@@ -109,37 +108,55 @@ describe('WebAuthn biometric password storage', () => {
     expect(mocks.encrypt).not.toHaveBeenCalled();
   });
 
-  it('returns an opaque rollback that restores the previous credential pair', async () => {
-    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'previous-credential');
-    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, 'previous-payload');
+  it('atomically replaces the complete record and returns an opaque rollback', async () => {
+    const previousRecord = JSON.stringify({
+      version: 1,
+      credentialId: 'previous-credential',
+      salt: 'previous-salt',
+      ciphertext: 'previous-ciphertext',
+    });
+    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, previousRecord);
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'legacy-credential');
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
 
     const result = await configureBiometricLoginWithRollback('new-password');
 
     expect(result.success).toBe(true);
     expect(result.rollback).toEqual(expect.any(Function));
-    expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBe(
-      'credential-handle'
+    const replacementWrites = setItemSpy.mock.calls.filter(
+      ([key]) => key === WEBAUTHN_PASSWORD_KEY
     );
+    expect(replacementWrites).toHaveLength(1);
+    expect(JSON.parse(replacementWrites[0][1])).toMatchObject({
+      version: 1,
+      credentialId: 'credential-handle',
+    });
+    expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBeNull();
+
     await result.rollback?.();
-    expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBe(
-      'previous-credential'
-    );
-    expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(
-      'previous-payload'
-    );
+    expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(previousRecord);
+    setItemSpy.mockRestore();
   });
 
-  it('restores the previous credential pair after a partial storage write', async () => {
-    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'previous-credential');
-    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, 'previous-payload');
+  it('preserves the previous complete record when the atomic commit fails', async () => {
+    const previousRecord = JSON.stringify({
+      version: 1,
+      credentialId: 'previous-credential',
+      salt: 'previous-salt',
+      ciphertext: 'previous-ciphertext',
+    });
+    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, previousRecord);
     const originalSetItem = Storage.prototype.setItem;
+    let replacementRejected = false;
     const setItemSpy = vi
       .spyOn(Storage.prototype, 'setItem')
       .mockImplementation(function (key: string, value: string) {
         if (
-          key === WEBAUTHN_CREDENTIAL_ID_KEY &&
-          value === 'credential-handle'
+          !replacementRejected &&
+          key === WEBAUTHN_PASSWORD_KEY &&
+          value !== previousRecord
         ) {
+          replacementRejected = true;
           throw new Error('credential write failed');
         }
         originalSetItem.call(this, key, value);
@@ -152,35 +169,39 @@ describe('WebAuthn biometric password storage', () => {
         success: false,
         error: 'credential write failed',
       });
-      expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBe(
-        'previous-credential'
-      );
-      expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(
-        'previous-payload'
-      );
+      expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(previousRecord);
     } finally {
       setItemSpy.mockRestore();
     }
   });
 
   it('returns a retry when WebAuthn replacement restoration is interrupted', async () => {
-    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'previous-credential');
-    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, 'previous-payload');
+    const previousRecord = JSON.stringify({
+      version: 1,
+      credentialId: 'previous-credential',
+      salt: 'previous-salt',
+      ciphertext: 'previous-ciphertext',
+    });
+    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, previousRecord);
     const originalSetItem = Storage.prototype.setItem;
+    let replacementRejected = false;
     let restorationFailed = false;
     const setItemSpy = vi
       .spyOn(Storage.prototype, 'setItem')
       .mockImplementation(function (key: string, value: string) {
         if (
-          key === WEBAUTHN_CREDENTIAL_ID_KEY &&
-          value === 'credential-handle'
+          !replacementRejected &&
+          key === WEBAUTHN_PASSWORD_KEY &&
+          value !== previousRecord
         ) {
+          replacementRejected = true;
           throw new Error('credential write failed');
         }
         if (
+          replacementRejected &&
           !restorationFailed &&
           key === WEBAUTHN_PASSWORD_KEY &&
-          value === 'previous-payload'
+          value === previousRecord
         ) {
           restorationFailed = true;
           throw new Error('restore failed');
@@ -197,15 +218,60 @@ describe('WebAuthn biometric password storage', () => {
         rollback: expect.any(Function),
       });
       await expect(result.rollback?.()).resolves.toBeUndefined();
-      expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBe(
-        'previous-credential'
-      );
-      expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(
-        'previous-payload'
-      );
+      expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(previousRecord);
     } finally {
       setItemSpy.mockRestore();
     }
+  });
+
+  it('keeps the committed record usable when legacy cleanup fails', async () => {
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'legacy-credential');
+    const originalRemoveItem = Storage.prototype.removeItem;
+    const removeItemSpy = vi
+      .spyOn(Storage.prototype, 'removeItem')
+      .mockImplementation(function (key: string) {
+        if (key === WEBAUTHN_CREDENTIAL_ID_KEY) {
+          throw new Error('legacy cleanup failed');
+        }
+        originalRemoveItem.call(this, key);
+      });
+
+    try {
+      expect(await configureBiometricLogin('account-password')).toEqual({
+        success: true,
+      });
+      expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBe(
+        'legacy-credential'
+      );
+      await expect(authenticateBiometricLogin('webauthn')).resolves.toEqual({
+        success: true,
+        data: { password: 'account-password' },
+      });
+      expect(mocks.authenticateWithWebAuthn).toHaveBeenCalledWith(
+        'credential-handle',
+        expect.any(Uint8Array)
+      );
+    } finally {
+      removeItemSpy.mockRestore();
+    }
+  });
+
+  it('rejects the obsolete split payload instead of pairing its legacy ID', async () => {
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'legacy-credential');
+    localStorage.setItem(
+      WEBAUTHN_PASSWORD_KEY,
+      JSON.stringify({
+        version: 1,
+        salt: btoa('encryption-salt'),
+        ciphertext: btoa('ciphertext'),
+      })
+    );
+
+    await expect(authenticateBiometricLogin('webauthn')).resolves.toEqual({
+      success: false,
+      error: 'Stored biometric password is invalid',
+    });
+    expect(mocks.authenticateWithWebAuthn).not.toHaveBeenCalled();
   });
 
   it('uses WebAuthn PRF output to recover only the password', async () => {
@@ -231,10 +297,14 @@ describe('WebAuthn biometric password storage', () => {
   ])(
     'cleans up the acquired key when the stored %s is malformed',
     async (_field, salt, ciphertext) => {
-      localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, 'credential-handle');
       localStorage.setItem(
         WEBAUTHN_PASSWORD_KEY,
-        JSON.stringify({ version: 1, salt, ciphertext })
+        JSON.stringify({
+          version: 1,
+          credentialId: 'credential-handle',
+          salt,
+          ciphertext,
+        })
       );
       const fillSpy = vi.spyOn(Uint8Array.prototype, 'fill');
 

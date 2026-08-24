@@ -66,10 +66,16 @@ describe('WebAuthn biometric password encryption integration', () => {
 
     expect(await configureBiometricLogin(password)).toEqual({ success: true });
 
-    const credentialRecord = localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY);
+    const legacyCredentialRecord = localStorage.getItem(
+      WEBAUTHN_CREDENTIAL_ID_KEY
+    );
     const encryptedRecord = localStorage.getItem(WEBAUTHN_PASSWORD_KEY);
-    expect(credentialRecord).not.toContain(password);
+    expect(legacyCredentialRecord).toBeNull();
     expect(encryptedRecord).not.toContain(password);
+    expect(JSON.parse(encryptedRecord ?? '{}')).toMatchObject({
+      version: 1,
+      credentialId: 'anonymous-credential-handle',
+    });
 
     await expect(authenticateBiometricLogin('webauthn')).resolves.toEqual({
       success: true,

@@ -56,6 +56,7 @@ export interface BiometricSetupTransactionResult extends BiometricSetupResult {
 
 interface WebAuthnPasswordPayload {
   version: 1;
+  credentialId: string;
   salt: string;
   ciphertext: string;
 }
@@ -208,6 +209,9 @@ function parseWebAuthnPayload(raw: string | null): WebAuthnPasswordPayload {
     !value ||
     typeof value !== 'object' ||
     (value as Partial<WebAuthnPasswordPayload>).version !== 1 ||
+    typeof (value as Partial<WebAuthnPasswordPayload>).credentialId !==
+      'string' ||
+    !(value as Partial<WebAuthnPasswordPayload>).credentialId ||
     typeof (value as Partial<WebAuthnPasswordPayload>).salt !== 'string' ||
     typeof (value as Partial<WebAuthnPasswordPayload>).ciphertext !== 'string'
   ) {
@@ -217,19 +221,11 @@ function parseWebAuthnPayload(raw: string | null): WebAuthnPasswordPayload {
   return value as WebAuthnPasswordPayload;
 }
 
-function restoreWebAuthnPassword(
-  credentialId: string | null,
-  payload: string | null
-): void {
-  if (payload === null) {
+function restoreWebAuthnPassword(record: string | null): void {
+  if (record === null) {
     localStorage.removeItem(WEBAUTHN_PASSWORD_KEY);
   } else {
-    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, payload);
-  }
-  if (credentialId === null) {
-    localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
-  } else {
-    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
+    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, record);
   }
 }
 
@@ -250,21 +246,32 @@ async function storeWebAuthnPassword(
     );
     const payload: WebAuthnPasswordPayload = {
       version: 1,
+      credentialId,
       salt: encodeToBase64(encryptionSalt),
       ciphertext: encodeToBase64(encryptedData),
     };
 
-    const previousCredentialId = localStorage.getItem(
-      WEBAUTHN_CREDENTIAL_ID_KEY
-    );
-    const previousPayload = localStorage.getItem(WEBAUTHN_PASSWORD_KEY);
-
+    const previousRecord = localStorage.getItem(WEBAUTHN_PASSWORD_KEY);
     const rollback = async () => {
-      restoreWebAuthnPassword(previousCredentialId, previousPayload);
+      restoreWebAuthnPassword(previousRecord);
     };
     try {
+      // The authenticator handle and its ciphertext are one logical record.
+      // A single Web Storage mutation cannot expose a mismatched pair after
+      // process termination.
       localStorage.setItem(WEBAUTHN_PASSWORD_KEY, JSON.stringify(payload));
-      localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
+
+      // Released pre-password builds used this handle-only key. It cannot
+      // unlock the new password format and is intentionally ignored. Cleanup
+      // is best-effort because the complete replacement is already committed.
+      try {
+        localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
+      } catch (cleanupError) {
+        logger.warn(
+          'Failed to remove legacy WebAuthn credential:',
+          cleanupError
+        );
+      }
       return rollback;
     } catch (error) {
       try {
@@ -285,17 +292,12 @@ async function storeWebAuthnPassword(
 }
 
 async function retrieveWebAuthnPassword(): Promise<string> {
-  const credentialId = localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY);
-  if (!credentialId) {
-    throw new Error('Biometric credential not found');
-  }
-
   const payload = parseWebAuthnPayload(
     localStorage.getItem(WEBAUTHN_PASSWORD_KEY)
   );
   const prfSalt = await getBiometricSalt();
   const { encryptionKey } = await authenticateWithWebAuthn(
-    credentialId,
+    payload.credentialId,
     prfSalt
   );
   let encryptionSalt: Uint8Array | undefined;
