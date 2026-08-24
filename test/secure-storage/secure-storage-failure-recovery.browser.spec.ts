@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GossipSdk } from '@massalabs/gossip-sdk';
 import { DatabaseConnection } from '@massalabs/gossip-sdk/db/sqlite';
 import { userProfile } from '@massalabs/gossip-sdk/db/schema';
 import {
@@ -38,6 +39,10 @@ function config(domain: string) {
       secureStorageWasmUrl,
     },
   };
+}
+
+function sdkConnection(sdk: GossipSdk): DatabaseConnection {
+  return (sdk as unknown as { _conn: DatabaseConnection })._conn;
 }
 
 function testProxy(connection: DatabaseConnection): FaultProxy {
@@ -175,6 +180,42 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     openConnections.clear();
     await deleteSecureStorage();
   }, 60_000);
+
+  it('invalidates SDK facades across a real rejected lock retry', async () => {
+    const password = 'sdk-rejected-lock-password';
+    const sdk = new GossipSdk();
+    try {
+      await sdk.init({
+        protocolBaseUrl: 'http://127.0.0.1:1',
+        storage: config('sdk-rejected-lock-readiness').storage,
+      });
+      await sdk.secureStorageCreate(0, password);
+      const connection = sdkConnection(sdk);
+      await testProxy(connection).stopPeriodicCoverForTesting();
+      expect(sdk.dbReady).toBe(true);
+      expect(() => sdk.queries).not.toThrow();
+      expect(() => sdk.profiles).not.toThrow();
+
+      await testProxy(connection).exec('PRAGMA user_version = 99', [], true);
+      await testProxy(connection).injectIndexedDbFaultsForTesting({
+        readwrite: 1,
+      });
+      await expect(sdk.secureStorageLock()).rejects.toThrow();
+
+      expect(sdk.storageState).toBe('unlocked');
+      expect(sdk.dbReady).toBe(false);
+      expect(() => sdk.queries).toThrow();
+      expect(() => sdk.profiles).toThrow();
+
+      await sdk.secureStorageLock();
+      expect(await sdk.secureStorageUnlock(password)).toBe(true);
+      expect(sdk.dbReady).toBe(true);
+      await sdk.secureStorageLock();
+    } finally {
+      await sdk.destroy();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }, 120_000);
 
   it('preserves cover and lifecycle durability through real VFS failures', async () => {
     const domain = 'real-vfs-failure-recovery';
