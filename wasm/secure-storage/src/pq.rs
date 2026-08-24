@@ -107,6 +107,12 @@ pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Result<Zer
 /// Re-randomize a ciphertext block using only the public key.
 ///
 /// The decrypted plaintext is unchanged but the ciphertext bytes differ.
+pub fn validate_pq_ciphertext(ciphertext: &[u8]) -> Result<()> {
+    pq_rerand::serialize::deserialize_slot(ciphertext)
+        .map(|_| ())
+        .ok_or(SecureStorageError::CorruptedBlock)
+}
+
 pub fn pq_rerand(pk: &PqPublicKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Result<Vec<u8>> {
     let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;

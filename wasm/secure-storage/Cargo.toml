@@ -33,6 +33,7 @@ crypto-password-kdf = { path = "../crypto-password-kdf" }
 pq-rerand = { git = "https://github.com/massalabs/pq-rerand", rev = "9a5a48beb0af01b0f23e5b68e2c6b53e38e7eb2a" }
 rand = "0.8"
 rayon = "1.10"
+sha2 = "0.10"
 thiserror = "2"
 zeroize = { version = "1.8", features = ["derive"] }
 

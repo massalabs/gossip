@@ -13,6 +13,7 @@ pub mod js_num;
 mod kdf;
 mod keypair;
 mod lifecycle;
+mod portable;
 mod pq;
 mod read;
 mod sql_tail;
@@ -49,8 +50,14 @@ pub use error::{Result, SecureStorageError};
 pub use kdf::{SessionKeys, derive_block_aead_key, derive_session_keys};
 pub use keypair::{KeypairFile, read_session_keypair, read_session_version_and_pk};
 pub use lifecycle::{allocate_session, cover_traffic_tick, destroy_session, provision_storage};
+pub use portable::{
+    MAX_PORTABLE_ARCHIVE_BYTES, PORTABLE_DIGEST_SIZE, PORTABLE_HEADER_SIZE, PORTABLE_MAGIC,
+    PORTABLE_RECORD_HEADER_SIZE, PORTABLE_VERSION, PortableArchiveReader, PortableArchiveWriter,
+    PortableHeader, PortableRecord, PortableRecordKind,
+};
 pub use pq::{
-    PQ_CT_SIZE, PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_keygen, pq_rerand,
+    PQ_CT_SIZE, PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_keygen,
+    pq_rerand, validate_pq_ciphertext,
 };
 pub use read::{decrypt_session_data_block, read_session_data, read_total_length};
 pub use types::SessionIndex;
