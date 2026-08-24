@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { COVER_TRAFFIC_NAMESPACES } from '../../src/db/secure-storage-namespaces';
-import type { SecureStorageWorkerApi } from '../../src/db/secure-storage-worker';
+import type { SecureStorageWorkerApi } from '../../src/db/secure-storage-worker-api';
 
 const wasmMock = vi.hoisted(() => ({
   init: vi.fn(),
@@ -45,7 +45,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('reloads durable state and zeroes the password when allocation throws', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     const password = new Uint8Array([1, 2, 3]);
     wasmMock.allocateSession.mockImplementation(() => {
@@ -60,7 +60,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('waits for an active cover flush before allocation starts', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     let finishCover!: () => void;
     const activeCover = new Promise<void>(resolve => {
@@ -88,7 +88,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('applies cover traffic deferred during allocation', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     let finishCreate!: () => void;
     const createFlush = new Promise<void>(resolve => {
@@ -118,7 +118,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('applies every concurrent cover request as its own durable pass', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     let finishFirst!: () => void;
     let finishSecond!: () => void;
@@ -163,7 +163,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('persists a failed pre-allocation cover pass before allocating', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     wasmMock.flushEncrypted
       .mockRejectedValueOnce(new Error('cover flush failed'))
@@ -193,7 +193,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('keeps cover queued across failed allocation recovery', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const { SECURE_STORAGE_RECOVERY_REQUIRED } =
       await import('../../src/db/secure-storage-errors');
     const api = new SecureStorageWorkerApi();
@@ -243,7 +243,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('reloads durable state after a rejected create flush', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     const password = new Uint8Array([7, 8, 9]);
     wasmMock.flushEncrypted.mockRejectedValueOnce(new Error('flush failed'));
@@ -257,7 +257,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('requires durable recovery before another lifecycle operation', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const { SECURE_STORAGE_RECOVERY_REQUIRED } =
       await import('../../src/db/secure-storage-errors');
     const api = new SecureStorageWorkerApi();
@@ -277,7 +277,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('keeps generic flush behind earlier cover work', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     let finishCover!: () => void;
     wasmMock.flushEncrypted
@@ -304,7 +304,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('allows an explicitly rejected generic flush to be retried', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     wasmMock.flushEncrypted
       .mockRejectedValueOnce(new Error('flush failed'))
@@ -340,7 +340,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     'recovers durable state before namespace %s',
     async (_name, run, mutate) => {
       const { SecureStorageWorkerApi } =
-        await import('../../src/db/secure-storage-worker');
+        await import('../../src/db/secure-storage-worker-api');
       const api = new SecureStorageWorkerApi();
       (
         api as unknown as { durableRecoveryRequired: boolean }
@@ -358,7 +358,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('recovers rejected lifecycle state before a generic flush', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const { SECURE_STORAGE_RECOVERY_REQUIRED } =
       await import('../../src/db/secure-storage-errors');
     const api = new SecureStorageWorkerApi();
@@ -383,7 +383,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('waits for create to finish before locking', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     let finishCreate!: () => void;
     wasmMock.flushEncrypted
@@ -414,7 +414,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('waits for accepted cover work before unlocking', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     let finishCover!: () => void;
     wasmMock.flushEncrypted.mockReturnValueOnce(
@@ -439,7 +439,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('drains accepted cover work before closing', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     let finishCover!: () => void;
     wasmMock.flushEncrypted
@@ -470,7 +470,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('keeps close behind a failed cover retry', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     wasmMock.flushEncrypted
       .mockRejectedValueOnce(new Error('cover flush failed'))
@@ -497,7 +497,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('recovers rejected lifecycle state before closing and permits retry', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const { SECURE_STORAGE_RECOVERY_REQUIRED } =
       await import('../../src/db/secure-storage-errors');
     const api = new SecureStorageWorkerApi();
@@ -523,7 +523,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('reloads durable state after a rejected destroy flush', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     wasmMock.flushEncrypted.mockRejectedValueOnce(new Error('flush failed'));
 
@@ -537,7 +537,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
   it('zeroes unlock password bytes when unlock throws', async () => {
     const { SecureStorageWorkerApi } =
-      await import('../../src/db/secure-storage-worker');
+      await import('../../src/db/secure-storage-worker-api');
     const api = new SecureStorageWorkerApi();
     const password = new Uint8Array([4, 5, 6]);
     wasmMock.unlockSession.mockImplementation(() => {

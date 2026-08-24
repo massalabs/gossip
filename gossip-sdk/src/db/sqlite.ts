@@ -21,7 +21,7 @@ import { drizzle, type SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
 import * as schema from './schema/index.js';
 import { runMigrations } from './migrate.js';
 import { execStatements } from './exec-utils.js';
-import type { SecureStorageWorkerProxy } from './secure-storage-worker.js';
+import type { SecureStorageWorkerProxy } from './secure-storage-worker-api.js';
 import type { SecureStorageNativePlugin } from './secure-storage-native.js';
 import {
   requiresSecureStorageRecovery,
