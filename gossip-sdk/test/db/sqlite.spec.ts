@@ -80,11 +80,41 @@ describe('DatabaseConnection secure lifecycle recovery', () => {
 });
 
 describe('DatabaseConnection transaction classification', () => {
-  it('keeps savepoint rollback inside the outer transaction', () => {
-    expect(classifyStatement('ROLLBACK TO SAVEPOINT sp_0')).toBe('other');
-    expect(classifyStatement('ROLLBACK TRANSACTION TO sp_0')).toBe('other');
-    expect(classifyStatement('ROLLBACK')).toBe('rollback');
-    expect(classifyStatement('ROLLBACK TRANSACTION;')).toBe('rollback');
+  it.each([
+    'ROLLBACK',
+    'ROLLBACK TRANSACTION;',
+    'ROLLBACK; -- trace',
+    'ROLLBACK TRANSACTION /* reason */',
+    '/* before */ ROLLBACK /* middle */ TRANSACTION; -- after',
+  ])('recognizes a complete rollback boundary: %s', sql => {
+    expect(classifyStatement(sql)).toBe('rollback');
+  });
+
+  it('tracks commented full and savepoint rollbacks through real SQLite', async () => {
+    const connection = getTestConnection();
+    const state = connection as unknown as { state: { txDepth: number } };
+
+    await connection.execRawDirect('BEGIN IMMEDIATE');
+    await connection.execRawDirect('SAVEPOINT sp_comment');
+    await connection.execRawDirect(
+      'ROLLBACK /* nested */ TO SAVEPOINT sp_comment; -- keep outer'
+    );
+    expect(state.state.txDepth).toBe(1);
+    await connection.execRawDirect('RELEASE SAVEPOINT sp_comment');
+    await connection.execRawDirect('ROLLBACK TRANSACTION; -- release outer');
+    expect(state.state.txDepth).toBe(0);
+  });
+
+  it.each([
+    'ROLLBACK TO SAVEPOINT sp_0',
+    'ROLLBACK TRANSACTION TO sp_0',
+    'ROLLBACK /* keep ownership */ TO SAVEPOINT sp_0; -- nested',
+    'ROLLBACK LATER',
+    'ROLLBACK; SELECT 1',
+    'ROLLBACK /* unterminated',
+    "SELECT 'ROLLBACK; -- data'",
+  ])('does not release ownership for a rollback lookalike: %s', sql => {
+    expect(classifyStatement(sql)).toBe('other');
   });
 });
 

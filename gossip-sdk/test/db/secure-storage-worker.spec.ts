@@ -483,6 +483,23 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     );
   });
 
+  it('releases transaction ownership after a commented full rollback', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+
+    await api.exec('BEGIN IMMEDIATE');
+    const cover = api.cover();
+    const close = api.close();
+    await api.exec('ROLLBACK /* complete */ TRANSACTION; -- trace', [], true);
+    await cover;
+    await close;
+
+    expect(wasmMock.coverTrafficTick).toHaveBeenCalledBefore(
+      wasmMock.closeDatabase
+    );
+  });
+
   it('resets poisoned SQL state before releasing queued durable work', async () => {
     const { SecureStorageWorkerApi } =
       await import('../../src/db/secure-storage-worker-api');

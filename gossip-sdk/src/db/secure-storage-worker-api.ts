@@ -15,6 +15,7 @@ import { logger } from '../utils/logs.js';
 
 import * as Comlink from 'comlink';
 import { SECURE_STORAGE_RECOVERY_REQUIRED } from './secure-storage-errors.js';
+import { classifyStatement } from './sql-statement.js';
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — generated WASM module path resolved at build time
@@ -569,12 +570,10 @@ export class SecureStorageWorkerApi {
     params: unknown[] = [],
     inTransaction: boolean = false
   ): Promise<ExecResult> {
-    const trimmed = sql.trimStart();
-    const beginsTransaction = /^BEGIN\b/i.test(trimmed);
-    const isCommit = /^COMMIT\b/i.test(trimmed);
-    const isFullRollback = /^ROLLBACK(?:\s+TRANSACTION)?\s*;?\s*$/i.test(
-      trimmed
-    );
+    const kind = classifyStatement(sql);
+    const beginsTransaction = kind === 'begin';
+    const isCommit = kind === 'commit';
+    const isFullRollback = kind === 'rollback';
     const endsTransaction = isCommit || isFullRollback;
 
     return this.enqueueSqlOperation(inTransaction, async () => {
@@ -611,11 +610,7 @@ export class SecureStorageWorkerApi {
           return this.recoverRejectedSqlBoundary('commit', error);
         }
       } else if (!inTransaction) {
-        if (
-          /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
-            trimmed
-          )
-        ) {
+        if (kind === 'mutation') {
           try {
             await flushEncrypted();
           } catch (error) {

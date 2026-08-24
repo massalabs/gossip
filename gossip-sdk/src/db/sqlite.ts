@@ -27,6 +27,7 @@ import {
   requiresSecureStorageRecovery,
   SecureStorageRecoveryRequiredError,
 } from './secure-storage-errors.js';
+import { classifyStatement, type StatementKind } from './sql-statement.js';
 import { SESSION_COUNT } from './secure-storage-namespaces.js';
 export { SecureStorageRecoveryRequiredError } from './secure-storage-errors.js';
 export {
@@ -34,6 +35,9 @@ export {
   SESSION_BLOB_NAMESPACE,
   SESSION_COUNT,
 } from './secure-storage-namespaces.js';
+
+export { classifyStatement } from './sql-statement.js';
+export type { StatementKind } from './sql-statement.js';
 
 export type GossipDatabase = SqliteRemoteDatabase<typeof schema>;
 
@@ -160,41 +164,6 @@ function assertNoUndefinedBindParams(params: unknown[]): void {
       );
     }
   }
-}
-
-/**
- * Classify a SQL statement for transaction-boundary tracking.
- *
- * Used by both the native and web dispatch paths to maintain `txDepth`
- * and to decide when a flush is required for durability.
- *
- * Mutation matchers cover schema changes (`CREATE`/`DROP`/`ALTER`),
- * data changes via CTE (`WITH ... INSERT`), `REPLACE`, and `VACUUM`.
- * `PRAGMA` is conservatively treated as a mutation since some pragmas
- * change persistent state.
- */
-export type StatementKind =
-  | 'begin'
-  | 'commit'
-  | 'rollback'
-  | 'mutation'
-  | 'other';
-
-export function classifyStatement(sql: string): StatementKind {
-  const trimmed = sql.trimStart();
-  if (/^BEGIN\b/i.test(trimmed)) return 'begin';
-  if (/^COMMIT\b/i.test(trimmed)) return 'commit';
-  if (/^ROLLBACK(?:\s+TRANSACTION)?\s*;?\s*$/i.test(trimmed)) {
-    return 'rollback';
-  }
-  if (
-    /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
-      trimmed
-    )
-  ) {
-    return 'mutation';
-  }
-  return 'other';
 }
 
 async function isNativePlatform(): Promise<boolean> {

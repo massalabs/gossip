@@ -1,5 +1,6 @@
 import * as Comlink from 'comlink';
 import { SecureStorageWorkerApi } from './secure-storage-worker-api.js';
+import { classifyStatement } from './sql-statement.js';
 
 interface IndexedDbFaultPlan {
   readwrite?: number;
@@ -58,10 +59,7 @@ class SecureStorageTestWorkerApi extends SecureStorageWorkerApi {
   }
 
   protected override executeSqlStatement(sql: string, params: unknown[]) {
-    if (
-      this.rejectNextSqlRollback &&
-      /^ROLLBACK(?:\s+TRANSACTION)?\s*;?\s*$/i.test(sql.trimStart())
-    ) {
+    if (this.rejectNextSqlRollback && classifyStatement(sql) === 'rollback') {
       this.rejectNextSqlRollback = false;
       throw new Error('injected SQL rollback failure');
     }
