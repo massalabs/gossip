@@ -7,9 +7,11 @@
 use std::io::{ErrorKind, Read, Write};
 
 use sha2::{Digest, Sha256};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::constants::{AEAD_TAG_SIZE, BLOCK_SIZE, SESSION_COUNT};
 use crate::error::{Result, SecureStorageError};
+#[cfg(test)]
 use crate::keypair::KeypairFile;
 use crate::pq::PqPublicKey;
 
@@ -83,6 +85,12 @@ pub struct PortableRecord {
     pub value: Vec<u8>,
 }
 
+impl Drop for PortableRecord {
+    fn drop(&mut self) {
+        self.value.zeroize();
+    }
+}
+
 impl PortableRecord {
     #[must_use]
     pub fn keypair(slot: u8, value: Vec<u8>) -> Self {
@@ -120,6 +128,37 @@ pub struct PortableHeader {
     pub record_section_length: u64,
 }
 
+pub(crate) fn validate_portable_keypair_value(value: &[u8]) -> Result<()> {
+    if value.len() < 4 {
+        return Err(SecureStorageError::InvalidPortableArchive);
+    }
+    let version = u32::from_be_bytes(
+        value[0..4]
+            .try_into()
+            .map_err(|_| SecureStorageError::InvalidPortableArchive)?,
+    );
+    if version != V1_KEYPAIR_VERSION {
+        return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
+            version,
+        )));
+    }
+    if value.len() != V1_KEYPAIR_VALUE_SIZE {
+        return Err(SecureStorageError::InvalidPortableArchive);
+    }
+
+    let public_key_end = 4 + V1_PUBLIC_KEY_SIZE;
+    PqPublicKey::from_bytes(&value[4..public_key_end])
+        .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
+    Ok(())
+}
+
+pub(crate) fn validate_portable_block_value(value: &[u8]) -> Result<()> {
+    if value.len() != V1_BLOCK_SIZE {
+        return Err(SecureStorageError::InvalidPortableArchive);
+    }
+    crate::pq::validate_pq_ciphertext(value).map_err(|_| SecureStorageError::InvalidPortableArchive)
+}
+
 #[derive(Default)]
 struct LayoutValidator {
     keypairs_seen: u8,
@@ -147,43 +186,20 @@ impl LayoutValidator {
             || record.slot != self.keypairs_seen
             || record.namespace != 0
             || record.block_index != 0
-            || record.value.len() < 4
         {
             return Err(SecureStorageError::InvalidPortableArchive);
         }
-
-        let version = u32::from_be_bytes(
-            record.value[0..4]
-                .try_into()
-                .map_err(|_| SecureStorageError::InvalidPortableArchive)?,
-        );
-        if version != V1_KEYPAIR_VERSION {
-            return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
-                version,
-            )));
-        }
-        if record.value.len() != V1_KEYPAIR_VALUE_SIZE {
-            return Err(SecureStorageError::InvalidPortableArchive);
-        }
-
-        let keypair = KeypairFile::deserialize(&record.value)
-            .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
-        PqPublicKey::from_bytes(&keypair.pq_pk)
-            .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
+        validate_portable_keypair_value(&record.value)?;
 
         self.keypairs_seen += 1;
         Ok(())
     }
 
     fn observe_block(&mut self, record: &PortableRecord) -> Result<()> {
-        if self.keypairs_seen != V1_SLOT_CAPACITY
-            || record.namespace >= V1_NAMESPACE_COUNT
-            || record.value.len() != V1_BLOCK_SIZE
-        {
+        if self.keypairs_seen != V1_SLOT_CAPACITY || record.namespace >= V1_NAMESPACE_COUNT {
             return Err(SecureStorageError::InvalidPortableArchive);
         }
-        crate::pq::validate_pq_ciphertext(&record.value)
-            .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
+        validate_portable_block_value(&record.value)?;
 
         if !self.block_started {
             if record.namespace != 0 || record.block_index != 0 || record.slot != 0 {
@@ -458,14 +474,14 @@ impl<R: Read> PortableArchiveReader<R> {
             if value_len != V1_KEYPAIR_VALUE_SIZE as u64 {
                 return Err(SecureStorageError::InvalidPortableArchive);
             }
-            let mut value = vec![0_u8; value_size];
+            let mut value = Zeroizing::new(vec![0_u8; value_size]);
             value[0..4].copy_from_slice(&version_bytes);
             read_exact_archive(&mut self.input, &mut value[4..])?;
-            value
+            std::mem::take(&mut *value)
         } else {
-            let mut value = vec![0_u8; value_size];
+            let mut value = Zeroizing::new(vec![0_u8; value_size]);
             read_exact_archive(&mut self.input, &mut value)?;
-            value
+            std::mem::take(&mut *value)
         };
         let record = PortableRecord {
             kind,
