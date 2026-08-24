@@ -65,6 +65,63 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     expect(wasmMock.reloadDurableStorage).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    [
+      'create',
+      (api: SecureStorageWorkerApi, value: Uint8Array) => api.create(0, value),
+    ],
+    [
+      'unlock',
+      (api: SecureStorageWorkerApi, value: Uint8Array) => api.unlock(value),
+    ],
+  ])(
+    'zeroes the password when close rejects %s admission',
+    async (_name, run) => {
+      const { SecureStorageWorkerApi } =
+        await import('../../src/db/secure-storage-worker-api');
+      const api = new SecureStorageWorkerApi();
+      const password = new Uint8Array([4, 5, 6]);
+      const close = api.close();
+
+      await expect(run(api, password)).rejects.toThrow(
+        'Secure storage worker is closing'
+      );
+      expect(Array.from(password)).toEqual([0, 0, 0]);
+      await close;
+    }
+  );
+
+  it.each([
+    [
+      'create',
+      (api: SecureStorageWorkerApi, value: Uint8Array) => api.create(0, value),
+      wasmMock.allocateSession,
+    ],
+    [
+      'unlock',
+      (api: SecureStorageWorkerApi, value: Uint8Array) => api.unlock(value),
+      wasmMock.unlockSession,
+    ],
+  ])(
+    'zeroes the password when prerequisite recovery rejects before %s',
+    async (_name, run, passwordOperation) => {
+      const { SecureStorageWorkerApi } =
+        await import('../../src/db/secure-storage-worker-api');
+      const api = new SecureStorageWorkerApi();
+      const password = new Uint8Array([7, 8, 9]);
+      (
+        api as unknown as { durableRecoveryRequired: boolean }
+      ).durableRecoveryRequired = true;
+      wasmMock.reloadDurableStorage.mockRejectedValueOnce(
+        new Error('recovery failed')
+      );
+
+      await expect(run(api, password)).rejects.toThrow('recovery failed');
+      expect(Array.from(password)).toEqual([0, 0, 0]);
+      expect(passwordOperation).not.toHaveBeenCalled();
+    }
+  );
+
   it('waits for an active cover flush before allocation starts', async () => {
     const { SecureStorageWorkerApi } =
       await import('../../src/db/secure-storage-worker-api');

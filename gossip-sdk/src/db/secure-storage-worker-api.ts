@@ -431,7 +431,7 @@ export class SecureStorageWorkerApi {
    * underlying DB is open and durable.
    */
   async create(slot: number, password: Uint8Array): Promise<void> {
-    return this.enqueueLifecycleOperation(async () => {
+    const operation = this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
       let allocationFailed = false;
       let allocationError: unknown;
@@ -466,6 +466,13 @@ export class SecureStorageWorkerApi {
         );
       }
     });
+    try {
+      return await operation;
+    } finally {
+      // Admission and prerequisite recovery can reject before the queued
+      // callback reaches its earlier pre-flush wipe.
+      password.fill(0);
+    }
   }
 
   /**
@@ -478,7 +485,7 @@ export class SecureStorageWorkerApi {
    * resolves.
    */
   async unlock(password: Uint8Array): Promise<boolean> {
-    return this.enqueueLifecycleOperation(async () => {
+    const operation = this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
       let ok: boolean;
       try {
@@ -491,6 +498,11 @@ export class SecureStorageWorkerApi {
       }
       return ok;
     });
+    try {
+      return await operation;
+    } finally {
+      password.fill(0);
+    }
   }
 
   async lock(): Promise<void> {
