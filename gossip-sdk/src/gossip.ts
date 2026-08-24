@@ -574,10 +574,17 @@ class GossipSdk {
       const delay = Number.isFinite(delayMs)
         ? Math.max(0, delayMs)
         : PUBLIC_KEY_REPUBLISH_INTERVAL_MS;
-      this._publicKeyPublicationTimer = setTimeout(() => {
+      const timer = setTimeout(() => {
         this._publicKeyPublicationTimer = null;
         void publish();
       }, delay);
+      this._publicKeyPublicationTimer = timer;
+
+      // A session may be used by short-lived Node automation with polling
+      // disabled. Keep publication scheduled while the process has other work,
+      // but do not let this timer alone keep Node alive for up to 24 hours.
+      const nodeTimer = timer as typeof timer & { unref?: () => void };
+      nodeTimer.unref?.();
     };
 
     const publish = async () => {

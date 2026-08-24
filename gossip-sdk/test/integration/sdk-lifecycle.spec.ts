@@ -215,6 +215,33 @@ describe('GossipSdk lifecycle', () => {
     await vi.waitFor(() => expect(postPublicKey).toHaveBeenCalledOnce());
   });
 
+  it('unrefs publication timers in Node without cancelling them', async () => {
+    await sdk.init({ storage: getTestStorageConfig() });
+    await sdk.openSession({
+      mnemonic: generateMnemonic(),
+      autoStartPolling: false,
+      publishPublicKey: false,
+    });
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    try {
+      sdk.startPublicKeyPublication();
+      await vi.waitFor(() => {
+        const timerIndex = setTimeoutSpy.mock.calls.findIndex(
+          ([, delay]) => delay === 60_000
+        );
+        expect(timerIndex).toBeGreaterThanOrEqual(0);
+
+        const timer = setTimeoutSpy.mock.results[timerIndex]?.value as {
+          hasRef?: () => boolean;
+        };
+        expect(timer.hasRef?.()).toBe(false);
+      });
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
   it('retries failed publication and republishes when refresh is due', async () => {
     await sdk.init({ storage: getTestStorageConfig() });
     await sdk.openSession({
