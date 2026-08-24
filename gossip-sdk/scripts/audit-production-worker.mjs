@@ -36,10 +36,11 @@ if (productionWorkers.length === 0) {
 }
 for (const artifact of artifacts) {
   if (!/\.(?:js|d\.ts)$/.test(artifact)) continue;
+  const artifactPath = relative(distPath, artifact);
   const content = await readFile(artifact, 'utf8');
   for (const token of forbidden) {
-    if (artifact.includes(token) || content.includes(token)) {
-      violations.push(`${relative(distPath, artifact)} contains ${token}`);
+    if (artifactPath.includes(token) || content.includes(token)) {
+      violations.push(`${artifactPath} contains ${token}`);
     }
   }
 }

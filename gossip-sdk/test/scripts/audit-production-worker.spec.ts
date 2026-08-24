@@ -64,6 +64,23 @@ describe('production worker artifact audit', () => {
     );
   });
 
+  it('ignores forbidden tokens outside the artifact root', async () => {
+    const parent = await mkdtemp(
+      join(tmpdir(), 'secure-storage-worker-test checkout ')
+    );
+    temporaryRoots.push(parent);
+    const root = join(parent, 'dist');
+    await mkdir(join(root, 'assets'), { recursive: true });
+    await writeFile(
+      join(root, 'assets', 'secure-storage-worker-clean.js'),
+      'export const productionWorker = true;\n'
+    );
+
+    const result = audit(root);
+
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   it('rejects forbidden controls in a final application worker', async () => {
     const root = await artifactRoot();
     await writeFile(
