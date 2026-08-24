@@ -274,6 +274,69 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     ).resolves.toEqual([{ username: 'durable retry value' }]);
   }, 120_000);
 
+  it('rejects additional prepared SQL statements before execution', async () => {
+    const domain = 'multiple-sql-statement-rejection';
+    const password = 'single-statement-password';
+    const now = new Date();
+    let connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    await connection.secureStorageCreate(0, password);
+    await connection.db.insert(userProfile).values({
+      userId: 'gossip1singlestatement',
+      username: 'durable single statement',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+      security: '{}',
+      session: new Uint8Array([2, 4, 6]),
+    });
+
+    for (const sql of [
+      'BEGIN IMMEDIATE; SELECT 1',
+      'COMMIT; SELECT 1',
+      'ROLLBACK; SELECT 1',
+    ]) {
+      await expect(testProxy(connection).exec(sql)).rejects.toThrow(
+        'multiple SQL statements are not allowed'
+      );
+    }
+    await expect(
+      testProxy(connection).exec(
+        'UPDATE userProfile SET username = ?; SELECT 1',
+        ['silently ignored tail']
+      )
+    ).rejects.toThrow('multiple SQL statements are not allowed');
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable single statement' }]);
+
+    await testProxy(connection).exec('BEGIN IMMEDIATE; -- accepted comment');
+    await testProxy(connection).exec(
+      'ROLLBACK TRANSACTION; /* accepted comment */',
+      [],
+      true
+    );
+    await expect(
+      testProxy(connection).exec(
+        'SELECT username FROM userProfile; -- accepted comment'
+      )
+    ).resolves.toMatchObject({ rows: [['durable single statement']] });
+
+    await connection.db
+      .update(userProfile)
+      .set({ username: 'durable after rejected tails' });
+    await connection.secureStorageLock();
+    await connection.close();
+    openConnections.delete(connection);
+    connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable after rejected tails' }]);
+  }, 120_000);
+
   it('recovers public nested transactions through the real worker stack', async () => {
     const domain = 'public-transaction-recovery';
     const password = 'public-transaction-password';

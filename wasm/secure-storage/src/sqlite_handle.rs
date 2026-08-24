@@ -26,6 +26,32 @@ use sqlite_wasm_rs::{
 
 pub type SqlResult<T> = Result<T, String>;
 
+fn sql_tail_is_ignorable(mut tail: &[u8]) -> bool {
+    loop {
+        while tail.first().is_some_and(u8::is_ascii_whitespace) {
+            tail = &tail[1..];
+        }
+        if tail.is_empty() {
+            return true;
+        }
+        if tail.starts_with(b"--") {
+            tail = tail
+                .iter()
+                .position(|byte| *byte == b'\n' || *byte == b'\r')
+                .map_or(&[], |newline| &tail[newline + 1..]);
+            continue;
+        }
+        if tail.starts_with(b"/*") {
+            let Some(end) = tail[2..].windows(2).position(|pair| pair == b"*/") else {
+                return false;
+            };
+            tail = &tail[end + 4..];
+            continue;
+        }
+        return false;
+    }
+}
+
 fn len_to_c_int(len: usize, kind: &str) -> SqlResult<c_int> {
     if len > c_int::MAX as usize {
         return Err(format!("{kind} exceeds i32::MAX bytes"));
@@ -153,6 +179,7 @@ impl SafeDb {
     pub fn prepare<'a>(&'a self, sql: &str) -> SqlResult<Option<SafeStmt<'a>>> {
         let sql_c = CString::new(sql).map_err(|_| "sql contains nul byte".to_string())?;
         let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
+        let mut tail: *const c_char = ptr::null();
         // SAFETY: self.handle is valid (SafeDb invariant). sqlite3_prepare_v2
         // contract (https://sqlite.org/c3ref/prepare.html):
         //   - zSql (sql_c.as_ptr()): read-only UTF-8, must outlive the call;
@@ -160,19 +187,30 @@ impl SafeDb {
         //   - nByte (sql_len): byte length of the SQL, checked to fit c_int.
         //   - ppStmt (&mut stmt): writable out pointer; SQLite writes a stmt
         //     handle or null if the SQL was empty/whitespace.
-        //   - pzTail is null (we reject multi-statement tails).
+        //   - pzTail (&mut tail): SQLite points it at the uncompiled suffix;
+        //     we reject anything except whitespace and complete comments.
         let sql_len = len_to_c_int(sql.len(), "sql string")?;
         let rc = unsafe {
-            sqlite3_prepare_v2(
-                self.handle,
-                sql_c.as_ptr(),
-                sql_len,
-                &mut stmt,
-                ptr::null_mut(),
-            )
+            sqlite3_prepare_v2(self.handle, sql_c.as_ptr(), sql_len, &mut stmt, &mut tail)
         };
         if rc != SQLITE_OK {
             return Err(errmsg(self.handle));
+        }
+        let valid_tail = if tail.is_null() {
+            false
+        } else {
+            // SAFETY: sqlite3_prepare_v2 sets pzTail to a position within the
+            // still-live, NUL-terminated sql_c allocation. CStr borrows only
+            // until sql_c leaves this scope.
+            sql_tail_is_ignorable(unsafe { CStr::from_ptr(tail) }.to_bytes())
+        };
+        if !valid_tail {
+            if !stmt.is_null() {
+                // SAFETY: SQLite initialized stmt on the successful prepare.
+                // No SafeStmt owns it yet, so finalize exactly once here.
+                let _rc = unsafe { sqlite3_finalize(stmt) };
+            }
+            return Err("multiple SQL statements are not allowed".to_string());
         }
         if stmt.is_null() {
             return Ok(None);
@@ -391,6 +429,15 @@ impl<'db> Drop for SafeStmt<'db> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sql_tail_accepts_only_whitespace_and_complete_comments() {
+        assert!(sql_tail_is_ignorable(b""));
+        assert!(sql_tail_is_ignorable(b"  \n\t-- trace\n/* done */ "));
+        assert!(!sql_tail_is_ignorable(b" SELECT 1"));
+        assert!(!sql_tail_is_ignorable(b";"));
+        assert!(!sql_tail_is_ignorable(b"/* unterminated"));
+    }
 
     #[test]
     fn len_to_c_int_accepts_c_int_max() {
