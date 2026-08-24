@@ -1,0 +1,276 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DatabaseConnection } from '@massalabs/gossip-sdk/db/sqlite';
+import { userProfile } from '@massalabs/gossip-sdk/db/schema';
+import {
+  COVER_TRAFFIC_NAMESPACES,
+  SECURE_STORAGE_IDB_NAME,
+  SESSION_BLOB_NAMESPACE,
+} from '@massalabs/gossip-sdk/db/secure-storage-namespaces';
+import secureStorageWasmUrlRaw from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
+
+const secureStorageWasmUrl = new URL(
+  secureStorageWasmUrlRaw,
+  window.location.href
+).href;
+const IDB_STORE_NAME = 'blocks';
+const SESSION_COUNT = 3;
+
+type FaultPlan = { readwrite?: number; readonly?: number };
+type FaultProxy = {
+  injectIndexedDbFaultsForTesting(plan: FaultPlan): Promise<void>;
+  clearIndexedDbFaultsForTesting(): Promise<void>;
+  retryFailedCoverNowForTesting(): Promise<boolean>;
+};
+
+type RawSnapshot = Map<string, Uint8Array>;
+
+function config(domain: string) {
+  return {
+    storage: {
+      type: 'secureStorage' as const,
+      domain,
+      secureStorageWasmUrl,
+    },
+  };
+}
+
+function testProxy(connection: DatabaseConnection): FaultProxy {
+  return (
+    connection as unknown as {
+      state: { secureProxy: FaultProxy | null };
+    }
+  ).state.secureProxy!;
+}
+
+async function deleteSecureStorage(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(SECURE_STORAGE_IDB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () =>
+      reject(new Error('secure-storage IndexedDB deletion was blocked'));
+  });
+}
+
+async function snapshotSecureStorage(): Promise<RawSnapshot> {
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(SECURE_STORAGE_IDB_NAME);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    return await new Promise<RawSnapshot>((resolve, reject) => {
+      const transaction = database.transaction(IDB_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(IDB_STORE_NAME);
+      const keysRequest = store.getAllKeys();
+      const valuesRequest = store.getAll();
+      transaction.oncomplete = () => {
+        const snapshot = new Map<string, Uint8Array>();
+        for (let index = 0; index < keysRequest.result.length; index++) {
+          const value = valuesRequest.result[index];
+          snapshot.set(
+            String(keysRequest.result[index]),
+            value instanceof Uint8Array
+              ? new Uint8Array(value)
+              : new Uint8Array(value as ArrayBuffer)
+          );
+        }
+        resolve(snapshot);
+      };
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function expectSameEntry(
+  before: RawSnapshot,
+  after: RawSnapshot,
+  key: string
+): void {
+  expect(Array.from(after.get(key) ?? [])).toEqual(
+    Array.from(before.get(key) ?? [])
+  );
+}
+
+function expectCoverChangedEverySlot(
+  before: RawSnapshot,
+  after: RawSnapshot
+): void {
+  for (const namespace of COVER_TRAFFIC_NAMESPACES) {
+    const changedSessions = new Set<number>();
+    for (const [key, oldValue] of before) {
+      const match = /^s:(\d+):n:(\d+):b:(\d+)$/.exec(key);
+      if (!match || Number(match[2]) !== namespace) continue;
+      const newValue = after.get(key);
+      if (
+        newValue &&
+        oldValue.some((byte, index) => byte !== newValue[index])
+      ) {
+        changedSessions.add(Number(match[1]));
+      }
+    }
+    expect(changedSessions).toEqual(
+      new Set(Array.from({ length: SESSION_COUNT }, (_, index) => index))
+    );
+  }
+}
+
+async function expectBaselineData(
+  connection: DatabaseConnection,
+  expectedNamespaceData: Uint8Array
+): Promise<void> {
+  const rows = await connection.db
+    .select({ userId: userProfile.userId })
+    .from(userProfile);
+  expect(rows).toEqual([{ userId: 'gossip1durablebaseline' }]);
+  expect(
+    Array.from(
+      await connection.secureStorageReadNamespaceData(
+        SESSION_BLOB_NAMESPACE,
+        0,
+        expectedNamespaceData.length
+      )
+    )
+  ).toEqual(Array.from(expectedNamespaceData));
+}
+
+describe('secure-storage real IndexedDB failure recovery', () => {
+  const openConnections = new Set<DatabaseConnection>();
+
+  async function openConnection(domain: string): Promise<DatabaseConnection> {
+    const connection = await DatabaseConnection.create(config(domain));
+    openConnections.add(connection);
+    return connection;
+  }
+
+  beforeEach(async () => {
+    await deleteSecureStorage();
+  }, 60_000);
+
+  afterEach(async () => {
+    for (const connection of openConnections) {
+      try {
+        await testProxy(connection).clearIndexedDbFaultsForTesting();
+        await connection.close();
+      } catch {
+        // Preserve the primary test failure; deletion below still detects a
+        // genuinely leaked worker handle.
+      }
+    }
+    openConnections.clear();
+    await deleteSecureStorage();
+  }, 60_000);
+
+  it('preserves cover and lifecycle durability through real VFS failures', async () => {
+    const domain = 'real-vfs-failure-recovery';
+    const baselinePassword = 'baseline-password';
+    const rejectedPassword = 'rejected-password';
+    const recoveryRejectedPassword = 'recovery-rejected-password';
+    const namespaceData = new Uint8Array([7, 6, 5, 4, 3, 2, 1]);
+    const connection = await openConnection(domain);
+
+    await connection.secureStorageCreate(0, baselinePassword);
+    const now = new Date();
+    await connection.db.insert(userProfile).values({
+      userId: 'gossip1durablebaseline',
+      username: 'durable baseline',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+      security: '{}',
+      session: new Uint8Array([1, 2, 3]),
+    });
+    await connection.secureStorageWriteNamespaceData(
+      SESSION_BLOB_NAMESPACE,
+      0,
+      namespaceData
+    );
+    await connection.secureStorageLock();
+
+    const beforeCover = await snapshotSecureStorage();
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+    });
+    const settlementOrder: string[] = [];
+    const cover = connection.secureStorageCoverTick().then(() => {
+      settlementOrder.push('cover');
+    });
+    const unlock = connection
+      .secureStorageUnlock(baselinePassword)
+      .then(unlocked => {
+        settlementOrder.push('unlock');
+        return unlocked;
+      });
+
+    let unlockSettled = false;
+    void unlock.then(() => {
+      unlockSettled = true;
+    });
+    await vi.waitFor(async () => {
+      expect(await testProxy(connection).retryFailedCoverNowForTesting()).toBe(
+        true
+      );
+    });
+    expect(unlockSettled).toBe(false);
+    await cover;
+    expect(await unlock).toBe(true);
+    expect(settlementOrder).toEqual(['cover', 'unlock']);
+    await expectBaselineData(connection, namespaceData);
+    await connection.secureStorageLock();
+
+    const afterCover = await snapshotSecureStorage();
+    expectCoverChangedEverySlot(beforeCover, afterCover);
+
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+    });
+    await expect(
+      connection.secureStorageCreate(1, rejectedPassword)
+    ).rejects.toThrow();
+    const afterRejectedCreate = await snapshotSecureStorage();
+    expectSameEntry(afterCover, afterRejectedCreate, 's:1:kp');
+    expect(await connection.secureStorageUnlock(rejectedPassword)).toBe(false);
+    expect(await connection.secureStorageUnlock(baselinePassword)).toBe(true);
+    await expectBaselineData(connection, namespaceData);
+    await connection.secureStorageLock();
+
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+      readonly: 3,
+    });
+    await expect(
+      connection.secureStorageCreate(1, recoveryRejectedPassword)
+    ).rejects.toThrow('recovery-required');
+    await expect(connection.secureStorageFlush()).rejects.toThrow();
+    await expect(connection.close()).rejects.toThrow();
+    await connection.close();
+    openConnections.delete(connection);
+
+    const afterGuardedClose = await snapshotSecureStorage();
+    expectSameEntry(afterCover, afterGuardedClose, 's:1:kp');
+
+    const reopened = await openConnection(domain);
+    try {
+      expect(await reopened.secureStorageUnlock(rejectedPassword)).toBe(false);
+      expect(await reopened.secureStorageUnlock(recoveryRejectedPassword)).toBe(
+        false
+      );
+      expect(await reopened.secureStorageUnlock(baselinePassword)).toBe(true);
+      await expectBaselineData(reopened, namespaceData);
+      await reopened.secureStorageLock();
+    } finally {
+      await reopened.close();
+      openConnections.delete(reopened);
+    }
+
+    const afterRelaunch = await snapshotSecureStorage();
+    expect(new Set(afterRelaunch.keys())).toEqual(
+      new Set(afterGuardedClose.keys())
+    );
+    expectCoverChangedEverySlot(afterGuardedClose, afterRelaunch);
+  }, 180_000);
+});
