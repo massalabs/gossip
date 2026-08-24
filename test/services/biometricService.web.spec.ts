@@ -184,21 +184,11 @@ describe('WebAuthn biometric password storage', () => {
     });
     localStorage.setItem(WEBAUTHN_PASSWORD_KEY, previousRecord);
     const originalSetItem = Storage.prototype.setItem;
-    let replacementRejected = false;
     let restorationFailed = false;
     const setItemSpy = vi
       .spyOn(Storage.prototype, 'setItem')
       .mockImplementation(function (key: string, value: string) {
         if (
-          !replacementRejected &&
-          key === WEBAUTHN_PASSWORD_KEY &&
-          value !== previousRecord
-        ) {
-          replacementRejected = true;
-          throw new Error('credential write failed');
-        }
-        if (
-          replacementRejected &&
           !restorationFailed &&
           key === WEBAUTHN_PASSWORD_KEY &&
           value === previousRecord
@@ -211,12 +201,17 @@ describe('WebAuthn biometric password storage', () => {
 
     try {
       const result = await configureBiometricLoginWithRollback('new-password');
+      const replacementRecord = localStorage.getItem(WEBAUTHN_PASSWORD_KEY);
 
       expect(result).toMatchObject({
-        success: false,
-        error: 'credential write failed',
+        success: true,
         rollback: expect.any(Function),
       });
+      expect(replacementRecord).not.toBe(previousRecord);
+      await expect(result.rollback?.()).rejects.toThrow('restore failed');
+      expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(
+        replacementRecord
+      );
       await expect(result.rollback?.()).resolves.toBeUndefined();
       expect(localStorage.getItem(WEBAUTHN_PASSWORD_KEY)).toBe(previousRecord);
     } finally {
