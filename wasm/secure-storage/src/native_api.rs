@@ -10,7 +10,9 @@
 //! bridge as base64 strings rather than `number[]`, which saved a ~×8
 //! overhead per byte on the Capacitor bridge.
 
+use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
+use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
 use base64::Engine;
@@ -471,6 +473,55 @@ fn exec_sql_batch(stmts: &[ExecSqlArgs]) -> Result<Vec<QueryResultJson>> {
     Ok(out)
 }
 
+/// Ask SQLite to identify the uncompiled suffix whenever SQL contains a
+/// possible statement separator. Most hot INSERT/UPDATE statements have no
+/// semicolon and retain the full benefit of rusqlite's statement cache.
+fn validate_sql_tail(conn: &rusqlite::Connection, sql: &str) -> Result<()> {
+    if !sql.as_bytes().contains(&b';') {
+        return Ok(());
+    }
+
+    let sql_c = CString::new(sql)
+        .map_err(|_| SecureStorageException::typed("SQLITE", "sql contains nul byte"))?;
+    let sql_len = i32::try_from(sql.len()).map_err(|_| {
+        SecureStorageException::typed("SQLITE", "sql string exceeds i32::MAX bytes")
+    })?;
+    let mut stmt: *mut rusqlite::ffi::sqlite3_stmt = ptr::null_mut();
+    let mut tail: *const c_char = ptr::null();
+    // SAFETY: conn is locked by the caller for this entire operation. Its
+    // handle and sql_c remain valid through prepare/finalize; both output
+    // pointers are writable and SQLite treats the SQL bytes as read-only.
+    let rc = unsafe {
+        rusqlite::ffi::sqlite3_prepare_v2(
+            conn.handle(),
+            sql_c.as_ptr(),
+            sql_len,
+            &mut stmt,
+            &mut tail,
+        )
+    };
+    let valid_tail = if rc == rusqlite::ffi::SQLITE_OK && !tail.is_null() {
+        // SAFETY: on successful prepare SQLite points pzTail inside the
+        // still-live NUL-terminated sql_c allocation.
+        crate::sql_tail::is_ignorable(unsafe { CStr::from_ptr(tail) }.to_bytes())
+    } else {
+        // Let prepare_cached below surface SQLite's normal syntax/schema error.
+        true
+    };
+    if !stmt.is_null() {
+        // SAFETY: SQLite initialized stmt during prepare and no Rust wrapper
+        // owns this preflight-only statement.
+        let _rc = unsafe { rusqlite::ffi::sqlite3_finalize(stmt) };
+    }
+    if !valid_tail {
+        return Err(SecureStorageException::typed(
+            "SQLITE",
+            "multiple SQL statements are not allowed",
+        ));
+    }
+    Ok(())
+}
+
 fn exec_sql_one(
     conn: &rusqlite::Connection,
     sql: &str,
@@ -481,7 +532,9 @@ fn exec_sql_one(
     // `prepare_cached` keeps a per-connection LRU of prepared statements
     // keyed by SQL text. The SDK reuses the same INSERT/UPDATE strings
     // for every message send, so the parser/planner cost is paid once per
-    // statement shape instead of every call.
+    // statement shape instead of every call. Validate before binding/step so
+    // SQLite and the JS classifier always observe the same single statement.
+    validate_sql_tail(conn, sql)?;
     let mut stmt = conn.prepare_cached(sql)?;
     let column_count = stmt.column_count();
     let columns: Vec<String> = (0..column_count)
@@ -617,6 +670,70 @@ mod tests {
             SecureStorageException::from(SecureStorageError::NotInitialized);
         assert_eq!(code, "NOT_INITIALIZED");
         assert_eq!(msg, "not initialized");
+    }
+
+    #[test]
+    fn native_sql_rejects_additional_statements_before_execution() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        exec_sql_one(
+            &conn,
+            "CREATE TABLE tail_test (value INTEGER NOT NULL)",
+            &[],
+        )
+        .unwrap();
+        exec_sql_one(&conn, "INSERT INTO tail_test VALUES (1)", &[]).unwrap();
+
+        let begin = exec_sql_one(&conn, "BEGIN IMMEDIATE; SELECT 1", &[])
+            .err()
+            .expect("additional BEGIN statement should fail");
+        assert!(begin.to_string().contains("multiple SQL statements"));
+        assert!(conn.is_autocommit());
+
+        exec_sql_one(&conn, "BEGIN IMMEDIATE", &[]).unwrap();
+        let commit = exec_sql_one(&conn, "COMMIT; SELECT 1", &[])
+            .err()
+            .expect("additional COMMIT statement should fail");
+        assert!(commit.to_string().contains("multiple SQL statements"));
+        assert!(!conn.is_autocommit());
+        let rollback = exec_sql_one(&conn, "ROLLBACK; SELECT 1", &[])
+            .err()
+            .expect("additional ROLLBACK statement should fail");
+        assert!(rollback.to_string().contains("multiple SQL statements"));
+        assert!(!conn.is_autocommit());
+        exec_sql_one(&conn, "ROLLBACK", &[]).unwrap();
+
+        let mutation = exec_sql_one(
+            &conn,
+            "UPDATE tail_test SET value = ?; SELECT 1",
+            &[serde_json::json!(2)],
+        )
+        .err()
+        .expect("additional mutation statement should fail");
+        assert!(mutation.to_string().contains("multiple SQL statements"));
+        let value: i64 = conn
+            .query_row("SELECT value FROM tail_test", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, 1);
+    }
+
+    #[test]
+    fn native_sql_accepts_single_statements_with_ignorable_tails() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        exec_sql_one(
+            &conn,
+            "CREATE TABLE tail_test (value INTEGER NOT NULL); -- schema\n",
+            &[],
+        )
+        .unwrap();
+        exec_sql_one(
+            &conn,
+            "INSERT INTO tail_test VALUES (?); /* inserted */ \n -- done",
+            &[serde_json::json!(7)],
+        )
+        .unwrap();
+
+        let result = exec_sql_one(&conn, "SELECT value FROM tail_test", &[]).unwrap();
+        assert_eq!(result.rows, vec![vec![serde_json::json!(7)]]);
     }
 
     #[test]

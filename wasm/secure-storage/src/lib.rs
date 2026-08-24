@@ -15,6 +15,7 @@ mod keypair;
 mod lifecycle;
 mod pq;
 mod read;
+mod sql_tail;
 pub mod storage;
 mod types;
 mod unlock;
