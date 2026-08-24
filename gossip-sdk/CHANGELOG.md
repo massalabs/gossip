@@ -13,12 +13,16 @@
   only while that session is open, becomes invalid when `closeSession()` or
   `destroy()` disposes the session, and must not be freed by callers. Code that
   needs serialized key bytes after logout must copy them before closing.
+- Legacy biometric-only credentials and pre-password classic or secure-storage
+  account state are intentionally not migrated by this release. Users upgrading
+  from those formats must reset local app storage and create their accounts
+  again; legacy import is not supported.
 
 ### Security and reliability
 
 - Account passwords are mandatory and biometric login stores one password-only
   credential without account metadata.
-- Secure-storage lifecycle, recovery, cover traffic, and key disposal are
-  coordinated at durable boundaries.
+- Onboarding rollback and transient/session key disposal preserve cleanup and
+  ownership boundaries.
 - Public-key publication preserves confirmed POST times across local persistence
   retries without redundant network publication.
