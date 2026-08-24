@@ -1,5 +1,9 @@
 import { logger } from '../../utils/logger.ts';
-import { generateUserKeys, UserProfile } from '@massalabs/gossip-sdk';
+import {
+  generateUserKeys,
+  IDENTITY_DERIVATION_VERSION,
+  UserProfile,
+} from '@massalabs/gossip-sdk';
 import { Account, PrivateKey, Provider } from '@massalabs/massa-web3';
 import { useAppStore } from '../appStore';
 
@@ -11,7 +15,22 @@ export function wipeAccountPrivateKey(
   privateKey?.toBytes().fill(0);
 }
 
-export async function deriveAccountFromMnemonic(mnemonic: string): Promise<{
+export async function deriveAccountFromMnemonic(
+  mnemonic: string,
+  identityDerivationVersion: number = IDENTITY_DERIVATION_VERSION
+): Promise<{
+  account: Account;
+  userIdBytes: Uint8Array;
+  evmAddress: string;
+  massaAddress: string;
+}> {
+  if (identityDerivationVersion !== IDENTITY_DERIVATION_VERSION) {
+    throw new Error('Unsupported identity derivation version');
+  }
+  return deriveAccountFromMnemonicV1(mnemonic);
+}
+
+async function deriveAccountFromMnemonicV1(mnemonic: string): Promise<{
   account: Account;
   userIdBytes: Uint8Array;
   evmAddress: string;

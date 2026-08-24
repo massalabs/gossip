@@ -382,12 +382,16 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     let derivedAccount: Account | undefined;
     let accountTransferred = false;
     try {
-      const derived = await deriveAccountFromMnemonic(mnemonic);
+      const derived = await deriveAccountFromMnemonic(
+        mnemonic,
+        security.identityDerivationVersion
+      );
       derivedAccount = derived.account;
       const userId = encodeUserId(derived.userIdBytes);
 
       await sdk.openSession({
         mnemonic,
+        identityDerivationVersion: security.identityDerivationVersion,
         encryptedSession: prepared?.encryptedSession,
         encryptionKey,
         onPersist: createOnPersist(userId),
@@ -648,8 +652,14 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         const { mnemonic, encryptionKey } = authResult;
         callerOwnedEncryptionKey = encryptionKey;
 
-        const derived = await deriveAccountFromMnemonic(mnemonic);
+        const derived = await deriveAccountFromMnemonic(
+          mnemonic,
+          profile.security.identityDerivationVersion
+        );
         derivedAccount = derived.account;
+        if (encodeUserId(derived.userIdBytes) !== profile.userId) {
+          throw new Error('Authenticated profile identity mismatch');
+        }
 
         // Prefer the secure-storage namespace blob when available; fall
         // back to the SQL profile column on the wa-sqlite backend. When
@@ -684,6 +694,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         await sdk.openSession({
           mnemonic,
+          identityDerivationVersion: profile.security.identityDerivationVersion,
           encryptedSession,
           encryptionKey,
           onPersist: createOnPersist(profile.userId),
@@ -931,7 +942,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         let backupAccount: Account | undefined;
         try {
           const derived = await deriveAccountFromMnemonic(
-            authenticated.mnemonic
+            authenticated.mnemonic,
+            profile.security.identityDerivationVersion
           );
           backupAccount = derived.account;
           return {

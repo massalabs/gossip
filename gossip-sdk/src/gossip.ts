@@ -72,7 +72,11 @@ import {
 } from './utils/validation.js';
 import { QueueManager } from './utils/queue.js';
 import { encodeUserId, decodeUserId } from './utils/userId.js';
-import { type StorageConfig, MessageStatus } from './db/index.js';
+import {
+  IDENTITY_DERIVATION_VERSION,
+  type StorageConfig,
+  MessageStatus,
+} from './db/index.js';
 import {
   DatabaseConnection,
   SESSION_BLOB_NAMESPACE,
@@ -102,6 +106,20 @@ export enum SdkStatus {
   SESSION_OPEN = 'session_open',
 }
 
+async function generateIdentityUserKeysV1(mnemonic: string) {
+  return generateUserKeys(mnemonic);
+}
+
+async function generateVersionedIdentityUserKeys(
+  mnemonic: string,
+  identityDerivationVersion: number
+) {
+  if (identityDerivationVersion !== IDENTITY_DERIVATION_VERSION) {
+    throw new Error('Unsupported identity derivation version');
+  }
+  return generateIdentityUserKeysV1(mnemonic);
+}
+
 export interface GossipSdkInitOptions {
   /** Protocol API base URL (shorthand for config.protocol.baseUrl) */
   protocolBaseUrl?: string;
@@ -114,6 +132,8 @@ export interface GossipSdkInitOptions {
 export interface OpenSessionOptions {
   /** BIP39 mnemonic phrase */
   mnemonic: string;
+  /** Frozen mnemonic-to-identity derivation suite. */
+  identityDerivationVersion?: number;
   /** Existing encrypted session blob (for restoring session) */
   encryptedSession?: Uint8Array;
   /** Encryption key for decrypting session and storage. Will be created if not provided. */
@@ -359,6 +379,12 @@ class GossipSdk {
       );
     }
 
+    const identityDerivationVersion =
+      options.identityDerivationVersion ?? IDENTITY_DERIVATION_VERSION;
+    if (identityDerivationVersion !== IDENTITY_DERIVATION_VERSION) {
+      throw new Error('Unsupported identity derivation version');
+    }
+
     const initializedState = this.state;
     const ownsEncryptionKey = options.encryptionKey === undefined;
     let encryptionKey: EncryptionKey | undefined;
@@ -396,7 +422,10 @@ class GossipSdk {
       }
 
       // Generate keys from mnemonic
-      const userKeys = await generateUserKeys(options.mnemonic);
+      const userKeys = await generateVersionedIdentityUserKeys(
+        options.mnemonic,
+        identityDerivationVersion
+      );
 
       // Create session with persistence callback.
       //

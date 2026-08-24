@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  encodeUserId,
   EncryptionKey,
   generateMnemonic,
+  generateNonce,
   SessionModule,
   UserKeys,
   UserPublicKeys,
@@ -10,6 +12,8 @@ import {
 import {
   auth,
   createPasswordSecurity,
+  deriveProfileEncryptionKeyV1,
+  encryptMnemonicV1,
   preparePasswordAccount,
   wipePreparedPasswordAccount,
 } from '../../src/stores/utils/auth';
@@ -25,6 +29,60 @@ function buildProfile(
 }
 
 describe('profile password encryption integration', () => {
+  it('preserves the frozen profile encryption and identity vector', async () => {
+    await generateNonce();
+    const mnemonic =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const profile = userProfile().build();
+    profile.security.encKeySalt = Uint8Array.from(
+      { length: 16 },
+      (_, index) => index
+    );
+    const encryptedMnemonicHex =
+      '6bd6920371fc73ace03e2229db2d67fe10d1127f908531eaca47cbf10a3bbf1f' +
+      'fd954b07467b00dba1a684515fa12c5d8b88949bd6ee76d3737f3b4c7419dab5' +
+      '83edc49b3e1903444473b3fb20d2f59102830b6f920bccc1a437543b96424e1b7' +
+      '093d0d0b07fd6495fcbc35e5c';
+    profile.security.mnemonicBackup.encryptedMnemonic = Uint8Array.from(
+      encryptedMnemonicHex
+        .match(/.{2}/g)!
+        .map(byte => Number.parseInt(byte, 16))
+    );
+    const writerKey = await deriveProfileEncryptionKeyV1(
+      'profile-v1-vector',
+      profile.security.encKeySalt
+    );
+    const emitted = await encryptMnemonicV1(
+      mnemonic,
+      writerKey,
+      profile.security.encKeySalt
+    );
+    expect(
+      Array.from(emitted, byte => byte.toString(16).padStart(2, '0')).join('')
+    ).toBe(encryptedMnemonicHex);
+    emitted.fill(0);
+    writerKey.free();
+
+    const authenticated = await auth(profile, 'profile-v1-vector');
+    expect(authenticated.mnemonic).toBe(mnemonic);
+    const derived = await deriveAccountFromMnemonic(
+      authenticated.mnemonic,
+      profile.security.identityDerivationVersion
+    );
+    expect(encodeUserId(derived.userIdBytes)).toBe(
+      'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s'
+    );
+    expect(derived.evmAddress).toBe(
+      '0xd30d988A4F82A21C03aD5497E6b950beB5408538'
+    );
+    expect(derived.massaAddress).toBe(
+      'AU1XfQoXydwZEcS2UF32PSjL8BwyHWruvDNZYCA5mhCnfZ5Daiyo'
+    );
+
+    derived.account.privateKey.toBytes().fill(0);
+    authenticated.encryptionKey.free();
+  });
+
   it('keeps a generated account signing key after transient derivation cleanup', async () => {
     const mnemonic = await generateMnemonic();
     const message = crypto.getRandomValues(new Uint8Array(32));
@@ -55,6 +113,37 @@ describe('profile password encryption integration', () => {
 
     created.encryptionKey.free();
     authenticated.encryptionKey.free();
+  });
+
+  it('rejects unsupported security versions before password derivation', async () => {
+    const mnemonic = await generateMnemonic();
+    const created = await createPasswordSecurity(mnemonic, 'correct-password');
+    const profile = buildProfile(created.security);
+    const security = profile.security as unknown as Record<string, unknown>;
+    const deriveSpy = vi.spyOn(EncryptionKey, 'from_seed');
+
+    for (const field of [
+      'formatVersion',
+      'passwordKdfVersion',
+      'mnemonicEncryptionVersion',
+      'identityDerivationVersion',
+    ]) {
+      security[field] = 2;
+      await expect(auth(profile, 'correct-password')).rejects.toThrow(
+        'Unsupported account security format'
+      );
+      security[field] = 1;
+    }
+    const originalSalt = profile.security.encKeySalt;
+    (profile.security as unknown as Record<string, unknown>).encKeySalt =
+      '1234567890123456';
+    await expect(auth(profile, 'correct-password')).rejects.toThrow(
+      'Account is missing encryption key salt'
+    );
+    profile.security.encKeySalt = originalSalt;
+    expect(deriveSpy).not.toHaveBeenCalled();
+    deriveSpy.mockRestore();
+    created.encryptionKey.free();
   });
 
   it('preflights an encrypted session entirely in RAM and wipes it', async () => {

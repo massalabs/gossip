@@ -1,5 +1,9 @@
 import {
   EncryptionKey,
+  IDENTITY_DERIVATION_VERSION,
+  PROFILE_MNEMONIC_ENCRYPTION_VERSION,
+  PROFILE_PASSWORD_KDF_VERSION,
+  PROFILE_SECURITY_FORMAT_VERSION,
   validateMnemonic,
   decrypt,
   deriveKey,
@@ -40,16 +44,20 @@ export async function createPasswordSecurity(
   }
 
   const salt = (await generateNonce()).to_bytes();
-  const encryptionKey = await deriveKey(password, salt);
+  const encryptionKey = await deriveProfileEncryptionKeyV1(password, salt);
 
   try {
-    const { encryptedData: encryptedMnemonic } = await encrypt(
+    const encryptedMnemonic = await encryptMnemonicV1(
       mnemonic,
       encryptionKey,
       salt
     );
     return {
       security: {
+        formatVersion: PROFILE_SECURITY_FORMAT_VERSION,
+        passwordKdfVersion: PROFILE_PASSWORD_KDF_VERSION,
+        mnemonicEncryptionVersion: PROFILE_MNEMONIC_ENCRYPTION_VERSION,
+        identityDerivationVersion: IDENTITY_DERIVATION_VERSION,
         authMethod: 'password',
         encKeySalt: salt,
         mnemonicBackup: {
@@ -137,25 +145,73 @@ export async function preparePasswordAccount(
   }
 }
 
+const MAX_ENCRYPTED_MNEMONIC_BYTES = 64 * 1024;
+
+export async function deriveProfileEncryptionKeyV1(
+  password: string,
+  salt: Uint8Array
+): Promise<EncryptionKey> {
+  return deriveKey(password, salt);
+}
+
+export async function encryptMnemonicV1(
+  mnemonic: string,
+  encryptionKey: EncryptionKey,
+  salt: Uint8Array
+): Promise<Uint8Array> {
+  const { encryptedData } = await encrypt(mnemonic, encryptionKey, salt);
+  return encryptedData;
+}
+
+async function decryptMnemonicV1(
+  encryptedMnemonic: Uint8Array,
+  salt: Uint8Array,
+  encryptionKey: EncryptionKey
+): Promise<string> {
+  return decrypt(encryptedMnemonic, salt, encryptionKey);
+}
+
 export async function auth(
   profile: UserProfile,
   password?: string
 ): Promise<AuthResult> {
-  const salt = profile.security.encKeySalt;
-  if (!salt || salt.length < 8) {
+  const security = profile.security;
+  if (
+    security.formatVersion !== PROFILE_SECURITY_FORMAT_VERSION ||
+    security.passwordKdfVersion !== PROFILE_PASSWORD_KDF_VERSION ||
+    security.mnemonicEncryptionVersion !==
+      PROFILE_MNEMONIC_ENCRYPTION_VERSION ||
+    security.identityDerivationVersion !== IDENTITY_DERIVATION_VERSION
+  ) {
+    throw new Error('Unsupported account security format');
+  }
+
+  const salt = security.encKeySalt;
+  const encryptedMnemonic = security.mnemonicBackup.encryptedMnemonic;
+  if (!(salt instanceof Uint8Array) || salt.length !== 16) {
     throw new Error(
       'Account is missing encryption key salt. Please re-authenticate and re-create your account after updating the app.'
     );
+  }
+  if (
+    !(encryptedMnemonic instanceof Uint8Array) ||
+    encryptedMnemonic.length < 17 ||
+    encryptedMnemonic.length > MAX_ENCRYPTED_MNEMONIC_BYTES
+  ) {
+    throw new Error('Account has an invalid encrypted mnemonic');
+  }
+  if (security.authMethod !== 'password') {
+    throw new Error('Unsupported account authentication method');
   }
   if (!password) {
     throw new Error('Password is required for authentication');
   }
 
-  const encryptionKey = await deriveKey(password, salt);
+  const encryptionKey = await deriveProfileEncryptionKeyV1(password, salt);
 
   try {
-    const mnemonic = await decrypt(
-      profile.security.mnemonicBackup.encryptedMnemonic,
+    const mnemonic = await decryptMnemonicV1(
+      encryptedMnemonic,
       salt,
       encryptionKey
     );

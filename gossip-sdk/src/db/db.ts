@@ -10,6 +10,12 @@ export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
 
 // Constants
 export const MESSAGE_ID_SIZE = 12;
+// Immutable emitted-format identifiers. Add new discriminated envelope
+// variants and retain V1 readers/writers; never increment these constants.
+export const PROFILE_SECURITY_FORMAT_VERSION = 1 as const;
+export const PROFILE_PASSWORD_KDF_VERSION = 1 as const;
+export const PROFILE_MNEMONIC_ENCRYPTION_VERSION = 1 as const;
+export const IDENTITY_DERIVATION_VERSION = 1 as const;
 
 // Define interfaces for data models
 export interface Contact {
@@ -57,31 +63,39 @@ export interface Message {
   };
 }
 
+export interface ProfileSecurityV1 {
+  formatVersion: typeof PROFILE_SECURITY_FORMAT_VERSION;
+  passwordKdfVersion: typeof PROFILE_PASSWORD_KDF_VERSION;
+  mnemonicEncryptionVersion: typeof PROFILE_MNEMONIC_ENCRYPTION_VERSION;
+  identityDerivationVersion: typeof IDENTITY_DERIVATION_VERSION;
+  encKeySalt: Uint8Array;
+
+  // Phase 3 profiles always use an account password.
+  authMethod: 'password';
+
+  // WebAuthn/FIDO2 (biometric) details when used
+  webauthn?: {
+    credentialId?: string;
+  };
+
+  // iCloud Keychain sync preference (iOS only)
+  iCloudSync?: boolean;
+
+  // Mnemonic backup details
+  mnemonicBackup: {
+    encryptedMnemonic: Uint8Array;
+    createdAt: Date;
+    backedUp: boolean;
+  };
+}
+
+export type ProfileSecurity = ProfileSecurityV1;
+
 export interface UserProfile {
   userId: string; // 32-byte user ID (gossip Bech32 encoded) - primary key
   username: string;
   avatar?: string | null;
-  security: {
-    encKeySalt: Uint8Array;
-
-    // Authentication method used to create the account
-    authMethod: AuthMethod;
-
-    // WebAuthn/FIDO2 (biometric) details when used
-    webauthn?: {
-      credentialId?: string;
-    };
-
-    // iCloud Keychain sync preference (iOS only)
-    iCloudSync?: boolean;
-
-    // Mnemonic backup details
-    mnemonicBackup: {
-      encryptedMnemonic: Uint8Array;
-      createdAt: Date;
-      backedUp: boolean;
-    };
-  };
+  security: ProfileSecurity;
   session: Uint8Array;
   bio?: string;
   status: 'online' | 'away' | 'busy' | 'offline';

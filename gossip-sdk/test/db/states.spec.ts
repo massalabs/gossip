@@ -12,7 +12,11 @@ import {
   MessageStatus,
   MessageType,
 } from '../../src/db';
-import { rowToUserProfile, userProfileToRow } from '../../src/db/queries';
+import {
+  rowToUserProfile,
+  userProfileToRow,
+  type UserProfileRow,
+} from '../../src/db/queries';
 import { clearAllTables, getTestDb, getTestQueries } from '../testDb';
 import * as schema from '../../src/db/schema';
 import type { UserProfile } from '../../src/db';
@@ -315,10 +319,14 @@ describe('Session Blob Round-Trip', () => {
     userId: 'gossip1testsession',
     username: 'testuser',
     security: {
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
       authMethod: 'password',
-      encKeySalt: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+      encKeySalt: new Uint8Array(16).fill(1),
       mnemonicBackup: {
-        encryptedMnemonic: new Uint8Array([10, 20, 30]),
+        encryptedMnemonic: new Uint8Array(32).fill(2),
         createdAt: new Date(),
         backedUp: false,
       },
@@ -328,6 +336,79 @@ describe('Session Blob Round-Trip', () => {
     lastSeen: new Date(),
     createdAt: new Date(),
     updatedAt: new Date(),
+  });
+
+  it('rejects unknown profile security and nested crypto versions', () => {
+    const row = userProfileToRow(makeProfile(new Uint8Array()));
+    for (const field of [
+      'formatVersion',
+      'passwordKdfVersion',
+      'mnemonicEncryptionVersion',
+      'identityDerivationVersion',
+    ]) {
+      const security = JSON.parse(row.security as string) as Record<
+        string,
+        unknown
+      >;
+      security[field] = 2;
+      expect(() =>
+        rowToUserProfile({ ...row, security: JSON.stringify(security) })
+      ).toThrow('Unsupported account security format');
+    }
+  });
+
+  it('allowlists security fields instead of invoking serialization hooks', () => {
+    const profile = makeProfile(new Uint8Array());
+    (profile.security as unknown as Record<string, unknown>).toJSON = () => ({
+      formatVersion: 999,
+    });
+    (
+      profile.security.mnemonicBackup.createdAt as unknown as Record<
+        string,
+        unknown
+      >
+    ).toJSON = () => 'invalid';
+    profile.security.encKeySalt[Symbol.iterator] = function* () {
+      yield 255;
+    };
+
+    const row = userProfileToRow(profile);
+    const restored = rowToUserProfile(row as UserProfileRow);
+    expect(restored.security.formatVersion).toBe(1);
+    expect(restored.security.encKeySalt).toEqual(new Uint8Array(16).fill(1));
+    expect(
+      Number.isFinite(restored.security.mnemonicBackup.createdAt.getTime())
+    ).toBe(true);
+  });
+
+  it('strictly rejects malformed profile security fields', () => {
+    const row = userProfileToRow(makeProfile(new Uint8Array()));
+    const expectRejected = (
+      mutate: (security: Record<string, unknown>) => void
+    ) => {
+      const security = JSON.parse(row.security as string) as Record<
+        string,
+        unknown
+      >;
+      mutate(security);
+      expect(() =>
+        rowToUserProfile({ ...row, security: JSON.stringify(security) })
+      ).toThrow();
+    };
+
+    expectRejected(security => {
+      security.encKeySalt = new Array(15).fill(1);
+    });
+    expectRejected(security => {
+      (security.mnemonicBackup as Record<string, unknown>).encryptedMnemonic =
+        new Array(16).fill(2);
+    });
+    expectRejected(security => {
+      security.authMethod = 'webauthn';
+    });
+    expectRejected(security => {
+      (security.mnemonicBackup as Record<string, unknown>).backedUp = 'false';
+    });
   });
 
   it('should store and retrieve a small session blob (62 bytes)', async () => {

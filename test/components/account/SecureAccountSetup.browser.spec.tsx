@@ -143,10 +143,14 @@ describe('SecureAccountSetup', () => {
     mocks.preparePasswordAccount.mockImplementation(async () => ({
       mnemonicBytes: new Uint8Array([1]),
       security: {
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
         authMethod: 'password',
-        encKeySalt: new Uint8Array([2]),
+        encKeySalt: new Uint8Array(16).fill(2),
         mnemonicBackup: {
-          encryptedMnemonic: new Uint8Array([3]),
+          encryptedMnemonic: new Uint8Array(32).fill(3),
           createdAt: new Date(),
           backedUp: false,
         },
@@ -188,10 +192,14 @@ describe('SecureAccountSetup', () => {
             resolve({
               mnemonicBytes: new Uint8Array([1]),
               security: {
+                formatVersion: 1,
+                passwordKdfVersion: 1,
+                mnemonicEncryptionVersion: 1,
+                identityDerivationVersion: 1,
                 authMethod: 'password',
-                encKeySalt: new Uint8Array([2]),
+                encKeySalt: new Uint8Array(16).fill(2),
                 mnemonicBackup: {
-                  encryptedMnemonic: new Uint8Array([3]),
+                  encryptedMnemonic: new Uint8Array(32).fill(3),
                   createdAt: new Date(),
                   backedUp: false,
                 },
@@ -429,10 +437,14 @@ describe('SecureAccountSetup', () => {
       .mockResolvedValueOnce({
         mnemonicBytes: new Uint8Array([1]),
         security: {
+          formatVersion: 1,
+          passwordKdfVersion: 1,
+          mnemonicEncryptionVersion: 1,
+          identityDerivationVersion: 1,
           authMethod: 'password',
-          encKeySalt: new Uint8Array([2]),
+          encKeySalt: new Uint8Array(16).fill(2),
           mnemonicBackup: {
-            encryptedMnemonic: new Uint8Array([3]),
+            encryptedMnemonic: new Uint8Array(32).fill(3),
             createdAt: new Date(),
             backedUp: false,
           },

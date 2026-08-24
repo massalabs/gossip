@@ -12,6 +12,7 @@ const authSpy = vi.hoisted(() => vi.fn());
 const configureBiometricSpy = vi.hoisted(() => vi.fn());
 const appState = vi.hoisted(() => ({ secureAccountCreationAllowed: true }));
 const derivedAccountKeys = vi.hoisted(() => [] as Uint8Array[]);
+const encodeUserIdSpy = vi.hoisted(() => vi.fn(() => 'mock-user-id'));
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
@@ -44,7 +45,14 @@ const makeSdkMock = () => ({
     createOrUpdate: vi.fn(async () => ({
       userId: 'mock-user-id',
       username: 'testuser',
-      security: { authMethod: 'password', encKeySalt: new Uint8Array(0) },
+      security: {
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
+        authMethod: 'password',
+        encKeySalt: new Uint8Array(16),
+      },
     })),
   },
   announcements: {
@@ -61,10 +69,14 @@ function mockProfile(session = new Uint8Array([9, 9])) {
     userId: 'mock-user-id',
     username: 'testuser',
     security: {
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
       authMethod: 'password' as const,
-      encKeySalt: new Uint8Array(0),
+      encKeySalt: new Uint8Array(16),
       mnemonicBackup: {
-        encryptedMnemonic: new Uint8Array(0),
+        encryptedMnemonic: new Uint8Array(32),
         createdAt: now,
         backedUp: false,
       },
@@ -119,6 +131,10 @@ vi.mock('@massalabs/gossip-sdk', async () => {
   );
   return {
     ...actual,
+    PROFILE_SECURITY_FORMAT_VERSION: 1,
+    PROFILE_PASSWORD_KDF_VERSION: 1,
+    PROFILE_MNEMONIC_ENCRYPTION_VERSION: 1,
+    IDENTITY_DERIVATION_VERSION: 1,
     generateMnemonic: vi.fn(() => 'word '.repeat(24).trim()),
     validateMnemonic: vi.fn(() => true),
     generateUserKeys: vi.fn(async () => ({
@@ -135,7 +151,7 @@ vi.mock('@massalabs/gossip-sdk', async () => {
       massa_address: () =>
         'AU1CKrPb3a1Aj3JJkeTuHJoMswGVDSdgg1ynK7QMMMKHVYjinBfq',
     })),
-    encodeUserId: vi.fn(() => 'mock-user-id'),
+    encodeUserId: encodeUserIdSpy,
     generateNonce: vi.fn(async () => ({
       to_bytes: () => new Uint8Array(16),
     })),
@@ -202,10 +218,14 @@ vi.mock('../../src/stores/utils/auth', () => ({
   auth: authSpy,
   createPasswordSecurity: vi.fn(async () => ({
     security: {
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
       authMethod: 'password',
       encKeySalt: new Uint8Array(16),
       mnemonicBackup: {
-        encryptedMnemonic: new Uint8Array(0),
+        encryptedMnemonic: new Uint8Array(32),
         createdAt: new Date(),
         backedUp: false,
       },
@@ -220,6 +240,8 @@ vi.mock('../../src/stores/utils/auth', () => ({
 
 beforeEach(() => {
   derivedAccountKeys.length = 0;
+  encodeUserIdSpy.mockReset();
+  encodeUserIdSpy.mockReturnValue('mock-user-id');
 });
 
 describe('AccountStore classic password discovery', () => {
@@ -272,6 +294,7 @@ describe('AccountStore classic password discovery', () => {
     sdk.storageState = 'unlocked';
     sdk.profiles.getAll.mockResolvedValue([first, second]);
     getSdkMock.mockReturnValue(sdk);
+    encodeUserIdSpy.mockReturnValue('second-user-id');
     authSpy
       .mockRejectedValueOnce(new Error('wrong profile'))
       .mockResolvedValueOnce({
@@ -293,6 +316,33 @@ describe('AccountStore classic password discovery', () => {
       expect.objectContaining({ publishPublicKey: false })
     );
     expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a profile whose decrypted mnemonic derives another identity', async () => {
+    const profile = mockProfile();
+    const free = vi.fn();
+    const sdk = makeSdkMock();
+    sdk.storageState = 'unlocked';
+    sdk.profiles.get.mockResolvedValue(profile);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free },
+    });
+    encodeUserIdSpy.mockReturnValue('different-user-id');
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'password',
+        userId: profile.userId,
+      })
+    ).rejects.toThrow('Authenticated profile identity mismatch');
+
+    expect(sdk.openSession).not.toHaveBeenCalled();
+    expect(free).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys).toHaveLength(1);
+    expect(Array.from(derivedAccountKeys[0])).toEqual([0, 0, 0]);
   });
 
   it('frees caller-owned keys and derived accounts before session open', async () => {

@@ -28,15 +28,15 @@ uses checked operations. Writers emit the unique canonical representation descri
 
 ## Container layout
 
-| Offset | Width | Field | Version 1 value |
-| ---: | ---: | --- | --- |
-| 0 | 8 | Magic | ASCII `GOSSIPBK` |
-| 8 | 8 | Container version | `1` |
-| 16 | 8 | Slot capacity | `3` |
-| 24 | 8 | Record count | Number of records |
-| 32 | 8 | Record-section length | Encoded record bytes |
-| 40 | variable | Record section | Canonical records |
-| `40 + record-section length` | 32 | Digest | SHA-256 |
+|                       Offset |    Width | Field                 | Version 1 value      |
+| ---------------------------: | -------: | --------------------- | -------------------- |
+|                            0 |        8 | Magic                 | ASCII `GOSSIPBK`     |
+|                            8 |        8 | Container version     | `1`                  |
+|                           16 |        8 | Slot capacity         | `3`                  |
+|                           24 |        8 | Record count          | Number of records    |
+|                           32 |        8 | Record-section length | Encoded record bytes |
+|                           40 | variable | Record section        | Canonical records    |
+| `40 + record-section length` |       32 | Digest                | SHA-256              |
 
 The complete artifact, including its digest, must not exceed 64 GiB
 (`68,719,476,736` bytes). The file length must equal `40 + record-section length + 32`; trailing or
@@ -49,14 +49,14 @@ version 1. A semantic or framing change requires a new top-level container versi
 
 Every record uses this uniform frame:
 
-| Relative offset | Width | Field |
-| ---: | ---: | --- |
-| 0 | 1 | Record kind |
-| 1 | 1 | Slot |
-| 2 | 8 | Namespace |
-| 10 | 8 | Block index |
-| 18 | 8 | Value length |
-| 26 | `value length` | Exact logical record value |
+| Relative offset |          Width | Field                      |
+| --------------: | -------------: | -------------------------- |
+|               0 |              1 | Record kind                |
+|               1 |              1 | Slot                       |
+|               2 |              8 | Namespace                  |
+|              10 |              8 | Block index                |
+|              18 |              8 | Value length               |
+|              26 | `value length` | Exact logical record value |
 
 ### Record kinds
 
@@ -68,12 +68,12 @@ Every record uses this uniform frame:
 
 A version-0 keypair value is exactly 98,340 bytes:
 
-| Relative offset | Width | Field |
-| ---: | ---: | --- |
-| 0 | 4 | Keypair version, `0` |
-| 4 | 65,536 | Canonical pq-rerand `9a5a48b` public key |
-| 65,540 | 16 | Secret-key wrapping nonce |
-| 65,556 | 32,784 | Wrapped 32,768-byte secret key plus 16-byte AEAD tag |
+| Relative offset |  Width | Field                                                |
+| --------------: | -----: | ---------------------------------------------------- |
+|               0 |      4 | Keypair version, `0`                                 |
+|               4 | 65,536 | Canonical pq-rerand `9a5a48b` public key             |
+|          65,540 |     16 | Secret-key wrapping nonce                            |
+|          65,556 | 32,784 | Wrapped 32,768-byte secret key plus 16-byte AEAD tag |
 
 The keypair version is read before applying version-specific lengths or parsers. The public key and
 every encrypted block must pass pq-rerand's strict canonical parsers. All other kinds, slots,
@@ -115,19 +115,43 @@ Container and logical-layout validation requires no account password. Nested acc
 migration occur only after a password successfully unlocks a real slot and must complete atomically
 before that account opens. Unmatched dummy and hidden real slots remain indistinguishable.
 
+## Profile security envelope
+
+The namespace-`0` SQLite `userProfile.security` JSON object carries four mandatory numeric dispatch
+fields before any account-password operation:
+
+- `formatVersion: 1`
+- `passwordKdfVersion: 1`
+- `mnemonicEncryptionVersion: 1`
+- `identityDerivationVersion: 1`
+
+The row parser rejects absent or unknown values before reconstructing salts/ciphertext, and account
+authentication rechecks them before password KDF work. The initial values freeze the current
+Argon2id profile-key derivation, AES-256-SIV mnemonic envelope, and mnemonic-to-identity derivation.
+A change to any operation requires a new corresponding version and retained historical decoder.
+Pre-envelope profiles remain outside the approved compatibility baseline. The browser compatibility
+test freezes password `profile-v1-vector`, salt bytes `00..0f`, the standard `abandon … about` BIP39
+mnemonic, its deterministic ciphertext, and these identity outputs:
+
+```text
+gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s
+0xd30d988A4F82A21C03aD5497E6b950beB5408538
+AU1XfQoXydwZEcS2UF32PSjL8BwyHWruvDNZYCA5mhCnfZ5Daiyo
+```
+
 ## SessionManager nested envelope
 
 Namespace `1` contains a separately encrypted SessionManager blob. The Phase 3 baseline begins with
 this clear, outer-secure-storage-protected header:
 
-| Offset | Width | Field | Initial value |
-| ---: | ---: | --- | --- |
-| 0 | 8 | Magic | ASCII `GOSSIPSM` |
-| 8 | 8 | Envelope version | `1` |
-| 16 | 8 | SessionManager payload version | `1` |
-| 24 | 8 | Ciphertext length | Bounded length |
-| 32 | 16 | AES-256-SIV nonce | Random nonce |
-| 48 | variable | Ciphertext | Versioned bincode payload plus tag |
+| Offset |    Width | Field                          | Initial value                      |
+| -----: | -------: | ------------------------------ | ---------------------------------- |
+|      0 |        8 | Magic                          | ASCII `GOSSIPSM`                   |
+|      8 |        8 | Envelope version               | `1`                                |
+|     16 |        8 | SessionManager payload version | `1`                                |
+|     24 |        8 | Ciphertext length              | Bounded length                     |
+|     32 |       16 | AES-256-SIV nonce              | Random nonce                       |
+|     48 | variable | Ciphertext                     | Versioned bincode payload plus tag |
 
 The first 32 bytes are nested AEAD additional authenticated data. Ciphertext is limited to 64 MiB,
 framing must consume the exact blob, and bincode must consume the complete decrypted plaintext.

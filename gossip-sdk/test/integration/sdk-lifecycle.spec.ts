@@ -173,6 +173,21 @@ describe('GossipSdk lifecycle', () => {
     ).rejects.toThrow('SDK not initialized');
   });
 
+  it('rejects unknown identity versions before key or session work', async () => {
+    await sdk.init({ storage: getTestStorageConfig() });
+    const deriveSpy = vi.spyOn(EncryptionKey, 'from_seed');
+
+    await expect(
+      sdk.openSession({
+        mnemonic: generateMnemonic(),
+        identityDerivationVersion: 2,
+      })
+    ).rejects.toThrow('Unsupported identity derivation version');
+    expect(deriveSpy).not.toHaveBeenCalled();
+    expect(sdk.isSessionOpen).toBe(false);
+    deriveSpy.mockRestore();
+  });
+
   it('opens and closes session with getters wired', async () => {
     await sdk.init({ storage: getTestStorageConfig() });
     await sdk.openSession({ mnemonic: generateMnemonic() });
