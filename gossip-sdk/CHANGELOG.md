@@ -24,5 +24,7 @@
   credential without account metadata.
 - Onboarding rollback and transient/session key disposal preserve cleanup and
   ownership boundaries.
+- Secure-storage allocation, cover traffic, namespace writes, SQL transactions,
+  lock, flush, and close share durable recovery and FIFO ordering boundaries.
 - Public-key publication preserves confirmed POST times across local persistence
   retries without redundant network publication.
