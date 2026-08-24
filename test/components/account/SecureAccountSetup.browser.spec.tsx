@@ -667,6 +667,38 @@ describe('SecureAccountSetup', () => {
     expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
   });
 
+  it('finishes lock-only recovery after unmount', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    const onComplete = vi.fn();
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+    mocks.logout
+      .mockRejectedValueOnce(new Error('lock failed'))
+      .mockResolvedValueOnce(undefined);
+    const rendered = await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={onComplete}
+        onRestart={vi.fn()}
+      />
+    );
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+    await expect
+      .element(page.getByText('secure_setup.lock_failed', { exact: true }))
+      .toBeInTheDocument();
+    expect(useAppStore.getState().secureAccountCreationAllowed).toBe(false);
+    expect(onComplete).not.toHaveBeenCalled();
+
+    await rendered.unmount();
+    await vi.waitFor(() => {
+      expect(mocks.logout).toHaveBeenCalledTimes(2);
+      expect(onComplete).toHaveBeenCalledOnce();
+    });
+    expect(account.passwordBytes.every(byte => byte === 0)).toBe(true);
+  });
+
   it('retries only locking when logout fails after account persistence', async () => {
     const account = stageAccount('alice', 'alice-password');
     const onComplete = vi.fn();

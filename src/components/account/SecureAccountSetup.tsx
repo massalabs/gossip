@@ -83,6 +83,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const [addingAccount, setAddingAccount] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [lockRecoveryPending, setLockRecoveryPending] = useState(false);
+  const lockRecoveryRequired = useRef(false);
   const [failureRecoveryPending, setFailureRecoveryPending] = useState(false);
   const failureRecovery = useRef<FailureRecovery | null>(null);
   const [showICloudModal, setShowICloudModal] = useState(false);
@@ -154,11 +155,13 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     try {
       await logout({ lockedByUser: false });
       await onComplete();
+      lockRecoveryRequired.current = false;
     } catch (logoutError) {
       logger.error(
         'Failed to lock persisted onboarding accounts:',
         logoutError
       );
+      lockRecoveryRequired.current = true;
       setLockRecoveryPending(true);
       setIsFinalizing(false);
     }
@@ -233,9 +236,16 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     if (mounted.current || unmountedRecoveryRunning.current) return;
     unmountedRecoveryRunning.current = true;
     try {
-      while (!mounted.current && failureRecovery.current) {
-        await retryFailureRecovery(failureRecovery.current);
+      while (
+        !mounted.current &&
+        (failureRecovery.current || lockRecoveryRequired.current)
+      ) {
         if (failureRecovery.current) {
+          await retryFailureRecovery(failureRecovery.current);
+        } else if (lockRecoveryRequired.current) {
+          await lockPersistedAccountsAndComplete();
+        }
+        if (failureRecovery.current || lockRecoveryRequired.current) {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
