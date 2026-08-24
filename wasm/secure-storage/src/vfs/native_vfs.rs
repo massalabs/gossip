@@ -126,6 +126,14 @@ impl VfsState {
 
 static STATE: OnceLock<Mutex<Option<VfsState>>> = OnceLock::new();
 
+#[cfg(test)]
+static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn test_mutex() -> &'static Mutex<()> {
+    TEST_LOCK.get_or_init(|| Mutex::new(()))
+}
+
 /// Auxiliary file data (journal/temp - unencrypted, in-memory only).
 static AUX: OnceLock<Mutex<Vec<Vec<u8>>>> = OnceLock::new();
 
@@ -1476,12 +1484,6 @@ unsafe extern "C" fn x_device_characteristics(_f: *mut sqlite3_file) -> c_int {
 mod tests {
     use super::*;
     use crate::run_with_stack;
-
-    static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn test_mutex() -> &'static Mutex<()> {
-        TEST_LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn ensure_registered() {
         register().unwrap();

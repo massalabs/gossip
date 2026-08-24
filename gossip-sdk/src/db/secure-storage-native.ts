@@ -21,6 +21,14 @@ interface RawPlugin {
 
 const raw = registerPlugin<RawPlugin>('SecureStorageNative');
 
+const PORTABLE_CHUNK_BYTES = 256 * 1024;
+
+export type PortableChunkWriter = (chunk: Uint8Array) => void | Promise<void>;
+export type PortableChunkReader = () =>
+  | Uint8Array
+  | null
+  | Promise<Uint8Array | null>;
+
 // ── base64 helpers ────────────────────────────────────────────────
 
 function u8ToBase64(bytes: Uint8Array | number[]): string {
@@ -50,6 +58,17 @@ async function callNative<T = unknown>(
     args: JSON.stringify(args),
   });
   return JSON.parse(result) as T;
+}
+
+let portableTransferTail: Promise<void> = Promise.resolve();
+
+function runPortableTransfer<T>(operation: () => Promise<T>): Promise<T> {
+  const result = portableTransferTail.then(operation, operation);
+  portableTransferTail = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
 }
 
 // ── SQL value encoding ────────────────────────────────────────────
@@ -120,6 +139,12 @@ export interface SecureStorageNativePlugin {
   >;
   flush(): Promise<void>;
   close(): Promise<void>;
+
+  /** Stream a locked whole-store snapshot without materializing it in JS. */
+  exportPortableV1(write: PortableChunkWriter): Promise<void>;
+
+  /** Atomically replace locked storage after validating a complete stream. */
+  importPortableV1(read: PortableChunkReader): Promise<void>;
 
   // Namespace data API - parity with the WASM worker. Enables the SDK
   // to persist the session blob on the native path without going
@@ -230,6 +255,55 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   },
   async close() {
     await callNative('close');
+  },
+  async exportPortableV1(write) {
+    return runPortableTransfer(async () => {
+      let finished = false;
+      await callNative('beginPortableExport');
+      try {
+        while (true) {
+          const encoded = await callNative<string | null>(
+            'readPortableExportChunk',
+            { maxBytes: PORTABLE_CHUNK_BYTES }
+          );
+          if (encoded === null) break;
+          await write(base64ToU8(encoded));
+        }
+        await callNative('finishPortableExport');
+        finished = true;
+      } finally {
+        if (!finished)
+          await callNative('abortPortableTransfer').catch(() => {});
+      }
+    });
+  },
+  async importPortableV1(read) {
+    return runPortableTransfer(async () => {
+      let finished = false;
+      await callNative('beginPortableImport');
+      try {
+        while (true) {
+          const chunk = await read();
+          if (chunk === null) break;
+          for (
+            let offset = 0;
+            offset < chunk.length;
+            offset += PORTABLE_CHUNK_BYTES
+          ) {
+            await callNative('pushPortableImportChunk', {
+              data: u8ToBase64(
+                chunk.subarray(offset, offset + PORTABLE_CHUNK_BYTES)
+              ),
+            });
+          }
+        }
+        await callNative('finishPortableImport');
+        finished = true;
+      } finally {
+        if (!finished)
+          await callNative('abortPortableTransfer').catch(() => {});
+      }
+    });
   },
   async writeNamespaceData({ namespace, offset, data }) {
     await callNative('writeNamespaceData', {

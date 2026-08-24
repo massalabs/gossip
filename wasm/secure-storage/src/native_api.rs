@@ -22,6 +22,9 @@ use crate::error::SecureStorageError;
 use crate::js_num;
 use crate::vfs::native_vfs;
 
+const MAX_PORTABLE_BASE64_CHARS: usize =
+    native_vfs::MAX_PORTABLE_BRIDGE_CHUNK_BYTES.div_ceil(3) * 4;
+
 // ── Global DB connection ────────────────────────────────────────────
 
 static DB: OnceLock<Mutex<Option<rusqlite::Connection>>> = OnceLock::new();
@@ -152,6 +155,18 @@ struct DestroySessionArgs {
     namespaces: Vec<u8>,
 }
 
+#[derive(Deserialize)]
+struct ReadPortableChunkArgs {
+    #[serde(rename = "maxBytes")]
+    max_bytes: usize,
+}
+
+#[derive(Deserialize)]
+struct PushPortableChunkArgs<'a> {
+    /// Base64-encoded portable container bytes borrowed from the wiped FFI buffer.
+    data: &'a str,
+}
+
 /// SQL values flow as raw JSON primitives; the one exception is BLOB,
 /// which cannot be represented as a JSON scalar and is carried as the
 /// sentinel object `{"blob": "<base64>"}` in both directions.
@@ -211,8 +226,9 @@ fn validate_storage_path(path: &str) -> Result<()> {
 /// and any rusqlite path that aborts on contract violation.
 #[uniffi::export]
 pub fn native_call(method: String, args_json: String) -> Result<String> {
+    let args_json = Zeroizing::new(args_json);
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        dispatch(&method, &args_json)
+        dispatch(&method, args_json.as_str())
     })) {
         Ok(r) => r,
         Err(panic) => {
@@ -281,6 +297,52 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
         }
         "close" => {
             close()?;
+            Ok("null".into())
+        }
+        "beginPortableExport" => {
+            prepare_portable_transfer()?;
+            native_vfs::begin_portable_export()?;
+            Ok("null".into())
+        }
+        "readPortableExportChunk" => {
+            let a: ReadPortableChunkArgs = parse(args)?;
+            let chunk = native_vfs::read_portable_export_chunk(a.max_bytes)?;
+            match chunk {
+                Some(bytes) => {
+                    let bytes = Zeroizing::new(bytes);
+                    let encoded = Zeroizing::new(B64.encode(bytes.as_slice()));
+                    Ok(serde_json::to_string(encoded.as_str())?)
+                }
+                None => Ok("null".into()),
+            }
+        }
+        "finishPortableExport" => {
+            native_vfs::finish_portable_export()?;
+            Ok("null".into())
+        }
+        "beginPortableImport" => {
+            prepare_portable_transfer()?;
+            native_vfs::begin_portable_import()?;
+            Ok("null".into())
+        }
+        "pushPortableImportChunk" => {
+            let a: PushPortableChunkArgs<'_> = parse(args)?;
+            if a.data.len() > MAX_PORTABLE_BASE64_CHARS {
+                return Err(SecureStorageException::typed(
+                    "OUT_OF_BOUNDS",
+                    "portable chunk exceeds bridge limit",
+                ));
+            }
+            let bytes = Zeroizing::new(B64.decode(a.data.as_bytes())?);
+            native_vfs::push_portable_import_chunk(&bytes)?;
+            Ok("null".into())
+        }
+        "finishPortableImport" => {
+            native_vfs::finish_portable_import()?;
+            Ok("null".into())
+        }
+        "abortPortableTransfer" => {
+            native_vfs::abort_portable_transfer()?;
             Ok("null".into())
         }
         "rayonThreadCount" => {
@@ -365,6 +427,17 @@ fn init_secure_storage(path: &str, domain: &str) -> Result<()> {
     let _ = rayon::ThreadPoolBuilder::new()
         .num_threads(3)
         .build_global();
+    Ok(())
+}
+
+fn prepare_portable_transfer() -> Result<()> {
+    {
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = None;
+    }
+    native_vfs::lock()?;
     Ok(())
 }
 
@@ -595,6 +668,44 @@ fn exec_sql_one(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dispatcher_roundtrips_portable_chunks() {
+        let _guard = native_vfs::test_mutex().lock().unwrap();
+        native_vfs::reset_state();
+        *db_mutex().lock().unwrap() = None;
+        let dir = tempfile::tempdir().unwrap();
+        let init = serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+            "domain": "test",
+        });
+        dispatch("initSecureStorage", &init.to_string()).unwrap();
+        dispatch("beginPortableImport", "{}").unwrap();
+
+        let fixture = include_bytes!("../tests/fixtures/portable-v1-minimal.gossipbackup");
+        for chunk in fixture.chunks(128 * 1024) {
+            let args = serde_json::json!({ "data": B64.encode(chunk) });
+            dispatch("pushPortableImportChunk", &args.to_string()).unwrap();
+        }
+        dispatch("finishPortableImport", "{}").unwrap();
+
+        dispatch("beginPortableExport", "{}").unwrap();
+        let mut exported = Vec::new();
+        loop {
+            let value = dispatch(
+                "readPortableExportChunk",
+                &serde_json::json!({ "maxBytes": 32 * 1024 }).to_string(),
+            )
+            .unwrap();
+            let encoded: Option<String> = serde_json::from_str(&value).unwrap();
+            let Some(encoded) = encoded else { break };
+            exported.extend_from_slice(&B64.decode(encoded).unwrap());
+        }
+        dispatch("finishPortableExport", "{}").unwrap();
+
+        assert_eq!(exported, fixture);
+        native_vfs::reset_state();
+    }
 
     #[test]
     fn native_call_catches_panic_and_returns_error() {
