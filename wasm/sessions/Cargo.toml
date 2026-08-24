@@ -19,3 +19,6 @@ zeroize = { version = "1.8", features = ["derive"] }
 web-time = "1.1"
 massa_signature = { git = "https://github.com/massalabs/massa.git", package = "massa_signature", default-features = false }
 massa_hash = { git = "https://github.com/massalabs/massa.git", package = "massa_hash", default-features = false }
+
+[dev-dependencies]
+sha2 = "0.10"

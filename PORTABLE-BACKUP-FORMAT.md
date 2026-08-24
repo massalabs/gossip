@@ -115,6 +115,33 @@ Container and logical-layout validation requires no account password. Nested acc
 migration occur only after a password successfully unlocks a real slot and must complete atomically
 before that account opens. Unmatched dummy and hidden real slots remain indistinguishable.
 
+## SessionManager nested envelope
+
+Namespace `1` contains a separately encrypted SessionManager blob. The Phase 3 baseline begins with
+this clear, outer-secure-storage-protected header:
+
+| Offset | Width | Field | Initial value |
+| ---: | ---: | --- | --- |
+| 0 | 8 | Magic | ASCII `GOSSIPSM` |
+| 8 | 8 | Envelope version | `1` |
+| 16 | 8 | SessionManager payload version | `1` |
+| 24 | 8 | Ciphertext length | Bounded length |
+| 32 | 16 | AES-256-SIV nonce | Random nonce |
+| 48 | variable | Ciphertext | Versioned bincode payload plus tag |
+
+The first 32 bytes are nested AEAD additional authenticated data. Ciphertext is limited to 64 MiB,
+framing must consume the exact blob, and bincode must consume the complete decrypted plaintext.
+Pre-envelope nonce-only blobs are outside the approved compatibility baseline. The committed
+`sessions/tests/fixtures/session-manager-v1.bin` fixture contains an active nested ratchet/session
+encrypted by the fixed 64-byte key `0x42`; its SHA-256 is:
+
+```text
+901297e4f54fcd1fc672406298427408554dd18d3d9565e49ba4a98a6aa4e1ee
+```
+
+Future schema work must keep a version-1 decoder that opens this fixture before emitting another
+payload version.
+
 ## Compatibility rules
 
 Top-level version dispatch occurs before any version-specific header field is interpreted. Nested

@@ -2585,6 +2585,7 @@ dependencies = [
  "massa_hash",
  "massa_signature",
  "serde",
+ "sha2",
  "web-time",
  "zeroize",
 ]
