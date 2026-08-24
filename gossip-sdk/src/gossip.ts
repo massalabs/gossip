@@ -199,7 +199,17 @@ class GossipSdk {
 
   private createProfileService(queries: Queries): ProfileService {
     return new ProfileService(queries, async userId => {
-      await this._auth?.persistPendingPublicationTimestamp(userId, queries);
+      try {
+        await this._auth?.persistPendingPublicationTimestamp(userId, queries);
+      } catch (error) {
+        // The profile upsert is already durable. Keep the confirmed timestamp
+        // pending for the publication scheduler instead of falsely rejecting
+        // a successful public profile mutation.
+        this.eventEmitter.emit(SdkEventType.ERROR, {
+          error: error instanceof Error ? error : new Error(String(error)),
+          context: 'persistPublicKeyPublicationTimestamp',
+        });
+      }
     });
   }
 

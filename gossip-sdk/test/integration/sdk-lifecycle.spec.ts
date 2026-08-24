@@ -8,11 +8,12 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { EncryptionKey } from '../../src/wasm/encryption';
 import { UserPublicKeys, UserSecretKeys } from '../../src/wasm/bindings';
-import { GossipSdk, SdkStatus } from '../../src/gossip';
+import { GossipSdk, SdkEventType, SdkStatus } from '../../src/gossip';
 import { clearAllTables, getTestStorageConfig } from '../testDb';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { MockMessageProtocol } from '../mocks';
 import { PUBLIC_KEY_REPUBLISH_INTERVAL_MS } from '../../src/services/auth';
+import { makeUserProfile } from '../helpers/factories';
 import {
   configureLogging,
   resetLoggingForTests,
@@ -101,6 +102,69 @@ describe('GossipSdk lifecycle', () => {
 
     connection.secureStorageLock.mockResolvedValueOnce(undefined);
     await expect(sdk.secureStorageLock()).resolves.toBeUndefined();
+  });
+
+  it('keeps committed profile mutations successful when publication bookkeeping fails', async () => {
+    await sdk.init({ storage: getTestStorageConfig() });
+    const publicationError = new Error('timestamp persistence failed');
+    const internals = sdk as unknown as {
+      _auth: {
+        persistPendingPublicationTimestamp: (
+          userId: string
+        ) => Promise<boolean>;
+      };
+    };
+    const persistTimestamp = vi
+      .spyOn(internals._auth, 'persistPendingPublicationTimestamp')
+      .mockRejectedValue(publicationError);
+    const emittedErrors: Array<{ error: Error; context: string }> = [];
+    sdk.on(SdkEventType.ERROR, payload => emittedErrors.push(payload));
+    const savedProfile = makeUserProfile();
+    const createdProfile = makeUserProfile({
+      userId:
+        'gossip1dp6gk5zp0f95g23av0aa0j926jknw4fk5ng77w4v92dxcjcwz9dsv5q6th',
+      username: 'created profile',
+    });
+
+    await expect(sdk.profiles.save(savedProfile)).resolves.toBeUndefined();
+    await expect(
+      sdk.profiles.createOrUpdate(
+        createdProfile.username,
+        createdProfile.userId,
+        createdProfile.security,
+        createdProfile.session
+      )
+    ).resolves.toMatchObject({ userId: createdProfile.userId });
+    await expect(
+      sdk.profiles.createOrUpdate(
+        createdProfile.username,
+        createdProfile.userId,
+        createdProfile.security,
+        new Uint8Array([4, 5, 6])
+      )
+    ).resolves.toMatchObject({ userId: createdProfile.userId });
+
+    await expect(sdk.profiles.get(savedProfile.userId)).resolves.toMatchObject({
+      username: savedProfile.username,
+    });
+    await expect(
+      sdk.profiles.get(createdProfile.userId)
+    ).resolves.toMatchObject({ session: new Uint8Array([4, 5, 6]) });
+    expect(persistTimestamp).toHaveBeenCalledTimes(3);
+    expect(emittedErrors).toEqual([
+      {
+        error: publicationError,
+        context: 'persistPublicKeyPublicationTimestamp',
+      },
+      {
+        error: publicationError,
+        context: 'persistPublicKeyPublicationTimestamp',
+      },
+      {
+        error: publicationError,
+        context: 'persistPublicKeyPublicationTimestamp',
+      },
+    ]);
   });
 
   it('throws on openSession before init', async () => {
