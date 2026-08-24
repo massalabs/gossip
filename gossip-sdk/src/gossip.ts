@@ -801,8 +801,7 @@ class GossipSdk {
    * for callers gating UI on this getter.
    */
   get dbReady(): boolean {
-    if (this._conn?.storageState === 'locked') return false;
-    return this._queries !== null;
+    return this._conn?.isOpen === true && this._queries !== null;
   }
 
   /**
@@ -811,7 +810,9 @@ class GossipSdk {
    *   route to signup; consumer calls `secureStorageCreate(slot, password)`.
    * - `'locked'`: real session exists, encrypted, key not in memory.
    *   UI should route to login; consumer calls `secureStorageUnlock(password)`.
-   * - `'unlocked'`: session open, `queries`/`profiles` available.
+   * - `'unlocked'`: session key remains available. During retryable lock
+   *   recovery the database may already be closed, so use `dbReady` before
+   *   accessing `queries` or `profiles`.
    * - `null`: not a secure-storage connection (other backend selected).
    */
   get storageState(): SecureStorageState | null {
@@ -904,9 +905,12 @@ class GossipSdk {
           'Call closeSession() first.'
       );
     }
-    await this.requireConn().secureStorageLock();
+    // The connection closes Drizzle before its fallible durable flush. Remove
+    // public query facades first so a rejected lock cannot report dbReady while
+    // every query already fails. The connection retains retryable key state.
     this._queries = null;
     this._profile = null;
+    await this.requireConn().secureStorageLock();
   }
 
   /**

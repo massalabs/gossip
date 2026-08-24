@@ -8,7 +8,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { EncryptionKey } from '../../src/wasm/encryption';
 import { UserPublicKeys, UserSecretKeys } from '../../src/wasm/bindings';
-import { GossipSdk } from '../../src/gossip';
+import { GossipSdk, SdkStatus } from '../../src/gossip';
 import { clearAllTables, getTestStorageConfig } from '../testDb';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { MockMessageProtocol } from '../mocks';
@@ -67,6 +67,40 @@ describe('GossipSdk lifecycle', () => {
 
     await sdk.init({ storage: getTestStorageConfig() });
     expect(emittedWarnings.length).toBeGreaterThan(0);
+  });
+
+  it('invalidates query readiness before a retryable lock failure', async () => {
+    const lockError = new Error('lock flush failed');
+    const connection = {
+      isOpen: true,
+      isSecureStorage: true,
+      storageState: 'unlocked' as const,
+      secureStorageLock: vi.fn().mockImplementationOnce(async () => {
+        connection.isOpen = false;
+        throw lockError;
+      }),
+    };
+    const internals = sdk as unknown as {
+      state: { status: SdkStatus };
+      _conn: typeof connection;
+      _queries: object | null;
+      _profile: object | null;
+    };
+    internals.state = { status: SdkStatus.INITIALIZED };
+    internals._conn = connection;
+    internals._queries = {};
+    internals._profile = {};
+    expect(sdk.dbReady).toBe(true);
+
+    await expect(sdk.secureStorageLock()).rejects.toBe(lockError);
+
+    expect(sdk.storageState).toBe('unlocked');
+    expect(sdk.dbReady).toBe(false);
+    expect(() => sdk.queries).toThrow();
+    expect(() => sdk.profiles).toThrow();
+
+    connection.secureStorageLock.mockResolvedValueOnce(undefined);
+    await expect(sdk.secureStorageLock()).resolves.toBeUndefined();
   });
 
   it('throws on openSession before init', async () => {
