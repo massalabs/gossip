@@ -28,6 +28,7 @@ import init, {
   coverTrafficTick,
   flushEncrypted,
   reloadDurableStorage,
+  resetSqlDatabaseToDurable,
   openDatabase,
   closeDatabase,
   execSql,
@@ -117,6 +118,8 @@ export class SecureStorageWorkerApi {
   private closeRequested = false;
   private closePromise: Promise<void> | null = null;
   private sqlTransactionActive = false;
+  private sqlTransactionPoisoned = false;
+  private sqlRecoveryPromise: Promise<void> | null = null;
 
   private async recoverDurableStorage(): Promise<void> {
     if (this.durableRecoveryPromise) {
@@ -138,7 +141,47 @@ export class SecureStorageWorkerApi {
     }
   }
 
+  private async recoverPoisonedSqlTransaction(): Promise<void> {
+    if (this.sqlRecoveryPromise) {
+      await this.sqlRecoveryPromise;
+      return;
+    }
+
+    const recovery = (async () => {
+      await resetSqlDatabaseToDurable();
+      this.sqlTransactionPoisoned = false;
+    })();
+    this.sqlRecoveryPromise = recovery;
+    try {
+      await recovery;
+    } finally {
+      if (this.sqlRecoveryPromise === recovery) {
+        this.sqlRecoveryPromise = null;
+      }
+    }
+  }
+
+  private async recoverRejectedSqlBoundary(
+    operation: 'commit' | 'rollback',
+    operationError: unknown
+  ): Promise<never> {
+    this.sqlTransactionPoisoned = true;
+    this.sqlTransactionActive = false;
+    try {
+      await this.recoverPoisonedSqlTransaction();
+    } catch (recoveryError) {
+      throw errorWithCause(
+        `${SECURE_STORAGE_RECOVERY_REQUIRED} ${operation} failed and SQL state could not be reset`,
+        { operationError, recoveryError }
+      );
+    }
+    throw operationError;
+  }
+
   private async ensureDurableStorageRecovered(): Promise<void> {
+    if (this.sqlTransactionPoisoned) {
+      await this.recoverPoisonedSqlTransaction();
+    }
     if (!this.durableRecoveryRequired) return;
     await this.recoverDurableStorage();
     // A foreground recovery should not leave safe queued cover work waiting for
@@ -490,6 +533,10 @@ export class SecureStorageWorkerApi {
     });
   }
 
+  protected executeSqlStatement(sql: string, params: unknown[]) {
+    return execSql(sql, params);
+  }
+
   /**
    * Execute a statement. Durability semantics:
    *   * When `inTransaction` is true, skip the flush on every inner
@@ -520,7 +567,18 @@ export class SecureStorageWorkerApi {
 
     return this.enqueueSqlOperation(inTransaction, async () => {
       await this.ensureDurableStorageRecovered();
-      const result = execSql(sql, params);
+      let result: ReturnType<typeof execSql>;
+      try {
+        result = this.executeSqlStatement(sql, params);
+      } catch (error) {
+        if (isFullRollback && this.sqlTransactionActive) {
+          // SQLite rejected the only statement that can release transaction
+          // ownership. Mark all cached SQL/VFS state ambiguous and allow only
+          // the durable reset gate to run before subsequent queued work.
+          return this.recoverRejectedSqlBoundary('rollback', error);
+        }
+        throw error;
+      }
       const rows = result.rows as unknown[][];
       const lastInsertRowId = result.lastInsertRowId;
       result.free();
@@ -532,7 +590,14 @@ export class SecureStorageWorkerApi {
       if (endsTransaction) this.sqlTransactionActive = false;
 
       if (isCommit) {
-        await flushEncrypted();
+        try {
+          await flushEncrypted();
+        } catch (error) {
+          // SQLite already accepted COMMIT but its VFS transaction did not
+          // become durable. Reset to the last committed IndexedDB image before
+          // any queued cover/lifecycle work can persist ambiguous pending pages.
+          return this.recoverRejectedSqlBoundary('commit', error);
+        }
       } else if (!inTransaction) {
         if (
           /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(

@@ -13,6 +13,7 @@ const wasmMock = vi.hoisted(() => ({
   coverTrafficTick: vi.fn(),
   flushEncrypted: vi.fn(),
   reloadDurableStorage: vi.fn(),
+  resetSqlDatabaseToDurable: vi.fn(),
   openDatabase: vi.fn(),
   closeDatabase: vi.fn(),
   execSql: vi.fn(),
@@ -41,6 +42,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     vi.resetAllMocks();
     wasmMock.flushEncrypted.mockResolvedValue(undefined);
     wasmMock.reloadDurableStorage.mockResolvedValue(undefined);
+    wasmMock.resetSqlDatabaseToDurable.mockResolvedValue(undefined);
     wasmMock.execSql.mockReturnValue({
       rows: [],
       lastInsertRowId: 0,
@@ -420,6 +422,87 @@ describe('SecureStorageWorkerApi password cleanup', () => {
       'COMMIT',
     ]);
     expect(wasmMock.coverTrafficTick).toHaveBeenCalledBefore(
+      wasmMock.closeDatabase
+    );
+  });
+
+  it('resets poisoned SQL state before releasing queued durable work', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    const sqlError = new Error('rollback failed');
+    wasmMock.execSql.mockImplementation((sql: string) => {
+      if (/^ROLLBACK$/i.test(sql)) throw sqlError;
+      return { rows: [], lastInsertRowId: 0, free: vi.fn() };
+    });
+
+    await api.exec('BEGIN IMMEDIATE');
+    const cover = api.cover();
+    const close = api.close();
+    await expect(api.exec('ROLLBACK', [], true)).rejects.toBe(sqlError);
+    await cover;
+    await close;
+
+    expect(wasmMock.resetSqlDatabaseToDurable).toHaveBeenCalledOnce();
+    expect(wasmMock.resetSqlDatabaseToDurable).toHaveBeenCalledBefore(
+      wasmMock.coverTrafficTick
+    );
+    expect(wasmMock.coverTrafficTick).toHaveBeenCalledBefore(
+      wasmMock.closeDatabase
+    );
+  });
+
+  it('resets a committed SQL image after its durable flush rejects', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    const flushError = new Error('commit flush failed');
+    wasmMock.flushEncrypted
+      .mockRejectedValueOnce(flushError)
+      .mockResolvedValue(undefined);
+    wasmMock.execSql.mockImplementation((sql: string) => {
+      if (/^ROLLBACK$/i.test(sql)) {
+        throw new Error('no active transaction');
+      }
+      return { rows: [], lastInsertRowId: 0, free: vi.fn() };
+    });
+
+    await api.exec('BEGIN IMMEDIATE');
+    await api.exec('INSERT INTO userProfile VALUES (?)', ['pending'], true);
+    await expect(api.exec('COMMIT', [], true)).rejects.toBe(flushError);
+    expect(wasmMock.resetSqlDatabaseToDurable).toHaveBeenCalledOnce();
+    await expect(api.exec('ROLLBACK', [], true)).rejects.toThrow(
+      'no active transaction'
+    );
+
+    await api.close();
+    expect(wasmMock.resetSqlDatabaseToDurable).toHaveBeenCalledOnce();
+    expect(wasmMock.closeDatabase).toHaveBeenCalledOnce();
+  });
+
+  it('keeps poisoned SQL cleanup retryable after reset rejection', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const { SECURE_STORAGE_RECOVERY_REQUIRED } =
+      await import('../../src/db/secure-storage-errors');
+    const api = new SecureStorageWorkerApi();
+    wasmMock.execSql.mockImplementation((sql: string) => {
+      if (/^ROLLBACK$/i.test(sql)) throw new Error('rollback failed');
+      return { rows: [], lastInsertRowId: 0, free: vi.fn() };
+    });
+    wasmMock.resetSqlDatabaseToDurable
+      .mockRejectedValueOnce(new Error('reset failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await api.exec('BEGIN IMMEDIATE');
+    await expect(api.exec('ROLLBACK', [], true)).rejects.toThrow(
+      SECURE_STORAGE_RECOVERY_REQUIRED
+    );
+    expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
+
+    await api.close();
+    expect(wasmMock.resetSqlDatabaseToDurable).toHaveBeenCalledTimes(2);
+    expect(wasmMock.resetSqlDatabaseToDurable).toHaveBeenCalledBefore(
       wasmMock.closeDatabase
     );
   });

@@ -8,6 +8,7 @@ interface IndexedDbFaultPlan {
 
 class SecureStorageTestWorkerApi extends SecureStorageWorkerApi {
   private indexedDbFaults = { readwrite: 0, readonly: 0 };
+  private rejectNextSqlRollback = false;
   private originalIndexedDbTransaction:
     | typeof IDBDatabase.prototype.transaction
     | null = null;
@@ -50,6 +51,21 @@ class SecureStorageTestWorkerApi extends SecureStorageWorkerApi {
       }
       return transaction;
     };
+  }
+
+  rejectNextSqlRollbackForTesting(): void {
+    this.rejectNextSqlRollback = true;
+  }
+
+  protected override executeSqlStatement(sql: string, params: unknown[]) {
+    if (
+      this.rejectNextSqlRollback &&
+      /^ROLLBACK(?:\s+TRANSACTION)?\s*;?\s*$/i.test(sql.trimStart())
+    ) {
+      this.rejectNextSqlRollback = false;
+      throw new Error('injected SQL rollback failure');
+    }
+    return super.executeSqlStatement(sql, params);
   }
 
   clearIndexedDbFaultsForTesting(): void {

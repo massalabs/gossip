@@ -22,6 +22,7 @@ type FaultProxy = {
   clearIndexedDbFaultsForTesting(): Promise<void>;
   retryFailedCoverNowForTesting(): Promise<boolean>;
   stopPeriodicCoverForTesting(): Promise<void>;
+  rejectNextSqlRollbackForTesting(): Promise<void>;
   exec(
     sql: string,
     params?: unknown[],
@@ -215,6 +216,92 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       await sdk.destroy();
       await new Promise(resolve => setTimeout(resolve, 0));
     }
+  }, 120_000);
+
+  it('retries a real poisoned SQL reset before lifecycle cleanup', async () => {
+    const domain = 'poisoned-sql-reset-recovery';
+    const password = 'poisoned-sql-password';
+    const namespaceData = new Uint8Array([4, 3, 2, 1]);
+    let connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    await connection.secureStorageCreate(0, password);
+    const now = new Date();
+    await connection.db.insert(userProfile).values({
+      userId: 'gossip1poisonedbaseline',
+      username: 'durable before poisoned rollback',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+      security: '{}',
+      session: new Uint8Array([9, 8, 7]),
+    });
+    await connection.secureStorageWriteNamespaceData(
+      SESSION_BLOB_NAMESPACE,
+      0,
+      namespaceData
+    );
+    const beforePoisonedRollback = await snapshotSecureStorage();
+
+    await testProxy(connection).exec('BEGIN IMMEDIATE');
+    await testProxy(connection).exec(
+      'UPDATE userProfile SET username = ? WHERE userId = ?',
+      ['commit whose flush rejects', 'gossip1poisonedbaseline'],
+      true
+    );
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+    });
+    await expect(
+      testProxy(connection).exec('COMMIT', [], true)
+    ).rejects.toThrow();
+    expectSnapshotsEqual(beforePoisonedRollback, await snapshotSecureStorage());
+    const afterRejectedCommit = await testProxy(connection).exec(
+      'SELECT username FROM userProfile'
+    );
+    expect(afterRejectedCommit).toMatchObject({
+      rows: [['durable before poisoned rollback']],
+    });
+
+    await testProxy(connection).exec('BEGIN IMMEDIATE');
+    await testProxy(connection).exec(
+      'UPDATE userProfile SET username = ? WHERE userId = ?',
+      ['ambiguous uncommitted value', 'gossip1poisonedbaseline'],
+      true
+    );
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readonly: 1,
+    });
+    await testProxy(connection).rejectNextSqlRollbackForTesting();
+    await expect(
+      testProxy(connection).exec('ROLLBACK', [], true)
+    ).rejects.toThrow('recovery-required');
+    expectSnapshotsEqual(beforePoisonedRollback, await snapshotSecureStorage());
+
+    await connection.secureStorageLock();
+    await connection.close();
+    openConnections.delete(connection);
+
+    connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
+    expect(
+      await connection.db
+        .select({ username: userProfile.username })
+        .from(userProfile)
+    ).toEqual([{ username: 'durable before poisoned rollback' }]);
+    expect(
+      Array.from(
+        await connection.secureStorageReadNamespaceData(
+          SESSION_BLOB_NAMESPACE,
+          0,
+          namespaceData.length
+        )
+      )
+    ).toEqual(Array.from(namespaceData));
+    await connection.secureStorageLock();
+    await connection.close();
+    openConnections.delete(connection);
   }, 120_000);
 
   it('preserves cover and lifecycle durability through real VFS failures', async () => {

@@ -7,6 +7,7 @@ const forbidden = [
   'clearIndexedDbFaultsForTesting',
   'retryFailedCoverNowForTesting',
   'stopPeriodicCoverForTesting',
+  'rejectNextSqlRollbackForTesting',
   'secure-storage-worker-test',
 ];
 

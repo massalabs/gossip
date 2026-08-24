@@ -377,13 +377,7 @@ pub fn clear_namespace(namespace: u8) -> Result<(), JsValue> {
 
 /// Discard pending IDB mutations and reload the last committed snapshot.
 ///
-/// Called by the worker when an allocation or destruction transaction rejects.
-/// This prevents a later cover-traffic flush from durably carrying the failed
-/// lifecycle operation. The recovered state is always locked.
-#[wasm_bindgen(js_name = reloadDurableStorage)]
-pub async fn reload_durable_storage() -> Result<(), JsValue> {
-    close_database_and_clear_files()?;
-
+async fn reload_idb_backend() -> Result<(), JsValue> {
     // Same program-lifetime pointer invariant as `flush_encrypted` below: the
     // backend is initialized once and never moved or replaced.
     let idb_ptr: Option<*const IdbBlockStorage> = with_app_state(|app| {
@@ -396,12 +390,21 @@ pub async fn reload_durable_storage() -> Result<(), JsValue> {
 
     let Some(ptr) = idb_ptr else {
         return Err(JsValue::from_str(
-            "reloadDurableStorage is only available for IndexedDB storage",
+            "durable reload is only available for IndexedDB storage",
         ));
     };
 
     // SAFETY: the backend lives in the leaked AppState and is never moved.
-    unsafe { &*ptr }.reload_durable().await?;
+    unsafe { &*ptr }.reload_durable().await
+}
+
+/// Called by the worker when an allocation or destruction transaction rejects.
+/// This prevents a later cover-traffic flush from durably carrying the failed
+/// lifecycle operation. The recovered state is always locked.
+#[wasm_bindgen(js_name = reloadDurableStorage)]
+pub async fn reload_durable_storage() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    reload_idb_backend().await?;
 
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
@@ -409,6 +412,40 @@ pub async fn reload_durable_storage() -> Result<(), JsValue> {
         state.namespace_states.clear();
         Ok(())
     })
+}
+
+/// Abandon a poisoned SQLite transaction and restore its last durable image
+/// while retaining the current unlocked session keys. No pending VFS bytes are
+/// flushed: closing SQLite rolls back its in-memory journal, then the IndexedDB
+/// cache is reloaded before a fresh database handle is opened.
+#[wasm_bindgen(js_name = resetSqlDatabaseToDurable)]
+pub async fn reset_sql_database_to_durable() -> Result<(), JsValue> {
+    with_app_state(|app| {
+        if app.state.borrow().session.is_none() {
+            return Err(JsValue::from_str(
+                "resetSqlDatabaseToDurable requires an unlocked session",
+            ));
+        }
+        Ok(())
+    })?;
+
+    close_database_and_clear_files()?;
+    reload_idb_backend().await?;
+    let sql_state = with_app_state(|app| {
+        let state = app.state.borrow();
+        let session = state.session.as_ref().ok_or_else(|| {
+            JsValue::from_str("resetSqlDatabaseToDurable lost the unlocked session")
+        })?;
+        load_namespace_state(&state.backend, &state.domain, session, DEFAULT_NAMESPACE)
+            .map_err(map_err)
+    })?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        state.namespace_states.clear();
+        state.namespace_states.insert(DEFAULT_NAMESPACE, sql_state);
+        Ok(())
+    })?;
+    open_database()
 }
 
 #[wasm_bindgen(js_name = flushEncrypted)]
