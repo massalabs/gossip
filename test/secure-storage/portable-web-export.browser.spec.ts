@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fixtureUrl from '../../wasm/secure-storage/tests/fixtures/portable-v1-minimal.gossipbackup?url';
-import { PortableWebExport } from '../../gossip-sdk/src/db/secure-storage-portable-web';
+import {
+  PortableWebExport,
+  PortableWebImport,
+} from '../../gossip-sdk/src/db/secure-storage-portable-web';
 
 const DB_NAME = 'secure_storage';
 const STORE_NAME = 'blocks';
@@ -183,6 +186,139 @@ describe('PortableWebExport', () => {
     await expect(PortableWebExport.begin(validators)).rejects.toThrow(
       'Unequal secure-storage slot layout'
     );
+    expect((await allKeys()).some(key => String(key).startsWith('x:'))).toBe(
+      false
+    );
+  });
+});
+
+describe('PortableWebImport', () => {
+  beforeEach(async () => {
+    await seed([]);
+  });
+
+  it('validates and spools a canonical archive without touching active data', async () => {
+    const expected = await fixture();
+    await seed([['s:0:sentinel', new Uint8Array([7])]]);
+    const transfer = await PortableWebImport.begin(validators);
+    for (let offset = 0; offset < expected.byteLength; offset += 71_111) {
+      await transfer.push(expected.slice(offset, offset + 71_111));
+    }
+    await transfer.finishValidation();
+
+    const keys = (await allKeys()).map(String);
+    expect(keys).toContain('s:0:sentinel');
+    expect(
+      keys.filter(key => key.startsWith('x:portable-import:'))
+    ).toHaveLength(records(expected).length);
+
+    await transfer.close();
+    expect((await allKeys()).map(String)).toEqual(['s:0:sentinel']);
+  });
+
+  it('serializes concurrently submitted chunks in admission order', async () => {
+    const expected = await fixture();
+    const transfer = await PortableWebImport.begin(validators);
+    const pushes: Promise<void>[] = [];
+    for (let offset = 0; offset < expected.byteLength; offset += 31_337) {
+      pushes.push(transfer.push(expected.slice(offset, offset + 31_337)));
+    }
+    await Promise.all(pushes);
+    await transfer.finishValidation();
+    await transfer.close();
+  });
+
+  it('drains admitted work before abort cleanup and rejects later writes', async () => {
+    const expected = await fixture();
+    const transfer = await PortableWebImport.begin(validators);
+    const push = transfer.push(expected);
+    const close = transfer.close();
+    await expect(push).rejects.toThrow('Portable import is not accepting data');
+    await close;
+    expect((await allKeys()).some(key => String(key).startsWith('x:'))).toBe(
+      false
+    );
+  });
+
+  it('bounds concurrently queued chunk ownership', async () => {
+    const transfer = await PortableWebImport.begin(validators);
+    const first = transfer.push(new Uint8Array(1024 * 1024));
+    const second = transfer.push(new Uint8Array(1024 * 1024));
+    await expect(transfer.push(new Uint8Array([1]))).rejects.toThrow(
+      'Portable import requires sequential chunk backpressure'
+    );
+    await Promise.allSettled([first, second]);
+    await transfer.close();
+  });
+
+  it('rejects records beyond the declared count before spooling them', async () => {
+    const bytes = await fixture();
+    new DataView(bytes.buffer).setBigUint64(24, 3n, false);
+    const transfer = await PortableWebImport.begin(validators);
+    await expect(transfer.push(bytes)).rejects.toThrow(
+      'Portable backup exceeds declared record count'
+    );
+    expect(
+      (await allKeys()).filter(key =>
+        String(key).startsWith('x:portable-import:')
+      )
+    ).toHaveLength(3);
+    await transfer.close();
+  });
+
+  it('rejects a checksum mismatch and keeps cleanup retryable', async () => {
+    const bytes = await fixture();
+    bytes[bytes.byteLength - 1] ^= 1;
+    const transfer = await PortableWebImport.begin(validators);
+    await transfer.push(bytes);
+    await expect(transfer.finishValidation()).rejects.toThrow(
+      'Portable backup checksum mismatch'
+    );
+    expect(
+      (await allKeys()).some(key =>
+        String(key).startsWith('x:portable-import:')
+      )
+    ).toBe(true);
+    await transfer.close();
+    expect((await allKeys()).some(key => String(key).startsWith('x:'))).toBe(
+      false
+    );
+  });
+
+  it('rejects non-canonical coordinates before accepting the record', async () => {
+    const bytes = await fixture();
+    bytes[41] = 1;
+    const transfer = await PortableWebImport.begin(validators);
+    await expect(transfer.push(bytes)).rejects.toThrow(
+      'Non-canonical portable keypair record'
+    );
+    await expect(transfer.push(new Uint8Array([1]))).rejects.toThrow(
+      'Portable import is not accepting data'
+    );
+    await transfer.close();
+  });
+
+  it('rejects trailing and truncated archives', async () => {
+    const expected = await fixture();
+    const trailing = await PortableWebImport.begin(validators);
+    const extended = new Uint8Array(expected.byteLength + 1);
+    extended.set(expected);
+    await expect(trailing.push(extended)).rejects.toThrow(
+      'Portable backup has trailing bytes'
+    );
+    await trailing.close();
+
+    const truncated = await PortableWebImport.begin(validators);
+    await truncated.push(expected.subarray(0, expected.byteLength - 1));
+    await expect(truncated.finishValidation()).rejects.toThrow(
+      'Portable backup is truncated'
+    );
+    await truncated.close();
+  });
+
+  it('reclaims interrupted import candidates during startup cleanup', async () => {
+    await seed([['x:portable-import:stale:s:0:kp', new Uint8Array([1, 2, 3])]]);
+    await PortableWebExport.cleanupInterrupted();
     expect((await allKeys()).some(key => String(key).startsWith('x:'))).toBe(
       false
     );

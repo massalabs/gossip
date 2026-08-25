@@ -10,6 +10,10 @@ const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024 * 1024;
 const BLOCK_BYTES = 65_536;
 const MAGIC = new TextEncoder().encode('GOSSIPBK');
 const EXPORT_SPOOL_PREFIX = 'x:portable-export:';
+const IMPORT_SPOOL_PREFIX = 'x:portable-import:';
+const MAX_TRANSFER_CHUNK_BYTES = 1024 * 1024;
+const MAX_KEYPAIR_VALUE_BYTES = 16 * 1024 * 1024;
+const MAX_QUEUED_IMPORT_BYTES = 2 * MAX_TRANSFER_CHUNK_BYTES;
 
 interface LogicalKeypair {
   kind: 'keypair';
@@ -45,26 +49,31 @@ interface CrossTabLease {
 
 const EXPORT_LOCK_NAME = 'gossip-secure-storage-portable-export';
 
-async function acquireExportLease(): Promise<CrossTabLease> {
+async function acquireExportLease(
+  signal?: AbortSignal
+): Promise<CrossTabLease> {
   if (!navigator.locks) {
     throw new Error('This browser cannot safely coordinate backup export');
   }
   let acquired!: () => void;
+  let acquisitionFailed!: (reason: unknown) => void;
   let release!: () => void;
-  const acquiredPromise = new Promise<void>(resolve => {
+  const acquiredPromise = new Promise<void>((resolve, reject) => {
     acquired = resolve;
+    acquisitionFailed = reject;
   });
   const hold = new Promise<void>(resolve => {
     release = resolve;
   });
   const completion = navigator.locks.request<void>(
     EXPORT_LOCK_NAME,
-    { mode: 'exclusive' },
+    { mode: 'exclusive', signal },
     async () => {
       acquired();
       await hold;
     }
   );
+  void completion.catch(acquisitionFailed);
   await acquiredPromise;
   return { release, completion };
 }
@@ -353,6 +362,7 @@ export class PortableWebExport {
     try {
       db = await openDatabase();
       await deleteSpools(db, EXPORT_SPOOL_PREFIX);
+      await deleteSpools(db, IMPORT_SPOOL_PREFIX);
     } finally {
       db?.close();
       lease.release();
@@ -368,6 +378,7 @@ export class PortableWebExport {
     try {
       db = await openDatabase();
       await deleteSpools(db, EXPORT_SPOOL_PREFIX);
+      await deleteSpools(db, IMPORT_SPOOL_PREFIX);
       const transferId = randomTransferId();
       const layout = await inspectAndSnapshotLayout(db, transferId, validators);
       return new PortableWebExport(db, lease, transferId, layout, validators);
@@ -444,7 +455,7 @@ export class PortableWebExport {
     if (
       !Number.isInteger(maxBytes) ||
       maxBytes <= 0 ||
-      maxBytes > 1024 * 1024
+      maxBytes > MAX_TRANSFER_CHUNK_BYTES
     ) {
       throw new Error('Invalid portable export chunk size');
     }
@@ -497,5 +508,404 @@ export class PortableWebExport {
     this.db = null;
     this.lease.release();
     await this.lease.completion;
+  }
+}
+
+function readPortableU64(view: DataView, offset: number): number {
+  const value = view.getBigUint64(offset, false);
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error('Portable backup integer is too large');
+  }
+  return Number(value);
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  let difference = 0;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference === 0;
+}
+
+async function putImportRecord(
+  db: IDBDatabase,
+  transferId: string,
+  key: LogicalKey,
+  value: Uint8Array
+): Promise<void> {
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  tx.objectStore(STORE_NAME).put(
+    value,
+    `${IMPORT_SPOOL_PREFIX}${transferId}:${encodedKey(key)}`
+  );
+  await transactionDone(tx);
+}
+
+interface ParsedFrame {
+  key: LogicalKey;
+  valueLength: number;
+}
+
+/**
+ * Strict bounded browser receiver for a portable-V1 archive.
+ *
+ * Records are validated and spooled under an import-owned prefix as their
+ * complete bytes arrive. Active `s:` storage is never touched by this stage;
+ * abort and restart can therefore discard the candidate without affecting the
+ * installation selected before import.
+ */
+export class PortableWebImport {
+  private readonly hash = sha256.create();
+  private db: IDBDatabase | null;
+  private lease: CrossTabLease | null;
+  private pending = new Uint8Array(0);
+  private stage:
+    | 'header'
+    | 'records'
+    | 'digest'
+    | 'validated'
+    | 'failed'
+    | 'closed' = 'header';
+  private operationTail: Promise<void> = Promise.resolve();
+  private queuedBytes = 0;
+  private finishing = false;
+  private closing = false;
+  private closePromise: Promise<void> | null = null;
+  private declaredRecordCount = 0;
+  private declaredRecordBytes = 0;
+  private parsedRecordCount = 0;
+  private parsedRecordBytes = 0;
+  private keypairSlot = 0;
+  private blockNamespace = 0;
+  private blockIndex = 0;
+  private blockSlot = 0;
+  private namespaceZeroBlocks = 0;
+  private expectedDigest: Uint8Array | null = null;
+  private totalReceived = 0;
+
+  private constructor(
+    db: IDBDatabase,
+    lease: CrossTabLease,
+    private readonly transferId: string,
+    private readonly validators: PortableWebValidators
+  ) {
+    this.db = db;
+    this.lease = lease;
+  }
+
+  static async begin(
+    validators: PortableWebValidators,
+    signal?: AbortSignal
+  ): Promise<PortableWebImport> {
+    const lease = await acquireExportLease(signal);
+    let db: IDBDatabase | null = null;
+    try {
+      db = await openDatabase();
+      await deleteSpools(db, IMPORT_SPOOL_PREFIX);
+      return new PortableWebImport(db, lease, randomTransferId(), validators);
+    } catch (error) {
+      db?.close();
+      lease.release();
+      await lease.completion;
+      throw error;
+    }
+  }
+
+  private append(chunk: Uint8Array): void {
+    const nextLength = checkedAdd(this.pending.byteLength, chunk.byteLength);
+    if (
+      nextLength >
+      MAX_KEYPAIR_VALUE_BYTES + FRAME_BYTES + MAX_TRANSFER_CHUNK_BYTES
+    ) {
+      throw new Error('Portable import record exceeds memory bound');
+    }
+    const next = new Uint8Array(nextLength);
+    next.set(this.pending, 0);
+    next.set(chunk, this.pending.byteLength);
+    this.pending.fill(0);
+    this.pending = next;
+  }
+
+  private consume(length: number): Uint8Array {
+    const value = this.pending.slice(0, length);
+    const remainder = this.pending.slice(length);
+    this.pending.fill(0);
+    this.pending = remainder;
+    return value;
+  }
+
+  private parseHeader(bytes: Uint8Array): void {
+    if (!equalBytes(bytes.subarray(0, MAGIC.byteLength), MAGIC)) {
+      throw new Error('Invalid portable backup magic');
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (readPortableU64(view, 8) !== 1) {
+      throw new Error('Unsupported portable backup version');
+    }
+    if (readPortableU64(view, 16) !== SESSION_COUNT) {
+      throw new Error('Portable backup slot capacity does not match runtime');
+    }
+    this.declaredRecordCount = readPortableU64(view, 24);
+    this.declaredRecordBytes = readPortableU64(view, 32);
+    if (
+      this.declaredRecordCount < SESSION_COUNT ||
+      this.declaredRecordCount >
+        Math.floor(this.declaredRecordBytes / (FRAME_BYTES + 4))
+    ) {
+      throw new Error('Invalid portable backup record count');
+    }
+    checkedAdd(
+      checkedAdd(HEADER_BYTES, this.declaredRecordBytes),
+      DIGEST_BYTES
+    );
+    this.hash.update(bytes);
+    this.stage = 'records';
+  }
+
+  private parseFrame(bytes: Uint8Array): ParsedFrame {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const kind = bytes[0];
+    const slot = bytes[1];
+    const namespace = readPortableU64(view, 2);
+    const blockIndex = readPortableU64(view, 10);
+    const valueLength = readPortableU64(view, 18);
+    if (kind === 0) {
+      if (
+        this.keypairSlot >= SESSION_COUNT ||
+        slot !== this.keypairSlot ||
+        namespace !== 0 ||
+        blockIndex !== 0 ||
+        valueLength < 4 ||
+        valueLength > MAX_KEYPAIR_VALUE_BYTES
+      ) {
+        throw new Error('Non-canonical portable keypair record');
+      }
+      return { key: { kind: 'keypair', slot }, valueLength };
+    }
+    if (kind !== 1 || this.keypairSlot !== SESSION_COUNT) {
+      throw new Error('Non-canonical portable record order');
+    }
+    if (valueLength !== BLOCK_BYTES || slot >= SESSION_COUNT) {
+      throw new Error('Invalid portable block record');
+    }
+    if (
+      this.blockNamespace === 0 &&
+      this.blockSlot === 0 &&
+      this.blockIndex > 0 &&
+      namespace === 1 &&
+      blockIndex === 0 &&
+      slot === 0
+    ) {
+      this.blockNamespace = 1;
+      this.blockIndex = 0;
+    }
+    if (
+      namespace !== this.blockNamespace ||
+      blockIndex !== this.blockIndex ||
+      slot !== this.blockSlot
+    ) {
+      throw new Error('Non-canonical portable block order');
+    }
+    return {
+      key: { kind: 'block', slot, namespace, blockIndex },
+      valueLength,
+    };
+  }
+
+  private advanceFrame(key: LogicalKey): void {
+    this.parsedRecordCount += 1;
+    if (key.kind === 'keypair') {
+      this.keypairSlot += 1;
+      return;
+    }
+    if (key.namespace === 0) this.namespaceZeroBlocks += 1;
+    this.blockSlot += 1;
+    if (this.blockSlot === SESSION_COUNT) {
+      this.blockSlot = 0;
+      this.blockIndex += 1;
+    }
+  }
+
+  private async consumeAvailable(): Promise<void> {
+    if (this.stage === 'header' && this.pending.byteLength >= HEADER_BYTES) {
+      this.parseHeader(this.consume(HEADER_BYTES));
+    }
+    while (this.stage === 'records') {
+      if (this.parsedRecordBytes === this.declaredRecordBytes) {
+        if (
+          this.parsedRecordCount !== this.declaredRecordCount ||
+          this.keypairSlot !== SESSION_COUNT ||
+          this.namespaceZeroBlocks === 0 ||
+          this.blockSlot !== 0
+        ) {
+          throw new Error('Incomplete portable backup layout');
+        }
+        this.stage = 'digest';
+        break;
+      }
+      if (this.pending.byteLength < FRAME_BYTES) break;
+      if (this.parsedRecordCount >= this.declaredRecordCount) {
+        throw new Error('Portable backup exceeds declared record count');
+      }
+      const frameBytes = this.pending.subarray(0, FRAME_BYTES);
+      const parsed = this.parseFrame(frameBytes);
+      const encodedLength = checkedAdd(FRAME_BYTES, parsed.valueLength);
+      if (this.parsedRecordBytes + encodedLength > this.declaredRecordBytes) {
+        throw new Error('Portable record exceeds declared section');
+      }
+      if (this.pending.byteLength < encodedLength) break;
+      const record = this.consume(encodedLength);
+      try {
+        const value = record.subarray(FRAME_BYTES);
+        if (parsed.key.kind === 'keypair') {
+          this.validators.validateKeypair(value);
+        } else {
+          this.validators.validateBlock(value);
+        }
+        this.hash.update(record);
+        if (!this.db) throw new Error('Portable import is closed');
+        await putImportRecord(this.db, this.transferId, parsed.key, value);
+        this.parsedRecordBytes += encodedLength;
+        this.advanceFrame(parsed.key);
+      } finally {
+        record.fill(0);
+      }
+    }
+    if (this.stage === 'digest' && this.pending.byteLength >= DIGEST_BYTES) {
+      this.expectedDigest = this.consume(DIGEST_BYTES);
+      this.stage = 'validated';
+    }
+    if (this.stage === 'validated' && this.pending.byteLength !== 0) {
+      throw new Error('Portable backup has trailing bytes');
+    }
+  }
+
+  private enqueue(operation: () => Promise<void>): Promise<void> {
+    const result = this.operationTail.then(operation, operation);
+    this.operationTail = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
+
+  push(chunk: Uint8Array): Promise<void> {
+    if (
+      this.closing ||
+      this.finishing ||
+      this.stage === 'validated' ||
+      this.stage === 'failed' ||
+      this.stage === 'closed'
+    ) {
+      return Promise.reject(new Error('Portable import is not accepting data'));
+    }
+    if (
+      !(chunk instanceof Uint8Array) ||
+      chunk.byteLength === 0 ||
+      chunk.byteLength > MAX_TRANSFER_CHUNK_BYTES
+    ) {
+      return Promise.reject(new Error('Invalid portable import chunk'));
+    }
+    if (this.queuedBytes + chunk.byteLength > MAX_QUEUED_IMPORT_BYTES) {
+      return Promise.reject(
+        new Error('Portable import requires sequential chunk backpressure')
+      );
+    }
+    this.queuedBytes += chunk.byteLength;
+    const ownedChunk = chunk.slice();
+    return this.enqueue(async () => {
+      if (this.closing || this.stage === 'failed') {
+        ownedChunk.fill(0);
+        this.queuedBytes -= ownedChunk.byteLength;
+        throw new Error('Portable import is not accepting data');
+      }
+      try {
+        this.totalReceived = checkedAdd(
+          this.totalReceived,
+          ownedChunk.byteLength
+        );
+        this.append(ownedChunk);
+        await this.consumeAvailable();
+      } catch (error) {
+        this.stage = 'failed';
+        this.pending.fill(0);
+        this.pending = new Uint8Array(0);
+        throw error;
+      } finally {
+        ownedChunk.fill(0);
+        this.queuedBytes -= ownedChunk.byteLength;
+      }
+    });
+  }
+
+  finishValidation(): Promise<void> {
+    if (this.closing || this.finishing) {
+      return Promise.reject(new Error('Portable import is not accepting data'));
+    }
+    this.finishing = true;
+    return this.enqueue(async () => {
+      if (this.stage === 'failed') {
+        throw new Error('Portable backup validation already failed');
+      }
+      if (this.stage !== 'validated' || !this.expectedDigest) {
+        throw new Error('Portable backup is truncated');
+      }
+      const expectedTotal =
+        HEADER_BYTES + this.declaredRecordBytes + DIGEST_BYTES;
+      if (this.totalReceived !== expectedTotal) {
+        throw new Error('Portable backup length does not match header');
+      }
+      const actualDigest = this.hash.digest();
+      if (!equalBytes(actualDigest, this.expectedDigest)) {
+        this.stage = 'failed';
+        throw new Error('Portable backup checksum mismatch');
+      }
+      this.expectedDigest.fill(0);
+      this.expectedDigest = null;
+      this.pending.fill(0);
+      this.db?.close();
+      this.db = null;
+      // Retain the cross-tab lease while the validated candidate awaits
+      // password authorization/migration. Otherwise another tab could start a
+      // transfer and reclaim this candidate before the all-at-once switch.
+    });
+  }
+
+  close(): Promise<void> {
+    if (this.stage === 'closed') return Promise.resolve();
+    if (this.closePromise) return this.closePromise;
+    this.closing = true;
+    const closing = (async () => {
+      await this.operationTail;
+      let lease = this.lease;
+      if (!lease) lease = await acquireExportLease();
+      if (!this.db) this.db = await openDatabase();
+      try {
+        await deleteSpools(
+          this.db,
+          `${IMPORT_SPOOL_PREFIX}${this.transferId}:`
+        );
+      } catch (error) {
+        this.db.close();
+        this.db = null;
+        this.lease = lease;
+        throw error;
+      }
+      this.pending.fill(0);
+      this.expectedDigest?.fill(0);
+      this.expectedDigest = null;
+      this.db.close();
+      this.db = null;
+      this.stage = 'closed';
+      lease.release();
+      await lease.completion;
+      this.lease = null;
+    })();
+    this.closePromise = closing;
+    void closing.catch(() => {
+      if (this.closePromise === closing) this.closePromise = null;
+    });
+    return closing;
   }
 }

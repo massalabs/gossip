@@ -19,7 +19,10 @@ import {
   classifyStatement,
   TOP_LEVEL_SAVEPOINT_ERROR,
 } from './sql-statement.js';
-import { PortableWebExport } from './secure-storage-portable-web.js';
+import {
+  PortableWebExport,
+  PortableWebImport,
+} from './secure-storage-portable-web.js';
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — generated WASM module path resolved at build time
@@ -129,7 +132,11 @@ export class SecureStorageWorkerApi {
   private sqlTransactionPoisoned = false;
   private sqlRecoveryPromise: Promise<void> | null = null;
   private portableExport: PortableWebExport | null = null;
+  private portableImport: PortableWebImport | null = null;
   private portableExportStarting = false;
+  private portableImportStarting = false;
+  private portableImportStartPromise: Promise<void> | null = null;
+  private portableImportStartAbort: AbortController | null = null;
 
   private async recoverDurableStorage(): Promise<void> {
     if (this.durableRecoveryPromise) {
@@ -730,8 +737,13 @@ export class SecureStorageWorkerApi {
    * terminal for this worker instance.
    */
   async beginPortableExport(): Promise<{ totalBytes: number }> {
-    if (this.portableExportStarting || this.portableExport) {
-      throw new Error('Portable export is already active');
+    if (
+      this.portableExportStarting ||
+      this.portableExport ||
+      this.portableImportStarting ||
+      this.portableImport
+    ) {
+      throw new Error('Portable transfer is already active');
     }
     this.portableExportStarting = true;
     this.coverOnlyMode = false;
@@ -773,17 +785,75 @@ export class SecureStorageWorkerApi {
     this.portableExport = null;
   }
 
+  async beginPortableImport(): Promise<void> {
+    if (
+      this.portableImportStarting ||
+      this.portableImport ||
+      this.portableExportStarting ||
+      this.portableExport
+    ) {
+      throw new Error('Portable transfer is already active');
+    }
+    this.portableImportStarting = true;
+    const controller = new AbortController();
+    this.portableImportStartAbort = controller;
+    // Validation writes only to an isolated `x:` candidate prefix and does
+    // not inspect or mutate active storage, so it must not wait behind the SQL
+    // lifecycle FIFO. This also lets AbortSignal cancel a pending Web Lock
+    // acquisition immediately instead of hanging behind unrelated work.
+    const start = (async () => {
+      this.portableImport = await PortableWebImport.begin(
+        {
+          validateKeypair: value => validatePortableKeypair(value),
+          validateBlock: value => validatePortableBlock(value),
+        },
+        controller.signal
+      );
+    })();
+    this.portableImportStartPromise = start;
+    try {
+      await start;
+    } finally {
+      if (this.portableImportStartPromise === start) {
+        this.portableImportStartPromise = null;
+        this.portableImportStartAbort = null;
+        this.portableImportStarting = false;
+      }
+    }
+  }
+
+  async pushPortableImportChunk(data: Uint8Array): Promise<void> {
+    const transfer = this.portableImport;
+    if (!transfer) throw new Error('Portable import is not active');
+    await transfer.push(data);
+  }
+
+  async finishPortableImportValidation(): Promise<void> {
+    const transfer = this.portableImport;
+    if (!transfer) throw new Error('Portable import is not active');
+    await transfer.finishValidation();
+  }
+
   async abortPortableTransfer(): Promise<void> {
-    const transfer = this.portableExport;
+    const pendingImport = this.portableImportStartPromise;
+    if (pendingImport) {
+      this.portableImportStartAbort?.abort();
+      await pendingImport.catch(() => {});
+    }
+    const transfer = this.portableExport ?? this.portableImport;
     if (transfer) {
-      // Clear the field only after cleanup succeeds. A rejected deletion keeps
+      // Clear fields only after cleanup succeeds. A rejected deletion keeps
       // the transfer retryable for the caller's recovery screen.
       await transfer.close();
       this.portableExport = null;
+      this.portableImport = null;
     }
     this.portableExportStarting = false;
-    this.coverOnlyMode = true;
-    if (this.coverTimerId === null) this.startCoverTraffic();
+    this.portableImportStarting = false;
+    if (this.closeRequested) {
+      this.coverOnlyMode = true;
+      if (this.coverTimerId === null) this.startCoverTraffic();
+    }
   }
 
   async flush(): Promise<void> {
@@ -794,8 +864,13 @@ export class SecureStorageWorkerApi {
   }
 
   async close(): Promise<void> {
-    if (this.portableExportStarting || this.portableExport) {
-      throw new Error('Cannot close secure storage during portable export');
+    if (
+      this.portableExportStarting ||
+      this.portableExport ||
+      this.portableImportStarting ||
+      this.portableImport
+    ) {
+      throw new Error('Cannot close secure storage during portable transfer');
     }
     if (this.closePromise) return this.closePromise;
 

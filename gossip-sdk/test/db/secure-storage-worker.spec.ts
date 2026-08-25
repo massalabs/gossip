@@ -4,6 +4,7 @@ import type { SecureStorageWorkerApi } from '../../src/db/secure-storage-worker-
 
 const portableMock = vi.hoisted(() => ({
   begin: vi.fn(),
+  importBegin: vi.fn(),
   cleanupInterrupted: vi.fn(),
 }));
 
@@ -37,6 +38,9 @@ vi.mock('../../src/db/secure-storage-portable-web.js', () => ({
     begin: portableMock.begin,
     cleanupInterrupted: portableMock.cleanupInterrupted,
   },
+  PortableWebImport: {
+    begin: portableMock.importBegin,
+  },
 }));
 
 vi.mock(
@@ -61,6 +65,11 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     portableMock.begin.mockResolvedValue({
       totalBytes: 72,
       read: vi.fn().mockResolvedValue(null),
+      close: vi.fn().mockResolvedValue(undefined),
+    });
+    portableMock.importBegin.mockResolvedValue({
+      push: vi.fn().mockResolvedValue(undefined),
+      finishValidation: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
     });
     wasmMock.execSql.mockReturnValue({
@@ -964,7 +973,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     const first = api.beginPortableExport();
     await vi.waitFor(() => expect(portableMock.begin).toHaveBeenCalledOnce());
     await expect(api.beginPortableExport()).rejects.toThrow(
-      'Portable export is already active'
+      'Portable transfer is already active'
     );
 
     const transfer = {
@@ -985,9 +994,63 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await api.beginPortableExport();
 
     await expect(api.close()).rejects.toThrow(
-      'Cannot close secure storage during portable export'
+      'Cannot close secure storage during portable transfer'
     );
     await api.abortPortableTransfer();
+  });
+
+  it('waits for an import start before reporting abort cleanup complete', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    let finishStart!: (value: unknown) => void;
+    portableMock.importBegin.mockReturnValueOnce(
+      new Promise(resolve => {
+        finishStart = resolve;
+      })
+    );
+    const transfer = {
+      push: vi.fn(),
+      finishValidation: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const begin = api.beginPortableImport();
+    await vi.waitFor(() =>
+      expect(portableMock.importBegin).toHaveBeenCalledOnce()
+    );
+    let aborted = false;
+    const abort = api.abortPortableTransfer().then(() => {
+      aborted = true;
+    });
+    await Promise.resolve();
+    expect(aborted).toBe(false);
+
+    finishStart(transfer);
+    await begin;
+    await abort;
+    expect(transfer.close).toHaveBeenCalledOnce();
+  });
+
+  it('serializes browser import validation and retains cleanup ownership', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    await api.beginPortableImport();
+    const transfer = await portableMock.importBegin.mock.results[0].value;
+    const chunk = new Uint8Array([1, 2, 3]);
+
+    await api.pushPortableImportChunk(chunk);
+    await api.finishPortableImportValidation();
+    expect(transfer.push).toHaveBeenCalledWith(chunk);
+    expect(transfer.finishValidation).toHaveBeenCalledOnce();
+    await expect(api.close()).rejects.toThrow(
+      'Cannot close secure storage during portable transfer'
+    );
+
+    await api.abortPortableTransfer();
+    expect(transfer.close).toHaveBeenCalledOnce();
+    await expect(api.close()).resolves.toBeUndefined();
   });
 
   it('keeps normal admission closed but resumes cover after export abort', async () => {
