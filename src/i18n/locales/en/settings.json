@@ -8,6 +8,7 @@
   "copy_mns_domain": "Copy MNS domain",
   "menu": {
     "account_backup": "Account Backup",
+    "secure_backup": "Secure Backup",
     "share_contact": "Share Contact",
     "notifications": "Notifications",
     "appearance": "Appearance",
@@ -79,6 +80,26 @@
     "private_key_warning": "<strong>Warning:</strong> This Massa private key cannot be used to restore your Gossip account. Use this only for external wallet compatibility. To restore your Gossip account, you must use the 24-word mnemonic phrase.",
     "password_required": "Password is required",
     "show_failed": "Failed to show backup information. Please try again."
+  },
+  "portable_backup": {
+    "title": "Secure Backup",
+    "all_accounts_title": "Back up all accounts",
+    "description": "Create one portable backup containing every encrypted account slot on this device.",
+    "important": "Important: Keep Gossip open until backup verification finishes. Leaving the app may interrupt or corrupt the backup.",
+    "possession_warning": "This backup has no additional password. Anyone who obtains it can try to guess your account passwords offline. Store it securely.",
+    "choose_destination": "Choose backup destination",
+    "change_destination": "Change destination",
+    "destination": "Destination",
+    "export": "Export all account data",
+    "writing": "Writing backup",
+    "verifying": "Verifying backup",
+    "success_title": "Backup verified",
+    "success_body": "Your portable backup was written and verified successfully.",
+    "continue_login": "Continue to Login",
+    "retry": "Retry backup",
+    "failed": "The backup was not completed. Any unverified output created by this attempt was removed.",
+    "cleanup_required": "The backup was not completed. Gossip could not remove the unverified output. Delete the selected file manually before continuing.",
+    "unsupported": "Secure streaming backup is not available in this browser. Use a supported desktop browser."
   },
   "debug": {
     "title": "Debug",

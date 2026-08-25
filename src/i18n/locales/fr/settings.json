@@ -8,6 +8,7 @@
   "copy_mns_domain": "Copier le domaine MNS",
   "menu": {
     "account_backup": "Sauvegarde du compte",
+    "secure_backup": "Sauvegarde sécurisée",
     "share_contact": "Partager le contact",
     "notifications": "Notifications",
     "appearance": "Apparence",
@@ -79,6 +80,26 @@
     "private_key_warning": "<strong>Attention :</strong> Cette clé privée Massa ne peut pas être utilisée pour restaurer ton compte Gossip. Utilise-la uniquement pour la compatibilité avec des portefeuilles externes. Pour restaurer ton compte Gossip, tu dois utiliser la phrase mnémonique de 24 mots.",
     "password_required": "Le mot de passe est requis",
     "show_failed": "Échec de l'affichage des informations de sauvegarde. Réessaie."
+  },
+  "portable_backup": {
+    "title": "Sauvegarde sécurisée",
+    "all_accounts_title": "Sauvegarder tous les comptes",
+    "description": "Créez une sauvegarde portable contenant chaque emplacement de compte chiffré de cet appareil.",
+    "important": "Important : gardez Gossip ouvert jusqu’à la fin de la vérification. Quitter l’application peut interrompre ou corrompre la sauvegarde.",
+    "possession_warning": "Cette sauvegarde n’a pas de mot de passe supplémentaire. Toute personne qui l’obtient peut tenter de deviner vos mots de passe de compte hors ligne. Conservez-la en lieu sûr.",
+    "choose_destination": "Choisir la destination",
+    "change_destination": "Changer de destination",
+    "destination": "Destination",
+    "export": "Exporter toutes les données des comptes",
+    "writing": "Écriture de la sauvegarde",
+    "verifying": "Vérification de la sauvegarde",
+    "success_title": "Sauvegarde vérifiée",
+    "success_body": "Votre sauvegarde portable a été écrite et vérifiée avec succès.",
+    "continue_login": "Continuer vers la connexion",
+    "retry": "Réessayer la sauvegarde",
+    "failed": "La sauvegarde n’est pas terminée. Toute sortie non vérifiée créée par cette tentative a été supprimée.",
+    "cleanup_required": "La sauvegarde n’est pas terminée. Gossip n’a pas pu supprimer la sortie non vérifiée. Supprimez manuellement le fichier sélectionné avant de continuer.",
+    "unsupported": "La sauvegarde sécurisée en continu n’est pas disponible dans ce navigateur. Utilisez un navigateur de bureau compatible."
   },
   "debug": {
     "title": "Débogage",

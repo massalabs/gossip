@@ -10,6 +10,7 @@ import { UserProfile } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 import MainLayout from '../components/ui/Layout/MainLayout';
 import AnimatedRoutes from '../components/ui/AnimatedRoutes';
+import PortableBackup from '../pages/PortableBackup';
 
 interface UnauthenticatedRoutesProps {
   existingAccountInfo: UserProfile | null;
@@ -62,6 +63,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
     <MainLayout>
       <AnimatedRoutes>
         <Route path={ROUTES.invite()} element={<InvitePage />} />
+        <Route path={ROUTES.portableBackup()} element={<PortableBackup />} />
         <Route
           path={ROUTES.welcome()}
           element={

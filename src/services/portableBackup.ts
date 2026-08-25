@@ -55,6 +55,11 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Backup cancelled', 'AbortError');
 }
 
+export function restartAfterPortableBackup(path: string): void {
+  window.history.replaceState(null, '', path);
+  window.location.reload();
+}
+
 export function canStreamBrowserBackup(): boolean {
   return (
     typeof window !== 'undefined' &&

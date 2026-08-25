@@ -1,5 +1,6 @@
 import { logger } from '../../utils/logger.ts';
 import React, { useState, useEffect, useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../../stores/accountStore';
 import {
@@ -148,6 +149,19 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           error={persistentError}
           onDismiss={() => onErrorChange?.(null)}
         />
+
+        {Capacitor.getPlatform() === 'web' && (
+          <Button
+            type="button"
+            variant="outline"
+            fullWidth
+            className="h-[51px] rounded-full"
+            disabled={biometricLoading || passwordLoading}
+            onClick={() => navigate(ROUTES.portableBackup())}
+          >
+            {t('login.backup_all_accounts')}
+          </Button>
+        )}
       </LoginLayout>
     );
   }
