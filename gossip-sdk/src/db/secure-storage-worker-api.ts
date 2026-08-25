@@ -19,6 +19,7 @@ import {
   classifyStatement,
   TOP_LEVEL_SAVEPOINT_ERROR,
 } from './sql-statement.js';
+import { PortableWebExport } from './secure-storage-portable-web.js';
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — generated WASM module path resolved at build time
@@ -42,6 +43,8 @@ import init, {
   namespaceDataLength,
   clearNamespace,
   destroySession,
+  validatePortableKeypair,
+  validatePortableBlock,
 } from '../assets/generated/wasm-secureStorage/secureStorage.js';
 
 import {
@@ -120,10 +123,13 @@ export class SecureStorageWorkerApi {
   private durableRecoveryRequired = false;
   private durableRecoveryPromise: Promise<void> | null = null;
   private closeRequested = false;
+  private coverOnlyMode = false;
   private closePromise: Promise<void> | null = null;
   private sqlTransactionActive = false;
   private sqlTransactionPoisoned = false;
   private sqlRecoveryPromise: Promise<void> | null = null;
+  private portableExport: PortableWebExport | null = null;
+  private portableExportStarting = false;
 
   private async recoverDurableStorage(): Promise<void> {
     if (this.durableRecoveryPromise) {
@@ -341,7 +347,7 @@ export class SecureStorageWorkerApi {
   }
 
   private runCoverTick(skipWhenClosing = false): Promise<void> {
-    if (this.closeRequested) {
+    if (this.closeRequested && !this.coverOnlyMode) {
       return skipWhenClosing
         ? Promise.resolve()
         : Promise.reject(new Error('Secure storage worker is closing'));
@@ -406,6 +412,15 @@ export class SecureStorageWorkerApi {
       await initThreadPool(RAYON_THREADS);
     }
     await initSecureStorage(domain, 'idb');
+    // Reclaim an export snapshot left by a terminated tab before normal app
+    // admission. The Rust loader ignores spool-prefixed values, and this
+    // cleanup takes the same cross-tab lease as active exporters so it never
+    // deletes a live snapshot.
+    await PortableWebExport.cleanupInterrupted();
+    // The cleanup lease may have waited behind another tab's export while that
+    // tab committed cover writes. Refresh the in-memory VFS cache from the
+    // post-lease durable image before this worker admits cover or lifecycle work.
+    await reloadDurableStorage();
     const hasExistingData = await wasmIdbHasData();
     if (!hasExistingData) {
       provisionStorage();
@@ -708,6 +723,69 @@ export class SecureStorageWorkerApi {
     });
   }
 
+  /**
+   * End normal admission and prepare a locked, stable browser snapshot.
+   * Reads after this point bypass the operation queue because no storage
+   * mutation is admitted; a failed/cancelled export intentionally remains
+   * terminal for this worker instance.
+   */
+  async beginPortableExport(): Promise<{ totalBytes: number }> {
+    if (this.portableExportStarting || this.portableExport) {
+      throw new Error('Portable export is already active');
+    }
+    this.portableExportStarting = true;
+    this.coverOnlyMode = false;
+    this.stopCoverTraffic();
+    this.closeRequested = true;
+    try {
+      return await this.enqueueLifecycleOperation(async () => {
+        await this.ensureDurableStorageRecovered();
+        closeDatabase();
+        await flushEncrypted();
+        lockSession();
+        const transfer = await PortableWebExport.begin({
+          validateKeypair: value => validatePortableKeypair(value),
+          validateBlock: value => validatePortableBlock(value),
+        });
+        this.portableExport = transfer;
+        // The spool is now immutable. Resume only periodic cover work against
+        // active storage while keeping every normal lifecycle/SQL operation
+        // permanently rejected for this terminal runtime.
+        this.coverOnlyMode = true;
+        this.startCoverTraffic();
+        return { totalBytes: transfer.totalBytes };
+      }, true);
+    } finally {
+      this.portableExportStarting = false;
+    }
+  }
+
+  async readPortableExportChunk(maxBytes: number): Promise<Uint8Array | null> {
+    const transfer = this.portableExport;
+    if (!transfer) throw new Error('Portable export is not active');
+    return transfer.read(maxBytes);
+  }
+
+  async finishPortableExport(): Promise<void> {
+    const transfer = this.portableExport;
+    if (!transfer) throw new Error('Portable export is not active');
+    await transfer.close();
+    this.portableExport = null;
+  }
+
+  async abortPortableTransfer(): Promise<void> {
+    const transfer = this.portableExport;
+    if (transfer) {
+      // Clear the field only after cleanup succeeds. A rejected deletion keeps
+      // the transfer retryable for the caller's recovery screen.
+      await transfer.close();
+      this.portableExport = null;
+    }
+    this.portableExportStarting = false;
+    this.coverOnlyMode = true;
+    if (this.coverTimerId === null) this.startCoverTraffic();
+  }
+
   async flush(): Promise<void> {
     return this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
@@ -716,6 +794,9 @@ export class SecureStorageWorkerApi {
   }
 
   async close(): Promise<void> {
+    if (this.portableExportStarting || this.portableExport) {
+      throw new Error('Cannot close secure storage during portable export');
+    }
     if (this.closePromise) return this.closePromise;
 
     // Prevent the periodic callback and public cover calls from admitting new

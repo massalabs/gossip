@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { COVER_TRAFFIC_NAMESPACES } from '../../src/db/secure-storage-namespaces';
 import type { SecureStorageWorkerApi } from '../../src/db/secure-storage-worker-api';
 
+const portableMock = vi.hoisted(() => ({
+  begin: vi.fn(),
+  cleanupInterrupted: vi.fn(),
+}));
+
 const wasmMock = vi.hoisted(() => ({
   init: vi.fn(),
   initSecureStorage: vi.fn(),
@@ -23,6 +28,15 @@ const wasmMock = vi.hoisted(() => ({
   namespaceDataLength: vi.fn(),
   clearNamespace: vi.fn(),
   destroySession: vi.fn(),
+  validatePortableKeypair: vi.fn(),
+  validatePortableBlock: vi.fn(),
+}));
+
+vi.mock('../../src/db/secure-storage-portable-web.js', () => ({
+  PortableWebExport: {
+    begin: portableMock.begin,
+    cleanupInterrupted: portableMock.cleanupInterrupted,
+  },
 }));
 
 vi.mock(
@@ -43,6 +57,12 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     wasmMock.flushEncrypted.mockResolvedValue(undefined);
     wasmMock.reloadDurableStorage.mockResolvedValue(undefined);
     wasmMock.resetSqlDatabaseToDurable.mockResolvedValue(undefined);
+    portableMock.cleanupInterrupted.mockResolvedValue(undefined);
+    portableMock.begin.mockResolvedValue({
+      totalBytes: 72,
+      read: vi.fn().mockResolvedValue(null),
+      close: vi.fn().mockResolvedValue(undefined),
+    });
     wasmMock.execSql.mockReturnValue({
       rows: [],
       lastInsertRowId: 0,
@@ -928,5 +948,66 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await expect(api.unlock(password)).rejects.toThrow('unlock failed');
 
     expect(Array.from(password)).toEqual([0, 0, 0]);
+  });
+
+  it('reserves export admission before asynchronous snapshot staging', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    let finishBegin!: (value: unknown) => void;
+    portableMock.begin.mockReturnValueOnce(
+      new Promise(resolve => {
+        finishBegin = resolve;
+      })
+    );
+
+    const first = api.beginPortableExport();
+    await vi.waitFor(() => expect(portableMock.begin).toHaveBeenCalledOnce());
+    await expect(api.beginPortableExport()).rejects.toThrow(
+      'Portable export is already active'
+    );
+
+    const transfer = {
+      totalBytes: 72,
+      read: vi.fn().mockResolvedValue(null),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    finishBegin(transfer);
+    await expect(first).resolves.toEqual({ totalBytes: 72 });
+    await api.finishPortableExport();
+    expect(transfer.close).toHaveBeenCalledOnce();
+  });
+
+  it('rejects worker close while an export owns its cleanup state', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    await api.beginPortableExport();
+
+    await expect(api.close()).rejects.toThrow(
+      'Cannot close secure storage during portable export'
+    );
+    await api.abortPortableTransfer();
+  });
+
+  it('keeps normal admission closed but resumes cover after export abort', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    await api.beginPortableExport();
+    await api.abortPortableTransfer();
+    const internals = api as unknown as {
+      closeRequested: boolean;
+      coverOnlyMode: boolean;
+      coverTimerId: ReturnType<typeof setTimeout> | null;
+    };
+
+    expect(internals.closeRequested).toBe(true);
+    expect(internals.coverOnlyMode).toBe(true);
+    expect(internals.coverTimerId).not.toBeNull();
+    await expect(api.unlock(new Uint8Array([1]))).rejects.toThrow(
+      'Secure storage worker is closing'
+    );
+    clearTimeout(internals.coverTimerId!);
   });
 });

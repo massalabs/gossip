@@ -95,6 +95,7 @@ import {
   type SdkEvents,
 } from './core/SdkEventEmitter.js';
 import { SdkPolling } from './core/SdkPolling.js';
+import type { PortableChunkWriter } from './db/secure-storage-native.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -278,6 +279,25 @@ class GossipSdk {
   private _persistInFlightPromise: Promise<void> | null = null;
   /** Back-off state after a failed persist; reset on every success. */
   private _persistBackoffMs = 0;
+  private _portableExportActive = false;
+  private _portableExportTerminal = false;
+  private _lifecycleCloseActive = false;
+  private _accountLifecycleActive = false;
+
+  private reserveAccountLifecycle(): () => void {
+    if (this._portableExportActive || this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK account lifecycle operation is already active');
+    }
+    this._accountLifecycleActive = true;
+    return () => {
+      this._accountLifecycleActive = false;
+    };
+  }
 
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -357,6 +377,11 @@ class GossipSdk {
   }
 
   async openSession(options: OpenSessionOptions): Promise<void> {
+    if (this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
     if (this.state.status === SdkStatus.UNINITIALIZED) {
       throw new Error('SDK not initialized. Call init() first.');
     }
@@ -385,6 +410,7 @@ class GossipSdk {
       throw new Error('Unsupported identity derivation version');
     }
 
+    const releaseLifecycle = this.reserveAccountLifecycle();
     const initializedState = this.state;
     const ownsEncryptionKey = options.encryptionKey === undefined;
     let encryptionKey: EncryptionKey | undefined;
@@ -583,6 +609,8 @@ class GossipSdk {
         this.state = initializedState;
       }
       throw error;
+    } finally {
+      releaseLifecycle();
     }
   }
 
@@ -684,7 +712,9 @@ class GossipSdk {
    * The database connection is kept open so a new session can be opened.
    * Call `destroy()` to release the database connection entirely.
    */
-  async closeSession(): Promise<void> {
+  private async closeSessionInternal(
+    forceSecureNamespacePersistence = false
+  ): Promise<void> {
     if (this.state.status !== SdkStatus.SESSION_OPEN) {
       return;
     }
@@ -693,15 +723,51 @@ class GossipSdk {
     this.stopPublicKeyPublication();
     this.pollingManager.stop();
 
-    // Drain any pending session persist before tearing down state.
-    // The debounced background flush may have queued writes that haven't
-    // run yet; this guarantees durability on graceful shutdown. We keep
-    // `status = SESSION_OPEN` during the drain so `flushPersist` can
-    // still read `session`/`encryptionKey`, and loop until the dirty
-    // flag stays clear — any persist callback firing between the await
-    // and `cleanup()` below re-sets it, and without a loop we'd lose
-    // that final state.
-    await this.flushSessionPersistSync();
+    if (forceSecureNamespacePersistence && this._conn?.isSecureStorage) {
+      let persistedStableState = false;
+      for (
+        let attempt = 0;
+        attempt < GossipSdk.MAX_PERSIST_DRAIN_LOOPS;
+        attempt++
+      ) {
+        if (this._persistTimer !== null) {
+          clearTimeout(this._persistTimer);
+          this._persistTimer = null;
+        }
+        if (this._persistInFlightPromise) {
+          await this._persistInFlightPromise;
+        }
+        // Any SessionModule callback that lands while the async namespace write
+        // is in flight sets this flag again, forcing another exact snapshot.
+        this._persistDirty = false;
+        const { encryptionKey, session } = this.state;
+        if (!encryptionKey) {
+          throw new Error('Cannot export without a messaging-session key');
+        }
+        const blob = session.toEncryptedBlob(encryptionKey);
+        try {
+          await this._conn.secureStorageReplaceNamespaceData(
+            SESSION_BLOB_NAMESPACE,
+            blob
+          );
+        } finally {
+          blob.fill(0);
+        }
+        if (!this._persistDirty && this._persistInFlightPromise === null) {
+          persistedStableState = true;
+          break;
+        }
+      }
+      if (!persistedStableState) {
+        throw new Error(
+          'Unable to freeze the latest messaging session state for export'
+        );
+      }
+    } else {
+      // Ordinary logout retains consumer callback semantics and drains its
+      // debounced writes before tearing down the session.
+      await this.flushSessionPersistSync();
+    }
 
     // Cleanup the manager and both identity-key wrappers deterministically.
     this.state.session.dispose();
@@ -728,18 +794,44 @@ class GossipSdk {
     };
   }
 
+  async closeSession(): Promise<void> {
+    if (this._portableExportActive) {
+      throw new Error('Cannot close session during portable export');
+    }
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK lifecycle operation is already active');
+    }
+    this._lifecycleCloseActive = true;
+    try {
+      await this.closeSessionInternal();
+    } finally {
+      this._lifecycleCloseActive = false;
+    }
+  }
+
   /**
    * Close the session and release the database connection.
    * After calling this, the instance cannot be reused — create a new one.
    */
   async destroy(): Promise<void> {
-    await this.closeSession();
-    this._queries = null;
-    if (this._conn) {
-      await this._conn.close();
-      this._conn = null;
+    if (this._portableExportActive) {
+      throw new Error('Cannot destroy SDK during portable export');
     }
-    this.state = { status: SdkStatus.UNINITIALIZED };
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK lifecycle operation is already active');
+    }
+    this._lifecycleCloseActive = true;
+    try {
+      await this.closeSessionInternal();
+      this._queries = null;
+      if (this._conn) {
+        await this._conn.close();
+        this._conn = null;
+      }
+      this.state = { status: SdkStatus.UNINITIALIZED };
+    } finally {
+      this._lifecycleCloseActive = false;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -880,7 +972,12 @@ class GossipSdk {
    * `init()` provisions decoys automatically when storage is empty.
    */
   async secureStorageProvision(): Promise<void> {
-    await this.requireConn().secureStorageProvision();
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageProvision();
+    } finally {
+      releaseLifecycle();
+    }
   }
 
   /**
@@ -899,11 +996,16 @@ class GossipSdk {
    *   underlying allocation fails.
    */
   async secureStorageCreate(slot: number, password: string): Promise<void> {
-    const conn = this.requireConn();
-    await conn.secureStorageCreate(slot, password);
-    if (!this._queries) {
-      this._queries = new Queries(conn);
-      this._profile = this.createProfileService(this._queries);
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      const conn = this.requireConn();
+      await conn.secureStorageCreate(slot, password);
+      if (!this._queries) {
+        this._queries = new Queries(conn);
+        this._profile = this.createProfileService(this._queries);
+      }
+    } finally {
+      releaseLifecycle();
     }
   }
 
@@ -920,13 +1022,18 @@ class GossipSdk {
    *   storage IO failure, empty password).
    */
   async secureStorageUnlock(password: string): Promise<boolean> {
-    const conn = this.requireConn();
-    const ok = await conn.secureStorageUnlock(password);
-    if (ok && !this._queries) {
-      this._queries = new Queries(conn);
-      this._profile = this.createProfileService(this._queries);
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      const conn = this.requireConn();
+      const ok = await conn.secureStorageUnlock(password);
+      if (ok && !this._queries) {
+        this._queries = new Queries(conn);
+        this._profile = this.createProfileService(this._queries);
+      }
+      return ok;
+    } finally {
+      releaseLifecycle();
     }
-    return ok;
   }
 
   /**
@@ -940,23 +1047,26 @@ class GossipSdk {
    * unlocked invariant other parts of the SDK rely on.
    */
   async secureStorageLock(): Promise<void> {
-    // Invariant: locking storage while a session is open would leave
-    // the SDK in SESSION_OPEN + storageState='locked', which the data
-    // services do not expect (they assume SESSION_OPEN implies
-    // unlocked storage and only check session status). Force the
-    // caller to closeSession first.
-    if (this.state.status === SdkStatus.SESSION_OPEN) {
-      throw new Error(
-        'Cannot lock secure storage while a session is open. ' +
-          'Call closeSession() first.'
-      );
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      // Invariant: locking storage while a session is open would leave
+      // the SDK in SESSION_OPEN + storageState='locked', which the data
+      // services do not expect (they assume SESSION_OPEN implies
+      // unlocked storage and only check session status). Force the
+      // caller to closeSession first.
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'Cannot lock secure storage while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      // The connection closes Drizzle before its fallible durable flush.
+      this._queries = null;
+      this._profile = null;
+      await this.requireConn().secureStorageLock();
+    } finally {
+      releaseLifecycle();
     }
-    // The connection closes Drizzle before its fallible durable flush. Remove
-    // public query facades first so a rejected lock cannot report dbReady while
-    // every query already fails. The connection retains retryable key state.
-    this._queries = null;
-    this._profile = null;
-    await this.requireConn().secureStorageLock();
   }
 
   /**
@@ -975,24 +1085,78 @@ class GossipSdk {
    * on. After this resolves, storageState is 'locked'.
    */
   async secureStorageDestroy(): Promise<void> {
-    if (this.state.status === SdkStatus.SESSION_OPEN) {
-      throw new Error(
-        'Cannot destroy secure storage while a session is open. ' +
-          'Call closeSession() first.'
-      );
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'Cannot destroy secure storage while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageDestroy([
+        SQL_NAMESPACE,
+        SESSION_BLOB_NAMESPACE,
+      ]);
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
     }
-    await this.requireConn().secureStorageDestroy([
-      SQL_NAMESPACE,
-      SESSION_BLOB_NAMESPACE,
-    ]);
-    this._queries = null;
-    this._profile = null;
   }
 
   /** Force-flush dirty encrypted blocks to the backing store. */
   async flush(): Promise<void> {
-    if (this._conn?.isSecureStorage) {
-      await this._conn.secureStorageFlush();
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this._conn?.isSecureStorage) {
+        await this._conn.secureStorageFlush();
+      }
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * End the current runtime session, force its debounced SessionManager state
+   * through namespace 1, lock storage, and stream one portable snapshot.
+   *
+   * This is intentionally one-way for this SDK runtime. Success, destination
+   * failure, and cancellation all leave storage locked; callers must route to
+   * login/reload rather than reopen stale services.
+   */
+  async exportPortableV1(write: PortableChunkWriter): Promise<void> {
+    if (this._portableExportActive) {
+      throw new Error('Portable export is already active');
+    }
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK lifecycle operation is already active');
+    }
+    this._portableExportActive = true;
+    try {
+      const conn = this.requireConn();
+      if (!conn.isSecureStorage) {
+        throw new Error('Portable export requires secure storage');
+      }
+      if (conn.storageState === 'empty') {
+        throw new Error(
+          'Portable export requires an existing locked installation'
+        );
+      }
+      this._portableExportTerminal = true;
+      await this.closeSessionInternal(true);
+      if (conn.storageState === 'unlocked') {
+        this._queries = null;
+        this._profile = null;
+        await conn.secureStorageLock();
+      }
+      if (conn.storageState !== 'locked') {
+        throw new Error(
+          'Portable export requires an existing locked installation'
+        );
+      }
+      await conn.secureStorageExportPortableV1(write);
+    } finally {
+      this._portableExportActive = false;
     }
   }
 
@@ -1030,6 +1194,11 @@ class GossipSdk {
    * need to reuse the bytes must clone before calling.
    */
   async persistSessionBlob(blob: Uint8Array): Promise<void> {
+    if (this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
     const conn = this._conn;
     if (!conn?.isSecureStorage) return;
     // The debounce + dirty-flag coalescing infrastructure already lives
@@ -1067,6 +1236,11 @@ class GossipSdk {
 
   /** Truncate the session blob namespace (e.g. on account reset). */
   async clearSessionBlob(): Promise<void> {
+    if (this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
     const conn = this._conn;
     if (!conn?.isSecureStorage) return;
     await conn.secureStorageClearNamespace(SESSION_BLOB_NAMESPACE);
@@ -1248,6 +1422,11 @@ class GossipSdk {
   // ─────────────────────────────────────────────────────────────────
 
   private requireSession(): SdkStateSessionOpen {
+    if (this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
     if (this.state.status !== SdkStatus.SESSION_OPEN) {
       throw new Error('No session open. Call openSession() first.');
     }
@@ -1395,6 +1574,16 @@ class GossipSdk {
         await this.flushPersist();
       }
     }
+    if (
+      !this._persistDirty &&
+      this._persistTimer === null &&
+      this._persistInFlightPromise === null
+    ) {
+      return;
+    }
+    throw new Error(
+      'Unable to durably persist the latest messaging session state'
+    );
   }
 
   /**

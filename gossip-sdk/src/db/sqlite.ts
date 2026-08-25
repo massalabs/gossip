@@ -22,7 +22,10 @@ import * as schema from './schema/index.js';
 import { runMigrations } from './migrate.js';
 import { execStatements } from './exec-utils.js';
 import type { SecureStorageWorkerProxy } from './secure-storage-worker-api.js';
-import type { SecureStorageNativePlugin } from './secure-storage-native.js';
+import type {
+  PortableChunkWriter,
+  SecureStorageNativePlugin,
+} from './secure-storage-native.js';
 import {
   requiresSecureStorageRecovery,
   SecureStorageRecoveryRequiredError,
@@ -134,6 +137,8 @@ interface DbState {
   secureProxy: SecureStorageWorkerProxy | null;
   nativePlugin: SecureStorageNativePlugin | null;
   useNativePlugin: boolean;
+  portableTransferActive: boolean;
+  closeActive: boolean;
 }
 
 interface TransactionContext {
@@ -160,6 +165,8 @@ function createDefaultState(): DbState {
     secureProxy: null,
     nativePlugin: null,
     useNativePlugin: false,
+    portableTransferActive: false,
+    closeActive: false,
   };
 }
 
@@ -890,6 +897,48 @@ export class DatabaseConnection {
     }
   }
 
+  /** Stream a stable locked snapshot. This operation is terminal for the
+   * current web worker even when the destination later fails or cancels. */
+  async secureStorageExportPortableV1(
+    write: PortableChunkWriter
+  ): Promise<void> {
+    if (this.state.storageState !== 'locked') {
+      throw new Error('Portable export requires locked secure storage');
+    }
+    if (this.state.portableTransferActive) {
+      throw new Error('Portable transfer is already active');
+    }
+    if (this.state.closeActive) {
+      throw new Error('Secure storage is closing');
+    }
+    this.state.portableTransferActive = true;
+    try {
+      if (this.state.useNativePlugin) {
+        await this.requireNativePlugin().exportPortableV1(write);
+        return;
+      }
+
+      const proxy = this.requireSecureProxy();
+      let finished = false;
+      try {
+        await proxy.beginPortableExport();
+        while (true) {
+          const chunk = await proxy.readPortableExportChunk(256 * 1024);
+          if (chunk === null) break;
+          // Ownership passes to the writer. It may retain or transfer the
+          // chunk, so this layer must not mutate it after the await.
+          await write(chunk);
+        }
+        await proxy.finishPortableExport();
+        finished = true;
+      } finally {
+        if (!finished) await proxy.abortPortableTransfer().catch(() => {});
+      }
+    } finally {
+      this.state.portableTransferActive = false;
+    }
+  }
+
   // ── Generic namespace data API ─────────────────────────────────
 
   /**
@@ -1121,19 +1170,31 @@ export class DatabaseConnection {
 
   async close(): Promise<void> {
     this.assertNoSecureStorageOperationInTransactionCallback();
-    if (this.state.useNativePlugin && this.state.nativePlugin) {
-      await this.state.nativePlugin.close();
-    } else if (this.state.secureProxy && this.state.worker) {
-      await this.state.secureProxy.close();
-      this.state.secureProxy[Comlink.releaseProxy]();
-      this.state.worker.terminate();
-    } else if (this.state.useWorker && this.state.worker) {
-      await this.postToWorker({ type: 'close' });
-      this.state.worker.terminate();
-    } else if (this.state.dbHandle !== null && this.state.sqlite3) {
-      await this.state.sqlite3.close(this.state.dbHandle);
+    if (this.state.portableTransferActive) {
+      throw new Error('Cannot close secure storage during portable transfer');
     }
-    this.state = createDefaultState();
+    if (this.state.closeActive) {
+      throw new Error('Secure storage close is already active');
+    }
+    this.state.closeActive = true;
+    try {
+      if (this.state.useNativePlugin && this.state.nativePlugin) {
+        await this.state.nativePlugin.close();
+      } else if (this.state.secureProxy && this.state.worker) {
+        await this.state.secureProxy.close();
+        this.state.secureProxy[Comlink.releaseProxy]();
+        this.state.worker.terminate();
+      } else if (this.state.useWorker && this.state.worker) {
+        await this.postToWorker({ type: 'close' });
+        this.state.worker.terminate();
+      } else if (this.state.dbHandle !== null && this.state.sqlite3) {
+        await this.state.sqlite3.close(this.state.dbHandle);
+      }
+      this.state = createDefaultState();
+    } catch (error) {
+      this.state.closeActive = false;
+      throw error;
+    }
   }
 
   async clearAllTables(): Promise<void> {
