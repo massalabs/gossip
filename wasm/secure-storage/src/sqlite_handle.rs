@@ -18,8 +18,8 @@ use sqlite_wasm_rs::{
     sqlite3_bind_blob, sqlite3_bind_double, sqlite3_bind_int64, sqlite3_bind_null,
     sqlite3_bind_text, sqlite3_close, sqlite3_column_blob, sqlite3_column_bytes,
     sqlite3_column_count, sqlite3_column_double, sqlite3_column_int64, sqlite3_column_text,
-    sqlite3_column_type, sqlite3_errmsg, sqlite3_exec, sqlite3_finalize, sqlite3_last_insert_rowid,
-    sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step, sqlite3_stmt,
+    sqlite3_column_type, sqlite3_complete, sqlite3_errmsg, sqlite3_exec, sqlite3_finalize,
+    sqlite3_last_insert_rowid, sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step, sqlite3_stmt,
 };
 
 // ── Errors ─────────────────────────────────────────────────────────
@@ -151,9 +151,15 @@ impl SafeDb {
 
     /// Prepare a statement. Returns `Ok(None)` if the SQL was empty/whitespace.
     pub fn prepare<'a>(&'a self, sql: &str) -> SqlResult<Option<SafeStmt<'a>>> {
-        let sql_c = CString::new(sql).map_err(|_| "sql contains nul byte".to_string())?;
+        let sql = crate::sql_tail::validate(sql, |candidate| {
+            // SAFETY: candidate is a valid NUL-terminated SQL prefix.
+            // sqlite3_complete performs lexical analysis only and does not
+            // prepare or execute against this live connection.
+            unsafe { sqlite3_complete(candidate.as_ptr()) != 0 }
+        })
+        .map_err(str::to_string)?;
+        let sql_c = CString::new(sql).map_err(|_| crate::sql_tail::NUL_BYTE.to_string())?;
         let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
-        let mut tail: *const c_char = ptr::null();
         // SAFETY: self.handle is valid (SafeDb invariant). sqlite3_prepare_v2
         // contract (https://sqlite.org/c3ref/prepare.html):
         //   - zSql (sql_c.as_ptr()): read-only UTF-8, must outlive the call;
@@ -161,30 +167,20 @@ impl SafeDb {
         //   - nByte (sql_len): byte length of the SQL, checked to fit c_int.
         //   - ppStmt (&mut stmt): writable out pointer; SQLite writes a stmt
         //     handle or null if the SQL was empty/whitespace.
-        //   - pzTail (&mut tail): SQLite points it at the uncompiled suffix;
-        //     we reject anything except whitespace and complete comments.
+        //   - pzTail is null because side-effect-free lexical validation above
+        //     already established that at most one statement is present.
         let sql_len = len_to_c_int(sql.len(), "sql string")?;
         let rc = unsafe {
-            sqlite3_prepare_v2(self.handle, sql_c.as_ptr(), sql_len, &mut stmt, &mut tail)
+            sqlite3_prepare_v2(
+                self.handle,
+                sql_c.as_ptr(),
+                sql_len,
+                &mut stmt,
+                ptr::null_mut(),
+            )
         };
         if rc != SQLITE_OK {
             return Err(errmsg(self.handle));
-        }
-        let valid_tail = if tail.is_null() {
-            false
-        } else {
-            // SAFETY: sqlite3_prepare_v2 sets pzTail to a position within the
-            // still-live, NUL-terminated sql_c allocation. CStr borrows only
-            // until sql_c leaves this scope.
-            crate::sql_tail::is_ignorable(unsafe { CStr::from_ptr(tail) }.to_bytes())
-        };
-        if !valid_tail {
-            if !stmt.is_null() {
-                // SAFETY: SQLite initialized stmt on the successful prepare.
-                // No SafeStmt owns it yet, so finalize exactly once here.
-                let _rc = unsafe { sqlite3_finalize(stmt) };
-            }
-            return Err("multiple SQL statements are not allowed".to_string());
         }
         if stmt.is_null() {
             return Ok(None);

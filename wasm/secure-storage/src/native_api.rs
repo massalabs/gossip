@@ -10,9 +10,7 @@
 //! bridge as base64 strings rather than `number[]`, which saved a ~×8
 //! overhead per byte on the Capacitor bridge.
 
-use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
-use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
 use base64::Engine;
@@ -473,53 +471,14 @@ fn exec_sql_batch(stmts: &[ExecSqlArgs]) -> Result<Vec<QueryResultJson>> {
     Ok(out)
 }
 
-/// Ask SQLite to identify the uncompiled suffix whenever SQL contains a
-/// possible statement separator. Most hot INSERT/UPDATE statements have no
-/// semicolon and retain the full benefit of rusqlite's statement cache.
-fn validate_sql_tail(conn: &rusqlite::Connection, sql: &str) -> Result<()> {
-    if !sql.as_bytes().contains(&b';') {
-        return Ok(());
-    }
-
-    let sql_c = CString::new(sql)
-        .map_err(|_| SecureStorageException::typed("SQLITE", "sql contains nul byte"))?;
-    let sql_len = i32::try_from(sql.len()).map_err(|_| {
-        SecureStorageException::typed("SQLITE", "sql string exceeds i32::MAX bytes")
-    })?;
-    let mut stmt: *mut rusqlite::ffi::sqlite3_stmt = ptr::null_mut();
-    let mut tail: *const c_char = ptr::null();
-    // SAFETY: conn is locked by the caller for this entire operation. Its
-    // handle and sql_c remain valid through prepare/finalize; both output
-    // pointers are writable and SQLite treats the SQL bytes as read-only.
-    let rc = unsafe {
-        rusqlite::ffi::sqlite3_prepare_v2(
-            conn.handle(),
-            sql_c.as_ptr(),
-            sql_len,
-            &mut stmt,
-            &mut tail,
-        )
-    };
-    let valid_tail = if rc == rusqlite::ffi::SQLITE_OK && !tail.is_null() {
-        // SAFETY: on successful prepare SQLite points pzTail inside the
-        // still-live NUL-terminated sql_c allocation.
-        crate::sql_tail::is_ignorable(unsafe { CStr::from_ptr(tail) }.to_bytes())
-    } else {
-        // Let prepare_cached below surface SQLite's normal syntax/schema error.
-        true
-    };
-    if !stmt.is_null() {
-        // SAFETY: SQLite initialized stmt during prepare and no Rust wrapper
-        // owns this preflight-only statement.
-        let _rc = unsafe { rusqlite::ffi::sqlite3_finalize(stmt) };
-    }
-    if !valid_tail {
-        return Err(SecureStorageException::typed(
-            "SQLITE",
-            "multiple SQL statements are not allowed",
-        ));
-    }
-    Ok(())
+/// Validate statement boundaries with SQLite's side-effect-free lexical
+/// parser before rusqlite can prepare against the live connection.
+fn validate_sql(sql: &str) -> Result<&str> {
+    crate::sql_tail::validate(sql, |candidate| {
+        // SAFETY: candidate is a valid NUL-terminated SQL prefix.
+        unsafe { rusqlite::ffi::sqlite3_complete(candidate.as_ptr()) != 0 }
+    })
+    .map_err(|message| SecureStorageException::typed("SQLITE", message))
 }
 
 fn exec_sql_one(
@@ -534,7 +493,7 @@ fn exec_sql_one(
     // for every message send, so the parser/planner cost is paid once per
     // statement shape instead of every call. Validate before binding/step so
     // SQLite and the JS classifier always observe the same single statement.
-    validate_sql_tail(conn, sql)?;
+    let sql = validate_sql(sql)?;
     let mut stmt = conn.prepare_cached(sql)?;
     let column_count = stmt.column_count();
     let columns: Vec<String> = (0..column_count)
@@ -714,6 +673,79 @@ mod tests {
             .query_row("SELECT value FROM tail_test", [], |row| row.get(0))
             .unwrap();
         assert_eq!(value, 1);
+
+        for (setting, statement) in [
+            ("query_only", "PRAGMA query_only=ON; SELECT 1"),
+            ("foreign_keys", "PRAGMA foreign_keys=ON; SELECT 1"),
+            (
+                "recursive_triggers",
+                "PRAGMA recursive_triggers=ON; SELECT 1",
+            ),
+        ] {
+            let before: i64 = conn
+                .query_row(&format!("PRAGMA {setting}"), [], |row| row.get(0))
+                .unwrap();
+            let error = exec_sql_one(&conn, statement, &[])
+                .err()
+                .expect("additional PRAGMA statement should fail");
+            assert!(error.to_string().contains("multiple SQL statements"));
+            let after: i64 = conn
+                .query_row(&format!("PRAGMA {setting}"), [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(after, before, "rejected {setting} changed connection state");
+        }
+
+        exec_sql_one(&conn, "PRAGMA query_only=ON", &[]).unwrap();
+        let enabled: i64 = conn
+            .query_row("PRAGMA query_only", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(enabled, 1);
+        exec_sql_one(&conn, "PRAGMA query_only=OFF", &[]).unwrap();
+    }
+
+    #[test]
+    fn native_sql_rejects_nul_and_normalizes_boundary_whitespace() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        exec_sql_one(
+            &conn,
+            "CREATE TABLE boundary_test (value INTEGER NOT NULL)",
+            &[],
+        )
+        .unwrap();
+        exec_sql_one(&conn, "INSERT INTO boundary_test VALUES (1)", &[]).unwrap();
+
+        for sql in [
+            "BEGIN\0ignored",
+            "UPDATE boundary_test SET value = 2\0ignored",
+            "PRAGMA query_only=ON\0ignored",
+        ] {
+            let error = exec_sql_one(&conn, sql, &[])
+                .err()
+                .expect("NUL-bearing SQL should fail");
+            assert!(error.to_string().contains("sql contains nul byte"));
+        }
+        for sql in [
+            "\u{a0}BEGIN IMMEDIATE; SELECT 1",
+            "\u{a0}UPDATE boundary_test SET value = 2; SELECT 1\u{a0}",
+        ] {
+            let error = exec_sql_one(&conn, sql, &[])
+                .err()
+                .expect("additional Unicode-bounded statement should fail");
+            assert!(error.to_string().contains("multiple SQL statements"));
+        }
+        let normalized = exec_sql_one(&conn, "\u{a0}SELECT value FROM boundary_test\u{a0}", &[])
+            .expect("ordinary Unicode-bounded SQL should be normalized");
+        assert_eq!(normalized.rows, vec![vec![serde_json::json!(1)]]);
+
+        assert!(conn.is_autocommit());
+        let value: i64 = conn
+            .query_row("SELECT value FROM boundary_test", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, 1);
+        let query_only: i64 = conn
+            .query_row("PRAGMA query_only", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(query_only, 0);
     }
 
     #[test]
@@ -731,9 +763,20 @@ mod tests {
             &[serde_json::json!(7)],
         )
         .unwrap();
+        exec_sql_one(&conn, "CREATE TABLE tail_audit (value TEXT)", &[]).unwrap();
+        exec_sql_one(
+            &conn,
+            "CREATE TRIGGER tail_trigger AFTER UPDATE ON tail_test \
+             BEGIN INSERT INTO tail_audit VALUES ('semi;colon'); END; -- trigger",
+            &[],
+        )
+        .unwrap();
+        exec_sql_one(&conn, "  UPDATE tail_test SET value = 8  ", &[]).unwrap();
 
         let result = exec_sql_one(&conn, "SELECT value FROM tail_test", &[]).unwrap();
-        assert_eq!(result.rows, vec![vec![serde_json::json!(7)]]);
+        assert_eq!(result.rows, vec![vec![serde_json::json!(8)]]);
+        let audit = exec_sql_one(&conn, "SELECT value FROM tail_audit", &[]).unwrap();
+        assert_eq!(audit.rows, vec![vec![serde_json::json!("semi;colon")]]);
     }
 
     #[test]

@@ -311,6 +311,57 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       connection.db.select({ username: userProfile.username }).from(userProfile)
     ).resolves.toEqual([{ username: 'durable single statement' }]);
 
+    for (const [setting, statement] of [
+      ['query_only', 'PRAGMA query_only=ON; SELECT 1'],
+      ['foreign_keys', 'PRAGMA foreign_keys=ON; SELECT 1'],
+      ['recursive_triggers', 'PRAGMA recursive_triggers=ON; SELECT 1'],
+    ]) {
+      const before = (await testProxy(connection).exec(
+        `PRAGMA ${setting}`
+      )) as { rows: unknown[][] };
+      await expect(testProxy(connection).exec(statement)).rejects.toThrow(
+        'multiple SQL statements are not allowed'
+      );
+      await expect(
+        testProxy(connection).exec(`PRAGMA ${setting}`)
+      ).resolves.toMatchObject({ rows: before.rows });
+    }
+    await testProxy(connection).exec('PRAGMA query_only=ON');
+    await expect(
+      testProxy(connection).exec('PRAGMA query_only')
+    ).resolves.toMatchObject({ rows: [[1]] });
+    await testProxy(connection).exec('PRAGMA query_only=OFF');
+
+    for (const sql of [
+      'BEGIN\0ignored',
+      'UPDATE userProfile SET username = "nul mutation"\0ignored',
+      'PRAGMA query_only=ON\0ignored',
+    ]) {
+      await expect(testProxy(connection).exec(sql)).rejects.toThrow(
+        'sql contains nul byte'
+      );
+    }
+    for (const sql of [
+      '\u00a0BEGIN IMMEDIATE; SELECT 1',
+      '\u00a0UPDATE userProfile SET username = "unicode mutation"; SELECT 1\u00a0',
+    ]) {
+      await expect(testProxy(connection).exec(sql)).rejects.toThrow(
+        'multiple SQL statements are not allowed'
+      );
+    }
+    await expect(
+      testProxy(connection).exec(
+        '\u00a0SELECT username FROM userProfile WHERE userId = ?\u00a0',
+        ['gossip1singlestatement']
+      )
+    ).resolves.toMatchObject({ rows: [['durable single statement']] });
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable single statement' }]);
+    await expect(
+      testProxy(connection).exec('PRAGMA query_only')
+    ).resolves.toMatchObject({ rows: [[0]] });
+
     await testProxy(connection).exec('BEGIN IMMEDIATE; -- accepted comment');
     await testProxy(connection).exec(
       'ROLLBACK TRANSACTION; /* accepted comment */',
