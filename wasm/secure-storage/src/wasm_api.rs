@@ -389,6 +389,25 @@ pub fn clear_namespace(namespace: u8) -> Result<(), JsValue> {
     })
 }
 
+/// Verify that this worker still owns the active IndexedDB generation.
+#[wasm_bindgen(js_name = verifyStorageGeneration)]
+pub async fn verify_storage_generation() -> Result<(), JsValue> {
+    let idb_ptr: Option<*const IdbBlockStorage> = with_app_state(|app| {
+        let state = app.state.borrow();
+        Ok(match &state.backend {
+            Backend::Idb(idb) => Some(idb as *const _),
+            Backend::Memory(_) => None,
+        })
+    })?;
+    let Some(ptr) = idb_ptr else {
+        return Err(JsValue::from_str(
+            "generation verification is only available for IndexedDB storage",
+        ));
+    };
+    // SAFETY: the backend lives in the leaked AppState and is never moved.
+    unsafe { &*ptr }.verify_generation().await
+}
+
 /// Discard pending IDB mutations and reload the last committed snapshot.
 ///
 async fn reload_idb_backend() -> Result<(), JsValue> {

@@ -29,6 +29,7 @@ const wasmMock = vi.hoisted(() => ({
   namespaceDataLength: vi.fn(),
   clearNamespace: vi.fn(),
   destroySession: vi.fn(),
+  verifyStorageGeneration: vi.fn(),
   validatePortableKeypair: vi.fn(),
   validatePortableBlock: vi.fn(),
 }));
@@ -61,6 +62,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     wasmMock.flushEncrypted.mockResolvedValue(undefined);
     wasmMock.reloadDurableStorage.mockResolvedValue(undefined);
     wasmMock.resetSqlDatabaseToDurable.mockResolvedValue(undefined);
+    wasmMock.verifyStorageGeneration.mockResolvedValue(undefined);
     portableMock.cleanupInterrupted.mockResolvedValue(undefined);
     portableMock.begin.mockResolvedValue({
       totalBytes: 72,
@@ -70,6 +72,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     portableMock.importBegin.mockResolvedValue({
       push: vi.fn().mockResolvedValue(undefined),
       finishValidation: vi.fn().mockResolvedValue(undefined),
+      install: vi.fn().mockResolvedValue({ generation: 'next' }),
       close: vi.fn().mockResolvedValue(undefined),
     });
     wasmMock.execSql.mockReturnValue({
@@ -1012,6 +1015,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     const transfer = {
       push: vi.fn(),
       finishValidation: vi.fn(),
+      install: vi.fn(),
       close: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -1051,6 +1055,64 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await api.abortPortableTransfer();
     expect(transfer.close).toHaveBeenCalledOnce();
     await expect(api.close()).resolves.toBeUndefined();
+  });
+
+  it('fences direct namespace reads before serving stale generation data', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    wasmMock.verifyStorageGeneration.mockRejectedValueOnce(
+      new Error('secure-storage generation changed; reload required')
+    );
+
+    await expect(api.namespaceDataLength(1)).rejects.toThrow(
+      'secure-storage generation changed'
+    );
+    expect(
+      (api as unknown as { generationStale: boolean }).generationStale
+    ).toBe(true);
+    expect(wasmMock.namespaceDataLength).not.toHaveBeenCalled();
+  });
+
+  it('terminalizes a stale generation instead of retrying cover forever', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    wasmMock.flushEncrypted.mockRejectedValueOnce(
+      new Error('secure-storage generation changed; reload required')
+    );
+
+    await expect(api.cover()).resolves.toBeUndefined();
+    const state = api as unknown as {
+      generationStale: boolean;
+      closeRequested: boolean;
+      coverRetryTimerId: ReturnType<typeof setTimeout> | null;
+    };
+    expect(state.generationStale).toBe(true);
+    expect(state.closeRequested).toBe(true);
+    expect(state.coverRetryTimerId).toBeNull();
+    await expect(api.unlock(new Uint8Array([1]))).rejects.toThrow(
+      'Secure storage worker is closing'
+    );
+  });
+
+  it('ends normal worker admission before atomically installing an import', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    await api.beginPortableImport();
+    const transfer = await portableMock.importBegin.mock.results[0].value;
+
+    await expect(api.installPortableImport()).resolves.toEqual({
+      generation: 'next',
+    });
+    expect(wasmMock.closeDatabase).toHaveBeenCalledOnce();
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledOnce();
+    expect(wasmMock.lockSession).toHaveBeenCalledOnce();
+    expect(transfer.install).toHaveBeenCalledOnce();
+    await expect(api.unlock(new Uint8Array([1]))).rejects.toThrow(
+      'Secure storage worker is closing'
+    );
   });
 
   it('keeps normal admission closed but resumes cover after export abort', async () => {

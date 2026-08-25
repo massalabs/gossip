@@ -1,11 +1,23 @@
 /* tslint:disable */
 /* eslint-disable */
 export function initSecureStorage(domain: string, backend: string): Promise<void>;
+/**
+ * Run a SQL statement with bound parameters.
+ *
+ * `params` is a JS array of values; supported types are number, string,
+ * Uint8Array, null, and bigint. Returns rows as a JS array of arrays
+ * (positional column values), matching the Drizzle sqlite-proxy contract.
+ */
+export function execSql(sql: string, params: Array<any>): ExecResult;
 export function idbHasData(): Promise<boolean>;
 export function provisionStorage(): void;
 export function allocateSession(slot: number, password: Uint8Array): void;
 export function namespaceDataLength(namespace: number): number;
 export function clearNamespace(namespace: number): void;
+/**
+ * Verify that this worker still owns the active IndexedDB generation.
+ */
+export function verifyStorageGeneration(): Promise<void>;
 /**
  * Called by the worker when an allocation or destruction transaction rejects.
  * This prevents a later cover-traffic flush from durably carrying the failed
@@ -22,14 +34,6 @@ export function resetSqlDatabaseToDurable(): Promise<void>;
 export function flushEncrypted(): Promise<void>;
 export function openDatabase(): void;
 export function closeDatabase(): void;
-/**
- * Run a SQL statement with bound parameters.
- *
- * `params` is a JS array of values; supported types are number, string,
- * Uint8Array, null, and bigint. Returns rows as a JS array of arrays
- * (positional column values), matching the Drizzle sqlite-proxy contract.
- */
-export function execSql(sql: string, params: Array<any>): ExecResult;
 export function unlockSession(password: Uint8Array): boolean;
 export function lockSession(): void;
 /**
@@ -111,6 +115,7 @@ export interface InitOutput {
   readonly unlockSession: (a: number, b: number) => [number, number, number];
   readonly validatePortableBlock: (a: number, b: number) => [number, number];
   readonly validatePortableKeypair: (a: number, b: number) => [number, number];
+  readonly verifyStorageGeneration: () => any;
   readonly writeNamespaceData: (a: number, b: number, c: number, d: number) => [number, number];
   readonly __wbg_wbg_rayon_poolbuilder_free: (a: number, b: number) => void;
   readonly initThreadPool: (a: number) => any;
@@ -137,11 +142,11 @@ export interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure99_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure80_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+  readonly closure101_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+  readonly closure105_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure671_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (a: number, b: number) => void;
-  readonly closure665_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure721_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure727_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

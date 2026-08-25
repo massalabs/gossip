@@ -46,6 +46,7 @@ import init, {
   namespaceDataLength,
   clearNamespace,
   destroySession,
+  verifyStorageGeneration,
   validatePortableKeypair,
   validatePortableBlock,
 } from '../assets/generated/wasm-secureStorage/secureStorage.js';
@@ -67,6 +68,8 @@ const RAYON_THREADS = Math.min(3, navigator.hardwareConcurrency || 3);
 const COVER_TRAFFIC_MIN_INTERVAL_MS = 10_000;
 /** Maximum delay between cover traffic ticks (ms). */
 const COVER_TRAFFIC_MAX_INTERVAL_MS = 30_000;
+const STORAGE_INSTALLATION_FENCE_LOCK_NAME =
+  'gossip-secure-storage-generation-install';
 
 export interface InitResult {
   /** True when IDB already holds keypairs from a prior run. */
@@ -137,6 +140,73 @@ export class SecureStorageWorkerApi {
   private portableImportStarting = false;
   private portableImportStartPromise: Promise<void> | null = null;
   private portableImportStartAbort: AbortController | null = null;
+  private generationStale = false;
+
+  private isGenerationMismatch(error: unknown): boolean {
+    return String(error).includes('secure-storage generation changed');
+  }
+
+  private markGenerationStale(): void {
+    this.generationStale = true;
+    this.closeRequested = true;
+    this.coverOnlyMode = false;
+    this.stopCoverTraffic();
+    if (this.coverRetryTimerId !== null) {
+      clearTimeout(this.coverRetryTimerId);
+      this.coverRetryTimerId = null;
+    }
+  }
+
+  private rejectQueuedForStaleGeneration(): void {
+    const error = new Error(
+      'Secure-storage generation changed; reload required'
+    );
+    for (const queued of this.operationQueue.splice(0)) {
+      if (queued.kind === 'cover') queued.resolve();
+      else queued.reject(error);
+    }
+  }
+
+  private async flushEncryptedFenced(signal?: AbortSignal): Promise<void> {
+    // Candidate installation owns this same exclusive Web Lock only for the
+    // active-generation switch. Every current worker therefore checks and
+    // commits its captured generation entirely before or after that switch,
+    // while long destination streaming never blocks unrelated durable writes.
+    try {
+      if (!navigator.locks) {
+        await flushEncrypted();
+        return;
+      }
+      await navigator.locks.request(
+        STORAGE_INSTALLATION_FENCE_LOCK_NAME,
+        { mode: 'exclusive', signal },
+        async () => flushEncrypted()
+      );
+    } catch (error) {
+      if (this.isGenerationMismatch(error)) this.markGenerationStale();
+      throw error;
+    }
+  }
+
+  private async verifyGenerationFenced<T>(operation: () => T): Promise<T> {
+    try {
+      if (!navigator.locks) {
+        await verifyStorageGeneration();
+        return operation();
+      }
+      return await navigator.locks.request(
+        STORAGE_INSTALLATION_FENCE_LOCK_NAME,
+        { mode: 'exclusive' },
+        async () => {
+          await verifyStorageGeneration();
+          return operation();
+        }
+      );
+    } catch (error) {
+      if (this.isGenerationMismatch(error)) this.markGenerationStale();
+      throw error;
+    }
+  }
 
   private async recoverDurableStorage(): Promise<void> {
     if (this.durableRecoveryPromise) {
@@ -151,6 +221,9 @@ export class SecureStorageWorkerApi {
     this.durableRecoveryPromise = recovery;
     try {
       await recovery;
+    } catch (error) {
+      if (this.isGenerationMismatch(error)) this.markGenerationStale();
+      throw error;
     } finally {
       if (this.durableRecoveryPromise === recovery) {
         this.durableRecoveryPromise = null;
@@ -171,6 +244,9 @@ export class SecureStorageWorkerApi {
     this.sqlRecoveryPromise = recovery;
     try {
       await recovery;
+    } catch (error) {
+      if (this.isGenerationMismatch(error)) this.markGenerationStale();
+      throw error;
     } finally {
       if (this.sqlRecoveryPromise === recovery) {
         this.sqlRecoveryPromise = null;
@@ -212,18 +288,40 @@ export class SecureStorageWorkerApi {
 
   private enqueueLifecycleOperation<T>(
     operation: () => Promise<T>,
-    allowDuringClose = false
+    allowDuringClose = false,
+    signal?: AbortSignal
   ): Promise<T> {
     if (this.closeRequested && !allowDuringClose) {
       return Promise.reject(new Error('Secure storage worker is closing'));
     }
+    if (signal?.aborted) {
+      return Promise.reject(
+        new DOMException('Operation aborted', 'AbortError')
+      );
+    }
     return new Promise<T>((resolve, reject) => {
-      this.operationQueue.push({
+      let queued!: QueuedLifecycleOperation;
+      const abort = () => {
+        const index = this.operationQueue.indexOf(queued);
+        if (index >= 0) {
+          this.operationQueue.splice(index, 1);
+          reject(new DOMException('Operation aborted', 'AbortError'));
+        }
+      };
+      queued = {
         kind: 'lifecycle',
-        operation,
+        operation: async () => {
+          signal?.removeEventListener('abort', abort);
+          if (signal?.aborted) {
+            throw new DOMException('Operation aborted', 'AbortError');
+          }
+          return operation();
+        },
         resolve: value => resolve(value as T),
         reject,
-      });
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      this.operationQueue.push(queued);
       this.pumpOperationQueue();
     });
   }
@@ -257,6 +355,10 @@ export class SecureStorageWorkerApi {
     this.operationPumpActive = true;
     try {
       while (this.operationQueue.length > 0) {
+        if (this.generationStale) {
+          this.rejectQueuedForStaleGeneration();
+          return;
+        }
         let queuedIndex = 0;
         if (this.sqlTransactionActive) {
           queuedIndex = this.operationQueue.findIndex(
@@ -269,7 +371,17 @@ export class SecureStorageWorkerApi {
         }
         const queued = this.operationQueue[queuedIndex];
         if (queued.kind === 'cover') {
-          const persisted = await this.runCoverPassAttempt();
+          let persisted: boolean;
+          try {
+            persisted = await this.runCoverPassAttempt();
+          } catch (error) {
+            if (this.isGenerationMismatch(error)) {
+              this.markGenerationStale();
+              this.rejectQueuedForStaleGeneration();
+              return;
+            }
+            throw error;
+          }
           if (!persisted) {
             this.scheduleCoverRetry();
             return;
@@ -337,6 +449,7 @@ export class SecureStorageWorkerApi {
     try {
       await this.ensureDurableStorageRecovered();
     } catch (error) {
+      if (this.isGenerationMismatch(error) || this.generationStale) throw error;
       logger.debug('[SecureStorage] durable cover recovery failed', error);
       return false;
     }
@@ -345,9 +458,10 @@ export class SecureStorageWorkerApi {
       for (const ns of COVER_TRAFFIC_NAMESPACES) {
         coverTrafficTick(ns);
       }
-      await flushEncrypted();
+      await this.flushEncryptedFenced();
       return true;
     } catch (error) {
+      if (this.isGenerationMismatch(error)) throw error;
       logger.debug('[SecureStorage] cover traffic tick failed', error);
       return false;
     }
@@ -477,7 +591,7 @@ export class SecureStorageWorkerApi {
         );
       }
       try {
-        await flushEncrypted();
+        await this.flushEncryptedFenced();
       } catch (error) {
         return this.recoverRejectedLifecycleOperation('create', error);
       }
@@ -535,7 +649,7 @@ export class SecureStorageWorkerApi {
     return this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
       closeDatabase();
-      await flushEncrypted();
+      await this.flushEncryptedFenced();
       lockSession();
     });
   }
@@ -564,7 +678,7 @@ export class SecureStorageWorkerApi {
       try {
         closeDatabase();
         destroySession(namespaces);
-        await flushEncrypted();
+        await this.flushEncryptedFenced();
       } catch (error) {
         return this.recoverRejectedLifecycleOperation('destroy', error);
       }
@@ -612,7 +726,9 @@ export class SecureStorageWorkerApi {
       await this.ensureDurableStorageRecovered();
       let result: ReturnType<typeof execSql>;
       try {
-        result = this.executeSqlStatement(sql, params);
+        result = await this.verifyGenerationFenced(() =>
+          this.executeSqlStatement(sql, params)
+        );
       } catch (error) {
         if (isFullRollback && this.sqlTransactionActive) {
           // SQLite rejected the only statement that can release transaction
@@ -634,7 +750,7 @@ export class SecureStorageWorkerApi {
 
       if (isCommit) {
         try {
-          await flushEncrypted();
+          await this.flushEncryptedFenced();
         } catch (error) {
           // SQLite already accepted COMMIT but its VFS transaction did not
           // become durable. Reset to the last committed IndexedDB image before
@@ -644,7 +760,7 @@ export class SecureStorageWorkerApi {
       } else if (!inTransaction) {
         if (kind === 'mutation') {
           try {
-            await flushEncrypted();
+            await this.flushEncryptedFenced();
           } catch (error) {
             // The autocommit statement already changed SQLite and its pending
             // VFS pages. A rejected durable flush must restore the last durable
@@ -679,27 +795,35 @@ export class SecureStorageWorkerApi {
     return this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
       writeNamespaceData(namespace, offset, data);
-      await flushEncrypted();
+      await this.flushEncryptedFenced();
     });
   }
 
-  readNamespaceData(
+  async readNamespaceData(
     namespace: number,
     offset: number,
     len: number
-  ): Uint8Array {
-    return readNamespaceData(namespace, offset, len);
+  ): Promise<Uint8Array> {
+    if (this.generationStale) {
+      throw new Error('Secure-storage generation changed; reload required');
+    }
+    return this.verifyGenerationFenced(() =>
+      readNamespaceData(namespace, offset, len)
+    );
   }
 
-  namespaceDataLength(namespace: number): number {
-    return namespaceDataLength(namespace);
+  async namespaceDataLength(namespace: number): Promise<number> {
+    if (this.generationStale) {
+      throw new Error('Secure-storage generation changed; reload required');
+    }
+    return this.verifyGenerationFenced(() => namespaceDataLength(namespace));
   }
 
   async clearNamespace(namespace: number): Promise<void> {
     return this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
       clearNamespace(namespace);
-      await flushEncrypted();
+      await this.flushEncryptedFenced();
     });
   }
 
@@ -726,7 +850,7 @@ export class SecureStorageWorkerApi {
       await this.ensureDurableStorageRecovered();
       clearNamespace(namespace);
       writeNamespaceData(namespace, 0, data);
-      await flushEncrypted();
+      await this.flushEncryptedFenced();
     });
   }
 
@@ -753,7 +877,7 @@ export class SecureStorageWorkerApi {
       return await this.enqueueLifecycleOperation(async () => {
         await this.ensureDurableStorageRecovered();
         closeDatabase();
-        await flushEncrypted();
+        await this.flushEncryptedFenced();
         lockSession();
         const transfer = await PortableWebExport.begin({
           validateKeypair: value => validatePortableKeypair(value),
@@ -795,21 +919,31 @@ export class SecureStorageWorkerApi {
       throw new Error('Portable transfer is already active');
     }
     this.portableImportStarting = true;
+    this.coverOnlyMode = false;
+    this.stopCoverTraffic();
+    this.closeRequested = true;
     const controller = new AbortController();
     this.portableImportStartAbort = controller;
-    // Validation writes only to an isolated `x:` candidate prefix and does
-    // not inspect or mutate active storage, so it must not wait behind the SQL
-    // lifecycle FIFO. This also lets AbortSignal cancel a pending Web Lock
-    // acquisition immediately instead of hanging behind unrelated work.
-    const start = (async () => {
-      this.portableImport = await PortableWebImport.begin(
-        {
-          validateKeypair: value => validatePortableKeypair(value),
-          validateBlock: value => validatePortableBlock(value),
-        },
-        controller.signal
-      );
-    })();
+    // Drain every operation accepted before import, lock the active store, and
+    // only then retain the cross-tab transfer lease. No active mutation from
+    // this worker can race candidate authorization or the generation switch.
+    const start = this.enqueueLifecycleOperation(
+      async () => {
+        await this.ensureDurableStorageRecovered();
+        closeDatabase();
+        await this.flushEncryptedFenced(controller.signal);
+        lockSession();
+        this.portableImport = await PortableWebImport.begin(
+          {
+            validateKeypair: value => validatePortableKeypair(value),
+            validateBlock: value => validatePortableBlock(value),
+          },
+          controller.signal
+        );
+      },
+      true,
+      controller.signal
+    );
     this.portableImportStartPromise = start;
     try {
       await start;
@@ -832,6 +966,19 @@ export class SecureStorageWorkerApi {
     const transfer = this.portableImport;
     if (!transfer) throw new Error('Portable import is not active');
     await transfer.finishValidation();
+  }
+
+  async installPortableImport(): Promise<{ generation: string }> {
+    const transfer = this.portableImport;
+    if (!transfer) throw new Error('Portable import is not active');
+    this.stopCoverTraffic();
+    this.closeRequested = true;
+    const result = await this.enqueueLifecycleOperation(
+      async () => transfer.install(),
+      true
+    );
+    this.portableImport = null;
+    return result;
   }
 
   async abortPortableTransfer(): Promise<void> {
@@ -859,7 +1006,7 @@ export class SecureStorageWorkerApi {
   async flush(): Promise<void> {
     return this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
-      await flushEncrypted();
+      await this.flushEncryptedFenced();
     });
   }
 
@@ -883,7 +1030,7 @@ export class SecureStorageWorkerApi {
     const closeOperation = this.enqueueLifecycleOperation(async () => {
       await this.ensureDurableStorageRecovered();
       closeDatabase();
-      await flushEncrypted();
+      await this.flushEncryptedFenced();
     }, true);
     this.closePromise = closeOperation;
     try {

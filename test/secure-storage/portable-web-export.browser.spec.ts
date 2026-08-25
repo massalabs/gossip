@@ -67,12 +67,21 @@ async function seed(entries: [string, Uint8Array][]): Promise<void> {
   db.close();
 }
 
-async function put(key: string, value: Uint8Array): Promise<void> {
+async function put(key: string, value: unknown): Promise<void> {
   const db = await openDatabase();
   const tx = db.transaction(STORE_NAME, 'readwrite');
   tx.objectStore(STORE_NAME).put(value, key);
   await transactionDone(tx);
   db.close();
+}
+
+async function getValue(key: string): Promise<unknown> {
+  const db = await openDatabase();
+  const tx = db.transaction(STORE_NAME, 'readonly');
+  const value = await request(tx.objectStore(STORE_NAME).get(key));
+  await transactionDone(tx);
+  db.close();
+  return value;
 }
 
 async function allKeys(): Promise<IDBValidKey[]> {
@@ -213,7 +222,9 @@ describe('PortableWebImport', () => {
     ).toHaveLength(records(expected).length);
 
     await transfer.close();
-    expect((await allKeys()).map(String)).toEqual(['s:0:sentinel']);
+    expect(
+      (await allKeys()).map(String).filter(key => key.startsWith('s:'))
+    ).toEqual(['s:0:sentinel']);
   });
 
   it('serializes concurrently submitted chunks in admission order', async () => {
@@ -316,11 +327,90 @@ describe('PortableWebImport', () => {
     await truncated.close();
   });
 
-  it('reclaims interrupted import candidates during startup cleanup', async () => {
-    await seed([['x:portable-import:stale:s:0:kp', new Uint8Array([1, 2, 3])]]);
-    await PortableWebExport.cleanupInterrupted();
+  it('atomically installs a validated candidate and rotates its generation', async () => {
+    const expected = await fixture();
+    await put('s:0:sentinel', new Uint8Array([7]));
+    const transfer = await PortableWebImport.begin(validators);
+    await transfer.push(expected);
+    await transfer.finishValidation();
+
+    const { generation } = await transfer.install();
+    expect(generation).toMatch(/^[0-9a-f]{32}$/);
+    expect(await getValue('m:active-generation')).toBe(generation);
+    // Legacy physical records may remain for pre-fence tabs, but the marker
+    // selects only the complete new generation.
+    expect(await getValue('s:0:sentinel')).toEqual(new Uint8Array([7]));
+    for (const [key, value] of records(expected)) {
+      expect(await getValue(`g:${generation}:${key}`)).toEqual(value);
+    }
     expect((await allKeys()).some(key => String(key).startsWith('x:'))).toBe(
       false
     );
+
+    await put('s:0:n:0:b:0', new Uint8Array(65_536));
+    const exported = await PortableWebExport.begin(validators);
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const chunk = await exported.read(256 * 1024);
+      if (chunk === null) break;
+      chunks.push(chunk);
+    }
+    await exported.close();
+    const roundTrip = new Uint8Array(
+      chunks.reduce((total, chunk) => total + chunk.byteLength, 0)
+    );
+    let offset = 0;
+    for (const chunk of chunks) {
+      roundTrip.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    expect(roundTrip).toEqual(expected);
+  });
+
+  it('does not delete an active generation when abort races installation', async () => {
+    const expected = await fixture();
+    const transfer = await PortableWebImport.begin(validators);
+    await transfer.push(expected);
+    await transfer.finishValidation();
+
+    const installation = transfer.install();
+    const close = transfer.close();
+    const { generation } = await installation;
+    await close;
+    expect(await getValue('m:active-generation')).toBe(generation);
+    expect(await getValue(`g:${generation}:s:0:kp`)).toEqual(
+      records(expected)[0][1]
+    );
+  });
+
+  it('rejects a stale candidate generation without changing active storage', async () => {
+    const expected = await fixture();
+    await put('s:0:sentinel', new Uint8Array([7]));
+    const transfer = await PortableWebImport.begin(validators);
+    await transfer.push(expected);
+    await transfer.finishValidation();
+    await put('m:active-generation', 'another-generation');
+
+    await expect(transfer.install()).rejects.toThrow(
+      'Secure-storage generation changed during import'
+    );
+    expect(await getValue('s:0:sentinel')).toEqual(new Uint8Array([7]));
+    expect(
+      (await allKeys()).some(key =>
+        String(key).startsWith('x:portable-import:')
+      )
+    ).toBe(true);
+    await transfer.close();
+  });
+
+  it('reclaims interrupted import candidates during startup cleanup', async () => {
+    await seed([
+      ['x:portable-import:stale:s:0:kp', new Uint8Array([1, 2, 3])],
+      ['g:0123456789abcdef0123456789abcdef:s:0:kp', new Uint8Array([4])],
+    ]);
+    await PortableWebExport.cleanupInterrupted();
+    const keys = (await allKeys()).map(String);
+    expect(keys.some(key => key.startsWith('x:'))).toBe(false);
+    expect(keys.some(key => key.startsWith('g:'))).toBe(false);
   });
 });

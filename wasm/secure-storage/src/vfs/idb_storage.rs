@@ -27,6 +27,8 @@ use crate::vfs::idb_state::{IdbKey, IdbStorageState};
 const DB_NAME: &str = "secure_storage";
 const STORE_NAME: &str = "blocks";
 const DB_VERSION: u32 = 1;
+const ACTIVE_GENERATION_KEY: &str = "m:active-generation";
+const LEGACY_GENERATION: &str = "legacy";
 
 // ── Low-level IDB helpers ───────────────────────────────────────────
 
@@ -45,18 +47,35 @@ async fn open_db() -> std::result::Result<IdbDatabase, JsValue> {
     Ok(req.into_future().await?)
 }
 
+fn valid_generation(generation: &str) -> bool {
+    generation == LEGACY_GENERATION
+        || (generation.len() == 32
+            && generation
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+}
+
+fn generation_prefix(generation: &str) -> String {
+    if generation == LEGACY_GENERATION {
+        String::new()
+    } else {
+        format!("g:{generation}:")
+    }
+}
+
 /// Load every active logical secure-storage entry.
 ///
 /// Browser export spools share this physical object store under an `x:`
 /// prefix so one IDB transaction can snapshot all active `s:` records. Never
 /// fetch spool values into the WASM cache: an interrupted large export must
 /// not double startup memory before the worker gets a chance to reclaim it.
-fn active_key_range() -> std::result::Result<web_sys::IdbKeyRange, JsValue> {
+fn active_key_range(generation: &str) -> std::result::Result<web_sys::IdbKeyRange, JsValue> {
+    let prefix = generation_prefix(generation);
     // `s;` is the exclusive lexical successor of the ASCII `s:` prefix.
-    // Malformed/future `s:` records stay in scope for strict typed rejection.
+    // Malformed/future active records stay in scope for strict rejection.
     web_sys::IdbKeyRange::bound_with_lower_open_and_upper_open(
-        &JsValue::from_str("s:"),
-        &JsValue::from_str("s;"),
+        &JsValue::from_str(&format!("{prefix}s:")),
+        &JsValue::from_str(&format!("{prefix}s;")),
         false,
         true,
     )
@@ -64,10 +83,11 @@ fn active_key_range() -> std::result::Result<web_sys::IdbKeyRange, JsValue> {
 
 async fn load_all_entries(
     db: &IdbDatabase,
+    generation: &str,
 ) -> std::result::Result<Vec<(String, Vec<u8>)>, JsValue> {
     let tx = db.transaction_on_one(STORE_NAME)?;
     let store = tx.object_store(STORE_NAME)?;
-    let range = active_key_range()?;
+    let range = active_key_range(generation)?;
     // Register both requests before either await so keys and values come from
     // one IndexedDB snapshot, while the range excludes export-owned `x:` data.
     let keys_req = store.get_all_keys_with_key(&range)?;
@@ -83,10 +103,15 @@ async fn load_all_entries(
     }
     let mut out = Vec::with_capacity(keys.length() as usize);
     for index in 0..keys.length() {
-        let key = keys
+        let physical_key = keys
             .get(index)
             .as_string()
             .ok_or_else(|| JsValue::from_str("invalid secure-storage key"))?;
+        let prefix = generation_prefix(generation);
+        let key = physical_key
+            .strip_prefix(&prefix)
+            .ok_or_else(|| JsValue::from_str("invalid secure-storage generation key"))?
+            .to_owned();
         let val = Uint8Array::new(&values.get(index));
         let mut buf = vec![0u8; val.length() as usize];
         val.copy_to(&mut buf);
@@ -98,22 +123,66 @@ async fn load_all_entries(
 /// True if the store contains at least one active logical record. Export
 /// spools alone never turn a fresh installation into a locked one.
 async fn has_any_data(db: &IdbDatabase) -> std::result::Result<bool, JsValue> {
+    let generation = read_active_generation(db).await?;
     let tx = db.transaction_on_one(STORE_NAME)?;
     let store = tx.object_store(STORE_NAME)?;
-    let count = store.count_with_key(&active_key_range()?)?.await?;
+    let count = store
+        .count_with_key(&active_key_range(&generation)?)?
+        .await?;
     tx.await.into_result()?;
     Ok(count > 0)
 }
 
-/// Apply puts and deletes in a single atomic readwrite transaction.
+async fn read_active_generation(db: &IdbDatabase) -> std::result::Result<String, JsValue> {
+    let read_tx = db.transaction_on_one(STORE_NAME)?;
+    let value = read_tx
+        .object_store(STORE_NAME)?
+        .get_owned(ACTIVE_GENERATION_KEY)?
+        .await?;
+    read_tx.await.into_result()?;
+    match value {
+        Some(value) => value
+            .as_string()
+            .filter(|value| valid_generation(value))
+            .ok_or_else(|| JsValue::from_str("invalid secure-storage generation marker")),
+        None => Ok(LEGACY_GENERATION.to_owned()),
+    }
+}
+
+async fn assert_active_generation(
+    db: &IdbDatabase,
+    expected: &str,
+) -> std::result::Result<(), JsValue> {
+    let tx = db.transaction_on_one(STORE_NAME)?;
+    let store = tx.object_store(STORE_NAME)?;
+    let value = store.get_owned(ACTIVE_GENERATION_KEY)?.await?;
+    tx.await.into_result()?;
+    let current = value
+        .and_then(|value| value.as_string())
+        .unwrap_or_else(|| LEGACY_GENERATION.to_owned());
+    if current != expected {
+        return Err(JsValue::from_str(
+            "secure-storage generation changed; reload required",
+        ));
+    }
+    Ok(())
+}
+
+/// Apply puts and deletes in a single atomic readwrite transaction, fenced by
+/// the generation captured when this worker loaded its in-memory state.
 async fn batch_apply(
     db: &IdbDatabase,
+    expected_generation: &str,
     puts: &[(String, Uint8Array)],
     deletes: &[String],
 ) -> std::result::Result<(), JsValue> {
     if puts.is_empty() && deletes.is_empty() {
         return Ok(());
     }
+    // The worker holds the portable-storage Web Lock across this check and
+    // commit. Import uses the same exclusive lock for its generation switch,
+    // so the two IndexedDB transactions form one fenced logical boundary.
+    assert_active_generation(db, expected_generation).await?;
     let tx = db.transaction_on_one_with_mode(STORE_NAME, IdbTransactionMode::Readwrite)?;
     let store = tx.object_store(STORE_NAME)?;
     for k in deletes {
@@ -133,6 +202,7 @@ async fn batch_apply(
 /// `RefCell` (single-threaded WASM, no `Mutex` needed).
 pub struct IdbBlockStorage {
     db: IdbDatabase,
+    generation: String,
     state: RefCell<IdbStorageState>,
 }
 
@@ -152,11 +222,13 @@ impl IdbBlockStorage {
     /// `IdbStorageState::from_entries` for the exact rejection predicates.
     pub async fn open() -> std::result::Result<Self, JsValue> {
         let db = open_db().await?;
-        let entries = load_all_entries(&db).await?;
+        let generation = read_active_generation(&db).await?;
+        let entries = load_all_entries(&db, &generation).await?;
         let entries_iter = entries.iter().map(|(k, v)| (k.as_str(), v.as_slice()));
         let (state, _skipped) = IdbStorageState::from_entries(entries_iter);
         Ok(Self {
             db,
+            generation,
             state: RefCell::new(state),
         })
     }
@@ -169,12 +241,18 @@ impl IdbBlockStorage {
         has_any_data(&db).await
     }
 
+    /// Reject when another tab selected a different active generation.
+    pub async fn verify_generation(&self) -> std::result::Result<(), JsValue> {
+        assert_active_generation(&self.db, &self.generation).await
+    }
+
     /// Discard every pending in-memory mutation and reload the last durable
     /// IndexedDB snapshot. Lifecycle operations use this after a rejected
     /// transaction so cover traffic cannot later commit a failed allocation or
     /// destruction.
     pub async fn reload_durable(&self) -> std::result::Result<(), JsValue> {
-        let entries = load_all_entries(&self.db).await?;
+        assert_active_generation(&self.db, &self.generation).await?;
+        let entries = load_all_entries(&self.db, &self.generation).await?;
         let entries_iter = entries.iter().map(|(k, v)| (k.as_str(), v.as_slice()));
         let (state, _skipped) = IdbStorageState::from_entries(entries_iter);
         *self.state.borrow_mut() = state;
@@ -194,6 +272,10 @@ impl IdbBlockStorage {
     /// re-marked dirty naturally and captured at the next drain —
     /// no race, no data loss, even when overwriting the same block.
     pub async fn persist_dirty(&self) -> std::result::Result<(), JsValue> {
+        // Even a clean durable boundary fences stale workers immediately.
+        // The worker holds the installation Web Lock across this check.
+        assert_active_generation(&self.db, &self.generation).await?;
+
         // Phase 1: drain (sync, under borrow_mut). Atomically empties
         // the dirty sets and captures their contents.
         let snapshot = {
@@ -216,32 +298,42 @@ impl IdbBlockStorage {
         let mut puts: Vec<(String, Uint8Array)> =
             Vec::with_capacity(snapshot.block_puts.len() + snapshot.keypair_puts.len());
         let mut deletes: Vec<String> = Vec::with_capacity(snapshot.block_deletes.len());
+        let generation_prefix = generation_prefix(&self.generation);
         for ((session, namespace, idx), data) in &snapshot.block_puts {
-            let key = IdbKey::Block {
-                session: *session,
-                namespace: *namespace,
-                idx: *idx,
-            }
-            .encode();
+            let key = format!(
+                "{generation_prefix}{}",
+                IdbKey::Block {
+                    session: *session,
+                    namespace: *namespace,
+                    idx: *idx,
+                }
+                .encode()
+            );
             puts.push((key, Uint8Array::from(&data[..])));
         }
         for (session, data) in &snapshot.keypair_puts {
-            let key = IdbKey::Keypair { session: *session }.encode();
+            let key = format!(
+                "{generation_prefix}{}",
+                IdbKey::Keypair { session: *session }.encode()
+            );
             puts.push((key, Uint8Array::from(data.as_slice())));
         }
         for (session, namespace, idx) in &snapshot.block_deletes {
-            let key = IdbKey::Block {
-                session: *session,
-                namespace: *namespace,
-                idx: *idx,
-            }
-            .encode();
+            let key = format!(
+                "{generation_prefix}{}",
+                IdbKey::Block {
+                    session: *session,
+                    namespace: *namespace,
+                    idx: *idx,
+                }
+                .encode()
+            );
             deletes.push(key);
         }
 
         // Phase 2: atomic commit to IDB. On failure, restore the
         // snapshot so the next flush will retry.
-        if let Err(e) = batch_apply(&self.db, &puts, &deletes).await {
+        if let Err(e) = batch_apply(&self.db, &self.generation, &puts, &deletes).await {
             self.state.borrow_mut().restore_pending(snapshot);
             return Err(e);
         }

@@ -11,6 +11,8 @@ const BLOCK_BYTES = 65_536;
 const MAGIC = new TextEncoder().encode('GOSSIPBK');
 const EXPORT_SPOOL_PREFIX = 'x:portable-export:';
 const IMPORT_SPOOL_PREFIX = 'x:portable-import:';
+const ACTIVE_GENERATION_KEY = 'm:active-generation';
+const LEGACY_GENERATION = 'legacy';
 const MAX_TRANSFER_CHUNK_BYTES = 1024 * 1024;
 const MAX_KEYPAIR_VALUE_BYTES = 16 * 1024 * 1024;
 const MAX_QUEUED_IMPORT_BYTES = 2 * MAX_TRANSFER_CHUNK_BYTES;
@@ -48,6 +50,7 @@ interface CrossTabLease {
 }
 
 const EXPORT_LOCK_NAME = 'gossip-secure-storage-portable-export';
+const INSTALLATION_FENCE_LOCK_NAME = 'gossip-secure-storage-generation-install';
 
 async function acquireExportLease(
   signal?: AbortSignal
@@ -179,10 +182,15 @@ function spoolPrefix(transferId: string): string {
   return `${EXPORT_SPOOL_PREFIX}${transferId}:`;
 }
 
+function activeRecordPrefix(generation: string): string {
+  return generation === LEGACY_GENERATION ? '' : `g:${generation}:`;
+}
+
 async function inspectAndSnapshotLayout(
   db: IDBDatabase,
   transferId: string,
-  validators: PortableWebValidators
+  validators: PortableWebValidators,
+  generation: string
 ): Promise<Layout> {
   const keypairs = Array<boolean>(SESSION_COUNT).fill(false);
   const counts = Array.from({ length: SESSION_COUNT }, () => [0, 0]);
@@ -197,6 +205,7 @@ async function inspectAndSnapshotLayout(
   const tx = db.transaction(STORE_NAME, 'readwrite');
   const store = tx.objectStore(STORE_NAME);
   const prefix = spoolPrefix(transferId);
+  const activePrefix = activeRecordPrefix(generation);
   let layout: Layout | null = null;
   const done = transactionDone(tx);
   // The cursor path reports the more specific validation error. Attach an
@@ -205,7 +214,7 @@ async function inspectAndSnapshotLayout(
   void done.catch(() => {});
   await new Promise<void>((resolve, reject) => {
     const cursorRequest = store.openCursor(
-      IDBKeyRange.bound('s:', 's;', false, true)
+      IDBKeyRange.bound(`${activePrefix}s:`, `${activePrefix}s;`, false, true)
     );
     cursorRequest.onerror = () =>
       reject(cursorRequest.error ?? new Error('IndexedDB cursor failed'));
@@ -246,7 +255,10 @@ async function inspectAndSnapshotLayout(
           resolve();
           return;
         }
-        const key = parseKey(cursor.key);
+        if (typeof cursor.key !== 'string') {
+          throw new Error('Invalid secure-storage key');
+        }
+        const key = parseKey(cursor.key.slice(activePrefix.length));
         const value = asBytes(cursor.value);
         if (key.kind === 'keypair') {
           if (keypairs[key.slot]) throw new Error('Duplicate storage key');
@@ -363,6 +375,7 @@ export class PortableWebExport {
       db = await openDatabase();
       await deleteSpools(db, EXPORT_SPOOL_PREFIX);
       await deleteSpools(db, IMPORT_SPOOL_PREFIX);
+      await cleanupInactiveGenerations(db);
     } finally {
       db?.close();
       lease.release();
@@ -379,8 +392,15 @@ export class PortableWebExport {
       db = await openDatabase();
       await deleteSpools(db, EXPORT_SPOOL_PREFIX);
       await deleteSpools(db, IMPORT_SPOOL_PREFIX);
+      await cleanupInactiveGenerations(db);
       const transferId = randomTransferId();
-      const layout = await inspectAndSnapshotLayout(db, transferId, validators);
+      const generation = await readActiveGeneration(db);
+      const layout = await inspectAndSnapshotLayout(
+        db,
+        transferId,
+        validators,
+        generation
+      );
       return new PortableWebExport(db, lease, transferId, layout, validators);
     } catch (error) {
       db?.close();
@@ -528,6 +548,136 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
   return difference === 0;
 }
 
+async function readActiveGeneration(db: IDBDatabase): Promise<string> {
+  const tx = db.transaction(STORE_NAME, 'readonly');
+  const existing = await request(
+    tx.objectStore(STORE_NAME).get(ACTIVE_GENERATION_KEY)
+  );
+  await transactionDone(tx);
+  if (existing === undefined) return LEGACY_GENERATION;
+  if (
+    typeof existing === 'string' &&
+    (existing === LEGACY_GENERATION || /^[0-9a-f]{32}$/.test(existing))
+  ) {
+    return existing;
+  }
+  throw new Error('Invalid secure-storage generation marker');
+}
+
+function prefixRange(prefix: string): IDBKeyRange {
+  if (!prefix.endsWith(':')) throw new Error('Invalid storage prefix');
+  return IDBKeyRange.bound(prefix, `${prefix.slice(0, -1)};`, false, true);
+}
+
+async function deletePrefix(db: IDBDatabase, prefix: string): Promise<void> {
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const store = tx.objectStore(STORE_NAME);
+  await new Promise<void>((resolve, reject) => {
+    const cursorRequest = store.openKeyCursor(prefixRange(prefix));
+    cursorRequest.onerror = () =>
+      reject(cursorRequest.error ?? new Error('IndexedDB cursor failed'));
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) {
+        resolve();
+        return;
+      }
+      store.delete(cursor.key);
+      cursor.continue();
+    };
+  });
+  await transactionDone(tx);
+}
+
+async function cleanupInactiveGenerations(db: IDBDatabase): Promise<void> {
+  const active = await readActiveGeneration(db);
+  const activePrefix = activeRecordPrefix(active);
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const store = tx.objectStore(STORE_NAME);
+  await new Promise<void>((resolve, reject) => {
+    const cursorRequest = store.openKeyCursor(prefixRange('g:'));
+    cursorRequest.onerror = () =>
+      reject(cursorRequest.error ?? new Error('IndexedDB cursor failed'));
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) {
+        resolve();
+        return;
+      }
+      if (
+        active === LEGACY_GENERATION ||
+        typeof cursor.key !== 'string' ||
+        !cursor.key.startsWith(activePrefix)
+      ) {
+        store.delete(cursor.key);
+      }
+      cursor.continue();
+    };
+  });
+  await transactionDone(tx);
+}
+
+async function stageCandidateGeneration(
+  db: IDBDatabase,
+  transferId: string,
+  generation: string
+): Promise<void> {
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const done = transactionDone(tx);
+  void done.catch(() => {});
+  const store = tx.objectStore(STORE_NAME);
+  const candidatePrefix = `${IMPORT_SPOOL_PREFIX}${transferId}:`;
+  const nextPrefix = activeRecordPrefix(generation);
+  let copied = 0;
+  await new Promise<void>((resolve, reject) => {
+    const cursorRequest = store.openCursor(prefixRange(candidatePrefix));
+    cursorRequest.onerror = () =>
+      reject(cursorRequest.error ?? new Error('IndexedDB cursor failed'));
+    cursorRequest.onsuccess = () => {
+      try {
+        const cursor = cursorRequest.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+        if (typeof cursor.key !== 'string') {
+          throw new Error('Invalid portable candidate key');
+        }
+        const activeKey = cursor.key.slice(candidatePrefix.length);
+        parseKey(activeKey);
+        store.put(cursor.value, `${nextPrefix}${activeKey}`);
+        copied += 1;
+        cursor.continue();
+      } catch (error) {
+        tx.abort();
+        reject(error);
+      }
+    };
+  });
+  if (copied === 0) {
+    tx.abort();
+    throw new Error('Portable import candidate is empty');
+  }
+  await done;
+}
+
+async function switchActiveGeneration(
+  db: IDBDatabase,
+  expectedGeneration: string,
+  nextGeneration: string
+): Promise<void> {
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const store = tx.objectStore(STORE_NAME);
+  const storedGeneration = await request(store.get(ACTIVE_GENERATION_KEY));
+  const current = storedGeneration ?? LEGACY_GENERATION;
+  if (current !== expectedGeneration) {
+    tx.abort();
+    throw new Error('Secure-storage generation changed during import');
+  }
+  store.put(nextGeneration, ACTIVE_GENERATION_KEY);
+  await transactionDone(tx);
+}
+
 async function putImportRecord(
   db: IDBDatabase,
   transferId: string,
@@ -570,6 +720,7 @@ export class PortableWebImport {
   private operationTail: Promise<void> = Promise.resolve();
   private queuedBytes = 0;
   private finishing = false;
+  private installing = false;
   private closing = false;
   private closePromise: Promise<void> | null = null;
   private declaredRecordCount = 0;
@@ -583,12 +734,15 @@ export class PortableWebImport {
   private namespaceZeroBlocks = 0;
   private expectedDigest: Uint8Array | null = null;
   private totalReceived = 0;
+  private digestVerified = false;
+  private stagedGeneration: string | null = null;
 
   private constructor(
     db: IDBDatabase,
     lease: CrossTabLease,
     private readonly transferId: string,
-    private readonly validators: PortableWebValidators
+    private readonly validators: PortableWebValidators,
+    private readonly sourceGeneration: string
   ) {
     this.db = db;
     this.lease = lease;
@@ -603,7 +757,15 @@ export class PortableWebImport {
     try {
       db = await openDatabase();
       await deleteSpools(db, IMPORT_SPOOL_PREFIX);
-      return new PortableWebImport(db, lease, randomTransferId(), validators);
+      await cleanupInactiveGenerations(db);
+      const sourceGeneration = await readActiveGeneration(db);
+      return new PortableWebImport(
+        db,
+        lease,
+        randomTransferId(),
+        validators,
+        sourceGeneration
+      );
     } catch (error) {
       db?.close();
       lease.release();
@@ -781,7 +943,7 @@ export class PortableWebImport {
     }
   }
 
-  private enqueue(operation: () => Promise<void>): Promise<void> {
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.operationTail.then(operation, operation);
     this.operationTail = result.then(
       () => undefined,
@@ -863,6 +1025,7 @@ export class PortableWebImport {
       }
       this.expectedDigest.fill(0);
       this.expectedDigest = null;
+      this.digestVerified = true;
       this.pending.fill(0);
       this.db?.close();
       this.db = null;
@@ -872,12 +1035,74 @@ export class PortableWebImport {
     });
   }
 
+  install(): Promise<{ generation: string }> {
+    if (
+      !this.digestVerified ||
+      this.closing ||
+      this.installing ||
+      this.stage !== 'validated'
+    ) {
+      return Promise.reject(new Error('Portable import is not validated'));
+    }
+    this.installing = true;
+    const installation = this.enqueue(async () => {
+      if (!this.db) this.db = await openDatabase();
+      if (!navigator.locks) {
+        throw new Error('This browser cannot safely install a backup');
+      }
+      const generation = this.stagedGeneration ?? randomTransferId();
+      if (!this.stagedGeneration) {
+        await stageCandidateGeneration(this.db, this.transferId, generation);
+        this.stagedGeneration = generation;
+      }
+      await navigator.locks.request(
+        INSTALLATION_FENCE_LOCK_NAME,
+        { mode: 'exclusive' },
+        async () => {
+          if (!this.db) throw new Error('Portable import is closed');
+          await switchActiveGeneration(
+            this.db,
+            this.sourceGeneration,
+            generation
+          );
+        }
+      );
+      // The marker switch is already committed. Cleanup cannot roll it back;
+      // restart cleanup removes any leftovers if quota/storage errors occur.
+      await deletePrefix(
+        this.db,
+        `${IMPORT_SPOOL_PREFIX}${this.transferId}:`
+      ).catch(() => {});
+      if (this.sourceGeneration !== LEGACY_GENERATION) {
+        await deletePrefix(
+          this.db,
+          activeRecordPrefix(this.sourceGeneration)
+        ).catch(() => {});
+      }
+      this.db.close();
+      this.db = null;
+      this.stage = 'closed';
+      const lease = this.lease;
+      this.lease = null;
+      lease?.release();
+      if (lease) await lease.completion;
+      return { generation };
+    });
+    void installation.catch(() => {
+      this.installing = false;
+    });
+    return installation;
+  }
+
   close(): Promise<void> {
     if (this.stage === 'closed') return Promise.resolve();
     if (this.closePromise) return this.closePromise;
     this.closing = true;
     const closing = (async () => {
       await this.operationTail;
+      // Installation may have completed while close waited. Its generation is
+      // now active and must never be treated as an abort-owned staging prefix.
+      if (this.stage === 'closed') return;
       let lease = this.lease;
       if (!lease) lease = await acquireExportLease();
       if (!this.db) this.db = await openDatabase();
@@ -886,6 +1111,12 @@ export class PortableWebImport {
           this.db,
           `${IMPORT_SPOOL_PREFIX}${this.transferId}:`
         );
+        if (this.stagedGeneration) {
+          await deletePrefix(
+            this.db,
+            activeRecordPrefix(this.stagedGeneration)
+          );
+        }
       } catch (error) {
         this.db.close();
         this.db = null;
