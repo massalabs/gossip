@@ -21,19 +21,29 @@ describe('secure-storage native portable transfer', () => {
     const chunks = [btoa('first'), btoa('second'), null];
     nativeCall.mockImplementation(
       ({ method }: { method: string; args: string }) => {
+        if (method === 'beginPortableExport') return result(11);
         if (method === 'readPortableExportChunk') return result(chunks.shift());
         return result(null);
       }
     );
     const written: number[][] = [];
+    const progress: Array<[number, number]> = [];
 
-    await SecureStorageNative.exportPortableV1(chunk => {
-      written.push(Array.from(chunk));
-    });
+    await SecureStorageNative.exportPortableV1(
+      chunk => {
+        written.push(Array.from(chunk));
+      },
+      value => progress.push([value.writtenBytes, value.totalBytes])
+    );
 
     expect(written).toEqual([
       Array.from(new TextEncoder().encode('first')),
       Array.from(new TextEncoder().encode('second')),
+    ]);
+    expect(progress).toEqual([
+      [0, 11],
+      [5, 11],
+      [11, 11],
     ]);
     expect(nativeCall.mock.calls.map(([options]) => options.method)).toEqual([
       'beginPortableExport',
@@ -50,6 +60,7 @@ describe('secure-storage native portable transfer', () => {
   it('aborts export when the destination rejects a chunk', async () => {
     nativeCall.mockImplementation(
       ({ method }: { method: string; args: string }) => {
+        if (method === 'beginPortableExport') return result(5);
         if (method === 'readPortableExportChunk') return result(btoa('chunk'));
         return result(null);
       }
@@ -119,6 +130,7 @@ describe('secure-storage native portable transfer', () => {
     });
     nativeCall.mockImplementation(
       ({ method }: { method: string; args: string }) => {
+        if (method === 'beginPortableExport') return result(0);
         if (method === 'readPortableExportChunk') return blockedRead;
         return result(null);
       }

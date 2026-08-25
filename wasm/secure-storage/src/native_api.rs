@@ -301,8 +301,8 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
         }
         "beginPortableExport" => {
             prepare_portable_transfer()?;
-            native_vfs::begin_portable_export()?;
-            Ok("null".into())
+            let total_bytes = native_vfs::begin_portable_export()?;
+            Ok(serde_json::to_string(&total_bytes)?)
         }
         "readPortableExportChunk" => {
             let a: ReadPortableChunkArgs = parse(args)?;

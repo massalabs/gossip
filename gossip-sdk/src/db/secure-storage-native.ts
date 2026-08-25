@@ -24,6 +24,13 @@ const raw = registerPlugin<RawPlugin>('SecureStorageNative');
 const PORTABLE_CHUNK_BYTES = 256 * 1024;
 
 export type PortableChunkWriter = (chunk: Uint8Array) => void | Promise<void>;
+export interface PortableTransferProgress {
+  writtenBytes: number;
+  totalBytes: number;
+}
+export type PortableProgressCallback = (
+  progress: PortableTransferProgress
+) => void;
 export type PortableChunkReader = () =>
   | Uint8Array
   | null
@@ -141,7 +148,10 @@ export interface SecureStorageNativePlugin {
   close(): Promise<void>;
 
   /** Stream a locked whole-store snapshot without materializing it in JS. */
-  exportPortableV1(write: PortableChunkWriter): Promise<void>;
+  exportPortableV1(
+    write: PortableChunkWriter,
+    onProgress?: PortableProgressCallback
+  ): Promise<void>;
 
   /** Atomically replace locked storage after validating a complete stream. */
   importPortableV1(read: PortableChunkReader): Promise<void>;
@@ -256,10 +266,12 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   async close() {
     await callNative('close');
   },
-  async exportPortableV1(write) {
+  async exportPortableV1(write, onProgress) {
     return runPortableTransfer(async () => {
       let finished = false;
-      await callNative('beginPortableExport');
+      let writtenBytes = 0;
+      const totalBytes = await callNative<number>('beginPortableExport');
+      onProgress?.({ writtenBytes, totalBytes });
       try {
         while (true) {
           const encoded = await callNative<string | null>(
@@ -267,7 +279,13 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
             { maxBytes: PORTABLE_CHUNK_BYTES }
           );
           if (encoded === null) break;
-          await write(base64ToU8(encoded));
+          const chunk = base64ToU8(encoded);
+          await write(chunk);
+          writtenBytes += chunk.byteLength;
+          onProgress?.({ writtenBytes, totalBytes });
+        }
+        if (writtenBytes !== totalBytes) {
+          throw new Error('Native portable export length changed');
         }
         await callNative('finishPortableExport');
         finished = true;

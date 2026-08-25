@@ -24,6 +24,7 @@ import { execStatements } from './exec-utils.js';
 import type { SecureStorageWorkerProxy } from './secure-storage-worker-api.js';
 import type {
   PortableChunkWriter,
+  PortableProgressCallback,
   SecureStorageNativePlugin,
 } from './secure-storage-native.js';
 import {
@@ -41,6 +42,11 @@ import {
   SQL_NAMESPACE,
 } from './secure-storage-namespaces.js';
 export { SecureStorageRecoveryRequiredError } from './secure-storage-errors.js';
+export type {
+  PortableChunkWriter,
+  PortableProgressCallback,
+  PortableTransferProgress,
+} from './secure-storage-native.js';
 export {
   SQL_NAMESPACE,
   SESSION_BLOB_NAMESPACE,
@@ -900,7 +906,8 @@ export class DatabaseConnection {
   /** Stream a stable locked snapshot. This operation is terminal for the
    * current web worker even when the destination later fails or cancels. */
   async secureStorageExportPortableV1(
-    write: PortableChunkWriter
+    write: PortableChunkWriter,
+    onProgress?: PortableProgressCallback
   ): Promise<void> {
     if (this.state.storageState !== 'locked') {
       throw new Error('Portable export requires locked secure storage');
@@ -914,20 +921,27 @@ export class DatabaseConnection {
     this.state.portableTransferActive = true;
     try {
       if (this.state.useNativePlugin) {
-        await this.requireNativePlugin().exportPortableV1(write);
+        await this.requireNativePlugin().exportPortableV1(write, onProgress);
         return;
       }
 
       const proxy = this.requireSecureProxy();
       let finished = false;
+      let writtenBytes = 0;
       try {
-        await proxy.beginPortableExport();
+        const { totalBytes } = await proxy.beginPortableExport();
+        onProgress?.({ writtenBytes, totalBytes });
         while (true) {
           const chunk = await proxy.readPortableExportChunk(256 * 1024);
           if (chunk === null) break;
           // Ownership passes to the writer. It may retain or transfer the
           // chunk, so this layer must not mutate it after the await.
           await write(chunk);
+          writtenBytes += chunk.byteLength;
+          onProgress?.({ writtenBytes, totalBytes });
+        }
+        if (writtenBytes !== totalBytes) {
+          throw new Error('Browser portable export length changed');
         }
         await proxy.finishPortableExport();
         finished = true;

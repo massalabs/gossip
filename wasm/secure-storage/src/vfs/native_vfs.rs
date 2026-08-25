@@ -485,7 +485,7 @@ fn require_locked_for_transfer(st: &VfsState) -> Result<()> {
 }
 
 /// Flush a canonical snapshot to a bounded spool and open it for chunked reads.
-pub fn begin_portable_export() -> Result<()> {
+pub fn begin_portable_export() -> Result<u64> {
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
@@ -500,12 +500,13 @@ pub fn begin_portable_export() -> Result<()> {
         file.flush()?;
         file.sync_all()?;
         drop(file);
+        let total_bytes = fs::metadata(&path)?.len();
         let file = File::open(&path)?;
         st.transfer = Some(PortableTransfer::Export {
             file,
             path: path.clone(),
         });
-        Ok(())
+        Ok(total_bytes)
     })();
     if result.is_err() {
         let _ = fs::remove_file(path);

@@ -95,7 +95,10 @@ import {
   type SdkEvents,
 } from './core/SdkEventEmitter.js';
 import { SdkPolling } from './core/SdkPolling.js';
-import type { PortableChunkWriter } from './db/secure-storage-native.js';
+import type {
+  PortableChunkWriter,
+  PortableProgressCallback,
+} from './db/secure-storage-native.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -1124,7 +1127,10 @@ class GossipSdk {
    * failure, and cancellation all leave storage locked; callers must route to
    * login/reload rather than reopen stale services.
    */
-  async exportPortableV1(write: PortableChunkWriter): Promise<void> {
+  async exportPortableV1(
+    write: PortableChunkWriter,
+    onProgress?: PortableProgressCallback
+  ): Promise<void> {
     if (this._portableExportActive) {
       throw new Error('Portable export is already active');
     }
@@ -1154,7 +1160,7 @@ class GossipSdk {
           'Portable export requires an existing locked installation'
         );
       }
-      await conn.secureStorageExportPortableV1(write);
+      await conn.secureStorageExportPortableV1(write, onProgress);
     } finally {
       this._portableExportActive = false;
     }
