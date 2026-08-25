@@ -1129,8 +1129,12 @@ class GossipSdk {
    */
   async exportPortableV1(
     write: PortableChunkWriter,
-    onProgress?: PortableProgressCallback
+    onProgress?: PortableProgressCallback,
+    signal?: AbortSignal
   ): Promise<void> {
+    if (signal?.aborted) {
+      throw new DOMException('Backup cancelled', 'AbortError');
+    }
     if (this._portableExportActive) {
       throw new Error('Portable export is already active');
     }
@@ -1160,7 +1164,7 @@ class GossipSdk {
           'Portable export requires an existing locked installation'
         );
       }
-      await conn.secureStorageExportPortableV1(write, onProgress);
+      await conn.secureStorageExportPortableV1(write, onProgress, signal);
     } finally {
       this._portableExportActive = false;
     }

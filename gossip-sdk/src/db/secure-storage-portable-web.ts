@@ -98,6 +98,14 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
+function abortTransaction(tx: IDBTransaction): void {
+  try {
+    tx.abort();
+  } catch {
+    // The transaction may already have aborted in response to cancellation.
+  }
+}
+
 function transactionDone(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
@@ -190,7 +198,8 @@ async function inspectAndSnapshotLayout(
   db: IDBDatabase,
   transferId: string,
   validators: PortableWebValidators,
-  generation: string
+  generation: string,
+  signal?: AbortSignal
 ): Promise<Layout> {
   const keypairs = Array<boolean>(SESSION_COUNT).fill(false);
   const counts = Array.from({ length: SESSION_COUNT }, () => [0, 0]);
@@ -202,7 +211,10 @@ async function inspectAndSnapshotLayout(
   // copies it to an export-owned prefix. Later destination backpressure cannot
   // keep an IndexedDB transaction alive, so streaming reads use this immutable
   // spool rather than mixing records committed by another tab between chunks.
+  if (signal?.aborted) throw new DOMException('Backup cancelled', 'AbortError');
   const tx = db.transaction(STORE_NAME, 'readwrite');
+  const abort = () => abortTransaction(tx);
+  signal?.addEventListener('abort', abort, { once: true });
   const store = tx.objectStore(STORE_NAME);
   const prefix = spoolPrefix(transferId);
   const activePrefix = activeRecordPrefix(generation);
@@ -283,12 +295,25 @@ async function inspectAndSnapshotLayout(
         store.put(value, `${prefix}${encodedKey(key)}`);
         cursor.continue();
       } catch (error) {
-        tx.abort();
-        reject(error);
+        abortTransaction(tx);
+        reject(
+          signal?.aborted
+            ? new DOMException('Backup cancelled', 'AbortError')
+            : error
+        );
       }
     };
   });
-  await done;
+  try {
+    await done;
+  } catch (error) {
+    if (signal?.aborted) {
+      throw new DOMException('Backup cancelled', 'AbortError');
+    }
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+  }
   if (!layout) throw new Error('Invalid portable layout');
   return layout;
 }
@@ -384,9 +409,10 @@ export class PortableWebExport {
   }
 
   static async begin(
-    validators: PortableWebValidators
+    validators: PortableWebValidators,
+    signal?: AbortSignal
   ): Promise<PortableWebExport> {
-    const lease = await acquireExportLease();
+    const lease = await acquireExportLease(signal);
     let db: IDBDatabase | null = null;
     try {
       db = await openDatabase();
@@ -399,7 +425,8 @@ export class PortableWebExport {
         db,
         transferId,
         validators,
-        generation
+        generation,
+        signal
       );
       return new PortableWebExport(db, lease, transferId, layout, validators);
     } catch (error) {
@@ -649,13 +676,13 @@ async function stageCandidateGeneration(
         copied += 1;
         cursor.continue();
       } catch (error) {
-        tx.abort();
+        abortTransaction(tx);
         reject(error);
       }
     };
   });
   if (copied === 0) {
-    tx.abort();
+    abortTransaction(tx);
     throw new Error('Portable import candidate is empty');
   }
   await done;
@@ -671,7 +698,7 @@ async function switchActiveGeneration(
   const storedGeneration = await request(store.get(ACTIVE_GENERATION_KEY));
   const current = storedGeneration ?? LEGACY_GENERATION;
   if (current !== expectedGeneration) {
-    tx.abort();
+    abortTransaction(tx);
     throw new Error('Secure-storage generation changed during import');
   }
   store.put(nextGeneration, ACTIVE_GENERATION_KEY);

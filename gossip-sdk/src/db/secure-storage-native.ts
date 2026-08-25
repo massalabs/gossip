@@ -150,7 +150,8 @@ export interface SecureStorageNativePlugin {
   /** Stream a locked whole-store snapshot without materializing it in JS. */
   exportPortableV1(
     write: PortableChunkWriter,
-    onProgress?: PortableProgressCallback
+    onProgress?: PortableProgressCallback,
+    signal?: AbortSignal
   ): Promise<void>;
 
   /** Atomically replace locked storage after validating a complete stream. */
@@ -266,18 +267,32 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   async close() {
     await callNative('close');
   },
-  async exportPortableV1(write, onProgress) {
+  async exportPortableV1(write, onProgress, signal) {
     return runPortableTransfer(async () => {
+      let begun = false;
       let finished = false;
       let writtenBytes = 0;
-      const totalBytes = await callNative<number>('beginPortableExport');
-      onProgress?.({ writtenBytes, totalBytes });
       try {
+        if (signal?.aborted) {
+          throw new DOMException('Backup cancelled', 'AbortError');
+        }
+        const totalBytes = await callNative<number>('beginPortableExport');
+        begun = true;
+        if (signal?.aborted) {
+          throw new DOMException('Backup cancelled', 'AbortError');
+        }
+        onProgress?.({ writtenBytes, totalBytes });
         while (true) {
+          if (signal?.aborted) {
+            throw new DOMException('Backup cancelled', 'AbortError');
+          }
           const encoded = await callNative<string | null>(
             'readPortableExportChunk',
             { maxBytes: PORTABLE_CHUNK_BYTES }
           );
+          if (signal?.aborted) {
+            throw new DOMException('Backup cancelled', 'AbortError');
+          }
           if (encoded === null) break;
           const chunk = base64ToU8(encoded);
           await write(chunk);
@@ -290,8 +305,9 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
         await callNative('finishPortableExport');
         finished = true;
       } finally {
-        if (!finished)
+        if (begun && !finished) {
           await callNative('abortPortableTransfer').catch(() => {});
+        }
       }
     });
   },

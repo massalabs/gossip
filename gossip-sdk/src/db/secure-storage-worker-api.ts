@@ -137,6 +137,9 @@ export class SecureStorageWorkerApi {
   private portableExport: PortableWebExport | null = null;
   private portableImport: PortableWebImport | null = null;
   private portableExportStarting = false;
+  private portableExportStartPromise: Promise<{ totalBytes: number }> | null =
+    null;
+  private portableExportStartAbort: AbortController | null = null;
   private portableImportStarting = false;
   private portableImportStartPromise: Promise<void> | null = null;
   private portableImportStartAbort: AbortController | null = null;
@@ -873,16 +876,21 @@ export class SecureStorageWorkerApi {
     this.coverOnlyMode = false;
     this.stopCoverTraffic();
     this.closeRequested = true;
-    try {
-      return await this.enqueueLifecycleOperation(async () => {
+    const controller = new AbortController();
+    this.portableExportStartAbort = controller;
+    const start = this.enqueueLifecycleOperation(
+      async () => {
         await this.ensureDurableStorageRecovered();
         closeDatabase();
-        await this.flushEncryptedFenced();
+        await this.flushEncryptedFenced(controller.signal);
         lockSession();
-        const transfer = await PortableWebExport.begin({
-          validateKeypair: value => validatePortableKeypair(value),
-          validateBlock: value => validatePortableBlock(value),
-        });
+        const transfer = await PortableWebExport.begin(
+          {
+            validateKeypair: value => validatePortableKeypair(value),
+            validateBlock: value => validatePortableBlock(value),
+          },
+          controller.signal
+        );
         this.portableExport = transfer;
         // The spool is now immutable. Resume only periodic cover work against
         // active storage while keeping every normal lifecycle/SQL operation
@@ -890,9 +898,19 @@ export class SecureStorageWorkerApi {
         this.coverOnlyMode = true;
         this.startCoverTraffic();
         return { totalBytes: transfer.totalBytes };
-      }, true);
+      },
+      true,
+      controller.signal
+    );
+    this.portableExportStartPromise = start;
+    try {
+      return await start;
     } finally {
-      this.portableExportStarting = false;
+      if (this.portableExportStartPromise === start) {
+        this.portableExportStartPromise = null;
+        this.portableExportStartAbort = null;
+        this.portableExportStarting = false;
+      }
     }
   }
 
@@ -982,6 +1000,11 @@ export class SecureStorageWorkerApi {
   }
 
   async abortPortableTransfer(): Promise<void> {
+    const pendingExport = this.portableExportStartPromise;
+    if (pendingExport) {
+      this.portableExportStartAbort?.abort();
+      await pendingExport.catch(() => {});
+    }
     const pendingImport = this.portableImportStartPromise;
     if (pendingImport) {
       this.portableImportStartAbort?.abort();

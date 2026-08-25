@@ -163,6 +163,26 @@ describe('PortableWebExport', () => {
     expect(actual).toEqual(expected);
   });
 
+  it('aborts snapshot staging and removes partial spool records', async () => {
+    const expected = await fixture();
+    await seed(records(expected));
+    const controller = new AbortController();
+    const cancellingValidators = {
+      ...validators,
+      validateKeypair(value: Uint8Array) {
+        validators.validateKeypair(value);
+        controller.abort();
+      },
+    };
+
+    await expect(
+      PortableWebExport.begin(cancellingValidators, controller.signal)
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect((await allKeys()).some(key => String(key).startsWith('x:'))).toBe(
+      false
+    );
+  });
+
   it('reclaims an interrupted export spool under the cross-tab lease', async () => {
     const expected = await fixture();
     await seed(records(expected));

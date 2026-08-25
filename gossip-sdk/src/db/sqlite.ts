@@ -907,7 +907,8 @@ export class DatabaseConnection {
    * current web worker even when the destination later fails or cancels. */
   async secureStorageExportPortableV1(
     write: PortableChunkWriter,
-    onProgress?: PortableProgressCallback
+    onProgress?: PortableProgressCallback,
+    signal?: AbortSignal
   ): Promise<void> {
     if (this.state.storageState !== 'locked') {
       throw new Error('Portable export requires locked secure storage');
@@ -921,18 +922,39 @@ export class DatabaseConnection {
     this.state.portableTransferActive = true;
     try {
       if (this.state.useNativePlugin) {
-        await this.requireNativePlugin().exportPortableV1(write, onProgress);
+        await this.requireNativePlugin().exportPortableV1(
+          write,
+          onProgress,
+          signal
+        );
         return;
       }
 
       const proxy = this.requireSecureProxy();
       let finished = false;
       let writtenBytes = 0;
+      const abort = () => {
+        void proxy.abortPortableTransfer().catch(() => {});
+      };
+      signal?.addEventListener('abort', abort, { once: true });
       try {
+        if (signal?.aborted) {
+          throw new DOMException('Backup cancelled', 'AbortError');
+        }
         const { totalBytes } = await proxy.beginPortableExport();
+        if (signal?.aborted) {
+          throw new DOMException('Backup cancelled', 'AbortError');
+        }
         onProgress?.({ writtenBytes, totalBytes });
         while (true) {
+          if (signal?.aborted) {
+            throw new DOMException('Backup cancelled', 'AbortError');
+          }
           const chunk = await proxy.readPortableExportChunk(256 * 1024);
+          if (signal?.aborted) {
+            chunk?.fill(0);
+            throw new DOMException('Backup cancelled', 'AbortError');
+          }
           if (chunk === null) break;
           // Ownership passes to the writer. It may retain or transfer the
           // chunk, so this layer must not mutate it after the await.
@@ -946,6 +968,7 @@ export class DatabaseConnection {
         await proxy.finishPortableExport();
         finished = true;
       } finally {
+        signal?.removeEventListener('abort', abort);
         if (!finished) await proxy.abortPortableTransfer().catch(() => {});
       }
     } finally {

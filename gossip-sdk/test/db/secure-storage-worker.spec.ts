@@ -990,6 +990,31 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     expect(transfer.close).toHaveBeenCalledOnce();
   });
 
+  it('cancels export snapshot staging before it creates a transfer', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    portableMock.begin.mockImplementationOnce(
+      (_validators: unknown, signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Backup cancelled', 'AbortError')),
+            { once: true }
+          );
+        })
+    );
+
+    const start = api.beginPortableExport();
+    await vi.waitFor(() => expect(portableMock.begin).toHaveBeenCalledOnce());
+    const abort = api.abortPortableTransfer();
+    await expect(start).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(abort).resolves.toBeUndefined();
+    expect(
+      (api as unknown as { portableExport: unknown }).portableExport
+    ).toBeNull();
+  });
+
   it('rejects worker close while an export owns its cleanup state', async () => {
     const { SecureStorageWorkerApi } =
       await import('../../src/db/secure-storage-worker-api');
