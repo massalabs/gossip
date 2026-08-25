@@ -81,6 +81,21 @@ describe('production worker artifact audit', () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
+  it('rejects forbidden tokens in a relative artifact path', async () => {
+    const root = await artifactRoot();
+    await writeFile(
+      join(root, 'assets', 'secure-storage-worker-test.js'),
+      'export const productionWorker = true;\n'
+    );
+
+    const result = audit(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      `${join('assets', 'secure-storage-worker-test.js')} contains secure-storage-worker-test`
+    );
+  });
+
   it('rejects forbidden controls in a final application worker', async () => {
     const root = await artifactRoot();
     await writeFile(
