@@ -4,6 +4,8 @@ export function initSecureStorage(domain: string, backend: string): Promise<void
 export function idbHasData(): Promise<boolean>;
 export function provisionStorage(): void;
 export function allocateSession(slot: number, password: Uint8Array): void;
+export function namespaceDataLength(namespace: number): number;
+export function clearNamespace(namespace: number): void;
 /**
  * Called by the worker when an allocation or destruction transaction rejects.
  * This prevents a later cover-traffic flush from durably carrying the failed
@@ -46,10 +48,18 @@ export function lockSession(): void;
  */
 export function destroySession(namespaces: Uint8Array): void;
 export function coverTrafficTick(namespace: number): void;
+/**
+ * Strictly validate one version-1 logical keypair record without unlocking it.
+ * Browser streaming export/import uses this bounded bridge so TypeScript never
+ * reimplements pq-rerand's canonical parser.
+ */
+export function validatePortableKeypair(value: Uint8Array): void;
+/**
+ * Strictly validate one version-1 encrypted block record.
+ */
+export function validatePortableBlock(value: Uint8Array): void;
 export function writeNamespaceData(namespace: number, offset: number, data: Uint8Array): void;
 export function readNamespaceData(namespace: number, offset: number, len: number): Uint8Array;
-export function namespaceDataLength(namespace: number): number;
-export function clearNamespace(namespace: number): void;
 export function initThreadPool(num_threads: number): Promise<any>;
 export function wbg_rayon_start_worker(receiver: number): void;
 /**
@@ -99,6 +109,8 @@ export interface InitOutput {
   readonly reloadDurableStorage: () => any;
   readonly resetSqlDatabaseToDurable: () => any;
   readonly unlockSession: (a: number, b: number) => [number, number, number];
+  readonly validatePortableBlock: (a: number, b: number) => [number, number];
+  readonly validatePortableKeypair: (a: number, b: number) => [number, number];
   readonly writeNamespaceData: (a: number, b: number, c: number, d: number) => [number, number];
   readonly __wbg_wbg_rayon_poolbuilder_free: (a: number, b: number) => void;
   readonly initThreadPool: (a: number) => any;
@@ -125,11 +137,11 @@ export interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure664_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure99_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure80_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
   readonly wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (a: number, b: number) => void;
-  readonly closure83_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
-  readonly closure98_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure720_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure665_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure721_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

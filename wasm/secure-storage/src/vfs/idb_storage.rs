@@ -45,37 +45,49 @@ async fn open_db() -> std::result::Result<IdbDatabase, JsValue> {
     Ok(req.into_future().await?)
 }
 
-/// Load every (key, value) pair currently in the store.
+/// Load every active logical secure-storage entry.
 ///
-/// IDB transactions in some browsers commit as soon as the microtask
-/// queue runs empty, which can happen at any `.await` boundary. To
-/// keep both `getAllKeys` and `getAll` inside the same transaction we
-/// register both requests synchronously *before* awaiting either, then
-/// await them in order.
+/// Browser export spools share this physical object store under an `x:`
+/// prefix so one IDB transaction can snapshot all active `s:` records. Never
+/// fetch spool values into the WASM cache: an interrupted large export must
+/// not double startup memory before the worker gets a chance to reclaim it.
+fn active_key_range() -> std::result::Result<web_sys::IdbKeyRange, JsValue> {
+    // `s;` is the exclusive lexical successor of the ASCII `s:` prefix.
+    // Malformed/future `s:` records stay in scope for strict typed rejection.
+    web_sys::IdbKeyRange::bound_with_lower_open_and_upper_open(
+        &JsValue::from_str("s:"),
+        &JsValue::from_str("s;"),
+        false,
+        true,
+    )
+}
+
 async fn load_all_entries(
     db: &IdbDatabase,
 ) -> std::result::Result<Vec<(String, Vec<u8>)>, JsValue> {
     let tx = db.transaction_on_one(STORE_NAME)?;
     let store = tx.object_store(STORE_NAME)?;
-
-    let keys_req = store.get_all_keys()?;
-    let vals_req = store.get_all()?;
-
-    // Per IndexedDB spec, both `getAllKeys()` and `getAll()` return items in
-    // key order within the same transaction snapshot, so the i-th key always
-    // matches the i-th value. The two requests are registered synchronously
-    // (see above) to guarantee they share one snapshot.
-    let keys_js = keys_req.await?;
-    let vals_js = vals_req.await?;
+    let range = active_key_range()?;
+    // Register both requests before either await so keys and values come from
+    // one IndexedDB snapshot, while the range excludes export-owned `x:` data.
+    let keys_req = store.get_all_keys_with_key(&range)?;
+    let values_req = store.get_all_with_key(&range)?;
+    let keys = keys_req.await?;
+    let values = values_req.await?;
     tx.await.into_result()?;
 
-    let len = keys_js.length() as usize;
-    let mut out = Vec::with_capacity(len);
-    for i in 0..len {
-        let key_js = keys_js.get(i as u32);
-        let val_js = vals_js.get(i as u32);
-        let key = key_js.as_string().unwrap_or_default();
-        let val = Uint8Array::new(&val_js);
+    if keys.length() != values.length() {
+        return Err(JsValue::from_str(
+            "secure-storage key/value snapshot mismatch",
+        ));
+    }
+    let mut out = Vec::with_capacity(keys.length() as usize);
+    for index in 0..keys.length() {
+        let key = keys
+            .get(index)
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("invalid secure-storage key"))?;
+        let val = Uint8Array::new(&values.get(index));
         let mut buf = vec![0u8; val.length() as usize];
         val.copy_to(&mut buf);
         out.push((key, buf));
@@ -83,12 +95,14 @@ async fn load_all_entries(
     Ok(out)
 }
 
-/// True if the store contains at least one entry.
+/// True if the store contains at least one active logical record. Export
+/// spools alone never turn a fresh installation into a locked one.
 async fn has_any_data(db: &IdbDatabase) -> std::result::Result<bool, JsValue> {
     let tx = db.transaction_on_one(STORE_NAME)?;
     let store = tx.object_store(STORE_NAME)?;
-    let n = store.count()?.await?;
-    Ok(n > 0)
+    let count = store.count_with_key(&active_key_range()?)?.await?;
+    tx.await.into_result()?;
+    Ok(count > 0)
 }
 
 /// Apply puts and deletes in a single atomic readwrite transaction.

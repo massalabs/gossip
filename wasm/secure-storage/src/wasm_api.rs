@@ -248,6 +248,20 @@ pub fn cover_traffic_tick(namespace: u8) -> Result<(), JsValue> {
     })
 }
 
+/// Strictly validate one version-1 logical keypair record without unlocking it.
+/// Browser streaming export/import uses this bounded bridge so TypeScript never
+/// reimplements pq-rerand's canonical parser.
+#[wasm_bindgen(js_name = validatePortableKeypair)]
+pub fn validate_portable_keypair(value: &[u8]) -> Result<(), JsValue> {
+    crate::portable::validate_portable_keypair_value(value).map_err(map_err)
+}
+
+/// Strictly validate one version-1 encrypted block record.
+#[wasm_bindgen(js_name = validatePortableBlock)]
+pub fn validate_portable_block(value: &[u8]) -> Result<(), JsValue> {
+    crate::portable::validate_portable_block_value(value).map_err(map_err)
+}
+
 // ── Generic namespace data exports ─────────────────────────────────
 //
 // These let the SDK store arbitrary blobs in namespaces != DEFAULT_NAMESPACE.

@@ -75,6 +75,10 @@ enum PortableTransfer {
         path: PathBuf,
         bytes: u64,
     },
+    Cleanup {
+        kind: PortableTransferKind,
+        path: PathBuf,
+    },
 }
 
 impl PortableTransfer {
@@ -82,12 +86,15 @@ impl PortableTransfer {
         match self {
             Self::Export { .. } => PortableTransferKind::Export,
             Self::Import { .. } => PortableTransferKind::Import,
+            Self::Cleanup { kind, .. } => *kind,
         }
     }
 
     fn path(&self) -> &Path {
         match self {
-            Self::Export { path, .. } | Self::Import { path, .. } => path,
+            Self::Export { path, .. } | Self::Import { path, .. } | Self::Cleanup { path, .. } => {
+                path
+            }
         }
     }
 }
@@ -594,8 +601,33 @@ pub fn finish_portable_import() -> Result<()> {
         st.backend.import_portable(input)?;
         Ok(())
     })();
-    let _ = fs::remove_file(path);
-    result
+    let cleanup = cleanup_portable_path(st, PortableTransferKind::Import, path);
+    match (result, cleanup) {
+        (Err(operation), _) => Err(operation),
+        (Ok(()), cleanup) => cleanup,
+    }
+}
+
+fn cleanup_portable_path(
+    st: &mut VfsState,
+    kind: PortableTransferKind,
+    path: PathBuf,
+) -> Result<()> {
+    st.transfer = Some(PortableTransfer::Cleanup {
+        kind,
+        path: path.clone(),
+    });
+    match fs::remove_file(&path) {
+        Ok(()) => {
+            st.transfer = None;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            st.transfer = None;
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Abort either transfer direction and delete its temporary spool.
@@ -608,13 +640,10 @@ pub fn abort_portable_transfer() -> Result<()> {
     let Some(transfer) = st.transfer.take() else {
         return Ok(());
     };
+    let kind = transfer.kind();
     let path = transfer.path().to_path_buf();
     drop(transfer);
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
+    cleanup_portable_path(st, kind, path)
 }
 
 fn finish_portable_transfer(expected: PortableTransferKind) -> Result<()> {
@@ -630,10 +659,10 @@ fn finish_portable_transfer(expected: PortableTransferKind) -> Result<()> {
         st.transfer = Some(transfer);
         return Err(SecureStorageError::PortableTransferInProgress);
     }
+    let kind = transfer.kind();
     let path = transfer.path().to_path_buf();
     drop(transfer);
-    let _ = fs::remove_file(path);
-    Ok(())
+    cleanup_portable_path(st, kind, path)
 }
 
 // ── Cover-traffic scheduler ─────────────────────────────────────────
@@ -1529,6 +1558,35 @@ mod tests {
         finish_portable_export().unwrap();
         assert_eq!(exported, fixture);
         assert!(!dir.path().join(PORTABLE_EXPORT_SPOOL).exists());
+        reset_state();
+    }
+
+    #[test]
+    fn portable_cleanup_failure_remains_retryable() {
+        let _guard = test_mutex().lock().unwrap();
+        reset_state();
+        let dir = tempfile::tempdir().unwrap();
+        init_native(dir.path().to_str().unwrap(), "test").unwrap();
+        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+        begin_portable_import().unwrap();
+        for chunk in fixture.chunks(8192) {
+            push_portable_import_chunk(chunk).unwrap();
+        }
+        finish_portable_import().unwrap();
+
+        begin_portable_export().unwrap();
+        let path = dir.path().join(PORTABLE_EXPORT_SPOOL);
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(finish_portable_export().is_err());
+        assert!(matches!(
+            has_data(),
+            Err(SecureStorageError::PortableTransferInProgress)
+        ));
+
+        fs::remove_dir(&path).unwrap();
+        abort_portable_transfer().unwrap();
+        assert!(has_data().unwrap());
         reset_state();
     }
 
