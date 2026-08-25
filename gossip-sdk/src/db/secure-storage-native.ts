@@ -297,7 +297,11 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
             });
           }
         }
-        await callNative('finishPortableImport');
+        // Validation is a new command so an older native binary rejects
+        // before changing active storage. `finishPortableImport` retains its
+        // historical validate+install meaning for old embedded JS bundles.
+        await callNative('validatePortableImport');
+        await callNative('installPortableImport');
         finished = true;
       } finally {
         if (!finished)

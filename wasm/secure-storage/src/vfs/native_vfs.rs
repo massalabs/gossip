@@ -35,6 +35,7 @@ use rusqlite::ffi::{
 
 use crate::DEFAULT_NAMESPACE;
 use crate::error::{Result, SecureStorageError};
+use crate::portable::PortableArchiveReader;
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, UnlockedSession, load_namespace_state};
 
@@ -75,6 +76,9 @@ enum PortableTransfer {
         path: PathBuf,
         bytes: u64,
     },
+    ValidatedImport {
+        path: PathBuf,
+    },
     Cleanup {
         kind: PortableTransferKind,
         path: PathBuf,
@@ -85,16 +89,17 @@ impl PortableTransfer {
     fn kind(&self) -> PortableTransferKind {
         match self {
             Self::Export { .. } => PortableTransferKind::Export,
-            Self::Import { .. } => PortableTransferKind::Import,
+            Self::Import { .. } | Self::ValidatedImport { .. } => PortableTransferKind::Import,
             Self::Cleanup { kind, .. } => *kind,
         }
     }
 
     fn path(&self) -> &Path {
         match self {
-            Self::Export { path, .. } | Self::Import { path, .. } | Self::Cleanup { path, .. } => {
-                path
-            }
+            Self::Export { path, .. }
+            | Self::Import { path, .. }
+            | Self::ValidatedImport { path }
+            | Self::Cleanup { path, .. } => path,
         }
     }
 }
@@ -577,7 +582,8 @@ pub fn push_portable_import_chunk(data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Validate and atomically install the completed import spool.
+/// Validate the completed import spool while retaining it as an isolated
+/// candidate. Active redb storage is not changed until explicit installation.
 pub fn finish_portable_import() -> Result<()> {
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
@@ -597,6 +603,37 @@ pub fn finish_portable_import() -> Result<()> {
         file.flush()?;
         file.sync_all()?;
         drop(file);
+        let input = File::open(&path)?;
+        let mut reader = PortableArchiveReader::new(input)?;
+        while reader.read_record()?.is_some() {}
+        reader.finish()?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            st.transfer = Some(PortableTransfer::ValidatedImport { path });
+            Ok(())
+        }
+        Err(operation) => {
+            let _ = cleanup_portable_path(st, PortableTransferKind::Import, path);
+            Err(operation)
+        }
+    }
+}
+
+/// Revalidate and atomically replace active redb storage from a validated
+/// candidate. A failure leaves the old installation selected.
+pub fn install_portable_import() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let Some(PortableTransfer::ValidatedImport { path }) = st.transfer.take() else {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    };
+
+    let result = (|| {
         let input = File::open(&path)?;
         st.backend.import_portable(input)?;
         Ok(())
@@ -1547,6 +1584,12 @@ mod tests {
             Err(SecureStorageError::PortableTransferInProgress)
         ));
         finish_portable_import().unwrap();
+        assert!(matches!(
+            has_data(),
+            Err(SecureStorageError::PortableTransferInProgress)
+        ));
+        assert!(dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
+        install_portable_import().unwrap();
         assert!(has_data().unwrap());
         assert!(!dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
 
@@ -1562,6 +1605,25 @@ mod tests {
     }
 
     #[test]
+    fn validated_portable_import_remains_abortable_before_install() {
+        let _guard = test_mutex().lock().unwrap();
+        reset_state();
+        let dir = tempfile::tempdir().unwrap();
+        init_native(dir.path().to_str().unwrap(), "test").unwrap();
+        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+        begin_portable_import().unwrap();
+        for chunk in fixture.chunks(8192) {
+            push_portable_import_chunk(chunk).unwrap();
+        }
+        finish_portable_import().unwrap();
+        abort_portable_transfer().unwrap();
+
+        assert!(!has_data().unwrap());
+        assert!(!dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
+        reset_state();
+    }
+
+    #[test]
     fn portable_cleanup_failure_remains_retryable() {
         let _guard = test_mutex().lock().unwrap();
         reset_state();
@@ -1573,6 +1635,7 @@ mod tests {
             push_portable_import_chunk(chunk).unwrap();
         }
         finish_portable_import().unwrap();
+        install_portable_import().unwrap();
 
         begin_portable_export().unwrap();
         let path = dir.path().join(PORTABLE_EXPORT_SPOOL);

@@ -337,8 +337,19 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             native_vfs::push_portable_import_chunk(&bytes)?;
             Ok("null".into())
         }
+        "validatePortableImport" => {
+            native_vfs::finish_portable_import()?;
+            Ok("null".into())
+        }
+        // Preserve the original bridge command's install-and-cleanup meaning
+        // for an older embedded JS bundle running against this native binary.
         "finishPortableImport" => {
             native_vfs::finish_portable_import()?;
+            native_vfs::install_portable_import()?;
+            Ok("null".into())
+        }
+        "installPortableImport" => {
+            native_vfs::install_portable_import()?;
             Ok("null".into())
         }
         "abortPortableTransfer" => {
@@ -687,7 +698,8 @@ mod tests {
             let args = serde_json::json!({ "data": B64.encode(chunk) });
             dispatch("pushPortableImportChunk", &args.to_string()).unwrap();
         }
-        dispatch("finishPortableImport", "{}").unwrap();
+        dispatch("validatePortableImport", "{}").unwrap();
+        dispatch("installPortableImport", "{}").unwrap();
 
         dispatch("beginPortableExport", "{}").unwrap();
         let mut exported = Vec::new();
@@ -704,6 +716,28 @@ mod tests {
         dispatch("finishPortableExport", "{}").unwrap();
 
         assert_eq!(exported, fixture);
+        native_vfs::reset_state();
+    }
+
+    #[test]
+    fn legacy_finish_portable_import_still_installs() {
+        let _guard = native_vfs::test_mutex().lock().unwrap();
+        native_vfs::reset_state();
+        *db_mutex().lock().unwrap() = None;
+        let dir = tempfile::tempdir().unwrap();
+        let init = serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+            "domain": "test",
+        });
+        dispatch("initSecureStorage", &init.to_string()).unwrap();
+        dispatch("beginPortableImport", "{}").unwrap();
+        let fixture = include_bytes!("../tests/fixtures/portable-v1-minimal.gossipbackup");
+        for chunk in fixture.chunks(128 * 1024) {
+            let args = serde_json::json!({ "data": B64.encode(chunk) });
+            dispatch("pushPortableImportChunk", &args.to_string()).unwrap();
+        }
+        dispatch("finishPortableImport", "{}").unwrap();
+        assert_eq!(dispatch("hasData", "{}").unwrap(), "true");
         native_vfs::reset_state();
     }
 

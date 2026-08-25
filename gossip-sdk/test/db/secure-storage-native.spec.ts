@@ -68,7 +68,7 @@ describe('secure-storage native portable transfer', () => {
     ]);
   });
 
-  it('streams import chunks and atomically finishes native validation', async () => {
+  it('streams, validates, then atomically installs a native import', async () => {
     const chunks: Array<Uint8Array | null> = [
       Uint8Array.from([1, 2]),
       new Uint8Array(),
@@ -83,7 +83,8 @@ describe('secure-storage native portable transfer', () => {
       'beginPortableImport',
       'pushPortableImportChunk',
       'pushPortableImportChunk',
-      'finishPortableImport',
+      'validatePortableImport',
+      'installPortableImport',
     ]);
     expect(JSON.parse(nativeCall.mock.calls[1][0].args)).toEqual({
       data: btoa(String.fromCharCode(1, 2)),
@@ -145,7 +146,8 @@ describe('secure-storage native portable transfer', () => {
       'readPortableExportChunk',
       'finishPortableExport',
       'beginPortableImport',
-      'finishPortableImport',
+      'validatePortableImport',
+      'installPortableImport',
     ]);
   });
 
