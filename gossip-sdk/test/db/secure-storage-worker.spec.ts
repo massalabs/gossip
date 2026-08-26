@@ -32,6 +32,11 @@ const wasmMock = vi.hoisted(() => ({
   verifyStorageGeneration: vi.fn(),
   validatePortableKeypair: vi.fn(),
   validatePortableBlock: vi.fn(),
+  beginCandidatePreview: vi.fn(),
+  appendCandidatePreviewBlock: vi.fn(),
+  finishCandidatePreview: vi.fn(),
+  queryCandidatePreview: vi.fn(),
+  endCandidatePreview: vi.fn(),
 }));
 
 vi.mock('../../src/db/secure-storage-portable-web.js', () => ({
@@ -73,6 +78,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
       push: vi.fn().mockResolvedValue(undefined),
       finishValidation: vi.fn().mockResolvedValue(undefined),
       install: vi.fn().mockResolvedValue({ generation: 'next' }),
+      previewCandidate: vi.fn().mockResolvedValue(false),
       close: vi.fn().mockResolvedValue(undefined),
     });
     wasmMock.execSql.mockReturnValue({
@@ -1080,6 +1086,162 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await api.abortPortableTransfer();
     expect(transfer.close).toHaveBeenCalledOnce();
     await expect(api.close()).resolves.toBeUndefined();
+  });
+
+  it('returns only a password-authenticated candidate profile and wipes the worker copy', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    (api as unknown as { domain: string }).domain = 'preview-domain';
+    await api.beginPortableImport();
+    const transfer = await portableMock.importBegin.mock.results[0].value;
+    const keypairs = [
+      new Uint8Array([1]),
+      new Uint8Array([2]),
+      new Uint8Array([3]),
+    ];
+    transfer.previewCandidate.mockImplementation(
+      (
+        begin: (values: Uint8Array[]) => boolean,
+        append: (
+          slot: number,
+          namespace: number,
+          blockIndex: number,
+          value: Uint8Array
+        ) => void
+      ) => {
+        expect(begin(keypairs)).toBe(true);
+        append(2, 0, 0, new Uint8Array(65_536));
+        return Promise.resolve(true);
+      }
+    );
+    wasmMock.beginCandidatePreview.mockReturnValue(true);
+    wasmMock.queryCandidatePreview.mockReturnValueOnce({
+      userId:
+        'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s',
+      username: 'Alice',
+      avatar: null,
+      createdAtMs: 1234,
+    });
+    const password = new Uint8Array([7, 8, 9]);
+
+    await expect(
+      api.authenticatePortableImportCandidate(password)
+    ).resolves.toEqual({
+      userId:
+        'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s',
+      username: 'Alice',
+      avatar: null,
+      createdAtMs: 1234,
+    });
+    expect(Array.from(password)).toEqual([0, 0, 0]);
+    expect(wasmMock.beginCandidatePreview).toHaveBeenCalledWith(
+      'preview-domain',
+      password,
+      keypairs
+    );
+    expect(wasmMock.appendCandidatePreviewBlock).toHaveBeenCalledOnce();
+    expect(wasmMock.finishCandidatePreview).toHaveBeenCalledOnce();
+    expect(wasmMock.queryCandidatePreview).toHaveBeenCalledOnce();
+    expect(wasmMock.endCandidatePreview).toHaveBeenCalledOnce();
+    expect(transfer.close).not.toHaveBeenCalled();
+  });
+
+  it('keeps a validated candidate retryable after a wrong preview password', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    await api.beginPortableImport();
+    const transfer = await portableMock.importBegin.mock.results[0].value;
+    transfer.previewCandidate.mockImplementationOnce(
+      (begin: (keypairs: Uint8Array[]) => boolean) => {
+        begin([]);
+        return Promise.resolve(false);
+      }
+    );
+    const password = new Uint8Array([4, 5, 6]);
+
+    await expect(
+      api.authenticatePortableImportCandidate(password)
+    ).rejects.toThrow('password was not accepted');
+    expect(Array.from(password)).toEqual([0, 0, 0]);
+    expect(wasmMock.endCandidatePreview).toHaveBeenCalledOnce();
+    expect(transfer.close).not.toHaveBeenCalled();
+  });
+
+  it('wipes a preview password even when no candidate is active', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    const password = new Uint8Array([9, 8, 7]);
+
+    await expect(
+      api.authenticatePortableImportCandidate(password)
+    ).rejects.toThrow('not active');
+    expect(Array.from(password)).toEqual([0, 0, 0]);
+  });
+
+  it('retries backend restoration before candidate abort and cover resumption', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    await api.beginPortableImport();
+    const transfer = await portableMock.importBegin.mock.results[0].value;
+    transfer.previewCandidate.mockImplementationOnce(
+      (begin: (keypairs: Uint8Array[]) => boolean) => {
+        begin([]);
+        return Promise.resolve(false);
+      }
+    );
+    wasmMock.endCandidatePreview
+      .mockRejectedValueOnce(new Error('IDB restore failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      api.authenticatePortableImportCandidate(new Uint8Array([1]))
+    ).rejects.toThrow('IDB restore failed');
+    expect(transfer.close).not.toHaveBeenCalled();
+
+    await api.abortPortableTransfer();
+    expect(wasmMock.endCandidatePreview).toHaveBeenCalledTimes(2);
+    expect(transfer.close).toHaveBeenCalledOnce();
+  });
+
+  it('serializes complete candidate preview and restoration lifecycles', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    await api.beginPortableImport();
+    const transfer = await portableMock.importBegin.mock.results[0].value;
+    wasmMock.beginCandidatePreview.mockReturnValue(true);
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    transfer.previewCandidate
+      .mockImplementationOnce(
+        async (begin: (keypairs: Uint8Array[]) => boolean) => {
+          begin([]);
+          await blocked;
+          return false;
+        }
+      )
+      .mockImplementationOnce(
+        async (begin: (keypairs: Uint8Array[]) => boolean) => {
+          begin([]);
+          return false;
+        }
+      );
+    const first = api.authenticatePortableImportCandidate(new Uint8Array([1]));
+    const second = api.authenticatePortableImportCandidate(new Uint8Array([2]));
+    await vi.waitFor(() =>
+      expect(transfer.previewCandidate).toHaveBeenCalledTimes(1)
+    );
+
+    release();
+    await Promise.allSettled([first, second]);
+    expect(transfer.previewCandidate).toHaveBeenCalledTimes(2);
+    expect(wasmMock.endCandidatePreview).toHaveBeenCalledTimes(2);
   });
 
   it('fences direct namespace reads before serving stale generation data', async () => {

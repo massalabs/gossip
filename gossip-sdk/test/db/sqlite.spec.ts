@@ -45,6 +45,41 @@ function lifecycleConnection(proxy: LifecycleProxy): DatabaseConnection {
 }
 
 describe('DatabaseConnection secure lifecycle recovery', () => {
+  it('retains failed portable install ownership until cleanup succeeds', async () => {
+    const proxy = {
+      installPortableImport: vi
+        .fn()
+        .mockRejectedValue(new Error('install failed')),
+      abortPortableTransfer: vi.fn().mockResolvedValue(undefined),
+    };
+    const connection = Object.create(
+      DatabaseConnection.prototype
+    ) as DatabaseConnection;
+    const internals = connection as unknown as {
+      state: {
+        storageState: 'locked';
+        useNativePlugin: false;
+        secureProxy: typeof proxy;
+        portableTransferActive: boolean;
+      };
+    };
+    internals.state = {
+      storageState: 'locked',
+      useNativePlugin: false,
+      secureProxy: proxy,
+      portableTransferActive: true,
+    };
+
+    await expect(
+      connection.secureStorageInstallPortableImport()
+    ).rejects.toThrow('install failed');
+    expect(internals.state.portableTransferActive).toBe(true);
+
+    await connection.secureStorageAbortPortableImport();
+    expect(proxy.abortPortableTransfer).toHaveBeenCalledOnce();
+    expect(internals.state.portableTransferActive).toBe(false);
+  });
+
   it('re-locks when post-unlock migration validation rejects', async () => {
     const unlock = vi.fn().mockResolvedValue(true);
     const lock = vi.fn().mockResolvedValue(undefined);

@@ -97,6 +97,58 @@ async function fixture(): Promise<Uint8Array> {
   return new Uint8Array(await (await fetch(fixtureUrl)).arrayBuffer());
 }
 
+async function expandedFixture(blockCount: number): Promise<Uint8Array> {
+  const original = await fixture();
+  const parsed = records(original);
+  const frames: Uint8Array[] = [];
+  const appendFrame = (
+    kind: number,
+    slot: number,
+    namespace: number,
+    blockIndex: number,
+    value: Uint8Array
+  ) => {
+    const frame = new Uint8Array(26 + value.byteLength);
+    const view = new DataView(frame.buffer);
+    frame[0] = kind;
+    frame[1] = slot;
+    view.setBigUint64(2, BigInt(namespace), false);
+    view.setBigUint64(10, BigInt(blockIndex), false);
+    view.setBigUint64(18, BigInt(value.byteLength), false);
+    frame.set(value, 26);
+    frames.push(frame);
+  };
+  for (let slot = 0; slot < 3; slot += 1) {
+    appendFrame(0, slot, 0, 0, parsed[slot][1]);
+  }
+  for (let blockIndex = 0; blockIndex < blockCount; blockIndex += 1) {
+    for (let slot = 0; slot < 3; slot += 1) {
+      appendFrame(1, slot, 0, blockIndex, parsed[3 + slot][1]);
+    }
+  }
+  const sectionBytes = frames.reduce(
+    (total, frame) => total + frame.byteLength,
+    0
+  );
+  const output = new Uint8Array(40 + sectionBytes + 32);
+  output.set(original.subarray(0, 40));
+  const header = new DataView(output.buffer);
+  header.setBigUint64(24, BigInt(frames.length), false);
+  header.setBigUint64(32, BigInt(sectionBytes), false);
+  let offset = 40;
+  for (const frame of frames) {
+    output.set(frame, offset);
+    offset += frame.byteLength;
+  }
+  output.set(
+    new Uint8Array(
+      await crypto.subtle.digest('SHA-256', output.subarray(0, offset))
+    ),
+    offset
+  );
+  return output;
+}
+
 const validators = {
   validateKeypair(value: Uint8Array) {
     expect(value.byteLength).toBe(98_340);
@@ -245,6 +297,95 @@ describe('PortableWebImport', () => {
     expect(
       (await allKeys()).map(String).filter(key => key.startsWith('s:'))
     ).toEqual(['s:0:sentinel']);
+  });
+
+  it('streams validated preview records without staging or exposing a match', async () => {
+    const expected = await fixture();
+    await put('s:0:sentinel', new Uint8Array([7]));
+    const transfer = await PortableWebImport.begin(validators);
+    await transfer.push(expected);
+    await transfer.finishValidation();
+    let borrowedKeypairs: Uint8Array[] = [];
+    let borrowedBlock: Uint8Array | null = null;
+    const coordinates: Array<[number, number, number]> = [];
+
+    await expect(
+      transfer.previewCandidate(
+        keypairs => {
+          borrowedKeypairs = keypairs;
+          return true;
+        },
+        (slot, namespace, blockIndex, value) => {
+          borrowedBlock ??= value;
+          coordinates.push([slot, namespace, blockIndex]);
+        }
+      )
+    ).resolves.toBe(true);
+
+    expect(borrowedKeypairs).toHaveLength(3);
+    expect(
+      borrowedKeypairs.every(keypair => keypair.every(byte => byte === 0))
+    ).toBe(true);
+    expect(borrowedBlock).not.toBeNull();
+    expect(borrowedBlock!.every(byte => byte === 0)).toBe(true);
+    expect(coordinates).toEqual(
+      records(expected)
+        .filter(([key]) => key.includes(':n:'))
+        .map(([key]) => {
+          const match = /^s:(\d):n:(\d):b:(\d+)$/.exec(key)!;
+          return [Number(match[1]), Number(match[2]), Number(match[3])];
+        })
+    );
+    expect(await getValue('m:active-generation')).toBeUndefined();
+    expect(await getValue('s:0:sentinel')).toEqual(new Uint8Array([7]));
+    expect(
+      (await allKeys()).some(key =>
+        String(key).startsWith('x:portable-import:')
+      )
+    ).toBe(true);
+    await transfer.close();
+  });
+
+  it('streams double-digit block indexes in numeric order', async () => {
+    const expected = await expandedFixture(12);
+    const transfer = await PortableWebImport.begin(validators);
+    for (let offset = 0; offset < expected.byteLength; offset += 256 * 1024) {
+      await transfer.push(expected.slice(offset, offset + 256 * 1024));
+    }
+    await transfer.finishValidation();
+    const indexes: number[] = [];
+
+    await expect(
+      transfer.previewCandidate(
+        () => true,
+        (_slot, _namespace, blockIndex) => indexes.push(blockIndex)
+      )
+    ).resolves.toBe(true);
+    expect(indexes).toEqual(
+      Array.from({ length: 12 }, (_, blockIndex) =>
+        Array.from({ length: 3 }, () => blockIndex)
+      ).flat()
+    );
+    await transfer.close();
+  });
+
+  it('does not stream candidate blocks after generic authentication failure', async () => {
+    const expected = await fixture();
+    const transfer = await PortableWebImport.begin(validators);
+    await transfer.push(expected);
+    await transfer.finishValidation();
+    let blockCalls = 0;
+
+    await expect(
+      transfer.previewCandidate(
+        () => false,
+        () => {
+          blockCalls += 1;
+        }
+      )
+    ).resolves.toBe(false);
+    expect(blockCalls).toBe(0);
+    await transfer.close();
   });
 
   it('serializes concurrently submitted chunks in admission order', async () => {

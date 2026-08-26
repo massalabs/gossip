@@ -49,6 +49,11 @@ import init, {
   verifyStorageGeneration,
   validatePortableKeypair,
   validatePortableBlock,
+  beginCandidatePreview,
+  appendCandidatePreviewBlock,
+  finishCandidatePreview,
+  queryCandidatePreview,
+  endCandidatePreview,
 } from '../assets/generated/wasm-secureStorage/secureStorage.js';
 
 import {
@@ -70,6 +75,13 @@ const COVER_TRAFFIC_MIN_INTERVAL_MS = 10_000;
 const COVER_TRAFFIC_MAX_INTERVAL_MS = 30_000;
 const STORAGE_INSTALLATION_FENCE_LOCK_NAME =
   'gossip-secure-storage-generation-install';
+
+export interface ImportedAccountPreview {
+  userId: string;
+  username: string;
+  avatar: string | null;
+  createdAtMs: number;
+}
 
 export interface InitResult {
   /** True when IDB already holds keypairs from a prior run. */
@@ -143,7 +155,10 @@ export class SecureStorageWorkerApi {
   private portableImportStarting = false;
   private portableImportStartPromise: Promise<void> | null = null;
   private portableImportStartAbort: AbortController | null = null;
+  private portablePreviewTail: Promise<void> = Promise.resolve();
+  private portablePreviewRecoveryError: unknown = null;
   private generationStale = false;
+  private domain = '';
 
   private isGenerationMismatch(error: unknown): boolean {
     return String(error).includes('secure-storage generation changed');
@@ -519,6 +534,7 @@ export class SecureStorageWorkerApi {
     domain: string,
     secureStorageWasmUrl?: string
   ): Promise<InitResult> {
+    this.domain = domain;
     await init(
       secureStorageWasmUrl
         ? { module_or_path: secureStorageWasmUrl }
@@ -986,7 +1002,63 @@ export class SecureStorageWorkerApi {
     await transfer.finishValidation();
   }
 
+  private async restorePortablePreviewBackend(): Promise<void> {
+    if (this.portablePreviewRecoveryError === null) return;
+    try {
+      await endCandidatePreview();
+      this.portablePreviewRecoveryError = null;
+    } catch (error) {
+      this.portablePreviewRecoveryError = error;
+      throw error;
+    }
+  }
+
+  async authenticatePortableImportCandidate(
+    password: Uint8Array
+  ): Promise<ImportedAccountPreview> {
+    const operation = async (): Promise<ImportedAccountPreview> => {
+      let previewStarted = false;
+      try {
+        await this.restorePortablePreviewBackend();
+        const transfer = this.portableImport;
+        if (!transfer) throw new Error('Portable import is not active');
+        const authenticated = await transfer.previewCandidate(
+          keypairs => {
+            previewStarted = true;
+            return beginCandidatePreview(this.domain, password, keypairs);
+          },
+          (slot, namespace, blockIndex, value) =>
+            appendCandidatePreviewBlock(slot, namespace, blockIndex, value)
+        );
+        if (!authenticated) {
+          throw new Error('Imported account password was not accepted');
+        }
+        finishCandidatePreview();
+        return queryCandidatePreview() as ImportedAccountPreview;
+      } finally {
+        password.fill(0);
+        if (previewStarted) {
+          try {
+            await endCandidatePreview();
+            this.portablePreviewRecoveryError = null;
+          } catch (error) {
+            this.portablePreviewRecoveryError = error;
+            throw error;
+          }
+        }
+      }
+    };
+    const result = this.portablePreviewTail.then(operation, operation);
+    this.portablePreviewTail = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
+
   async installPortableImport(): Promise<{ generation: string }> {
+    await this.portablePreviewTail;
+    await this.restorePortablePreviewBackend();
     const transfer = this.portableImport;
     if (!transfer) throw new Error('Portable import is not active');
     this.stopCoverTraffic();
@@ -1000,6 +1072,8 @@ export class SecureStorageWorkerApi {
   }
 
   async abortPortableTransfer(): Promise<void> {
+    await this.portablePreviewTail;
+    await this.restorePortablePreviewBackend();
     const pendingExport = this.portableExportStartPromise;
     if (pendingExport) {
       this.portableExportStartAbort?.abort();

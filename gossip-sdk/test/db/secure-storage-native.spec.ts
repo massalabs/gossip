@@ -163,6 +163,50 @@ describe('secure-storage native portable transfer', () => {
     ]);
   });
 
+  it('keeps each staged native push contiguous under concurrency', async () => {
+    nativeCall.mockImplementation(() => result(null));
+    const first = new Uint8Array(256 * 1024 + 1).fill(1);
+    const second = new Uint8Array(256 * 1024 + 1).fill(2);
+
+    await Promise.all([
+      SecureStorageNative.pushPortableImportChunk(first),
+      SecureStorageNative.pushPortableImportChunk(second),
+    ]);
+
+    const firstBytes = nativeCall.mock.calls.map(([options]) => {
+      const { data } = JSON.parse(options.args) as { data: string };
+      return atob(data).charCodeAt(0);
+    });
+    expect(firstBytes).toEqual([1, 1, 2, 2]);
+  });
+
+  it('authenticates a staged candidate without adding slot metadata', async () => {
+    nativeCall.mockResolvedValueOnce({
+      result: JSON.stringify({
+        userId:
+          'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s',
+        username: 'Alice',
+        avatar: null,
+        createdAtMs: 1234,
+      }),
+    });
+    const password = new Uint8Array([1, 2, 3]);
+
+    await expect(
+      SecureStorageNative.authenticatePortableImportCandidate({ password })
+    ).resolves.toEqual({
+      userId:
+        'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s',
+      username: 'Alice',
+      avatar: null,
+      createdAtMs: 1234,
+    });
+    expect(nativeCall).toHaveBeenCalledWith({
+      method: 'authenticatePortableImportCandidate',
+      args: JSON.stringify({ password: btoa(String.fromCharCode(1, 2, 3)) }),
+    });
+  });
+
   it('aborts import when the source rejects', async () => {
     nativeCall.mockImplementation(() => result(null));
 

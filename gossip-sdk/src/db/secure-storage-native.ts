@@ -68,10 +68,22 @@ async function callNative<T = unknown>(
 }
 
 let portableTransferTail: Promise<void> = Promise.resolve();
+let portableImportOperationTail: Promise<void> = Promise.resolve();
 
 function runPortableTransfer<T>(operation: () => Promise<T>): Promise<T> {
   const result = portableTransferTail.then(operation, operation);
   portableTransferTail = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
+function runPortableImportOperation<T>(
+  operation: () => Promise<T>
+): Promise<T> {
+  const result = portableImportOperationTail.then(operation, operation);
+  portableImportOperationTail = result.then(
     () => undefined,
     () => undefined
   );
@@ -156,6 +168,21 @@ export interface SecureStorageNativePlugin {
 
   /** Atomically replace locked storage after validating a complete stream. */
   importPortableV1(read: PortableChunkReader): Promise<void>;
+  beginPortableImport(): Promise<void>;
+  pushPortableImportChunk(data: Uint8Array): Promise<void>;
+  validatePortableImport(): Promise<void>;
+  installPortableImport(): Promise<void>;
+  abortPortableTransfer(): Promise<void>;
+
+  /** Project one profile from an already validated isolated candidate. */
+  authenticatePortableImportCandidate(options: {
+    password: Uint8Array;
+  }): Promise<{
+    userId: string;
+    username: string;
+    avatar: string | null;
+    createdAtMs: number;
+  }>;
 
   // Namespace data API - parity with the WASM worker. Enables the SDK
   // to persist the session blob on the native path without going
@@ -311,10 +338,39 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
       }
     });
   },
+  async beginPortableImport() {
+    await runPortableImportOperation(() => callNative('beginPortableImport'));
+  },
+  async pushPortableImportChunk(data) {
+    await runPortableImportOperation(async () => {
+      for (
+        let offset = 0;
+        offset < data.length;
+        offset += PORTABLE_CHUNK_BYTES
+      ) {
+        await callNative('pushPortableImportChunk', {
+          data: u8ToBase64(
+            data.subarray(offset, offset + PORTABLE_CHUNK_BYTES)
+          ),
+        });
+      }
+    });
+  },
+  async validatePortableImport() {
+    await runPortableImportOperation(() =>
+      callNative('validatePortableImport')
+    );
+  },
+  async installPortableImport() {
+    await runPortableImportOperation(() => callNative('installPortableImport'));
+  },
+  async abortPortableTransfer() {
+    await runPortableImportOperation(() => callNative('abortPortableTransfer'));
+  },
   async importPortableV1(read) {
     return runPortableTransfer(async () => {
       let finished = false;
-      await callNative('beginPortableImport');
+      await SecureStorageNative.beginPortableImport();
       try {
         while (true) {
           const chunk = await read();
@@ -324,24 +380,29 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
             offset < chunk.length;
             offset += PORTABLE_CHUNK_BYTES
           ) {
-            await callNative('pushPortableImportChunk', {
-              data: u8ToBase64(
-                chunk.subarray(offset, offset + PORTABLE_CHUNK_BYTES)
-              ),
-            });
+            await SecureStorageNative.pushPortableImportChunk(
+              chunk.subarray(offset, offset + PORTABLE_CHUNK_BYTES)
+            );
           }
         }
         // Validation is a new command so an older native binary rejects
         // before changing active storage. `finishPortableImport` retains its
         // historical validate+install meaning for old embedded JS bundles.
-        await callNative('validatePortableImport');
-        await callNative('installPortableImport');
+        await SecureStorageNative.validatePortableImport();
+        await SecureStorageNative.installPortableImport();
         finished = true;
       } finally {
         if (!finished)
-          await callNative('abortPortableTransfer').catch(() => {});
+          await SecureStorageNative.abortPortableTransfer().catch(() => {});
       }
     });
+  },
+  async authenticatePortableImportCandidate({ password }) {
+    return runPortableImportOperation(() =>
+      callNative('authenticatePortableImportCandidate', {
+        password: u8ToBase64(password),
+      })
+    );
   },
   async writeNamespaceData({ namespace, offset, data }) {
     await callNative('writeNamespaceData', {

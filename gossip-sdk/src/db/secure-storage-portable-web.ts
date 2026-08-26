@@ -1062,6 +1062,86 @@ export class PortableWebImport {
     });
   }
 
+  previewCandidate(
+    begin: (keypairs: Uint8Array[]) => boolean,
+    appendBlock: (
+      slot: number,
+      namespace: number,
+      blockIndex: number,
+      value: Uint8Array
+    ) => void
+  ): Promise<boolean> {
+    if (
+      !this.digestVerified ||
+      this.closing ||
+      this.installing ||
+      this.stage !== 'validated'
+    ) {
+      return Promise.reject(new Error('Portable import is not validated'));
+    }
+    return this.enqueue(async () => {
+      if (!this.db) this.db = await openDatabase();
+      const prefix = `${IMPORT_SPOOL_PREFIX}${this.transferId}:`;
+      const keypairTx = this.db.transaction(STORE_NAME, 'readonly');
+      const keypairDone = transactionDone(keypairTx);
+      const keypairStore = keypairTx.objectStore(STORE_NAME);
+      const keypairs = await Promise.all(
+        Array.from({ length: SESSION_COUNT }, async (_, slot) => {
+          const value = await request(
+            keypairStore.get(
+              `${prefix}${encodedKey({ kind: 'keypair', slot })}`
+            )
+          );
+          return asBytes(value).slice();
+        })
+      );
+      await keypairDone;
+      let authenticated = false;
+      try {
+        authenticated = begin(keypairs);
+      } finally {
+        for (const keypair of keypairs) keypair.fill(0);
+      }
+      if (!authenticated) return false;
+
+      // String IDB keys sort block 10 before block 2. Read each numeric block
+      // coordinate explicitly, keeping only one fixed all-slot batch in RAM.
+      const blockCount = this.namespaceZeroBlocks / SESSION_COUNT;
+      if (!Number.isSafeInteger(blockCount) || blockCount < 1) {
+        throw new Error('Portable import candidate layout is invalid');
+      }
+      for (let blockIndex = 0; blockIndex < blockCount; blockIndex += 1) {
+        const tx = this.db.transaction(STORE_NAME, 'readonly');
+        const done = transactionDone(tx);
+        const store = tx.objectStore(STORE_NAME);
+        const values = await Promise.all(
+          Array.from({ length: SESSION_COUNT }, async (_, slot) => {
+            const value = await request(
+              store.get(
+                `${prefix}${encodedKey({
+                  kind: 'block',
+                  slot,
+                  namespace: 0,
+                  blockIndex,
+                })}`
+              )
+            );
+            return asBytes(value).slice();
+          })
+        );
+        await done;
+        for (let slot = 0; slot < SESSION_COUNT; slot += 1) {
+          try {
+            appendBlock(slot, 0, blockIndex, values[slot]);
+          } finally {
+            values[slot].fill(0);
+          }
+        }
+      }
+      return true;
+    });
+  }
+
   install(): Promise<{ generation: string }> {
     if (
       !this.digestVerified ||

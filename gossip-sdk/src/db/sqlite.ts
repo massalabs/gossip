@@ -21,7 +21,10 @@ import { drizzle, type SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
 import * as schema from './schema/index.js';
 import { runMigrations } from './migrate.js';
 import { execStatements } from './exec-utils.js';
-import type { SecureStorageWorkerProxy } from './secure-storage-worker-api.js';
+import type {
+  ImportedAccountPreview,
+  SecureStorageWorkerProxy,
+} from './secure-storage-worker-api.js';
 import type {
   PortableChunkWriter,
   PortableProgressCallback,
@@ -974,6 +977,87 @@ export class DatabaseConnection {
     } finally {
       this.state.portableTransferActive = false;
     }
+  }
+
+  async secureStorageBeginPortableImport(): Promise<void> {
+    if (this.state.storageState !== 'locked') {
+      throw new Error('Portable import requires locked secure storage');
+    }
+    if (this.state.portableTransferActive) {
+      throw new Error('Portable transfer is already active');
+    }
+    if (this.state.closeActive) throw new Error('Secure storage is closing');
+    this.state.portableTransferActive = true;
+    try {
+      if (this.state.useNativePlugin) {
+        await this.requireNativePlugin().beginPortableImport();
+      } else {
+        await this.requireSecureProxy().beginPortableImport();
+      }
+    } catch (error) {
+      this.state.portableTransferActive = false;
+      throw error;
+    }
+  }
+
+  async secureStoragePushPortableImportChunk(data: Uint8Array): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().pushPortableImportChunk(data);
+    } else {
+      await this.requireSecureProxy().pushPortableImportChunk(data);
+    }
+  }
+
+  async secureStorageValidatePortableImport(): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().validatePortableImport();
+    } else {
+      await this.requireSecureProxy().finishPortableImportValidation();
+    }
+  }
+
+  async secureStorageAuthenticatePortableImportCandidate(
+    password: Uint8Array
+  ): Promise<ImportedAccountPreview> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      return this.requireNativePlugin().authenticatePortableImportCandidate({
+        password,
+      });
+    }
+    return this.requireSecureProxy().authenticatePortableImportCandidate(
+      password
+    );
+  }
+
+  async secureStorageInstallPortableImport(): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().installPortableImport();
+    } else {
+      await this.requireSecureProxy().installPortableImport();
+    }
+    this.state.portableTransferActive = false;
+  }
+
+  async secureStorageAbortPortableImport(): Promise<void> {
+    if (!this.state.portableTransferActive) return;
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().abortPortableTransfer();
+    } else {
+      await this.requireSecureProxy().abortPortableTransfer();
+    }
+    this.state.portableTransferActive = false;
   }
 
   // ── Generic namespace data API ─────────────────────────────────

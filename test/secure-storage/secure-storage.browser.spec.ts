@@ -136,6 +136,68 @@ describe('secure storage pipeline', () => {
     await reader.close();
   }, 120_000);
 
+  it('previews an authenticated portable candidate without installing it', async () => {
+    const password = 'preview-password';
+    const domain = 'vitest-portable-preview';
+    const userId =
+      'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s';
+    const now = new Date(1234);
+    const conn = await DatabaseConnection.create(config(domain));
+    await conn.secureStorageCreate(0, password);
+    await conn.db.insert(userProfile).values({
+      userId,
+      username: 'Alice',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+      security: JSON.stringify({
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
+        authMethod: 'password',
+        encKeySalt: Array.from({ length: 16 }, (_, index) => index),
+        mnemonicBackup: {
+          encryptedMnemonic: Array.from({ length: 17 }, (_, index) => index),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          backedUp: false,
+        },
+      }),
+      session: new Uint8Array([0]),
+    });
+    await conn.secureStorageFlush();
+    await conn.secureStorageLock();
+    const archive: Uint8Array[] = [];
+    await conn.secureStorageExportPortableV1(chunk => {
+      archive.push(chunk.slice());
+    });
+
+    await conn.secureStorageBeginPortableImport();
+    for (const chunk of archive) {
+      await conn.secureStoragePushPortableImportChunk(chunk);
+    }
+    await conn.secureStorageValidatePortableImport();
+    await expect(
+      conn.secureStorageAuthenticatePortableImportCandidate(
+        new TextEncoder().encode('wrong-password')
+      )
+    ).rejects.toThrow('password was not accepted');
+    await expect(
+      conn.secureStorageAuthenticatePortableImportCandidate(
+        new TextEncoder().encode(password)
+      )
+    ).resolves.toEqual({
+      userId,
+      username: 'Alice',
+      avatar: null,
+      createdAtMs: 1234,
+    });
+    await conn.secureStorageAbortPortableImport();
+    expect(conn.storageState).toBe('locked');
+    await conn.close();
+  }, 120_000);
+
   it('data persists across close/reopen', async () => {
     const password = 'test-persist';
     const domain = 'vitest-persist';
