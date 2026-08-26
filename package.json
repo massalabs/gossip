@@ -154,7 +154,7 @@
     "vite-plugin-mkcert": "^1.17.9",
     "vite-plugin-node-polyfills": "^0.24.0",
     "vite-plugin-pwa": "^0.21.1",
-    "vitest": "^4.0.14",
+    "vitest": "^4.1.0",
     "vitest-browser-react": "^2.0.2",
     "wasm-pack": "^0.13.1",
     "workbox-core": "^7.4.0",
