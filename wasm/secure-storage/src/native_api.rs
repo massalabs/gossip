@@ -16,7 +16,7 @@ use std::sync::{Mutex, OnceLock};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::error::SecureStorageError;
 use crate::js_num;
@@ -94,14 +94,14 @@ struct InitArgs {
     domain: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 struct AllocateArgs {
     slot: u8,
     /// base64-encoded password bytes
     password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 struct UnlockArgs {
     /// base64-encoded password bytes
     password: String,
@@ -269,13 +269,13 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
         }
         "allocateSession" => {
             let a: AllocateArgs = parse(args)?;
-            let password = Zeroizing::new(B64.decode(a.password)?);
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
             allocate(a.slot, &password)?;
             Ok("null".into())
         }
         "unlockSession" => {
             let a: UnlockArgs = parse(args)?;
-            let password = Zeroizing::new(B64.decode(a.password)?);
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
             let ok = unlock(&password)?;
             Ok(serde_json::to_string(&ok)?)
         }
@@ -343,9 +343,23 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
         }
         "authenticatePortableImportCandidate" => {
             let a: UnlockArgs = parse(args)?;
-            let password = Zeroizing::new(B64.decode(a.password)?);
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
             let preview = native_vfs::preview_portable_import(&password)?;
             Ok(serde_json::to_string(&preview)?)
+        }
+        "beginPortableOuterMigration" => {
+            native_vfs::begin_portable_outer_migration()?;
+            Ok("null".into())
+        }
+        "admitPortableOuterMigrationPassword" => {
+            let a: UnlockArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
+            native_vfs::admit_portable_outer_migration_password(&password)?;
+            Ok("null".into())
+        }
+        "finishPortableOuterMigration" => {
+            native_vfs::finish_portable_outer_migration()?;
+            Ok("null".into())
         }
         // Preserve the original bridge command's install-and-cleanup meaning
         // for an older embedded JS bundle running against this native binary.
@@ -705,6 +719,8 @@ mod tests {
             dispatch("pushPortableImportChunk", &args.to_string()).unwrap();
         }
         dispatch("validatePortableImport", "{}").unwrap();
+        dispatch("beginPortableOuterMigration", "{}").unwrap();
+        dispatch("finishPortableOuterMigration", "{}").unwrap();
         dispatch("installPortableImport", "{}").unwrap();
 
         dispatch("beginPortableExport", "{}").unwrap();
@@ -721,12 +737,15 @@ mod tests {
         }
         dispatch("finishPortableExport", "{}").unwrap();
 
-        assert_eq!(exported, fixture);
+        assert_ne!(exported, fixture);
+        let mut reader = crate::portable::PortableArchiveReader::new(exported.as_slice()).unwrap();
+        while reader.read_record().unwrap().is_some() {}
+        reader.finish().unwrap();
         native_vfs::reset_state();
     }
 
     #[test]
-    fn legacy_finish_portable_import_still_installs() {
+    fn legacy_finish_portable_import_rejects_unmigrated_candidate() {
         let _guard = native_vfs::test_mutex().lock().unwrap();
         native_vfs::reset_state();
         *db_mutex().lock().unwrap() = None;
@@ -742,8 +761,9 @@ mod tests {
             let args = serde_json::json!({ "data": B64.encode(chunk) });
             dispatch("pushPortableImportChunk", &args.to_string()).unwrap();
         }
-        dispatch("finishPortableImport", "{}").unwrap();
-        assert_eq!(dispatch("hasData", "{}").unwrap(), "true");
+        assert!(dispatch("finishPortableImport", "{}").is_err());
+        dispatch("abortPortableTransfer", "{}").unwrap();
+        assert_eq!(dispatch("hasData", "{}").unwrap(), "false");
         native_vfs::reset_state();
     }
 

@@ -31,10 +31,6 @@ export interface PortableTransferProgress {
 export type PortableProgressCallback = (
   progress: PortableTransferProgress
 ) => void;
-export type PortableChunkReader = () =>
-  | Uint8Array
-  | null
-  | Promise<Uint8Array | null>;
 
 // ── base64 helpers ────────────────────────────────────────────────
 
@@ -166,11 +162,12 @@ export interface SecureStorageNativePlugin {
     signal?: AbortSignal
   ): Promise<void>;
 
-  /** Atomically replace locked storage after validating a complete stream. */
-  importPortableV1(read: PortableChunkReader): Promise<void>;
   beginPortableImport(): Promise<void>;
   pushPortableImportChunk(data: Uint8Array): Promise<void>;
   validatePortableImport(): Promise<void>;
+  beginPortableOuterMigration(): Promise<void>;
+  admitPortableOuterMigrationPassword(password: Uint8Array): Promise<void>;
+  finishPortableOuterMigration(): Promise<void>;
   installPortableImport(): Promise<void>;
   abortPortableTransfer(): Promise<void>;
 
@@ -361,41 +358,28 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
       callNative('validatePortableImport')
     );
   },
+  async beginPortableOuterMigration() {
+    await runPortableImportOperation(() =>
+      callNative('beginPortableOuterMigration')
+    );
+  },
+  async admitPortableOuterMigrationPassword(password) {
+    await runPortableImportOperation(() =>
+      callNative('admitPortableOuterMigrationPassword', {
+        password: u8ToBase64(password),
+      })
+    );
+  },
+  async finishPortableOuterMigration() {
+    await runPortableImportOperation(() =>
+      callNative('finishPortableOuterMigration')
+    );
+  },
   async installPortableImport() {
     await runPortableImportOperation(() => callNative('installPortableImport'));
   },
   async abortPortableTransfer() {
     await runPortableImportOperation(() => callNative('abortPortableTransfer'));
-  },
-  async importPortableV1(read) {
-    return runPortableTransfer(async () => {
-      let finished = false;
-      await SecureStorageNative.beginPortableImport();
-      try {
-        while (true) {
-          const chunk = await read();
-          if (chunk === null) break;
-          for (
-            let offset = 0;
-            offset < chunk.length;
-            offset += PORTABLE_CHUNK_BYTES
-          ) {
-            await SecureStorageNative.pushPortableImportChunk(
-              chunk.subarray(offset, offset + PORTABLE_CHUNK_BYTES)
-            );
-          }
-        }
-        // Validation is a new command so an older native binary rejects
-        // before changing active storage. `finishPortableImport` retains its
-        // historical validate+install meaning for old embedded JS bundles.
-        await SecureStorageNative.validatePortableImport();
-        await SecureStorageNative.installPortableImport();
-        finished = true;
-      } finally {
-        if (!finished)
-          await SecureStorageNative.abortPortableTransfer().catch(() => {});
-      }
-    });
   },
   async authenticatePortableImportCandidate({ password }) {
     return runPortableImportOperation(() =>

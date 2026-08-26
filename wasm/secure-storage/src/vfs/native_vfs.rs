@@ -33,9 +33,14 @@ use rusqlite::ffi::{
     sqlite3_file, sqlite3_io_methods, sqlite3_vfs, sqlite3_vfs_find, sqlite3_vfs_register,
 };
 
+use zeroize::Zeroizing;
+
 use crate::DEFAULT_NAMESPACE;
 use crate::error::{Result, SecureStorageError};
-use crate::portable::{PortableArchiveReader, PortableRecordKind};
+use crate::portable::{
+    PortableArchiveReader, PortableArchiveWriter, PortableHeader, PortableRecord,
+    PortableRecordKind,
+};
 use crate::preview::{ImportedAccountPreview, query_imported_account_preview};
 use crate::read::read_session_data;
 use crate::storage::{BlockStorage, KeypairStorage, MemoryStorage};
@@ -61,6 +66,7 @@ const COVER_TRAFFIC_NAMESPACES: &[u8] = &[DEFAULT_NAMESPACE, SESSION_BLOB_NAMESP
 
 const PORTABLE_EXPORT_SPOOL: &str = ".portable-export.tmp";
 const PORTABLE_IMPORT_SPOOL: &str = ".portable-import.tmp";
+const PORTABLE_MIGRATION_SPOOL: &str = ".portable-migration.tmp";
 pub const MAX_PORTABLE_BRIDGE_CHUNK_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -81,10 +87,15 @@ enum PortableTransfer {
     },
     ValidatedImport {
         path: PathBuf,
+        source_path: Option<PathBuf>,
+    },
+    ImportMigration {
+        path: PathBuf,
+        plan: Box<crate::OuterMigrationPlan>,
     },
     Cleanup {
         kind: PortableTransferKind,
-        path: PathBuf,
+        paths: Vec<PathBuf>,
     },
 }
 
@@ -92,7 +103,9 @@ impl PortableTransfer {
     fn kind(&self) -> PortableTransferKind {
         match self {
             Self::Export { .. } => PortableTransferKind::Export,
-            Self::Import { .. } | Self::ValidatedImport { .. } => PortableTransferKind::Import,
+            Self::Import { .. } | Self::ValidatedImport { .. } | Self::ImportMigration { .. } => {
+                PortableTransferKind::Import
+            }
             Self::Cleanup { kind, .. } => *kind,
         }
     }
@@ -101,8 +114,9 @@ impl PortableTransfer {
         match self {
             Self::Export { path, .. }
             | Self::Import { path, .. }
-            | Self::ValidatedImport { path }
-            | Self::Cleanup { path, .. } => path,
+            | Self::ValidatedImport { path, .. }
+            | Self::ImportMigration { path, .. } => path,
+            Self::Cleanup { paths, .. } => &paths[0],
         }
     }
 }
@@ -210,7 +224,11 @@ fn io_methods() -> &'static sqlite3_io_methods {
 pub fn init_native(path: &str, domain: &str) -> Result<()> {
     let base_path = PathBuf::from(path);
     fs::create_dir_all(&base_path)?;
-    for spool in [PORTABLE_EXPORT_SPOOL, PORTABLE_IMPORT_SPOOL] {
+    for spool in [
+        PORTABLE_EXPORT_SPOOL,
+        PORTABLE_IMPORT_SPOOL,
+        PORTABLE_MIGRATION_SPOOL,
+    ] {
         match fs::remove_file(base_path.join(spool)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -315,7 +333,7 @@ pub fn provision() -> Result<()> {
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
     st.require_transfer_idle()?;
-    if let Err(e) = crate::provision_storage(&mut st.backend) {
+    if let Err(e) = crate::lifecycle::provision_storage_for_domain(&mut st.backend, &st.domain) {
         st.backend.discard_pending();
         return Err(e);
     }
@@ -357,6 +375,34 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn unlock_with_native_stack<S>(
+    storage: &S,
+    domain: &str,
+    password: &[u8],
+    require_unique: bool,
+) -> Result<UnlockedSession>
+where
+    S: BlockStorage + KeypairStorage + Sync,
+{
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("gossip-password-unlock".into())
+            .stack_size(16 * 1024 * 1024)
+            .spawn_scoped(scope, move || {
+                if require_unique {
+                    crate::unlock::unlock_session_unique(storage, domain, password)
+                } else {
+                    crate::unlock_session(storage, domain, password)
+                }
+            })
+            .map_err(|error| {
+                SecureStorageError::Storage(format!("password unlock worker: {error}"))
+            })?
+            .join()
+            .map_err(|_| SecureStorageError::Storage("password unlock worker failed".into()))?
+    })
+}
+
 /// Unlock a session by trying each slot with `password`.
 pub fn unlock(password: &[u8]) -> Result<bool> {
     let mutex = state_mutex();
@@ -365,7 +411,7 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
     st.require_transfer_idle()?;
-    match crate::unlock_session(&st.backend, &st.domain, password) {
+    match unlock_with_native_stack(&st.backend, &st.domain, password, false) {
         Ok(session) => {
             let sql_state =
                 load_namespace_state(&st.backend, &st.domain, &session, DEFAULT_NAMESPACE)?;
@@ -607,15 +653,15 @@ pub fn finish_portable_import() -> Result<()> {
         file.flush()?;
         file.sync_all()?;
         drop(file);
-        let input = File::open(&path)?;
-        let mut reader = PortableArchiveReader::new(input)?;
-        while reader.read_record()?.is_some() {}
-        reader.finish()?;
+        validate_portable_archive_path(path.clone())?;
         Ok(())
     })();
     match result {
         Ok(()) => {
-            st.transfer = Some(PortableTransfer::ValidatedImport { path });
+            st.transfer = Some(PortableTransfer::ValidatedImport {
+                path,
+                source_path: None,
+            });
             Ok(())
         }
         Err(operation) => {
@@ -623,6 +669,22 @@ pub fn finish_portable_import() -> Result<()> {
             Err(operation)
         }
     }
+}
+
+fn validate_portable_archive_path(path: PathBuf) -> Result<()> {
+    std::thread::Builder::new()
+        .name("gossip-portable-validation".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || {
+            let mut reader = PortableArchiveReader::new(File::open(path)?)?;
+            while reader.read_record()?.is_some() {}
+            reader.finish().map(|_| ())
+        })
+        .map_err(|error| {
+            SecureStorageError::Storage(format!("portable validation worker: {error}"))
+        })?
+        .join()
+        .map_err(|_| SecureStorageError::Storage("portable validation worker failed".into()))?
 }
 
 /// Authenticate and project one profile from the validated candidate without
@@ -633,7 +695,10 @@ pub fn preview_portable_import(password: &[u8]) -> Result<ImportedAccountPreview
     let st = guard
         .as_ref()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
-    let PortableTransfer::ValidatedImport { path } = st
+    let PortableTransfer::ValidatedImport {
+        path,
+        source_path: None,
+    } = st
         .transfer
         .as_ref()
         .ok_or(SecureStorageError::PortableTransferInProgress)?
@@ -656,7 +721,7 @@ pub fn preview_portable_import(password: &[u8]) -> Result<ImportedAccountPreview
     }
     drop(keypair_reader);
 
-    let session = crate::unlock::unlock_session_unique(&storage, &domain, password)?;
+    let session = unlock_with_native_stack(&storage, &domain, password, true)?;
     let matched = session.session_index;
     let mut required_blocks: Option<u64> = None;
     let mut reader = PortableArchiveReader::new(File::open(path)?)?;
@@ -713,6 +778,280 @@ pub fn preview_portable_import(password: &[u8]) -> Result<ImportedAccountPreview
     query_imported_account_preview(database)
 }
 
+/// Begin password-loaded outer migration without emitting any intermediate
+/// generation or slot match.
+pub fn begin_portable_outer_migration() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let Some(PortableTransfer::ValidatedImport {
+        path,
+        source_path: None,
+    }) = st.transfer.take()
+    else {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    };
+    let worker_path = path.clone();
+    let worker_domain = st.domain.clone();
+    let plan = std::thread::Builder::new()
+        .name("gossip-migration-admission".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || {
+            candidate_keypairs(&worker_path)
+                .and_then(|keypairs| crate::OuterMigrationPlan::new(&worker_domain, keypairs))
+                .map(Box::new)
+        })
+        .map_err(|error| {
+            SecureStorageError::Storage(format!("migration admission worker: {error}"))
+        })
+        .and_then(|worker| {
+            worker.join().map_err(|_| {
+                SecureStorageError::Storage("migration admission worker failed".into())
+            })?
+        });
+    match plan {
+        Ok(plan) => {
+            st.transfer = Some(PortableTransfer::ImportMigration { path, plan });
+            Ok(())
+        }
+        Err(error) => {
+            st.transfer = Some(PortableTransfer::ValidatedImport {
+                path,
+                source_path: None,
+            });
+            Err(error)
+        }
+    }
+}
+
+pub fn admit_portable_outer_migration_password(password: &[u8]) -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let Some(PortableTransfer::ImportMigration { path, plan }) = st.transfer.take() else {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    };
+    let password = Zeroizing::new(password.to_vec());
+    let worker = std::thread::Builder::new()
+        .name("gossip-password-admission".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || {
+            let mut plan = plan;
+            let result = plan.admit_password(&password);
+            (plan, result)
+        })
+        .map_err(|error| {
+            SecureStorageError::Storage(format!("password admission worker: {error}"))
+        });
+    let (plan, result) = match worker {
+        Ok(worker) => match worker.join() {
+            Ok(value) => value,
+            Err(_) => {
+                st.transfer = Some(PortableTransfer::ValidatedImport {
+                    path,
+                    source_path: None,
+                });
+                return Err(SecureStorageError::Storage(
+                    "password admission worker failed".into(),
+                ));
+            }
+        },
+        Err(error) => {
+            st.transfer = Some(PortableTransfer::ValidatedImport {
+                path,
+                source_path: None,
+            });
+            return Err(error);
+        }
+    };
+    st.transfer = Some(PortableTransfer::ImportMigration { path, plan });
+    result
+}
+
+/// Finalize one complete current-suite candidate. Failure deletes only the
+/// incomplete destination and restores the validated source for re-admission.
+pub fn finish_portable_outer_migration() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let Some(PortableTransfer::ImportMigration { path, plan }) = st.transfer.take() else {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    };
+    let output = st.base_path.join(PORTABLE_MIGRATION_SPOOL);
+    let source_for_worker = path.clone();
+    let output_for_worker = output.clone();
+    let result = std::thread::Builder::new()
+        .name("gossip-outer-migration".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || transform_portable_candidate(&source_for_worker, &output_for_worker, *plan))
+        .map_err(|error| SecureStorageError::Storage(format!("outer migration worker: {error}")))
+        .and_then(|worker| {
+            worker
+                .join()
+                .map_err(|_| SecureStorageError::Storage("outer migration worker failed".into()))?
+        });
+    if let Err(error) = result {
+        match fs::remove_file(&output) {
+            Ok(()) => {}
+            Err(remove_error) if remove_error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                st.transfer = Some(PortableTransfer::Cleanup {
+                    kind: PortableTransferKind::Import,
+                    paths: vec![output, path],
+                });
+                return Err(error);
+            }
+        }
+        st.transfer = Some(PortableTransfer::ValidatedImport {
+            path,
+            source_path: None,
+        });
+        return Err(error);
+    }
+    st.transfer = Some(PortableTransfer::ValidatedImport {
+        path: output,
+        source_path: Some(path),
+    });
+    Ok(())
+}
+
+fn candidate_keypairs(path: &Path) -> Result<[Vec<u8>; crate::SESSION_COUNT]> {
+    let mut reader = PortableArchiveReader::new(File::open(path)?)?;
+    let mut keypairs: [Vec<u8>; crate::SESSION_COUNT] = std::array::from_fn(|_| Vec::new());
+    for slot in 0..crate::SESSION_COUNT {
+        let record = reader
+            .read_record()?
+            .ok_or(SecureStorageError::InvalidPortableArchive)?;
+        if record.kind != PortableRecordKind::Keypair || usize::from(record.slot) != slot {
+            return Err(SecureStorageError::InvalidPortableArchive);
+        }
+        keypairs[slot] = record.value.clone();
+    }
+    Ok(keypairs)
+}
+
+fn transform_portable_candidate(
+    source: &Path,
+    output: &Path,
+    plan: crate::OuterMigrationPlan,
+) -> Result<()> {
+    let source_keypairs = candidate_keypairs(source)?;
+    let source_header = PortableArchiveReader::new(File::open(source)?)?.header();
+    let old_keypair_bytes = source_keypairs.iter().try_fold(0_u64, |total, value| {
+        total
+            .checked_add(value.len() as u64)
+            .ok_or(SecureStorageError::Overflow)
+    })?;
+    let new_keypair_size =
+        crate::keypair::serialized_keypair_size(crate::keypair::CURRENT_SESSION_VERSION).ok_or(
+            SecureStorageError::UnsupportedVersion(crate::keypair::CURRENT_SESSION_VERSION),
+        )? as u64;
+    let record_section_length = source_header
+        .record_section_length
+        .checked_sub(old_keypair_bytes)
+        .and_then(|value| value.checked_add(new_keypair_size * crate::SESSION_COUNT as u64))
+        .ok_or(SecureStorageError::Overflow)?;
+    let header = PortableHeader {
+        record_count: source_header.record_count,
+        record_section_length,
+    };
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(output)?;
+    let mut writer = PortableArchiveWriter::new(file, header)?;
+    let mut migration = plan.finalize()?;
+    for (slot, keypair) in migration.keypairs().into_iter().enumerate() {
+        writer.write_record(&PortableRecord::keypair(slot as u8, keypair.to_vec()))?;
+    }
+
+    let mut reader = PortableArchiveReader::new(File::open(source)?)?;
+    for _ in 0..crate::SESSION_COUNT {
+        reader
+            .read_record()?
+            .ok_or(SecureStorageError::InvalidPortableArchive)?;
+    }
+    let mut current_namespace = 0_u8;
+    let mut namespace_blocks = 0_u64;
+    while let Some(first) = reader.read_record()? {
+        if first.kind != PortableRecordKind::Block || first.slot != 0 {
+            return Err(SecureStorageError::InvalidPortableArchive);
+        }
+        let namespace = u8::try_from(first.namespace)
+            .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
+        if namespace != current_namespace {
+            migration.finish_namespace(current_namespace, namespace_blocks)?;
+            current_namespace = namespace;
+            namespace_blocks = 0;
+        }
+        if first.block_index != namespace_blocks {
+            return Err(SecureStorageError::InvalidPortableArchive);
+        }
+        let second = reader
+            .read_record()?
+            .ok_or(SecureStorageError::InvalidPortableArchive)?;
+        let third = reader
+            .read_record()?
+            .ok_or(SecureStorageError::InvalidPortableArchive)?;
+        let records = [first, second, third];
+        for (slot, record) in records.iter().enumerate() {
+            if record.kind != PortableRecordKind::Block
+                || usize::from(record.slot) != slot
+                || record.namespace != u64::from(namespace)
+                || record.block_index != namespace_blocks
+            {
+                return Err(SecureStorageError::InvalidPortableArchive);
+            }
+        }
+        let first_block: &[u8; crate::BLOCK_SIZE] = records[0]
+            .value
+            .as_slice()
+            .try_into()
+            .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
+        let second_block: &[u8; crate::BLOCK_SIZE] = records[1]
+            .value
+            .as_slice()
+            .try_into()
+            .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
+        let third_block: &[u8; crate::BLOCK_SIZE] = records[2]
+            .value
+            .as_slice()
+            .try_into()
+            .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
+        let refs = [first_block, second_block, third_block];
+        let migrated = migration.migrate_block_batch(namespace, namespace_blocks, refs)?;
+        for (slot, value) in migrated.into_iter().enumerate() {
+            writer.write_record(&PortableRecord::block(
+                slot as u8,
+                namespace,
+                namespace_blocks,
+                value.to_vec(),
+            ))?;
+        }
+        namespace_blocks = namespace_blocks
+            .checked_add(1)
+            .ok_or(SecureStorageError::Overflow)?;
+    }
+    migration.finish_namespace(current_namespace, namespace_blocks)?;
+    if current_namespace == 0 {
+        migration.finish_namespace(1, 0)?;
+    }
+    reader.finish()?;
+    let output_file = writer.finish()?;
+    output_file.sync_all()?;
+
+    let mut validation = PortableArchiveReader::new(File::open(output)?)?;
+    while validation.read_record()?.is_some() {}
+    validation.finish().map(|_| ())
+}
+
 /// Revalidate and atomically replace active redb storage from a validated
 /// candidate. A failure leaves the old installation selected.
 pub fn install_portable_import() -> Result<()> {
@@ -721,7 +1060,16 @@ pub fn install_portable_import() -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
-    let Some(PortableTransfer::ValidatedImport { path }) = st.transfer.take() else {
+    let transfer = st
+        .transfer
+        .take()
+        .ok_or(SecureStorageError::PortableTransferInProgress)?;
+    let PortableTransfer::ValidatedImport {
+        path,
+        source_path: Some(source_path),
+    } = transfer
+    else {
+        st.transfer = Some(transfer);
         return Err(SecureStorageError::PortableTransferInProgress);
     };
 
@@ -732,19 +1080,48 @@ pub fn install_portable_import() -> Result<()> {
     })();
     if let Err(error) = result {
         // Pre-commit failures leave the exact validated candidate retryable.
-        st.transfer = Some(PortableTransfer::ValidatedImport { path });
+        st.transfer = Some(PortableTransfer::ValidatedImport {
+            path,
+            source_path: Some(source_path),
+        });
         return Err(error);
     }
 
     // Replacement has committed. A later spool-cleanup error must not be
     // reported as an install failure, which would misrepresent active state.
     // init_native repeats deletion before another session can open.
-    if fs::remove_file(&path).is_err() {
-        let _ = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&path)
-            .and_then(|file| file.sync_all());
+    for cleanup_path in [&path, &source_path] {
+        if fs::remove_file(cleanup_path).is_err() {
+            let _ = OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(cleanup_path)
+                .and_then(|file| file.sync_all());
+        }
+    }
+    st.transfer = None;
+    Ok(())
+}
+
+fn cleanup_portable_paths(
+    st: &mut VfsState,
+    kind: PortableTransferKind,
+    mut paths: Vec<PathBuf>,
+) -> Result<()> {
+    while let Some(path) = paths.first().cloned() {
+        st.transfer = Some(PortableTransfer::Cleanup {
+            kind,
+            paths: paths.clone(),
+        });
+        match fs::remove_file(&path) {
+            Ok(()) => {
+                paths.remove(0);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                paths.remove(0);
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
     st.transfer = None;
     Ok(())
@@ -755,21 +1132,7 @@ fn cleanup_portable_path(
     kind: PortableTransferKind,
     path: PathBuf,
 ) -> Result<()> {
-    st.transfer = Some(PortableTransfer::Cleanup {
-        kind,
-        path: path.clone(),
-    });
-    match fs::remove_file(&path) {
-        Ok(()) => {
-            st.transfer = None;
-            Ok(())
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            st.transfer = None;
-            Ok(())
-        }
-        Err(error) => Err(error.into()),
-    }
+    cleanup_portable_paths(st, kind, vec![path])
 }
 
 /// Abort either transfer direction and delete its temporary spool.
@@ -783,9 +1146,15 @@ pub fn abort_portable_transfer() -> Result<()> {
         return Ok(());
     };
     let kind = transfer.kind();
-    let path = transfer.path().to_path_buf();
-    drop(transfer);
-    cleanup_portable_path(st, kind, path)
+    let paths = match transfer {
+        PortableTransfer::ValidatedImport {
+            path,
+            source_path: Some(source_path),
+        } => vec![path, source_path],
+        PortableTransfer::Cleanup { paths, .. } => paths,
+        transfer => vec![transfer.path().to_path_buf()],
+    };
+    cleanup_portable_paths(st, kind, paths)
 }
 
 fn finish_portable_transfer(expected: PortableTransferKind) -> Result<()> {
@@ -1674,39 +2043,46 @@ mod tests {
 
     #[test]
     fn portable_spools_stream_without_exposing_partial_imports() {
-        let _guard = test_mutex().lock().unwrap();
-        reset_state();
-        let dir = tempfile::tempdir().unwrap();
-        init_native(dir.path().to_str().unwrap(), "test").unwrap();
-        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            let dir = tempfile::tempdir().unwrap();
+            init_native(dir.path().to_str().unwrap(), "test").unwrap();
+            let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
 
-        begin_portable_import().unwrap();
-        for chunk in fixture.chunks(8192) {
-            push_portable_import_chunk(chunk).unwrap();
-        }
-        assert!(matches!(
-            has_data(),
-            Err(SecureStorageError::PortableTransferInProgress)
-        ));
-        finish_portable_import().unwrap();
-        assert!(matches!(
-            has_data(),
-            Err(SecureStorageError::PortableTransferInProgress)
-        ));
-        assert!(dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
-        install_portable_import().unwrap();
-        assert!(has_data().unwrap());
-        assert!(!dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
+            begin_portable_import().unwrap();
+            for chunk in fixture.chunks(8192) {
+                push_portable_import_chunk(chunk).unwrap();
+            }
+            assert!(matches!(
+                has_data(),
+                Err(SecureStorageError::PortableTransferInProgress)
+            ));
+            finish_portable_import().unwrap();
+            assert!(matches!(
+                has_data(),
+                Err(SecureStorageError::PortableTransferInProgress)
+            ));
+            assert!(dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
+            begin_portable_outer_migration().unwrap();
+            finish_portable_outer_migration().unwrap();
+            install_portable_import().unwrap();
+            assert!(has_data().unwrap());
+            assert!(!dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
 
-        begin_portable_export().unwrap();
-        let mut exported = Vec::new();
-        while let Some(chunk) = read_portable_export_chunk(4096).unwrap() {
-            exported.extend_from_slice(&chunk);
-        }
-        finish_portable_export().unwrap();
-        assert_eq!(exported, fixture);
-        assert!(!dir.path().join(PORTABLE_EXPORT_SPOOL).exists());
-        reset_state();
+            begin_portable_export().unwrap();
+            let mut exported = Vec::new();
+            while let Some(chunk) = read_portable_export_chunk(4096).unwrap() {
+                exported.extend_from_slice(&chunk);
+            }
+            finish_portable_export().unwrap();
+            assert_ne!(exported, fixture);
+            let mut reader = PortableArchiveReader::new(exported.as_slice()).unwrap();
+            while reader.read_record().unwrap().is_some() {}
+            reader.finish().unwrap();
+            assert!(!dir.path().join(PORTABLE_EXPORT_SPOOL).exists());
+            reset_state();
+        });
     }
 
     #[test]
@@ -1767,6 +2143,97 @@ mod tests {
     }
 
     #[test]
+    fn native_outer_migration_rotates_all_slots_and_installs_selected_data() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (source, conn) = setup_native_vfs();
+            conn.execute_batch(
+                "CREATE TABLE userProfile (
+                    userId TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    avatar TEXT,
+                    createdAt INTEGER NOT NULL,
+                    security TEXT NOT NULL
+                );
+                INSERT INTO userProfile VALUES (
+                    'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s',
+                    'Alice', NULL, 1234,
+                    '{\"formatVersion\":1,\"passwordKdfVersion\":1,
+                      \"mnemonicEncryptionVersion\":1,\"identityDerivationVersion\":1,
+                      \"authMethod\":\"password\",
+                      \"encKeySalt\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
+                      \"mnemonicBackup\":{
+                        \"encryptedMnemonic\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
+                        \"createdAt\":\"2026-01-01T00:00:00.000Z\",\"backedUp\":false}}'
+                );",
+            )
+            .unwrap();
+            drop(conn);
+            lock().unwrap();
+            let source_keypairs: [Vec<u8>; crate::SESSION_COUNT] = {
+                let guard = state_mutex().lock().unwrap();
+                let state = guard.as_ref().unwrap();
+                std::array::from_fn(|slot| {
+                    state
+                        .backend
+                        .read_keypair(SessionIndex::new(slot as u8).unwrap())
+                        .unwrap()
+                        .to_vec()
+                })
+            };
+            let total = begin_portable_export().unwrap();
+            let mut archive = Vec::new();
+            while let Some(chunk) = read_portable_export_chunk(8192).unwrap() {
+                archive.extend_from_slice(&chunk);
+            }
+            finish_portable_export().unwrap();
+            assert_eq!(archive.len() as u64, total);
+            drop(source);
+            reset_state();
+
+            let destination = tempfile::tempdir().unwrap();
+            init_native(destination.path().to_str().unwrap(), "test").unwrap();
+            begin_portable_import().unwrap();
+            for chunk in archive.chunks(8192) {
+                push_portable_import_chunk(chunk).unwrap();
+            }
+            finish_portable_import().unwrap();
+            begin_portable_outer_migration().unwrap();
+            assert!(admit_portable_outer_migration_password(b"wrong").is_err());
+            admit_portable_outer_migration_password(b"password").unwrap();
+            finish_portable_outer_migration().unwrap();
+
+            let migrated_path = destination.path().join(PORTABLE_MIGRATION_SPOOL);
+            assert!(migrated_path.exists());
+            assert!(destination.path().join(PORTABLE_IMPORT_SPOOL).exists());
+            let mut reader =
+                PortableArchiveReader::new(File::open(&migrated_path).unwrap()).unwrap();
+            for slot in 0..crate::SESSION_COUNT {
+                let record = reader.read_record().unwrap().unwrap();
+                let keypair = crate::KeypairFile::deserialize(&record.value).unwrap();
+                let source_keypair =
+                    crate::KeypairFile::deserialize(&source_keypairs[slot]).unwrap();
+                assert_eq!(keypair.version, crate::CURRENT_SESSION_VERSION);
+                assert_ne!(keypair.pq_pk, source_keypair.pq_pk);
+            }
+            drop(reader);
+
+            install_portable_import().unwrap();
+            assert!(!destination.path().join(PORTABLE_IMPORT_SPOOL).exists());
+            assert!(!migrated_path.exists());
+            assert!(unlock(b"password").unwrap());
+            let db = open_db().unwrap();
+            let username: String = db
+                .query_row("SELECT username FROM userProfile", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(username, "Alice");
+            drop(db);
+            lock().unwrap();
+            reset_state();
+        });
+    }
+
+    #[test]
     fn validated_portable_import_remains_abortable_before_install() {
         let _guard = test_mutex().lock().unwrap();
         reset_state();
@@ -1797,19 +2264,23 @@ mod tests {
             push_portable_import_chunk(chunk).unwrap();
         }
         finish_portable_import().unwrap();
-        let path = dir.path().join(PORTABLE_IMPORT_SPOOL);
+        begin_portable_outer_migration().unwrap();
+        finish_portable_outer_migration().unwrap();
+        let path = dir.path().join(PORTABLE_MIGRATION_SPOOL);
         let mut file = OpenOptions::new().write(true).open(&path).unwrap();
         file.write_all(b"broken").unwrap();
         file.sync_all().unwrap();
 
         assert!(install_portable_import().is_err());
         assert!(path.exists());
+        assert!(dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
         assert!(matches!(
             has_data(),
             Err(SecureStorageError::PortableTransferInProgress)
         ));
         abort_portable_transfer().unwrap();
         assert!(!path.exists());
+        assert!(!dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
         reset_state();
     }
 
@@ -1825,6 +2296,8 @@ mod tests {
             push_portable_import_chunk(chunk).unwrap();
         }
         finish_portable_import().unwrap();
+        begin_portable_outer_migration().unwrap();
+        finish_portable_outer_migration().unwrap();
         install_portable_import().unwrap();
 
         begin_portable_export().unwrap();

@@ -79,39 +79,37 @@ describe('secure-storage native portable transfer', () => {
     ]);
   });
 
-  it('streams, validates, then atomically installs a native import', async () => {
-    const chunks: Array<Uint8Array | null> = [
-      Uint8Array.from([1, 2]),
-      new Uint8Array(),
-      Uint8Array.from([3]),
-      null,
-    ];
+  it('stages, migrates, then installs a native import', async () => {
     nativeCall.mockImplementation(() => result(null));
 
-    await SecureStorageNative.importPortableV1(() => chunks.shift() ?? null);
+    await SecureStorageNative.beginPortableImport();
+    await SecureStorageNative.pushPortableImportChunk(
+      Uint8Array.from([1, 2, 3])
+    );
+    await SecureStorageNative.validatePortableImport();
+    await SecureStorageNative.beginPortableOuterMigration();
+    await SecureStorageNative.finishPortableOuterMigration();
+    await SecureStorageNative.installPortableImport();
 
     expect(nativeCall.mock.calls.map(([options]) => options.method)).toEqual([
       'beginPortableImport',
       'pushPortableImportChunk',
-      'pushPortableImportChunk',
       'validatePortableImport',
+      'beginPortableOuterMigration',
+      'finishPortableOuterMigration',
       'installPortableImport',
     ]);
     expect(JSON.parse(nativeCall.mock.calls[1][0].args)).toEqual({
-      data: btoa(String.fromCharCode(1, 2)),
-    });
-    expect(JSON.parse(nativeCall.mock.calls[2][0].args)).toEqual({
-      data: btoa(String.fromCharCode(3)),
+      data: btoa(String.fromCharCode(1, 2, 3)),
     });
   });
 
-  it('splits oversized reader chunks before crossing the bridge', async () => {
+  it('splits oversized staged chunks before crossing the bridge', async () => {
     const large = new Uint8Array(256 * 1024 + 3);
     large[large.length - 1] = 7;
-    const chunks: Array<Uint8Array | null> = [large, null];
     nativeCall.mockImplementation(() => result(null));
 
-    await SecureStorageNative.importPortableV1(() => chunks.shift() ?? null);
+    await SecureStorageNative.pushPortableImportChunk(large);
 
     const pushes = nativeCall.mock.calls.filter(
       ([options]) => options.method === 'pushPortableImportChunk'
@@ -123,44 +121,24 @@ describe('secure-storage native portable transfer', () => {
     ).toEqual([0, 0, 7]);
   });
 
-  it('serializes complete transfers so one abort cannot cancel another', async () => {
-    let releaseRead: ((value: { result: string }) => void) | undefined;
-    const blockedRead = new Promise<{ result: string }>(resolve => {
-      releaseRead = resolve;
-    });
-    nativeCall.mockImplementation(
-      ({ method }: { method: string; args: string }) => {
-        if (method === 'beginPortableExport') return result(0);
-        if (method === 'readPortableExportChunk') return blockedRead;
-        return result(null);
-      }
-    );
+  it('sequences native outer-migration password admission', async () => {
+    nativeCall.mockImplementation(() => result(null));
+    const password = new Uint8Array([7, 8, 9]);
 
-    const exporting = SecureStorageNative.exportPortableV1(() => {});
-    await vi.waitFor(() => {
-      expect(
-        nativeCall.mock.calls.some(
-          ([o]) => o.method === 'readPortableExportChunk'
-        )
-      ).toBe(true);
-    });
-    const importing = SecureStorageNative.importPortableV1(() => null);
-    await Promise.resolve();
-    expect(
-      nativeCall.mock.calls.some(([o]) => o.method === 'beginPortableImport')
-    ).toBe(false);
+    await SecureStorageNative.beginPortableOuterMigration();
+    await SecureStorageNative.admitPortableOuterMigrationPassword(password);
+    await SecureStorageNative.finishPortableOuterMigration();
 
-    releaseRead?.({ result: 'null' });
-    await exporting;
-    await importing;
     expect(nativeCall.mock.calls.map(([options]) => options.method)).toEqual([
-      'beginPortableExport',
-      'readPortableExportChunk',
-      'finishPortableExport',
-      'beginPortableImport',
-      'validatePortableImport',
-      'installPortableImport',
+      'beginPortableOuterMigration',
+      'admitPortableOuterMigrationPassword',
+      'finishPortableOuterMigration',
     ]);
+    expect(JSON.parse(nativeCall.mock.calls[1][0].args)).toEqual({
+      password: btoa(String.fromCharCode(7, 8, 9)),
+    });
+    // The caller retains this successful password for later private migration.
+    expect(Array.from(password)).toEqual([7, 8, 9]);
   });
 
   it('keeps each staged native push contiguous under concurrency', async () => {
@@ -205,20 +183,5 @@ describe('secure-storage native portable transfer', () => {
       method: 'authenticatePortableImportCandidate',
       args: JSON.stringify({ password: btoa(String.fromCharCode(1, 2, 3)) }),
     });
-  });
-
-  it('aborts import when the source rejects', async () => {
-    nativeCall.mockImplementation(() => result(null));
-
-    await expect(
-      SecureStorageNative.importPortableV1(() => {
-        throw new Error('source failed');
-      })
-    ).rejects.toThrow('source failed');
-
-    expect(nativeCall.mock.calls.map(([options]) => options.method)).toEqual([
-      'beginPortableImport',
-      'abortPortableTransfer',
-    ]);
   });
 });
