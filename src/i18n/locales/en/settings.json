@@ -90,6 +90,7 @@
     "choose_destination": "Choose backup destination",
     "change_destination": "Change destination",
     "destination": "Destination",
+    "selected_file": "the selected Gossip backup",
     "export": "Export all account data",
     "notification_title": "Gossip secure backup",
     "preparing": "Preparing backup",

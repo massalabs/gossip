@@ -226,7 +226,7 @@ const Settings = (): React.ReactElement => {
               <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
             )}
           </Button>
-          {Capacitor.getPlatform() !== 'ios' && (
+          {['web', 'android', 'ios'].includes(Capacitor.getPlatform()) && (
             <Button
               variant="outline"
               size="custom"

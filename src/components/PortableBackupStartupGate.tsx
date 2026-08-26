@@ -6,16 +6,21 @@ import { listInterruptedNativeBackups } from '../services/portableBackupNative';
 
 const RECOVERY_KEY = 'gossip:portable-backup-result';
 
-/** Block every account route until Android's device-local output journal is clear. */
+function isNativePlatform(): boolean {
+  const platform = Capacitor.getPlatform();
+  return platform === 'android' || platform === 'ios';
+}
+
+/** Block every account route until the native device-local output journal is clear. */
 const PortableBackupStartupGate: React.FC<React.PropsWithChildren> = ({
   children,
 }) => {
   const [state, setState] = useState<'checking' | 'required' | 'clear'>(
-    Capacitor.getPlatform() === 'android' ? 'checking' : 'clear'
+    isNativePlatform() ? 'checking' : 'clear'
   );
 
   useEffect(() => {
-    if (Capacitor.getPlatform() !== 'android') return;
+    if (!isNativePlatform()) return;
     let active = true;
     void listInterruptedNativeBackups()
       .then(outputs => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GossipSdk } from '@massalabs/gossip-sdk';
 
 const mocks = vi.hoisted(() => ({
+  platform: 'android',
   plugin: {
     selectExportDestination: vi.fn(),
     beginExport: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     finishVerification: vi.fn(),
     listInterruptedOutputs: vi.fn(),
     deleteOutput: vi.fn(),
+    resetRecoveryJournal: vi.fn(),
     startProtection: vi.fn(),
     updateProtection: vi.fn(),
     stopProtection: vi.fn(),
@@ -19,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@capacitor/core', () => ({
+  Capacitor: { getPlatform: () => mocks.platform },
   registerPlugin: () => mocks.plugin,
 }));
 
@@ -64,6 +67,7 @@ function decodeWrite(): Uint8Array {
 describe('Android portable backup transport', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.platform = 'android';
     for (const method of [
       'beginExport',
       'beginVerification',
@@ -82,6 +86,7 @@ describe('Android portable backup transport', () => {
     }));
     mocks.plugin.deleteOutput.mockResolvedValue({ deleted: true });
     mocks.plugin.listInterruptedOutputs.mockResolvedValue({ outputs: [] });
+    mocks.plugin.resetRecoveryJournal.mockResolvedValue(undefined);
   });
 
   it('writes, fsyncs, reads back, and verifies exact native bytes', async () => {
@@ -137,6 +142,31 @@ describe('Android portable backup transport', () => {
     await expect(
       exportNativeBackup(sdkFor(expected), destination, labels)
     ).rejects.toBeInstanceOf(PortableBackupCleanupRequiredError);
+  });
+
+  it('resets only an unreadable iOS journal after explicit manual cleanup', async () => {
+    mocks.platform = 'ios';
+    mocks.plugin.listInterruptedOutputs.mockRejectedValueOnce(
+      new Error('journal unreadable')
+    );
+
+    const { forgetInterruptedNativeBackups } =
+      await import('../../src/services/portableBackupNative');
+    await expect(forgetInterruptedNativeBackups()).resolves.toBeUndefined();
+    expect(mocks.plugin.resetRecoveryJournal).toHaveBeenCalledOnce();
+  });
+
+  it('never invokes the iOS journal reset after an Android listing failure', async () => {
+    mocks.plugin.listInterruptedOutputs.mockRejectedValueOnce(
+      new Error('Android bridge unavailable')
+    );
+    const { forgetInterruptedNativeBackups } =
+      await import('../../src/services/portableBackupNative');
+
+    await expect(forgetInterruptedNativeBackups()).rejects.toThrow(
+      'Android bridge unavailable'
+    );
+    expect(mocks.plugin.resetRecoveryJournal).not.toHaveBeenCalled();
   });
 
   it('deletes every recoverable interrupted output before retry', async () => {

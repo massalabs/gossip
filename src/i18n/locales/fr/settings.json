@@ -90,6 +90,7 @@
     "choose_destination": "Choisir la destination",
     "change_destination": "Changer de destination",
     "destination": "Destination",
+    "selected_file": "la sauvegarde Gossip sélectionnée",
     "export": "Exporter toutes les données des comptes",
     "notification_title": "Sauvegarde sécurisée Gossip",
     "preparing": "Préparation de la sauvegarde",

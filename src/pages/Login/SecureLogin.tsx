@@ -150,7 +150,7 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           onDismiss={() => onErrorChange?.(null)}
         />
 
-        {Capacitor.getPlatform() !== 'ios' && (
+        {['web', 'android', 'ios'].includes(Capacitor.getPlatform()) && (
           <Button
             type="button"
             variant="outline"

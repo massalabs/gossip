@@ -1,4 +1,4 @@
-import { registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { sha256 } from '@noble/hashes/sha2';
 import type {
   GossipSdk,
@@ -34,6 +34,7 @@ interface NativeFilePlugin {
   listInterruptedOutputs(): Promise<{ outputs: NativeDestination[] }>;
   deleteOutput(options: { token: string }): Promise<{ deleted: boolean }>;
   forgetOutput(options: { token: string }): Promise<void>;
+  resetRecoveryJournal(): Promise<void>;
   abandon(options: { token: string }): Promise<{ deleted: boolean }>;
   startProtection(options: { title: string; text: string }): Promise<void>;
   updateProtection(options: {
@@ -134,7 +135,17 @@ export async function cleanupInterruptedNativeBackups(): Promise<NativeBackupCle
 }
 
 export async function forgetInterruptedNativeBackups(): Promise<void> {
-  const { outputs } = await nativeFiles.listInterruptedOutputs();
+  let outputs: NativeBackupDestination[];
+  try {
+    ({ outputs } = await nativeFiles.listInterruptedOutputs());
+  } catch (error) {
+    if (Capacitor.getPlatform() !== 'ios') throw error;
+    // This path is reached only from the explicit manual-cleanup Continue
+    // action. iOS authorizes reset only while its excluded local journal is
+    // unreadable; normal readable journals must forget named tokens instead.
+    await nativeFiles.resetRecoveryJournal();
+    return;
+  }
   for (const output of outputs) {
     await nativeFiles.forgetOutput({ token: output.token });
   }

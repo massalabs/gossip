@@ -90,6 +90,7 @@
     "choose_destination": "选择备份位置",
     "change_destination": "更改位置",
     "destination": "保存位置",
+    "selected_file": "所选的 Gossip 备份",
     "export": "导出所有账户数据",
     "notification_title": "Gossip 安全备份",
     "preparing": "正在准备备份",

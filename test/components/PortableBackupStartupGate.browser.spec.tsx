@@ -6,10 +6,10 @@ import PortableBackupStartupGate from '../../src/components/PortableBackupStartu
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const mocks = vi.hoisted(() => ({ list: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), platform: 'android' }));
 
 vi.mock('@capacitor/core', () => ({
-  Capacitor: { getPlatform: () => 'android' },
+  Capacitor: { getPlatform: () => mocks.platform },
   registerPlugin: () => ({}),
 }));
 
@@ -28,6 +28,7 @@ vi.mock('../../src/pages/PortableBackup', () => ({
 describe('Android portable backup startup gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.platform = 'android';
     window.sessionStorage.clear();
   });
 
@@ -72,6 +73,25 @@ describe('Android portable backup startup gate', () => {
     expect(window.sessionStorage.getItem('gossip:portable-backup-result')).toBe(
       'interrupted'
     );
+  });
+
+  it('also forces recovery before account routes on iOS', async () => {
+    mocks.platform = 'ios';
+    mocks.list.mockResolvedValue([
+      { token: 'opaque-token', name: 'pending.gossipbackup' },
+    ]);
+    await render(
+      <PortableBackupStartupGate>
+        <div>account-routes</div>
+      </PortableBackupStartupGate>
+    );
+
+    await expect
+      .element(page.getByText('native-backup-recovery'))
+      .toBeVisible();
+    await expect
+      .element(page.getByText('account-routes'))
+      .not.toBeInTheDocument();
   });
 
   it('mounts account routes only after a clear journal result', async () => {

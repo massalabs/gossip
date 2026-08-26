@@ -53,7 +53,7 @@ type Result =
 
 type BackupDestination =
   | { kind: 'browser'; handle: FileSystemFileHandle; name: string }
-  | { kind: 'android'; handle: NativeBackupDestination; name: string };
+  | { kind: 'native'; handle: NativeBackupDestination; name: string };
 
 const RECOVERY_KEY = 'gossip:portable-backup-result';
 
@@ -99,10 +99,10 @@ const PortableBackup: React.FC = () => {
   const allowRestartRef = useRef(false);
   const mountedRef = useRef(true);
   const platform = Capacitor.getPlatform();
+  const nativePlatform = platform === 'android' || platform === 'ios';
   const supported =
     sdk.isSecureStorage &&
-    (platform === 'android' ||
-      (platform === 'web' && canStreamBrowserBackup()));
+    (nativePlatform || (platform === 'web' && canStreamBrowserBackup()));
 
   useEffect(() => {
     mountedRef.current = true;
@@ -111,7 +111,7 @@ const PortableBackup: React.FC = () => {
       abortRef.current?.abort();
       const currentDestination = destinationRef.current;
       if (
-        currentDestination?.kind === 'android' &&
+        currentDestination?.kind === 'native' &&
         !terminalStartedRef.current
       ) {
         void abandonNativeBackupDestination(currentDestination.handle).catch(
@@ -122,7 +122,7 @@ const PortableBackup: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (platform !== 'android') return;
+    if (!nativePlatform) return;
     void listInterruptedNativeBackups().then(outputs => {
       if (outputs.length === 0 || !mountedRef.current) return;
       setRecoveryName(outputs.map(output => output.name).join(', '));
@@ -132,7 +132,7 @@ const PortableBackup: React.FC = () => {
       setTerminalStarted(true);
       setResult('interrupted');
     });
-  }, [initialResult, platform]);
+  }, [initialResult, nativePlatform]);
 
   useEffect(() => {
     if (!terminalStarted) return;
@@ -158,7 +158,7 @@ const PortableBackup: React.FC = () => {
     if (recoveryBusy) return;
     setRecoveryBusy(true);
     try {
-      if (platform === 'android' && result === 'interrupted') {
+      if (nativePlatform && result === 'interrupted') {
         const cleanup = await cleanupInterruptedNativeBackups().catch(() => ({
           cleaned: false,
           remaining: [] as NativeBackupDestination[],
@@ -173,7 +173,7 @@ const PortableBackup: React.FC = () => {
           setResult('cleanup-required');
           return;
         }
-      } else if (platform === 'android' && result === 'cleanup-required') {
+      } else if (nativePlatform && result === 'cleanup-required') {
         // The user-facing recovery text requires manual deletion before this
         // action. Forget only the device-local capability, never the file.
         await forgetInterruptedNativeBackups();
@@ -189,14 +189,14 @@ const PortableBackup: React.FC = () => {
     } finally {
       if (mountedRef.current) setRecoveryBusy(false);
     }
-  }, [authenticated, logout, platform, recoveryBusy, result]);
+  }, [authenticated, logout, nativePlatform, recoveryBusy, result]);
 
   const selectDestination = useCallback(async () => {
     try {
-      if (platform === 'android') {
+      if (nativePlatform) {
         const handle = await selectNativeBackupDestination();
         const previous = destinationRef.current;
-        if (previous?.kind === 'android') {
+        if (previous?.kind === 'native') {
           const released = await abandonNativeBackupDestination(
             previous.handle
           );
@@ -208,7 +208,7 @@ const PortableBackup: React.FC = () => {
           }
         }
         const selected = {
-          kind: 'android',
+          kind: 'native',
           handle,
           name: handle.name,
         } as const;
@@ -234,7 +234,7 @@ const PortableBackup: React.FC = () => {
         setResult('failed');
       }
     }
-  }, [platform]);
+  }, [nativePlatform]);
 
   const exportBackup = useCallback(async () => {
     if (!destination || exporting) return;
@@ -247,7 +247,7 @@ const PortableBackup: React.FC = () => {
     setResult('idle');
     setProgress(null);
     try {
-      if (destination.kind === 'android') {
+      if (destination.kind === 'native') {
         await exportNativeBackup(
           sdk,
           destination.handle,
@@ -291,7 +291,7 @@ const PortableBackup: React.FC = () => {
     if (recoveryBusy) return;
     setRecoveryBusy(true);
     try {
-      if (platform === 'android') {
+      if (nativePlatform) {
         const cleanup = await cleanupInterruptedNativeBackups().catch(() => ({
           cleaned: false,
           remaining: [] as NativeBackupDestination[],
@@ -313,7 +313,7 @@ const PortableBackup: React.FC = () => {
     } finally {
       if (mountedRef.current) setRecoveryBusy(false);
     }
-  }, [platform, recoveryBusy]);
+  }, [nativePlatform, recoveryBusy]);
 
   if (result === 'success') {
     return (
@@ -447,11 +447,17 @@ const PortableBackup: React.FC = () => {
               >
                 {result === 'cleanup-required'
                   ? t('portable_backup.cleanup_required', {
-                      name: recoveryName ?? destination?.name ?? '',
+                      name:
+                        recoveryName ??
+                        destination?.name ??
+                        t('portable_backup.selected_file'),
                     })
                   : result === 'interrupted'
                     ? t('portable_backup.interrupted', {
-                        name: recoveryName ?? destination?.name ?? '',
+                        name:
+                          recoveryName ??
+                          destination?.name ??
+                          t('portable_backup.selected_file'),
                       })
                     : t('portable_backup.failed')}
               </div>

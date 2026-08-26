@@ -90,6 +90,7 @@
     "choose_destination": "Выбрать место сохранения",
     "change_destination": "Изменить место сохранения",
     "destination": "Место сохранения",
+    "selected_file": "выбранную резервную копию Gossip",
     "export": "Экспортировать данные всех аккаунтов",
     "notification_title": "Защищённая резервная копия Gossip",
     "preparing": "Подготовка резервной копии",
