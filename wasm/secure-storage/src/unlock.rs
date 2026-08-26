@@ -83,6 +83,25 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
     domain: &str,
     password: &[u8],
 ) -> Result<UnlockedSession> {
+    unlock_session_inner(storage, domain, password, false)
+}
+
+/// Candidate-only unlock that rejects ambiguous duplicate-password slots with
+/// the same generic failure as no match. Every slot still performs equal work.
+pub fn unlock_session_unique<S: BlockStorage + KeypairStorage>(
+    storage: &S,
+    domain: &str,
+    password: &[u8],
+) -> Result<UnlockedSession> {
+    unlock_session_inner(storage, domain, password, true)
+}
+
+fn unlock_session_inner<S: BlockStorage + KeypairStorage>(
+    storage: &S,
+    domain: &str,
+    password: &[u8],
+    require_unique: bool,
+) -> Result<UnlockedSession> {
     let keys = derive_session_keys(domain, password);
 
     let mut indices: Vec<u8> = (0..crate::SESSION_COUNT as u8).collect();
@@ -91,6 +110,7 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
     let sk_wrap_aead_key = crypto_aead::Key::from_ref(&keys.sk_wrap_key);
 
     let mut result: Option<UnlockedSession> = None;
+    let mut match_count = 0_usize;
 
     for i in indices {
         let Ok(session) = SessionIndex::new(i) else {
@@ -114,8 +134,9 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
             .and_then(|bytes| PqSecretKey::from_bytes(bytes).ok());
         let pk_parse = PqPublicKey::from_bytes(&kf.pq_pk).ok();
 
-        if result.is_none() {
-            if let (Some(pq_rerand_sk), Some(pq_rerand_pk)) = (sk_parse, pk_parse) {
+        if let (Some(pq_rerand_sk), Some(pq_rerand_pk)) = (sk_parse, pk_parse) {
+            match_count = match_count.saturating_add(1);
+            if result.is_none() {
                 result = Some(UnlockedSession {
                     session_index: session,
                     session_version: kf.version,
@@ -127,6 +148,9 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
         }
     }
 
+    if require_unique && match_count != 1 {
+        return Err(SecureStorageError::InvalidPassword);
+    }
     result.ok_or(SecureStorageError::InvalidPassword)
 }
 
@@ -265,6 +289,20 @@ mod tests {
 
             let u2 = unlock_session(&storage, DOMAIN, pw2).unwrap();
             assert_eq!(u2.session_index.as_u8(), 2);
+        });
+    }
+
+    #[test]
+    fn candidate_unlock_rejects_duplicate_password_matches() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            for slot in [0, 2] {
+                let session = SessionIndex::new(slot).unwrap();
+                provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+            }
+
+            assert!(unlock_session(&storage, DOMAIN, PASSWORD).is_ok());
+            assert!(unlock_session_unique(&storage, DOMAIN, PASSWORD).is_err());
         });
     }
 

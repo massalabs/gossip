@@ -33,6 +33,8 @@ mod wasm_api;
 
 #[cfg(feature = "native")]
 mod native_api;
+#[cfg(any(feature = "native", feature = "wasm"))]
+mod preview;
 
 #[cfg(feature = "native")]
 uniffi::setup_scaffolding!();

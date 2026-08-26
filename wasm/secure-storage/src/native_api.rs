@@ -341,6 +341,12 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             native_vfs::finish_portable_import()?;
             Ok("null".into())
         }
+        "authenticatePortableImportCandidate" => {
+            let a: UnlockArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password)?);
+            let preview = native_vfs::preview_portable_import(&password)?;
+            Ok(serde_json::to_string(&preview)?)
+        }
         // Preserve the original bridge command's install-and-cleanup meaning
         // for an older embedded JS bundle running against this native binary.
         "finishPortableImport" => {

@@ -83,6 +83,10 @@ pub struct SafeDb {
 impl SafeDb {
     /// Open a database via the named VFS with `READWRITE | CREATE` flags.
     pub fn open(name: &CStr, vfs_name: &CStr) -> SqlResult<Self> {
+        Self::open_with_flags(name, vfs_name, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
+    }
+
+    fn open_with_flags(name: &CStr, vfs_name: &CStr, flags: c_int) -> SqlResult<Self> {
         let mut handle: *mut sqlite3 = ptr::null_mut();
         // SAFETY: sqlite3_open_v2 contract (https://sqlite.org/c3ref/open.html):
         //   - filename (name): "must be encoded in UTF-8" — guaranteed by CStr.
@@ -90,14 +94,7 @@ impl SafeDb {
         //     the VFS" — likewise. SQLite treats both as read-only per spec,
         //     so CStr::as_ptr's immutability requirement is upheld.
         //   - ppDb (&mut handle): writable out pointer for SQLite to populate.
-        let rc = unsafe {
-            sqlite3_open_v2(
-                name.as_ptr(),
-                &mut handle,
-                SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
-                vfs_name.as_ptr(),
-            )
-        };
+        let rc = unsafe { sqlite3_open_v2(name.as_ptr(), &mut handle, flags, vfs_name.as_ptr()) };
         if rc != SQLITE_OK {
             let msg = if handle.is_null() {
                 format!("sqlite3_open_v2 failed with error code: {rc}")

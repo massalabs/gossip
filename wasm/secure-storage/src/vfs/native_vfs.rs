@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::mem::size_of;
 use std::os::raw::{c_char, c_int, c_void};
@@ -35,7 +35,10 @@ use rusqlite::ffi::{
 
 use crate::DEFAULT_NAMESPACE;
 use crate::error::{Result, SecureStorageError};
-use crate::portable::PortableArchiveReader;
+use crate::portable::{PortableArchiveReader, PortableRecordKind};
+use crate::preview::{ImportedAccountPreview, query_imported_account_preview};
+use crate::read::read_session_data;
+use crate::storage::{BlockStorage, KeypairStorage, MemoryStorage};
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, UnlockedSession, load_namespace_state};
 
@@ -622,6 +625,94 @@ pub fn finish_portable_import() -> Result<()> {
     }
 }
 
+/// Authenticate and project one profile from the validated candidate without
+/// mutating active redb, the retained spool, or global native VFS state.
+pub fn preview_portable_import(password: &[u8]) -> Result<ImportedAccountPreview> {
+    let mutex = state_mutex();
+    let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let PortableTransfer::ValidatedImport { path } = st
+        .transfer
+        .as_ref()
+        .ok_or(SecureStorageError::PortableTransferInProgress)?
+    else {
+        return Err(SecureStorageError::PortableTransferInProgress);
+    };
+    let domain = st.domain.clone();
+
+    let mut storage = MemoryStorage::new();
+    let mut keypair_reader = PortableArchiveReader::new(File::open(path)?)?;
+    for expected_slot in 0..crate::SESSION_COUNT as u8 {
+        let record = keypair_reader
+            .read_record()?
+            .ok_or(SecureStorageError::InvalidPortableArchive)?;
+        if record.kind != PortableRecordKind::Keypair || record.slot != expected_slot {
+            return Err(SecureStorageError::InvalidPortableArchive);
+        }
+        let session = SessionIndex::new(record.slot)?;
+        storage.write_keypair(session, &record.value)?;
+    }
+    drop(keypair_reader);
+
+    let session = crate::unlock::unlock_session_unique(&storage, &domain, password)?;
+    let matched = session.session_index;
+    let mut required_blocks: Option<u64> = None;
+    let mut reader = PortableArchiveReader::new(File::open(path)?)?;
+    while let Some(record) = reader.read_record()? {
+        if record.kind != PortableRecordKind::Block
+            || record.slot != matched.as_u8()
+            || record.namespace != u64::from(DEFAULT_NAMESPACE)
+        {
+            continue;
+        }
+        if record.block_index > 0
+            && record.block_index
+                >= required_blocks.ok_or(SecureStorageError::InvalidPortableArchive)?
+        {
+            continue;
+        }
+        if record.block_index != storage.block_count(matched, DEFAULT_NAMESPACE)? {
+            return Err(SecureStorageError::InvalidPortableArchive);
+        }
+        let block: &[u8; crate::BLOCK_SIZE] = record
+            .value
+            .as_slice()
+            .try_into()
+            .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
+        storage.append_block(matched, DEFAULT_NAMESPACE, block)?;
+        if record.block_index == 0 {
+            let total = crate::read::preview_total_length_from_block_zero(
+                &storage,
+                &domain,
+                DEFAULT_NAMESPACE,
+                &session,
+            )?;
+            required_blocks = Some(crate::read::preview_block_count(total)?);
+        }
+    }
+    reader.finish()?;
+    let namespace = load_namespace_state(&storage, &domain, &session, DEFAULT_NAMESPACE)?;
+    if storage.block_count(matched, DEFAULT_NAMESPACE)?
+        != required_blocks.ok_or(SecureStorageError::InvalidPortableArchive)?
+    {
+        return Err(SecureStorageError::InvalidPortableArchive);
+    }
+    let length =
+        usize::try_from(namespace.total_data_length).map_err(|_| SecureStorageError::Overflow)?;
+    let database = read_session_data(
+        &storage,
+        &domain,
+        DEFAULT_NAMESPACE,
+        &session,
+        &namespace,
+        0,
+        length,
+    )?;
+    query_imported_account_preview(database)
+}
+
 /// Revalidate and atomically replace active redb storage from a validated
 /// candidate. A failure leaves the old installation selected.
 pub fn install_portable_import() -> Result<()> {
@@ -639,11 +730,24 @@ pub fn install_portable_import() -> Result<()> {
         st.backend.import_portable(input)?;
         Ok(())
     })();
-    let cleanup = cleanup_portable_path(st, PortableTransferKind::Import, path);
-    match (result, cleanup) {
-        (Err(operation), _) => Err(operation),
-        (Ok(()), cleanup) => cleanup,
+    if let Err(error) = result {
+        // Pre-commit failures leave the exact validated candidate retryable.
+        st.transfer = Some(PortableTransfer::ValidatedImport { path });
+        return Err(error);
     }
+
+    // Replacement has committed. A later spool-cleanup error must not be
+    // reported as an install failure, which would misrepresent active state.
+    // init_native repeats deletion before another session can open.
+    if fs::remove_file(&path).is_err() {
+        let _ = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .and_then(|file| file.sync_all());
+    }
+    st.transfer = None;
+    Ok(())
 }
 
 fn cleanup_portable_path(
@@ -1606,6 +1710,63 @@ mod tests {
     }
 
     #[test]
+    fn validated_portable_import_previews_profile_without_installing() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (source, conn) = setup_native_vfs();
+            conn.execute_batch(
+                "CREATE TABLE userProfile (
+                userId TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                avatar TEXT,
+                createdAt INTEGER NOT NULL,
+                security TEXT NOT NULL
+            );
+            INSERT INTO userProfile VALUES (
+                'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s',
+                'Alice', NULL, 1234,
+                '{\"formatVersion\":1,\"passwordKdfVersion\":1,
+                  \"mnemonicEncryptionVersion\":1,\"identityDerivationVersion\":1,
+                  \"authMethod\":\"password\",
+                  \"encKeySalt\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
+                  \"mnemonicBackup\":{
+                    \"encryptedMnemonic\":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
+                    \"createdAt\":\"2026-01-01T00:00:00.000Z\",\"backedUp\":false}}'
+            );",
+            )
+            .unwrap();
+            drop(conn);
+            lock().unwrap();
+            let total = begin_portable_export().unwrap();
+            let mut archive = Vec::new();
+            while let Some(chunk) = read_portable_export_chunk(8192).unwrap() {
+                archive.extend_from_slice(&chunk);
+            }
+            finish_portable_export().unwrap();
+            assert_eq!(archive.len() as u64, total);
+            drop(source);
+            reset_state();
+
+            let destination = tempfile::tempdir().unwrap();
+            init_native(destination.path().to_str().unwrap(), "test").unwrap();
+            begin_portable_import().unwrap();
+            for chunk in archive.chunks(8192) {
+                push_portable_import_chunk(chunk).unwrap();
+            }
+            finish_portable_import().unwrap();
+
+            assert!(preview_portable_import(b"wrong password").is_err());
+            let preview = preview_portable_import(b"password").unwrap();
+            assert_eq!(preview.username, "Alice");
+            assert_eq!(preview.created_at_ms, 1234);
+            assert!(destination.path().join(PORTABLE_IMPORT_SPOOL).exists());
+            abort_portable_transfer().unwrap();
+            assert!(!has_data().unwrap());
+            reset_state();
+        });
+    }
+
+    #[test]
     fn validated_portable_import_remains_abortable_before_install() {
         let _guard = test_mutex().lock().unwrap();
         reset_state();
@@ -1621,6 +1782,34 @@ mod tests {
 
         assert!(!has_data().unwrap());
         assert!(!dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
+        reset_state();
+    }
+
+    #[test]
+    fn failed_portable_install_retains_candidate_cleanup_ownership() {
+        let _guard = test_mutex().lock().unwrap();
+        reset_state();
+        let dir = tempfile::tempdir().unwrap();
+        init_native(dir.path().to_str().unwrap(), "test").unwrap();
+        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+        begin_portable_import().unwrap();
+        for chunk in fixture.chunks(8192) {
+            push_portable_import_chunk(chunk).unwrap();
+        }
+        finish_portable_import().unwrap();
+        let path = dir.path().join(PORTABLE_IMPORT_SPOOL);
+        let mut file = OpenOptions::new().write(true).open(&path).unwrap();
+        file.write_all(b"broken").unwrap();
+        file.sync_all().unwrap();
+
+        assert!(install_portable_import().is_err());
+        assert!(path.exists());
+        assert!(matches!(
+            has_data(),
+            Err(SecureStorageError::PortableTransferInProgress)
+        ));
+        abort_portable_transfer().unwrap();
+        assert!(!path.exists());
         reset_state();
     }
 

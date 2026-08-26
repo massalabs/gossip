@@ -11,6 +11,43 @@ use crate::storage::BlockStorage;
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, UnlockedSession};
 
+/// Bound password-preview memory independently of the 64-GiB transfer limit.
+/// Larger valid backups remain preserved and retryable but require a future
+/// demand-paged preview implementation (tracked outside this first release).
+pub const MAX_PREVIEW_DATABASE_BYTES: u64 = 128 * 1024 * 1024;
+
+pub fn preview_block_count(total_length: u64) -> Result<u64> {
+    if total_length > MAX_PREVIEW_DATABASE_BYTES {
+        return Err(SecureStorageError::OutOfBounds);
+    }
+    let first_capacity = (PLAINTEXT_SIZE - LENGTH_HDR_SIZE) as u64;
+    if total_length <= first_capacity {
+        return Ok(1);
+    }
+    let remaining = total_length - first_capacity;
+    let block_size = PLAINTEXT_SIZE as u64;
+    Ok(1 + remaining.div_ceil(block_size))
+}
+
+/// Read the candidate length header before all declared padding blocks are
+/// retained. Unlike normal namespace loading, this deliberately does not
+/// compare the length against the currently admitted block count.
+pub fn preview_total_length_from_block_zero<S: BlockStorage>(
+    storage: &S,
+    domain: &str,
+    namespace: u8,
+    session: &UnlockedSession,
+) -> Result<u64> {
+    let plaintext = decrypt_session_data_block(storage, domain, namespace, session, 0)?;
+    let length = u64::from_be_bytes(
+        plaintext[..LENGTH_HDR_SIZE]
+            .try_into()
+            .map_err(|_| SecureStorageError::CorruptedBlock)?,
+    );
+    preview_block_count(length)?;
+    Ok(length)
+}
+
 /// Internal helper to decrypt a single block given all session parameters.
 fn _decrypt_session_data_block<S: BlockStorage>(
     storage: &S,
