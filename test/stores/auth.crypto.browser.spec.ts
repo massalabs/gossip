@@ -19,6 +19,7 @@ import {
 } from '../../src/stores/utils/auth';
 import { userProfile } from '../helpers/factories/userProfile';
 import { deriveAccountFromMnemonic } from '../../src/stores/utils/accountHelpers';
+import { PROFILE_SECURITY_V1_FIXTURE } from '../fixtures/profileSecurityV1';
 
 function buildProfile(
   security: Awaited<ReturnType<typeof createPasswordSecurity>>['security']
@@ -31,25 +32,21 @@ function buildProfile(
 describe('profile password encryption integration', () => {
   it('preserves the frozen profile encryption and identity vector', async () => {
     await generateNonce();
-    const mnemonic =
-      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const { mnemonic } = PROFILE_SECURITY_V1_FIXTURE;
     const profile = userProfile().build();
     profile.security.encKeySalt = Uint8Array.from(
-      { length: 16 },
-      (_, index) => index
+      PROFILE_SECURITY_V1_FIXTURE.encryptionKeySaltHex
+        .match(/.{2}/g)!
+        .map(byte => Number.parseInt(byte, 16))
     );
-    const encryptedMnemonicHex =
-      '6bd6920371fc73ace03e2229db2d67fe10d1127f908531eaca47cbf10a3bbf1f' +
-      'fd954b07467b00dba1a684515fa12c5d8b88949bd6ee76d3737f3b4c7419dab5' +
-      '83edc49b3e1903444473b3fb20d2f59102830b6f920bccc1a437543b96424e1b7' +
-      '093d0d0b07fd6495fcbc35e5c';
+    const { encryptedMnemonicHex } = PROFILE_SECURITY_V1_FIXTURE;
     profile.security.mnemonicBackup.encryptedMnemonic = Uint8Array.from(
       encryptedMnemonicHex
         .match(/.{2}/g)!
         .map(byte => Number.parseInt(byte, 16))
     );
     const writerKey = await deriveProfileEncryptionKeyV1(
-      'profile-v1-vector',
+      PROFILE_SECURITY_V1_FIXTURE.password,
       profile.security.encKeySalt
     );
     const emitted = await encryptMnemonicV1(
@@ -63,21 +60,20 @@ describe('profile password encryption integration', () => {
     emitted.fill(0);
     writerKey.free();
 
-    const authenticated = await auth(profile, 'profile-v1-vector');
+    const authenticated = await auth(
+      profile,
+      PROFILE_SECURITY_V1_FIXTURE.password
+    );
     expect(authenticated.mnemonic).toBe(mnemonic);
     const derived = await deriveAccountFromMnemonic(
       authenticated.mnemonic,
       profile.security.identityDerivationVersion
     );
     expect(encodeUserId(derived.userIdBytes)).toBe(
-      'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s'
+      PROFILE_SECURITY_V1_FIXTURE.userId
     );
-    expect(derived.evmAddress).toBe(
-      '0xd30d988A4F82A21C03aD5497E6b950beB5408538'
-    );
-    expect(derived.massaAddress).toBe(
-      'AU1XfQoXydwZEcS2UF32PSjL8BwyHWruvDNZYCA5mhCnfZ5Daiyo'
-    );
+    expect(derived.evmAddress).toBe(PROFILE_SECURITY_V1_FIXTURE.evmAddress);
+    expect(derived.massaAddress).toBe(PROFILE_SECURITY_V1_FIXTURE.massaAddress);
 
     derived.account.privateKey.toBytes().fill(0);
     authenticated.encryptionKey.free();
