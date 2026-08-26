@@ -156,7 +156,7 @@
     "vite-plugin-pwa": "^0.21.1",
     "vitest": "^4.0.14",
     "vitest-browser-react": "^2.0.2",
-    "wasm-pack": "^0.13.1",
+    "wasm-pack": "^0.15.0",
     "workbox-core": "^7.4.0",
     "workbox-precaching": "^7.4.0",
     "workbox-routing": "^7.4.0",
