@@ -3,11 +3,12 @@
 use rand::seq::SliceRandom;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
+#[cfg(test)]
 use crate::domain;
 use crate::error::{Result, SecureStorageError};
 use crate::kdf::derive_session_keys;
 use crate::keypair::read_session_keypair;
-use crate::pq::{PqPublicKey, PqSecretKey};
+use crate::pq::{PqPublicKey, PqSecretKey, keypair_matches};
 use crate::read::read_total_length;
 use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
@@ -121,20 +122,28 @@ fn unlock_session_inner<S: BlockStorage + KeypairStorage>(
             continue;
         };
 
-        let sk_wrap_aad = domain::sk_wrap_aad(domain, kf.version, session);
         let nonce = crypto_aead::Nonce::from(kf.sk_nonce);
-
-        let decrypt_result =
-            crypto_aead::decrypt(&sk_wrap_aead_key, &nonce, &kf.sk_ct, sk_wrap_aad.as_bytes())
-                .map(Zeroizing::new);
+        let decrypt_result = kf.wrap_aad(domain, session).ok().and_then(|aad| {
+            crypto_aead::decrypt(&sk_wrap_aead_key, &nonce, &kf.sk_ct, &aad).map(Zeroizing::new)
+        });
 
         // Always parse pk/sk regardless of AEAD result to equalize timing.
         let sk_parse = decrypt_result
             .as_ref()
             .and_then(|bytes| PqSecretKey::from_bytes(bytes).ok());
         let pk_parse = PqPublicKey::from_bytes(&kf.pq_pk).ok();
+        let wrapped_secret_opened = sk_parse.is_some();
+        let pq_rerand_sk = sk_parse.unwrap_or_else(|| {
+            let dummy = Zeroizing::new(vec![0_u8; PqSecretKey::byte_size()]);
+            PqSecretKey::from_bytes(&dummy).expect("zero dummy secret is canonical")
+        });
+        let pq_rerand_pk = pk_parse.unwrap_or_else(|| {
+            let dummy = Zeroizing::new(vec![0_u8; PqPublicKey::byte_size()]);
+            PqPublicKey::from_bytes(&dummy).expect("zero dummy public key is canonical")
+        });
+        let pair_matches = keypair_matches(&pq_rerand_pk, &pq_rerand_sk);
 
-        if let (Some(pq_rerand_sk), Some(pq_rerand_pk)) = (sk_parse, pk_parse) {
+        if wrapped_secret_opened && pair_matches {
             match_count = match_count.saturating_add(1);
             if result.is_none() {
                 result = Some(UnlockedSession {
@@ -303,6 +312,23 @@ mod tests {
 
             assert!(unlock_session(&storage, DOMAIN, PASSWORD).is_ok());
             assert!(unlock_session_unique(&storage, DOMAIN, PASSWORD).is_err());
+        });
+    }
+
+    #[test]
+    fn legacy_unlock_rejects_substituted_public_key() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let session = SessionIndex::new(0).unwrap();
+            provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+            let mut keypair = read_session_keypair(&storage, session).unwrap();
+            let (other_public, _other_secret) = pq_keygen();
+            keypair.pq_pk = other_public.to_bytes();
+            storage
+                .write_keypair(session, &keypair.serialize())
+                .unwrap();
+
+            assert!(unlock_session(&storage, DOMAIN, PASSWORD).is_err());
         });
     }
 

@@ -75,6 +75,23 @@ A version-0 keypair value is exactly 98,340 bytes:
 |          65,540 |     16 | Secret-key wrapping nonce                            |
 |          65,556 | 32,784 | Wrapped 32,768-byte secret key plus 16-byte AEAD tag |
 
+A version-1 keypair value is exactly 98,352 bytes:
+
+| Relative offset |  Width | Field                                                |
+| --------------: | -----: | ---------------------------------------------------- |
+|               0 |      4 | Keypair version, `1`                                 |
+|               4 |      4 | Public-key length, `65,536`                          |
+|               8 |      4 | Wrapping-nonce length, `16`                          |
+|              12 |      4 | Wrapped-secret length, `32,784`                      |
+|              16 | 65,536 | Canonical pq-rerand `9a5a48b` public key             |
+|          65,552 |     16 | Secret-key wrapping nonce                            |
+|          65,568 | 32,784 | Wrapped 32,768-byte secret key plus 16-byte AEAD tag |
+
+Version 1 binds `GOSSIPKP`, the bounded domain, slot, version, all three lengths, and the complete
+public key into the wrapping AEAD. It selects the current block KDF/AAD suite with explicit session
+version `1`. New storage emits version 1; the frozen version-0 reader exists only to migrate the
+initial portable baseline.
+
 The keypair version is read before applying version-specific lengths or parsers. The public key and
 every encrypted block must pass pq-rerand's strict canonical parsers. All other kinds, slots,
 namespaces, versions, or value sizes are invalid or unsupported as applicable.
@@ -108,12 +125,17 @@ attacker-controlled count or total length.
 
 ## Import semantics
 
-Import is whole-store replacement, never merge. The candidate receives the exact record values;
-import does not decrypt, re-encrypt, rerandomize, classify, trim, regenerate, or coalesce them.
+Import is whole-store replacement, never merge. Initial candidate validation preserves every exact
+record value and never mutates the user-owned source file. No initial-stage operation decrypts,
+classifies, trims, regenerates, or coalesces records.
 
-Container and logical-layout validation requires no account password. Nested account validation and
-migration occur only after a password successfully unlocks a real slot and must complete atomically
-before that account opens. Unmatched dummy and hidden real slots remain indistinguishable.
+After password authentication, finalization creates one separate complete current-suite generation.
+It generates fresh public keypairs for all three slots, re-encrypts authenticated selected-account
+logical blocks, replaces unselected slots with fresh dummy keypairs and cover blocks, and performs an
+additional pq-rerand on every output block. Transformation processes complete three-slot coordinates
+and emits no intermediate per-password generation, slot match, occupancy marker, or account count.
+The exact validated source remains retryable until the complete destination is sealed and switched
+atomically.
 
 ## Profile security envelope
 

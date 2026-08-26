@@ -10,7 +10,7 @@ use crate::constants::{DEFAULT_NAMESPACE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSI
 use crate::domain;
 use crate::error::{Result, SecureStorageError};
 use crate::kdf::derive_session_keys;
-use crate::keypair::{KeypairFile, read_session_version_and_pk};
+use crate::keypair::{CURRENT_SESSION_VERSION, KeypairFile, read_session_version_and_pk};
 use crate::pq::{PqPublicKey, PqSecretKey, pq_keygen};
 use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
@@ -27,6 +27,13 @@ use crate::write::{encrypt_session_data_block, ensure_block_count, repair_blocks
 /// are created for each slot; other namespaces are created lazily on
 /// first write.
 pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> Result<()> {
+    provision_storage_for_domain(storage, "")
+}
+
+pub fn provision_storage_for_domain<S: BlockStorage + KeypairStorage>(
+    storage: &mut S,
+    domain: &str,
+) -> Result<()> {
     for i in 0..SESSION_COUNT as u8 {
         let slot = SessionIndex::new(i).unwrap();
         let (pk, _sk) = pq_keygen();
@@ -42,7 +49,13 @@ pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> R
         let mut dummy_sk = Zeroizing::new(vec![0u8; PqSecretKey::byte_size()]);
         rand::rngs::OsRng.fill_bytes(dummy_sk.as_mut());
 
-        let kf = KeypairFile::build_wrapped(0, pk.to_bytes(), &dummy_wrap_key, &dummy_sk, b"");
+        let kf = KeypairFile::build_current_wrapped(
+            domain,
+            slot,
+            pk.to_bytes(),
+            &dummy_wrap_key,
+            &dummy_sk,
+        )?;
         storage.write_keypair(slot, &kf.serialize())?;
         storage.reset_blockstream(slot, DEFAULT_NAMESPACE)?;
     }
@@ -69,18 +82,17 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
 
     let keys = derive_session_keys(domain, password);
 
-    let version: u32 = 0;
-    let sk_wrap_aad = domain::sk_wrap_aad(domain, version, slot);
+    let version = CURRENT_SESSION_VERSION;
     let sk_wrap_aead_key = crypto_aead::Key::from_ref(&keys.sk_wrap_key);
     let sk_bytes = Zeroizing::new(pq_rerand_sk.to_bytes());
 
-    let kf = KeypairFile::build_wrapped(
-        version,
+    let kf = KeypairFile::build_current_wrapped(
+        domain,
+        slot,
         pq_rerand_pk.to_bytes(),
         &sk_wrap_aead_key,
         &sk_bytes,
-        sk_wrap_aad.as_bytes(),
-    );
+    )?;
     storage.write_keypair(slot, &kf.serialize())?;
 
     let session = UnlockedSession {
@@ -180,7 +192,13 @@ pub fn destroy_session<S: BlockStorage + KeypairStorage>(
     });
     let mut dummy_sk = Zeroizing::new(vec![0u8; PqSecretKey::byte_size()]);
     rand::rngs::OsRng.fill_bytes(dummy_sk.as_mut());
-    let kf = KeypairFile::build_wrapped(0, pk.to_bytes(), &dummy_wrap_key, &dummy_sk, b"");
+    let kf = KeypairFile::build_current_wrapped(
+        domain,
+        slot,
+        pk.to_bytes(),
+        &dummy_wrap_key,
+        &dummy_sk,
+    )?;
     storage.write_keypair(slot, &kf.serialize())?;
 
     // 2. Snapshot-symmetric camouflage. For each namespace, sweep every
@@ -338,7 +356,7 @@ mod tests {
                 let s = SessionIndex::new(i).unwrap();
                 let data = storage.read_keypair(s).unwrap();
                 let kf = KeypairFile::deserialize(&data).unwrap();
-                assert_eq!(kf.version, 0);
+                assert_eq!(kf.version, CURRENT_SESSION_VERSION);
                 assert_eq!(kf.pq_pk.len(), PqPublicKey::byte_size());
             }
         });

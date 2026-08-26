@@ -8,6 +8,7 @@ const manifestPath = path.join(root, 'COMPATIBILITY-FIXTURES.sha256');
 const fixedFixtures = [
   'gossip-sdk/drizzle/meta/_journal.json',
   'test/fixtures/profileSecurityV1.ts',
+  'wasm/secure-storage/tests/fixtures/keypair-v1.bin',
   'wasm/secure-storage/tests/fixtures/portable-v1-minimal.gossipbackup',
   'wasm/sessions/tests/fixtures/session-manager-v1.bin',
 ];

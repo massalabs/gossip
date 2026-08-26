@@ -33,13 +33,15 @@ const BLOCK_KIND: u8 = 1;
 const V1_SLOT_CAPACITY: u8 = 3;
 const V1_NAMESPACE_COUNT: u64 = 2;
 const V1_BLOCK_SIZE: usize = 65_536;
-const V1_KEYPAIR_VERSION: u32 = 0;
+const V1_LEGACY_KEYPAIR_VERSION: u32 = 0;
+const V1_CURRENT_KEYPAIR_VERSION: u32 = 1;
 const V1_PUBLIC_KEY_SIZE: usize = 65_536;
 const V1_SECRET_KEY_SIZE: usize = 32_768;
 const V1_NONCE_SIZE: usize = 16;
 const V1_AEAD_TAG_SIZE: usize = 16;
-const V1_KEYPAIR_VALUE_SIZE: usize =
+const V1_LEGACY_KEYPAIR_VALUE_SIZE: usize =
     4 + V1_PUBLIC_KEY_SIZE + V1_NONCE_SIZE + V1_SECRET_KEY_SIZE + V1_AEAD_TAG_SIZE;
+const V1_CURRENT_KEYPAIR_VALUE_SIZE: usize = V1_LEGACY_KEYPAIR_VALUE_SIZE + 12;
 const V1_MAX_KEYPAIR_VALUE_SIZE: u64 = 16 * 1024 * 1024;
 
 // Version 1 freezes these wire values. A dependency/storage change must not
@@ -137,17 +139,19 @@ pub(crate) fn validate_portable_keypair_value(value: &[u8]) -> Result<()> {
             .try_into()
             .map_err(|_| SecureStorageError::InvalidPortableArchive)?,
     );
-    if version != V1_KEYPAIR_VERSION {
-        return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
-            version,
-        )));
-    }
-    if value.len() != V1_KEYPAIR_VALUE_SIZE {
+    let expected_size = match version {
+        V1_LEGACY_KEYPAIR_VERSION => V1_LEGACY_KEYPAIR_VALUE_SIZE,
+        V1_CURRENT_KEYPAIR_VERSION => V1_CURRENT_KEYPAIR_VALUE_SIZE,
+        version => {
+            return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
+                version,
+            )));
+        }
+    };
+    if value.len() != expected_size {
         return Err(SecureStorageError::InvalidPortableArchive);
     }
-
-    let public_key_end = 4 + V1_PUBLIC_KEY_SIZE;
-    PqPublicKey::from_bytes(&value[4..public_key_end])
+    crate::keypair::KeypairFile::deserialize(value)
         .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
     Ok(())
 }
@@ -466,12 +470,16 @@ impl<R: Read> PortableArchiveReader<R> {
             let mut version_bytes = [0_u8; 4];
             read_exact_archive(&mut self.input, &mut version_bytes)?;
             let version = u32::from_be_bytes(version_bytes);
-            if version != V1_KEYPAIR_VERSION {
-                return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
-                    version,
-                )));
-            }
-            if value_len != V1_KEYPAIR_VALUE_SIZE as u64 {
+            let expected_size = match version {
+                V1_LEGACY_KEYPAIR_VERSION => V1_LEGACY_KEYPAIR_VALUE_SIZE,
+                V1_CURRENT_KEYPAIR_VERSION => V1_CURRENT_KEYPAIR_VALUE_SIZE,
+                version => {
+                    return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
+                        version,
+                    )));
+                }
+            };
+            if value_len != expected_size as u64 {
                 return Err(SecureStorageError::InvalidPortableArchive);
             }
             let mut value = Zeroizing::new(vec![0_u8; value_size]);
@@ -525,6 +533,8 @@ impl<R: Read> PortableArchiveReader<R> {
 
 #[cfg(test)]
 mod tests {
+    const V1_KEYPAIR_VERSION: u32 = V1_LEGACY_KEYPAIR_VERSION;
+    const V1_KEYPAIR_VALUE_SIZE: usize = V1_LEGACY_KEYPAIR_VALUE_SIZE;
     use std::io::Cursor;
 
     use super::*;
@@ -753,17 +763,17 @@ mod tests {
     }
 
     #[test]
-    fn reader_dispatches_keypair_version_before_v0_size() {
+    fn reader_dispatches_unknown_keypair_version_before_value_size() {
         let mut bytes = encode(&records()).unwrap();
         let first_keypair_value =
             PORTABLE_HEADER_SIZE as usize + PORTABLE_RECORD_HEADER_SIZE as usize;
-        bytes[first_keypair_value..first_keypair_value + 4].copy_from_slice(&1_u32.to_be_bytes());
+        bytes[first_keypair_value..first_keypair_value + 4].copy_from_slice(&2_u32.to_be_bytes());
         replace_digest(&mut bytes);
 
         let mut reader = PortableArchiveReader::new(Cursor::new(bytes)).unwrap();
         assert!(matches!(
             reader.read_record(),
-            Err(SecureStorageError::UnsupportedPortableVersion(1))
+            Err(SecureStorageError::UnsupportedPortableVersion(2))
         ));
     }
 

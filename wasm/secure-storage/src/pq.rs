@@ -113,6 +113,18 @@ pub fn validate_pq_ciphertext(ciphertext: &[u8]) -> Result<()> {
         .ok_or(SecureStorageError::CorruptedBlock)
 }
 
+/// Verify that a parsed public and secret key form a usable pair without
+/// relying on unauthenticated clear public-key bytes alone.
+#[must_use]
+pub fn keypair_matches(pk: &PqPublicKey, sk: &PqSecretKey) -> bool {
+    let challenge = Zeroizing::new([0xA5_u8; PQ_MSG_SIZE]);
+    let ciphertext = pq_encrypt(pk, &challenge);
+    let Ok(ciphertext) = <&[u8; PQ_CT_SIZE]>::try_from(ciphertext.as_slice()) else {
+        return false;
+    };
+    pq_decrypt(sk, ciphertext).is_ok_and(|plaintext| plaintext.as_slice() == challenge.as_slice())
+}
+
 pub fn pq_rerand(pk: &PqPublicKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Result<Vec<u8>> {
     let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;

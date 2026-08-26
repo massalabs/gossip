@@ -8,12 +8,16 @@ bytes carry a persisted meaning. CI verifies both the hashes and complete manife
 - every numbered SQL migration in `gossip-sdk/drizzle` and the exact append-only journal indices;
 - the portable V1 archive in
   `wasm/secure-storage/tests/fixtures/portable-v1-minimal.gossipbackup`;
+- the current outer keypair V1 envelope in
+  `wasm/secure-storage/tests/fixtures/keypair-v1.bin`;
 - the SessionManager V1 envelope in `wasm/sessions/tests/fixtures/session-manager-v1.bin`; and
 - the public account-security V1 vector in `test/fixtures/profileSecurityV1.ts`.
 
 The account-security vector fixes the password KDF, mnemonic encryption, identity derivation, and
-expected Gossip, EVM, and Massa identities. It is deliberately public test data, never live user
-material.
+expected Gossip, EVM, and Massa identities. The keypair fixture freezes the version-first lengths,
+public-key-bound wrapping AAD, and a usable pq-rerand keypair under public test password
+`keypair-v1-password` and domain `keypair-v1-fixture`. These are deliberately public test data, never
+live user material.
 
 ## Update policy
 

@@ -59,7 +59,7 @@ fn _decrypt_session_data_block<S: BlockStorage>(
     root_aead_key: &[u8],
     block_index: u64,
 ) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
-    if session_version != 0 {
+    if !crate::keypair::is_supported_session_version(session_version) {
         return Err(SecureStorageError::UnsupportedVersion(session_version));
     }
     let block_ct = storage.read_block(session_index, namespace, block_index)?;

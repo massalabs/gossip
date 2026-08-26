@@ -56,6 +56,10 @@ thread_local! {
         const { RefCell::new(None) };
     /// Open SQLite database handle (RAII — closes on drop).
     static DB: RefCell<Option<SafeDb>> = const { RefCell::new(None) };
+    /// Password-loaded import migration state. Slot matches and secrets never
+    /// cross into JavaScript; only complete all-slot batches are returned.
+    static OUTER_MIGRATION_PLAN: RefCell<Option<crate::OuterMigrationPlan>> = const { RefCell::new(None) };
+    static OUTER_MIGRATION: RefCell<Option<crate::OuterMigration>> = const { RefCell::new(None) };
 }
 
 fn map_err(e: SecureStorageError) -> JsValue {
@@ -363,6 +367,123 @@ pub async fn end_candidate_preview() -> Result<(), JsValue> {
     })
 }
 
+/// Begin password admission for one validated candidate. Only opaque plan
+/// state is retained; no transformed/mixed-version generation is emitted.
+#[wasm_bindgen(js_name = beginOuterMigration)]
+pub fn begin_outer_migration(domain: &str, keypairs: &Array) -> Result<(), JsValue> {
+    if keypairs.length() != crate::SESSION_COUNT as u32 {
+        return Err(JsValue::from_str("invalid outer migration keypairs"));
+    }
+    let mut values: [Vec<u8>; crate::SESSION_COUNT] = std::array::from_fn(|_| Vec::new());
+    for slot in 0..crate::SESSION_COUNT {
+        let value = Uint8Array::new(&keypairs.get(slot as u32));
+        values[slot] = value.to_vec();
+    }
+    let plan = crate::OuterMigrationPlan::new(domain, values).map_err(map_err)?;
+    OUTER_MIGRATION.with(|migration| migration.borrow_mut().take());
+    OUTER_MIGRATION_PLAN.with(|state| {
+        *state.borrow_mut() = Some(plan);
+    });
+    Ok(())
+}
+
+/// Admit one password with all-slot constant work. The owned WASM copy is
+/// zeroized before return and a generic false discloses no matched slot.
+#[wasm_bindgen(js_name = admitOuterMigrationPassword)]
+pub fn admit_outer_migration_password(password: Vec<u8>) -> Result<bool, JsValue> {
+    let password = Zeroizing::new(password);
+    OUTER_MIGRATION_PLAN.with(|state| {
+        let mut state = state.borrow_mut();
+        let plan = state
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("outer migration is not active"))?;
+        match plan.admit_password(&password) {
+            Ok(()) => Ok(true),
+            Err(SecureStorageError::InvalidPassword) => Ok(false),
+            Err(error) => Err(map_err(error)),
+        }
+    })
+}
+
+/// Generate fresh current-suite keypairs for all slots at once. Every public
+/// key changes, so comparing source and destination cannot reveal selection.
+#[wasm_bindgen(js_name = finalizeOuterMigration)]
+pub fn finalize_outer_migration() -> Result<Array, JsValue> {
+    let plan = OUTER_MIGRATION_PLAN
+        .with(|state| state.borrow_mut().take())
+        .ok_or_else(|| JsValue::from_str("outer migration is not active"))?;
+    let migration = plan.finalize().map_err(map_err)?;
+    let result = Array::new();
+    for keypair in migration.keypairs() {
+        result.push(&Uint8Array::from(keypair).into());
+    }
+    OUTER_MIGRATION.with(|state| *state.borrow_mut() = Some(migration));
+    Ok(result)
+}
+
+/// Transform one complete fixed-slot block coordinate.
+#[wasm_bindgen(js_name = migrateOuterBlockBatch)]
+pub fn migrate_outer_block_batch(
+    namespace: u8,
+    block_index: f64,
+    values: &Array,
+) -> Result<Array, JsValue> {
+    let block_index = safe_f64_to_u64(block_index)
+        .ok_or_else(|| JsValue::from_str("invalid outer migration block index"))?;
+    if values.length() != crate::SESSION_COUNT as u32 {
+        return Err(JsValue::from_str("invalid outer migration block batch"));
+    }
+    let inputs: [Zeroizing<Vec<u8>>; crate::SESSION_COUNT] = std::array::from_fn(|slot| {
+        Zeroizing::new(Uint8Array::new(&values.get(slot as u32)).to_vec())
+    });
+    let mut refs = Vec::with_capacity(crate::SESSION_COUNT);
+    for input in &inputs {
+        refs.push(
+            <&[u8; crate::BLOCK_SIZE]>::try_from(input.as_slice())
+                .map_err(|_| JsValue::from_str("invalid outer migration block"))?,
+        );
+    }
+    let refs: [&[u8; crate::BLOCK_SIZE]; crate::SESSION_COUNT] = refs
+        .try_into()
+        .map_err(|_| JsValue::from_str("invalid outer migration block batch"))?;
+    let migrated = OUTER_MIGRATION.with(|state| {
+        let mut state = state.borrow_mut();
+        state
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("outer migration is not finalized"))?
+            .migrate_block_batch(namespace, block_index, refs)
+            .map_err(map_err)
+    })?;
+    let result = Array::new();
+    for value in &migrated {
+        result.push(&Uint8Array::from(value.as_slice()).into());
+    }
+    Ok(result)
+}
+
+#[wasm_bindgen(js_name = finishOuterMigrationNamespace)]
+pub fn finish_outer_migration_namespace(
+    namespace: u8,
+    source_block_count: f64,
+) -> Result<(), JsValue> {
+    let source_block_count = safe_f64_to_u64(source_block_count)
+        .ok_or_else(|| JsValue::from_str("invalid outer migration block count"))?;
+    OUTER_MIGRATION.with(|state| {
+        state
+            .borrow_mut()
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("outer migration is not finalized"))?
+            .finish_namespace(namespace, source_block_count)
+            .map_err(map_err)
+    })
+}
+
+#[wasm_bindgen(js_name = endOuterMigration)]
+pub fn end_outer_migration() {
+    OUTER_MIGRATION_PLAN.with(|state| state.borrow_mut().take());
+    OUTER_MIGRATION.with(|state| state.borrow_mut().take());
+}
+
 #[wasm_bindgen(js_name = idbHasData)]
 pub async fn idb_has_data() -> Result<bool, JsValue> {
     IdbBlockStorage::has_data().await
@@ -373,7 +494,9 @@ pub fn provision_storage() -> Result<(), JsValue> {
     close_database_and_clear_files()?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
-        crate::provision_storage(&mut state.backend).map_err(map_err)?;
+        let domain = state.domain.clone();
+        crate::lifecycle::provision_storage_for_domain(&mut state.backend, &domain)
+            .map_err(map_err)?;
         state.session = None;
         state.namespace_states.clear();
         Ok(())

@@ -47,7 +47,7 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     block_index: u64,
     plaintext: &[u8; PLAINTEXT_SIZE],
 ) -> Result<()> {
-    if session.session_version != 0 {
+    if !crate::keypair::is_supported_session_version(session.session_version) {
         return Err(SecureStorageError::UnsupportedVersion(
             session.session_version,
         ));
@@ -286,7 +286,7 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     offset: u64,
     data: &[u8],
 ) -> Result<()> {
-    if session.session_version != 0 {
+    if !crate::keypair::is_supported_session_version(session.session_version) {
         return Err(SecureStorageError::UnsupportedVersion(
             session.session_version,
         ));
@@ -393,7 +393,7 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
     ns_state: &mut NamespaceState,
     new_total: u64,
 ) -> Result<()> {
-    if session.session_version != 0 {
+    if !crate::keypair::is_supported_session_version(session.session_version) {
         return Err(SecureStorageError::UnsupportedVersion(
             session.session_version,
         ));

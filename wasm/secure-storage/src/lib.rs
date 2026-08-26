@@ -13,6 +13,7 @@ pub mod js_num;
 mod kdf;
 mod keypair;
 mod lifecycle;
+mod outer_migration;
 mod portable;
 mod pq;
 mod read;
@@ -50,8 +51,12 @@ pub use domain::{
 };
 pub use error::{Result, SecureStorageError};
 pub use kdf::{SessionKeys, derive_block_aead_key, derive_session_keys};
-pub use keypair::{KeypairFile, read_session_keypair, read_session_version_and_pk};
+pub use keypair::{
+    CURRENT_SESSION_VERSION, KeypairFile, LEGACY_SESSION_VERSION, read_session_keypair,
+    read_session_version_and_pk,
+};
 pub use lifecycle::{allocate_session, cover_traffic_tick, destroy_session, provision_storage};
+pub use outer_migration::{OuterMigration, OuterMigrationPlan};
 pub use portable::{
     MAX_PORTABLE_ARCHIVE_BYTES, PORTABLE_DIGEST_SIZE, PORTABLE_HEADER_SIZE, PORTABLE_MAGIC,
     PORTABLE_RECORD_HEADER_SIZE, PORTABLE_VERSION, PortableArchiveReader, PortableArchiveWriter,
@@ -69,14 +74,14 @@ pub use write::{
     repair_blockstream_lengths, shrink_session_data, write_session_data,
 };
 
-/// Run a test closure on a thread with a 4 MiB stack.
+/// Run a test closure on a thread with a 16 MiB stack.
 ///
 /// PQ (ML-KEM) operations use large stack allocations that can overflow
 /// the default Rust test thread stack (~2 MiB on macOS).
 #[cfg(test)]
 pub(crate) fn run_with_stack<F: FnOnce() + Send + 'static>(f: F) {
     std::thread::Builder::new()
-        .stack_size(4 * 1024 * 1024)
+        .stack_size(16 * 1024 * 1024)
         .spawn(f)
         .unwrap()
         .join()
