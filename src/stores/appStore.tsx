@@ -36,6 +36,13 @@ interface AppStoreState {
   // App initialization state (whether app has checked for existing accounts)
   isInitialized: boolean;
   setIsInitialized: (value: boolean) => void;
+  // Runtime-only fail-closed login routing after an unreadable import marker.
+  lockedStartupFallback: boolean;
+  setLockedStartupFallback: (value: boolean) => void;
+  setSecureStartupRouting: (
+    initialized: boolean,
+    lockedFallback: boolean
+  ) => void;
   // Durable authorization to continue first-install secure account creation
   // after provision-only dummy storage or a complete onboarding rollback.
   secureAccountCreationAllowed: boolean;
@@ -111,6 +118,16 @@ const useAppStoreBase = create<AppStoreState>()(
       isInitialized: false,
       setIsInitialized: (value: boolean) => {
         set({ isInitialized: value });
+      },
+      lockedStartupFallback: false,
+      setLockedStartupFallback: (value: boolean) => {
+        set({ lockedStartupFallback: value });
+      },
+      setSecureStartupRouting: (initialized, lockedFallback) => {
+        set({
+          isInitialized: initialized,
+          lockedStartupFallback: lockedFallback,
+        });
       },
       secureAccountCreationAllowed: false,
       setSecureAccountCreationAllowed: (value: boolean) => {

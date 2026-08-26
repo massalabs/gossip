@@ -11,6 +11,9 @@ const preview = {
 
 function harness() {
   let authorized = true;
+  const claim = vi.fn().mockResolvedValue(undefined);
+  const release = vi.fn().mockResolvedValue(undefined);
+  const prepareCommit = vi.fn();
   const commitSuccess = vi.fn();
   const borrowed: Uint8Array[] = [];
   const candidate: PortableImportCandidate = {
@@ -28,13 +31,19 @@ function harness() {
     beginPortableImport: vi.fn().mockResolvedValue(candidate),
   } as unknown as GossipSdk;
   const authorization = {
+    claim,
+    release,
     isAuthorized: () => authorized,
+    prepareCommit,
     commitSuccess,
   };
   return {
     sdk,
     candidate,
     authorization,
+    claim,
+    release,
+    prepareCommit,
     commitSuccess,
     borrowed,
     revoke: () => {
@@ -94,6 +103,12 @@ describe('PortableImportCoordinator', () => {
     expect(coordinator.list()).toHaveLength(1);
     expect(Array.from(h.borrowed[0])).not.toEqual(
       new Array('retry-password'.length).fill(0)
+    );
+    await expect(
+      coordinator.authenticate('different-password')
+    ).rejects.toThrow('account set is frozen');
+    expect(() => coordinator.remove(coordinator.list()[0].passwordId)).toThrow(
+      'account set is frozen'
     );
     await coordinator.install();
     expect(Array.from(h.borrowed[0])).toEqual(
@@ -182,7 +197,7 @@ describe('PortableImportCoordinator', () => {
     expect(h.candidate.abort).toHaveBeenCalledTimes(2);
   });
 
-  it('does not commit success metadata after terminal authorization changes', async () => {
+  it('keeps preconsumed authority through the physical terminal commit', async () => {
     const h = harness();
     vi.mocked(h.candidate.install).mockImplementation(async admitPasswords => {
       await admitPasswords(async password => {
@@ -196,10 +211,9 @@ describe('PortableImportCoordinator', () => {
     );
     await coordinator.authenticate('commit-race-password');
 
-    await expect(coordinator.install()).rejects.toThrow(
-      'authorization changed at commit'
-    );
-    expect(h.commitSuccess).not.toHaveBeenCalled();
+    await expect(coordinator.install()).resolves.toBeUndefined();
+    expect(h.prepareCommit).toHaveBeenCalledOnce();
+    expect(h.commitSuccess).toHaveBeenCalledOnce();
     expect(Array.from(h.borrowed[0])).toEqual(
       new Array('commit-race-password'.length).fill(0)
     );

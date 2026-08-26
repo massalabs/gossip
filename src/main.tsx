@@ -7,6 +7,7 @@ import { showInitError } from './utils/initError.ts';
 import { installSafariWorkerDedup } from './utils/safariWorkerDedup';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
+import { useAppStore } from './stores/appStore';
 import { establishFirstInstallCreationGrant } from './hooks/useProfileLoader';
 import { protocolConfig } from './config/protocol';
 import { SECURE_STORAGE_ENABLED } from './config/features';
@@ -121,9 +122,18 @@ async function bootstrap() {
 }
 
 bootstrap()
-  .then(sdk => {
+  .then(async sdk => {
     useSdkStore.getState().setSdk(sdk);
-    establishFirstInstallCreationGrant(sdk);
+    try {
+      await establishFirstInstallCreationGrant(sdk);
+    } catch (error) {
+      if (sdk.isSecureStorage && sdk.storageState === 'locked') {
+        const appState = useAppStore.getState();
+        appState.setSecureStartupRouting(appState.isInitialized, true);
+      } else {
+        throw error;
+      }
+    }
 
     createRoot(document.getElementById('root')!).render(
       <StrictMode>

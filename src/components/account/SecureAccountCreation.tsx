@@ -8,17 +8,22 @@ import AccountCreationForm, {
 } from './AccountCreationForm';
 import SecureAccountSetup from './SecureAccountSetup';
 import { stageAccount, StagedAccount } from './stagedAccount';
+import type { OnboardingStorageModeLease } from '../../services/portableImportAuthorization';
 
 type Step = 'form' | 'setup';
 
 interface SecureAccountCreationProps {
   onComplete: () => void | Promise<void>;
   onBack: () => void;
+  onCredentialOperationChange?: (active: boolean) => void;
+  creationModeLease?: OnboardingStorageModeLease;
 }
 
 const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
   onComplete,
   onBack,
+  onCredentialOperationChange,
+  creationModeLease,
 }) => {
   const { t } = useTranslation('auth');
   const [step, setStep] = useState<Step>('form');
@@ -51,6 +56,8 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
         initialAccount={initialAccount}
         onComplete={onComplete}
         onRestart={handleRestart}
+        onCredentialOperationChange={onCredentialOperationChange}
+        creationModeLease={creationModeLease}
       />
     );
   }

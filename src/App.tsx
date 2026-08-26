@@ -33,7 +33,8 @@ import PortableBackupStartupGate from './components/PortableBackupStartupGate.ts
 
 export const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
-  const { isInitialized } = useAppStore();
+  const { isInitialized, lockedStartupFallback } = useAppStore();
+  const routesInitialized = isInitialized || lockedStartupFallback;
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
   useStoreInit(); // Initialize all stores when user profile is available
@@ -64,7 +65,12 @@ export const AppContent: React.FC = () => {
 
   // LoadingScreen only during the very first profile-loader pass — not
   // for subsequent actions that toggle isLoading (signup, login, etc.).
-  if (isLoading && !isInitialized && !userProfile && !initialLoadDone.current) {
+  if (
+    isLoading &&
+    !routesInitialized &&
+    !userProfile &&
+    !initialLoadDone.current
+  ) {
     return <LoadingScreen />;
   }
 
@@ -73,7 +79,7 @@ export const AppContent: React.FC = () => {
   // Design note: If a user manually navigates to an invite URL before initialization completes,
   // the onboarding flow is skipped and the invite page is shown directly. This is to handle the
   // case where a user has the phone app and doesn't necessarily need to create an account on web or pwa.
-  if (!isInitialized && !inviteMatch) {
+  if (!routesInitialized && !inviteMatch) {
     return (
       <PageLayout>
         <Onboarding />

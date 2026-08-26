@@ -10,10 +10,10 @@ describe('secure-storage startup routing', () => {
     useAppStore.getState().setSecureAccountCreationAllowed(false);
   });
 
-  it('persists the first-install grant as soon as empty storage is known', () => {
+  it('persists the first-install grant as soon as empty storage is known', async () => {
     useAppStore.getState().setSecureAccountCreationAllowed(false);
 
-    establishFirstInstallCreationGrant({
+    await establishFirstInstallCreationGrant({
       isSecureStorage: true,
       storageState: 'empty',
     });
@@ -21,14 +21,24 @@ describe('secure-storage startup routing', () => {
     expect(useAppStore.getState().secureAccountCreationAllowed).toBe(true);
   });
 
-  it('does not grant creation for locked storage', () => {
+  it('does not grant creation for locked storage', async () => {
     useAppStore.getState().setSecureAccountCreationAllowed(false);
 
-    establishFirstInstallCreationGrant({
+    await establishFirstInstallCreationGrant({
       isSecureStorage: true,
       storageState: 'locked',
     });
 
+    expect(useAppStore.getState().secureAccountCreationAllowed).toBe(false);
+  });
+
+  it('revokes a stale grant when the backend proves import committed', async () => {
+    useAppStore.getState().setSecureAccountCreationAllowed(true);
+    await establishFirstInstallCreationGrant({
+      isSecureStorage: true,
+      storageState: 'locked',
+      wasPortableImportInstalled: async () => true,
+    });
     expect(useAppStore.getState().secureAccountCreationAllowed).toBe(false);
   });
 

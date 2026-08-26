@@ -21,6 +21,11 @@ import {
 } from '../../services/biometricService';
 import { generateMnemonic } from '@massalabs/gossip-sdk';
 import { MAX_SECURE_ACCOUNTS } from '../../config/features';
+import {
+  consumeOnboardingCreationAuthority,
+  restoreOnboardingCreationAuthorityAfterRollback,
+  type OnboardingStorageModeLease,
+} from '../../services/portableImportAuthorization';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
@@ -44,20 +49,27 @@ interface FailureRecovery {
   pendingAccountIndexes: number[];
   rollbackBiometric?: () => Promise<void>;
   biometricRestored: boolean;
+  creationAuthorityOwner: string | null;
 }
 
 interface SecureAccountSetupProps {
   initialAccount: StagedAccount;
   onComplete: () => void | Promise<void>;
   onRestart: (message: string) => void;
+  onCredentialOperationChange?: (active: boolean) => void;
+  creationModeLease?: OnboardingStorageModeLease;
 }
 
 const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   initialAccount,
   onComplete,
   onRestart,
+  onCredentialOperationChange,
+  creationModeLease,
 }) => {
   const { t } = useTranslation('auth');
+  const operationChangeRef = useRef(onCredentialOperationChange);
+  operationChangeRef.current = onCredentialOperationChange;
   const initializePreparedAccount = useAccountStore(
     state => state.initializePreparedAccount
   );
@@ -99,6 +111,12 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
 
     return () => {
       mounted.current = false;
+      if (
+        activeCredentialOperations.current === 0 &&
+        (failureRecovery.current || lockRecoveryRequired.current)
+      ) {
+        operationChangeRef.current?.(true);
+      }
       // React StrictMode immediately replays effects in development. Delay the
       // ownership check by one microtask so that simulated cleanup cannot wipe
       // credentials from the still-mounted component.
@@ -114,12 +132,23 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     operation: () => Promise<T>
   ): Promise<T> => {
     activeCredentialOperations.current += 1;
+    if (activeCredentialOperations.current === 1) {
+      operationChangeRef.current?.(true);
+    }
     try {
       return await operation();
     } finally {
       activeCredentialOperations.current -= 1;
-      if (!mounted.current && activeCredentialOperations.current === 0) {
-        continueUnmountedCleanup.current();
+      if (activeCredentialOperations.current === 0) {
+        if (
+          mounted.current &&
+          !failureRecovery.current &&
+          !lockRecoveryRequired.current
+        ) {
+          operationChangeRef.current?.(false);
+        } else if (!mounted.current) {
+          continueUnmountedCleanup.current();
+        }
       }
     }
   };
@@ -225,6 +254,17 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       return;
     }
 
+    try {
+      restoreOnboardingCreationAuthorityAfterRollback(
+        recovery.creationAuthorityOwner
+      );
+    } catch (restoreError) {
+      logger.error('Failed to restore onboarding authority:', restoreError);
+      failureRecovery.current = recovery;
+      setFailureRecoveryPending(true);
+      setIsFinalizing(false);
+      return;
+    }
     failureRecovery.current = null;
     wipeStagedAccounts(stagedAccountsRef.current);
     const appState = useAppStore.getState();
@@ -254,6 +294,14 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       }
     } finally {
       unmountedRecoveryRunning.current = false;
+      if (
+        !mounted.current &&
+        activeCredentialOperations.current === 0 &&
+        !failureRecovery.current &&
+        !lockRecoveryRequired.current
+      ) {
+        operationChangeRef.current?.(false);
+      }
     }
   };
   continueUnmountedCleanup.current = () => {
@@ -269,6 +317,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     let currentPersistenceIndex: number | null = null;
     let failure: unknown;
     let rollbackBiometric: (() => Promise<void>) | undefined;
+    let creationAuthorityOwner: string | null = null;
 
     try {
       // Nothing reaches durable account storage until every confirmed password
@@ -296,6 +345,10 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
         }
       }
 
+      // Consume overwrite authority before the first durable account write.
+      // A verified full rollback restores it; a crash fails closed.
+      creationAuthorityOwner =
+        consumeOnboardingCreationAuthority(creationModeLease);
       for (const [index, account] of stagedAccounts.entries()) {
         currentPersistenceIndex = index;
         await initializePreparedAccount(
@@ -325,6 +378,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
         pendingAccountIndexes,
         rollbackBiometric,
         biometricRestored: rollbackBiometric === undefined,
+        creationAuthorityOwner,
       };
     } finally {
       for (const prepared of preparedAccounts) {

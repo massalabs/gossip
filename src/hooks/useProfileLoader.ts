@@ -4,15 +4,22 @@ import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { getSdk } from '../stores/sdkStore';
 import type { GossipSdk } from '@massalabs/gossip-sdk';
+import { reconcilePortableImportAuthority } from '../services/portableImportAuthorization';
 
 const PROFILE_LOAD_DELAY_MS = 100;
 
-export function establishFirstInstallCreationGrant(
-  sdk: Pick<GossipSdk, 'isSecureStorage' | 'storageState'>
-): void {
-  if (sdk.isSecureStorage && sdk.storageState === 'empty') {
-    useAppStore.getState().setSecureAccountCreationAllowed(true);
-  }
+export async function establishFirstInstallCreationGrant(
+  sdk: Pick<GossipSdk, 'isSecureStorage' | 'storageState'> &
+    Partial<Pick<GossipSdk, 'wasPortableImportInstalled'>>
+): Promise<void> {
+  if (!sdk.isSecureStorage) return;
+  await reconcilePortableImportAuthority(
+    () =>
+      sdk.wasPortableImportInstalled
+        ? sdk.wasPortableImportInstalled()
+        : Promise.resolve(false),
+    sdk.storageState
+  );
 }
 
 export function shouldInitializeSecureStorage(
@@ -36,7 +43,7 @@ export function useProfileLoader() {
         // Persist first-install authorization before the UI delay. Bootstrap
         // also calls this immediately after SDK initialization, before React
         // mounts, to minimize the unavoidable cross-store process-kill window.
-        establishFirstInstallCreationGrant(getSdk());
+        await establishFirstInstallCreationGrant(getSdk());
 
         // Add a small delay to ensure database is ready
         await new Promise(resolve =>
@@ -55,12 +62,20 @@ export function useProfileLoader() {
         const sdk = getSdk();
         if (sdk.isSecureStorage) {
           const appState = useAppStore.getState();
-          appState.setIsInitialized(
+          if (
+            useAccountStore.getState().userProfile !== null ||
+            sdk.storageState === 'unlocked'
+          ) {
+            appState.setSecureStartupRouting(true, false);
+            return;
+          }
+          appState.setSecureStartupRouting(
             shouldInitializeSecureStorage(
               sdk.storageState,
               sdk.storageState === 'empty' ||
                 appState.secureAccountCreationAllowed
-            )
+            ),
+            false
           );
           return;
         }
@@ -76,7 +91,19 @@ export function useProfileLoader() {
         }
       } catch (error) {
         logger.error('Error loading user profile from SQLite:', error);
-        useAppStore.getState().setIsInitialized(false);
+        let initializeLockedStorage = false;
+        try {
+          const sdk = getSdk();
+          initializeLockedStorage =
+            sdk.isSecureStorage && sdk.storageState === 'locked';
+        } catch {
+          // SDK bootstrap has not completed; retain onboarding fallback.
+        }
+        const appState = useAppStore.getState();
+        appState.setSecureStartupRouting(
+          appState.isInitialized,
+          initializeLockedStorage
+        );
       } finally {
         setLoading(false);
       }

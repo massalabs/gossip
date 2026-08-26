@@ -3,10 +3,13 @@ import { useAccountStore } from '../../stores/accountStore';
 import AccountCreationForm, {
   AccountCreationResult,
 } from './AccountCreationForm';
+import type { OnboardingStorageModeLease } from '../../services/portableImportAuthorization';
 
 interface ClassicAccountCreationProps {
   onComplete: () => void | Promise<void>;
   onBack: () => void;
+  onCredentialOperationChange?: (active: boolean) => void;
+  creationModeLease?: OnboardingStorageModeLease;
 }
 
 const ClassicAccountCreation: React.FC<ClassicAccountCreationProps> = ({

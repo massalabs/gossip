@@ -5,12 +5,18 @@ import {
 } from './importedAccountPreviews';
 
 export interface PortableImportAuthorization {
+  claim(): Promise<void>;
+  release(): Promise<void>;
   isAuthorized(): boolean;
+  /** Durably consume replacement authority before the physical commit. */
+  prepareCommit(): void;
+  /** Finalize non-authority application state after the physical commit. */
   commitSuccess(): void;
 }
 
 interface RuntimeAuthorizationGate {
   active: boolean;
+  commitPrepared: boolean;
 }
 
 /**
@@ -25,6 +31,7 @@ export class PortableImportCoordinator {
   private readonly previews = new ImportedAccountPreviews();
   private closed = false;
   private cancelRequested = false;
+  private installAttempted = false;
   private installReserved = false;
   private installing = false;
   private operationTail = Promise.resolve();
@@ -39,18 +46,26 @@ export class PortableImportCoordinator {
     sdk: GossipSdk,
     authorization: PortableImportAuthorization
   ): Promise<PortableImportCoordinator> {
-    const gate = { active: true };
-    const candidate = await sdk.beginPortableImport(() => {
-      if (!gate.active) return false;
-      try {
-        const authorized = authorization.isAuthorized();
-        if (!authorized) gate.active = false;
-        return authorized;
-      } catch (error) {
-        gate.active = false;
-        throw error;
-      }
-    });
+    await authorization.claim();
+    const gate = { active: true, commitPrepared: false };
+    let candidate: PortableImportCandidate;
+    try {
+      candidate = await sdk.beginPortableImport(() => {
+        if (!gate.active) return false;
+        if (gate.commitPrepared) return true;
+        try {
+          const authorized = authorization.isAuthorized();
+          if (!authorized) gate.active = false;
+          return authorized;
+        } catch (error) {
+          gate.active = false;
+          throw error;
+        }
+      });
+    } catch (error) {
+      await authorization.release().catch(() => {});
+      throw error;
+    }
     return new PortableImportCoordinator(candidate, authorization, gate);
   }
 
@@ -83,6 +98,10 @@ export class PortableImportCoordinator {
   }
 
   authenticate(passwordText: string): Promise<LoadedImportedAccountPreview> {
+    this.requireOpen();
+    if (this.installAttempted) {
+      return Promise.reject(new Error('Portable import account set is frozen'));
+    }
     return this.enqueue(async () => {
       this.requireOpen();
       await this.requireAuthorized();
@@ -112,6 +131,9 @@ export class PortableImportCoordinator {
     if (this.installing) {
       throw new Error('Portable import is already installing');
     }
+    if (this.installAttempted) {
+      throw new Error('Portable import account set is frozen');
+    }
     return this.previews.remove(passwordId);
   }
 
@@ -120,6 +142,7 @@ export class PortableImportCoordinator {
     if (this.installReserved) {
       return Promise.reject(new Error('Portable import is already installing'));
     }
+    this.installAttempted = true;
     this.installReserved = true;
     const installation = this.enqueue(async () => {
       this.requireOpen();
@@ -132,6 +155,10 @@ export class PortableImportCoordinator {
       }
       this.installing = true;
       try {
+        if (!this.gate.commitPrepared) {
+          this.authorization.prepareCommit();
+          this.gate.commitPrepared = true;
+        }
         await this.candidate.install(async admit => {
           for (const preview of this.previews.list()) {
             await this.previews.usePassword(preview.passwordId, admit);
@@ -142,6 +169,7 @@ export class PortableImportCoordinator {
             throw new Error('Portable import authorization changed at commit');
           }
           this.authorization.commitSuccess();
+          await this.authorization.release();
         } finally {
           // Physical installation is already terminal even if application-state
           // persistence unexpectedly reports an error.
@@ -179,6 +207,7 @@ export class PortableImportCoordinator {
     await this.enqueue(async () => {
       if (this.closed) return;
       await this.candidate.abort();
+      await this.authorization.release();
       this.closed = true;
     });
   }
@@ -194,6 +223,7 @@ export class PortableImportCoordinator {
 
   private authorizationValid(): boolean {
     if (!this.gate.active) return false;
+    if (this.gate.commitPrepared) return true;
     try {
       const authorized = this.authorization.isAuthorized();
       if (!authorized) this.gate.active = false;
@@ -210,7 +240,8 @@ export class PortableImportCoordinator {
     this.gate.active = false;
     this.previews.dispose();
     void this.candidate.abort().then(
-      () => {
+      async () => {
+        await this.authorization.release();
         this.closed = true;
       },
       () => {
@@ -237,6 +268,7 @@ export class PortableImportCoordinator {
     this.previews.dispose();
     try {
       await this.candidate.abort();
+      await this.authorization.release();
       this.closed = true;
     } catch {
       // Keep the coordinator cleanup-capable. A later cancel() retries the

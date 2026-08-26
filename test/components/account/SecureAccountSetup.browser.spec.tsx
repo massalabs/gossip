@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   preparePasswordAccount: vi.fn(),
   wipePreparedPasswordAccount: vi.fn(),
   logout: vi.fn(),
+  consumeCreationAuthority: vi.fn(),
+  restoreCreationAuthority: vi.fn(),
   stagedAccounts: [] as Array<{ passwordBytes: Uint8Array }>,
 }));
 
@@ -57,6 +59,12 @@ vi.mock('@massalabs/gossip-sdk', async () => {
     validatePassword: () => ({ valid: true }),
   };
 });
+
+vi.mock('../../../src/services/portableImportAuthorization', () => ({
+  consumeOnboardingCreationAuthority: mocks.consumeCreationAuthority,
+  restoreOnboardingCreationAuthorityAfterRollback:
+    mocks.restoreCreationAuthority,
+}));
 
 vi.mock('../../../src/services/biometricService', () => ({
   checkBiometricAvailability: mocks.checkBiometricAvailability,
