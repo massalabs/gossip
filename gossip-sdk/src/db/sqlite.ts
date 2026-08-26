@@ -1380,6 +1380,7 @@ export class DatabaseConnection {
       await tx.delete(schema.discussions);
       await tx.delete(schema.contacts);
       await tx.delete(schema.accountSettings);
+      await tx.delete(schema.privateMigration);
       await tx.delete(schema.userProfile);
       await tx.delete(schema.pendingEncryptedMessages);
       await tx.delete(schema.pendingAnnouncements);
@@ -1404,6 +1405,7 @@ export class DatabaseConnection {
       await tx
         .delete(schema.accountSettings)
         .where(eq(schema.accountSettings.userId, userId));
+      await tx.delete(schema.privateMigration);
       // Profile table keyed by userId
       await tx
         .delete(schema.userProfile)

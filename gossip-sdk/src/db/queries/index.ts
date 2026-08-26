@@ -7,6 +7,7 @@ import { UserProfileQueries } from './userProfile.js';
 import { AnnouncementCursorQueries } from './announcementCursors.js';
 import { PendingAnnouncementQueries } from './pendingAnnouncements.js';
 import { ActiveSeekerQueries } from './activeSeekers.js';
+import { PrivateMigrationQueries } from './privateMigration.js';
 
 export type { AccountSettingsV1 } from './accountSettings.js';
 export type { ContactRow } from './contacts.js';
@@ -15,6 +16,7 @@ export type { MessageRow, MessageInsert } from './messages.js';
 export type { UserProfileRow, UserProfileInsert } from './userProfile.js';
 export { rowToUserProfile, userProfileToRow } from './userProfile.js';
 export type { PendingAnnouncementRow } from './pendingAnnouncements.js';
+export type { PrivateMigrationStateV1 } from './privateMigration.js';
 
 /**
  * Bundle of all query classes, scoped to a single DatabaseConnection.
@@ -31,6 +33,7 @@ export class Queries {
   readonly announcementCursors: AnnouncementCursorQueries;
   readonly pendingAnnouncements: PendingAnnouncementQueries;
   readonly activeSeekers: ActiveSeekerQueries;
+  readonly privateMigration: PrivateMigrationQueries;
 
   constructor(readonly conn: DatabaseConnection) {
     this.accountSettings = new AccountSettingsQueries(conn);
@@ -41,5 +44,6 @@ export class Queries {
     this.announcementCursors = new AnnouncementCursorQueries(conn);
     this.pendingAnnouncements = new PendingAnnouncementQueries(conn);
     this.activeSeekers = new ActiveSeekerQueries(conn);
+    this.privateMigration = new PrivateMigrationQueries(conn);
   }
 }
