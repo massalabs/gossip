@@ -7,7 +7,7 @@ import {
   PROFILE_PASSWORD_KDF_VERSION,
   PROFILE_SECURITY_FORMAT_VERSION,
   type UserProfile,
-} from '../db';
+} from '../db.js';
 
 export type UserProfileRow = typeof schema.userProfile.$inferSelect;
 export type UserProfileInsert = typeof schema.userProfile.$inferInsert;

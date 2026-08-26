@@ -319,7 +319,7 @@ export class SecureStorageWorkerApi {
       );
     }
     return new Promise<T>((resolve, reject) => {
-      let queued!: QueuedLifecycleOperation;
+      const queued = {} as QueuedLifecycleOperation;
       const abort = () => {
         const index = this.operationQueue.indexOf(queued);
         if (index >= 0) {
@@ -327,7 +327,7 @@ export class SecureStorageWorkerApi {
           reject(new DOMException('Operation aborted', 'AbortError'));
         }
       };
-      queued = {
+      Object.assign(queued, {
         kind: 'lifecycle',
         operation: async () => {
           signal?.removeEventListener('abort', abort);
@@ -336,9 +336,9 @@ export class SecureStorageWorkerApi {
           }
           return operation();
         },
-        resolve: value => resolve(value as T),
+        resolve: (value: unknown) => resolve(value as T),
         reject,
-      };
+      });
       signal?.addEventListener('abort', abort, { once: true });
       this.operationQueue.push(queued);
       this.pumpOperationQueue();
@@ -1019,6 +1019,9 @@ export class SecureStorageWorkerApi {
   ): Promise<ImportedAccountPreview> {
     const operation = async (): Promise<ImportedAccountPreview> => {
       let previewStarted = false;
+      let failed = false;
+      let failure: unknown;
+      let preview: ImportedAccountPreview | null = null;
       try {
         await this.restorePortablePreviewBackend();
         const transfer = this.portableImport;
@@ -1035,19 +1038,25 @@ export class SecureStorageWorkerApi {
           throw new Error('Imported account password was not accepted');
         }
         finishCandidatePreview();
-        return queryCandidatePreview() as ImportedAccountPreview;
-      } finally {
-        password.fill(0);
-        if (previewStarted) {
-          try {
-            await endCandidatePreview();
-            this.portablePreviewRecoveryError = null;
-          } catch (error) {
-            this.portablePreviewRecoveryError = error;
-            throw error;
-          }
+        preview = queryCandidatePreview() as ImportedAccountPreview;
+      } catch (error) {
+        failed = true;
+        failure = error;
+      }
+      password.fill(0);
+      if (previewStarted) {
+        try {
+          await endCandidatePreview();
+          this.portablePreviewRecoveryError = null;
+        } catch (error) {
+          this.portablePreviewRecoveryError = error;
+          throw error;
         }
       }
+      if (failed) throw failure;
+      if (preview === null)
+        throw new Error('Imported account preview is unavailable');
+      return preview;
     };
     const result = this.portablePreviewTail.then(operation, operation);
     this.portablePreviewTail = result.then(
