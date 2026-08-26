@@ -40,6 +40,7 @@ public class PortableBackupFilePlugin extends Plugin {
     private static final String INDEX = "tokens";
     private static final int URI_FLAGS =
             Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+    private static final int READ_FLAGS = Intent.FLAG_GRANT_READ_URI_PERMISSION;
 
     private static final class Access {
         final Uri uri;
@@ -49,12 +50,20 @@ public class PortableBackupFilePlugin extends Plugin {
         FileInputStream input;
         long written;
         boolean unverified;
+        final boolean source;
+        final long totalBytes;
 
         Access(Uri uri, int flags, String name, boolean unverified) {
+            this(uri, flags, name, unverified, false, -1);
+        }
+
+        Access(Uri uri, int flags, String name, boolean unverified, boolean source, long totalBytes) {
             this.uri = uri;
             this.flags = flags;
             this.name = name;
             this.unverified = unverified;
+            this.source = source;
+            this.totalBytes = totalBytes;
         }
     }
 
@@ -98,6 +107,53 @@ public class PortableBackupFilePlugin extends Plugin {
         startActivityForResult(call, intent, "exportDestinationSelected");
     }
 
+    @PluginMethod
+    public synchronized void selectImportSource(PluginCall call) {
+        if (destroyed) {
+            call.reject("Backup transport is unavailable", "DESTROYED");
+            return;
+        }
+        if (pickerPending) {
+            call.reject("Backup source selection is already active", "PICKER_ACTIVE");
+            return;
+        }
+        pickerPending = true;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/octet-stream");
+        intent.addFlags(READ_FLAGS);
+        startActivityForResult(call, intent, "importSourceSelected");
+    }
+
+    @ActivityCallback
+    private synchronized void importSourceSelected(PluginCall call, ActivityResult result) {
+        pickerPending = false;
+        if (call == null) return;
+        Intent data = result == null ? null : result.getData();
+        Uri uri = data == null ? null : data.getData();
+        if (result == null || result.getResultCode() != Activity.RESULT_OK || uri == null) {
+            call.reject("Backup source selection cancelled", "CANCELLED");
+            return;
+        }
+        int flags = data.getFlags() & READ_FLAGS;
+        long totalBytes = sourceLength(uri);
+        if (totalBytes < 0 || totalBytes > MAX_BACKUP_BYTES) {
+            releaseGrant(new Access(uri, flags, displayName(uri), false, true, totalBytes));
+            call.reject("Backup source size is unavailable", "INVALID_SOURCE");
+            return;
+        }
+        String token = UUID.randomUUID().toString();
+        Access state = new Access(uri, flags, displayName(uri), false, true, totalBytes);
+        if (destroyed) {
+            releaseGrant(state);
+            call.reject("Backup transport is unavailable", "DESTROYED");
+            return;
+        }
+        access.put(token, state);
+        call.resolve(new JSObject().put("token", token).put("name", state.name)
+                .put("totalBytes", state.totalBytes));
+    }
+
     @ActivityCallback
     private synchronized void exportDestinationSelected(PluginCall call, ActivityResult result) {
         pickerPending = false;
@@ -133,8 +189,60 @@ public class PortableBackupFilePlugin extends Plugin {
     }
 
     @PluginMethod
-    public synchronized void beginExport(PluginCall call) {
+    public synchronized void readImportChunk(PluginCall call) {
         Access state = requireAccess(call);
+        if (state == null) return;
+        Integer requested = call.getInt("maxBytes", MAX_CHUNK);
+        int maxBytes = requested == null ? MAX_CHUNK : requested;
+        if (!state.source || maxBytes <= 0 || maxBytes > MAX_CHUNK) {
+            call.reject("Invalid import source state", "NOT_OPEN");
+            return;
+        }
+        byte[] bytes = new byte[maxBytes];
+        try {
+            if (state.input == null) {
+                ParcelFileDescriptor descriptor = resolver().openFileDescriptor(state.uri, "r");
+                if (descriptor == null) throw new IllegalStateException("provider returned no descriptor");
+                state.input = new ParcelFileDescriptor.AutoCloseInputStream(descriptor);
+                state.written = 0;
+            }
+            int count = state.input.read(bytes);
+            if (count < 0) {
+                call.resolve(new JSObject().put("data", JSObject.NULL));
+                return;
+            }
+            state.written = Math.addExact(state.written, count);
+            if (state.written > state.totalBytes) throw new IllegalStateException("source grew");
+            call.resolve(new JSObject().put(
+                    "data", Base64.encodeToString(bytes, 0, count, Base64.NO_WRAP)));
+        } catch (Exception error) {
+            call.reject("Unable to read backup source", "IMPORT_READ_FAILED", error);
+        } finally {
+            java.util.Arrays.fill(bytes, (byte) 0);
+        }
+    }
+
+    @PluginMethod
+    public synchronized void finishImportSource(PluginCall call) {
+        String token = call.getString("token");
+        Access state = token == null ? null : access.get(token);
+        if (state == null) {
+            call.resolve();
+            return;
+        }
+        if (!state.source) {
+            call.reject("Backup access token has the wrong purpose", "INVALID_TOKEN");
+            return;
+        }
+        closeStreams(state);
+        access.remove(token);
+        releaseGrant(state);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public synchronized void beginExport(PluginCall call) {
+        Access state = requireOutputAccess(call);
         if (state == null) return;
         closeStreams(state);
         state.unverified = true;
@@ -155,7 +263,7 @@ public class PortableBackupFilePlugin extends Plugin {
 
     @PluginMethod
     public synchronized void writeExportChunk(PluginCall call) {
-        Access state = requireAccess(call);
+        Access state = requireOutputAccess(call);
         if (state == null) return;
         String encoded = call.getString("data");
         if (encoded == null || encoded.length() == 0 || encoded.length() > MAX_BASE64) {
@@ -195,7 +303,7 @@ public class PortableBackupFilePlugin extends Plugin {
 
     @PluginMethod
     public synchronized void finishExport(PluginCall call) {
-        Access state = requireAccess(call);
+        Access state = requireOutputAccess(call);
         if (state == null) return;
         FileOutputStream output = state.output;
         if (output == null) {
@@ -221,7 +329,7 @@ public class PortableBackupFilePlugin extends Plugin {
 
     @PluginMethod
     public synchronized void beginVerification(PluginCall call) {
-        Access state = requireAccess(call);
+        Access state = requireOutputAccess(call);
         if (state == null) return;
         closeInput(state);
         try {
@@ -236,7 +344,7 @@ public class PortableBackupFilePlugin extends Plugin {
 
     @PluginMethod
     public synchronized void readVerificationChunk(PluginCall call) {
-        Access state = requireAccess(call);
+        Access state = requireOutputAccess(call);
         if (state == null) return;
         Integer requested = call.getInt("maxBytes", MAX_CHUNK);
         int maxBytes = requested == null ? MAX_CHUNK : requested;
@@ -260,7 +368,7 @@ public class PortableBackupFilePlugin extends Plugin {
     public synchronized void finishVerification(PluginCall call) {
         String token = call.getString("token");
         Access state = token == null ? null : access.get(token);
-        if (state == null) {
+        if (state == null || state.source) {
             call.reject("Backup access token expired", "INVALID_TOKEN");
             return;
         }
@@ -286,7 +394,7 @@ public class PortableBackupFilePlugin extends Plugin {
     public synchronized void deleteOutput(PluginCall call) {
         String token = call.getString("token");
         Access state = token == null ? null : access.get(token);
-        if (state == null) {
+        if (state == null || state.source) {
             call.resolve(new JSObject().put("deleted", false));
             return;
         }
@@ -314,6 +422,10 @@ public class PortableBackupFilePlugin extends Plugin {
         Access state = token == null ? null : access.get(token);
         if (state == null) {
             call.resolve();
+            return;
+        }
+        if (state.source) {
+            call.reject("Backup access token has the wrong purpose", "INVALID_TOKEN");
             return;
         }
         closeStreams(state);
@@ -368,7 +480,10 @@ public class PortableBackupFilePlugin extends Plugin {
     protected synchronized void handleOnDestroy() {
         destroyed = true;
         pickerPending = false;
-        for (Access state : access.values()) closeStreams(state);
+        for (Access state : access.values()) {
+            closeStreams(state);
+            if (state.source) releaseGrant(state);
+        }
         access.clear();
         getContext().stopService(new Intent(getContext(), PortableBackupForegroundService.class));
         super.handleOnDestroy();
@@ -381,7 +496,30 @@ public class PortableBackupFilePlugin extends Plugin {
         return state;
     }
 
+    private Access requireOutputAccess(PluginCall call) {
+        Access state = requireAccess(call);
+        if (state != null && state.source) {
+            call.reject("Backup access token has the wrong purpose", "INVALID_TOKEN");
+            return null;
+        }
+        return state;
+    }
+
     private ContentResolver resolver() { return getContext().getContentResolver(); }
+
+    private long sourceLength(Uri uri) {
+        try (ParcelFileDescriptor descriptor = resolver().openFileDescriptor(uri, "r")) {
+            if (descriptor != null && descriptor.getStatSize() >= 0) return descriptor.getStatSize();
+        } catch (Exception ignored) {}
+        try (android.database.Cursor cursor = resolver().query(
+                uri, new String[] { OpenableColumns.SIZE }, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int index = cursor.getColumnIndex(OpenableColumns.SIZE);
+                if (index >= 0 && !cursor.isNull(index)) return cursor.getLong(index);
+            }
+        } catch (Exception ignored) {}
+        return -1;
+    }
 
     private String displayName(Uri uri) {
         try (android.database.Cursor cursor = resolver().query(

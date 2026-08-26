@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   platform: 'android',
   plugin: {
     selectExportDestination: vi.fn(),
+    selectImportSource: vi.fn(),
+    readImportChunk: vi.fn(),
+    finishImportSource: vi.fn(),
     beginExport: vi.fn(),
     writeExportChunk: vi.fn(),
     finishExport: vi.fn(),
@@ -28,6 +31,7 @@ vi.mock('@capacitor/core', () => ({
 import {
   cleanupInterruptedNativeBackups,
   exportNativeBackup,
+  streamNativeBackupImport,
 } from '../../src/services/portableBackupNative';
 import { PortableBackupCleanupRequiredError } from '../../src/services/portableBackup';
 
@@ -75,6 +79,7 @@ describe('Android portable backup transport', () => {
       'startProtection',
       'updateProtection',
       'stopProtection',
+      'finishImportSource',
     ] as const) {
       mocks.plugin[method].mockResolvedValue(undefined);
     }
@@ -87,6 +92,47 @@ describe('Android portable backup transport', () => {
     mocks.plugin.deleteOutput.mockResolvedValue({ deleted: true });
     mocks.plugin.listInterruptedOutputs.mockResolvedValue({ outputs: [] });
     mocks.plugin.resetRecoveryJournal.mockResolvedValue(undefined);
+  });
+
+  it('streams a read-only import source, wipes chunks, and releases its token', async () => {
+    const expected = new Uint8Array(80).map((_, index) => index);
+    mocks.plugin.readImportChunk
+      .mockResolvedValueOnce({ data: base64(expected) })
+      .mockResolvedValueOnce({ data: null });
+    let borrowed: Uint8Array | null = null;
+    const finishValidation = vi.fn().mockResolvedValue(undefined);
+
+    await streamNativeBackupImport(
+      { token: 'source-token', name: 'source.gossipbackup', totalBytes: 80 },
+      chunk => {
+        borrowed = chunk;
+        expect(chunk).toEqual(expected);
+      },
+      finishValidation
+    );
+
+    expect(finishValidation).toHaveBeenCalledOnce();
+    expect(mocks.plugin.finishImportSource).toHaveBeenCalledWith({
+      token: 'source-token',
+    });
+    expect(Array.from(borrowed!)).toEqual(new Array(80).fill(0));
+  });
+
+  it('rejects changed native source length and still releases access', async () => {
+    mocks.plugin.readImportChunk.mockResolvedValueOnce({
+      data: base64(new Uint8Array(73)),
+    });
+
+    await expect(
+      streamNativeBackupImport(
+        { token: 'source-token', name: 'source.gossipbackup', totalBytes: 72 },
+        vi.fn(),
+        vi.fn()
+      )
+    ).rejects.toThrow('source length changed');
+    expect(mocks.plugin.finishImportSource).toHaveBeenCalledWith({
+      token: 'source-token',
+    });
   });
 
   it('writes, fsyncs, reads back, and verifies exact native bytes', async () => {

@@ -1,5 +1,6 @@
 import Capacitor
 import UIKit
+import UniformTypeIdentifiers
 
 /// Bounded document-picker transport. JavaScript receives random durable tokens, never URLs.
 @objc(PortableBackupFilePlugin)
@@ -10,6 +11,9 @@ public final class PortableBackupFilePlugin: CAPPlugin, CAPBridgedPlugin,
     public let jsName = "PortableBackupFile"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "selectExportDestination", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "selectImportSource", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "readImportChunk", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "finishImportSource", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "beginExport", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "writeExportChunk", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "finishExport", returnType: CAPPluginReturnPromise),
@@ -31,6 +35,10 @@ public final class PortableBackupFilePlugin: CAPPlugin, CAPBridgedPlugin,
     private let maxBackupBytes: UInt64 = 64 * 1024 * 1024 * 1024
     private var entries: [String: PortableBackupEntry] = [:]
     private var runtimes: [String: PortableBackupRuntime] = [:]
+    private var sourceRuntimes: [String: PortableBackupRuntime] = [:]
+    private var sourceSizes: [String: UInt64] = [:]
+    private enum PickerPurpose { case exportDestination, importSource }
+    private var pickerPurpose: PickerPurpose?
     private var pickerCall: CAPPluginCall?
     private var pickerPlaceholder: URL?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -84,6 +92,7 @@ public final class PortableBackupFilePlugin: CAPPlugin, CAPBridgedPlugin,
                 throw CocoaError(.fileWriteUnknown)
             }
             pickerCall = call
+            pickerPurpose = .exportDestination
             pickerPlaceholder = placeholder
             let picker = UIDocumentPickerViewController(forExporting: [file], asCopy: true)
             picker.delegate = self
@@ -98,6 +107,29 @@ public final class PortableBackupFilePlugin: CAPPlugin, CAPBridgedPlugin,
         }
     }
 
+    @objc func selectImportSource(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.stateLock.lock()
+            defer { self.stateLock.unlock() }
+            guard self.pickerCall == nil else {
+                call.reject("Backup source selection is already active", "PICKER_ACTIVE")
+                return
+            }
+            self.pickerCall = call
+            self.pickerPurpose = .importSource
+            let picker = UIDocumentPickerViewController(
+                forOpeningContentTypes: [UTType.data], asCopy: false)
+            picker.delegate = self
+            picker.allowsMultipleSelection = false
+            guard let presenter = self.bridge?.viewController else {
+                self.cleanupPicker()
+                call.reject("Unable to open backup source picker", "PICKER_FAILED")
+                return
+            }
+            presenter.present(picker, animated: true)
+        }
+    }
+
     public func documentPicker(
         _ controller: UIDocumentPickerViewController,
         didPickDocumentsAt urls: [URL]
@@ -106,6 +138,29 @@ public final class PortableBackupFilePlugin: CAPPlugin, CAPBridgedPlugin,
         defer { stateLock.unlock() }
         guard let call = pickerCall, urls.count == 1, let url = urls.first else {
             pickerCall?.reject("Select one Gossip backup", "INVALID_DESTINATION")
+            cleanupPicker()
+            return
+        }
+        if pickerPurpose == .importSource {
+            do {
+                let runtime = try PortableBackupRuntime(url: url)
+                let values = try url.resourceValues(forKeys: [.fileSizeKey])
+                guard let fileSize = values.fileSize, fileSize >= 0 else {
+                    throw TransportError.notOpen
+                }
+                let size = UInt64(fileSize)
+                guard size <= maxBackupBytes else { throw TransportError.tooLarge }
+                let token = UUID().uuidString
+                sourceRuntimes[token] = runtime
+                sourceSizes[token] = size
+                call.resolve([
+                    "token": token,
+                    "name": url.lastPathComponent,
+                    "totalBytes": NSNumber(value: size),
+                ])
+            } catch {
+                call.reject("Unable to retain backup source access", "INVALID_SOURCE")
+            }
             cleanupPicker()
             return
         }
@@ -148,6 +203,49 @@ public final class PortableBackupFilePlugin: CAPPlugin, CAPBridgedPlugin,
         defer { stateLock.unlock() }
         pickerCall?.reject("Backup destination selection cancelled", "CANCELLED")
         cleanupPicker()
+    }
+
+    @objc func readImportChunk(_ call: CAPPluginCall) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        do {
+            guard let token = call.getString("token"),
+                  let runtime = sourceRuntimes[token],
+                  let totalBytes = sourceSizes[token]
+            else { throw TransportError.invalidToken }
+            let requested = call.getInt("maxBytes") ?? maxChunk
+            guard requested > 0, requested <= maxChunk else {
+                throw TransportError.invalidChunk
+            }
+            let read = try PortableBackupCoordinatedAccess.read(runtime.url) { url in
+                let input = try FileHandle(forReadingFrom: url)
+                defer { try? input.close() }
+                try input.seek(toOffset: runtime.inputOffset)
+                return try input.read(upToCount: requested)
+            }
+            guard var bytes = read, !bytes.isEmpty else {
+                call.resolve(["data": NSNull()])
+                return
+            }
+            defer { bytes.resetBytes(in: 0..<bytes.count) }
+            runtime.inputOffset = try adding(runtime.inputOffset, UInt64(bytes.count))
+            guard runtime.inputOffset <= totalBytes else { throw TransportError.tooLarge }
+            call.resolve(["data": bytes.base64EncodedString()])
+        } catch {
+            reject(call, error, code: "IMPORT_READ_FAILED")
+        }
+    }
+
+    @objc func finishImportSource(_ call: CAPPluginCall) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard let token = call.getString("token") else {
+            call.reject("Backup source token expired", "INVALID_TOKEN")
+            return
+        }
+        sourceRuntimes.removeValue(forKey: token)?.close()
+        sourceSizes.removeValue(forKey: token)
+        call.resolve()
     }
 
     @objc func beginExport(_ call: CAPPluginCall) {
@@ -423,6 +521,7 @@ public final class PortableBackupFilePlugin: CAPPlugin, CAPBridgedPlugin,
 
     deinit {
         for runtime in runtimes.values { runtime.close() }
+        for runtime in sourceRuntimes.values { runtime.close() }
         endBackgroundTask()
         if let placeholder = pickerPlaceholder {
             try? FileManager.default.removeItem(at: placeholder)
@@ -515,6 +614,7 @@ public final class PortableBackupFilePlugin: CAPPlugin, CAPBridgedPlugin,
     private func cleanupPicker() {
         if let placeholder = pickerPlaceholder { try? FileManager.default.removeItem(at: placeholder) }
         pickerPlaceholder = nil
+        pickerPurpose = nil
         pickerCall = nil
     }
 

@@ -17,8 +17,18 @@ interface NativeDestination {
   name: string;
 }
 
+interface NativeSource extends NativeDestination {
+  totalBytes: number;
+}
+
 interface NativeFilePlugin {
   selectExportDestination(): Promise<NativeDestination>;
+  selectImportSource(): Promise<NativeSource>;
+  readImportChunk(options: {
+    token: string;
+    maxBytes: number;
+  }): Promise<{ data: string | null }>;
+  finishImportSource(options: { token: string }): Promise<void>;
   beginExport(options: { token: string }): Promise<void>;
   writeExportChunk(options: {
     token: string;
@@ -55,6 +65,7 @@ export interface NativeBackupLabels {
 }
 
 export type NativeBackupDestination = NativeDestination;
+export type NativeBackupSource = NativeSource;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('Backup cancelled', 'AbortError');
@@ -99,6 +110,109 @@ function validProgress(progress: PortableTransferProgress): boolean {
 
 export function selectNativeBackupDestination(): Promise<NativeBackupDestination> {
   return nativeFiles.selectExportDestination();
+}
+
+export function selectNativeBackupSource(): Promise<NativeBackupSource> {
+  return nativeFiles.selectImportSource();
+}
+
+export function releaseNativeBackupSource(
+  source: NativeBackupSource
+): Promise<void> {
+  return nativeFiles.finishImportSource({ token: source.token });
+}
+
+/** Stream a read-only native document through bounded, wipeable bridge chunks. */
+export async function streamNativeBackupImport(
+  source: NativeBackupSource,
+  receive: (chunk: Uint8Array) => void | Promise<void>,
+  finishValidation: () => void | Promise<void>,
+  onProgress?: (readBytes: number, totalBytes: number) => void,
+  signal?: AbortSignal,
+  labels?: NativeBackupLabels
+): Promise<void> {
+  if (
+    !Number.isSafeInteger(source.totalBytes) ||
+    source.totalBytes < 72 ||
+    source.totalBytes > MAX_BACKUP_BYTES
+  ) {
+    await nativeFiles
+      .finishImportSource({ token: source.token })
+      .catch(() => {});
+    throw new Error('Portable backup file size is invalid');
+  }
+  let readBytes = 0;
+  try {
+    if (labels) {
+      await nativeFiles.startProtection({
+        title: labels.notificationTitle,
+        text: labels.preparing,
+      });
+    }
+    onProgress?.(readBytes, source.totalBytes);
+    while (true) {
+      throwIfAborted(signal);
+      const { data } = await nativeFiles.readImportChunk({
+        token: source.token,
+        maxBytes: CHUNK_BYTES,
+      });
+      throwIfAborted(signal);
+      if (data === null) break;
+      const chunk = fromBase64(data);
+      try {
+        if (
+          chunk.byteLength === 0 ||
+          chunk.byteLength > CHUNK_BYTES ||
+          readBytes + chunk.byteLength > source.totalBytes
+        ) {
+          throw new Error('Native backup source length changed');
+        }
+        await receive(chunk);
+        throwIfAborted(signal);
+        readBytes += chunk.byteLength;
+        onProgress?.(readBytes, source.totalBytes);
+        if (labels) {
+          await nativeFiles.updateProtection({
+            text: labels.writing,
+            processedBytes: readBytes,
+            totalBytes: source.totalBytes,
+          });
+        }
+      } finally {
+        chunk.fill(0);
+      }
+    }
+    if (readBytes !== source.totalBytes) {
+      throw new Error('Native backup source length changed');
+    }
+    await finishValidation();
+  } finally {
+    await nativeFiles
+      .finishImportSource({ token: source.token })
+      .catch(() => {});
+    if (labels) await nativeFiles.stopProtection().catch(() => {});
+  }
+}
+
+export async function startNativeImportProtection(
+  labels: NativeBackupLabels
+): Promise<void> {
+  await nativeFiles.startProtection({
+    title: labels.notificationTitle,
+    text: labels.preparing,
+  });
+}
+
+export async function updateNativeImportProtection(
+  text: string,
+  processedBytes = 0,
+  totalBytes = 0
+): Promise<void> {
+  await nativeFiles.updateProtection({ text, processedBytes, totalBytes });
+}
+
+export function stopNativeImportProtection(): Promise<void> {
+  return nativeFiles.stopProtection();
 }
 
 export function isNativeBackupSelectionCancellation(error: unknown): boolean {
