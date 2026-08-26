@@ -1,0 +1,159 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { GossipSdk } from '@massalabs/gossip-sdk';
+
+const mocks = vi.hoisted(() => ({
+  plugin: {
+    selectExportDestination: vi.fn(),
+    beginExport: vi.fn(),
+    writeExportChunk: vi.fn(),
+    finishExport: vi.fn(),
+    beginVerification: vi.fn(),
+    readVerificationChunk: vi.fn(),
+    finishVerification: vi.fn(),
+    listInterruptedOutputs: vi.fn(),
+    deleteOutput: vi.fn(),
+    startProtection: vi.fn(),
+    updateProtection: vi.fn(),
+    stopProtection: vi.fn(),
+  },
+}));
+
+vi.mock('@capacitor/core', () => ({
+  registerPlugin: () => mocks.plugin,
+}));
+
+import {
+  cleanupInterruptedNativeBackups,
+  exportNativeBackup,
+} from '../../src/services/portableBackupNative';
+import { PortableBackupCleanupRequiredError } from '../../src/services/portableBackup';
+
+function base64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('base64');
+}
+
+function sdkFor(bytes: Uint8Array): GossipSdk {
+  return {
+    async exportPortableV1(
+      write: (chunk: Uint8Array) => Promise<void>,
+      progress: (value: { writtenBytes: number; totalBytes: number }) => void
+    ) {
+      progress({ writtenBytes: 0, totalBytes: bytes.byteLength });
+      await write(bytes.slice());
+      progress({
+        writtenBytes: bytes.byteLength,
+        totalBytes: bytes.byteLength,
+      });
+    },
+  } as unknown as GossipSdk;
+}
+
+const destination = { token: 'opaque-token', name: 'backup.gossipbackup' };
+const labels = {
+  notificationTitle: 'Backup',
+  preparing: 'Preparing',
+  writing: 'Writing',
+  verifying: 'Verifying',
+};
+
+function decodeWrite(): Uint8Array {
+  const encoded = mocks.plugin.writeExportChunk.mock.calls[0][0].data;
+  return new Uint8Array(Buffer.from(encoded, 'base64'));
+}
+
+describe('Android portable backup transport', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const method of [
+      'beginExport',
+      'beginVerification',
+      'finishVerification',
+      'startProtection',
+      'updateProtection',
+      'stopProtection',
+    ] as const) {
+      mocks.plugin[method].mockResolvedValue(undefined);
+    }
+    mocks.plugin.writeExportChunk.mockImplementation(async () => ({
+      writtenBytes: decodeWrite().byteLength,
+    }));
+    mocks.plugin.finishExport.mockImplementation(async () => ({
+      writtenBytes: decodeWrite().byteLength,
+    }));
+    mocks.plugin.deleteOutput.mockResolvedValue({ deleted: true });
+    mocks.plugin.listInterruptedOutputs.mockResolvedValue({ outputs: [] });
+  });
+
+  it('writes, fsyncs, reads back, and verifies exact native bytes', async () => {
+    const expected = new Uint8Array([1, 2, 3, 4, 5]);
+    mocks.plugin.readVerificationChunk
+      .mockResolvedValueOnce({ data: base64(expected) })
+      .mockResolvedValueOnce({ data: null });
+    const progress: Array<[string, number, number]> = [];
+
+    await exportNativeBackup(sdkFor(expected), destination, labels, value =>
+      progress.push([value.phase, value.processedBytes, value.totalBytes])
+    );
+
+    expect(decodeWrite()).toEqual(expected);
+    expect(mocks.plugin.finishExport).toHaveBeenCalledWith({
+      token: destination.token,
+    });
+    expect(mocks.plugin.finishVerification).toHaveBeenCalledWith({
+      token: destination.token,
+    });
+    expect(mocks.plugin.deleteOutput).not.toHaveBeenCalled();
+    expect(mocks.plugin.stopProtection).toHaveBeenCalledOnce();
+    expect(progress).toEqual([
+      ['writing', 0, 5],
+      ['writing', 5, 5],
+      ['verifying', 0, 5],
+      ['verifying', 5, 5],
+    ]);
+  });
+
+  it('deletes a committed destination after read-back corruption', async () => {
+    const expected = new Uint8Array([1, 2, 3]);
+    mocks.plugin.readVerificationChunk
+      .mockResolvedValueOnce({ data: base64(new Uint8Array([9, 2, 3])) })
+      .mockResolvedValueOnce({ data: null });
+
+    await expect(
+      exportNativeBackup(sdkFor(expected), destination, labels)
+    ).rejects.toThrow('Native backup read-back verification failed');
+    expect(mocks.plugin.deleteOutput).toHaveBeenCalledWith({
+      token: destination.token,
+    });
+    expect(mocks.plugin.finishVerification).not.toHaveBeenCalled();
+  });
+
+  it('surfaces manual cleanup when deletion and truncation are unavailable', async () => {
+    const expected = new Uint8Array([1, 2, 3]);
+    mocks.plugin.readVerificationChunk.mockRejectedValueOnce(
+      new Error('provider unavailable')
+    );
+    mocks.plugin.deleteOutput.mockResolvedValueOnce({ deleted: false });
+
+    await expect(
+      exportNativeBackup(sdkFor(expected), destination, labels)
+    ).rejects.toBeInstanceOf(PortableBackupCleanupRequiredError);
+  });
+
+  it('deletes every recoverable interrupted output before retry', async () => {
+    mocks.plugin.listInterruptedOutputs.mockResolvedValueOnce({
+      outputs: [
+        { token: 'one', name: 'one.gossipbackup' },
+        { token: 'two', name: 'two.gossipbackup' },
+      ],
+    });
+    mocks.plugin.deleteOutput
+      .mockResolvedValueOnce({ deleted: true })
+      .mockResolvedValueOnce({ deleted: true });
+
+    await expect(cleanupInterruptedNativeBackups()).resolves.toEqual({
+      cleaned: true,
+      remaining: [],
+    });
+    expect(mocks.plugin.deleteOutput).toHaveBeenCalledTimes(2);
+  });
+});
