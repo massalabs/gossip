@@ -91,6 +91,8 @@
     "change_destination": "Change destination",
     "destination": "Destination",
     "export": "Export all account data",
+    "notification_title": "Gossip secure backup",
+    "preparing": "Preparing backup",
     "writing": "Writing backup",
     "verifying": "Verifying backup",
     "success_title": "Backup verified",
@@ -98,7 +100,8 @@
     "continue_login": "Continue to Login",
     "retry": "Retry backup",
     "failed": "The backup was not completed. Any unverified output created by this attempt was removed.",
-    "cleanup_required": "The backup was not completed. Gossip could not remove the unverified output. Delete the selected file manually before continuing.",
+    "interrupted": "An earlier backup to {{name}} was interrupted. Gossip must delete its incomplete output before you retry or continue.",
+    "cleanup_required": "The backup was not completed. Gossip could not remove the unverified output. Delete {{name}} manually before continuing.",
     "unsupported": "Secure streaming backup is not available in this browser. Use a supported desktop browser."
   },
   "debug": {

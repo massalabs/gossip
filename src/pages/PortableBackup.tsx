@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { CheckCircle, Download, AlertTriangle } from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +16,16 @@ import {
   selectBrowserBackupDestination,
   type PortableBackupProgress,
 } from '../services/portableBackup';
+import {
+  abandonNativeBackupDestination,
+  cleanupInterruptedNativeBackups,
+  exportNativeBackup,
+  forgetInterruptedNativeBackups,
+  listInterruptedNativeBackups,
+  isNativeBackupSelectionCancellation,
+  selectNativeBackupDestination,
+  type NativeBackupDestination,
+} from '../services/portableBackupNative';
 import { useAccountStore } from '../stores/accountStore';
 
 const formatter = new Intl.NumberFormat(undefined, {
@@ -33,7 +44,16 @@ function formatBytes(bytes: number): string {
   return `${formatter.format(value)} ${unit}`;
 }
 
-type Result = 'idle' | 'success' | 'failed' | 'cleanup-required';
+type Result =
+  | 'idle'
+  | 'success'
+  | 'failed'
+  | 'interrupted'
+  | 'cleanup-required';
+
+type BackupDestination =
+  | { kind: 'browser'; handle: FileSystemFileHandle; name: string }
+  | { kind: 'android'; handle: NativeBackupDestination; name: string };
 
 const RECOVERY_KEY = 'gossip:portable-backup-result';
 
@@ -41,6 +61,7 @@ function storedResult(): Result {
   const value = window.sessionStorage.getItem(RECOVERY_KEY);
   return value === 'success' ||
     value === 'failed' ||
+    value === 'interrupted' ||
     value === 'cleanup-required'
     ? value
     : 'idle';
@@ -60,7 +81,7 @@ const PortableBackup: React.FC = () => {
   const sdk = useGossipSdk();
   const logout = useAccountStore(state => state.logout);
   const authenticated = useAccountStore(state => state.userProfile !== null);
-  const [destination, setDestination] = useState<FileSystemFileHandle | null>(
+  const [destination, setDestination] = useState<BackupDestination | null>(
     null
   );
   const [progress, setProgress] = useState<PortableBackupProgress | null>(null);
@@ -70,18 +91,48 @@ const PortableBackup: React.FC = () => {
     initialResult !== 'idle'
   );
   const [result, setResult] = useState<Result>(initialResult);
+  const [recoveryName, setRecoveryName] = useState<string | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const destinationRef = useRef<BackupDestination | null>(null);
+  const terminalStartedRef = useRef(initialResult !== 'idle');
   const allowRestartRef = useRef(false);
   const mountedRef = useRef(true);
-  const supported = sdk.isSecureStorage && canStreamBrowserBackup();
+  const platform = Capacitor.getPlatform();
+  const supported =
+    sdk.isSecureStorage &&
+    (platform === 'android' ||
+      (platform === 'web' && canStreamBrowserBackup()));
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       abortRef.current?.abort();
+      const currentDestination = destinationRef.current;
+      if (
+        currentDestination?.kind === 'android' &&
+        !terminalStartedRef.current
+      ) {
+        void abandonNativeBackupDestination(currentDestination.handle).catch(
+          () => false
+        );
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (platform !== 'android') return;
+    void listInterruptedNativeBackups().then(outputs => {
+      if (outputs.length === 0 || !mountedRef.current) return;
+      setRecoveryName(outputs.map(output => output.name).join(', '));
+      if (initialResult !== 'idle') return;
+      persistResult('interrupted');
+      terminalStartedRef.current = true;
+      setTerminalStarted(true);
+      setResult('interrupted');
+    });
+  }, [initialResult, platform]);
 
   useEffect(() => {
     if (!terminalStarted) return;
@@ -104,46 +155,119 @@ const PortableBackup: React.FC = () => {
   }, [terminalStarted]);
 
   const returnToLogin = useCallback(async () => {
+    if (recoveryBusy) return;
+    setRecoveryBusy(true);
     try {
-      if (authenticated) await logout({ lockedByUser: true });
-    } catch {
-      // The runtime is terminal; a full restart is still the only safe exit.
-    } finally {
+      if (platform === 'android' && result === 'interrupted') {
+        const cleanup = await cleanupInterruptedNativeBackups().catch(() => ({
+          cleaned: false,
+          remaining: [] as NativeBackupDestination[],
+        }));
+        if (!cleanup.cleaned) {
+          if (cleanup.remaining.length > 0) {
+            setRecoveryName(
+              cleanup.remaining.map(output => output.name).join(', ')
+            );
+          }
+          persistResult('cleanup-required');
+          setResult('cleanup-required');
+          return;
+        }
+      } else if (platform === 'android' && result === 'cleanup-required') {
+        // The user-facing recovery text requires manual deletion before this
+        // action. Forget only the device-local capability, never the file.
+        await forgetInterruptedNativeBackups();
+      }
+      try {
+        if (authenticated) await logout({ lockedByUser: true });
+      } catch {
+        // The runtime is terminal; a full restart is still the only safe exit.
+      }
       clearStoredResult();
       allowRestartRef.current = true;
       restartAfterPortableBackup(ROUTES.welcome());
+    } finally {
+      if (mountedRef.current) setRecoveryBusy(false);
     }
-  }, [authenticated, logout]);
+  }, [authenticated, logout, platform, recoveryBusy, result]);
 
   const selectDestination = useCallback(async () => {
     try {
-      const handle = await selectBrowserBackupDestination();
-      setDestination(handle);
+      if (platform === 'android') {
+        const handle = await selectNativeBackupDestination();
+        const previous = destinationRef.current;
+        if (previous?.kind === 'android') {
+          const released = await abandonNativeBackupDestination(
+            previous.handle
+          );
+          if (!released) {
+            await abandonNativeBackupDestination(handle).catch(() => false);
+            throw new Error(
+              'Unable to release the previous backup destination'
+            );
+          }
+        }
+        const selected = {
+          kind: 'android',
+          handle,
+          name: handle.name,
+        } as const;
+        destinationRef.current = selected;
+        setDestination(selected);
+      } else {
+        const handle = await selectBrowserBackupDestination();
+        const selected = {
+          kind: 'browser',
+          handle,
+          name: handle.name,
+        } as const;
+        destinationRef.current = selected;
+        setDestination(selected);
+      }
       setResult('idle');
       setProgress(null);
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+      if (
+        !(error instanceof DOMException && error.name === 'AbortError') &&
+        !isNativeBackupSelectionCancellation(error)
+      ) {
         setResult('failed');
       }
     }
-  }, []);
+  }, [platform]);
 
   const exportBackup = useCallback(async () => {
     if (!destination || exporting) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setExporting(true);
+    terminalStartedRef.current = true;
     setTerminalStarted(true);
     persistResult('cleanup-required');
     setResult('idle');
     setProgress(null);
     try {
-      await exportBrowserBackup(
-        sdk,
-        destination,
-        setProgress,
-        controller.signal
-      );
+      if (destination.kind === 'android') {
+        await exportNativeBackup(
+          sdk,
+          destination.handle,
+          {
+            notificationTitle: t('portable_backup.notification_title'),
+            preparing: t('portable_backup.preparing'),
+            writing: t('portable_backup.writing'),
+            verifying: t('portable_backup.verifying'),
+          },
+          setProgress,
+          controller.signal
+        );
+      } else {
+        await exportBrowserBackup(
+          sdk,
+          destination.handle,
+          setProgress,
+          controller.signal
+        );
+      }
       persistResult('success');
       setResult('success');
     } catch (error) {
@@ -161,13 +285,35 @@ const PortableBackup: React.FC = () => {
         restartAfterPortableBackup(ROUTES.portableBackup());
       }
     }
-  }, [destination, exporting, sdk]);
+  }, [destination, exporting, sdk, t]);
 
-  const retry = useCallback(() => {
-    clearStoredResult();
-    allowRestartRef.current = true;
-    restartAfterPortableBackup(ROUTES.portableBackup());
-  }, []);
+  const retry = useCallback(async () => {
+    if (recoveryBusy) return;
+    setRecoveryBusy(true);
+    try {
+      if (platform === 'android') {
+        const cleanup = await cleanupInterruptedNativeBackups().catch(() => ({
+          cleaned: false,
+          remaining: [] as NativeBackupDestination[],
+        }));
+        if (!cleanup.cleaned) {
+          if (cleanup.remaining.length > 0) {
+            setRecoveryName(
+              cleanup.remaining.map(output => output.name).join(', ')
+            );
+          }
+          persistResult('cleanup-required');
+          setResult('cleanup-required');
+          return;
+        }
+      }
+      clearStoredResult();
+      allowRestartRef.current = true;
+      restartAfterPortableBackup(ROUTES.portableBackup());
+    } finally {
+      if (mountedRef.current) setRecoveryBusy(false);
+    }
+  }, [platform, recoveryBusy]);
 
   if (result === 'success') {
     return (
@@ -182,7 +328,11 @@ const PortableBackup: React.FC = () => {
               {t('portable_backup.success_body')}
             </p>
           </div>
-          <Button fullWidth onClick={() => void returnToLogin()}>
+          <Button
+            fullWidth
+            disabled={recoveryBusy}
+            onClick={() => void returnToLogin()}
+          >
             {t('portable_backup.continue_login')}
           </Button>
         </div>
@@ -233,7 +383,9 @@ const PortableBackup: React.FC = () => {
           </div>
         </div>
 
-        {!supported ? (
+        {!supported &&
+        result !== 'interrupted' &&
+        result !== 'cleanup-required' ? (
           <p className="rounded-xl border border-border bg-muted p-4 text-sm text-muted-foreground">
             {t('portable_backup.unsupported')}
           </p>
@@ -294,8 +446,14 @@ const PortableBackup: React.FC = () => {
                 className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-foreground leading-relaxed"
               >
                 {result === 'cleanup-required'
-                  ? t('portable_backup.cleanup_required')
-                  : t('portable_backup.failed')}
+                  ? t('portable_backup.cleanup_required', {
+                      name: recoveryName ?? destination?.name ?? '',
+                    })
+                  : result === 'interrupted'
+                    ? t('portable_backup.interrupted', {
+                        name: recoveryName ?? destination?.name ?? '',
+                      })
+                    : t('portable_backup.failed')}
               </div>
             )}
 
@@ -308,14 +466,21 @@ const PortableBackup: React.FC = () => {
                 >
                   {t('common:cancel')}
                 </Button>
-              ) : result === 'failed' || result === 'cleanup-required' ? (
+              ) : result === 'failed' ||
+                result === 'interrupted' ||
+                result === 'cleanup-required' ? (
                 <>
-                  <Button fullWidth onClick={retry}>
+                  <Button
+                    fullWidth
+                    disabled={recoveryBusy}
+                    onClick={() => void retry()}
+                  >
                     {t('portable_backup.retry')}
                   </Button>
                   <Button
                     variant="outline"
                     fullWidth
+                    disabled={recoveryBusy}
                     onClick={() => void returnToLogin()}
                   >
                     {t('portable_backup.continue_login')}

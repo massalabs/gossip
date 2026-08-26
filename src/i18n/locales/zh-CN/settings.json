@@ -91,6 +91,8 @@
     "change_destination": "更改位置",
     "destination": "保存位置",
     "export": "导出所有账户数据",
+    "notification_title": "Gossip 安全备份",
+    "preparing": "正在准备备份",
     "writing": "正在写入备份",
     "verifying": "正在验证备份",
     "success_title": "备份已验证",
@@ -98,7 +100,8 @@
     "continue_login": "继续登录",
     "retry": "重试备份",
     "failed": "备份未完成。本次操作创建的所有未验证输出均已删除。",
-    "cleanup_required": "备份未完成。Gossip 无法删除未验证输出。请先手动删除所选文件再继续。",
+    "interrupted": "之前写入 {{name}} 的备份已中断。重试或继续之前，Gossip 必须删除未完成的输出。",
+    "cleanup_required": "备份未完成。Gossip 无法删除未验证输出。请先手动删除 {{name}} 再继续。",
     "unsupported": "此浏览器不支持安全流式备份。请使用受支持的桌面浏览器。"
   },
   "debug": {

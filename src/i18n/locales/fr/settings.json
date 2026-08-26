@@ -91,6 +91,8 @@
     "change_destination": "Changer de destination",
     "destination": "Destination",
     "export": "Exporter toutes les données des comptes",
+    "notification_title": "Sauvegarde sécurisée Gossip",
+    "preparing": "Préparation de la sauvegarde",
     "writing": "Écriture de la sauvegarde",
     "verifying": "Vérification de la sauvegarde",
     "success_title": "Sauvegarde vérifiée",
@@ -98,7 +100,8 @@
     "continue_login": "Continuer vers la connexion",
     "retry": "Réessayer la sauvegarde",
     "failed": "La sauvegarde n’est pas terminée. Toute sortie non vérifiée créée par cette tentative a été supprimée.",
-    "cleanup_required": "La sauvegarde n’est pas terminée. Gossip n’a pas pu supprimer la sortie non vérifiée. Supprimez manuellement le fichier sélectionné avant de continuer.",
+    "interrupted": "Une sauvegarde précédente vers {{name}} a été interrompue. Gossip doit supprimer sa sortie incomplète avant de réessayer ou de continuer.",
+    "cleanup_required": "La sauvegarde n’est pas terminée. Gossip n’a pas pu supprimer la sortie non vérifiée. Supprimez manuellement {{name}} avant de continuer.",
     "unsupported": "La sauvegarde sécurisée en continu n’est pas disponible dans ce navigateur. Utilisez un navigateur de bureau compatible."
   },
   "debug": {

@@ -29,6 +29,7 @@ import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
 import PageLayout from './components/ui/Layout/PageLayout.tsx';
+import PortableBackupStartupGate from './components/PortableBackupStartupGate.tsx';
 
 export const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -121,7 +122,9 @@ function App() {
       <ErrorBoundary>
         <KeyboardAwareWrapper>
           <AppUrlListener />
-          <AppContent />
+          <PortableBackupStartupGate>
+            <AppContent />
+          </PortableBackupStartupGate>
           <DebugConsole />
           {/* <div className="hidden">
             <PWABadge />
