@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import fixtureUrl from '../../wasm/secure-storage/tests/fixtures/portable-v1-minimal.gossipbackup?url';
+import initSecureStorageWasm from '../../gossip-sdk/src/assets/generated/wasm-secureStorage/secureStorage.js';
+import secureStorageWasmUrlRaw from '../../gossip-sdk/src/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
 import {
   PortableWebExport,
   PortableWebImport,
@@ -151,12 +153,22 @@ async function expandedFixture(blockCount: number): Promise<Uint8Array> {
 
 const validators = {
   validateKeypair(value: Uint8Array) {
-    expect(value.byteLength).toBe(98_340);
+    expect([98_340, 98_352]).toContain(value.byteLength);
   },
   validateBlock(value: Uint8Array) {
     expect(value.byteLength).toBe(65_536);
   },
 };
+
+async function stageOuterMigration(transfer: PortableWebImport): Promise<void> {
+  await transfer.beginOuterMigration('portable-web-test');
+  await transfer.finalizeOuterMigration();
+}
+
+beforeAll(async () => {
+  const wasmUrl = new URL(secureStorageWasmUrlRaw, window.location.href).href;
+  await initSecureStorageWasm({ module_or_path: wasmUrl });
+});
 
 afterEach(async () => {
   await deleteDatabase();
@@ -494,15 +506,25 @@ describe('PortableWebImport', () => {
     const transfer = await PortableWebImport.begin(validators);
     await transfer.push(expected);
     await transfer.finishValidation();
+    await stageOuterMigration(transfer);
 
     const { generation } = await transfer.install();
     expect(generation).toMatch(/^[0-9a-f]{32}$/);
     expect(await getValue('m:active-generation')).toBe(generation);
-    // Legacy physical records may remain for pre-fence tabs, but the marker
-    // selects only the complete new generation.
-    expect(await getValue('s:0:sentinel')).toEqual(new Uint8Array([7]));
+    // The marker switch fences stale tabs before legacy records are removed.
+    expect(await getValue('s:0:sentinel')).toBeUndefined();
+    const installedRecords: [string, Uint8Array][] = [];
     for (const [key, value] of records(expected)) {
-      expect(await getValue(`g:${generation}:${key}`)).toEqual(value);
+      const installed = (await getValue(
+        `g:${generation}:${key}`
+      )) as Uint8Array;
+      expect(installed).not.toEqual(value);
+      if (key.endsWith(':kp')) {
+        expect(new DataView(installed.buffer).getUint32(0, false)).toBe(1);
+      } else {
+        expect(installed).toHaveLength(65_536);
+      }
+      installedRecords.push([key, installed]);
     }
     expect((await allKeys()).some(key => String(key).startsWith('x:'))).toBe(
       false
@@ -525,7 +547,7 @@ describe('PortableWebImport', () => {
       roundTrip.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    expect(roundTrip).toEqual(expected);
+    expect(records(roundTrip)).toEqual(installedRecords);
   });
 
   it('does not delete an active generation when abort races installation', async () => {
@@ -533,15 +555,18 @@ describe('PortableWebImport', () => {
     const transfer = await PortableWebImport.begin(validators);
     await transfer.push(expected);
     await transfer.finishValidation();
+    await stageOuterMigration(transfer);
 
     const installation = transfer.install();
     const close = transfer.close();
     const { generation } = await installation;
     await close;
     expect(await getValue('m:active-generation')).toBe(generation);
-    expect(await getValue(`g:${generation}:s:0:kp`)).toEqual(
-      records(expected)[0][1]
-    );
+    const installedKeypair = (await getValue(
+      `g:${generation}:s:0:kp`
+    )) as Uint8Array;
+    expect(installedKeypair).not.toEqual(records(expected)[0][1]);
+    expect(new DataView(installedKeypair.buffer).getUint32(0, false)).toBe(1);
   });
 
   it('rejects a stale candidate generation without changing active storage', async () => {
@@ -550,6 +575,7 @@ describe('PortableWebImport', () => {
     const transfer = await PortableWebImport.begin(validators);
     await transfer.push(expected);
     await transfer.finishValidation();
+    await stageOuterMigration(transfer);
     await put('m:active-generation', 'another-generation');
 
     await expect(transfer.install()).rejects.toThrow(

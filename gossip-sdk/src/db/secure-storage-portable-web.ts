@@ -1,4 +1,12 @@
 import { sha256 } from '@noble/hashes/sha2';
+import {
+  beginOuterMigration as beginOuterMigrationWasm,
+  admitOuterMigrationPassword,
+  finalizeOuterMigration as finalizeOuterMigrationWasm,
+  migrateOuterBlockBatch,
+  finishOuterMigrationNamespace,
+  endOuterMigration,
+} from '../assets/generated/wasm-secureStorage/secureStorage.js';
 import { SESSION_COUNT } from './secure-storage-namespaces.js';
 
 const DB_NAME = 'secure_storage';
@@ -619,6 +627,9 @@ async function deletePrefix(db: IDBDatabase, prefix: string): Promise<void> {
 async function cleanupInactiveGenerations(db: IDBDatabase): Promise<void> {
   const active = await readActiveGeneration(db);
   const activePrefix = activeRecordPrefix(active);
+  if (active !== LEGACY_GENERATION) {
+    await deletePrefix(db, 's:');
+  }
   const tx = db.transaction(STORE_NAME, 'readwrite');
   const store = tx.objectStore(STORE_NAME);
   await new Promise<void>((resolve, reject) => {
@@ -646,14 +657,13 @@ async function cleanupInactiveGenerations(db: IDBDatabase): Promise<void> {
 
 async function stageCandidateGeneration(
   db: IDBDatabase,
-  transferId: string,
+  candidatePrefix: string,
   generation: string
 ): Promise<void> {
   const tx = db.transaction(STORE_NAME, 'readwrite');
   const done = transactionDone(tx);
   void done.catch(() => {});
   const store = tx.objectStore(STORE_NAME);
-  const candidatePrefix = `${IMPORT_SPOOL_PREFIX}${transferId}:`;
   const nextPrefix = activeRecordPrefix(generation);
   let copied = 0;
   await new Promise<void>((resolve, reject) => {
@@ -763,6 +773,8 @@ export class PortableWebImport {
   private totalReceived = 0;
   private digestVerified = false;
   private stagedGeneration: string | null = null;
+  private migrationPrefix: string | null = null;
+  private migrationState: 'idle' | 'planning' | 'finalizing' | 'ready' = 'idle';
 
   private constructor(
     db: IDBDatabase,
@@ -1142,6 +1154,168 @@ export class PortableWebImport {
     });
   }
 
+  beginOuterMigration(domain: string): Promise<void> {
+    if (!this.digestVerified || this.stage !== 'validated' || this.closing) {
+      return Promise.reject(new Error('Portable import is not validated'));
+    }
+    return this.enqueue(async () => {
+      if (this.migrationState !== 'idle') {
+        throw new Error('Portable outer migration is already active');
+      }
+      if (!this.db) this.db = await openDatabase();
+      const prefix = `${IMPORT_SPOOL_PREFIX}${this.transferId}:`;
+      const tx = this.db.transaction(STORE_NAME, 'readonly');
+      const done = transactionDone(tx);
+      const store = tx.objectStore(STORE_NAME);
+      const keypairs = await Promise.all(
+        Array.from({ length: SESSION_COUNT }, async (_, slot) =>
+          asBytes(
+            await request(
+              store.get(`${prefix}${encodedKey({ kind: 'keypair', slot })}`)
+            )
+          ).slice()
+        )
+      );
+      await done;
+      try {
+        beginOuterMigrationWasm(domain, keypairs);
+        this.migrationState = 'planning';
+      } finally {
+        for (const keypair of keypairs) keypair.fill(0);
+      }
+    });
+  }
+
+  admitOuterMigrationPassword(password: Uint8Array): Promise<void> {
+    if (!this.digestVerified || this.stage !== 'validated' || this.closing) {
+      return Promise.reject(new Error('Portable import is not validated'));
+    }
+    return this.enqueue(async () => {
+      if (this.migrationState !== 'planning') {
+        throw new Error('Portable outer migration is not accepting passwords');
+      }
+      if (!admitOuterMigrationPassword(password)) {
+        throw new Error('Imported account password was not accepted');
+      }
+    });
+  }
+
+  finalizeOuterMigration(): Promise<void> {
+    if (!this.digestVerified || this.stage !== 'validated' || this.closing) {
+      return Promise.reject(new Error('Portable import is not validated'));
+    }
+    return this.enqueue(async () => {
+      if (this.migrationState !== 'planning') {
+        throw new Error('Portable outer migration is not ready');
+      }
+      this.migrationState = 'finalizing';
+      if (!this.db) this.db = await openDatabase();
+      const sourcePrefix = `${IMPORT_SPOOL_PREFIX}${this.transferId}:`;
+      const migrationGeneration = randomTransferId();
+      const migrationPrefix = activeRecordPrefix(migrationGeneration);
+      try {
+        const keypairs = finalizeOuterMigrationWasm();
+        try {
+          if (keypairs.length !== SESSION_COUNT) {
+            throw new Error('Invalid migrated keypair batch');
+          }
+          const tx = this.db.transaction(STORE_NAME, 'readwrite');
+          const store = tx.objectStore(STORE_NAME);
+          for (let slot = 0; slot < SESSION_COUNT; slot += 1) {
+            this.validators.validateKeypair(keypairs[slot]);
+            store.put(
+              keypairs[slot],
+              `${migrationPrefix}${encodedKey({ kind: 'keypair', slot })}`
+            );
+          }
+          await transactionDone(tx);
+        } finally {
+          for (const keypair of keypairs) keypair.fill(0);
+        }
+
+        for (let namespace = 0; namespace < 2; namespace += 1) {
+          const recordCount =
+            namespace === 0
+              ? this.namespaceZeroBlocks
+              : this.parsedRecordCount -
+                SESSION_COUNT -
+                this.namespaceZeroBlocks;
+          const blockCount = recordCount / SESSION_COUNT;
+          if (
+            !Number.isSafeInteger(blockCount) ||
+            blockCount < 0 ||
+            (namespace === 0 && blockCount < 1)
+          ) {
+            throw new Error('Invalid migrated namespace layout');
+          }
+          for (let blockIndex = 0; blockIndex < blockCount; blockIndex += 1) {
+            const readTx = this.db.transaction(STORE_NAME, 'readonly');
+            const readDone = transactionDone(readTx);
+            const sourceStore = readTx.objectStore(STORE_NAME);
+            const sourceValues = await Promise.all(
+              Array.from({ length: SESSION_COUNT }, async (_, slot) =>
+                asBytes(
+                  await request(
+                    sourceStore.get(
+                      `${sourcePrefix}${encodedKey({
+                        kind: 'block',
+                        slot,
+                        namespace,
+                        blockIndex,
+                      })}`
+                    )
+                  )
+                ).slice()
+              )
+            );
+            await readDone;
+            let migrated: Uint8Array[] = [];
+            try {
+              migrated = migrateOuterBlockBatch(
+                namespace,
+                blockIndex,
+                sourceValues
+              );
+              if (migrated.length !== SESSION_COUNT) {
+                throw new Error('Invalid migrated block batch');
+              }
+              const writeTx = this.db.transaction(STORE_NAME, 'readwrite');
+              const outputStore = writeTx.objectStore(STORE_NAME);
+              for (let slot = 0; slot < SESSION_COUNT; slot += 1) {
+                this.validators.validateBlock(migrated[slot]);
+                outputStore.put(
+                  migrated[slot],
+                  `${migrationPrefix}${encodedKey({
+                    kind: 'block',
+                    slot,
+                    namespace,
+                    blockIndex,
+                  })}`
+                );
+              }
+              await transactionDone(writeTx);
+            } finally {
+              for (const value of sourceValues) value.fill(0);
+              for (const value of migrated) value.fill(0);
+            }
+          }
+          finishOuterMigrationNamespace(namespace, blockCount);
+        }
+        this.migrationPrefix = migrationPrefix;
+        this.stagedGeneration = migrationGeneration;
+        this.migrationState = 'ready';
+      } catch (error) {
+        this.migrationState = 'idle';
+        this.migrationPrefix = null;
+        this.stagedGeneration = null;
+        await deletePrefix(this.db, migrationPrefix).catch(() => {});
+        throw error;
+      } finally {
+        endOuterMigration();
+      }
+    });
+  }
+
   install(): Promise<{ generation: string }> {
     if (
       !this.digestVerified ||
@@ -1151,6 +1325,15 @@ export class PortableWebImport {
     ) {
       return Promise.reject(new Error('Portable import is not validated'));
     }
+    if (
+      this.migrationState !== 'ready' ||
+      !this.migrationPrefix ||
+      !this.stagedGeneration
+    ) {
+      return Promise.reject(
+        new Error('Portable import requires outer migration')
+      );
+    }
     this.installing = true;
     const installation = this.enqueue(async () => {
       if (!this.db) this.db = await openDatabase();
@@ -1159,7 +1342,11 @@ export class PortableWebImport {
       }
       const generation = this.stagedGeneration ?? randomTransferId();
       if (!this.stagedGeneration) {
-        await stageCandidateGeneration(this.db, this.transferId, generation);
+        await stageCandidateGeneration(
+          this.db,
+          this.migrationPrefix ?? `${IMPORT_SPOOL_PREFIX}${this.transferId}:`,
+          generation
+        );
         this.stagedGeneration = generation;
       }
       await navigator.locks.request(
@@ -1180,12 +1367,12 @@ export class PortableWebImport {
         this.db,
         `${IMPORT_SPOOL_PREFIX}${this.transferId}:`
       ).catch(() => {});
-      if (this.sourceGeneration !== LEGACY_GENERATION) {
-        await deletePrefix(
-          this.db,
-          activeRecordPrefix(this.sourceGeneration)
-        ).catch(() => {});
-      }
+      await deletePrefix(
+        this.db,
+        this.sourceGeneration === LEGACY_GENERATION
+          ? 's:'
+          : activeRecordPrefix(this.sourceGeneration)
+      ).catch(() => {});
       this.db.close();
       this.db = null;
       this.stage = 'closed';
@@ -1218,6 +1405,9 @@ export class PortableWebImport {
           this.db,
           `${IMPORT_SPOOL_PREFIX}${this.transferId}:`
         );
+        if (this.migrationPrefix) {
+          await deletePrefix(this.db, this.migrationPrefix);
+        }
         if (this.stagedGeneration) {
           await deletePrefix(
             this.db,

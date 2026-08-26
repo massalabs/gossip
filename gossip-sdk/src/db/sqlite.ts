@@ -1022,6 +1022,45 @@ export class DatabaseConnection {
     }
   }
 
+  async secureStorageBeginPortableOuterMigration(): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().beginPortableOuterMigration();
+    } else {
+      await this.requireSecureProxy().beginPortableOuterMigration();
+    }
+  }
+
+  async secureStorageAdmitPortableOuterMigrationPassword(
+    password: Uint8Array
+  ): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().admitPortableOuterMigrationPassword(
+        password
+      );
+    } else {
+      await this.requireSecureProxy().admitPortableOuterMigrationPassword(
+        password
+      );
+    }
+  }
+
+  async secureStorageFinishPortableOuterMigration(): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().finishPortableOuterMigration();
+    } else {
+      await this.requireSecureProxy().finishPortableOuterMigration();
+    }
+  }
+
   async secureStorageAuthenticatePortableImportCandidate(
     password: Uint8Array
   ): Promise<ImportedAccountPreview> {
@@ -1045,7 +1084,12 @@ export class DatabaseConnection {
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().installPortableImport();
     } else {
-      await this.requireSecureProxy().installPortableImport();
+      const proxy = this.requireSecureProxy();
+      await proxy.installPortableImport();
+      proxy[Comlink.releaseProxy]();
+      this.state.worker?.terminate();
+      this.state.worker = null;
+      this.state.secureProxy = null;
     }
     this.state.portableTransferActive = false;
   }

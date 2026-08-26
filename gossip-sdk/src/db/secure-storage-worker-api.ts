@@ -54,6 +54,7 @@ import init, {
   finishCandidatePreview,
   queryCandidatePreview,
   endCandidatePreview,
+  endOuterMigration,
 } from '../assets/generated/wasm-secureStorage/secureStorage.js';
 
 import {
@@ -1056,6 +1057,33 @@ export class SecureStorageWorkerApi {
     return result;
   }
 
+  async beginPortableOuterMigration(): Promise<void> {
+    await this.portablePreviewTail;
+    await this.restorePortablePreviewBackend();
+    const transfer = this.portableImport;
+    if (!transfer) throw new Error('Portable import is not active');
+    await transfer.beginOuterMigration(this.domain);
+  }
+
+  async admitPortableOuterMigrationPassword(
+    password: Uint8Array
+  ): Promise<void> {
+    try {
+      if (!this.portableImport) {
+        throw new Error('Portable import is not active');
+      }
+      await this.portableImport.admitOuterMigrationPassword(password);
+    } finally {
+      password.fill(0);
+    }
+  }
+
+  async finishPortableOuterMigration(): Promise<void> {
+    const transfer = this.portableImport;
+    if (!transfer) throw new Error('Portable import is not active');
+    await transfer.finalizeOuterMigration();
+  }
+
   async installPortableImport(): Promise<{ generation: string }> {
     await this.portablePreviewTail;
     await this.restorePortablePreviewBackend();
@@ -1085,6 +1113,7 @@ export class SecureStorageWorkerApi {
       await pendingImport.catch(() => {});
     }
     const transfer = this.portableExport ?? this.portableImport;
+    if (this.portableImport) endOuterMigration();
     if (transfer) {
       // Clear fields only after cleanup succeeds. A rejected deletion keeps
       // the transfer retryable for the caller's recovery screen.

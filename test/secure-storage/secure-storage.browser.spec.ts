@@ -193,9 +193,22 @@ describe('secure storage pipeline', () => {
       avatar: null,
       createdAtMs: 1234,
     });
-    await conn.secureStorageAbortPortableImport();
+    await conn.secureStorageBeginPortableOuterMigration();
+    await conn.secureStorageAdmitPortableOuterMigrationPassword(
+      new TextEncoder().encode(password)
+    );
+    await conn.secureStorageFinishPortableOuterMigration();
+    await conn.secureStorageInstallPortableImport();
     expect(conn.storageState).toBe('locked');
     await conn.close();
+
+    const restored = await DatabaseConnection.create(config(domain));
+    expect(await restored.secureStorageUnlock(password)).toBe(true);
+    const profiles = await restored.db
+      .select({ userId: userProfile.userId, username: userProfile.username })
+      .from(userProfile);
+    expect(profiles).toEqual([{ userId, username: 'Alice' }]);
+    await restored.close();
   }, 120_000);
 
   it('data persists across close/reopen', async () => {

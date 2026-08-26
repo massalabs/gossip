@@ -37,6 +37,12 @@ const wasmMock = vi.hoisted(() => ({
   finishCandidatePreview: vi.fn(),
   queryCandidatePreview: vi.fn(),
   endCandidatePreview: vi.fn(),
+  beginOuterMigration: vi.fn(),
+  admitOuterMigrationPassword: vi.fn(),
+  finalizeOuterMigration: vi.fn(),
+  migrateOuterBlockBatch: vi.fn(),
+  finishOuterMigrationNamespace: vi.fn(),
+  endOuterMigration: vi.fn(),
 }));
 
 vi.mock('../../src/db/secure-storage-portable-web.js', () => ({
@@ -79,6 +85,9 @@ describe('SecureStorageWorkerApi password cleanup', () => {
       finishValidation: vi.fn().mockResolvedValue(undefined),
       install: vi.fn().mockResolvedValue({ generation: 'next' }),
       previewCandidate: vi.fn().mockResolvedValue(false),
+      beginOuterMigration: vi.fn().mockResolvedValue(undefined),
+      admitOuterMigrationPassword: vi.fn(),
+      finalizeOuterMigration: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
     });
     wasmMock.execSql.mockReturnValue({
@@ -1242,6 +1251,27 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await Promise.allSettled([first, second]);
     expect(transfer.previewCandidate).toHaveBeenCalledTimes(2);
     expect(wasmMock.endCandidatePreview).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps outer migration matches inside WASM and wipes admission passwords', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    (api as unknown as { domain: string }).domain = 'migration-domain';
+    await api.beginPortableImport();
+    const transfer = await portableMock.importBegin.mock.results[0].value;
+    const password = new Uint8Array([4, 5, 6]);
+
+    await api.beginPortableOuterMigration();
+    await api.admitPortableOuterMigrationPassword(password);
+    await api.finishPortableOuterMigration();
+
+    expect(transfer.beginOuterMigration).toHaveBeenCalledWith(
+      'migration-domain'
+    );
+    expect(transfer.admitOuterMigrationPassword).toHaveBeenCalledOnce();
+    expect(Array.from(password)).toEqual([0, 0, 0]);
+    expect(transfer.finalizeOuterMigration).toHaveBeenCalledOnce();
   });
 
   it('fences direct namespace reads before serving stale generation data', async () => {
