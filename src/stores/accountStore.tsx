@@ -4,6 +4,9 @@ import {
   encodeUserId,
   UserProfile,
   SecureStorageRecoveryRequiredError,
+  MessagingSessionRecoveryRequiredError,
+  SELF_CONTACT_ID,
+  UnreadableMessagingSessionError,
 } from '@massalabs/gossip-sdk';
 
 import { generateMnemonic, EncryptionKey } from '@massalabs/gossip-sdk';
@@ -43,6 +46,7 @@ export type LoginMethod = {
   type: 'password';
   password: string;
   userId?: string;
+  resetMessagingSessions?: boolean;
 };
 
 export interface OnboardingRollbackResult {
@@ -643,6 +647,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           : null;
         const migrationActive =
           migrationState !== null && migrationState.completedPhase < 5;
+        const messagingResetAuthorizedAtStart =
+          migrationState?.completedPhase === 3;
         if (migrationState && migrationState.completedPhase < 5) {
           set({
             privateMigrationPhase: (migrationState.completedPhase +
@@ -718,30 +724,39 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         );
         if (migrationActive) await completeMigrationPhase(3);
 
-        // Prefer the secure-storage namespace blob when available; fall
-        // back to the SQL profile column on the wa-sqlite backend. When
-        // both are empty (fresh allocate pre-first-persist) leave
-        // `encryptedSession` undefined so `openSession` generates a new
-        // session instead of trying to decrypt zero bytes.
-        //
-        // Invariant (PD): when `usesSessionBlobNamespace` is true, the
-        // SQL `profile.session` fallback is read-only legacy data left
-        // over from the wa-sqlite era; writers in `createOnPersist`
-        // already gate on this flag and never persist into the SQL
-        // column. A future writer that forgets the gate would inject
-        // stale-or-stolen bytes into the namespace fallback path here.
-        // If you change `createOnPersist` to write to SQL again, you
-        // must also drop this fallback or it can resurrect the wrong
-        // session blob (regression worth a debug assertion).
+        const sessionMigrationPending = migrationState?.completedPhase === 3;
+        if (
+          method.resetMessagingSessions &&
+          (!sessionMigrationPending || !messagingResetAuthorizedAtStart)
+        ) {
+          throw new Error(
+            'Messaging session reset is not currently authorized'
+          );
+        }
+
         let encryptedSession: Uint8Array | undefined;
+        let usedLegacySessionFallback = false;
         if (sdk.usesSessionBlobNamespace) {
-          const ns = await sdk.readSessionBlob();
-          encryptedSession =
-            ns && ns.length > 0
-              ? ns
-              : profile.session && profile.session.length > 0
-                ? profile.session
-                : undefined;
+          if (method.resetMessagingSessions) {
+            await sdk.queries.messagingSessionRecovery.prepareReset();
+          } else {
+            const ns = await sdk.readSessionBlob();
+            if (!ns || ns.length === 0) {
+              encryptedSession =
+                profile.session && profile.session.length > 0
+                  ? profile.session
+                  : undefined;
+              usedLegacySessionFallback = encryptedSession !== undefined;
+              if (!encryptedSession && sessionMigrationPending) {
+                throw new MessagingSessionRecoveryRequiredError('missing');
+              }
+              if (!encryptedSession && importedInstallation) {
+                throw new Error('Imported messaging session is missing');
+              }
+            } else {
+              encryptedSession = ns;
+            }
+          }
         } else {
           encryptedSession =
             profile.session && profile.session.length > 0
@@ -749,23 +764,69 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
               : undefined;
         }
 
-        await sdk.openSession({
-          mnemonic,
-          identityDerivationVersion: profile.security.identityDerivationVersion,
-          encryptedSession,
-          encryptionKey,
-          onPersist: createOnPersist(profile.userId),
-          // Start only after the migration journal and lastSeen save commit.
-          publishPublicKey: false,
-          autoStartPolling: migrationActive ? false : undefined,
-        });
+        const persistOpenedSession = createOnPersist(profile.userId);
+        let sessionPersistenceEnabled = !method.resetMessagingSessions;
+        try {
+          await sdk.openSession({
+            mnemonic,
+            identityDerivationVersion:
+              profile.security.identityDerivationVersion,
+            encryptedSession,
+            encryptionKey,
+            onPersist: async (blob, key) => {
+              if (sessionPersistenceEnabled) {
+                await persistOpenedSession(blob, key);
+              }
+            },
+            // Start only after the migration journal and lastSeen save commit.
+            publishPublicKey: false,
+            autoStartPolling: migrationActive ? false : undefined,
+          });
+        } catch (error) {
+          if (
+            sessionMigrationPending &&
+            !method.resetMessagingSessions &&
+            error instanceof UnreadableMessagingSessionError
+          ) {
+            throw new MessagingSessionRecoveryRequiredError('unreadable');
+          }
+          throw error;
+        }
         sessionOpenedThisCall = true;
+
+        if (method.resetMessagingSessions) {
+          const discussions = await sdk.queries.discussions.getByOwner(
+            profile.userId
+          );
+          for (const discussion of discussions) {
+            if (
+              !discussion.weAccepted ||
+              discussion.contactUserId === SELF_CONTACT_ID
+            ) {
+              continue;
+            }
+            const reopened = await sdk.discussions.createSessionForContact(
+              discussion.contactUserId,
+              new Uint8Array(0),
+              { resetQueue: false, triggerRefresh: false }
+            );
+            if (!reopened.success) throw reopened.error;
+          }
+          await sdk.persistSessionBlob(sdk.getEncryptedSession());
+          sessionPersistenceEnabled = true;
+        } else if (importedInstallation && usedLegacySessionFallback) {
+          // Promote the readable legacy SQL fallback before clearing it. A
+          // crash after this atomic namespace write simply resumes phase 4.
+          await sdk.persistSessionBlob(sdk.getEncryptedSession());
+        }
+
         if (migrationActive) await completeMigrationPhase(4);
         callerOwnedEncryptionKey = null;
 
         const lastSeen = new Date();
         const updatedProfile = {
           ...profile,
+          session: importedInstallation ? new Uint8Array(0) : profile.session,
           lastSeen,
         };
         await getSdk().profiles.save(updatedProfile);

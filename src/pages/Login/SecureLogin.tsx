@@ -14,6 +14,7 @@ import { useLoginForm } from './useLoginForm';
 import { PasswordForm } from './PasswordForm';
 import { ErrorDisplay } from './ErrorDisplay';
 import { LoginLayout } from './LoginLayout';
+import { MessagingSessionRecoveryRequiredError } from '@massalabs/gossip-sdk';
 
 // ─────────────────────────────────────────────────────────────────
 // Secure-storage Login: manual or biometric-recovered account password
@@ -31,6 +32,8 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       'capacitor' | 'webauthn' | 'none'
     >('none');
     const [biometricLoading, setBiometricLoading] = useState(false);
+    const [showSessionResetConfirm, setShowSessionResetConfirm] =
+      useState(false);
 
     const {
       isLoading: passwordLoading,
@@ -38,6 +41,10 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       setPassword,
       passwordInputRef,
       handlePasswordAuth,
+      messagingRecoveryRequired,
+      beginMessagingSessionRecovery,
+      retryMessagingSessions,
+      resetMessagingSessions,
       navigate,
     } = useLoginForm({
       onAccountSelected,
@@ -67,6 +74,7 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
     const handleBiometricAuth = useCallback(async () => {
       setBiometricLoading(true);
       onErrorChange?.(null);
+      let recoveredPassword: string | null = null;
 
       try {
         const result = await authenticateBiometricLogin(biometricMethod);
@@ -75,9 +83,10 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           throw new Error(result.error || 'Biometric authentication failed');
         }
 
+        recoveredPassword = result.data.password;
         await loadAccount({
           type: 'password',
-          password: result.data.password,
+          password: recoveredPassword,
         });
 
         const state = useAccountStore.getState();
@@ -87,6 +96,13 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           throw new Error('Failed to load account');
         }
       } catch (error) {
+        if (
+          error instanceof MessagingSessionRecoveryRequiredError &&
+          recoveredPassword !== null
+        ) {
+          beginMessagingSessionRecovery(recoveredPassword);
+          return;
+        }
         // Never purge the singleton credential after login failure. It may
         // reference a deliberately deleted account, and pre-profile login
         // cannot determine that without creating an account-association oracle.
@@ -103,6 +119,7 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       }
     }, [
       biometricMethod,
+      beginMessagingSessionRecovery,
       loadAccount,
       onAccountSelected,
       onErrorChange,
@@ -110,6 +127,74 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       t,
       passwordInputRef,
     ]);
+
+    if (messagingRecoveryRequired) {
+      return (
+        <LoginLayout title={t('session_recovery.title')} subtitle="">
+          <div className="space-y-5 text-center">
+            <p className="text-sm text-muted-foreground">
+              {t('session_recovery.body')}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {t('session_recovery.keys_warning')}
+            </p>
+            <ErrorDisplay
+              error={persistentError}
+              onDismiss={() => onErrorChange?.(null)}
+            />
+            <div className="space-y-3">
+              <Button
+                type="button"
+                variant="primary"
+                fullWidth
+                loading={passwordLoading}
+                disabled={passwordLoading}
+                onClick={() => void retryMessagingSessions()}
+              >
+                {t('session_recovery.retry')}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                fullWidth
+                disabled={passwordLoading}
+                onClick={() => setShowSessionResetConfirm(true)}
+              >
+                {t('session_recovery.reset')}
+              </Button>
+            </div>
+          </div>
+          {showSessionResetConfirm && (
+            <div className="mt-6 space-y-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+              <p className="text-sm font-medium text-foreground">
+                {t('session_recovery.confirm_body')}
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  fullWidth
+                  disabled={passwordLoading}
+                  onClick={() => setShowSessionResetConfirm(false)}
+                >
+                  {t('session_recovery.cancel')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  fullWidth
+                  loading={passwordLoading}
+                  disabled={passwordLoading}
+                  onClick={() => void resetMessagingSessions()}
+                >
+                  {t('session_recovery.confirm')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </LoginLayout>
+      );
+    }
 
     if (privateMigrationPhase) {
       return (

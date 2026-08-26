@@ -3,7 +3,11 @@ import {
   IncompleteOnboardingSlotCleanupError,
   useAccountStore,
 } from '../../src/stores/accountStore';
-import { SecureStorageRecoveryRequiredError } from '@massalabs/gossip-sdk';
+import {
+  MessagingSessionRecoveryRequiredError,
+  SecureStorageRecoveryRequiredError,
+  SELF_CONTACT_ID,
+} from '@massalabs/gossip-sdk';
 import type { Account } from '@massalabs/massa-web3';
 
 // Shared spy so individual test suites can assert on it
@@ -30,12 +34,24 @@ const makeSdkMock = () => ({
   openSession: vi.fn(async () => {}),
   startPublicKeyPublication: vi.fn(),
   polling: { start: vi.fn(), stop: vi.fn(), isRunning: false },
-  getEncryptedSession: vi.fn(() => new Uint8Array(0)),
+  getEncryptedSession: vi.fn(() => new Uint8Array([6, 6])),
   readSessionBlob: vi.fn(async () => null),
   persistSessionBlob: vi.fn(async () => {}),
   userId: 'mock-user-id',
   publicKeys: {},
+  discussions: {
+    createSessionForContact: vi.fn(async () => ({
+      success: true as const,
+      data: new Uint8Array([7]),
+    })),
+  },
   queries: {
+    messagingSessionRecovery: {
+      prepareReset: vi.fn(async () => {}),
+    },
+    discussions: {
+      getByOwner: vi.fn(async () => []),
+    },
     privateMigration: {
       begin: vi.fn(async (installationEpoch: string) => ({
         formatVersion: 1 as const,
@@ -166,6 +182,14 @@ vi.mock('@massalabs/gossip-sdk', async () => {
     PROFILE_PASSWORD_KDF_VERSION: 1,
     PROFILE_MNEMONIC_ENCRYPTION_VERSION: 1,
     IDENTITY_DERIVATION_VERSION: 1,
+    UnreadableMessagingSessionError: class extends Error {},
+    MessagingSessionRecoveryRequiredError: class extends Error {
+      readonly reason: 'missing' | 'unreadable';
+      constructor(reason: 'missing' | 'unreadable') {
+        super('Messaging sessions could not be restored');
+        this.reason = reason;
+      }
+    },
     generateMnemonic: vi.fn(() => 'word '.repeat(24).trim()),
     validateMnemonic: vi.fn(() => true),
     generateUserKeys: vi.fn(async () => ({
@@ -467,6 +491,110 @@ describe('AccountStore classic password discovery', () => {
     expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
     expect(sdk.polling.start).toHaveBeenCalledOnce();
     expect(useAccountStore.getState().privateMigrationPhase).toBeNull();
+  });
+
+  it('requires explicit recovery for a missing imported session namespace', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile(new Uint8Array(0));
+    sdk.isSecureStorage = true;
+    sdk.usesSessionBlobNamespace = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    sdk.profiles.get.mockResolvedValue(profile);
+    sdk.readSessionBlob.mockResolvedValue(null);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free: vi.fn() },
+    });
+    localStorage.setItem(
+      'gossip:portable-import-private-migration-epoch-v1',
+      '00112233445566778899aabbccddeeff'
+    );
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: profile.userId,
+      })
+    ).rejects.toBeInstanceOf(MessagingSessionRecoveryRequiredError);
+
+    expect(sdk.openSession).not.toHaveBeenCalled();
+    expect(
+      sdk.queries.messagingSessionRecovery.prepareReset
+    ).not.toHaveBeenCalled();
+    expect(sdk.secureStorageLock).toHaveBeenCalledOnce();
+  });
+
+  it('rebuilds accepted contact sessions before durable activation', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile();
+    sdk.isSecureStorage = true;
+    sdk.usesSessionBlobNamespace = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    sdk.profiles.get.mockResolvedValue(profile);
+    sdk.queries.privateMigration.begin.mockResolvedValue({
+      formatVersion: 1,
+      installationEpoch: '00112233445566778899aabbccddeeff',
+      completedPhase: 3,
+    });
+    sdk.queries.discussions.getByOwner.mockResolvedValue([
+      { weAccepted: true, contactUserId: 'accepted-contact' },
+      { weAccepted: false, contactUserId: 'pending-contact' },
+      { weAccepted: true, contactUserId: SELF_CONTACT_ID },
+    ]);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { type: 'mock-key' },
+    });
+    localStorage.setItem(
+      'gossip:portable-import-private-migration-epoch-v1',
+      '00112233445566778899aabbccddeeff'
+    );
+
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'account-password',
+      userId: profile.userId,
+      resetMessagingSessions: true,
+    });
+
+    expect(
+      sdk.queries.messagingSessionRecovery.prepareReset
+    ).toHaveBeenCalledOnce();
+    expect(sdk.openSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedSession: undefined,
+        publishPublicKey: false,
+        autoStartPolling: false,
+      })
+    );
+    expect(sdk.discussions.createSessionForContact).toHaveBeenCalledOnce();
+    expect(sdk.discussions.createSessionForContact).toHaveBeenCalledWith(
+      'accepted-contact',
+      expect.any(Uint8Array),
+      { resetQueue: false, triggerRefresh: false }
+    );
+    expect(sdk.persistSessionBlob).toHaveBeenCalledWith(new Uint8Array([6, 6]));
+    expect(sdk.profiles.save).toHaveBeenCalledWith(
+      expect.objectContaining({ session: new Uint8Array(0) })
+    );
+    expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
+    expect(sdk.polling.start).toHaveBeenCalledOnce();
   });
 
   it('keeps migration failures locked before activation', async () => {

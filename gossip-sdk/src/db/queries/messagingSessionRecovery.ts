@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { MessageDirection, MessageStatus } from '../db.js';
 import type { DatabaseConnection } from '../sqlite.js';
 import {
@@ -29,6 +29,8 @@ export class MessagingSessionRecoveryQueries {
         .where(
           and(
             eq(messages.direction, MessageDirection.OUTGOING),
+            // Self-messages are local encrypted storage, not peer queues.
+            ne(messages.contactUserId, '__self__'),
             inArray(messages.status, [
               MessageStatus.READY,
               MessageStatus.SENDING,

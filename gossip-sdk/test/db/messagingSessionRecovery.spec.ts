@@ -40,6 +40,17 @@ describe('MessagingSessionRecoveryQueries', () => {
         });
       }
     }
+    await db.insert(messages).values({
+      ownerUserId: 'owner',
+      contactUserId: '__self__',
+      content: 'saved message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(timestamp++),
+      encryptedMessage: new Uint8Array([5]),
+      seeker: new Uint8Array([6]),
+    });
     await db.insert(activeSeekers).values({ seeker: new Uint8Array([1]) });
     await db.insert(pendingEncryptedMessages).values({
       seeker: new Uint8Array([2]),
@@ -61,6 +72,7 @@ describe('MessagingSessionRecoveryQueries', () => {
       const recovered = after.find(row => row.id === original.id)!;
       const shouldReset =
         original.direction === MessageDirection.OUTGOING &&
+        original.contactUserId !== '__self__' &&
         RESET_STATUSES.has(original.status as MessageStatus);
       expect(recovered.status).toBe(
         shouldReset ? MessageStatus.WAITING_SESSION : original.status

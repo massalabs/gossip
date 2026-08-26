@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   authenticateBiometricLogin: vi.fn(),
   checkBiometricAvailability: vi.fn(),
   handlePasswordAuth: vi.fn(),
+  retryMessagingSessions: vi.fn(),
+  resetMessagingSessions: vi.fn(),
+  beginMessagingSessionRecovery: vi.fn(),
+  messagingRecoveryRequired: false,
   loadAccount: vi.fn(),
   navigate: vi.fn(),
   setPassword: vi.fn(),
@@ -48,6 +52,10 @@ vi.mock('../../../src/pages/Login/useLoginForm', () => ({
     setPassword: mocks.setPassword,
     passwordInputRef: { current: null },
     handlePasswordAuth: mocks.handlePasswordAuth,
+    messagingRecoveryRequired: mocks.messagingRecoveryRequired,
+    beginMessagingSessionRecovery: mocks.beginMessagingSessionRecovery,
+    retryMessagingSessions: mocks.retryMessagingSessions,
+    resetMessagingSessions: mocks.resetMessagingSessions,
     navigate: mocks.navigate,
   }),
 }));
@@ -57,6 +65,7 @@ describe('password-only biometric login wiring', () => {
     vi.clearAllMocks();
     mocks.userProfile = null;
     mocks.privateMigrationPhase = null;
+    mocks.messagingRecoveryRequired = false;
     mocks.checkBiometricAvailability.mockResolvedValue({
       available: true,
       method: 'webauthn',
@@ -137,6 +146,28 @@ describe('password-only biometric login wiring', () => {
       expect(onErrorChange).toHaveBeenLastCalledWith('login.biometric_locked');
     });
     await expect.element(page.getByPlaceholder('login.password')).toBeEnabled();
+  });
+
+  it('requires final confirmation before resetting messaging sessions', async () => {
+    mocks.messagingRecoveryRequired = true;
+    await render(
+      <SecureLogin onCreateNewAccount={vi.fn()} onAccountSelected={vi.fn()} />
+    );
+
+    await expect
+      .element(page.getByText('session_recovery.title'))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole('button', { name: 'session_recovery.reset' })
+    );
+    await expect
+      .element(page.getByText('session_recovery.confirm_body'))
+      .toBeInTheDocument();
+    expect(mocks.resetMessagingSessions).not.toHaveBeenCalled();
+    await userEvent.click(
+      page.getByRole('button', { name: 'session_recovery.confirm' })
+    );
+    expect(mocks.resetMessagingSessions).toHaveBeenCalledOnce();
   });
 
   it('blocks secure login controls behind exact migration progress', async () => {

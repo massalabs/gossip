@@ -107,6 +107,22 @@ import type { ImportedAccountPreview } from './db/secure-storage-worker-api.js';
 
 export type PortableImportAuthorization = () => boolean;
 
+export class UnreadableMessagingSessionError extends Error {
+  constructor() {
+    super(
+      '[GossipSdk] Failed to load encrypted session. Please provide a valid encryptedSession and encryptionKey.'
+    );
+    this.name = 'UnreadableMessagingSessionError';
+  }
+}
+
+export class MessagingSessionRecoveryRequiredError extends Error {
+  constructor(readonly reason: 'missing' | 'unreadable') {
+    super('Messaging sessions could not be restored');
+    this.name = 'MessagingSessionRecoveryRequiredError';
+  }
+}
+
 export class PortableImportTerminalError extends Error {
   readonly cause: unknown;
 
@@ -481,9 +497,7 @@ class GossipSdk {
           // We only create this wrapper for validation, free it immediately
           sessionManager.free();
         } catch {
-          throw new Error(
-            '[GossipSdk] Failed to load encrypted session. Please provide a valid encryptedSession and encryptionKey.'
-          );
+          throw new UnreadableMessagingSessionError();
         }
       }
 
