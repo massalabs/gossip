@@ -26,14 +26,30 @@ const makeSdkMock = () => ({
   secureStorageLock: vi.fn(async () => {}),
   secureStorageCreate: vi.fn(async () => {}),
   secureStorageDestroy: vi.fn(async () => {}),
+  wasPortableImportInstalled: vi.fn(async () => false),
   openSession: vi.fn(async () => {}),
   startPublicKeyPublication: vi.fn(),
+  polling: { start: vi.fn(), stop: vi.fn(), isRunning: false },
   getEncryptedSession: vi.fn(() => new Uint8Array(0)),
   readSessionBlob: vi.fn(async () => null),
   persistSessionBlob: vi.fn(async () => {}),
   userId: 'mock-user-id',
   publicKeys: {},
   queries: {
+    privateMigration: {
+      begin: vi.fn(async (installationEpoch: string) => ({
+        formatVersion: 1 as const,
+        installationEpoch,
+        completedPhase: 0,
+      })),
+      completePhase: vi.fn(
+        async (installationEpoch: string, completedPhase: number) => ({
+          formatVersion: 1 as const,
+          installationEpoch,
+          completedPhase,
+        })
+      ),
+    },
     accountSettings: {
       create: vi.fn(async (userId: string) => ({
         userId,
@@ -256,6 +272,7 @@ vi.mock('../../src/stores/utils/auth', () => ({
 }));
 
 beforeEach(() => {
+  localStorage.removeItem('gossip:portable-import-private-migration-epoch-v1');
   derivedAccountKeys.length = 0;
   encodeUserIdSpy.mockReset();
   encodeUserIdSpy.mockReturnValue('mock-user-id');
@@ -409,6 +426,121 @@ describe('AccountStore classic password discovery', () => {
 
     expect(encryptionKey.free).toHaveBeenCalledOnce();
     expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('durably gates imported login through all five phases', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    sdk.profiles.get.mockResolvedValue(profile);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { type: 'mock-key' },
+    });
+    localStorage.setItem(
+      'gossip:portable-import-private-migration-epoch-v1',
+      '00112233445566778899aabbccddeeff'
+    );
+
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'account-password',
+      userId: profile.userId,
+    });
+
+    expect(sdk.queries.privateMigration.completePhase.mock.calls).toEqual(
+      [1, 2, 3, 4, 5].map(phase => ['00112233445566778899aabbccddeeff', phase])
+    );
+    expect(sdk.openSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        publishPublicKey: false,
+        autoStartPolling: false,
+      })
+    );
+    expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
+    expect(sdk.polling.start).toHaveBeenCalledOnce();
+    expect(useAccountStore.getState().privateMigrationPhase).toBeNull();
+  });
+
+  it('keeps migration failures locked before activation', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    sdk.profiles.get.mockResolvedValue(profile);
+    sdk.queries.privateMigration.completePhase.mockImplementation(
+      async (installationEpoch: string, completedPhase: number) => {
+        if (completedPhase === 3) throw new Error('checkpoint failed');
+        return { formatVersion: 1 as const, installationEpoch, completedPhase };
+      }
+    );
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free: vi.fn() },
+    });
+    localStorage.setItem(
+      'gossip:portable-import-private-migration-epoch-v1',
+      '00112233445566778899aabbccddeeff'
+    );
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: profile.userId,
+      })
+    ).rejects.toThrow('checkpoint failed');
+
+    expect(sdk.openSession).not.toHaveBeenCalled();
+    expect(sdk.startPublicKeyPublication).not.toHaveBeenCalled();
+    expect(sdk.polling.start).not.toHaveBeenCalled();
+    expect(sdk.secureStorageLock).toHaveBeenCalledOnce();
+    expect(useAccountStore.getState().userProfile).toBeNull();
+    expect(useAccountStore.getState().privateMigrationPhase).toBeNull();
+  });
+
+  it('fails closed when imported attestation has no destination epoch', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+      })
+    ).rejects.toThrow('migration epoch is unavailable');
+
+    expect(sdk.queries.privateMigration.begin).not.toHaveBeenCalled();
+    expect(sdk.openSession).not.toHaveBeenCalled();
+    expect(sdk.startPublicKeyPublication).not.toHaveBeenCalled();
+    expect(sdk.polling.start).not.toHaveBeenCalled();
+    expect(sdk.secureStorageLock).toHaveBeenCalledOnce();
   });
 
   it('closes SDK-owned keys when finalization fails after session open', async () => {

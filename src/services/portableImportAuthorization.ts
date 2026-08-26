@@ -6,6 +6,8 @@ import type { PortableImportAuthorization } from './portableImportCoordinator';
 const AUTHORITY_CONSUMED_KEY = 'gossip:portable-import-authority-consumed-v1';
 const CREATION_COMMITTED_KEY = 'gossip:onboarding-creation-committed-v1';
 const ONBOARDING_MODE_KEY = 'gossip:onboarding-storage-mode-v1';
+const PRIVATE_MIGRATION_EPOCH_KEY =
+  'gossip:portable-import-private-migration-epoch-v1';
 const ONBOARDING_MODE_LOCK = 'gossip-onboarding-storage-mode-v1';
 type OnboardingStorageMode = 'create' | 'import';
 let nativeModeTail: Promise<void> = Promise.resolve();
@@ -59,6 +61,30 @@ async function withOnboardingModeLock<T>(
     }
   }
   return await operation();
+}
+
+export function getPortableImportMigrationEpoch(): string | null {
+  const epoch = durableStorage()?.getItem(PRIVATE_MIGRATION_EPOCH_KEY) ?? null;
+  if (epoch === null) return null;
+  if (!/^[0-9a-f]{32}$/u.test(epoch)) {
+    throw new Error('Invalid portable import migration epoch');
+  }
+  return epoch;
+}
+
+export function ensurePortableImportMigrationEpoch(): string {
+  const current = getPortableImportMigrationEpoch();
+  if (current) return current;
+  const storage = durableStorage();
+  if (!storage)
+    throw new Error('Portable import migration storage unavailable');
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const epoch = Array.from(bytes, byte =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+  storage.setItem(PRIVATE_MIGRATION_EPOCH_KEY, epoch);
+  return epoch;
 }
 
 export function portableImportAuthorityWasConsumed(): boolean {
@@ -143,6 +169,7 @@ export async function reconcilePortableImportAuthority(
       durable.isInitialized ||
       durableStorage()?.getItem(CREATION_COMMITTED_KEY) !== null
     ) {
+      if (imported) ensurePortableImportMigrationEpoch();
       state.setSecureAccountCreationAllowed(false);
       return;
     }

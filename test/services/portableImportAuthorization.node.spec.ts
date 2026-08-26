@@ -17,7 +17,9 @@ import {
   claimOnboardingStorageMode,
   consumeOnboardingCreationAuthority,
   createOnboardingPortableImportAuthorization,
+  getPortableImportMigrationEpoch,
   isOnboardingStorageCreationAuthorized,
+  reconcilePortableImportAuthority,
   restoreOnboardingCreationAuthorityAfterRollback,
 } from '../../src/services/portableImportAuthorization';
 
@@ -46,6 +48,21 @@ describe('onboarding portable import authorization', () => {
     state.isInitialized = false;
     state.secureAccountCreationAllowed = true;
     vi.clearAllMocks();
+  });
+
+  it('creates one opaque destination epoch while reconciling an import', async () => {
+    await reconcilePortableImportAuthority(
+      () => Promise.resolve(true),
+      'locked'
+    );
+    const epoch = getPortableImportMigrationEpoch();
+    expect(epoch).toMatch(/^[0-9a-f]{32}$/u);
+    await reconcilePortableImportAuthority(
+      () => Promise.resolve(true),
+      'locked'
+    );
+    expect(getPortableImportMigrationEpoch()).toBe(epoch);
+    expect(state.setSecureAccountCreationAllowed).toHaveBeenCalledWith(false);
   });
 
   it('reads current durable authority instead of a stale tab cache', async () => {

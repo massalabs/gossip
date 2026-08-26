@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   setPassword: vi.fn(),
   userProfile: null as Record<string, unknown> | null,
+  privateMigrationPhase: null as number | null,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -31,7 +32,10 @@ vi.mock('../../../src/services/biometricService', () => ({
 vi.mock('../../../src/stores/accountStore', () => {
   const useAccountStore = Object.assign(
     (selector: (state: Record<string, unknown>) => unknown) =>
-      selector({ loadAccount: mocks.loadAccount }),
+      selector({
+        loadAccount: mocks.loadAccount,
+        privateMigrationPhase: mocks.privateMigrationPhase,
+      }),
     { getState: () => ({ userProfile: mocks.userProfile }) }
   );
   return { useAccountStore };
@@ -52,6 +56,7 @@ describe('password-only biometric login wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.userProfile = null;
+    mocks.privateMigrationPhase = null;
     mocks.checkBiometricAvailability.mockResolvedValue({
       available: true,
       method: 'webauthn',
@@ -132,6 +137,23 @@ describe('password-only biometric login wiring', () => {
       expect(onErrorChange).toHaveBeenLastCalledWith('login.biometric_locked');
     });
     await expect.element(page.getByPlaceholder('login.password')).toBeEnabled();
+  });
+
+  it('blocks secure login controls behind exact migration progress', async () => {
+    mocks.privateMigrationPhase = 3;
+    await render(
+      <SecureLogin onCreateNewAccount={vi.fn()} onAccountSelected={vi.fn()} />
+    );
+
+    await expect
+      .element(page.getByText('private_migration.title'))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText('private_migration.phase_3'))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByPlaceholder('login.password'))
+      .not.toBeInTheDocument();
   });
 
   it('lets secure login discover the hidden slot from only the recovered password', async () => {

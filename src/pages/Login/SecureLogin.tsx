@@ -23,6 +23,9 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
   ({ onAccountSelected, persistentError = null, onErrorChange }) => {
     const { t } = useTranslation('auth');
     const loadAccount = useAccountStore(state => state.loadAccount);
+    const privateMigrationPhase = useAccountStore(
+      state => state.privateMigrationPhase
+    );
     const [biometricAvailable, setBiometricAvailable] = useState(false);
     const [biometricMethod, setBiometricMethod] = useState<
       'capacitor' | 'webauthn' | 'none'
@@ -107,6 +110,26 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       t,
       passwordInputRef,
     ]);
+
+    if (privateMigrationPhase) {
+      return (
+        <LoginLayout title={t('private_migration.title')} subtitle="">
+          <div
+            className="flex min-h-52 flex-col items-center justify-center gap-6 text-center"
+            role="status"
+            aria-live="polite"
+          >
+            <div
+              className="h-12 w-12 animate-spin rounded-full border-[3px] border-border border-t-primary"
+              aria-hidden="true"
+            />
+            <p className="text-sm font-medium text-foreground">
+              {t(`private_migration.phase_${privateMigrationPhase}`)}
+            </p>
+          </div>
+        </LoginLayout>
+      );
+    }
 
     return (
       <LoginLayout title={t('login.welcome')} subtitle="">

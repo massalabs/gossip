@@ -10,6 +10,7 @@ import { generateMnemonic, EncryptionKey } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
 import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
+import { getPortableImportMigrationEpoch } from '../services/portableImportAuthorization';
 
 import {
   Provider,
@@ -35,6 +36,8 @@ import {
   fetchMnsDomainsIfEnabled,
   wipeAccountPrivateKey,
 } from './utils/accountHelpers';
+
+export type PrivateMigrationPhase = 1 | 2 | 3 | 4 | 5;
 
 export type LoginMethod = {
   type: 'password';
@@ -70,6 +73,7 @@ interface AccountState {
   userProfile: UserProfile | null;
   encryptionKey: EncryptionKey | null;
   isLoading: boolean;
+  privateMigrationPhase: PrivateMigrationPhase | null;
   lockedByUser: boolean;
   account: Account | null;
   evmAddress: string | null;
@@ -167,6 +171,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       userProfile: null,
       encryptionKey: null,
       isLoading: false,
+      privateMigrationPhase: null,
     };
   };
 
@@ -497,6 +502,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     userProfile: null,
     encryptionKey: null,
     isLoading: true,
+    privateMigrationPhase: null,
     lockedByUser: false,
     account: null,
     evmAddress: null,
@@ -623,6 +629,44 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           unlockedThisCall = true;
         }
 
+        const importedInstallation = sdk.isSecureStorage
+          ? await sdk.wasPortableImportInstalled()
+          : false;
+        const migrationEpoch = importedInstallation
+          ? getPortableImportMigrationEpoch()
+          : null;
+        if (importedInstallation && !migrationEpoch) {
+          throw new Error('Imported account migration epoch is unavailable');
+        }
+        let migrationState = migrationEpoch
+          ? await sdk.queries.privateMigration.begin(migrationEpoch)
+          : null;
+        const migrationActive =
+          migrationState !== null && migrationState.completedPhase < 5;
+        if (migrationState && migrationState.completedPhase < 5) {
+          set({
+            privateMigrationPhase: (migrationState.completedPhase +
+              1) as PrivateMigrationPhase,
+          });
+        }
+        const completeMigrationPhase = async (
+          phase: PrivateMigrationPhase
+        ): Promise<void> => {
+          if (!migrationEpoch || !migrationState) return;
+          if (migrationState.completedPhase < phase) {
+            migrationState = await sdk.queries.privateMigration.completePhase(
+              migrationEpoch,
+              phase
+            );
+          }
+          if (migrationState.completedPhase === phase) {
+            set({
+              privateMigrationPhase:
+                phase === 5 ? null : ((phase + 1) as PrivateMigrationPhase),
+            });
+          }
+        };
+
         let profile: UserProfile | null = null;
         let authResult: Awaited<ReturnType<typeof auth>> | null = null;
 
@@ -662,9 +706,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (encodeUserId(derived.userIdBytes) !== profile.userId) {
           throw new Error('Authenticated profile identity mismatch');
         }
+        if (migrationActive) await completeMigrationPhase(1);
+
+        // Current V1 security envelopes are already canonical. This durable
+        // checkpoint remains the dispatch boundary for future retained
+        // decoders and proves authentication completed before any rewrite.
+        if (migrationActive) await completeMigrationPhase(2);
+
         const accountSettings = await sdk.queries.accountSettings.getOrCreate(
           profile.userId
         );
+        if (migrationActive) await completeMigrationPhase(3);
 
         // Prefer the secure-storage namespace blob when available; fall
         // back to the SQL profile column on the wa-sqlite backend. When
@@ -703,11 +755,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           encryptedSession,
           encryptionKey,
           onPersist: createOnPersist(profile.userId),
-          // Start only after the app's lastSeen profile save below commits, so
-          // its full upsert cannot race the publication timestamp update.
+          // Start only after the migration journal and lastSeen save commit.
           publishPublicKey: false,
+          autoStartPolling: migrationActive ? false : undefined,
         });
         sessionOpenedThisCall = true;
+        if (migrationActive) await completeMigrationPhase(4);
         callerOwnedEncryptionKey = null;
 
         const lastSeen = new Date();
@@ -716,7 +769,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           lastSeen,
         };
         await getSdk().profiles.save(updatedProfile);
+        if (migrationActive) await completeMigrationPhase(5);
         sdk.startPublicKeyPublication();
+        if (migrationActive) sdk.polling.start();
 
         useAppStore.getState().setIsInitialized(true);
         wipeAccountPrivateKey(get().account);
@@ -769,7 +824,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         }
         logger.error('Error loading account:', error);
-        set({ isLoading: false });
+        set({ isLoading: false, privateMigrationPhase: null });
         throw error;
       }
     },
