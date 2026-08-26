@@ -317,11 +317,11 @@ describe('GossipSdk lifecycle', () => {
     expect(connection.secureStorageAbortPortableImport).toHaveBeenCalledOnce();
   });
 
-  it('serializes concurrent portable-import startup attempts', async () => {
+  it('imports into empty first-install storage and serializes startup', async () => {
     let release: (() => void) | undefined;
     const connection = {
       isSecureStorage: true,
-      storageState: 'locked' as const,
+      storageState: 'empty' as const,
       secureStorageBeginPortableImport: vi.fn(
         () =>
           new Promise<void>(resolve => {

@@ -1216,6 +1216,12 @@ class GossipSdk {
     }
   }
 
+  /** Return whether the active locked installation came from portable import. */
+  async wasPortableImportInstalled(): Promise<boolean> {
+    if (this.state.status !== SdkStatus.INITIALIZED) return false;
+    return this.requireConn().secureStoragePortableImportInstalled();
+  }
+
   /**
    * Start one replacement-only portable import under an application-owned
    * onboarding authorization check. The returned object is the sole runtime
@@ -1256,8 +1262,11 @@ class GossipSdk {
       throw new Error('Portable import requires an initialized SDK');
     }
     const conn = this.requireConn();
-    if (!conn.isSecureStorage || conn.storageState !== 'locked') {
-      throw new Error('Portable import requires locked secure storage');
+    if (
+      !conn.isSecureStorage ||
+      (conn.storageState !== 'empty' && conn.storageState !== 'locked')
+    ) {
+      throw new Error('Portable import requires replaceable secure storage');
     }
     if (!isAuthorized()) {
       throw new Error('Portable import is not currently authorized');

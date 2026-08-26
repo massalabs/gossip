@@ -979,9 +979,21 @@ export class DatabaseConnection {
     }
   }
 
+  async secureStoragePortableImportInstalled(): Promise<boolean> {
+    if (!this.state.isSecureStorage) return false;
+    if (this.state.useNativePlugin) {
+      return (await this.requireNativePlugin().portableImportInstalled())
+        .installed;
+    }
+    return this.requireSecureProxy().portableImportInstalled();
+  }
+
   async secureStorageBeginPortableImport(): Promise<void> {
-    if (this.state.storageState !== 'locked') {
-      throw new Error('Portable import requires locked secure storage');
+    if (
+      this.state.storageState !== 'empty' &&
+      this.state.storageState !== 'locked'
+    ) {
+      throw new Error('Portable import requires replaceable secure storage');
     }
     if (this.state.portableTransferActive) {
       throw new Error('Portable transfer is already active');

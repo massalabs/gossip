@@ -111,6 +111,7 @@ export interface SecureStorageNativePlugin {
   initSecureStorage(options: { path: string; domain: string }): Promise<void>;
   provisionStorage(): Promise<void>;
   hasData(): Promise<{ hasData: boolean }>;
+  portableImportInstalled(): Promise<{ installed: boolean }>;
   // Binary payloads (passwords, namespace blobs) are typed as Uint8Array
   // end-to-end. Going through `number[]` was an O(n) memcopy in each
   // direction with no benefit: the plugin internally base64-encodes
@@ -232,6 +233,10 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   async hasData() {
     const hasData = await callNative<boolean>('hasData');
     return { hasData };
+  },
+  async portableImportInstalled() {
+    const installed = await callNative<boolean>('portableImportInstalled');
+    return { installed };
   },
   async allocateSession({ slot, password }) {
     await callNative('allocateSession', {

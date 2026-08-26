@@ -267,6 +267,10 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             let has = native_vfs::has_data()?;
             Ok(serde_json::to_string(&has)?)
         }
+        "portableImportInstalled" => {
+            let installed = native_vfs::portable_import_installed()?;
+            Ok(serde_json::to_string(&installed)?)
+        }
         "allocateSession" => {
             let a: AllocateArgs = parse(args)?;
             let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);

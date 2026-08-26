@@ -32,6 +32,9 @@ use crate::types::SessionIndex;
 
 const BLOCKS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("blocks");
 const KEYPAIRS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("keypairs");
+const METADATA: TableDefinition<&[u8], &[u8]> = TableDefinition::new("metadata");
+const PORTABLE_IMPORT_INSTALLED_KEY: &[u8] = b"portable-import-installed-v1";
+const PORTABLE_IMPORT_INSTALLED_VALUE: &[u8] = b"yes";
 
 // ── Buffered write ───────────────────────────────────────────────────
 
@@ -142,6 +145,19 @@ impl RedbStorage {
     /// Return true if the on-disk database already has any keypair
     /// entries; used to gate `provision` at boot so we don't wipe
     /// existing slots by re-provisioning random throwaway keys.
+    pub fn portable_import_installed(&self) -> Result<bool> {
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
+        let table = match txn.open_table(METADATA) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(false),
+            Err(error) => return Err(redb_err("metadata table")(error)),
+        };
+        Ok(table
+            .get(PORTABLE_IMPORT_INSTALLED_KEY)
+            .map_err(redb_err("metadata read"))?
+            .is_some_and(|value| value.value() == PORTABLE_IMPORT_INSTALLED_VALUE))
+    }
+
     pub fn has_data(&self) -> Result<bool> {
         let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
         let table = match txn.open_table(KEYPAIRS) {
@@ -385,12 +401,21 @@ impl RedbStorage {
             let mut blocks = txn
                 .open_table(BLOCKS)
                 .map_err(redb_err("portable blocks"))?;
+            let mut metadata = txn
+                .open_table(METADATA)
+                .map_err(redb_err("portable metadata"))?;
             keypairs
                 .retain(|_, _| false)
                 .map_err(redb_err("portable clear keypairs"))?;
             blocks
                 .retain(|_, _| false)
                 .map_err(redb_err("portable clear blocks"))?;
+            metadata
+                .insert(
+                    PORTABLE_IMPORT_INSTALLED_KEY,
+                    PORTABLE_IMPORT_INSTALLED_VALUE,
+                )
+                .map_err(redb_err("portable metadata marker"))?;
 
             while let Some(record) = reader.read_record()? {
                 match record.kind {

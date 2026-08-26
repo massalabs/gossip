@@ -315,6 +315,15 @@ pub fn register() -> Result<()> {
 
 /// Return true if the backing redb database already has keypair data.
 /// Used by the plugin layer to gate `provision` at boot.
+pub fn portable_import_installed() -> Result<bool> {
+    let mutex = state_mutex();
+    let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.backend.portable_import_installed()
+}
+
 pub fn has_data() -> Result<bool> {
     let mutex = state_mutex();
     let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
@@ -2220,6 +2229,7 @@ mod tests {
             finish_portable_outer_migration().unwrap();
 
             let migrated_path = destination.path().join(PORTABLE_MIGRATION_SPOOL);
+            assert!(!portable_import_installed().unwrap());
             assert!(migrated_path.exists());
             assert!(destination.path().join(PORTABLE_IMPORT_SPOOL).exists());
             let mut reader =
@@ -2235,6 +2245,7 @@ mod tests {
             drop(reader);
 
             install_portable_import().unwrap();
+            assert!(portable_import_installed().unwrap());
             assert!(!destination.path().join(PORTABLE_IMPORT_SPOOL).exists());
             assert!(!migrated_path.exists());
             assert!(unlock(b"password").unwrap());

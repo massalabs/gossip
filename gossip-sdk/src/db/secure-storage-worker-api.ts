@@ -22,6 +22,7 @@ import {
 import {
   PortableWebExport,
   PortableWebImport,
+  portableImportInstalledWeb,
 } from './secure-storage-portable-web.js';
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -942,6 +943,10 @@ export class SecureStorageWorkerApi {
     if (!transfer) throw new Error('Portable export is not active');
     await transfer.close();
     this.portableExport = null;
+  }
+
+  portableImportInstalled(): Promise<boolean> {
+    return portableImportInstalledWeb();
   }
 
   async beginPortableImport(): Promise<void> {

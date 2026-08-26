@@ -20,6 +20,7 @@ const MAGIC = new TextEncoder().encode('GOSSIPBK');
 const EXPORT_SPOOL_PREFIX = 'x:portable-export:';
 const IMPORT_SPOOL_PREFIX = 'x:portable-import:';
 const ACTIVE_GENERATION_KEY = 'm:active-generation';
+const PORTABLE_IMPORT_INSTALLED_KEY = 'm:portable-import-installed-v1';
 const LEGACY_GENERATION = 'legacy';
 const MAX_TRANSFER_CHUNK_BYTES = 1024 * 1024;
 const MAX_KEYPAIR_VALUE_BYTES = 16 * 1024 * 1024;
@@ -739,10 +740,45 @@ async function switchActiveGeneration(
       await deletePrefixFromStore(store, prefix);
     }
     store.put(nextGeneration, ACTIVE_GENERATION_KEY);
+    store.put(true, PORTABLE_IMPORT_INSTALLED_KEY);
     await done;
   } catch (error) {
     abortTransaction(tx);
     throw error;
+  }
+}
+
+export async function portableImportInstalledWeb(): Promise<boolean> {
+  if (!navigator.locks) {
+    const db = await openDatabase();
+    try {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const value = await request(
+        tx.objectStore(STORE_NAME).get(PORTABLE_IMPORT_INSTALLED_KEY)
+      );
+      await transactionDone(tx);
+      return value === true;
+    } finally {
+      db.close();
+    }
+  }
+  // Wait for any cross-tab export/import owner. Authority reconciliation must
+  // observe either the pre-commit installation or its atomic marker, never an
+  // in-flight gap between the two.
+  const lease = await acquireExportLease();
+  let db: IDBDatabase | null = null;
+  try {
+    db = await openDatabase();
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const value = await request(
+      tx.objectStore(STORE_NAME).get(PORTABLE_IMPORT_INSTALLED_KEY)
+    );
+    await transactionDone(tx);
+    return value === true;
+  } finally {
+    db?.close();
+    lease.release();
+    await lease.completion;
   }
 }
 

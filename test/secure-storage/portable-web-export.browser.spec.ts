@@ -5,6 +5,7 @@ import secureStorageWasmUrlRaw from '../../gossip-sdk/src/assets/generated/wasm-
 import {
   PortableWebExport,
   PortableWebImport,
+  portableImportInstalledWeb,
 } from '../../gossip-sdk/src/db/secure-storage-portable-web';
 
 const DB_NAME = 'secure_storage';
@@ -511,6 +512,8 @@ describe('PortableWebImport', () => {
     const { generation } = await transfer.install();
     expect(generation).toMatch(/^[0-9a-f]{32}$/);
     expect(await getValue('m:active-generation')).toBe(generation);
+    expect(await getValue('m:portable-import-installed-v1')).toBe(true);
+    await expect(portableImportInstalledWeb()).resolves.toBe(true);
     // The marker switch fences stale tabs before legacy records are removed.
     expect(await getValue('s:0:sentinel')).toBeUndefined();
     const installedRecords: [string, Uint8Array][] = [];
