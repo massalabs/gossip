@@ -8,6 +8,7 @@ import { AnnouncementCursorQueries } from './announcementCursors.js';
 import { PendingAnnouncementQueries } from './pendingAnnouncements.js';
 import { ActiveSeekerQueries } from './activeSeekers.js';
 import { PrivateMigrationQueries } from './privateMigration.js';
+import { MessagingSessionRecoveryQueries } from './messagingSessionRecovery.js';
 
 export type { AccountSettingsV1 } from './accountSettings.js';
 export type { ContactRow } from './contacts.js';
@@ -34,6 +35,7 @@ export class Queries {
   readonly pendingAnnouncements: PendingAnnouncementQueries;
   readonly activeSeekers: ActiveSeekerQueries;
   readonly privateMigration: PrivateMigrationQueries;
+  readonly messagingSessionRecovery: MessagingSessionRecoveryQueries;
 
   constructor(readonly conn: DatabaseConnection) {
     this.accountSettings = new AccountSettingsQueries(conn);
@@ -45,5 +47,6 @@ export class Queries {
     this.pendingAnnouncements = new PendingAnnouncementQueries(conn);
     this.activeSeekers = new ActiveSeekerQueries(conn);
     this.privateMigration = new PrivateMigrationQueries(conn);
+    this.messagingSessionRecovery = new MessagingSessionRecoveryQueries(conn);
   }
 }
