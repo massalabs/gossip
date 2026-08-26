@@ -8,6 +8,7 @@ class MyViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(BackgroundRefreshPlugin())
         bridge?.registerPluginInstance(NetworkObserverPlugin())
         bridge?.registerPluginInstance(SecureStoragePlugin())
+        bridge?.registerPluginInstance(PortableBackupFilePlugin())
 
         #if DEBUG
         bridge?.registerPluginInstance(SSLBypassPlugin())
