@@ -135,7 +135,16 @@ logical blocks, replaces unselected slots with fresh dummy keypairs and cover bl
 additional pq-rerand on every output block. Transformation processes complete three-slot coordinates
 and emits no intermediate per-password generation, slot match, occupancy marker, or account count.
 The exact validated source remains retryable until the complete destination is sealed and switched
-atomically.
+atomically. Omission independence begins only after whole-archive framing, digest, canonical PQ, and
+record validation; malformed records are rejected before password admission regardless of which
+account they may contain. Authenticated inner corruption in an unselected slot is ignored because
+that payload is replaced rather than decrypted.
+
+A successful browser switch erases the staged source and previous active generation in the same
+IndexedDB transaction as the marker update. Native redb replacement cannot be atomic with file
+removal, so a failed source-spool erase retains cleanup ownership and blocks ordinary storage access
+until retry succeeds. Success must never leave omitted source accounts available to normal runtime
+operation.
 
 ## Profile security envelope
 

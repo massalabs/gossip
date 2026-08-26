@@ -1090,16 +1090,32 @@ pub fn install_portable_import() -> Result<()> {
     // Replacement has committed. A later spool-cleanup error must not be
     // reported as an install failure, which would misrepresent active state.
     // init_native repeats deletion before another session can open.
-    for cleanup_path in [&path, &source_path] {
-        if fs::remove_file(cleanup_path).is_err() {
-            let _ = OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(cleanup_path)
-                .and_then(|file| file.sync_all());
+    let mut pending_cleanup = Vec::new();
+    for cleanup_path in [path, source_path] {
+        match fs::remove_file(&cleanup_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                let wiped = OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(&cleanup_path)
+                    .and_then(|file| file.sync_all())
+                    .is_ok();
+                if !wiped {
+                    pending_cleanup.push(cleanup_path);
+                }
+            }
         }
     }
-    st.transfer = None;
+    st.transfer = if pending_cleanup.is_empty() {
+        None
+    } else {
+        Some(PortableTransfer::Cleanup {
+            kind: PortableTransferKind::Import,
+            paths: pending_cleanup,
+        })
+    };
     Ok(())
 }
 
@@ -2281,6 +2297,37 @@ mod tests {
         abort_portable_transfer().unwrap();
         assert!(!path.exists());
         assert!(!dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
+        reset_state();
+    }
+
+    #[test]
+    fn committed_import_blocks_access_until_source_cleanup_finishes() {
+        let _guard = test_mutex().lock().unwrap();
+        reset_state();
+        let dir = tempfile::tempdir().unwrap();
+        init_native(dir.path().to_str().unwrap(), "test").unwrap();
+        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+        begin_portable_import().unwrap();
+        for chunk in fixture.chunks(8192) {
+            push_portable_import_chunk(chunk).unwrap();
+        }
+        finish_portable_import().unwrap();
+        begin_portable_outer_migration().unwrap();
+        finish_portable_outer_migration().unwrap();
+
+        let source = dir.path().join(PORTABLE_IMPORT_SPOOL);
+        fs::remove_file(&source).unwrap();
+        fs::create_dir(&source).unwrap();
+        install_portable_import().unwrap();
+        assert!(matches!(
+            has_data(),
+            Err(SecureStorageError::PortableTransferInProgress)
+        ));
+        assert!(!dir.path().join(PORTABLE_MIGRATION_SPOOL).exists());
+
+        fs::remove_dir(&source).unwrap();
+        abort_portable_transfer().unwrap();
+        assert!(has_data().unwrap());
         reset_state();
     }
 

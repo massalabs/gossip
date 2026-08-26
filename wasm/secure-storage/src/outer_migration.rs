@@ -474,6 +474,102 @@ mod tests {
         });
     }
 
+    fn migrate_without_admission(
+        source: &MemoryStorage,
+        keypairs: &[Vec<u8>; SESSION_COUNT],
+    ) -> MemoryStorage {
+        let plan = OuterMigrationPlan::new(DOMAIN, keypairs.clone()).unwrap();
+        let mut migration = plan.finalize().unwrap();
+        let mut destination = MemoryStorage::new();
+        for (index, keypair) in migration.keypairs().into_iter().enumerate() {
+            let parsed = KeypairFile::deserialize(keypair).unwrap();
+            assert_eq!(parsed.version, CURRENT_SESSION_VERSION);
+            destination
+                .write_keypair(SessionIndex::new(index as u8).unwrap(), keypair)
+                .unwrap();
+        }
+        for namespace in [0_u8, 1] {
+            let count = source
+                .block_count(SessionIndex::new(0).unwrap(), namespace)
+                .unwrap();
+            for block_index in 0..count {
+                let source_batch = std::array::from_fn(|index| {
+                    source
+                        .read_block(
+                            SessionIndex::new(index as u8).unwrap(),
+                            namespace,
+                            block_index,
+                        )
+                        .unwrap()
+                });
+                let migrated = migration
+                    .migrate_block_batch(
+                        namespace,
+                        block_index,
+                        source_batch.each_ref().map(Box::as_ref),
+                    )
+                    .unwrap();
+                for index in 0..SESSION_COUNT {
+                    assert_ne!(migrated[index].as_slice(), source_batch[index].as_slice());
+                    destination
+                        .append_block(
+                            SessionIndex::new(index as u8).unwrap(),
+                            namespace,
+                            migrated[index].as_slice().try_into().unwrap(),
+                        )
+                        .unwrap();
+                }
+            }
+            migration.finish_namespace(namespace, count).unwrap();
+        }
+        destination
+    }
+
+    #[test]
+    fn replaces_every_unadmitted_slot_with_fresh_current_cover() {
+        run_with_stack(|| {
+            let (mut source, keypairs) = legacy_source();
+            // Canonical PQ cover with invalid account AEAD proves omitted
+            // payloads are never decrypted after archive validation.
+            let slot = SessionIndex::new(1).unwrap();
+            let keypair = read_session_keypair(&source, slot).unwrap();
+            let public = PqPublicKey::from_bytes(&keypair.pq_pk).unwrap();
+            let mut aad_root = String::new();
+            crate::domain::block_scope(&mut aad_root, DOMAIN, LEGACY_SESSION_VERSION, slot, 0, 0);
+            let cover = create_cover_block(&public, &aad_root);
+            source
+                .write_block(slot, 0, 0, cover.as_slice().try_into().unwrap())
+                .unwrap();
+
+            let first = migrate_without_admission(&source, &keypairs);
+            let second = migrate_without_admission(&source, &keypairs);
+            for index in 0..SESSION_COUNT {
+                let slot = SessionIndex::new(index as u8).unwrap();
+                let source_keypair = source.read_keypair(slot).unwrap();
+                let first_keypair = first.read_keypair(slot).unwrap();
+                let second_keypair = second.read_keypair(slot).unwrap();
+                assert_ne!(first_keypair.as_slice(), source_keypair.as_slice());
+                assert_ne!(second_keypair.as_slice(), source_keypair.as_slice());
+                assert_ne!(first_keypair.as_slice(), second_keypair.as_slice());
+                for namespace in [0_u8, 1] {
+                    let count = source.block_count(slot, namespace).unwrap();
+                    assert_eq!(first.block_count(slot, namespace).unwrap(), count);
+                    assert_eq!(second.block_count(slot, namespace).unwrap(), count);
+                    for block_index in 0..count {
+                        assert_ne!(
+                            first.read_block(slot, namespace, block_index).unwrap(),
+                            second.read_block(slot, namespace, block_index).unwrap()
+                        );
+                    }
+                }
+            }
+            for password in [PASSWORD, OMITTED_PASSWORD] {
+                assert!(unlock_session(&first, DOMAIN, password).is_err());
+                assert!(unlock_session(&second, DOMAIN, password).is_err());
+            }
+        });
+    }
+
     #[test]
     fn rejects_corruption_inside_authenticated_logical_range() {
         run_with_stack(|| {

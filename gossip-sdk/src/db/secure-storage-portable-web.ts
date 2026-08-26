@@ -698,12 +698,35 @@ async function stageCandidateGeneration(
   await done;
 }
 
+async function deletePrefixFromStore(
+  store: IDBObjectStore,
+  prefix: string
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const cursorRequest = store.openKeyCursor(prefixRange(prefix));
+    cursorRequest.onerror = () =>
+      reject(cursorRequest.error ?? new Error('IndexedDB cursor failed'));
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) {
+        resolve();
+        return;
+      }
+      store.delete(cursor.key);
+      cursor.continue();
+    };
+  });
+}
+
 async function switchActiveGeneration(
   db: IDBDatabase,
   expectedGeneration: string,
-  nextGeneration: string
+  nextGeneration: string,
+  erasedPrefixes: string[]
 ): Promise<void> {
   const tx = db.transaction(STORE_NAME, 'readwrite');
+  const done = transactionDone(tx);
+  void done.catch(() => {});
   const store = tx.objectStore(STORE_NAME);
   const storedGeneration = await request(store.get(ACTIVE_GENERATION_KEY));
   const current = storedGeneration ?? LEGACY_GENERATION;
@@ -711,8 +734,16 @@ async function switchActiveGeneration(
     abortTransaction(tx);
     throw new Error('Secure-storage generation changed during import');
   }
-  store.put(nextGeneration, ACTIVE_GENERATION_KEY);
-  await transactionDone(tx);
+  try {
+    for (const prefix of erasedPrefixes) {
+      await deletePrefixFromStore(store, prefix);
+    }
+    store.put(nextGeneration, ACTIVE_GENERATION_KEY);
+    await done;
+  } catch (error) {
+    abortTransaction(tx);
+    throw error;
+  }
 }
 
 async function putImportRecord(
@@ -1357,22 +1388,18 @@ export class PortableWebImport {
           await switchActiveGeneration(
             this.db,
             this.sourceGeneration,
-            generation
+            generation,
+            [
+              `${IMPORT_SPOOL_PREFIX}${this.transferId}:`,
+              this.sourceGeneration === LEGACY_GENERATION
+                ? 's:'
+                : activeRecordPrefix(this.sourceGeneration),
+            ]
           );
         }
       );
-      // The marker switch is already committed. Cleanup cannot roll it back;
-      // restart cleanup removes any leftovers if quota/storage errors occur.
-      await deletePrefix(
-        this.db,
-        `${IMPORT_SPOOL_PREFIX}${this.transferId}:`
-      ).catch(() => {});
-      await deletePrefix(
-        this.db,
-        this.sourceGeneration === LEGACY_GENERATION
-          ? 's:'
-          : activeRecordPrefix(this.sourceGeneration)
-      ).catch(() => {});
+      // The marker, exact source spool, and previous generation changed in
+      // one transaction, so success never leaves omitted accounts durable.
       this.db.close();
       this.db = null;
       this.stage = 'closed';
