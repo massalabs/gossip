@@ -99,10 +99,35 @@ import type {
   PortableChunkWriter,
   PortableProgressCallback,
 } from './db/secure-storage-native.js';
+import type { ImportedAccountPreview } from './db/secure-storage-worker-api.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
+
+export type PortableImportAuthorization = () => boolean;
+
+export class PortableImportTerminalError extends Error {
+  readonly cause: unknown;
+
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = 'PortableImportTerminalError';
+    this.cause = options?.cause;
+  }
+}
+
+export interface PortableImportCandidate {
+  push(chunk: Uint8Array): Promise<void>;
+  finishValidation(): Promise<void>;
+  authenticate(password: Uint8Array): Promise<ImportedAccountPreview>;
+  install(
+    admitPasswords: (
+      admit: (password: Uint8Array) => Promise<void>
+    ) => void | Promise<void>
+  ): Promise<void>;
+  abort(): Promise<void>;
+}
 
 export enum SdkStatus {
   UNINITIALIZED = 'uninitialized',
@@ -284,6 +309,10 @@ class GossipSdk {
   private _persistBackoffMs = 0;
   private _portableExportActive = false;
   private _portableExportTerminal = false;
+  private _portableImportActive = false;
+  private _portableImportTerminal = false;
+  private _portableImportStartupCleanup = false;
+  private _portableImportBeginActive = false;
   private _lifecycleCloseActive = false;
   private _accountLifecycleActive = false;
 
@@ -291,6 +320,11 @@ class GossipSdk {
     if (this._portableExportActive || this._portableExportTerminal) {
       throw new Error(
         'This SDK runtime ended for portable export; reload first'
+      );
+    }
+    if (this._portableImportActive || this._portableImportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable import; reload first'
       );
     }
     if (this._lifecycleCloseActive || this._accountLifecycleActive) {
@@ -380,6 +414,9 @@ class GossipSdk {
   }
 
   async openSession(options: OpenSessionOptions): Promise<void> {
+    if (this._portableImportActive || this._portableImportTerminal) {
+      throw new Error('Cannot open a session during or after portable import');
+    }
     if (this._portableExportTerminal) {
       throw new Error(
         'This SDK runtime ended for portable export; reload first'
@@ -798,6 +835,9 @@ class GossipSdk {
   }
 
   async closeSession(): Promise<void> {
+    if (this._portableImportActive) {
+      throw new Error('Cannot close a session during portable import');
+    }
     if (this._portableExportActive) {
       throw new Error('Cannot close session during portable export');
     }
@@ -817,6 +857,9 @@ class GossipSdk {
    * After calling this, the instance cannot be reused — create a new one.
    */
   async destroy(): Promise<void> {
+    if (this._portableImportActive) {
+      throw new Error('Cannot destroy SDK during portable import');
+    }
     if (this._portableExportActive) {
       throw new Error('Cannot destroy SDK during portable export');
     }
@@ -1135,6 +1178,9 @@ class GossipSdk {
     if (signal?.aborted) {
       throw new DOMException('Backup cancelled', 'AbortError');
     }
+    if (this._portableImportActive || this._portableImportTerminal) {
+      throw new Error('Cannot export during or after portable import');
+    }
     if (this._portableExportActive) {
       throw new Error('Portable export is already active');
     }
@@ -1168,6 +1214,269 @@ class GossipSdk {
     } finally {
       this._portableExportActive = false;
     }
+  }
+
+  /**
+   * Start one replacement-only portable import under an application-owned
+   * onboarding authorization check. The returned object is the sole runtime
+   * capability for the candidate and serializes every operation.
+   */
+  async beginPortableImport(
+    isAuthorized: PortableImportAuthorization
+  ): Promise<PortableImportCandidate> {
+    if (this._portableImportBeginActive) {
+      throw new Error('Portable import startup is already active');
+    }
+    this._portableImportBeginActive = true;
+    try {
+      return await this.beginPortableImportInternal(isAuthorized);
+    } finally {
+      this._portableImportBeginActive = false;
+    }
+  }
+
+  private async beginPortableImportInternal(
+    isAuthorized: PortableImportAuthorization
+  ): Promise<PortableImportCandidate> {
+    if (this._portableImportStartupCleanup) {
+      await this.requireConn().secureStorageAbortPortableImport();
+      this._portableImportStartupCleanup = false;
+      this._portableImportActive = false;
+    }
+    if (this._portableImportActive || this._portableImportTerminal) {
+      throw new Error('Portable import is already active or completed');
+    }
+    if (this._portableExportActive || this._portableExportTerminal) {
+      throw new Error('Portable import is unavailable after export');
+    }
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK lifecycle operation is already active');
+    }
+    if (this.state.status !== SdkStatus.INITIALIZED) {
+      throw new Error('Portable import requires an initialized SDK');
+    }
+    const conn = this.requireConn();
+    if (!conn.isSecureStorage || conn.storageState !== 'locked') {
+      throw new Error('Portable import requires locked secure storage');
+    }
+    if (!isAuthorized()) {
+      throw new Error('Portable import is not currently authorized');
+    }
+
+    this._portableImportActive = true;
+    try {
+      await conn.secureStorageBeginPortableImport();
+    } catch (error) {
+      this._portableImportActive = false;
+      throw error;
+    }
+    let authorizedAfterStart: boolean;
+    try {
+      authorizedAfterStart = isAuthorized();
+    } catch (error) {
+      try {
+        await conn.secureStorageAbortPortableImport();
+        this._portableImportActive = false;
+      } catch {
+        this._portableImportStartupCleanup = true;
+      }
+      throw error;
+    }
+    if (!authorizedAfterStart) {
+      try {
+        await conn.secureStorageAbortPortableImport();
+        this._portableImportActive = false;
+      } catch (error) {
+        this._portableImportStartupCleanup = true;
+        throw error;
+      }
+      throw new Error('Portable import is not currently authorized');
+    }
+
+    type ImportStage = 'receiving' | 'validated' | 'ready' | 'closed';
+    let stage: ImportStage = 'receiving';
+    let closing = false;
+    let operationTail = Promise.resolve();
+    const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+      const result = operationTail.then(operation, operation);
+      operationTail = result.then(
+        () => undefined,
+        () => undefined
+      );
+      return result;
+    };
+    const closeCandidate = async (): Promise<void> => {
+      if (stage === 'closed') return;
+      closing = true;
+      await conn.secureStorageAbortPortableImport();
+      stage = 'closed';
+      this._portableImportActive = false;
+    };
+    let authorizationDenied = false;
+    const requireAuthorization = (): void => {
+      if (authorizationDenied) {
+        throw new Error('Portable import is not currently authorized');
+      }
+      try {
+        if (!isAuthorized()) {
+          authorizationDenied = true;
+          throw new Error('Portable import is not currently authorized');
+        }
+      } catch (error) {
+        authorizationDenied = true;
+        throw error;
+      }
+    };
+
+    return Object.freeze({
+      push: (chunk: Uint8Array) =>
+        enqueue(async () => {
+          if (closing || stage !== 'receiving') {
+            throw new Error('Portable import is not receiving data');
+          }
+          try {
+            requireAuthorization();
+            await conn.secureStoragePushPortableImportChunk(chunk);
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+        }),
+      finishValidation: () =>
+        enqueue(async () => {
+          if (closing || stage !== 'receiving') {
+            throw new Error('Portable import cannot be validated');
+          }
+          try {
+            requireAuthorization();
+            await conn.secureStorageValidatePortableImport();
+            stage = 'validated';
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+        }),
+      authenticate: (password: Uint8Array) =>
+        enqueue(async () => {
+          if (closing || stage !== 'validated') {
+            throw new Error('Portable import is not validated');
+          }
+          try {
+            requireAuthorization();
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+          let preview: ImportedAccountPreview;
+          try {
+            preview =
+              await conn.secureStorageAuthenticatePortableImportCandidate(
+                password
+              );
+          } catch (error) {
+            try {
+              requireAuthorization();
+            } catch (authorizationError) {
+              await closeCandidate().catch(() => {});
+              throw authorizationError;
+            }
+            throw error;
+          }
+          try {
+            requireAuthorization();
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+          return preview;
+        }),
+      install: (
+        admitPasswords: Parameters<PortableImportCandidate['install']>[0]
+      ) =>
+        enqueue(async () => {
+          if (closing || (stage !== 'validated' && stage !== 'ready')) {
+            throw new Error('Portable import cannot be installed');
+          }
+          try {
+            requireAuthorization();
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+
+          if (stage === 'validated') {
+            await conn.secureStorageBeginPortableOuterMigration();
+            let accepting = true;
+            let admitActive = false;
+            const admissions: Promise<void>[] = [];
+            const admit = (password: Uint8Array): Promise<void> => {
+              if (!accepting || admitActive) {
+                const rejected = Promise.reject<void>(
+                  new Error('Portable import password admission is invalid')
+                );
+                admissions.push(rejected);
+                return rejected;
+              }
+              requireAuthorization();
+              admitActive = true;
+              const admission =
+                conn.secureStorageAdmitPortableOuterMigrationPassword(password);
+              admissions.push(admission);
+              void admission.then(
+                () => {
+                  admitActive = false;
+                },
+                () => {
+                  admitActive = false;
+                }
+              );
+              return admission;
+            };
+            try {
+              await admitPasswords(admit);
+              accepting = false;
+              await Promise.all(admissions);
+              if (admissions.length === 0) {
+                throw new Error('Portable import requires an admitted account');
+              }
+            } catch (error) {
+              accepting = false;
+              await closeCandidate().catch(() => {});
+              throw new PortableImportTerminalError(
+                'Portable import password admission failed',
+                { cause: error }
+              );
+            }
+            try {
+              requireAuthorization();
+            } catch (error) {
+              await closeCandidate().catch(() => {});
+              throw error;
+            }
+            try {
+              await conn.secureStorageFinishPortableOuterMigration();
+              stage = 'ready';
+            } catch (error) {
+              // Finalization failures restore the exact validated source, so
+              // retained application-owned passwords can retry.
+              stage = 'validated';
+              throw error;
+            }
+          }
+
+          try {
+            requireAuthorization();
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+          await conn.secureStorageInstallPortableImport();
+          stage = 'closed';
+          this._portableImportActive = false;
+          this._portableImportTerminal = true;
+        }),
+      abort: () => enqueue(closeCandidate),
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────
