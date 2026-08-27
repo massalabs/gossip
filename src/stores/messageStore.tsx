@@ -42,6 +42,11 @@ const createStoreId = (): string => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+// Bumped by cleanup() so async work started before a logout/account switch
+// can detect it is stale and stop before writing the previous account's
+// data into the freshly wiped store.
+let storeGeneration = 0;
+
 /**
  * Resolve the optional replyTo / forwardOf fields for a new outgoing message.
  * A forward to the same contact collapses into a reply (quoting that contact's
@@ -118,12 +123,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       set(state => {
         const msgMap = new Map(state.messagesByContact);
         const rxnMap = new Map(state.reactionsByContact);
-        if (messages.length > 0) {
-          msgMap.set(
-            newContactId,
-            messages.map(m => ({ ...m }))
-          );
-        }
+        // Always store the entry (even empty) so re-opening an empty
+        // conversation doesn't refetch every time.
+        msgMap.set(
+          newContactId,
+          messages.map(m => ({ ...m }))
+        );
         if (reactions.length > 0) {
           rxnMap.set(
             newContactId,
@@ -133,7 +138,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         return {
           messagesByContact: msgMap,
           reactionsByContact: rxnMap,
-          reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
+          reactionGroupsCache: patchReactionCache(
+            state.reactionGroupsCache,
+            newContactId,
+            msgMap,
+            rxnMap
+          ),
         };
       });
     } catch (error) {
@@ -145,26 +155,39 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     const { userProfile } = useAccountStore.getState();
     if (!userProfile?.userId || get().cleanupFn || get().isInitializing) return;
 
+    // If cleanup() runs while we're loading (logout, account switch), the
+    // generation changes and every continuation below bails out instead of
+    // repopulating the wiped store with the previous account's messages.
+    const generation = storeGeneration;
     set({ isInitializing: true });
 
     const sdk = getSdk();
     if (sdk.isSessionOpen) {
       try {
         const discussions = await sdk.discussions.list();
+        const perContact = await Promise.all(
+          discussions.map(async d => {
+            const [msgs, rxns] = await Promise.all([
+              sdk.messages.getVisibleMessages(d.contactUserId),
+              sdk.messages.getReactions(d.contactUserId),
+            ]);
+            return { contactUserId: d.contactUserId, msgs, rxns };
+          })
+        );
+        if (generation !== storeGeneration) return;
+
         const msgMap = new Map<string, StoreMessage[]>();
         const rxnMap = new Map<string, StoreMessage[]>();
-        for (const d of discussions) {
-          const msgs = await sdk.messages.getVisibleMessages(d.contactUserId);
-          const rxns = await sdk.messages.getReactions(d.contactUserId);
-          if (msgs.length > 0) {
-            msgMap.set(
-              d.contactUserId,
-              msgs.map(m => ({ ...m }))
-            );
-          }
+        for (const { contactUserId, msgs, rxns } of perContact) {
+          // Always store the entry (even empty) so opening an empty
+          // conversation doesn't trigger a refetch.
+          msgMap.set(
+            contactUserId,
+            msgs.map(m => ({ ...m }))
+          );
           if (rxns.length > 0) {
             rxnMap.set(
-              d.contactUserId,
+              contactUserId,
               rxns.map(r => ({ ...r }))
             );
           }
@@ -175,12 +198,14 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
         });
       } catch (error) {
+        if (generation !== storeGeneration) return;
         logger.error('Messages initial load error:', error);
         set({ isInitializing: false });
         return;
       }
     }
 
+    if (generation !== storeGeneration) return;
     set({
       cleanupFn: createEventHandlers(sdk, set, get),
       isInitializing: false,
@@ -353,7 +378,10 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         );
         return;
       }
-      get().removeReaction(
+      // Switching emoji: remove the previous reaction before adding the new
+      // one. Awaited so a failure (which rolls back inside removeReaction)
+      // is observed before we optimistically add the replacement.
+      await get().removeReaction(
         existing.id,
         existing.messageId,
         existing.storeId,
@@ -431,52 +459,79 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     };
 
     let matchedContact: string | null = null;
-    if (contactUserId) {
-      if (removeReactionFromState(set, contactUserId, match)) {
-        matchedContact = contactUserId;
+    let removedReaction: StoreMessage | undefined;
+    const captureAndRemove = (contact: string): boolean => {
+      const candidate = (get().reactionsByContact.get(contact) || []).find(
+        match
+      );
+      if (!candidate || !removeReactionFromState(set, contact, match)) {
+        return false;
       }
+      matchedContact = contact;
+      removedReaction = candidate;
+      return true;
+    };
+
+    if (contactUserId) {
+      captureAndRemove(contactUserId);
     } else {
       for (const [contact] of get().reactionsByContact) {
-        if (removeReactionFromState(set, contact, match)) {
-          matchedContact = contact;
-          break;
-        }
+        if (captureAndRemove(contact)) break;
       }
     }
 
-    const sdk = getSdk();
-    let dbId = reactionDbId;
-    if (!dbId && reactionMessageId && matchedContact) {
-      const ownerUserId = useAccountStore.getState().userProfile?.userId;
-      if (ownerUserId) {
-        const found = await sdk.messages.findMessageByMsgId(
-          reactionMessageId,
-          ownerUserId,
-          matchedContact
-        );
-        dbId = found?.id;
+    try {
+      const sdk = getSdk();
+      let dbId = reactionDbId;
+      if (!dbId && reactionMessageId && matchedContact) {
+        const ownerUserId = useAccountStore.getState().userProfile?.userId;
+        if (ownerUserId) {
+          const found = await sdk.messages.findMessageByMsgId(
+            reactionMessageId,
+            ownerUserId,
+            matchedContact
+          );
+          dbId = found?.id;
+        }
       }
-    }
-    if (dbId) {
-      await sdk.messages.deleteMessage(dbId);
+      if (dbId) {
+        await sdk.messages.deleteMessage(dbId);
+      }
+    } catch (error) {
+      logger.error('Failed to remove reaction:', error);
+      // Roll back the optimistic removal so the UI stays in sync with the DB.
+      if (matchedContact && removedReaction) {
+        addReactionToState(set, matchedContact, removedReaction, false);
+      }
     }
   },
 
   clearMessages: contactUserId => {
     set(state => {
+      const removedMsgs = state.messagesByContact.get(contactUserId);
+      if (!removedMsgs && !state.reactionsByContact.has(contactUserId)) {
+        return state;
+      }
       const msgMap = new Map(state.messagesByContact);
       const rxnMap = new Map(state.reactionsByContact);
       msgMap.delete(contactUserId);
       rxnMap.delete(contactUserId);
+      // Only this contact's cache entries change — drop them instead of
+      // recomputing the cache for every contact.
+      const cache = new Map(state.reactionGroupsCache);
+      for (const entry of removedMsgs ?? []) {
+        if (entry.messageId) cache.delete(messageIdKey(entry.messageId));
+      }
       return {
         messagesByContact: msgMap,
         reactionsByContact: rxnMap,
-        reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
+        reactionGroupsCache: cache,
       };
     });
   },
 
   cleanup: () => {
+    storeGeneration++;
     get().cleanupFn?.();
     set({
       cleanupFn: null,
@@ -485,6 +540,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       reactionGroupsCache: new Map(),
       currentContactUserId: null,
       isInitializing: false,
+      optimisticallySentStoreIds: new Set<string>(),
     });
   },
 }));

@@ -266,6 +266,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       evmAddress: null,
       userProfile: null,
       encryptionKey: null,
+      provider: null,
       isLoading: false,
     };
   };
@@ -277,7 +278,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   // The SQL `userProfile.session` column and in-memory profile session
   // are left unchanged on this path: namespace writes transfer/detach the
   // blob, and the SQL column is only a legacy fallback for wa-sqlite data.
-  const createOnPersist = (_userId: string) => {
+  const createOnPersist = () => {
     return async (blob: Uint8Array, _key: EncryptionKey) => {
       const sdk = getSdk();
       const current = get().userProfile;
@@ -321,7 +322,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     const { account, userIdBytes, evmAddress } =
       await deriveAccountFromMnemonic(mnemonic);
-    const userId = encodeUserId(userIdBytes);
 
     const sdk = getSdk();
     if (sdk.isSecureStorage && provisionOpts.useBiometrics) {
@@ -385,7 +385,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     await sdk.openSession({
       mnemonic,
       encryptionKey,
-      onPersist: createOnPersist(userId),
+      onPersist: createOnPersist(),
       // Don't poll during onboarding — we may open the session just to
       // write the profile and then close it again to create another
       // account in a different slot. Polling is re-enabled on the real
@@ -570,7 +570,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           mnemonic,
           encryptedSession,
           encryptionKey,
-          onPersist: createOnPersist(profile.userId),
+          onPersist: createOnPersist(),
         });
 
         const lastSeen = new Date();
@@ -845,11 +845,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           },
         };
 
-        await getSdk().profiles.save({
-          ...updatedProfile,
-          updatedAt: new Date(),
-        });
-        set({ userProfile: updatedProfile });
+        const savedProfile = { ...updatedProfile, updatedAt: new Date() };
+        await getSdk().profiles.save(savedProfile);
+        set({ userProfile: savedProfile });
       } catch (error) {
         logger.error('Error marking mnemonic backup as complete:', error);
         throw error;
@@ -1006,6 +1004,10 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
         state.account
       );
 
+      // The account may have changed (logout / account switch) while the
+      // provider was being created — don't attach a provider bound to a
+      // stale account.
+      if (useAccountStoreBase.getState().account !== state.account) return;
       useAccountStoreBase.setState({ provider });
     } else {
       useAccountStoreBase.setState({ provider: null });

@@ -136,9 +136,16 @@ const useWalletStoreBase = create<WalletStoreState>((set, get) => ({
       const valueUsd = priceUsd != null ? balanceWhole * priceUsd : null;
 
       const updated: TokenState = { ...token, balance, priceUsd, valueUsd };
-      const next = tokens.slice();
-      next[tokenIndex] = updated;
-      set({ tokens: next });
+      // Functional update: a concurrent refreshBalances() may have replaced
+      // the array since we captured it above — don't clobber its result.
+      set(state => {
+        const next = state.tokens.slice();
+        if (!next[tokenIndex] || next[tokenIndex].ticker !== token.ticker) {
+          return state;
+        }
+        next[tokenIndex] = updated;
+        return { tokens: next };
+      });
     } catch (error) {
       logger.error('Error refreshing token balance:', error);
     }

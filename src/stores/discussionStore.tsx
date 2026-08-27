@@ -20,8 +20,6 @@ interface DiscussionStoreState {
   filter: DiscussionFilter;
 
   init: () => void;
-  getDiscussionsForContact: (contactUserId: string) => Discussion[];
-  getDiscussionsByStatus: (status: SessionStatus[]) => Discussion[];
   cleanup: () => void;
   setModalOpen: (discussionId: number, isOpen: boolean) => void;
   isModalOpen: (discussionId: number) => boolean;
@@ -46,9 +44,12 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
     set({ isInitializing: true });
 
+    // Set by cleanup() so an in-flight fetch can't repopulate the store
+    // with the previous account's data after logout.
+    let disposed = false;
     let isFetching = false;
     const fetchData = async () => {
-      if (isFetching) return;
+      if (isFetching || disposed) return;
       isFetching = true;
       try {
         const sdk = getSdk();
@@ -58,6 +59,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         const discussionsList = isSessionOpen
           ? await sdk.discussions.list()
           : [];
+        if (disposed) return;
 
         // Initialize sessionsStatuses map if empty
         if (isSessionOpen && get().sessionsStatuses.size === 0) {
@@ -72,31 +74,28 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           set({ sessionsStatuses: statusMap });
         }
 
-        // Sort discussions
+        // Sort discussions. Snapshot the statuses once instead of re-reading
+        // the store inside the comparator (O(n log n) store reads otherwise).
+        const statuses = get().sessionsStatuses;
+        const isRequested = (status: SessionStatus | undefined): boolean =>
+          status === SessionStatus.SelfRequested ||
+          status === SessionStatus.PeerRequested;
+
         const getActivityTime = (discussion: Discussion): number => {
           if (discussion.lastMessageTimestamp) {
             return discussion.lastMessageTimestamp.getTime();
           }
-          const status = get().sessionsStatuses.get(discussion.contactUserId);
-          if (
-            status &&
-            [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
-              status
-            ) &&
-            discussion.updatedAt
-          ) {
+          const status = statuses.get(discussion.contactUserId);
+          if (isRequested(status) && discussion.updatedAt) {
             return discussion.updatedAt.getTime();
           }
           return discussion.createdAt.getTime();
         };
 
-        const getStatusPriority = (status: SessionStatus): number => {
-          if (
-            [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
-              status
-            )
-          )
-            return 0;
+        const getStatusPriority = (
+          status: SessionStatus | undefined
+        ): number => {
+          if (isRequested(status)) return 0;
           if (status === SessionStatus.Active) return 1;
           return 2;
         };
@@ -104,14 +103,15 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         const getPinnedPriority = (discussion: Discussion): number =>
           discussion.pinned ? 0 : 1;
 
-        const sortedDiscussions = discussionsList.sort((a, b) => {
+        // Sort a copy — the SDK owns the array returned by list().
+        const sortedDiscussions = [...discussionsList].sort((a, b) => {
           const pinnedDiff = getPinnedPriority(a) - getPinnedPriority(b);
           if (pinnedDiff !== 0) return pinnedDiff;
 
           if (isSessionOpen) {
             const statusDiff =
-              getStatusPriority(get().sessionsStatuses.get(a.contactUserId)!) -
-              getStatusPriority(get().sessionsStatuses.get(b.contactUserId)!);
+              getStatusPriority(statuses.get(a.contactUserId)) -
+              getStatusPriority(statuses.get(b.contactUserId));
             if (statusDiff !== 0) return statusDiff;
           }
 
@@ -140,6 +140,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         if (isSessionOpen) {
           contactsList = await sdk.contacts.list();
         }
+        if (disposed) return;
 
         set({
           discussions: sortedDiscussions,
@@ -157,28 +158,17 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     fetchData();
 
     const sdk = getSdk();
-    const cleanupFn = createDiscussionEventHandlers(sdk, set, fetchData);
+    const removeEventHandlers = createDiscussionEventHandlers(
+      sdk,
+      set,
+      fetchData
+    );
+    const cleanupFn = () => {
+      disposed = true;
+      removeEventHandlers();
+    };
 
     set({ cleanupFn, isInitializing: false });
-  },
-
-  getDiscussionsForContact: (contactUserId: string) => {
-    const ownerUserId = useAccountStore.getState().userProfile?.userId;
-    if (!ownerUserId) return [];
-    return get().discussions.filter(
-      discussion => discussion.contactUserId === contactUserId
-    );
-  },
-
-  getDiscussionsByStatus: (status: SessionStatus[]) => {
-    const ownerUserId = useAccountStore.getState().userProfile?.userId;
-    if (!ownerUserId) return [];
-    if (!getSdk().isSessionOpen) return [];
-    return get().discussions.filter(discussion => {
-      return status.includes(
-        getSdk().discussions.getStatus(discussion.contactUserId)
-      );
-    });
   },
 
   cleanup: () => {

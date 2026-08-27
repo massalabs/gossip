@@ -23,7 +23,6 @@ export const messageIdEquals = (
 
 export const messageIdKey = (id: Uint8Array): string => id.join(',');
 
-export const EMPTY_MESSAGES: Message[] = [];
 /** Empty list for `reactionsByContact` entries (`StoreMessage[]`). */
 export const EMPTY_STORE_MESSAGES: StoreMessage[] = [];
 export const EMPTY_REACTIONS: ReactionGroup[] = [];
@@ -235,21 +234,6 @@ export function replaceOptimisticWithPersisted(
     // optimistic → persisted transition (prevents a bubble unmount/remount).
     updated[idx] = { ...persisted, storeId };
     return updated;
-  });
-}
-
-export function rollbackInsert(
-  set: SetFn,
-  contactUserId: string,
-  message: Message
-) {
-  set(state => {
-    const map = patchContact(state.messagesByContact, contactUserId, msgs =>
-      [...msgs, { ...message }].sort(
-        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
-      )
-    );
-    return map ? { messagesByContact: map } : state;
   });
 }
 
