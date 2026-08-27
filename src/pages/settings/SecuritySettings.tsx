@@ -3,8 +3,18 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
+import OptionBottomSheet from '../../components/ui/OptionBottomSheet';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
+
+const TIMEOUT_OPTIONS: { labelKey: string; value: number | null }[] = [
+  { labelKey: 'security.auto_lock_off', value: null },
+  { labelKey: 'security.auto_lock_1m', value: 60 },
+  { labelKey: 'security.auto_lock_5m', value: 300 },
+  { labelKey: 'security.auto_lock_15m', value: 900 },
+  { labelKey: 'security.auto_lock_30m', value: 1800 },
+  { labelKey: 'security.auto_lock_1h', value: 3600 },
+];
 
 const SecuritySettings: React.FC = () => {
   const { t } = useTranslation('settings');
@@ -14,22 +24,10 @@ const SecuritySettings: React.FC = () => {
 
   const [isTimeoutModalOpen, setIsTimeoutModalOpen] = useState(false);
 
-  const TIMEOUT_OPTIONS = useMemo(
-    () => [
-      { labelKey: 'security.auto_lock_off', value: null as number | null },
-      { labelKey: 'security.auto_lock_1m', value: 60 },
-      { labelKey: 'security.auto_lock_5m', value: 300 },
-      { labelKey: 'security.auto_lock_15m', value: 900 },
-      { labelKey: 'security.auto_lock_30m', value: 1800 },
-      { labelKey: 'security.auto_lock_1h', value: 3600 },
-    ],
-    []
-  );
-
   const timeoutLabel = useMemo(() => {
     const option = TIMEOUT_OPTIONS.find(o => o.value === autoLockTimeout);
     return option ? t(option.labelKey) : t('security.auto_lock_off');
-  }, [autoLockTimeout, t, TIMEOUT_OPTIONS]);
+  }, [autoLockTimeout, t]);
 
   const handleBack = () => {
     navigate(ROUTES.settings());
@@ -62,39 +60,20 @@ const SecuritySettings: React.FC = () => {
         </button>
       </div>
 
-      {isTimeoutModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
-          onClick={() => setIsTimeoutModalOpen(false)}
-        >
-          <div
-            className="bg-background w-full max-w-md rounded-t-2xl p-6 pb-8"
-            onClick={e => e.stopPropagation()}
-          >
-            <h3 className="text-base font-semibold text-foreground mb-4">
-              {t('security.auto_lock_title')}
-            </h3>
-            <div className="flex flex-col gap-1">
-              {TIMEOUT_OPTIONS.map(option => (
-                <button
-                  key={String(option.value)}
-                  onClick={() => {
-                    setAutoLockTimeout(option.value);
-                    setIsTimeoutModalOpen(false);
-                  }}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
-                    autoLockTimeout === option.value
-                      ? 'bg-accent-soft text-accent-soft-foreground font-medium'
-                      : 'hover:bg-muted text-foreground'
-                  }`}
-                >
-                  {t(option.labelKey)}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      <OptionBottomSheet
+        isOpen={isTimeoutModalOpen}
+        title={t('security.auto_lock_title')}
+        options={TIMEOUT_OPTIONS.map(o => ({
+          label: t(o.labelKey),
+          value: o.value,
+        }))}
+        selectedValue={autoLockTimeout}
+        onSelect={value => {
+          setAutoLockTimeout(value);
+          setIsTimeoutModalOpen(false);
+        }}
+        onClose={() => setIsTimeoutModalOpen(false)}
+      />
     </PageLayout>
   );
 };

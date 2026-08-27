@@ -165,7 +165,7 @@ const Discussions: React.FC = () => {
   const menuItems: MenuItem[] = useMemo(
     () => [
       {
-        label: 'Settings',
+        label: t('settings:title'),
         icon: <Settings className="w-5 h-5" />,
         onClick: () => navigate(ROUTES.settings()),
       },

@@ -27,6 +27,8 @@ import { useManualRenewDiscussion } from '../hooks/useManualRenew';
 import type { Contact } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import toast from 'react-hot-toast';
+import OptionBottomSheet from '../components/ui/OptionBottomSheet';
+import { RETENTION_OPTIONS } from '../constants/retention';
 
 const DiscussionSettings: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -119,25 +121,12 @@ const DiscussionSettings: React.FC = () => {
     [gossip, discussion?.id]
   );
 
-  const RETENTION_OPTIONS = useMemo(
-    () => [
-      { labelKey: 'settings.auto_delete_off', value: null as number | null },
-      { labelKey: 'settings.auto_delete_5m', value: 300 },
-      { labelKey: 'settings.auto_delete_1h', value: 3600 },
-      { labelKey: 'settings.auto_delete_8h', value: 28800 },
-      { labelKey: 'settings.auto_delete_1d', value: 86400 },
-      { labelKey: 'settings.auto_delete_1w', value: 604800 },
-      { labelKey: 'settings.auto_delete_1mo', value: 2592000 },
-    ],
-    []
-  );
-
   const currentRetention = discussion?.messageRetentionDuration ?? null;
 
   const retentionLabel = useMemo(() => {
     const option = RETENTION_OPTIONS.find(o => o.value === currentRetention);
     return option ? t(option.labelKey) : t('settings.auto_delete_off');
-  }, [currentRetention, t, RETENTION_OPTIONS]);
+  }, [currentRetention, t]);
 
   const handleSelectRetention = useCallback(
     async (value: number | null) => {
@@ -342,36 +331,17 @@ const DiscussionSettings: React.FC = () => {
       </div>
 
       {/* Retention picker modal */}
-      {isRetentionModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
-          onClick={() => setIsRetentionModalOpen(false)}
-        >
-          <div
-            className="bg-background w-full max-w-md rounded-t-2xl p-6 pb-8"
-            onClick={e => e.stopPropagation()}
-          >
-            <h3 className="text-base font-semibold text-foreground mb-4">
-              {t('settings.auto_delete')}
-            </h3>
-            <div className="flex flex-col gap-1">
-              {RETENTION_OPTIONS.map(option => (
-                <button
-                  key={String(option.value)}
-                  onClick={() => handleSelectRetention(option.value)}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
-                    currentRetention === option.value
-                      ? 'bg-accent-soft text-accent-soft-foreground font-medium'
-                      : 'hover:bg-muted text-foreground'
-                  }`}
-                >
-                  {t(option.labelKey)}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      <OptionBottomSheet
+        isOpen={isRetentionModalOpen}
+        title={t('settings.auto_delete')}
+        options={RETENTION_OPTIONS.map(o => ({
+          label: t(o.labelKey),
+          value: o.value,
+        }))}
+        selectedValue={currentRetention}
+        onSelect={value => void handleSelectRetention(value)}
+        onClose={() => setIsRetentionModalOpen(false)}
+      />
 
       {/* Participants Section */}
       <div>

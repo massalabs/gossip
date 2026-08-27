@@ -27,25 +27,14 @@ import { useKeyboardStore } from '../stores/keyboardStore';
 import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
 import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useUiStore } from '../stores/uiStore';
+import OptionBottomSheet from '../components/ui/OptionBottomSheet';
+import { RETENTION_OPTIONS } from '../constants/retention';
 
 // Module-level guard so a given forward NAVIGATION is processed once across
 // remounts (StrictMode, route animation, back/forward nav). Keyed by the
 // navigation nonce, not the message id — forwarding the same message again
 // later is a new navigation and must work.
 const handledForwardNonces = new Set<number>();
-
-const RETENTION_OPTIONS: {
-  labelKey: string;
-  value: number | null;
-}[] = [
-  { labelKey: 'settings.auto_delete_off', value: null },
-  { labelKey: 'settings.auto_delete_5m', value: 300 },
-  { labelKey: 'settings.auto_delete_1h', value: 3600 },
-  { labelKey: 'settings.auto_delete_8h', value: 28800 },
-  { labelKey: 'settings.auto_delete_1d', value: 86400 },
-  { labelKey: 'settings.auto_delete_1w', value: 604800 },
-  { labelKey: 'settings.auto_delete_1mo', value: 2592000 },
-];
 
 const SelfDiscussion: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -221,39 +210,20 @@ const SelfDiscussion: React.FC = () => {
     </div>
   );
 
-  const retentionModal = isRetentionModalOpen ? (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
-      onClick={() => setIsRetentionModalOpen(false)}
-    >
-      <div
-        className="bg-background w-full max-w-md rounded-t-2xl p-6 pb-8"
-        onClick={e => e.stopPropagation()}
-      >
-        <h3 className="text-base font-semibold text-foreground mb-1">
-          {t('settings.auto_delete')}
-        </h3>
-        <p className="text-sm text-muted-foreground mb-4">
-          {t('settings.auto_delete_description')}
-        </p>
-        <div className="flex flex-col gap-1">
-          {RETENTION_OPTIONS.map(option => (
-            <button
-              key={String(option.value)}
-              onClick={() => void handleSelectRetention(option.value)}
-              className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
-                retentionDuration === option.value
-                  ? 'bg-accent-soft text-accent-soft-foreground font-medium'
-                  : 'hover:bg-muted text-foreground'
-              }`}
-            >
-              {t(option.labelKey)}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  ) : null;
+  const retentionModal = (
+    <OptionBottomSheet
+      isOpen={isRetentionModalOpen}
+      title={t('settings.auto_delete')}
+      description={t('settings.auto_delete_description')}
+      options={RETENTION_OPTIONS.map(o => ({
+        label: t(o.labelKey),
+        value: o.value,
+      }))}
+      selectedValue={retentionDuration}
+      onSelect={value => void handleSelectRetention(value)}
+      onClose={() => setIsRetentionModalOpen(false)}
+    />
+  );
 
   return (
     <DiscussionLayout

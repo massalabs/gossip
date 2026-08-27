@@ -5,7 +5,6 @@ import { BrowserRouter, useMatch } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
-// import PWABadge from './PWABadge.tsx';
 import { DebugConsole } from './components/ui/DebugConsole';
 import { Toaster } from 'react-hot-toast';
 
@@ -135,9 +134,6 @@ function App() {
           <AppUrlListener />
           <AppContent />
           <DebugConsole />
-          {/* <div className="hidden">
-            <PWABadge />
-          </div> */}
         </KeyboardAwareWrapper>
         <Toaster
           position="top-center"
