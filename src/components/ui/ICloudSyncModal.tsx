@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check, Info } from 'react-feather';
+import { useTranslation } from 'react-i18next';
 import BaseModal from './BaseModal';
 import Button from './Button';
 
@@ -14,6 +15,8 @@ const ICloudSyncModal: React.FC<ICloudSyncModalProps> = ({
   onClose,
   onConfirm,
 }) => {
+  const { t } = useTranslation('auth');
+
   const handleEnable = () => {
     onConfirm(true);
     onClose();
@@ -25,23 +28,20 @@ const ICloudSyncModal: React.FC<ICloudSyncModalProps> = ({
   };
 
   return (
-    <BaseModal isOpen={isOpen} onClose={onClose} title="iCloud Keychain Sync">
+    <BaseModal isOpen={isOpen} onClose={onClose} title={t('icloud_sync.title')}>
       <div className="space-y-4">
         <div className="space-y-3">
-          <p className="text-sm text-foreground">
-            Would you like to sync your account credentials with iCloud
-            Keychain?
-          </p>
+          <p className="text-sm text-foreground">{t('icloud_sync.question')}</p>
 
           <div className="bg-muted rounded-lg p-4 space-y-2">
             <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Check className="w-4 h-4 text-success" aria-hidden="true" />
-              Benefits
+              {t('icloud_sync.benefits_title')}
             </h4>
             <ul className="text-xs text-muted-foreground space-y-1 ml-6">
-              <li>• Access your account from all your Apple devices</li>
-              <li>• Automatic backup to iCloud</li>
-              <li>• Seamless sync across iPhone, iPad, and Mac</li>
+              <li>• {t('icloud_sync.benefit_devices')}</li>
+              <li>• {t('icloud_sync.benefit_backup')}</li>
+              <li>• {t('icloud_sync.benefit_sync')}</li>
             </ul>
           </div>
 
@@ -51,11 +51,10 @@ const ICloudSyncModal: React.FC<ICloudSyncModalProps> = ({
                 className="w-4 h-4 text-muted-foreground"
                 aria-hidden="true"
               />
-              Note
+              {t('icloud_sync.note_title')}
             </h4>
             <p className="text-xs text-muted-foreground">
-              iCloud Keychain must be enabled on your device for sync to work.
-              Your credentials are encrypted and secure.
+              {t('icloud_sync.note_body')}
             </p>
           </div>
         </div>
@@ -68,7 +67,7 @@ const ICloudSyncModal: React.FC<ICloudSyncModalProps> = ({
             fullWidth
             className="h-11 rounded-xl text-sm font-medium"
           >
-            Enable iCloud Sync
+            {t('icloud_sync.enable')}
           </Button>
           <Button
             onClick={handleDisable}
@@ -77,7 +76,7 @@ const ICloudSyncModal: React.FC<ICloudSyncModalProps> = ({
             fullWidth
             className="h-11 rounded-xl text-sm font-medium"
           >
-            Keep Local Only
+            {t('icloud_sync.keep_local')}
           </Button>
         </div>
       </div>

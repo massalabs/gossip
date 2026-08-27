@@ -1,5 +1,6 @@
 import React, { RefObject } from 'react';
 import { Upload } from 'react-feather';
+import { useTranslation } from 'react-i18next';
 import Button from '../ui/Button';
 
 interface ImportFileSectionProps {
@@ -13,6 +14,8 @@ const ImportFileSection: React.FC<ImportFileSectionProps> = ({
   onFileImport,
   isImporting,
 }) => {
+  const { t } = useTranslation('contacts');
+
   const handleButtonClick = () => {
     fileInputRef.current?.click();
   };
@@ -21,7 +24,7 @@ const ImportFileSection: React.FC<ImportFileSectionProps> = ({
     <div className="py-6 border-b border-border">
       <div className="text-center">
         <p className="text-sm text-muted-foreground mb-4">
-          Have a contact file?
+          {t('have_contact_file')}
         </p>
         <Button
           onClick={handleButtonClick}
@@ -30,7 +33,7 @@ const ImportFileSection: React.FC<ImportFileSectionProps> = ({
           className="inline-flex items-center gap-2"
         >
           <Upload className="w-5 h-5" aria-hidden="true" />
-          <span>Select file</span>
+          <span>{t('select_file')}</span>
         </Button>
         <input
           ref={fileInputRef}
@@ -39,7 +42,7 @@ const ImportFileSection: React.FC<ImportFileSectionProps> = ({
           className="hidden"
           onChange={onFileImport}
           disabled={isImporting}
-          aria-label="Import contact from YAML file"
+          aria-label={t('new_contact.import_file_aria')}
         />
       </div>
     </div>

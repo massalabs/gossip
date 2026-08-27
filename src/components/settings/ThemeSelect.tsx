@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Moon, Sun, Smartphone, Check, ChevronRight } from 'react-feather';
+import { useTranslation } from 'react-i18next';
 import BaseModal from '../ui/BaseModal';
 import { Theme } from '../../stores/uiStore';
 
@@ -20,12 +21,13 @@ const ThemeSelect: React.FC<ThemeSelectProps> = ({
   resolvedTheme,
   onThemeChange,
 }) => {
+  const { t } = useTranslation('settings');
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const themeOptions: ThemeOption[] = [
-    { id: 'light', label: 'Light', icon: Sun },
-    { id: 'dark', label: 'Dark', icon: Moon },
-    { id: 'system', label: 'System', icon: Smartphone },
+    { id: 'light', label: t('appearance.theme_light'), icon: Sun },
+    { id: 'dark', label: t('appearance.theme_dark'), icon: Moon },
+    { id: 'system', label: t('appearance.theme_system'), icon: Smartphone },
   ];
 
   const selectedTheme =
@@ -59,7 +61,7 @@ const ThemeSelect: React.FC<ThemeSelectProps> = ({
             </div>
             <div className="flex flex-col items-start flex-1 min-w-0">
               <span className="text-base font-normal text-foreground truncate w-full">
-                Theme
+                {t('appearance.theme')}
               </span>
               <span className="text-xs text-muted-foreground truncate w-full">
                 {selectedTheme.label}
@@ -74,7 +76,7 @@ const ThemeSelect: React.FC<ThemeSelectProps> = ({
       <BaseModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Select Theme"
+        title={t('appearance.select_theme')}
       >
         <div className="space-y-2">
           {themeOptions.map(option => {

@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.ts';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import {
@@ -21,6 +22,7 @@ const NATIVE_APP_OPEN_DELAY = 150; // Wait for DOM ready + layout
 const APP_SWITCH_DETECTION_DELAY = 300; // Time to detect if native app took over
 
 export const InvitePage: React.FC = () => {
+  const { t } = useTranslation();
   const { userId } = useParams<{ userId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -36,10 +38,10 @@ export const InvitePage: React.FC = () => {
 
   useEffect(() => {
     if (!userId) {
-      toast.error('Invalid invite');
+      toast.error(t('errors:invalid_invite'));
       navigate('/');
     }
-  }, [userId, navigate]);
+  }, [userId, navigate, t]);
 
   /**
    * Attempts to open the native app via button click.
@@ -148,11 +150,9 @@ export const InvitePage: React.FC = () => {
     } else {
       setIsOpeningApp(false);
       setAppOpenFailed(true);
-      toast.error(
-        'Could not open the app. You can continue in the web app instead.'
-      );
+      toast.error(t('invite.open_failed'));
     }
-  }, [userId, searchParams, tryOpenNativeApp]);
+  }, [userId, searchParams, tryOpenNativeApp, t]);
 
   /**
    * Handle continuing in web app
@@ -197,7 +197,9 @@ export const InvitePage: React.FC = () => {
 
   return (
     <PageLayout
-      header={<PageHeader title="Invite" onBack={() => navigate('/')} />}
+      header={
+        <PageHeader title={t('invite.title')} onBack={() => navigate('/')} />
+      }
       contentClassName="flex flex-col items-center justify-center px-6 py-8 sm:py-12 max-w-lg mx-auto"
     >
       <div className="w-full space-y-6 animate-fade-in">
@@ -207,12 +209,12 @@ export const InvitePage: React.FC = () => {
             <PrivacyGraphic size={120} className="py-4" />
           </div>
           <h2 className="text-2xl sm:text-3xl font-semibold text-foreground mb-3">
-            {appOpened ? 'Opening in App' : "You've been invited!"}
+            {appOpened ? t('invite.opening_title') : t('invite.invited_title')}
           </h2>
           <p className="text-muted-foreground text-base mb-8">
             {appOpened
-              ? "If the app didn't open, you can continue in the web app instead."
-              : 'Open this invite in the Gossip app to start chatting with your contact.'}
+              ? t('invite.opening_description')
+              : t('invite.invited_description')}
           </p>
 
           {/* Primary Actions */}
@@ -225,7 +227,7 @@ export const InvitePage: React.FC = () => {
                 size="lg"
                 className="rounded-full"
               >
-                Continue in Web App Instead
+                {t('invite.continue_web_instead')}
               </Button>
             ) : (
               <>
@@ -238,7 +240,7 @@ export const InvitePage: React.FC = () => {
                   size="lg"
                   className="font-semibold rounded-full"
                 >
-                  {isOpeningApp ? 'Opening...' : 'Open in App'}
+                  {isOpeningApp ? t('invite.opening') : t('invite.open_in_app')}
                 </Button>
 
                 <Button
@@ -248,7 +250,7 @@ export const InvitePage: React.FC = () => {
                   size="lg"
                   className="rounded-full"
                 >
-                  Continue in Web App
+                  {t('invite.continue_web')}
                 </Button>
               </>
             )}
@@ -263,7 +265,7 @@ export const InvitePage: React.FC = () => {
             size="md"
             className="rounded-full"
           >
-            Learn more about Gossip
+            {t('invite.learn_more')}
           </Button>
         </div>
       </div>

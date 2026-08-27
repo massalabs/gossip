@@ -20,5 +20,23 @@
   "copied_to_clipboard": "Copied to clipboard!",
   "contact_name": "Contact name",
   "enter_name": "Enter a name",
-  "introduce_yourself": "Introduce yourself or add context to your contact request..."
+  "introduce_yourself": "Introduce yourself or add context to your contact request...",
+  "navigation": {
+    "label": "Main navigation",
+    "discussions": "Discussions",
+    "settings": "Settings"
+  },
+  "invite": {
+    "title": "Invite",
+    "opening_title": "Opening in App",
+    "invited_title": "You've been invited!",
+    "opening_description": "If the app didn't open, you can continue in the web app instead.",
+    "invited_description": "Open this invite in the Gossip app to start chatting with your contact.",
+    "open_in_app": "Open in App",
+    "opening": "Opening...",
+    "continue_web": "Continue in Web App",
+    "continue_web_instead": "Continue in Web App Instead",
+    "open_failed": "Could not open the app. You can continue in the web app instead.",
+    "learn_more": "Learn more about Gossip"
+  }
 }

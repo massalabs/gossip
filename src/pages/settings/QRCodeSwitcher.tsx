@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Camera } from 'react-feather';
 import ShareContact from '../../components/settings/ShareContact';
 import ScanQRCode from '../../components/settings/ScanQRCode';
@@ -14,6 +15,7 @@ import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
 
 const QRCodeSwitcher: React.FC = () => {
+  const { t } = useTranslation('settings');
   const gossip = useGossipSdk();
   const navigate = useNavigate();
   const { signalReady } = useOverlayReady();
@@ -64,14 +66,14 @@ const QRCodeSwitcher: React.FC = () => {
       <PageLayout
         header={
           <PageHeader
-            title="Share Contact"
+            title={t('menu.share_contact')}
             onBack={handleBack}
             rightAction={
               <Button
                 variant="circular"
                 size="custom"
                 onClick={() => setShowScanner(true)}
-                ariaLabel="Scan QR code"
+                ariaLabel={t('contacts:new_contact.scan_qr')}
                 className="w-9 h-9 bg-accent hover:bg-accent/80 flex items-center justify-center"
               >
                 <Camera className="w-5 h-5 text-accent-foreground" />

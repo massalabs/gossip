@@ -26,6 +26,12 @@
     "confirm": "确定要删除此账户吗？",
     "warning": "此操作无法撤销"
   },
+  "delete_session": {
+    "title": "删除当前会话",
+    "warning": "注意：删除当前会话是不可逆的操作",
+    "popover": "如果设备上有其他会话，它们不会被删除",
+    "confirm": "删除会话"
+  },
   "edit_username_modal": {
     "title": "修改用户名",
     "placeholder": "输入用户名",
@@ -43,7 +49,14 @@
     "qr_alt": "您的联系方式二维码"
   },
   "appearance": {
-    "title": "外观"
+    "title": "外观",
+    "theme": "主题",
+    "select_theme": "选择主题",
+    "theme_light": "浅色",
+    "theme_dark": "深色",
+    "theme_system": "跟随系统",
+    "bottom_nav": "底部导航栏",
+    "toggle_bottom_nav": "开关底部导航栏"
   },
   "about": {
     "title": "关于",

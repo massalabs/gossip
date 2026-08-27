@@ -26,6 +26,12 @@
     "confirm": "Are you sure you want to delete this account?",
     "warning": "This action cannot be undone"
   },
+  "delete_session": {
+    "title": "Delete current session",
+    "warning": "Attention: Deleting current Session is an irreversible action",
+    "popover": "If other sessions on the device, they will not be deleted",
+    "confirm": "Delete session"
+  },
   "edit_username_modal": {
     "title": "Edit Username",
     "placeholder": "Enter username",
@@ -43,7 +49,14 @@
     "qr_alt": "Your contact QR code"
   },
   "appearance": {
-    "title": "Appearance"
+    "title": "Appearance",
+    "theme": "Theme",
+    "select_theme": "Select Theme",
+    "theme_light": "Light",
+    "theme_dark": "Dark",
+    "theme_system": "System",
+    "bottom_nav": "Bottom navigation bar",
+    "toggle_bottom_nav": "Toggle bottom navigation bar"
   },
   "about": {
     "title": "About",
