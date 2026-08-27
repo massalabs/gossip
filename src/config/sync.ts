@@ -27,13 +27,6 @@ export interface SyncConfig {
    * Recommended: 5-15 minutes
    */
   fallbackSyncIntervalMs: number;
-
-  /**
-   * Interval for sync when app is open and active (in milliseconds)
-   * Much more aggressive since the app is actively being used
-   * Recommended: 10-30 seconds for responsive updates
-   */
-  activeSyncIntervalMs: number;
 }
 
 export const defaultSyncConfig: SyncConfig = {
@@ -43,8 +36,4 @@ export const defaultSyncConfig: SyncConfig = {
   // Fallback timer interval when app is in background (5 minutes)
   // On mobile, service workers may be terminated, so this is less reliable
   fallbackSyncIntervalMs: 5 * 60 * 1000, // 5 minutes
-
-  // Aggressive sync interval when app is open and active (10 seconds)
-  // Much more responsive when user is actively using the app
-  activeSyncIntervalMs: 2 * 1000, // 2 seconds
 };

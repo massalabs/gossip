@@ -42,16 +42,16 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   gossip.on(
     SdkEventType.SESSION_REQUESTED,
     async ({ contact }: { discussion: Discussion; contact: Contact }) => {
-      const foreground = await isAppInForeground();
-      if (!foreground) {
-        try {
-          await notificationService.showNewDiscussionNotification();
-          logger.info('[SDK Event] New discussion request notification shown', {
-            contactUserId: contact.userId,
-          });
-        } catch (error) {
-          logger.error('[SDK Event] Failed to show notification:', error);
-        }
+      try {
+        const foreground = await isAppInForeground();
+        if (foreground) return;
+
+        await notificationService.showNewDiscussionNotification();
+        logger.info('[SDK Event] New discussion request notification shown', {
+          contactUserId: contact.userId,
+        });
+      } catch (error) {
+        logger.error('[SDK Event] Failed to show notification:', error);
       }
     }
   );
@@ -67,10 +67,10 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     const currentContact = useMessageStore.getState().currentContactUserId;
     if (currentContact === message.contactUserId) return;
 
-    const foreground = await isAppInForeground();
-    if (foreground) return;
-
     try {
+      const foreground = await isAppInForeground();
+      if (foreground) return;
+
       const { discussions } = useDiscussionStore.getState();
       const discussion = discussions.find(
         d => d.contactUserId === message.contactUserId

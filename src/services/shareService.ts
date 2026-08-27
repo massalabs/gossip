@@ -106,6 +106,8 @@ async function shareFileViaNative(
   }
 }
 
+const DOWNLOAD_BLOB_URL_REVOKE_DELAY_MS = 10_000;
+
 function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   try {
@@ -117,7 +119,11 @@ function downloadBlob(blob: Blob, fileName: string): void {
     a.click();
     a.remove();
   } finally {
-    URL.revokeObjectURL(url);
+    // Revoking synchronously after click() can abort the download in Firefox,
+    // so delay the revoke to give the download time to start
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, DOWNLOAD_BLOB_URL_REVOKE_DELAY_MS);
   }
 }
 

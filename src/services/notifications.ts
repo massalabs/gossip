@@ -72,6 +72,19 @@ export class NotificationService {
       return;
     }
 
+    await this.refreshNativePermissionStatus();
+  }
+
+  /**
+   * Refresh the native notification permission status from the OS,
+   * bypassing the one-time initialization flag. Best-effort; errors are
+   * logged and the last known state is kept.
+   */
+  private async refreshNativePermissionStatus(): Promise<void> {
+    if (!this.isNativePlatform()) {
+      return;
+    }
+
     try {
       const status: LocalNotificationPermissionStatus =
         await LocalNotifications.checkPermissions();
@@ -127,21 +140,41 @@ export class NotificationService {
   }
 
   /**
-   * Check if service worker is available and ready
-   * @returns Promise resolving to service worker controller if available
+   * Wait for the service worker registration to be ready, with a timeout.
+   * `navigator.serviceWorker.ready` can pend forever if registration failed,
+   * so race it against a timeout and let callers fall back to the non-SW path.
+   * @param timeoutMs - Maximum time to wait for the service worker (default 3s)
+   * @returns Promise resolving to the registration, or null if unavailable
    */
-  private async getServiceWorkerController(): Promise<ServiceWorker | null> {
+  private async getServiceWorkerRegistration(
+    timeoutMs: number = 3000
+  ): Promise<ServiceWorkerRegistration | null> {
     if (!('serviceWorker' in navigator)) {
       return null;
     }
 
     try {
-      // Wait for service worker to be ready
-      await navigator.serviceWorker.ready;
-      return navigator.serviceWorker.controller;
+      return await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise<null>(resolve =>
+          setTimeout(() => resolve(null), timeoutMs)
+        ),
+      ]);
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Check if service worker is available and ready
+   * @returns Promise resolving to service worker controller if available
+   */
+  private async getServiceWorkerController(): Promise<ServiceWorker | null> {
+    const registration = await this.getServiceWorkerRegistration();
+    if (!registration) {
+      return null;
+    }
+    return navigator.serviceWorker.controller;
   }
 
   /**
@@ -267,6 +300,14 @@ export class NotificationService {
         ],
       });
     } catch (error) {
+      // The `Notification` constructor doesn't exist in iOS/Android WebViews,
+      // so the browser-based fallback would always throw on native platforms.
+      // Only fall back when not running natively; otherwise just log.
+      if (this.isNativePlatform()) {
+        logger.error('Failed to show native notification:', error);
+        return;
+      }
+
       // If anything goes wrong, log and fall back to browser-based notification
       logger.error(
         'Failed to show native notification, falling back to web notification:',
@@ -461,7 +502,7 @@ export class NotificationService {
   getPermissionStatus(): NotificationPermission {
     if (this.isNativePlatform()) {
       // Kick off async sync with native permission state; return last known state.
-      void this.initNativePermissionStatus();
+      void this.refreshNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }
@@ -475,7 +516,7 @@ export class NotificationService {
   getPreferences(): NotificationPreferences {
     if (this.isNativePlatform()) {
       // Kick off async sync with native permission state; return last known state.
-      void this.initNativePermissionStatus();
+      void this.refreshNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }
@@ -493,8 +534,7 @@ export class NotificationService {
   async fetchPreferences(): Promise<NotificationPreferences> {
     if (this.isNativePlatform()) {
       // Force a fresh read so the returned state reflects the real OS status.
-      this.nativePermissionInitialized = false;
-      await this.initNativePermissionStatus();
+      await this.refreshNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }
@@ -579,9 +619,24 @@ export class NotificationService {
    * Clear all notifications with Gossip tags
    */
   async clearAllNotifications(): Promise<void> {
+    // Native: service workers are not available in native WebViews, so clear
+    // delivered notifications via Capacitor LocalNotifications instead.
+    if (this.isNativePlatform()) {
+      try {
+        await LocalNotifications.removeAllDeliveredNotifications();
+      } catch (error) {
+        logger.error('Failed to clear native notifications:', error);
+      }
+      return;
+    }
+
     if ('serviceWorker' in navigator) {
       try {
-        const registration = await navigator.serviceWorker.ready;
+        const registration = await this.getServiceWorkerRegistration();
+        if (!registration) {
+          // Service worker not ready (or timed out) - nothing to clear
+          return;
+        }
         const notifications = await registration.getNotifications();
         notifications.forEach(notification => {
           notification.close();
