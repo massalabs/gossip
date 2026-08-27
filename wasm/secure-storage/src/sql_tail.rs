@@ -90,7 +90,10 @@ fn consume_ignorable(mut input: &[u8], allow_empty_statements: bool) -> Option<(
             continue;
         }
         if input.starts_with(b"/*") {
-            let end = input[2..].windows(2).position(|pair| pair == b"*/")?;
+            let Some(end) = input[2..].windows(2).position(|pair| pair == b"*/") else {
+                // SQLite treats end-of-input as terminating a block comment.
+                return Some(());
+            };
             input = &input[end + 4..];
             continue;
         }
@@ -99,7 +102,7 @@ fn consume_ignorable(mut input: &[u8], allow_empty_statements: bool) -> Option<(
 }
 
 /// Return whether a prepared statement's uncompiled tail contains only
-/// whitespace and complete SQL comments.
+/// whitespace and SQL comments, including block comments terminated by EOF.
 pub(crate) fn is_ignorable(tail: &[u8]) -> bool {
     consume_ignorable(tail, false).is_some()
 }
@@ -178,7 +181,7 @@ mod tests {
         assert!(!is_ignorable(b"-- trace\r\nSELECT is executable"));
         assert!(!is_ignorable(b" SELECT 1"));
         assert!(!is_ignorable(b";"));
-        assert!(!is_ignorable(b"/* unterminated"));
+        assert!(is_ignorable(b"/* terminated by EOF"));
     }
 
     #[test]
@@ -217,6 +220,11 @@ mod tests {
 
     #[test]
     fn rejects_empty_prefixes_and_a_complete_statement_tail() {
+        assert_eq!(
+            validate("UPDATE t SET value = 1; /* terminated by EOF", |_| true),
+            Ok("UPDATE t SET value = 1; /* terminated by EOF")
+        );
+
         let complete =
             |candidate: &CStr| matches!(candidate.to_bytes(), b";" | b";;" | b";; SELECT 1;");
         assert_eq!(

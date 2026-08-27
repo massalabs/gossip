@@ -109,6 +109,8 @@ interface DbState {
     run<T>(inTransaction: boolean, fn: () => Promise<T>): Promise<T>;
     getStore(): boolean;
   } | null;
+  /** Number of active public transaction callbacks on this connection. */
+  transactionCallbackDepth: number;
   /**
    * Open-transaction depth, maintained by inspecting the SQL stream in
    * `execRawDirect`. Both `withTransaction` (issues BEGIN/COMMIT directly)
@@ -141,6 +143,7 @@ function createDefaultState(): DbState {
     drizzleDb: null,
     dbLock: Promise.resolve(),
     txScopeGuard: null,
+    transactionCallbackDepth: 0,
     txDepth: 0,
     secureProxy: null,
     nativePlugin: null,
@@ -623,6 +626,7 @@ export class DatabaseConnection {
   }
 
   async secureStorageProvision(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.storageState !== 'empty') {
       return;
     }
@@ -634,6 +638,7 @@ export class DatabaseConnection {
   }
 
   async secureStorageCreate(slot: number, password: string): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (!Number.isInteger(slot) || slot < 0 || slot >= SESSION_COUNT) {
       throw new Error(
         `secureStorageCreate: slot must be an integer in [0, ${SESSION_COUNT - 1}], got ${slot}`
@@ -700,6 +705,7 @@ export class DatabaseConnection {
   }
 
   async secureStorageUnlock(password: string): Promise<boolean> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (password.length === 0) {
       throw new Error('secureStorageUnlock: password cannot be empty');
     }
@@ -747,6 +753,7 @@ export class DatabaseConnection {
   }
 
   async secureStorageLock(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     // Flip user-visible state synchronously, before the worker await.
     // A concurrent `queries`/`profiles` access in the same event-loop
     // tick then sees `storageState === 'locked'` and throws the clean
@@ -783,6 +790,7 @@ export class DatabaseConnection {
    * in Rust.
    */
   async secureStorageDestroy(namespaces: number[]): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     this.state.drizzleDb = null;
     this.state.storageState = 'locked';
     try {
@@ -812,6 +820,7 @@ export class DatabaseConnection {
    * manual invocation is only useful for tests.
    */
   async secureStorageCoverTick(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().coverTrafficTick();
     } else {
@@ -820,6 +829,7 @@ export class DatabaseConnection {
   }
 
   async secureStorageFlush(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().flush();
     } else {
@@ -841,6 +851,7 @@ export class DatabaseConnection {
     offset: number,
     data: Uint8Array
   ): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().writeNamespaceData({
         namespace,
@@ -859,6 +870,7 @@ export class DatabaseConnection {
     offset: number,
     len: number
   ): Promise<Uint8Array> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       const { data } = await this.requireNativePlugin().readNamespaceData({
         namespace,
@@ -872,6 +884,7 @@ export class DatabaseConnection {
 
   /** Total bytes currently stored in a namespace stream (0 if empty). */
   async secureStorageNamespaceDataLength(namespace: number): Promise<number> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       const { length } = await this.requireNativePlugin().namespaceDataLength({
         namespace,
@@ -883,6 +896,7 @@ export class DatabaseConnection {
 
   /** Truncate a namespace stream to length 0. */
   async secureStorageClearNamespace(namespace: number): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().clearNamespace({ namespace });
       return;
@@ -901,6 +915,7 @@ export class DatabaseConnection {
     namespace: number,
     data: Uint8Array
   ): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().replaceNamespaceData({
         namespace,
@@ -1007,11 +1022,28 @@ export class DatabaseConnection {
   }
 
   private async runInTxScope<T>(fn: () => Promise<T>): Promise<T> {
-    const guard = this.state.txScopeGuard;
-    if (!guard) {
-      return fn();
+    this.state.transactionCallbackDepth++;
+    try {
+      const guard = this.state.txScopeGuard;
+      if (!guard) {
+        return await fn();
+      }
+      return await guard.run(true, fn);
+    } finally {
+      this.state.transactionCallbackDepth--;
     }
-    return guard.run(true, fn);
+  }
+
+  private assertNoSecureStorageOperationInTransactionCallback(): void {
+    if (this.state.transactionCallbackDepth > 0) {
+      // Autonomous worker cover traffic does not cross this connection API and
+      // remains queued behind transaction ownership. Reject only main-thread
+      // reentry, which would otherwise wait for a COMMIT that cannot run until
+      // the callback returns. The error deliberately exposes no storage state.
+      throw new Error(
+        'Secure storage operations are not allowed inside a transaction callback'
+      );
+    }
   }
 
   private async initTxScopeGuard(): Promise<void> {
@@ -1037,6 +1069,7 @@ export class DatabaseConnection {
   }
 
   async close(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin && this.state.nativePlugin) {
       await this.state.nativePlugin.close();
     } else if (this.state.secureProxy && this.state.worker) {

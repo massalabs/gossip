@@ -514,6 +514,28 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     );
   });
 
+  it('matches SQLite EOF block comments for durability and ownership', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+
+    await api.exec(
+      "UPDATE userProfile SET username = 'durable' /* terminated by EOF"
+    );
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledOnce();
+
+    await api.exec('BEGIN IMMEDIATE /* terminated by EOF');
+    const cover = api.cover();
+    await Promise.resolve();
+    expect(wasmMock.coverTrafficTick).not.toHaveBeenCalled();
+    await api.exec('ROLLBACK; /* terminated by EOF', [], true);
+    await cover;
+
+    expect(wasmMock.coverTrafficTick.mock.calls.map(([ns]) => ns)).toEqual(
+      COVER_TRAFFIC_NAMESPACES
+    );
+  });
+
   it('resets poisoned SQL state before releasing queued durable work', async () => {
     const { SecureStorageWorkerApi } =
       await import('../../src/db/secure-storage-worker-api');

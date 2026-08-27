@@ -12,7 +12,7 @@ export type StatementKind =
  * accepted execution, but exact transaction boundaries prevent a valid
  * savepoint rollback or multi-statement lookalike from releasing ownership.
  */
-function withoutSqlComments(sql: string): string | null {
+function withoutSqlComments(sql: string): string {
   let result = '';
   let quote: "'" | '"' | '`' | ']' | null = null;
 
@@ -58,9 +58,12 @@ function withoutSqlComments(sql: string): string | null {
     }
     if (character === '/' && next === '*') {
       const end = sql.indexOf('*/', index + 2);
-      if (end === -1) return null;
-      index = end + 1;
       result += ' ';
+      // SQLite treats end-of-input as terminating a block comment. Preserve
+      // that lexical rule so executed mutations and transaction boundaries
+      // cannot be misclassified merely because the final `*/` is absent.
+      if (end === -1) break;
+      index = end + 1;
       continue;
     }
     result += character;
@@ -71,7 +74,6 @@ function withoutSqlComments(sql: string): string | null {
 
 export function classifyStatement(sql: string): StatementKind {
   const uncommented = withoutSqlComments(sql);
-  if (uncommented === null) return 'other';
   // This ECMAScript trim is the canonical boundary-normalization contract.
   // The Rust validator mirrors its exact code-point set, rejects Rust-only
   // boundary whitespace, and rejects leading empty statements that this

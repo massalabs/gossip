@@ -788,6 +788,12 @@ mod tests {
             &[serde_json::json!(7)],
         )
         .unwrap();
+        exec_sql_one(
+            &conn,
+            "UPDATE tail_test SET value = 8 /* terminated by EOF",
+            &[],
+        )
+        .unwrap();
         exec_sql_one(&conn, "CREATE TABLE tail_audit (value TEXT)", &[]).unwrap();
         exec_sql_one(
             &conn,
@@ -797,10 +803,15 @@ mod tests {
             &[],
         )
         .unwrap();
-        exec_sql_one(&conn, "  UPDATE tail_test SET value = 8  ", &[]).unwrap();
+        exec_sql_one(
+            &conn,
+            "UPDATE tail_test SET value = 9; /* terminated by EOF",
+            &[],
+        )
+        .unwrap();
 
         let result = exec_sql_one(&conn, "SELECT value FROM tail_test", &[]).unwrap();
-        assert_eq!(result.rows, vec![vec![serde_json::json!(8)]]);
+        assert_eq!(result.rows, vec![vec![serde_json::json!(9)]]);
         let audit = exec_sql_one(&conn, "SELECT value FROM tail_audit", &[]).unwrap();
         assert_eq!(audit.rows, vec![vec![serde_json::json!("semi;colon")]]);
 
@@ -814,6 +825,11 @@ mod tests {
             carriage_return_comment.rows,
             vec![vec![serde_json::json!("quoted;value")]]
         );
+
+        exec_sql_one(&conn, "BEGIN IMMEDIATE /* terminated by EOF", &[]).unwrap();
+        assert!(!conn.is_autocommit());
+        exec_sql_one(&conn, "ROLLBACK; /* terminated by EOF", &[]).unwrap();
+        assert!(conn.is_autocommit());
     }
 
     #[test]

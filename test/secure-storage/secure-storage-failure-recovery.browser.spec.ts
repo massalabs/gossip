@@ -389,6 +389,40 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       )
     ).resolves.toMatchObject({ rows: [['durable single statement']] });
 
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+    });
+    await expect(
+      testProxy(connection).exec(
+        'UPDATE userProfile SET username = ? /* terminated by EOF',
+        ['rejected EOF-comment mutation']
+      )
+    ).rejects.toThrow();
+    await expect(
+      connection.db.select({ username: userProfile.username }).from(userProfile)
+    ).resolves.toEqual([{ username: 'durable single statement' }]);
+    await testProxy(connection).exec(
+      'UPDATE userProfile SET username = ?; /* terminated by EOF',
+      ['durable EOF-comment mutation']
+    );
+
+    await testProxy(connection).exec('BEGIN IMMEDIATE /* terminated by EOF');
+    let eofCoverSettled = false;
+    const eofCover = testProxy(connection)
+      .cover()
+      .then(() => {
+        eofCoverSettled = true;
+      });
+    await Promise.resolve();
+    expect(eofCoverSettled).toBe(false);
+    await testProxy(connection).exec(
+      'ROLLBACK; /* terminated by EOF',
+      [],
+      true
+    );
+    await eofCover;
+    expect(eofCoverSettled).toBe(true);
+
     const rawConnection = connection as unknown as {
       execRawDirect(sql: string, params?: unknown[]): Promise<unknown[][]>;
       state: { txDepth: number };
@@ -455,19 +489,19 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     });
 
     let coverSettled = false;
-    let lockSettled = false;
     let queuedCover!: Promise<void>;
-    let queuedLock!: Promise<void>;
     await connection.db.transaction(async outer => {
       await outer.update(userProfile).set({ username: 'durable outer value' });
       queuedCover = testProxy(connection).cover();
-      queuedLock = connection.secureStorageLock();
       void queuedCover.then(() => {
         coverSettled = true;
       });
-      void queuedLock.then(() => {
-        lockSettled = true;
-      });
+      await expect(connection.secureStorageFlush()).rejects.toThrow(
+        'Secure storage operations are not allowed inside a transaction callback'
+      );
+      await expect(connection.secureStorageLock()).rejects.toThrow(
+        'Secure storage operations are not allowed inside a transaction callback'
+      );
 
       await expect(
         outer.transaction(async inner => {
@@ -482,10 +516,9 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       ).resolves.toEqual([{ username: 'durable outer value' }]);
       await Promise.resolve();
       expect(coverSettled).toBe(false);
-      expect(lockSettled).toBe(false);
     });
     await queuedCover;
-    await queuedLock;
+    await connection.secureStorageLock();
 
     expect(await connection.secureStorageUnlock(password)).toBe(true);
     await expect(
