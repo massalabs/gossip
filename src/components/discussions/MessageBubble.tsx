@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { CornerUpLeft, ChevronDown } from 'react-feather';
 import { Message } from '@massalabs/gossip-sdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
+import LinkText from './LinkText';
 import CitedMessage, { type CitedMessageOriginal } from './CitedMessage';
 import MessageStatusIndicator from './MessageStatus';
 import ReactionBar from './ReactionBar';
@@ -13,46 +14,6 @@ import {
 } from './hooks/useSwipeToReply';
 
 const SWIPE_INDICATOR_MAX_WIDTH = 60;
-
-// ---------------------------------------------------------------------------
-// LinkText (inline helper — renders parsed text with clickable links)
-// ---------------------------------------------------------------------------
-
-function LinkText({
-  segments,
-  onLinkClick,
-  linkAriaLabel,
-}: {
-  segments: ReturnType<typeof parseLinks>;
-  onLinkClick: (e: React.MouseEvent<HTMLAnchorElement>) => void;
-  linkAriaLabel: (content: string) => string;
-}) {
-  return (
-    <>
-      {segments.map((segment, index) =>
-        segment.type === 'link' ? (
-          <a
-            key={index}
-            href={segment.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={onLinkClick}
-            aria-label={linkAriaLabel(segment.content)}
-            className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
-            style={{
-              textDecorationColor: 'currentColor',
-              textDecorationThickness: '1px',
-            }}
-          >
-            {segment.content}
-          </a>
-        ) : (
-          <span key={index}>{segment.content}</span>
-        )
-      )}
-    </>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Types

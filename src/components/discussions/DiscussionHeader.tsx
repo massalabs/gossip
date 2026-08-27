@@ -18,7 +18,6 @@ interface DiscussionHeaderProps {
   anyDiscussionId?: number | null;
   anyDiscussionRetentionDuration?: number | null;
   onBack?: () => void;
-  onSync?: () => void;
   onSearchToggle?: () => void;
   title?: string;
 }

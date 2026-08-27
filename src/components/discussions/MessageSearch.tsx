@@ -37,8 +37,8 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
   }, [query]);
 
   const navigateTo = useCallback(
-    (msg: Message) => {
-      if (msg.id != null) {
+    (msg: Message | undefined) => {
+      if (msg?.id != null) {
         onScrollToMessage(msg.id);
         onHighlightChange(msg.id);
       }
@@ -61,6 +61,9 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
       m.content.toLowerCase().includes(lowerQuery)
     );
     setMatches(found);
+    // Matches can shrink while searching (message deleted, retention purge):
+    // keep the cursor in range so the counter and prev/next stay valid.
+    setCurrentIndex(i => Math.min(i, Math.max(0, found.length - 1)));
 
     // Only auto-navigate when the query changed, not on message updates
     if (debouncedQuery !== prevQueryRef.current) {

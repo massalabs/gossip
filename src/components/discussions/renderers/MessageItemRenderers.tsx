@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Clock } from 'react-feather';
 import { DiscussionDirection } from '@massalabs/gossip-sdk';
 import DateSeparator from '../DateSeparator';
+import LinkText from '../LinkText';
 import { parseLinks, openUrl } from '../../../utils/linkUtils';
 
 // =============================================================================
@@ -48,30 +49,13 @@ export const AnnouncementRenderer: React.FC<AnnouncementRendererProps> = ({
           {t('announcement')}
         </p>
         <p className="whitespace-pre-wrap wrap-break-word">
-          {parsedLinks.map((segment, index) => {
-            if (segment.type === 'link') {
-              return (
-                <a
-                  key={index}
-                  href={segment.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={handleLinkClick}
-                  aria-label={t('message_item.link_opens_new_tab', {
-                    content: segment.content,
-                  })}
-                  className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
-                  style={{
-                    textDecorationColor: 'currentColor',
-                    textDecorationThickness: '1px',
-                  }}
-                >
-                  {segment.content}
-                </a>
-              );
+          <LinkText
+            segments={parsedLinks}
+            onLinkClick={handleLinkClick}
+            linkAriaLabel={content =>
+              t('message_item.link_opens_new_tab', { content })
             }
-            return <span key={index}>{segment.content}</span>;
-          })}
+          />
         </p>
       </div>
     </div>

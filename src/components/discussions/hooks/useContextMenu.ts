@@ -164,22 +164,24 @@ export function useContextMenu({
       });
     }
     return items;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    onReplyTo,
-    onForward,
-    onDelete,
-    isOutgoing,
-    isDeleted,
-    message.id,
-    message.content,
-  ]);
+  }, [onReplyTo, onForward, onDelete, onEdit, isOutgoing, isDeleted, message, t]);
 
-  return {
-    isContextMenuOpen,
-    openContextMenu,
-    closeContextMenu,
-    contextMenuItems,
-    handleContextMenu,
-  };
+  // Stable object so consumers can safely use the hook result in dep arrays
+  // (and memoized children don't see a new prop identity every render).
+  return useMemo(
+    () => ({
+      isContextMenuOpen,
+      openContextMenu,
+      closeContextMenu,
+      contextMenuItems,
+      handleContextMenu,
+    }),
+    [
+      isContextMenuOpen,
+      openContextMenu,
+      closeContextMenu,
+      contextMenuItems,
+      handleContextMenu,
+    ]
+  );
 }

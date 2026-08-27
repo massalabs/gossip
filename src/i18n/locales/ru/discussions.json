@@ -34,7 +34,10 @@
     "pin_discussion": "Закрепить",
     "unpin_discussion": "Открепить",
     "edit_name": "Изменить имя",
-    "edit_name_title": "Изменить название чата"
+    "edit_name_title": "Изменить название чата",
+    "name_updated": "Имя обновлено",
+    "name_update_failed": "Не удалось обновить имя",
+    "pin_failed": "Не удалось закрепить чат"
   },
   "scroll_to_bottom": "К последним сообщениям",
   "search": {
@@ -83,7 +86,9 @@
     "auto_delete_8h": "8 часов",
     "auto_delete_1d": "1 день",
     "auto_delete_1w": "1 неделя",
-    "auto_delete_1mo": "1 месяц"
+    "auto_delete_1mo": "1 месяц",
+    "retention_update_failed": "Не удалось обновить настройку автоудаления",
+    "mute_update_failed": "Не удалось обновить настройку уведомлений"
   },
   "new_discussion": {
     "title": "Новый чат",
@@ -112,7 +117,14 @@
     "refuse": "Отклонить",
     "set_contact_name": "Задать имя контакта",
     "refuse_title": "Отклонить запрос на связь?",
-    "refuse_body": "При отклонении этот запрос на чат будет закрыт."
+    "refuse_body": "При отклонении этот запрос на чат будет закрыт.",
+    "sections": {
+      "discussions": "Обсуждения",
+      "contacts": "Контакты",
+      "pinned": "Закреплённые",
+      "pending": "Ожидающие",
+      "active": "Активные"
+    }
   },
   "empty": {
     "no_discussions": "Чатов пока нет",

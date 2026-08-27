@@ -32,9 +32,11 @@ export function useOriginalMessage({
     }
   }
 
-  // Reactive lookup in the store — picks up optimistic updates (e.g. delete)
+  // Reactive lookup in the store — picks up optimistic updates (e.g. delete).
+  // Messages that cite nothing select `undefined` so a store update doesn't
+  // re-render every plain message in the list.
   const storeMessages = useMessageStore(state =>
-    state.messagesByContact.get(originalContactUserId)
+    citedMsgId ? state.messagesByContact.get(originalContactUserId) : undefined
   );
   const storeMatch = useMemo(() => {
     if (!citedMsgId || !storeMessages) return undefined;
@@ -54,6 +56,9 @@ export function useOriginalMessage({
       setIsLoadingOriginal(true);
       setOriginalNotFound(false);
 
+      // Items are virtualized: a slow lookup can resolve after this row
+      // unmounted or switched to another message — drop the stale result.
+      let cancelled = false;
       const findMessage = async () => {
         try {
           const msg = await sdk.messages.findMessageByMsgId(
@@ -61,6 +66,7 @@ export function useOriginalMessage({
             message.ownerUserId,
             originalContactUserId
           );
+          if (cancelled) return;
 
           if (msg) {
             setDbOriginal(msg);
@@ -70,15 +76,19 @@ export function useOriginalMessage({
             setOriginalNotFound(true);
           }
         } catch (e) {
+          if (cancelled) return;
           logger.error('Error finding message by seeker:', e);
           setDbOriginal(null);
           setOriginalNotFound(true);
         } finally {
-          setIsLoadingOriginal(false);
+          if (!cancelled) setIsLoadingOriginal(false);
         }
       };
 
       findMessage();
+      return () => {
+        cancelled = true;
+      };
     } else if (message.replyTo || message.forwardOf) {
       setDbOriginal(null);
       setOriginalNotFound(true);
@@ -144,14 +154,28 @@ export function useOriginalMessage({
   const canNavigateToForwarded =
     !!originalMessage?.id && typeof onScrollToMessage === 'function';
 
-  return {
-    originalMessage,
-    isLoadingOriginal,
-    originalNotFound,
-    handleReplyContextClick,
-    handleReplyContextKeyDown,
-    parsedReplyLinks,
-    parsedForwardLinks,
-    canNavigateToForwarded,
-  };
+  // Stable object: this result is passed as a prop to the memoized
+  // MessageBubble — a fresh object every render would defeat its memo.
+  return useMemo(
+    () => ({
+      originalMessage,
+      isLoadingOriginal,
+      originalNotFound,
+      handleReplyContextClick,
+      handleReplyContextKeyDown,
+      parsedReplyLinks,
+      parsedForwardLinks,
+      canNavigateToForwarded,
+    }),
+    [
+      originalMessage,
+      isLoadingOriginal,
+      originalNotFound,
+      handleReplyContextClick,
+      handleReplyContextKeyDown,
+      parsedReplyLinks,
+      parsedForwardLinks,
+      canNavigateToForwarded,
+    ]
+  );
 }
