@@ -66,9 +66,7 @@
       "indexes": {
         "active_seekers_seeker_idx": {
           "name": "active_seekers_seeker_idx",
-          "columns": [
-            "seeker"
-          ],
+          "columns": ["seeker"],
           "isUnique": false
         }
       },
@@ -171,18 +169,12 @@
       "indexes": {
         "contacts_owner_user_idx": {
           "name": "contacts_owner_user_idx",
-          "columns": [
-            "ownerUserId",
-            "userId"
-          ],
+          "columns": ["ownerUserId", "userId"],
           "isUnique": false
         },
         "contacts_owner_name_idx": {
           "name": "contacts_owner_name_idx",
-          "columns": [
-            "ownerUserId",
-            "name"
-          ],
+          "columns": ["ownerUserId", "name"],
           "isUnique": false
         }
       },
@@ -371,10 +363,7 @@
       "indexes": {
         "discussions_owner_contact_idx": {
           "name": "discussions_owner_contact_idx",
-          "columns": [
-            "ownerUserId",
-            "contactUserId"
-          ],
+          "columns": ["ownerUserId", "contactUserId"],
           "isUnique": true
         }
       },
@@ -523,69 +512,42 @@
       "indexes": {
         "messages_owner_contact_idx": {
           "name": "messages_owner_contact_idx",
-          "columns": [
-            "ownerUserId",
-            "contactUserId"
-          ],
+          "columns": ["ownerUserId", "contactUserId"],
           "isUnique": false
         },
         "messages_owner_status_idx": {
           "name": "messages_owner_status_idx",
-          "columns": [
-            "ownerUserId",
-            "status"
-          ],
+          "columns": ["ownerUserId", "status"],
           "isUnique": false
         },
         "messages_owner_contact_status_idx": {
           "name": "messages_owner_contact_status_idx",
-          "columns": [
-            "ownerUserId",
-            "contactUserId",
-            "status"
-          ],
+          "columns": ["ownerUserId", "contactUserId", "status"],
           "isUnique": false
         },
         "messages_owner_seeker_idx": {
           "name": "messages_owner_seeker_idx",
-          "columns": [
-            "ownerUserId",
-            "seeker"
-          ],
+          "columns": ["ownerUserId", "seeker"],
           "isUnique": false
         },
         "messages_owner_contact_dir_idx": {
           "name": "messages_owner_contact_dir_idx",
-          "columns": [
-            "ownerUserId",
-            "contactUserId",
-            "direction"
-          ],
+          "columns": ["ownerUserId", "contactUserId", "direction"],
           "isUnique": false
         },
         "messages_owner_dir_status_idx": {
           "name": "messages_owner_dir_status_idx",
-          "columns": [
-            "ownerUserId",
-            "direction",
-            "status"
-          ],
+          "columns": ["ownerUserId", "direction", "status"],
           "isUnique": false
         },
         "messages_timestamp_idx": {
           "name": "messages_timestamp_idx",
-          "columns": [
-            "timestamp"
-          ],
+          "columns": ["timestamp"],
           "isUnique": false
         },
         "messages_owner_contact_msgid_idx": {
           "name": "messages_owner_contact_msgid_idx",
-          "columns": [
-            "ownerUserId",
-            "contactUserId",
-            "messageId"
-          ],
+          "columns": ["ownerUserId", "contactUserId", "messageId"],
           "isUnique": false
         }
       },
@@ -629,16 +591,12 @@
       "indexes": {
         "pending_announcements_announcement_idx": {
           "name": "pending_announcements_announcement_idx",
-          "columns": [
-            "announcement"
-          ],
+          "columns": ["announcement"],
           "isUnique": true
         },
         "pending_announcements_fetchedAt_idx": {
           "name": "pending_announcements_fetchedAt_idx",
-          "columns": [
-            "fetchedAt"
-          ],
+          "columns": ["fetchedAt"],
           "isUnique": false
         }
       },
@@ -682,16 +640,12 @@
       "indexes": {
         "pending_encrypted_seeker_idx": {
           "name": "pending_encrypted_seeker_idx",
-          "columns": [
-            "seeker"
-          ],
+          "columns": ["seeker"],
           "isUnique": false
         },
         "pending_encrypted_fetchedAt_idx": {
           "name": "pending_encrypted_fetchedAt_idx",
-          "columns": [
-            "fetchedAt"
-          ],
+          "columns": ["fetchedAt"],
           "isUnique": false
         }
       },
@@ -824,16 +778,12 @@
       "indexes": {
         "userProfile_username_idx": {
           "name": "userProfile_username_idx",
-          "columns": [
-            "username"
-          ],
+          "columns": ["username"],
           "isUnique": false
         },
         "userProfile_status_idx": {
           "name": "userProfile_status_idx",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         }
       },
