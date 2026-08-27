@@ -36,6 +36,13 @@ import {
 import type { LoadedImportedAccountPreview } from '../services/importedAccountPreviews';
 import { restartAfterPortableBackup } from '../services/portableBackup';
 import { useAppStore } from '../stores/appStore';
+import {
+  blockPortableImportAccountOutputs,
+  clearPortableImportCleanupPending,
+  markPortableImportCleanupPending,
+  runPortableImportPostCommitCleanup,
+  unblockPortableImportAccountOutputs,
+} from '../services/portableImportCleanup';
 
 interface PortableImportProps {
   onBack: () => void;
@@ -85,6 +92,8 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
   const operationGenerationRef = useRef(0);
   const runtimeStartedRef = useRef(false);
   const installPromiseRef = useRef<Promise<void> | null>(null);
+  const postCommitCleanupRef = useRef(false);
+  const outputUnblockRef = useRef(false);
   const platform = Capacitor.getPlatform();
   const nativePlatform = platform === 'android' || platform === 'ios';
   const supported = nativePlatform || canStreamBrowserImport();
@@ -109,10 +118,14 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
       } else if (phaseRef.current !== 'restart') {
         const coordinator = coordinatorRef.current;
         if (runtimeStartedRef.current) {
-          void coordinator
-            ?.cancel()
-            .catch(() => {})
-            .finally(() => restartAfterPortableBackup(ROUTES.default()));
+          if (coordinator) {
+            void coordinator
+              .cancel()
+              .catch(() => {})
+              .finally(() => restartAfterPortableBackup(ROUTES.default()));
+          } else {
+            restartAfterPortableBackup(ROUTES.default());
+          }
         } else {
           void coordinator?.cancel().catch(() => {});
         }
@@ -287,6 +300,36 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
 
   const cancel = useCallback(async () => {
     if (phase === 'installing') return;
+    if (outputUnblockRef.current) {
+      setBusy(true);
+      setError(null);
+      try {
+        await unblockPortableImportAccountOutputs();
+        clearPortableImportCleanupPending();
+        outputUnblockRef.current = false;
+        updatePhase('confirm');
+        setError(t('import.install_failed'));
+      } catch {
+        setError(t('import.cleanup_failed'));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (postCommitCleanupRef.current) {
+      setBusy(true);
+      setError(null);
+      try {
+        await runPortableImportPostCommitCleanup();
+        postCommitCleanupRef.current = false;
+        updatePhase('success');
+      } catch {
+        setError(t('import.cleanup_failed'));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     operationGenerationRef.current += 1;
     abortRef.current?.abort();
     const startupPending = busy && phase === 'idle';
@@ -341,9 +384,19 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
         });
         await updateNativeImportProtection(t('import.installing'));
       }
+      markPortableImportCleanupPending();
+      await blockPortableImportAccountOutputs();
       await coordinator.install();
       coordinatorRef.current = null;
-      nextPhase = 'success';
+      postCommitCleanupRef.current = true;
+      try {
+        await runPortableImportPostCommitCleanup();
+        postCommitCleanupRef.current = false;
+        nextPhase = 'success';
+      } catch {
+        nextPhase = 'cleanup';
+        nextError = t('import.cleanup_failed');
+      }
     } catch (caught) {
       if (
         caught instanceof Error &&
@@ -354,7 +407,36 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
         nextPhase = 'restart';
         nextError = t('import.terminal_failed');
       } else {
-        nextError = t('import.install_failed');
+        try {
+          if (await sdk.wasPortableImportInstalled()) {
+            await coordinator.finalizeAttestedInstallation();
+            coordinatorRef.current = null;
+            postCommitCleanupRef.current = true;
+            try {
+              await runPortableImportPostCommitCleanup();
+              postCommitCleanupRef.current = false;
+              nextPhase = 'success';
+            } catch {
+              nextPhase = 'cleanup';
+              nextError = t('import.cleanup_failed');
+            }
+          } else {
+            try {
+              await unblockPortableImportAccountOutputs();
+              clearPortableImportCleanupPending();
+              nextError = t('import.install_failed');
+            } catch {
+              outputUnblockRef.current = true;
+              nextPhase = 'cleanup';
+              nextError = t('import.cleanup_failed');
+            }
+          }
+        } catch {
+          coordinatorRef.current = null;
+          terminalFailure = true;
+          nextPhase = 'restart';
+          nextError = t('import.terminal_failed');
+        }
       }
     } finally {
       if (protectionAttempted) {
@@ -373,7 +455,7 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
         setBusy(false);
       }
     }
-  }, [busy, nativePlatform, previews.length, t, updatePhase]);
+  }, [busy, nativePlatform, previews.length, sdk, t, updatePhase]);
 
   const complete = useCallback(() => {
     useAppStore.getState().setIsInitialized(true);

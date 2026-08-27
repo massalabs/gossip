@@ -196,6 +196,18 @@ export class PortableImportCoordinator {
     });
   }
 
+  async finalizeAttestedInstallation(): Promise<void> {
+    // The backend marker proves the replacement committed even when the
+    // original install promise rejected during application-state release.
+    // Never abort that committed backend; only dispose secrets and retry the
+    // idempotent authority/lease finalization.
+    this.closed = true;
+    this.gate.active = false;
+    this.previews.dispose();
+    this.authorization.commitSuccess();
+    await this.authorization.release();
+  }
+
   async cancel(): Promise<void> {
     if (this.closed) return;
     if (this.installing) {

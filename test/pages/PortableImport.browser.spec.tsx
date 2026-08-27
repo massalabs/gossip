@@ -75,6 +75,14 @@ vi.mock('../../src/services/portableImportCoordinator', () => ({
   PortableImportCoordinator: { begin: mocks.begin },
 }));
 
+vi.mock('../../src/services/portableImportCleanup', () => ({
+  markPortableImportCleanupPending: vi.fn(),
+  blockPortableImportAccountOutputs: vi.fn().mockResolvedValue(undefined),
+  unblockPortableImportAccountOutputs: vi.fn().mockResolvedValue(undefined),
+  clearPortableImportCleanupPending: vi.fn(),
+  runPortableImportPostCommitCleanup: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../src/services/portableImportAuthorization', () => ({
   createOnboardingPortableImportAuthorization: () => ({
     claim: vi.fn().mockResolvedValue(undefined),

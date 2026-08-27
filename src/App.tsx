@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter, useMatch } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
+import { reconcileDebugLogsGeneration } from './stores/useDebugLogs';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
 // import PWABadge from './PWABadge.tsx';
 import { DebugConsole } from './components/ui/DebugConsole';
@@ -30,6 +31,10 @@ import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
 import PageLayout from './components/ui/Layout/PageLayout.tsx';
 import PortableBackupStartupGate from './components/PortableBackupStartupGate.tsx';
+import {
+  isPortableImportCleanupPending,
+  PORTABLE_IMPORT_CLEANUP_EVENT,
+} from './services/portableImportCleanup';
 
 export const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -100,6 +105,40 @@ export const AppContent: React.FC = () => {
   );
 };
 
+function CleanupGatedDebugConsole() {
+  const [blocked, setBlocked] = useState(true);
+  useEffect(() => {
+    let active = true;
+    let revision = 0;
+    const refresh = async () => {
+      const currentRevision = ++revision;
+      const pending = isPortableImportCleanupPending();
+      if (pending) {
+        if (active) setBlocked(true);
+        return;
+      }
+      await reconcileDebugLogsGeneration();
+      if (
+        active &&
+        currentRevision === revision &&
+        !isPortableImportCleanupPending()
+      ) {
+        setBlocked(false);
+      }
+    };
+    const handleRefresh = () => void refresh();
+    window.addEventListener(PORTABLE_IMPORT_CLEANUP_EVENT, handleRefresh);
+    window.addEventListener('storage', handleRefresh);
+    void refresh();
+    return () => {
+      active = false;
+      window.removeEventListener(PORTABLE_IMPORT_CLEANUP_EVENT, handleRefresh);
+      window.removeEventListener('storage', handleRefresh);
+    };
+  }, []);
+  return blocked ? null : <DebugConsole />;
+}
+
 function App() {
   const { initTheme } = useTheme();
   const { initOnlineStore } = useOnlineStore();
@@ -130,8 +169,8 @@ function App() {
           <AppUrlListener />
           <PortableBackupStartupGate>
             <AppContent />
+            <CleanupGatedDebugConsole />
           </PortableBackupStartupGate>
-          <DebugConsole />
           {/* <div className="hidden">
             <PWABadge />
           </div> */}

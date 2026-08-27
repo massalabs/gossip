@@ -29,6 +29,23 @@ import {
   getBiometricSalt,
 } from '../constants/biometric';
 
+export async function clearBiometricLoginCredential(): Promise<void> {
+  if (isNative) {
+    const locations =
+      Capacitor.getPlatform() === 'ios' ? [false, true] : [false];
+    const results = await Promise.allSettled(
+      locations.map(syncToICloud => removeNativePassword(syncToICloud))
+    );
+    if (results.some(result => result.status === 'rejected')) {
+      throw new Error('Failed to clear biometric login credential');
+    }
+    return;
+  }
+
+  localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
+  localStorage.removeItem(WEBAUTHN_PASSWORD_KEY);
+}
+
 export interface BiometricAvailability {
   available: boolean;
   biometryType?: 'fingerprint' | 'face' | 'none';

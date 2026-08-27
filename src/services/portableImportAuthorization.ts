@@ -206,12 +206,18 @@ export async function claimOnboardingStorageMode(
     const storage = durableStorage();
     const raw = storage?.getItem(ONBOARDING_MODE_KEY);
     if (raw === null || raw === undefined) return;
+    let storedOwner: unknown;
     try {
-      if ((JSON.parse(raw) as { owner?: unknown }).owner === owner) {
-        storage?.removeItem(ONBOARDING_MODE_KEY);
-      }
+      storedOwner = (JSON.parse(raw) as { owner?: unknown }).owner;
     } catch {
       // A malformed or foreign claim is never removed by this owner.
+      return;
+    }
+    if (storedOwner !== owner) return;
+    storage?.removeItem(ONBOARDING_MODE_KEY);
+    const remaining = storage?.getItem(ONBOARDING_MODE_KEY);
+    if (remaining !== null && remaining !== undefined) {
+      throw new Error('Onboarding storage ownership could not be released');
     }
   };
 
@@ -231,16 +237,19 @@ export async function claimOnboardingStorageMode(
         const released = new Promise<void>(resolve => {
           releaseLock = resolve;
         });
+        let releasedLease = false;
         const ownedLease: OnboardingStorageModeLease = {
           release: async () => {
+            if (releasedLease) return;
+            clearOwnedMode();
             releaseLock();
             await holding;
+            releasedLease = true;
           },
         };
         leaseOwners.set(ownedLease, { mode, owner });
         resolveLease(ownedLease);
         await released;
-        clearOwnedMode();
       }
     );
     void holding.catch(rejectLease);
@@ -261,9 +270,9 @@ export async function claimOnboardingStorageMode(
   const ownedLease: OnboardingStorageModeLease = {
     release: async () => {
       if (released) return;
-      released = true;
       clearOwnedMode();
       releaseMutex();
+      released = true;
     },
   };
   leaseOwners.set(ownedLease, { mode, owner });
@@ -337,8 +346,9 @@ export function createOnboardingPortableImportAuthorization(): PortableImportAut
     },
     release: async () => {
       const owned = lease;
-      lease = null;
-      await owned?.release();
+      if (!owned) return;
+      await owned.release();
+      if (lease === owned) lease = null;
     },
     isAuthorized: () => {
       if (!lease) return false;

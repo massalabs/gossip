@@ -9,7 +9,10 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const mocks = vi.hoisted(() => ({ list: vi.fn(), platform: 'android' }));
 
 vi.mock('@capacitor/core', () => ({
-  Capacitor: { getPlatform: () => mocks.platform },
+  Capacitor: {
+    getPlatform: () => mocks.platform,
+    isNativePlatform: () => mocks.platform !== 'web',
+  },
   registerPlugin: () => ({}),
 }));
 

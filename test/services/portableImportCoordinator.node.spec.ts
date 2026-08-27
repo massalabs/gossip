@@ -78,6 +78,31 @@ describe('PortableImportCoordinator', () => {
     expect(() => coordinator.list()).toThrow('closed');
   });
 
+  it('finalizes secrets and authority after an independently attested commit', async () => {
+    const h = harness();
+    vi.mocked(h.candidate.install).mockImplementation(async admitPasswords => {
+      await admitPasswords(async password => h.borrowed.push(password));
+      throw new Error('authority release failed');
+    });
+    const coordinator = await PortableImportCoordinator.begin(
+      h.sdk,
+      h.authorization
+    );
+    await coordinator.authenticate('attested-password');
+
+    await expect(coordinator.install()).rejects.toThrow(
+      'authority release failed'
+    );
+    await coordinator.finalizeAttestedInstallation();
+
+    expect(h.commitSuccess).toHaveBeenCalledOnce();
+    expect(h.release).toHaveBeenCalledOnce();
+    expect(Array.from(h.borrowed[0])).toEqual(
+      new Array('attested-password'.length).fill(0)
+    );
+    expect(() => coordinator.list()).toThrow('closed');
+  });
+
   it('retains accepted passwords for a retryable pre-commit failure', async () => {
     const h = harness();
     const installError = new Error('commit failed');
