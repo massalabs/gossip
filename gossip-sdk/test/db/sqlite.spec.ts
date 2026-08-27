@@ -1,3 +1,4 @@
+import * as Comlink from 'comlink';
 import { describe, expect, it, vi } from 'vitest';
 import {
   classifyStatement,
@@ -43,6 +44,140 @@ function lifecycleConnection(proxy: LifecycleProxy): DatabaseConnection {
   };
   return connection;
 }
+
+function portableConnection(state: Record<PropertyKey, unknown>) {
+  const connection = Object.create(
+    DatabaseConnection.prototype
+  ) as DatabaseConnection;
+  (connection as unknown as { state: Record<PropertyKey, unknown> }).state = {
+    storageState: 'locked',
+    portableTransferActive: false,
+    closeActive: false,
+    ...state,
+  };
+  return connection;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+describe('DatabaseConnection portable lifecycle fencing', () => {
+  it('keeps browser close retryable while an export is active', async () => {
+    const beginning = deferred<{ totalBytes: number }>();
+    const proxy = {
+      beginPortableExport: vi.fn(() => beginning.promise),
+      readPortableExportChunk: vi.fn().mockResolvedValue(null),
+      finishPortableExport: vi.fn().mockResolvedValue(undefined),
+      abortPortableTransfer: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      [Comlink.releaseProxy]: vi.fn(),
+    };
+    const worker = { terminate: vi.fn() };
+    const connection = portableConnection({
+      useNativePlugin: false,
+      secureProxy: proxy,
+      worker,
+    });
+
+    const exporting = connection.secureStorageExportPortableV1(() => {});
+    await expect(connection.close()).rejects.toThrow(
+      'Cannot close secure storage during portable transfer'
+    );
+    expect(proxy.close).not.toHaveBeenCalled();
+
+    beginning.resolve({ totalBytes: 0 });
+    await exporting;
+    await expect(connection.close()).resolves.toBeUndefined();
+    expect(proxy.close).toHaveBeenCalledOnce();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('keeps browser import retryable after a pending close fails', async () => {
+    const closing = deferred<void>();
+    const proxy = {
+      close: vi.fn(() => closing.promise),
+      beginPortableImport: vi.fn().mockResolvedValue(undefined),
+      abortPortableTransfer: vi.fn().mockResolvedValue(undefined),
+      [Comlink.releaseProxy]: vi.fn(),
+    };
+    const connection = portableConnection({
+      useNativePlugin: false,
+      secureProxy: proxy,
+      worker: { terminate: vi.fn() },
+    });
+
+    const closePromise = connection.close();
+    await expect(connection.secureStorageBeginPortableImport()).rejects.toThrow(
+      'Secure storage is closing'
+    );
+    expect(proxy.beginPortableImport).not.toHaveBeenCalled();
+
+    closing.reject(new Error('close failed'));
+    await expect(closePromise).rejects.toThrow('close failed');
+    await expect(
+      connection.secureStorageBeginPortableImport()
+    ).resolves.toBeUndefined();
+    await connection.secureStorageAbortPortableImport();
+    expect(proxy.beginPortableImport).toHaveBeenCalledOnce();
+  });
+
+  it('keeps native close retryable while an export is active', async () => {
+    const exporting = deferred<void>();
+    const plugin = {
+      exportPortableV1: vi.fn(() => exporting.promise),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const connection = portableConnection({
+      useNativePlugin: true,
+      nativePlugin: plugin,
+    });
+
+    const exportPromise = connection.secureStorageExportPortableV1(() => {});
+    await expect(connection.close()).rejects.toThrow(
+      'Cannot close secure storage during portable transfer'
+    );
+    expect(plugin.close).not.toHaveBeenCalled();
+
+    exporting.resolve();
+    await exportPromise;
+    await expect(connection.close()).resolves.toBeUndefined();
+    expect(plugin.close).toHaveBeenCalledOnce();
+  });
+
+  it('keeps native import retryable after a pending close fails', async () => {
+    const closing = deferred<void>();
+    const plugin = {
+      close: vi.fn(() => closing.promise),
+      beginPortableImport: vi.fn().mockResolvedValue(undefined),
+      abortPortableTransfer: vi.fn().mockResolvedValue(undefined),
+    };
+    const connection = portableConnection({
+      useNativePlugin: true,
+      nativePlugin: plugin,
+    });
+
+    const closePromise = connection.close();
+    await expect(connection.secureStorageBeginPortableImport()).rejects.toThrow(
+      'Secure storage is closing'
+    );
+    expect(plugin.beginPortableImport).not.toHaveBeenCalled();
+
+    closing.reject(new Error('close failed'));
+    await expect(closePromise).rejects.toThrow('close failed');
+    await expect(
+      connection.secureStorageBeginPortableImport()
+    ).resolves.toBeUndefined();
+    await connection.secureStorageAbortPortableImport();
+    expect(plugin.beginPortableImport).toHaveBeenCalledOnce();
+  });
+});
 
 describe('DatabaseConnection secure lifecycle recovery', () => {
   it('retains failed portable install ownership until cleanup succeeds', async () => {
