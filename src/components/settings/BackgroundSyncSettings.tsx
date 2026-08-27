@@ -70,20 +70,18 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
   const isAndroidNative = isNative && platform === 'android';
   const isIOSNative = isNative && platform === 'ios';
 
-  // Load status on mount
-  useEffect(() => {
-    if (!isNative) {
-      setIsLoading(false);
-      return;
-    }
-
-    const loadStatus = async () => {
+  // Shared status loader: `refresh` forces a re-query of native state
+  // instead of returning the possibly cached status
+  const fetchStatus = useCallback(
+    async (refresh: boolean) => {
       setIsLoading(true);
       try {
         if (isAndroidNative) {
           const [syncStatus, deviceReliabilityInfo, xiaomiCheck] =
             await Promise.all([
-              batteryOptimizationService.getStatus(),
+              refresh
+                ? batteryOptimizationService.refreshStatus()
+                : batteryOptimizationService.getStatus(),
               batteryOptimizationService.getDeviceReliabilityInfo(),
               batteryOptimizationService.isXiaomiDevice(),
             ]);
@@ -92,7 +90,9 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
           setDeviceInfo(deviceReliabilityInfo);
           setIsXiaomi(xiaomiCheck);
         } else if (isIOSNative) {
-          const status = await backgroundRefreshService.getFullStatus();
+          const status = refresh
+            ? await backgroundRefreshService.refreshStatus()
+            : await backgroundRefreshService.getFullStatus();
           setIosStatus(status);
         }
       } catch (error) {
@@ -100,10 +100,19 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
       } finally {
         setIsLoading(false);
       }
-    };
+    },
+    [isAndroidNative, isIOSNative]
+  );
 
-    void loadStatus();
-  }, [isNative, isAndroidNative, isIOSNative]);
+  // Load status on mount
+  useEffect(() => {
+    if (!isNative) {
+      setIsLoading(false);
+      return;
+    }
+
+    void fetchStatus(false);
+  }, [isNative, fetchStatus]);
 
   useEffect(() => {
     if (!isNative) return;
@@ -155,30 +164,8 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
   // Refresh status
   const handleRefresh = useCallback(async () => {
     if (!isNative) return;
-
-    setIsLoading(true);
-    try {
-      if (isAndroidNative) {
-        const [syncStatus, deviceReliabilityInfo, xiaomiCheck] =
-          await Promise.all([
-            batteryOptimizationService.refreshStatus(),
-            batteryOptimizationService.getDeviceReliabilityInfo(),
-            batteryOptimizationService.isXiaomiDevice(),
-          ]);
-
-        setAndroidStatus(syncStatus);
-        setDeviceInfo(deviceReliabilityInfo);
-        setIsXiaomi(xiaomiCheck);
-      } else if (isIOSNative) {
-        const status = await backgroundRefreshService.refreshStatus();
-        setIosStatus(status);
-      }
-    } catch (error) {
-      logger.error('Failed to refresh status:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isNative, isAndroidNative, isIOSNative]);
+    await fetchStatus(true);
+  }, [isNative, fetchStatus]);
 
   // Store listener handle in a ref to avoid cleanup issues with async setup
   const appStateListenerRef = useRef<PluginListenerHandle | null>(null);
@@ -187,9 +174,14 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
   useEffect(() => {
     if (!isNative) return;
 
+    let cancelled = false;
+    let refreshTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
     const refreshWithDelay = () => {
       // Delay to ensure native state is updated after returning from system settings
-      setTimeout(() => {
+      if (refreshTimeoutId) clearTimeout(refreshTimeoutId);
+      refreshTimeoutId = setTimeout(() => {
+        refreshTimeoutId = null;
         void handleRefresh();
       }, 1000);
     };
@@ -201,6 +193,11 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
             refreshWithDelay();
           }
         });
+        if (cancelled) {
+          // Cleanup already ran — remove the listener right away
+          void listener.remove();
+          return;
+        }
         appStateListenerRef.current = listener;
       } catch (error) {
         logger.error('Failed to setup app state listener:', error);
@@ -210,6 +207,11 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     void setupAppStateListener();
 
     return () => {
+      cancelled = true;
+      if (refreshTimeoutId) {
+        clearTimeout(refreshTimeoutId);
+        refreshTimeoutId = null;
+      }
       if (appStateListenerRef.current) {
         void appStateListenerRef.current.remove();
         appStateListenerRef.current = null;

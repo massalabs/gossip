@@ -41,6 +41,9 @@ export function useContactForm() {
 
   const publicKeysCache = useRef<Map<string, UserPublicKeys>>(new Map());
 
+  // Sequence counter so stale async lookups can't overwrite newer input
+  const requestSeqRef = useRef(0);
+
   const [name, setName] = useState<FieldState>({
     value: '',
     loading: false,
@@ -62,12 +65,15 @@ export function useContactForm() {
     string | undefined
   >(undefined);
 
-  // Sync customUsername with profile username when it becomes available
+  // Seed customUsername from the profile username once, when it first
+  // becomes available — never repopulate after the user edits/clears it
+  const customUsernameSeededRef = useRef(!!userProfile?.username);
   useEffect(() => {
-    if (userProfile?.username && !customUsername) {
+    if (userProfile?.username && !customUsernameSeededRef.current) {
+      customUsernameSeededRef.current = true;
       setCustomUsername(userProfile.username);
     }
-  }, [userProfile?.username, customUsername]);
+  }, [userProfile?.username]);
 
   const [publicKeys, setPublicKeys] = useState<UserPublicKeys | null>(null);
 
@@ -129,6 +135,7 @@ export function useContactForm() {
   const handleUserIdChange = useCallback(
     async (value: string) => {
       const trimmed = value.trim();
+      const seq = ++requestSeqRef.current;
 
       setPublicKeys(null);
       setUserId(prev => ({ ...prev, value: trimmed }));
@@ -151,6 +158,7 @@ export function useContactForm() {
 
         // Resolve MNS domain to gossip ID
         const mnsResult = await mnsService.resolveToGossipId(trimmed);
+        if (seq !== requestSeqRef.current) return;
 
         if (!mnsResult.success) {
           setUserId(_ => ({
@@ -193,8 +201,10 @@ export function useContactForm() {
         try {
           // Fetch public key for the resolved gossip ID
           const publicKey = await getPublicKey(resolvedGossipId);
+          if (seq !== requestSeqRef.current) return;
 
           const existing = await gossip.contacts.get(resolvedGossipId);
+          if (seq !== requestSeqRef.current) return;
           if (existing) {
             setUserId(prev => ({
               ...prev,
@@ -208,6 +218,7 @@ export function useContactForm() {
           setUserId(prev => ({ ...prev, loading: false }));
           return;
         } catch (error) {
+          if (seq !== requestSeqRef.current) return;
           logger.error('Failed to fetch public key:', error);
           setUserId(prev => ({
             ...prev,
@@ -251,8 +262,10 @@ export function useContactForm() {
 
       try {
         const publicKey = await getPublicKey(trimmed);
+        if (seq !== requestSeqRef.current) return;
 
         const existing = await gossip.contacts.get(trimmed);
+        if (seq !== requestSeqRef.current) return;
         if (existing) {
           setUserId(prev => ({
             ...prev,
@@ -265,6 +278,7 @@ export function useContactForm() {
         setPublicKeys(publicKey);
         setUserId(prev => ({ ...prev, loading: false }));
       } catch (error) {
+        if (seq !== requestSeqRef.current) return;
         logger.error('Failed to fetch public key:', error);
         setUserId(prev => ({
           ...prev,
@@ -285,7 +299,9 @@ export function useContactForm() {
   }, []);
 
   const handleCustomUsernameChange = useCallback((value: string) => {
+    customUsernameSeededRef.current = true;
     setCustomUsername(value);
+    setCustomUsernameError(undefined);
   }, []);
 
   const handleFileImport = useCallback(
@@ -372,6 +388,7 @@ export function useContactForm() {
         setCustomUsernameError(customUsernameResult.error);
         return;
       }
+      setCustomUsernameError(undefined);
     }
 
     // Prevent adding own user ID as a contact, even if previous checks passed

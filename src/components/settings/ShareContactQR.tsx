@@ -4,7 +4,7 @@ import { Check, Copy } from 'react-feather';
 
 import { PrivacyGraphic } from '../graphics';
 import { formatUserId } from '@massalabs/gossip-sdk';
-import { qrCache, generateQRDataUrl } from './shareContactQrCache';
+import { qrCache, generateQRDataUrl, setCachedQr } from './shareContactQrCache';
 
 interface ShareContactQRProps {
   deepLinkUrl: string;
@@ -88,21 +88,9 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
     }
   }, [userId]);
 
-  // Measure container width and update on resize
+  // Measure container width and update on resize (the observer also fires
+  // once on observe, covering the initial measurement)
   useEffect(() => {
-    const updateWidth = () => {
-      if (containerRef.current) {
-        setContainerWidth(containerRef.current.offsetWidth);
-      }
-    };
-
-    // Initial measurement
-    updateWidth();
-
-    // Listen for resize events
-    window.addEventListener('resize', updateWidth);
-
-    // Use ResizeObserver for more accurate measurements
     const resizeObserver = new ResizeObserver(entries => {
       for (const entry of entries) {
         setContainerWidth(entry.contentRect.width);
@@ -114,7 +102,6 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
     }
 
     return () => {
-      window.removeEventListener('resize', updateWidth);
       resizeObserver.disconnect();
     };
   }, []);
@@ -133,7 +120,7 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
     generateQRDataUrl(deepLinkUrl)
       .then(dataUrl => {
         if (!isMounted) return;
-        qrCache.set(deepLinkUrl, dataUrl);
+        setCachedQr(deepLinkUrl, dataUrl);
         setQrDataUrl(dataUrl);
         onQRCodeGenerated?.(dataUrl);
       })

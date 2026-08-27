@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Capacitor } from '@capacitor/core';
 import { Lock, Shield, Zap } from 'react-feather';
@@ -135,18 +135,26 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
     []
   );
 
-  const handleUsernameChange = handleValidatedChange(
-    validateUsernameFormat,
-    setUsername,
-    setIsUsernameValid,
-    setUsernameError
+  const handleUsernameChange = useMemo(
+    () =>
+      handleValidatedChange(
+        validateUsernameFormat,
+        setUsername,
+        setIsUsernameValid,
+        setUsernameError
+      ),
+    [handleValidatedChange]
   );
 
-  const handlePasswordChange = handleValidatedChange(
-    validatePassword,
-    setPassword,
-    setIsPasswordValid,
-    setPasswordError
+  const handlePasswordChange = useMemo(
+    () =>
+      handleValidatedChange(
+        validatePassword,
+        setPassword,
+        setIsPasswordValid,
+        setPasswordError
+      ),
+    [handleValidatedChange]
   );
 
   const passwordsMatch = password === confirmPassword;

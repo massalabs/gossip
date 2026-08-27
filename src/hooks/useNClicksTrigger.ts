@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 interface UseNClicksTriggerOptions {
   clickNumber: number;
@@ -23,7 +23,7 @@ export function useNClicksTrigger(
 ): UseNClicksTriggerReturn {
   const { clickNumber, callback, pingTimeout = 2000 } = options;
 
-  const [, setCount] = useState(0);
+  const countRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callbackRef = useRef(callback);
 
@@ -42,30 +42,27 @@ export function useNClicksTrigger(
   }, []);
 
   const ping = useCallback(() => {
-    setCount(prev => {
-      const next = prev + 1;
+    const next = countRef.current + 1;
 
-      if (next >= clickNumber) {
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-        }
-        // Fire callback and reset counter
-        callbackRef.current?.();
-        return 0;
-      }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
 
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
+    if (next >= clickNumber) {
+      // Fire callback and reset counter
+      countRef.current = 0;
+      void callbackRef.current?.();
+      return;
+    }
 
-      if (pingTimeout > 0) {
-        timeoutRef.current = setTimeout(() => {
-          setCount(0);
-        }, pingTimeout);
-      }
+    countRef.current = next;
 
-      return next;
-    });
+    if (pingTimeout > 0) {
+      timeoutRef.current = setTimeout(() => {
+        countRef.current = 0;
+      }, pingTimeout);
+    }
   }, [clickNumber, pingTimeout]);
 
   return { ping };

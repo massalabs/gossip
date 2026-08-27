@@ -4,26 +4,8 @@ import { useUiStore } from '../stores/uiStore';
 function findScrollContainer(
   containerRef: RefObject<HTMLElement | null>
 ): HTMLElement | null {
-  const container = containerRef.current?.querySelector(
-    '.scroll-container'
-  ) as HTMLElement;
-
-  if (container) return container;
-
-  const allElements = containerRef.current?.querySelectorAll('*');
-  if (allElements) {
-    for (const el of Array.from(allElements)) {
-      const htmlEl = el as HTMLElement;
-      const style = window.getComputedStyle(htmlEl);
-      if (
-        (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
-        htmlEl.scrollHeight > htmlEl.clientHeight
-      ) {
-        return htmlEl;
-      }
-    }
-  }
-  return null;
+  return (containerRef.current?.querySelector('.scroll-container') ??
+    null) as HTMLElement | null;
 }
 
 export function useHeaderScrollDetection(

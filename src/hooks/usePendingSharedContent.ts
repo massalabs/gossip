@@ -35,9 +35,10 @@ export const usePendingSharedContent = () => {
         let decodedText = rawValue;
         try {
           const urlObj = new URL(rawValue);
+          // searchParams.get already percent-decodes the value
           const sharedText = urlObj.searchParams.get('text');
           if (sharedText) {
-            decodedText = decodeURIComponent(sharedText);
+            decodedText = sharedText;
           }
         } catch {
           // rawValue was not a URL; treat as plain text

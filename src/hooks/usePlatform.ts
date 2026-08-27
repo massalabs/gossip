@@ -1,12 +1,24 @@
 import { useSyncExternalStore } from 'react';
 import { isNative, type AppContext } from '../utils/platform';
 
+// Cache subscribe functions per query so useSyncExternalStore gets a stable
+// reference and doesn't tear down / re-add the listener on every render.
+const matchMediaSubscribers = new Map<
+  string,
+  (onChange: () => void) => () => void
+>();
+
 function subscribeMatchMedia(query: string) {
-  return (onChange: () => void) => {
-    const mql = window.matchMedia(query);
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  };
+  let subscribe = matchMediaSubscribers.get(query);
+  if (!subscribe) {
+    subscribe = (onChange: () => void) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    };
+    matchMediaSubscribers.set(query, subscribe);
+  }
+  return subscribe;
 }
 
 function useMatchMedia(query: string): boolean {
