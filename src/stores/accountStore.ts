@@ -3,11 +3,8 @@ import { create } from 'zustand';
 import { encodeUserId, UserProfile } from '@massalabs/gossip-sdk';
 
 import {
-  encrypt,
-  deriveKey,
   generateMnemonic,
   EncryptionKey,
-  generateNonce,
   encodeToBase64,
 } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
@@ -15,22 +12,11 @@ import { getSdk } from './sdkStore';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import {
   checkBiometricAvailability,
-  createCredential,
   clearLoginBiometricCredentials,
   hasExistingCredential,
 } from '../services/biometricService';
-import {
-  BIOMETRIC_STORAGE_KEY,
-  getBiometricSalt,
-  WEBAUTHN_CREDENTIAL_ID_KEY,
-} from '../constants/biometric';
-import {
-  Provider,
-  Account,
-  JsonRpcProvider,
-  PublicApiUrl,
-  NetworkName,
-} from '@massalabs/massa-web3';
+import { BIOMETRIC_STORAGE_KEY } from '../constants/biometric';
+import { Provider, Account } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
 
@@ -43,134 +29,13 @@ import {
   deriveAccountFromMnemonic,
   fetchMnsDomainsIfEnabled,
 } from './utils/accountHelpers';
+import { provisionAccount } from './utils/accountSecurity';
+import { registerAccountStoreSubscriptions } from './accountStore.subscriptions';
 
 export type LoginMethod =
   | { type: 'password'; password: string; userId?: string }
   | { type: 'biometric'; userId?: string }
   | { type: 'encryptionKey'; encryptionKey: EncryptionKey };
-
-type accountProvisionResult = {
-  encryptionKey: EncryptionKey;
-  security: UserProfile['security'];
-};
-
-async function provisionAccount(
-  username: string,
-  mnemonic: string | undefined,
-  userIdBytes: Uint8Array,
-  opts: { useBiometrics: boolean; password?: string; iCloudSync?: boolean }
-): Promise<accountProvisionResult> {
-  if (opts.useBiometrics) {
-    return await buildSecurityFromBiometrics(
-      mnemonic,
-      username,
-      userIdBytes,
-      opts.iCloudSync ?? false
-    );
-  } else {
-    const password = opts.password?.trim();
-    if (!password) {
-      throw new Error('Password is required');
-    }
-    return await buildSecurityFromPassword(mnemonic, password);
-  }
-}
-
-// Helpers to build security blobs and in-memory keys
-async function buildSecurityFromPassword(
-  mnemonic: string | undefined,
-  password: string
-): Promise<{
-  security: UserProfile['security'];
-  encryptionKey: EncryptionKey;
-}> {
-  const salt = (await generateNonce()).to_bytes();
-  const key = await deriveKey(password, salt);
-
-  if (!mnemonic) {
-    throw new Error('Mnemonic is required for account creation');
-  }
-
-  const { encryptedData: encryptedMnemonic } = await encrypt(
-    mnemonic,
-    key,
-    salt
-  );
-  const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
-    encryptedMnemonic,
-    createdAt: new Date(),
-    backedUp: false,
-  };
-
-  const security: UserProfile['security'] = {
-    authMethod: 'password',
-    encKeySalt: salt,
-    mnemonicBackup,
-  };
-
-  return { security, encryptionKey: key };
-}
-
-async function buildSecurityFromBiometrics(
-  mnemonic: string | undefined,
-  username: string,
-  userIdBytes: Uint8Array,
-  iCloudSync = false
-): Promise<{
-  security: UserProfile['security'];
-  encryptionKey: EncryptionKey;
-}> {
-  if (!mnemonic) {
-    throw new Error('Mnemonic is required for account creation');
-  }
-
-  // WebAuthn PRF needs the fixed biometric salt; Capacitor ignores it.
-  // Mnemonic encryption uses a separate random salt.
-  const prfSalt = await getBiometricSalt();
-  const encSalt = (await generateNonce()).to_bytes();
-
-  const credentialResult = await createCredential(
-    `Gossip:${username}`,
-    userIdBytes,
-    prfSalt,
-    iCloudSync
-  );
-
-  if (!credentialResult.success || !credentialResult.data) {
-    throw new Error(
-      credentialResult.error || 'Failed to create biometric credential'
-    );
-  }
-
-  const { credentialId, encryptionKey, authMethod } = credentialResult.data;
-
-  // Persist WebAuthn credential ID for login discovery
-  if (credentialId) {
-    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
-  }
-
-  const { encryptedData } = await encrypt(mnemonic, encryptionKey, encSalt);
-
-  const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
-    encryptedMnemonic: encryptedData,
-    createdAt: new Date(),
-    backedUp: false,
-  };
-
-  const security: UserProfile['security'] = {
-    authMethod,
-    webauthn: credentialId
-      ? {
-          credentialId,
-        }
-      : undefined,
-    iCloudSync,
-    encKeySalt: encSalt,
-    mnemonicBackup,
-  };
-
-  return { security, encryptionKey };
-}
 
 interface AccountState {
   userProfile: UserProfile | null;
@@ -968,62 +833,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   };
 });
 
-useAccountStoreBase.subscribe(async (state, prevState) => {
-  const current = state.userProfile;
-  const previous = prevState.userProfile;
+export type AccountStoreApi = typeof useAccountStoreBase;
 
-  const sdk = getSdk();
-  if (!current || !sdk.isSessionOpen) return;
-  if (current === previous) return;
-  if (previous && current.userId === previous.userId) return;
-
-  try {
-    await sdk.auth.publishPublicKey(sdk.publicKeys, sdk.userId, sdk.queries);
-  } catch (error) {
-    logger.error('Error publishing public key:', error);
-  }
-});
-
-// Subscribe to account changes to initialize provider
-useAccountStoreBase.subscribe(async (state, prevState) => {
-  const currentAddress = state.account?.address?.toString();
-  const prevAddress = prevState.account?.address?.toString();
-
-  if (currentAddress === prevAddress) return;
-
-  try {
-    const networkName = useAppStore.getState().networkName;
-    const publicApiUrl =
-      networkName === NetworkName.Buildnet
-        ? PublicApiUrl.Buildnet
-        : PublicApiUrl.Mainnet;
-
-    if (state.account) {
-      const provider = await JsonRpcProvider.fromRPCUrl(
-        publicApiUrl,
-        state.account
-      );
-
-      // The account may have changed (logout / account switch) while the
-      // provider was being created — don't attach a provider bound to a
-      // stale account.
-      if (useAccountStoreBase.getState().account !== state.account) return;
-      useAccountStoreBase.setState({ provider });
-    } else {
-      useAccountStoreBase.setState({ provider: null });
-    }
-  } catch (error) {
-    logger.error('Error initializing provider:', error);
-  }
-});
-
-// Subscribe to provider changes to fetch MNS domains when provider becomes available
-useAccountStoreBase.subscribe(async (state, prevState) => {
-  if (state.provider === prevState.provider) return;
-
-  if (state.provider && state.userProfile) {
-    fetchMnsDomainsIfEnabled(state.userProfile, state.provider);
-  }
-});
+registerAccountStoreSubscriptions(useAccountStoreBase);
 
 export const useAccountStore = createSelectors(useAccountStoreBase);
