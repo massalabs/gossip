@@ -64,7 +64,25 @@ function parseSecurityEnvelope(value: unknown): RawSecurityEnvelope {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error('Invalid account security envelope');
   }
-  const envelope = raw as Record<string, unknown>;
+  const parsedEnvelope = raw as Record<string, unknown>;
+  const versionFields = [
+    parsedEnvelope.formatVersion,
+    parsedEnvelope.passwordKdfVersion,
+    parsedEnvelope.mnemonicEncryptionVersion,
+    parsedEnvelope.identityDerivationVersion,
+  ];
+  const isReleasedVersionlessEnvelope = versionFields.every(
+    field => field === undefined
+  );
+  const envelope = isReleasedVersionlessEnvelope
+    ? {
+        ...parsedEnvelope,
+        formatVersion: PROFILE_SECURITY_FORMAT_VERSION,
+        passwordKdfVersion: PROFILE_PASSWORD_KDF_VERSION,
+        mnemonicEncryptionVersion: PROFILE_MNEMONIC_ENCRYPTION_VERSION,
+        identityDerivationVersion: IDENTITY_DERIVATION_VERSION,
+      }
+    : parsedEnvelope;
   if (
     envelope.formatVersion !== PROFILE_SECURITY_FORMAT_VERSION ||
     envelope.passwordKdfVersion !== PROFILE_PASSWORD_KDF_VERSION ||

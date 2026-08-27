@@ -23,6 +23,7 @@ describe('encrypted account settings runtime state', () => {
     updateSettings.mockReset();
     getDomains.mockReset();
     useAppStore.getState().resetAccountSettings();
+    useAppStore.getState().clearLegacyAccountSettingsMigration();
   });
 
   it('updates runtime MNS state only after the durable row resolves', async () => {
@@ -161,6 +162,53 @@ describe('encrypted account settings runtime state', () => {
     expect(useAppStore.getState()).toMatchObject({
       mnsEnabled: false,
       mnsDomains: [],
+    });
+  });
+
+  it('retains released device-global settings only as a migration value', async () => {
+    localStorage.setItem(
+      STORAGE_KEYS.APP_STORE,
+      JSON.stringify({
+        state: {
+          mnsEnabled: true,
+          mnsDomains: ['stale.massa'],
+          defaultRetentionDuration: null,
+        },
+        version: 0,
+      })
+    );
+    const persistedStore = useAppStore as typeof useAppStore & {
+      persist: { rehydrate: () => Promise<void> };
+    };
+
+    await persistedStore.persist.rehydrate();
+
+    expect(useAppStore.getState().legacyAccountSettingsMigration).toEqual({
+      mnsEnabled: true,
+      defaultRetentionDuration: null,
+    });
+    const persisted = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.APP_STORE) ?? '{}'
+    ) as { state?: Record<string, unknown> };
+    expect(persisted.state).not.toHaveProperty('mnsEnabled');
+    expect(persisted.state).not.toHaveProperty('mnsDomains');
+    expect(persisted.state).not.toHaveProperty('defaultRetentionDuration');
+  });
+
+  it('retains MNS from stores released before retention settings', async () => {
+    localStorage.setItem(
+      STORAGE_KEYS.APP_STORE,
+      JSON.stringify({ state: { mnsEnabled: true }, version: 0 })
+    );
+    const persistedStore = useAppStore as typeof useAppStore & {
+      persist: { rehydrate: () => Promise<void> };
+    };
+
+    await persistedStore.persist.rehydrate();
+
+    expect(useAppStore.getState().legacyAccountSettingsMigration).toEqual({
+      mnsEnabled: true,
+      defaultRetentionDuration: 2_592_000,
     });
   });
 

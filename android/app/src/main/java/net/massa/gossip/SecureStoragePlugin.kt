@@ -72,6 +72,7 @@ class SecureStoragePlugin : Plugin() {
     fun resetStorage(call: PluginCall) {
         executor.execute {
             try {
+                nativeCall("prepareStorageReset", "{}")
                 val storage = context.filesDir.resolve("secure-storage")
                 if (storage.exists() && !storage.deleteRecursively()) {
                     throw IllegalStateException("secure storage could not be deleted")

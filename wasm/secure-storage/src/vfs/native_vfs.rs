@@ -223,6 +223,16 @@ fn io_methods() -> &'static sqlite3_io_methods {
 /// Create state with redb backend.
 pub fn init_native(path: &str, domain: &str) -> Result<()> {
     let base_path = PathBuf::from(path);
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    if let Some(state) = guard.as_ref() {
+        if state.base_path == base_path && state.domain == domain {
+            return Ok(());
+        }
+        return Err(SecureStorageError::Storage(
+            "native storage is already initialized".to_string(),
+        ));
+    }
     fs::create_dir_all(&base_path)?;
     for spool in [
         PORTABLE_EXPORT_SPOOL,
@@ -236,8 +246,6 @@ pub fn init_native(path: &str, domain: &str) -> Result<()> {
         }
     }
     let storage = RedbStorage::open(&base_path)?;
-    let mutex = state_mutex();
-    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = Some(VfsState {
         backend: storage,
         base_path,
@@ -1382,6 +1390,21 @@ pub fn open_db() -> Result<rusqlite::Connection> {
     Ok(conn)
 }
 
+/// Release every process-local handle before the platform irreversibly
+/// deletes the native storage directory.
+pub fn release_for_storage_reset() -> Result<()> {
+    let mut guard = state_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
+    *guard = None;
+    drop(guard);
+    aux()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?
+        .clear();
+    Ok(())
+}
+
 /// Reset global state (for tests only).
 #[cfg(test)]
 pub(crate) fn reset_state() {
@@ -2064,6 +2087,24 @@ mod tests {
         allocate(0, b"password").unwrap();
         let conn = open_db().unwrap();
         (dir, conn)
+    }
+
+    #[test]
+    fn native_initialization_is_idempotent_for_the_same_storage() {
+        let _guard = test_mutex().lock().unwrap();
+        reset_state();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+
+        init_native(path, "test").unwrap();
+        init_native(path, "test").unwrap();
+        assert!(init_native(path, "different-domain").is_err());
+        release_for_storage_reset().unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+        init_native(path, "test").unwrap();
+        assert!(!has_data().unwrap());
+
+        reset_state();
     }
 
     #[test]

@@ -714,14 +714,21 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         }
         if (migrationActive) await completeMigrationPhase(1);
 
-        // Current V1 security envelopes are already canonical. This durable
-        // checkpoint remains the dispatch boundary for future retained
-        // decoders and proves authentication completed before any rewrite.
+        // Authentication succeeds before the retained versionless decoder is
+        // rewritten by the profile save below.
         if (migrationActive) await completeMigrationPhase(2);
 
+        const appState = useAppStore.getState();
+        const legacyAccountSettings = importedInstallation
+          ? null
+          : appState.legacyAccountSettingsMigration;
         const accountSettings = await sdk.queries.accountSettings.getOrCreate(
-          profile.userId
+          profile.userId,
+          legacyAccountSettings ?? undefined
         );
+        if (legacyAccountSettings) {
+          appState.clearLegacyAccountSettingsMigration();
+        }
         if (migrationActive) await completeMigrationPhase(3);
 
         const sessionMigrationPending = migrationState?.completedPhase === 3;

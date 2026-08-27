@@ -14,6 +14,11 @@ interface DebugButtonPosition {
   y: number;
 }
 
+interface LegacyAccountSettingsMigration {
+  mnsEnabled: boolean;
+  defaultRetentionDuration: number | null;
+}
+
 interface AppStoreState {
   // Terms of Service acceptance
   tosAccepted: boolean;
@@ -56,6 +61,9 @@ interface AppStoreState {
   // Pending forward message id (used during discussion selection)
   pendingForwardMessageId: number | null;
   setPendingForwardMessageId: (messageId: number | null) => void;
+  // Released device-global values awaiting one authenticated account rewrite.
+  legacyAccountSettingsMigration: LegacyAccountSettingsMigration | null;
+  clearLegacyAccountSettingsMigration: () => void;
   // Active encrypted account-settings owner (runtime-only).
   activeAccountSettingsUserId: string | null;
   accountSettingsGeneration: number;
@@ -147,6 +155,10 @@ const useAppStoreBase = create<AppStoreState>()(
       pendingForwardMessageId: null,
       setPendingForwardMessageId: (messageId: number | null) => {
         set({ pendingForwardMessageId: messageId });
+      },
+      legacyAccountSettingsMigration: null,
+      clearLegacyAccountSettingsMigration: () => {
+        set({ legacyAccountSettingsMigration: null });
       },
       // Per-account encrypted settings (runtime defaults until login).
       activeAccountSettingsUserId: null,
@@ -262,6 +274,21 @@ const useAppStoreBase = create<AppStoreState>()(
         const localState = {
           ...(persisted as Record<string, unknown>),
         };
+        const legacyMnsEnabled = localState.mnsEnabled;
+        const legacyRetention = localState.defaultRetentionDuration;
+        const hasLegacyMns = typeof legacyMnsEnabled === 'boolean';
+        const hasLegacyRetention =
+          legacyRetention === null ||
+          (Number.isSafeInteger(legacyRetention) &&
+            (legacyRetention as number) >= 0);
+        if (hasLegacyMns || hasLegacyRetention) {
+          localState.legacyAccountSettingsMigration = {
+            mnsEnabled: hasLegacyMns ? legacyMnsEnabled : false,
+            defaultRetentionDuration: hasLegacyRetention
+              ? legacyRetention
+              : 2_592_000,
+          };
+        }
         delete localState.mnsEnabled;
         delete localState.mnsDomains;
         delete localState.defaultRetentionDuration;
@@ -277,6 +304,7 @@ const useAppStoreBase = create<AppStoreState>()(
         networkName: state.networkName,
         disableNativeScreenshot: state.disableNativeScreenshot,
         autoLockTimeout: state.autoLockTimeout,
+        legacyAccountSettingsMigration: state.legacyAccountSettingsMigration,
       }),
     }
   )

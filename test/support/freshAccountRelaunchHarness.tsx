@@ -11,6 +11,7 @@ import { useProfileLoader } from '../../src/hooks/useProfileLoader';
 import { useAccountStore } from '../../src/stores/accountStore';
 import { useAppStore } from '../../src/stores/appStore';
 import { useSdkStore } from '../../src/stores/sdkStore';
+import { claimOnboardingStorageMode } from '../../src/services/portableImportAuthorization';
 import {
   preparePasswordAccount,
   wipePreparedPasswordAccount,
@@ -133,7 +134,7 @@ export async function prepareRolledBackAccounts(
 ): Promise<PrepareRollbackResult> {
   localStorage.clear();
   useAppStore.setState({
-    isInitialized: true,
+    isInitialized: false,
     secureAccountCreationAllowed: false,
   });
   const sdk = new GossipSdk();
@@ -241,6 +242,7 @@ export async function runFreshAccountRelaunchScenario(
   const root = createRoot(mount);
   let completed = false;
   let restartError: string | null = null;
+  const creationModeLease = await claimOnboardingStorageMode('create');
   root.render(
     <SecureAccountSetup
       initialAccount={stagedReplacement}
@@ -250,6 +252,7 @@ export async function runFreshAccountRelaunchScenario(
       onRestart={message => {
         restartError = message;
       }}
+      creationModeLease={creationModeLease}
     />
   );
 
@@ -297,6 +300,7 @@ export async function runFreshAccountRelaunchScenario(
   } finally {
     root.unmount();
     mount.remove();
+    await creationModeLease.release();
     if (sdk.isSessionOpen) {
       await useAccountStore.getState().logout({ lockedByUser: false });
     }

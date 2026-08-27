@@ -299,6 +299,10 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             native_vfs::flush()?;
             Ok("null".into())
         }
+        "prepareStorageReset" => {
+            prepare_storage_reset()?;
+            Ok("null".into())
+        }
         "close" => {
             close()?;
             Ok("null".into())
@@ -462,6 +466,17 @@ fn init_secure_storage(path: &str, domain: &str) -> Result<()> {
     let _ = rayon::ThreadPoolBuilder::new()
         .num_threads(3)
         .build_global();
+    Ok(())
+}
+
+fn prepare_storage_reset() -> Result<()> {
+    {
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = None;
+    }
+    native_vfs::release_for_storage_reset()?;
     Ok(())
 }
 
@@ -1009,6 +1024,7 @@ mod tests {
 
     #[test]
     fn native_lock_session_surfaces_vfs_errors() {
+        let _guard = crate::vfs::native_vfs::test_mutex().lock().unwrap();
         crate::vfs::native_vfs::reset_state();
 
         let err = dispatch("lockSession", "{}").expect_err("lockSession should surface VFS errors");
@@ -1020,6 +1036,7 @@ mod tests {
 
     #[test]
     fn native_close_surfaces_flush_errors() {
+        let _guard = crate::vfs::native_vfs::test_mutex().lock().unwrap();
         crate::vfs::native_vfs::reset_state();
 
         let err = dispatch("close", "{}").expect_err("close should surface flush errors");

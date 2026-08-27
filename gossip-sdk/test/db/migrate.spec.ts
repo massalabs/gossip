@@ -61,6 +61,78 @@ describe('runMigrations', () => {
     ).toBe(true);
   });
 
+  it('atomically upgrades an exact legacy ledger before continuing', async () => {
+    const prefix = MIGRATIONS.slice(0, 2);
+    let currentLedgerReads = 0;
+    const execRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+      if (sql === MIGRATION_LEDGER_QUERY) {
+        currentLedgerReads += 1;
+        if (currentLedgerReads === 1) {
+          throw new Error('no such column: digest');
+        }
+        return ledgerRows(prefix);
+      }
+      return [];
+    });
+    const transactionExecutors: ReturnType<typeof vi.fn>[] = [];
+    const withTransaction = async <T>(
+      fn: (txExecRaw: ExecRaw) => Promise<T>
+    ): Promise<T> => {
+      const txExecRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+        if (sql.startsWith('SELECT idx, substr(tag')) {
+          return prefix.map(migration => [
+            migration.idx,
+            migration.tag,
+            migration.tag.length,
+          ]);
+        }
+        return [];
+      });
+      transactionExecutors.push(txExecRaw);
+      return fn(txExecRaw);
+    };
+
+    await runMigrations(execRaw, withTransaction);
+
+    const upgradeCalls = transactionExecutors[0].mock.calls;
+    expect(
+      upgradeCalls.some(([sql]) => String(sql).startsWith('ALTER TABLE'))
+    ).toBe(true);
+    expect(
+      upgradeCalls.filter(([sql]) =>
+        String(sql).startsWith('UPDATE _migrations')
+      )
+    ).toHaveLength(prefix.length);
+    expect(currentLedgerReads).toBe(2);
+  });
+
+  it('rejects a mismatched legacy ledger before altering it', async () => {
+    const execRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+      if (sql === MIGRATION_LEDGER_QUERY) {
+        throw new Error('no such column: digest');
+      }
+      return [];
+    });
+    const txExecRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+      if (sql.startsWith('SELECT idx, substr(tag')) {
+        return [[MIGRATIONS[0].idx, 'wrong-tag', 9]];
+      }
+      return [];
+    });
+    const withTransaction = async <T>(
+      fn: (transactionExecRaw: ExecRaw) => Promise<T>
+    ): Promise<T> => fn(txExecRaw);
+
+    await expect(runMigrations(execRaw, withTransaction)).rejects.toThrow(
+      'Unsupported database migration history'
+    );
+    expect(
+      txExecRaw.mock.calls.some(([sql]) =>
+        String(sql).startsWith('ALTER TABLE')
+      )
+    ).toBe(false);
+  });
+
   it('accepts only an exact known migration prefix', async () => {
     for (const rows of [
       [[MIGRATIONS[0].idx, 'wrong-tag', 9, MIGRATIONS[0].digest, 64]],

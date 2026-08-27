@@ -4,7 +4,7 @@ index 9dfaf18..37ca01d 100644
 +++ b/node_modules/@capacitor/background-runner/android/src/main/java/io/ionic/backgroundrunner/plugin/api/KV.kt
 @@ -5,6 +5,12 @@ import android.content.SharedPreferences
  import io.ionic.android_js_engine.capacitor_api.KVAPI
- 
+
  class KV (context: android.content.Context, label: String) : KVAPI {
 +    companion object {
 +        private const val SYNC_LOCK_KEY = "gossip-sync-lock-time"
@@ -13,11 +13,11 @@ index 9dfaf18..37ca01d 100644
 +    }
 +
      private val prefs: SharedPreferences
- 
+
      init {
 @@ -12,9 +18,31 @@ class KV (context: android.content.Context, label: String) : KVAPI {
      }
- 
+
      override fun set(key: String, value: String) {
 -        val editor: SharedPreferences.Editor = prefs.edit()
 -        editor.putString(key, value)
@@ -48,11 +48,11 @@ index 9dfaf18..37ca01d 100644
 +        }
 +        prefs.edit().putString(key, value).apply()
      }
- 
+
      override fun get(key: String): String? {
 @@ -22,8 +50,12 @@ class KV (context: android.content.Context, label: String) : KVAPI {
      }
- 
+
      override fun remove(key: String) {
 -        val editor: SharedPreferences.Editor = prefs.edit()
 -        editor.remove(key)
@@ -76,15 +76,15 @@ index 406e572..81ac345 100644
      var groupSummary: String? = null
      var channelId: String? = null
 +    var gossipOutputGeneration: String
- 
+
      private val jsDateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
- 
+
 @@ -36,6 +37,7 @@ class Notification(jsonObject: JSONObject) {
          ongoing = jsonObject.optBoolean("ongoing", false)
          autoCancel = jsonObject.optBoolean("autoCancel", false)
          actionTypeId = jsonObject.optString("actionTypeId", null)
 +        gossipOutputGeneration = jsonObject.optString("gossipOutputGeneration", "0")
- 
+
          val scheduleDateString = jsonObject.optString("scheduleAt", "")
          if (scheduleDateString.isNotEmpty()) {
 diff --git a/node_modules/@capacitor/background-runner/android/src/main/java/io/ionic/backgroundrunner/plugin/api/Notifications.kt b/node_modules/@capacitor/background-runner/android/src/main/java/io/ionic/backgroundrunner/plugin/api/Notifications.kt
@@ -103,7 +103,7 @@ index 9eb28f3..bcb49c2 100644
          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
              flags = flags or PendingIntent.FLAG_MUTABLE
 @@ -209,6 +213,14 @@ class Notifications(context: Context) : NotificationsAPI {
- 
+
          val pendingIntent =
              PendingIntent.getBroadcast(context, request.id, intent, flags)
 +        val runnerStorage = context.getSharedPreferences(
@@ -114,7 +114,7 @@ index 9eb28f3..bcb49c2 100644
 +            ?.toMutableSet() ?: mutableSetOf()
 +        pendingIds.add(request.id.toString())
 +        runnerStorage.edit().putStringSet("gossip-runner-notification-ids", pendingIds).commit()
- 
+
          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
              alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, request.scheduleAt.time, pendingIntent)
 diff --git a/node_modules/@capacitor/background-runner/android/src/main/java/io/ionic/backgroundrunner/plugin/api/TimedNotificationPublisher.kt b/node_modules/@capacitor/background-runner/android/src/main/java/io/ionic/backgroundrunner/plugin/api/TimedNotificationPublisher.kt
@@ -128,7 +128,7 @@ index 7fc1ae3..b73d167 100644
 +        const val OUTPUT_GENERATION_KEY = "gossip-account-output-generation-v1"
 +        const val OUTPUT_GENERATION_EXTRA = "gossip.accountOutputGeneration"
      }
- 
+
      override fun onReceive(context: Context?, intent: Intent?) {
 -        val notificationManager =
 -            context!!.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -149,13 +149,13 @@ index 7fc1ae3..b73d167 100644
 +            runnerStorage.edit()
 +                .putStringSet("gossip-runner-notification-ids", pendingIds)
 +                .commit()
- 
+
 -        val notification: android.app.Notification?
 +            val blocked = runnerStorage.getString("gossip-account-cleanup-blocked-v1", null)
 +            val currentGeneration = runnerStorage.getString(OUTPUT_GENERATION_KEY, "0")
 +            val scheduledGeneration = intent?.getStringExtra(OUTPUT_GENERATION_EXTRA)
 +            if (!blocked.isNullOrEmpty() || scheduledGeneration != currentGeneration) return
- 
+
 -        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
 -            notification = intent!!.getParcelableExtra(NOTIFICATION_KEY, android.app.Notification::class.java)
 -        } else {
@@ -171,10 +171,10 @@ index 7fc1ae3..b73d167 100644
 +            } else {
 +                notification = getParcelableExtraLegacy(intent!!)
 +            }
- 
+
 -        notification?.`when` = System.currentTimeMillis()
 +            notification?.`when` = System.currentTimeMillis()
- 
+
 -        val id =
 -            intent.getIntExtra(Notifications.notificationIntentKey, Int.MIN_VALUE)
 -        if (id == Int.MIN_VALUE) {
@@ -188,7 +188,7 @@ index 7fc1ae3..b73d167 100644
          }
 -        notificationManager.notify(id, notification)
      }
- 
+
      @Suppress("DEPRECATION")
 diff --git a/node_modules/@capacitor/background-runner/ios/Sources/CapacitorBackgroundRunner/CapacitorAPI/KV.swift b/node_modules/@capacitor/background-runner/ios/Sources/CapacitorBackgroundRunner/CapacitorAPI/KV.swift
 index a9a2e6d..9fce709 100644
@@ -196,7 +196,7 @@ index a9a2e6d..9fce709 100644
 +++ b/node_modules/@capacitor/background-runner/ios/Sources/CapacitorBackgroundRunner/CapacitorAPI/KV.swift
 @@ -8,7 +8,42 @@ import JavaScriptCore
  }
- 
+
  class CapacitorKVStore: NSObject, CapacitorKVStoreExports {
 +    private static let syncLockKey = "gossip-sync-lock-time"
 +    private static let syncLockTimeoutMs: Int64 = 90_000
@@ -236,10 +236,10 @@ index a9a2e6d..9fce709 100644
 +        }
          UserDefaults.standard.set(value, forKey: key)
      }
- 
+
 @@ -24,6 +59,13 @@ class CapacitorKVStore: NSObject, CapacitorKVStoreExports {
      }
- 
+
      static func remove(_ key: String) {
 -        return UserDefaults.standard.removeObject(forKey: key)
 +        if key == syncLockKey {
@@ -261,7 +261,7 @@ index 1e33243..01854a5 100644
      let summaryArgument: String?
      let groupSummary: String?
 +    let gossipOutputGeneration: String
- 
+
      init(from dict: [String: Any?]) throws {
          guard let id = dict["id"] as? Int else {
 @@ -60,6 +61,7 @@ struct NotificationOption {
@@ -271,10 +271,10 @@ index 1e33243..01854a5 100644
 +        self.gossipOutputGeneration = dict["gossipOutputGeneration"] as? String ?? "0"
      }
  }
- 
+
 @@ -131,8 +133,18 @@ class CapacitorNotifications: NSObject, CapacitorNotificationsExports {
              }
- 
+
              if let notificationOptions = options.toArray() as? [[String: Any?]] {
 +                let scheduling = DispatchGroup()
                  for option in notificationOptions {
@@ -288,13 +288,13 @@ index 1e33243..01854a5 100644
 +                    if blocked != nil || notificationOption.gossipOutputGeneration != currentGeneration {
 +                        continue
 +                    }
- 
+
                      let content = UNMutableNotificationContent()
                      content.title = NSString.localizedUserNotificationString(forKey: notificationOption.title, arguments: nil)
 @@ -172,8 +184,14 @@ class CapacitorNotifications: NSObject, CapacitorNotificationsExports {
                      let trigger = UNTimeIntervalNotificationTrigger(timeInterval: dateInterval.duration, repeats: false)
                      let request = UNNotificationRequest(identifier: "\(notificationOption.id)", content: content, trigger: trigger)
- 
+
 -                    UNUserNotificationCenter.current().add(request)
 +                    scheduling.enter()
 +                    UNUserNotificationCenter.current().add(request) { _ in

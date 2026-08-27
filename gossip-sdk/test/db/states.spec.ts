@@ -358,6 +358,43 @@ describe('Session Blob Round-Trip', () => {
     }
   });
 
+  it('decodes the released versionless profile security shape as V1', () => {
+    const row = userProfileToRow(makeProfile(new Uint8Array()));
+    const security = JSON.parse(row.security as string) as Record<
+      string,
+      unknown
+    >;
+    delete security.formatVersion;
+    delete security.passwordKdfVersion;
+    delete security.mnemonicEncryptionVersion;
+    delete security.identityDerivationVersion;
+
+    const restored = rowToUserProfile({
+      ...row,
+      security: JSON.stringify(security),
+    });
+
+    expect(restored.security).toMatchObject({
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
+    });
+  });
+
+  it('rejects partially versioned profile security shapes', () => {
+    const row = userProfileToRow(makeProfile(new Uint8Array()));
+    const security = JSON.parse(row.security as string) as Record<
+      string,
+      unknown
+    >;
+    delete security.identityDerivationVersion;
+
+    expect(() =>
+      rowToUserProfile({ ...row, security: JSON.stringify(security) })
+    ).toThrow('Unsupported account security format');
+  });
+
   it('allowlists security fields instead of invoking serialization hooks', () => {
     const profile = makeProfile(new Uint8Array());
     (profile.security as unknown as Record<string, unknown>).toJSON = () => ({
@@ -506,6 +543,30 @@ describe('Account settings', () => {
     ).resolves.toEqual({
       userId: 'gossip1settings',
       formatVersion: 1,
+      mnsEnabled: true,
+      defaultRetentionDuration: null,
+    });
+  });
+
+  it('atomically seeds a missing row from released device-global settings', async () => {
+    await expect(
+      q().accountSettings.getOrCreate('gossip1legacysettings', {
+        mnsEnabled: true,
+        defaultRetentionDuration: null,
+      })
+    ).resolves.toEqual({
+      userId: 'gossip1legacysettings',
+      formatVersion: 1,
+      mnsEnabled: true,
+      defaultRetentionDuration: null,
+    });
+
+    await expect(
+      q().accountSettings.getOrCreate('gossip1legacysettings', {
+        mnsEnabled: false,
+        defaultRetentionDuration: 86_400,
+      })
+    ).resolves.toMatchObject({
       mnsEnabled: true,
       defaultRetentionDuration: null,
     });

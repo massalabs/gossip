@@ -44,14 +44,27 @@ export class AccountSettingsQueries {
     return validate(row);
   }
 
-  async getOrCreate(userId: string): Promise<AccountSettingsV1> {
+  async getOrCreate(
+    userId: string,
+    initial?: Pick<AccountSettingsV1, 'mnsEnabled' | 'defaultRetentionDuration'>
+  ): Promise<AccountSettingsV1> {
+    if (
+      initial?.defaultRetentionDuration !== undefined &&
+      initial.defaultRetentionDuration !== null &&
+      (!Number.isSafeInteger(initial.defaultRetentionDuration) ||
+        initial.defaultRetentionDuration < 0)
+    ) {
+      throw new Error('Invalid default retention duration');
+    }
     await this.conn.db
       .insert(accountSettings)
       .values({
         userId,
         formatVersion: ACCOUNT_SETTINGS_FORMAT_VERSION,
-        mnsEnabled: false,
-        defaultRetentionDuration: DEFAULT_RETENTION_DURATION_SECONDS,
+        mnsEnabled: initial?.mnsEnabled ?? false,
+        defaultRetentionDuration: initial
+          ? initial.defaultRetentionDuration
+          : DEFAULT_RETENTION_DURATION_SECONDS,
       })
       .onConflictDoNothing({ target: accountSettings.userId });
     const row = await this.get(userId);

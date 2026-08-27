@@ -6,7 +6,7 @@ vi.mock('@massalabs/gossip-sdk', async () => {
   const actual = await vi.importActual<typeof import('@massalabs/gossip-sdk')>(
     '@massalabs/gossip-sdk'
   );
-  return { ...actual, generateUserKeys };
+  return { ...actual, generateUserKeys, IDENTITY_DERIVATION_VERSION: 1 };
 });
 
 import { deriveAccountFromMnemonic } from '../../src/stores/utils/accountHelpers';

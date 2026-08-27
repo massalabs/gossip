@@ -114,6 +114,7 @@ async function clearRuntimeAccountState(): Promise<void> {
     Promise.resolve().then(() => mnsService.reset()),
     Promise.resolve().then(() => qrCache.clear()),
     Promise.resolve().then(() => app.resetAccountSettings()),
+    Promise.resolve().then(() => app.clearLegacyAccountSettingsMigration()),
     Promise.resolve().then(() => app.setPendingDeepLinkInfo(null)),
     Promise.resolve().then(() => app.setPendingSharedContent(null)),
     Promise.resolve().then(() => app.setPendingForwardMessageId(null)),

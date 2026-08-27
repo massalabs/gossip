@@ -61,6 +61,7 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func resetStorage(_ call: CAPPluginCall) {
         Self.worker.enqueue {
             do {
+                _ = try nativeCall(method: "prepareStorageReset", argsJson: "{}")
                 let base = FileManager.default.urls(
                     for: .applicationSupportDirectory,
                     in: .userDomainMask

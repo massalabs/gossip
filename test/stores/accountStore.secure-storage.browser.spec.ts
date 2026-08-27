@@ -11,6 +11,7 @@ import secureStorageWasmUrlRaw from '@massalabs/gossip-sdk/assets/generated/wasm
 
 const mocks = vi.hoisted(() => ({
   sdk: null as GossipSdk | null,
+  deriveAccount: vi.fn(),
 }));
 
 vi.mock('../../src/stores/sdkStore', () => ({
@@ -21,12 +22,7 @@ vi.mock('../../src/stores/sdkStore', () => ({
 }));
 
 vi.mock('../../src/stores/utils/accountHelpers', () => ({
-  deriveAccountFromMnemonic: vi.fn(async () => ({
-    account: null,
-    userIdBytes: new Uint8Array(32),
-    evmAddress: '0x0000000000000000000000000000000000000000',
-    massaAddress: 'AU1test',
-  })),
+  deriveAccountFromMnemonic: mocks.deriveAccount,
   fetchMnsDomainsIfEnabled: vi.fn(),
   wipeAccountPrivateKey: vi.fn(),
 }));
@@ -154,6 +150,21 @@ async function provisionProfile(
 describe('secure biometric account-store login integration', () => {
   beforeEach(async () => {
     mocks.sdk = null;
+    mocks.deriveAccount.mockImplementation(async (mnemonic: string) => {
+      const keys = await generateUserKeys(mnemonic);
+      const publicKeys = keys.public_keys();
+      try {
+        return {
+          account: null,
+          userIdBytes: publicKeys.derive_id(),
+          evmAddress: '0x0000000000000000000000000000000000000000',
+          massaAddress: 'AU1test',
+        };
+      } finally {
+        publicKeys.free();
+        keys.free();
+      }
+    });
     useAppStore.getState().setSecureAccountCreationAllowed(true);
     await clearSecureStorageIdb();
   }, 60_000);

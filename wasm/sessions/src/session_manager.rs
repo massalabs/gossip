@@ -260,15 +260,29 @@ impl SessionManager {
     /// let restored_manager = SessionManager::from_encrypted_blob(&encrypted_blob, &key).unwrap();
     /// ```
     pub fn from_encrypted_blob(encrypted_blob: &[u8], key: &crypto_aead::Key) -> Option<Self> {
-        let prefix = encrypted_blob.get(..16)?;
-        if prefix[..8] != SESSION_BLOB_MAGIC {
-            return None;
+        if encrypted_blob.get(..8) != Some(SESSION_BLOB_MAGIC.as_slice()) {
+            return Self::from_released_versionless_blob(encrypted_blob, key);
         }
+        let prefix = encrypted_blob.get(..16)?;
         let envelope_version = u64::from_be_bytes(prefix[8..16].try_into().ok()?);
         match envelope_version {
             SESSION_BLOB_ENVELOPE_VERSION => Self::from_encrypted_blob_v1(encrypted_blob, key),
             _ => None,
         }
+    }
+
+    fn from_released_versionless_blob(
+        encrypted_blob: &[u8],
+        key: &crypto_aead::Key,
+    ) -> Option<Self> {
+        let nonce_end = crypto_aead::NONCE_SIZE;
+        let nonce_bytes: [u8; crypto_aead::NONCE_SIZE] =
+            encrypted_blob.get(..nonce_end)?.try_into().ok()?;
+        let ciphertext = encrypted_blob.get(nonce_end..)?;
+        validated_session_ciphertext_len(u64::try_from(ciphertext.len()).ok()?)?;
+        let nonce = crypto_aead::Nonce::from(nonce_bytes);
+        let decrypted_blob = Zeroizing::new(crypto_aead::decrypt(key, &nonce, ciphertext, b"")?);
+        Self::decode_payload_v1(&decrypted_blob)
     }
 
     fn from_encrypted_blob_v1(encrypted_blob: &[u8], key: &crypto_aead::Key) -> Option<Self> {
@@ -1440,6 +1454,12 @@ mod tests {
         )
     }
 
+    fn encrypt_released_versionless_payload(payload: &[u8], key: &crypto_aead::Key) -> Vec<u8> {
+        let nonce = crypto_aead::Nonce::from([9_u8; crypto_aead::NONCE_SIZE]);
+        let ciphertext = crypto_aead::encrypt(key, &nonce, payload, b"");
+        [nonce.as_bytes(), ciphertext.as_slice()].concat()
+    }
+
     #[test]
     fn test_encryption_decryption_empty_session() {
         // Test encrypting and decrypting an empty session manager
@@ -1579,7 +1599,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encrypted_blob_rejects_unknown_versions_and_legacy_framing() {
+    fn test_encrypted_blob_rejects_unknown_versions_and_invalid_versionless_framing() {
         let manager = SessionManager::new(create_test_config());
         let key = generate_test_key();
         let encrypted_blob = manager.to_encrypted_blob(&key).unwrap();
@@ -1590,8 +1610,26 @@ mod tests {
             assert!(SessionManager::from_encrypted_blob(&unsupported, &key).is_none());
         }
 
-        let legacy_nonce_and_ciphertext = &encrypted_blob[SESSION_BLOB_HEADER_SIZE..];
-        assert!(SessionManager::from_encrypted_blob(legacy_nonce_and_ciphertext, &key).is_none());
+        let header_bound_nonce_and_ciphertext = &encrypted_blob[SESSION_BLOB_HEADER_SIZE..];
+        assert!(
+            SessionManager::from_encrypted_blob(header_bound_nonce_and_ciphertext, &key).is_none()
+        );
+    }
+
+    #[test]
+    fn test_encrypted_blob_decodes_released_versionless_framing() {
+        let manager = SessionManager::new(create_test_config());
+        let key = generate_test_key();
+        let payload = manager.encode_payload_v1().unwrap();
+        let legacy_blob = encrypt_released_versionless_payload(&payload, &key);
+
+        let restored = SessionManager::from_encrypted_blob(&legacy_blob, &key).unwrap();
+
+        assert_eq!(restored.peers.len(), manager.peers.len());
+        assert_eq!(
+            restored.config.max_session_lag_length,
+            manager.config.max_session_lag_length
+        );
     }
 
     #[test]

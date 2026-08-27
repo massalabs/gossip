@@ -19,6 +19,28 @@ export const MIGRATION_LEDGER_QUERY =
   `SELECT idx, substr(tag, 1, ${MIGRATION_TAG_MAX_CHARS}), length(tag), ` +
   `substr(digest, 1, ${MIGRATION_DIGEST_CHARS}), length(digest) ` +
   `FROM _migrations ORDER BY idx ASC LIMIT ${MIGRATIONS.length + 1}`;
+const LEGACY_MIGRATION_LEDGER_QUERY =
+  `SELECT idx, substr(tag, 1, ${MIGRATION_TAG_MAX_CHARS}), length(tag) ` +
+  `FROM _migrations ORDER BY idx ASC LIMIT ${MIGRATIONS.length + 1}`;
+
+function validateLegacyLedgerRows(rows: unknown[][]): void {
+  if (rows.length > MIGRATIONS.length) {
+    throw new Error('Unsupported database migration history');
+  }
+  for (let position = 0; position < rows.length; position++) {
+    const row = rows[position] as [unknown, unknown, unknown];
+    const expected = MIGRATIONS[position];
+    if (
+      !expected ||
+      !Number.isSafeInteger(row[0]) ||
+      row[0] !== expected.idx ||
+      row[1] !== expected.tag ||
+      row[2] !== expected.tag.length
+    ) {
+      throw new Error('Unsupported database migration history');
+    }
+  }
+}
 
 function makeCreateStatementsIdempotent(statement: string): string {
   if (/^\s*CREATE\s+TABLE\s+(?!IF\s+NOT\s+EXISTS)/i.test(statement)) {
@@ -50,7 +72,29 @@ export async function runMigrations(
     )`
   );
 
-  const rows = await execRaw(MIGRATION_LEDGER_QUERY);
+  let rows: unknown[][];
+  try {
+    rows = await execRaw(MIGRATION_LEDGER_QUERY);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !/no such column(?: named)?:?\s*digest/i.test(error.message)
+    ) {
+      throw error;
+    }
+    await withTransaction(async txExecRaw => {
+      const legacyRows = await txExecRaw(LEGACY_MIGRATION_LEDGER_QUERY);
+      validateLegacyLedgerRows(legacyRows);
+      await txExecRaw('ALTER TABLE _migrations ADD COLUMN digest TEXT');
+      for (const migration of MIGRATIONS.slice(0, legacyRows.length)) {
+        await txExecRaw(
+          'UPDATE _migrations SET digest = ? WHERE idx = ? AND tag = ? AND digest IS NULL',
+          [migration.digest, migration.idx, migration.tag]
+        );
+      }
+    });
+    rows = await execRaw(MIGRATION_LEDGER_QUERY);
+  }
   if (rows.length > MIGRATIONS.length) {
     throw new Error('Unsupported database migration history');
   }

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   message: vi.fn(),
   self: vi.fn(),
   resetSettings: vi.fn(),
+  clearLegacySettings: vi.fn(),
   deepLink: vi.fn(),
   shared: vi.fn(),
   forward: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock('../../src/stores/appStore', () => ({
   useAppStore: {
     getState: () => ({
       resetAccountSettings: mocks.resetSettings,
+      clearLegacyAccountSettingsMigration: mocks.clearLegacySettings,
       setPendingDeepLinkInfo: mocks.deepLink,
       setPendingSharedContent: mocks.shared,
       setPendingForwardMessageId: mocks.forward,
@@ -101,6 +103,7 @@ describe('portable import post-commit cleanup', () => {
     expect(mocks.message).toHaveBeenCalledOnce();
     expect(mocks.self).toHaveBeenCalledOnce();
     expect(mocks.resetSettings).toHaveBeenCalledOnce();
+    expect(mocks.clearLegacySettings).toHaveBeenCalledOnce();
     expect(mocks.deepLink).toHaveBeenCalledWith(null);
     expect(mocks.shared).toHaveBeenCalledWith(null);
     expect(mocks.forward).toHaveBeenCalledWith(null);

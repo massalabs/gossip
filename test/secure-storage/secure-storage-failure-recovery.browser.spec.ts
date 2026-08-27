@@ -16,14 +16,18 @@ const secureStorageWasmUrl = new URL(
 const IDB_STORE_NAME = 'blocks';
 const SESSION_COUNT = 3;
 
-type FaultPlan = { readwrite?: number; readonly?: number };
+type FaultPlan = {
+  readwrite?: number;
+  readonly?: number;
+  readonlyAfterReadwrite?: number;
+};
 type FaultProxy = {
   injectIndexedDbFaultsForTesting(plan: FaultPlan): Promise<void>;
   clearIndexedDbFaultsForTesting(): Promise<void>;
   retryFailedCoverNowForTesting(): Promise<boolean>;
   stopPeriodicCoverForTesting(): Promise<void>;
   cover(): Promise<void>;
-  rejectNextSqlRollbackForTesting(): Promise<void>;
+  rejectNextSqlRollbackForTesting(readonlyFaults?: number): Promise<void>;
   exec(
     sql: string,
     params?: unknown[],
@@ -567,10 +571,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       connection.db.select({ username: userProfile.username }).from(userProfile)
     ).resolves.toEqual([{ username: 'durable outer value' }]);
 
-    await testProxy(connection).injectIndexedDbFaultsForTesting({
-      readonly: 1,
-    });
-    await testProxy(connection).rejectNextSqlRollbackForTesting();
+    await testProxy(connection).rejectNextSqlRollbackForTesting(1);
     await expect(
       connection.db.transaction(async tx => {
         await tx
@@ -647,10 +648,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       ['ambiguous uncommitted value', 'gossip1poisonedbaseline'],
       true
     );
-    await testProxy(connection).injectIndexedDbFaultsForTesting({
-      readonly: 1,
-    });
-    await testProxy(connection).rejectNextSqlRollbackForTesting();
+    await testProxy(connection).rejectNextSqlRollbackForTesting(1);
     await expect(
       testProxy(connection).exec('ROLLBACK', [], true)
     ).rejects.toThrow('recovery-required');
@@ -806,7 +804,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     const beforeRecoveryRejected = await snapshotSecureStorage();
     await testProxy(connection).injectIndexedDbFaultsForTesting({
       readwrite: 1,
-      readonly: 6,
+      readonlyAfterReadwrite: 6,
     });
     await expect(
       connection.secureStorageCreate(1, recoveryRejectedPassword)
