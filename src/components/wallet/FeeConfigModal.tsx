@@ -20,6 +20,13 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
   const [config, setConfig] = useState<FeeConfig>(currentConfig);
   const { t } = useTranslation('wallet');
 
+  // Sync local state with the stored config whenever the modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setConfig(currentConfig);
+    }
+  }, [isOpen, currentConfig]);
+
   const handlePresetChange = useCallback(
     (preset: 'low' | 'standard' | 'high') => {
       setConfig({
@@ -156,7 +163,11 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
                   name="feeType"
                   checked={config.type === 'preset'}
                   onChange={() =>
-                    setConfig({ type: 'preset', preset: 'standard' })
+                    setConfig({
+                      type: 'preset',
+                      preset:
+                        config.preset ?? currentConfig.preset ?? 'standard',
+                    })
                   }
                   className="w-4 h-4 text-blue-600 border-gray-300 focus-visible:ring-blue-500"
                 />

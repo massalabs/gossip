@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight } from 'react-feather';
 import { useWalletStore } from '../../stores/walletStore';
@@ -48,19 +48,19 @@ const SendModal: React.FC<SendModalProps> = ({
   const availableBalance = selectedToken?.balance || 0n;
 
   // Use the ui-kit send hook
-  const {
-    sendAsset,
-    isPending,
-    error: _sendError,
-    operation: _operation,
-  } = useSend({ provider });
+  const { sendAsset, isPending } = useSend({ provider });
 
-  // Calculate amount in bigint for validation
-  const amountBigInt = amount
-    ? selectedToken.isNative
-      ? parseMas(amount)
-      : parseUnits(amount, selectedToken.decimals)
-    : 0n;
+  // Calculate amount in bigint for validation (null when unparseable)
+  const amountBigInt = useMemo(() => {
+    if (!amount || !selectedToken) return 0n;
+    try {
+      return selectedToken.isNative
+        ? parseMas(amount)
+        : parseUnits(amount, selectedToken.decimals);
+    } catch {
+      return null;
+    }
+  }, [amount, selectedToken]);
 
   const resetModalState = useCallback(() => {
     setShowConfirmation(false);
@@ -146,6 +146,13 @@ const SendModal: React.FC<SendModalProps> = ({
       return false;
     }
 
+    if (amountBigInt === null) {
+      const errorMsg = 'Invalid amount';
+      setError(errorMsg);
+      toast.error(errorMsg);
+      return false;
+    }
+
     // Check if user has enough balance
     // For native tokens (MAS), check amount + fees
     // For non-native tokens, only check the amount (fees are paid in MAS)
@@ -218,7 +225,8 @@ const SendModal: React.FC<SendModalProps> = ({
   );
 
   const handleConfirmTransaction = useCallback(async () => {
-    setIsConfirming(true);
+    if (!selectedToken || amountBigInt === null) return;
+
     setError(null);
 
     // Close all modals immediately - don't wait for transaction
@@ -229,11 +237,6 @@ const SendModal: React.FC<SendModalProps> = ({
     let loadingToast: string | null = null;
 
     try {
-      // Convert amount to bigint
-      const amountBigInt = selectedToken.isNative
-        ? parseMas(amount)
-        : parseUnits(amount, selectedToken.decimals);
-
       // Create asset object for ui-kit
       const asset = {
         decimals: selectedToken.decimals,
@@ -247,19 +250,25 @@ const SendModal: React.FC<SendModalProps> = ({
         duration: Infinity,
       });
 
-      await sendAsset({
+      const operation = await sendAsset({
         recipient: recipient.trim(),
         amount: amountBigInt,
         asset,
         final: false,
+        fee: getFeeAmountAtomic(),
       });
 
-      await refreshBalances();
-
-      // Dismiss loading toast and show success
+      // Dismiss loading toast
       if (loadingToast) {
         toast.dismiss(loadingToast);
       }
+
+      if (!operation) {
+        toast.error(t('send.failed'));
+        return;
+      }
+
+      await refreshBalances();
 
       toast.success(
         `Successfully sent ${formatAmount(amountBigInt, selectedToken.decimals).preview} ${selectedToken.ticker} to ${recipient.slice(0, 6)}...${recipient.slice(-4)}`
@@ -276,9 +285,10 @@ const SendModal: React.FC<SendModalProps> = ({
     onSuccess,
     onClose,
     selectedToken,
-    amount,
+    amountBigInt,
     sendAsset,
     recipient,
+    getFeeAmountAtomic,
     refreshBalances,
     t,
   ]);
@@ -308,6 +318,25 @@ const SendModal: React.FC<SendModalProps> = ({
     }
   }, [feeConfig, t]);
 
+  const amountUsdEstimate = useMemo(() => {
+    if (!selectedToken?.priceUsd || !amount || isNaN(parseFloat(amount))) {
+      return null;
+    }
+
+    const masToken = tokens.find(token => token.ticker === 'MAS');
+    const masPriceUsd = masToken?.priceUsd ?? 0;
+    const feeAmountUsd = getFeeAmount() * masPriceUsd;
+
+    // For native tokens, include the fee in USD calculation
+    // For non-native tokens, only show the token amount in USD
+    return selectedToken.isNative
+      ? (
+          parseFloat(amount) * (selectedToken.priceUsd ?? 0) +
+          feeAmountUsd
+        ).toFixed(2)
+      : (parseFloat(amount) * (selectedToken.priceUsd ?? 0)).toFixed(2);
+  }, [selectedToken, amount, tokens, getFeeAmount]);
+
   if (!isOpen) return null;
 
   return (
@@ -322,7 +351,7 @@ const SendModal: React.FC<SendModalProps> = ({
           selectedToken={selectedToken}
           onSelect={token => {
             const index = tokens.findIndex(t => t.address === token.address);
-            setSelectedTokenIndex(index);
+            setSelectedTokenIndex(Math.max(0, index));
           }}
         />
       </div>
@@ -396,27 +425,7 @@ const SendModal: React.FC<SendModalProps> = ({
             }{' '}
             {selectedToken?.ticker}
           </span>
-          {selectedToken?.priceUsd && amount && !isNaN(parseFloat(amount)) && (
-            <span>
-              ≈ $
-              {(() => {
-                const masToken = tokens.find(token => token.ticker === 'MAS');
-                const masPriceUsd = masToken?.priceUsd ?? 0;
-                const feeAmountUsd = getFeeAmount() * masPriceUsd;
-
-                // For native tokens, include the fee in USD calculation
-                // For non-native tokens, only show the token amount in USD
-                return selectedToken.isNative
-                  ? (
-                      parseFloat(amount) * (selectedToken.priceUsd ?? 0) +
-                      feeAmountUsd
-                    ).toFixed(2)
-                  : (
-                      parseFloat(amount) * (selectedToken.priceUsd ?? 0)
-                    ).toFixed(2);
-              })()}
-            </span>
-          )}
+          {amountUsdEstimate && <span>≈ ${amountUsdEstimate}</span>}
         </div>
       </div>
 
@@ -460,13 +469,15 @@ const SendModal: React.FC<SendModalProps> = ({
         tokenTicker={selectedToken?.ticker || ''}
         estimatedFee={`${getFeeAmount()} MAS`}
         totalCost={`${
-          selectedToken.isNative
-            ? formatAmount(
-                amountBigInt + getFeeAmountAtomic(),
-                selectedToken.decimals
-              ).preview + ` ${selectedToken.ticker}`
-            : formatAmount(amountBigInt, selectedToken.decimals).preview +
-              ` ${selectedToken.ticker} + ${getFeeAmount()} MAS`
+          !selectedToken || amountBigInt === null
+            ? ''
+            : selectedToken.isNative
+              ? formatAmount(
+                  amountBigInt + getFeeAmountAtomic(),
+                  selectedToken.decimals
+                ).preview + ` ${selectedToken.ticker}`
+              : formatAmount(amountBigInt, selectedToken.decimals).preview +
+                ` ${selectedToken.ticker} + ${getFeeAmount()} MAS`
         }`}
         isLoading={isConfirming}
       />
