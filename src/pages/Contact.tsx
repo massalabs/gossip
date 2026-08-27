@@ -49,8 +49,7 @@ const Contact: React.FC = () => {
   const [showSuccessCheck, setShowSuccessCheck] = useState(false);
 
   const displayName =
-    (renamed?.userId === contact?.userId ? renamed?.name : contact?.name) ??
-    '';
+    (renamed?.userId === contact?.userId ? renamed?.name : contact?.name) ?? '';
 
   const contactPublicKeys = useMemo(() => {
     if (!contact?.publicKeys) return null;

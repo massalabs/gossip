@@ -169,7 +169,13 @@ const DiscussionSettings: React.FC = () => {
       patchDiscussion(discussion.id, { mutedNotifications: !newMuted });
       toast.error(t('settings.mute_update_failed'));
     }
-  }, [gossip, discussion?.id, discussion?.mutedNotifications, patchDiscussion, t]);
+  }, [
+    gossip,
+    discussion?.id,
+    discussion?.mutedNotifications,
+    patchDiscussion,
+    t,
+  ]);
 
   const handleNavigateToContact = useCallback(
     (contact: Contact) => {

@@ -164,7 +164,16 @@ export function useContextMenu({
       });
     }
     return items;
-  }, [onReplyTo, onForward, onDelete, onEdit, isOutgoing, isDeleted, message, t]);
+  }, [
+    onReplyTo,
+    onForward,
+    onDelete,
+    onEdit,
+    isOutgoing,
+    isDeleted,
+    message,
+    t,
+  ]);
 
   // Stable object so consumers can safely use the hook result in dep arrays
   // (and memoized children don't see a new prop identity every render).
