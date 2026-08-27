@@ -388,6 +388,9 @@ describe('secure-storage real IndexedDB failure recovery', () => {
         'SELECT username FROM userProfile; -- accepted comment'
       )
     ).resolves.toMatchObject({ rows: [['durable single statement']] });
+    await expect(
+      testProxy(connection).exec('SAVEPOINT unsupported_outer')
+    ).rejects.toThrow('Top-level savepoints are not supported');
 
     await testProxy(connection).injectIndexedDbFaultsForTesting({
       readwrite: 1,
@@ -406,6 +409,18 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       ['durable EOF-comment mutation']
     );
 
+    for (const sql of ['ANALYZE', 'REINDEX']) {
+      await testProxy(connection).injectIndexedDbFaultsForTesting({
+        readwrite: 1,
+      });
+      await expect(testProxy(connection).exec(sql)).rejects.toThrow();
+      await expect(
+        connection.db
+          .select({ username: userProfile.username })
+          .from(userProfile)
+      ).resolves.toEqual([{ username: 'durable EOF-comment mutation' }]);
+    }
+
     await testProxy(connection).exec('BEGIN IMMEDIATE /* terminated by EOF');
     let eofCoverSettled = false;
     const eofCover = testProxy(connection)
@@ -422,6 +437,19 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     );
     await eofCover;
     expect(eofCoverSettled).toBe(true);
+
+    await testProxy(connection).exec('BEGIN IMMEDIATE');
+    let endCoverSettled = false;
+    const endCover = testProxy(connection)
+      .cover()
+      .then(() => {
+        endCoverSettled = true;
+      });
+    await Promise.resolve();
+    expect(endCoverSettled).toBe(false);
+    await testProxy(connection).exec('END TRANSACTION', [], true);
+    await endCover;
+    expect(endCoverSettled).toBe(true);
 
     const rawConnection = connection as unknown as {
       execRawDirect(sql: string, params?: unknown[]): Promise<unknown[][]>;
@@ -603,7 +631,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       readwrite: 1,
     });
     await expect(
-      testProxy(connection).exec('COMMIT', [], true)
+      testProxy(connection).exec('END TRANSACTION', [], true)
     ).rejects.toThrow();
     expectSnapshotsEqual(beforePoisonedRollback, await snapshotSecureStorage());
     const afterRejectedCommit = await testProxy(connection).exec(

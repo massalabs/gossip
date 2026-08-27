@@ -93,6 +93,10 @@ describe('DatabaseConnection transaction classification', () => {
   it.each([
     ['\u00a0BEGIN IMMEDIATE\u00a0', 'begin'],
     ['\ufeffCOMMIT\ufeff', 'commit'],
+    ['END TRANSACTION; -- alias', 'commit'],
+    ['SAVEPOINT outer', 'savepoint'],
+    ['ANALYZE userProfile', 'mutation'],
+    ['REINDEX', 'mutation'],
     ['\u0085BEGIN', 'other'],
     ['COMMIT\u0085', 'other'],
     [';;BEGIN', 'other'],
@@ -114,9 +118,13 @@ describe('DatabaseConnection transaction classification', () => {
     }
   );
 
-  it('tracks commented full and savepoint rollbacks through real SQLite', async () => {
+  it('tracks commit aliases and nested savepoint rollbacks through real SQLite', async () => {
     const connection = getTestConnection();
     const state = connection as unknown as { state: { txDepth: number } };
+
+    await connection.execRawDirect('BEGIN IMMEDIATE');
+    await connection.execRawDirect('END TRANSACTION; -- release outer');
+    expect(state.state.txDepth).toBe(0);
 
     await connection.execRawDirect('BEGIN IMMEDIATE');
     await connection.execRawDirect('SAVEPOINT sp_comment');
@@ -127,6 +135,20 @@ describe('DatabaseConnection transaction classification', () => {
     await connection.execRawDirect('RELEASE SAVEPOINT sp_comment');
     await connection.execRawDirect('ROLLBACK TRANSACTION; -- release outer');
     expect(state.state.txDepth).toBe(0);
+  });
+
+  it('rejects an outermost savepoint while preserving nested savepoints', async () => {
+    const connection = getTestConnection();
+    await expect(connection.execRawDirect('SAVEPOINT outer')).rejects.toThrow(
+      'Top-level savepoints are not supported'
+    );
+
+    await connection.execRawDirect('BEGIN IMMEDIATE');
+    await expect(connection.execRawDirect('SAVEPOINT nested')).resolves.toEqual(
+      []
+    );
+    await connection.execRawDirect('RELEASE SAVEPOINT nested');
+    await connection.execRawDirect('ROLLBACK');
   });
 
   it.each([
@@ -155,8 +177,6 @@ describe('DatabaseConnection transaction callback guards', () => {
       () => connection.secureStorageCoverTick(),
       () => connection.secureStorageFlush(),
       () => connection.secureStorageWriteNamespaceData(1, 0, new Uint8Array()),
-      () => connection.secureStorageReadNamespaceData(1, 0, 0),
-      () => connection.secureStorageNamespaceDataLength(1),
       () => connection.secureStorageClearNamespace(1),
       () => connection.secureStorageReplaceNamespaceData(1, new Uint8Array()),
       () => connection.close(),
@@ -175,6 +195,10 @@ describe('DatabaseConnection transaction callback guards', () => {
   it('does not flush a native backend reentrantly before commit', async () => {
     const execSql = vi.fn(async () => ({ rows: [], lastInsertRowId: 0 }));
     const flush = vi.fn(async () => undefined);
+    const readNamespaceData = vi.fn(async () => ({
+      data: new Uint8Array([4, 2]),
+    }));
+    const namespaceDataLength = vi.fn(async () => ({ length: 2 }));
     const connection = Object.create(
       DatabaseConnection.prototype
     ) as DatabaseConnection;
@@ -197,22 +221,48 @@ describe('DatabaseConnection transaction callback guards', () => {
       transactionCallbackDepth: 0,
       txDepth: 0,
       secureProxy: null,
-      nativePlugin: { execSql, flush },
+      nativePlugin: {
+        execSql,
+        flush,
+        readNamespaceData,
+        namespaceDataLength,
+      },
       useNativePlugin: true,
     };
 
     await connection.withTransaction(async () => {
+      await expect(
+        connection.secureStorageReadNamespaceData(1, 0, 2)
+      ).resolves.toEqual(new Uint8Array([4, 2]));
+      await expect(
+        connection.secureStorageNamespaceDataLength(1)
+      ).resolves.toBe(2);
       await expect(connection.secureStorageFlush()).rejects.toThrow(
         'Secure storage operations are not allowed inside a transaction callback'
       );
       expect(flush).not.toHaveBeenCalled();
     });
 
+    expect(flush).toHaveBeenCalledOnce();
+
+    const raw = connection as unknown as RawConnection;
+    await raw.execRawDirect('ANALYZE');
+    await raw.execRawDirect('REINDEX');
+    await raw.execRawDirect('BEGIN IMMEDIATE');
+    await raw.execRawDirect('END TRANSACTION');
+    await expect(raw.execRawDirect('SAVEPOINT outer')).rejects.toThrow(
+      'Top-level savepoints are not supported'
+    );
+
     expect(execSql.mock.calls.map(([request]) => request.sql)).toEqual([
       'BEGIN IMMEDIATE',
       'COMMIT',
+      'ANALYZE',
+      'REINDEX',
+      'BEGIN IMMEDIATE',
+      'END TRANSACTION',
     ]);
-    expect(flush).toHaveBeenCalledOnce();
+    expect(flush).toHaveBeenCalledTimes(4);
   });
 });
 

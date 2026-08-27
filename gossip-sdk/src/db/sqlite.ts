@@ -27,7 +27,11 @@ import {
   requiresSecureStorageRecovery,
   SecureStorageRecoveryRequiredError,
 } from './secure-storage-errors.js';
-import { classifyStatement, type StatementKind } from './sql-statement.js';
+import {
+  classifyStatement,
+  TOP_LEVEL_SAVEPOINT_ERROR,
+  type StatementKind,
+} from './sql-statement.js';
 import { SESSION_COUNT } from './secure-storage-namespaces.js';
 export { SecureStorageRecoveryRequiredError } from './secure-storage-errors.js';
 export {
@@ -109,7 +113,11 @@ interface DbState {
     run<T>(inTransaction: boolean, fn: () => Promise<T>): Promise<T>;
     getStore(): boolean;
   } | null;
-  /** Number of active public transaction callbacks on this connection. */
+  /**
+   * Number of active public transaction callbacks on this connection. Browser
+   * runtimes lack async-local context, so mutating/lifecycle guards
+   * conservatively apply connection-wide until every callback settles.
+   */
   transactionCallbackDepth: number;
   /**
    * Open-transaction depth, maintained by inspecting the SQL stream in
@@ -326,6 +334,13 @@ export class DatabaseConnection {
     // depth but doesn't yet have any data needing durable flush).
     const wasInTxn = this.state.txDepth > 0;
     const kind = classifyStatement(sql);
+    if (kind === 'savepoint' && !wasInTxn) {
+      // An outermost SQLite savepoint is itself a transaction. Until the
+      // bridge reports SQLite's authoritative autocommit state, accepting it
+      // here would allow inner mutations to flush before ROLLBACK TO and let
+      // RELEASE commit without the required durable flush.
+      throw new Error(TOP_LEVEL_SAVEPOINT_ERROR);
+    }
 
     if (this.state.useNativePlugin && this.state.nativePlugin) {
       // No `Array.from` on Uint8Array params: encodeSqlParam in
@@ -870,7 +885,6 @@ export class DatabaseConnection {
     offset: number,
     len: number
   ): Promise<Uint8Array> {
-    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       const { data } = await this.requireNativePlugin().readNamespaceData({
         namespace,
@@ -884,7 +898,6 @@ export class DatabaseConnection {
 
   /** Total bytes currently stored in a namespace stream (0 if empty). */
   async secureStorageNamespaceDataLength(namespace: number): Promise<number> {
-    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       const { length } = await this.requireNativePlugin().namespaceDataLength({
         namespace,

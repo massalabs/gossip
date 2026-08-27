@@ -3,8 +3,12 @@ export type StatementKind =
   | 'begin'
   | 'commit'
   | 'rollback'
+  | 'savepoint'
   | 'mutation'
   | 'other';
+
+export const TOP_LEVEL_SAVEPOINT_ERROR =
+  'Top-level savepoints are not supported';
 
 /**
  * Remove SQL comments without treating comment markers inside quoted values or
@@ -86,14 +90,17 @@ export function classifyStatement(sql: string): StatementKind {
   ) {
     return 'begin';
   }
-  if (/^COMMIT(?:\s+TRANSACTION)?\s*;?$/i.test(normalized)) {
+  if (/^(?:COMMIT|END)(?:\s+TRANSACTION)?\s*;?$/i.test(normalized)) {
     return 'commit';
   }
   if (/^ROLLBACK(?:\s+TRANSACTION)?\s*;?$/i.test(normalized)) {
     return 'rollback';
   }
+  if (/^SAVEPOINT\b/i.test(normalized)) {
+    return 'savepoint';
+  }
   if (
-    /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
+    /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA|ANALYZE|REINDEX)\b/i.test(
       normalized
     )
   ) {

@@ -448,18 +448,30 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     await api.exec('INSERT INTO userProfile VALUES (?)', ['inside'], true);
     expect(wasmMock.coverTrafficTick).not.toHaveBeenCalled();
     expect(wasmMock.closeDatabase).not.toHaveBeenCalled();
-    await api.exec('COMMIT', [], true);
+    await api.exec('END TRANSACTION', [], true);
     await cover;
     await close;
 
     expect(wasmMock.execSql.mock.calls.map(([sql]) => sql)).toEqual([
       'BEGIN IMMEDIATE',
       'INSERT INTO userProfile VALUES (?)',
-      'COMMIT',
+      'END TRANSACTION',
     ]);
     expect(wasmMock.coverTrafficTick).toHaveBeenCalledBefore(
       wasmMock.closeDatabase
     );
+  });
+
+  it('rejects top-level savepoints before execution', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+
+    await expect(api.exec('SAVEPOINT outer')).rejects.toThrow(
+      'Top-level savepoints are not supported'
+    );
+    expect(wasmMock.execSql).not.toHaveBeenCalled();
+    expect(wasmMock.flushEncrypted).not.toHaveBeenCalled();
   });
 
   it('retains outer transaction ownership through savepoint rollback', async () => {
@@ -534,6 +546,18 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     expect(wasmMock.coverTrafficTick.mock.calls.map(([ns]) => ns)).toEqual(
       COVER_TRAFFIC_NAMESPACES
     );
+  });
+
+  it('flushes ANALYZE and REINDEX as autocommit mutations', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+
+    await api.exec('ANALYZE');
+    await api.exec('REINDEX');
+
+    expect(wasmMock.execSql).toHaveBeenCalledTimes(2);
+    expect(wasmMock.flushEncrypted).toHaveBeenCalledTimes(2);
   });
 
   it('resets poisoned SQL state before releasing queued durable work', async () => {

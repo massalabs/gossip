@@ -15,7 +15,10 @@ import { logger } from '../utils/logs.js';
 
 import * as Comlink from 'comlink';
 import { SECURE_STORAGE_RECOVERY_REQUIRED } from './secure-storage-errors.js';
-import { classifyStatement } from './sql-statement.js';
+import {
+  classifyStatement,
+  TOP_LEVEL_SAVEPOINT_ERROR,
+} from './sql-statement.js';
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — generated WASM module path resolved at build time
@@ -575,6 +578,13 @@ export class SecureStorageWorkerApi {
     const isCommit = kind === 'commit';
     const isFullRollback = kind === 'rollback';
     const endsTransaction = isCommit || isFullRollback;
+
+    if (kind === 'savepoint' && !this.sqlTransactionActive) {
+      // Defense in depth for direct worker callers that bypass the connection
+      // guard. Nested savepoints remain valid once a tracked BEGIN owns the
+      // queue.
+      throw new Error(TOP_LEVEL_SAVEPOINT_ERROR);
+    }
 
     return this.enqueueSqlOperation(inTransaction, async () => {
       await this.ensureDurableStorageRecovered();
