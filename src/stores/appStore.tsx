@@ -159,8 +159,9 @@ const useAppStoreBase = create<AppStoreState>()(
           const domainsWithSuffix = domains.map(domain => `${domain}.massa`);
           set({ mnsDomains: domainsWithSuffix });
         } catch (error) {
+          // Keep the cached domains: a transient network error must not
+          // blank out names that were valid a second ago.
           logger.error('Error fetching MNS domains:', error);
-          set({ mnsDomains: [] });
         }
       },
     }),
