@@ -33,6 +33,48 @@ interface DebugStore {
 
 let idCounter = Date.now();
 
+// ---------------------------------------------------------------------------
+// Debounced persistence
+//
+// The persist middleware re-serializes the WHOLE log array on every log call;
+// a log burst would do quadratic serialization work and hammer Capacitor
+// Preferences. Coalesce writes to at most one per second (trailing) and
+// flush when the page is hidden so nothing is lost on background/close.
+// ---------------------------------------------------------------------------
+const PERSIST_DEBOUNCE_MS = 1000;
+let pendingWrite: { name: string; value: string } | null = null;
+let writeTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function flushPendingLogWrite(): Promise<void> {
+  if (writeTimer !== null) {
+    clearTimeout(writeTimer);
+    writeTimer = null;
+  }
+  const write = pendingWrite;
+  pendingWrite = null;
+  if (write) {
+    await Preferences.set({ key: write.name, value: write.value });
+  }
+}
+
+function scheduleLogWrite(name: string, value: string): void {
+  pendingWrite = { name, value };
+  if (writeTimer === null) {
+    writeTimer = setTimeout(() => {
+      writeTimer = null;
+      void flushPendingLogWrite();
+    }, PERSIST_DEBOUNCE_MS);
+  }
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      void flushPendingLogWrite();
+    }
+  });
+}
+
 /**
  * Deep equality comparison for LogData.
  */
@@ -370,10 +412,11 @@ export const useDebugLogs = create<DebugStore>()(
           const { value } = await Preferences.get({ key: name });
           return value;
         },
-        setItem: async (name: string, value: string) => {
-          await Preferences.set({ key: name, value });
+        setItem: (name: string, value: string) => {
+          scheduleLogWrite(name, value);
         },
         removeItem: async (name: string) => {
+          pendingWrite = null;
           await Preferences.remove({ key: name });
         },
       })),
@@ -381,6 +424,16 @@ export const useDebugLogs = create<DebugStore>()(
         logs: state.logs,
         logLimit: state.logLimit,
       }),
+      // Rehydration is async: logs recorded during startup would otherwise
+      // be silently replaced by the persisted array. Keep both (persisted
+      // first — they're older), trimmed to the limit.
+      merge: (persisted, current) => {
+        const persistedState = (persisted ?? {}) as Partial<DebugStore>;
+        const persistedLogs = persistedState.logs ?? [];
+        const limit = persistedState.logLimit ?? current.logLimit;
+        const logs = [...persistedLogs, ...current.logs].slice(-limit);
+        return { ...current, ...persistedState, logs };
+      },
     }
   )
 );
