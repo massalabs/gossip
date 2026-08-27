@@ -9,6 +9,7 @@ on:
       - 'gossip-sdk/src/assets/generated/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'scripts/run-wasm-tests.mjs'
       - '.github/workflows/rust-wasm.yml'
 
 jobs:
@@ -125,7 +126,7 @@ jobs:
       - name: Run Rust tests via npm
         env:
           RUST_MIN_STACK: 16777216
-        run: npm run wasm:test
+        run: npm run wasm:test:all
 
       - name: Check secure-storage WASM surface
         run: npm run wasm:check:secure-storage
