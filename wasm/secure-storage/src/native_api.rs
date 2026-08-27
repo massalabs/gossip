@@ -724,6 +724,26 @@ mod tests {
                 .expect("NUL-bearing SQL should fail");
             assert!(error.to_string().contains("sql contains nul byte"));
         }
+        for sql in ["\u{85}BEGIN IMMEDIATE", "BEGIN IMMEDIATE\u{85}"] {
+            let error = exec_sql_one(&conn, sql, &[])
+                .err()
+                .expect("Rust-only boundary whitespace should fail");
+            assert!(
+                error
+                    .to_string()
+                    .contains("unsupported sql boundary whitespace")
+            );
+        }
+        for sql in [";;BEGIN IMMEDIATE", "; UPDATE boundary_test SET value = 2"] {
+            let error = exec_sql_one(&conn, sql, &[])
+                .err()
+                .expect("leading empty statements should fail");
+            assert!(
+                error
+                    .to_string()
+                    .contains("leading empty SQL statements are not allowed")
+            );
+        }
         for sql in [
             "\u{a0}BEGIN IMMEDIATE; SELECT 1",
             "\u{a0}UPDATE boundary_test SET value = 2; SELECT 1\u{a0}",
@@ -733,9 +753,14 @@ mod tests {
                 .expect("additional Unicode-bounded statement should fail");
             assert!(error.to_string().contains("multiple SQL statements"));
         }
-        let normalized = exec_sql_one(&conn, "\u{a0}SELECT value FROM boundary_test\u{a0}", &[])
-            .expect("ordinary Unicode-bounded SQL should be normalized");
-        assert_eq!(normalized.rows, vec![vec![serde_json::json!(1)]]);
+        for sql in [
+            "\u{a0}SELECT value FROM boundary_test\u{a0}",
+            "\u{feff}SELECT value FROM boundary_test\u{feff}",
+        ] {
+            let normalized = exec_sql_one(&conn, sql, &[])
+                .expect("ECMAScript Unicode-bounded SQL should be normalized");
+            assert_eq!(normalized.rows, vec![vec![serde_json::json!(1)]]);
+        }
 
         assert!(conn.is_autocommit());
         let value: i64 = conn

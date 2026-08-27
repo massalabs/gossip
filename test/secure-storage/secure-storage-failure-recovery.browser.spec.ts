@@ -341,6 +341,19 @@ describe('secure-storage real IndexedDB failure recovery', () => {
         'sql contains nul byte'
       );
     }
+    for (const sql of ['\u0085BEGIN IMMEDIATE', 'BEGIN IMMEDIATE\u0085']) {
+      await expect(testProxy(connection).exec(sql)).rejects.toThrow(
+        'unsupported sql boundary whitespace'
+      );
+    }
+    for (const sql of [
+      ';;BEGIN IMMEDIATE',
+      '; UPDATE userProfile SET username = "empty prefix mutation"',
+    ]) {
+      await expect(testProxy(connection).exec(sql)).rejects.toThrow(
+        'leading empty SQL statements are not allowed'
+      );
+    }
     for (const sql of [
       '\u00a0BEGIN IMMEDIATE; SELECT 1',
       '\u00a0UPDATE userProfile SET username = "unicode mutation"; SELECT 1\u00a0',
@@ -349,12 +362,14 @@ describe('secure-storage real IndexedDB failure recovery', () => {
         'multiple SQL statements are not allowed'
       );
     }
-    await expect(
-      testProxy(connection).exec(
-        '\u00a0SELECT username FROM userProfile WHERE userId = ?\u00a0',
-        ['gossip1singlestatement']
-      )
-    ).resolves.toMatchObject({ rows: [['durable single statement']] });
+    for (const sql of [
+      '\u00a0SELECT username FROM userProfile WHERE userId = ?\u00a0',
+      '\ufeffSELECT username FROM userProfile WHERE userId = ?\ufeff',
+    ]) {
+      await expect(
+        testProxy(connection).exec(sql, ['gossip1singlestatement'])
+      ).resolves.toMatchObject({ rows: [['durable single statement']] });
+    }
     await expect(
       connection.db.select({ username: userProfile.username }).from(userProfile)
     ).resolves.toEqual([{ username: 'durable single statement' }]);

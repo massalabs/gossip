@@ -90,6 +90,20 @@ describe('DatabaseConnection transaction classification', () => {
     expect(classifyStatement(sql)).toBe('rollback');
   });
 
+  it.each([
+    ['\u00a0BEGIN IMMEDIATE\u00a0', 'begin'],
+    ['\ufeffCOMMIT\ufeff', 'commit'],
+    ['\u0085BEGIN', 'other'],
+    ['COMMIT\u0085', 'other'],
+    [';;BEGIN', 'other'],
+    ["; /* empty */ UPDATE user_profile SET username = 'ignored'", 'other'],
+  ] as const)(
+    'matches the Rust SQL boundary contract for %j',
+    (sql, expected) => {
+      expect(classifyStatement(sql)).toBe(expected);
+    }
+  );
+
   it('tracks commented full and savepoint rollbacks through real SQLite', async () => {
     const connection = getTestConnection();
     const state = connection as unknown as { state: { txDepth: number } };

@@ -69,6 +69,10 @@ function withoutSqlComments(sql: string): string | null {
 export function classifyStatement(sql: string): StatementKind {
   const uncommented = withoutSqlComments(sql);
   if (uncommented === null) return 'other';
+  // This ECMAScript trim is the canonical boundary-normalization contract.
+  // The Rust validator mirrors its exact code-point set, rejects Rust-only
+  // boundary whitespace, and rejects leading empty statements that this
+  // classifier deliberately leaves as `other`.
   const normalized = uncommented.trim();
   if (
     /^BEGIN(?:\s+(?:DEFERRED|IMMEDIATE|EXCLUSIVE))?(?:\s+TRANSACTION)?\s*;?$/i.test(

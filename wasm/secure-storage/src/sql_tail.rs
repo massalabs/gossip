@@ -1,7 +1,29 @@
 use std::ffi::CStr;
 
 pub(crate) const MULTIPLE_STATEMENTS: &str = "multiple SQL statements are not allowed";
+pub(crate) const LEADING_EMPTY_STATEMENT: &str = "leading empty SQL statements are not allowed";
 pub(crate) const NUL_BYTE: &str = "sql contains nul byte";
+pub(crate) const UNSUPPORTED_BOUNDARY_WHITESPACE: &str = "unsupported sql boundary whitespace";
+
+/// Match exactly the whitespace removed by ECMAScript `String.prototype.trim`.
+/// The JavaScript worker classifies the original statement after that trim, so
+/// Rust must neither remove a broader Unicode set nor execute different bytes.
+fn is_ecmascript_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0009}'..='\u{000d}'
+            | '\u{0020}'
+            | '\u{00a0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200a}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202f}'
+            | '\u{205f}'
+            | '\u{3000}'
+            | '\u{feff}'
+    )
+}
 
 fn consume_ignorable(mut input: &[u8], allow_empty_statements: bool) -> Option<()> {
     loop {
@@ -55,11 +77,15 @@ where
     if sql.as_bytes().contains(&0) {
         return Err(NUL_BYTE);
     }
-    // rusqlite's statement cache applies Rust str::trim() before prepare.
-    // Normalize once here and return this exact slice for both native and WASM
-    // execution so lexical validation and preparation cannot parse different
-    // bytes at statement boundaries.
-    let sql = sql.trim();
+    // Normalize exactly as the JavaScript classifier does. rusqlite's
+    // statement cache later applies Rust `str::trim`, whose broader Unicode
+    // set includes U+0085. Reject any remaining Rust-only boundary whitespace
+    // before preparation rather than letting native execution observe bytes
+    // that JavaScript did not classify.
+    let sql = sql.trim_matches(is_ecmascript_whitespace);
+    if sql.trim() != sql {
+        return Err(UNSUPPORTED_BOUNDARY_WHITESPACE);
+    }
     if !sql.as_bytes().contains(&b';') {
         return Ok(sql);
     }
@@ -80,7 +106,10 @@ where
         let complete = sqlite_complete(candidate);
         prefix[index + 1] = saved;
 
-        if complete && !is_empty_statement_prefix(&sql.as_bytes()[..=index]) {
+        if complete {
+            if is_empty_statement_prefix(&sql.as_bytes()[..=index]) {
+                return Err(LEADING_EMPTY_STATEMENT);
+            }
             return if is_ignorable(&sql.as_bytes()[index + 1..]) {
                 Ok(sql)
             } else {
@@ -115,19 +144,28 @@ mod tests {
         assert!(!called);
 
         assert_eq!(validate("\u{a0}BEGIN\u{a0}", |_| false), Ok("BEGIN"));
+        assert_eq!(validate("\u{feff}BEGIN\u{feff}", |_| false), Ok("BEGIN"));
+        assert_eq!(
+            validate("\u{85}BEGIN", |_| false),
+            Err(UNSUPPORTED_BOUNDARY_WHITESPACE)
+        );
+        assert_eq!(
+            validate("BEGIN\u{85}", |_| false),
+            Err(UNSUPPORTED_BOUNDARY_WHITESPACE)
+        );
     }
 
     #[test]
-    fn skips_empty_prefixes_and_rejects_a_complete_statement_tail() {
+    fn rejects_empty_prefixes_and_a_complete_statement_tail() {
         let complete =
             |candidate: &CStr| matches!(candidate.to_bytes(), b";" | b";;" | b";; SELECT 1;");
         assert_eq!(
             validate(";; SELECT 1; -- done", complete),
-            Ok(";; SELECT 1; -- done")
+            Err(LEADING_EMPTY_STATEMENT)
         );
         assert_eq!(
             validate(";; SELECT 1; SELECT 2", complete),
-            Err(MULTIPLE_STATEMENTS)
+            Err(LEADING_EMPTY_STATEMENT)
         );
     }
 }
