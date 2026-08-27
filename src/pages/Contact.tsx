@@ -23,7 +23,6 @@ const Contact: React.FC = () => {
   const gossip = useGossipSdk();
 
   const { userId } = useParams();
-  const [showUserId, setShowUserId] = useState(false);
   const navigate = useNavigate();
   const contact = useDiscussionStore(s =>
     s.contacts.find(c => c.userId === userId)
@@ -170,13 +169,7 @@ const Contact: React.FC = () => {
               <Check className="w-4 h-4 text-success transition-opacity duration-200" />
             )}
           </div>
-          <UserIdDisplay
-            userId={contact.userId}
-            showCopy
-            showHideToggle
-            visible={showUserId}
-            onChange={setShowUserId}
-          />
+          <UserIdDisplay userId={contact.userId} showCopy />
         </div>
       </div>
       <div className="mt-6 grid grid-cols-1 gap-2">

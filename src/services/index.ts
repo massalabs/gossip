@@ -71,10 +71,19 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
       const foreground = await isAppInForeground();
       if (foreground) return;
 
+      // Mute check: prefer the hydrated store; right after resume the store
+      // can still be empty, so fall back to the SDK (SQLite) — otherwise a
+      // muted contact would notify anyway.
       const { discussions } = useDiscussionStore.getState();
-      const discussion = discussions.find(
+      let discussion = discussions.find(
         d => d.contactUserId === message.contactUserId
       );
+      if (!discussion && discussions.length === 0 && gossip.isSessionOpen) {
+        const dbDiscussions = await gossip.discussions.list();
+        discussion = dbDiscussions.find(
+          d => d.contactUserId === message.contactUserId
+        );
+      }
       if (discussion?.mutedNotifications) return;
 
       await notificationService.showDiscussionNotification(

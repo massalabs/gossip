@@ -84,7 +84,6 @@ const Settings = (): React.ReactElement => {
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
-  const [showUserId, setShowUserId] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
   const [activeView, setActiveView] = useState<SettingsView>(SettingsView.MAIN);
@@ -214,12 +213,9 @@ const Settings = (): React.ReactElement => {
                 {(!mnsEnabled || mnsDomains.length === 0) && (
                   <UserIdDisplay
                     userId={userProfile.userId}
-                    visible={showUserId}
-                    onChange={setShowUserId}
                     textSize="xs"
                     textClassName="text-muted-foreground font-mono"
                     showCopy
-                    showHideToggle
                     prefixChars={4}
                     suffixChars={4}
                   />
