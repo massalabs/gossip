@@ -30,7 +30,6 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
 
     const loadAccount = useAccountStore(state => state.loadAccount);
     const lockedByUser = useAccountStore(state => state.lockedByUser);
-    const [usePassword, setUsePassword] = useState(false);
     const [showAccountSelection, setShowAccountSelection] = useState(false);
     const [selectedAccountInfo, setSelectedAccountInfo] =
       useState<UserProfile | null>(null);
@@ -42,6 +41,7 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
     const autoAuthAttempted = useRef(false);
 
     const currentAccount = selectedAccountInfo || accountInfo;
+    const usePassword = currentAccount?.security?.authMethod === 'password';
     const [inputFocused, setInputFocused] = useState(false);
     const keyboardOpen = useKeyboardStore(s => s.isVisible) || inputFocused;
 
@@ -56,14 +56,6 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
       onErrorChange,
       userId: currentAccount?.userId,
     });
-
-    useEffect(() => {
-      const shouldUsePassword =
-        currentAccount?.security?.authMethod === 'password';
-      if (usePassword !== shouldUsePassword) {
-        setUsePassword(shouldUsePassword);
-      }
-    }, [currentAccount, usePassword]);
 
     useEffect(() => {
       (async () => {
@@ -166,8 +158,6 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
 
     const displayUsername = currentAccount?.username;
     const accountSupportsBiometrics = !usePassword;
-    const shouldShowBiometricOption =
-      biometricMethodAvailable || accountSupportsBiometrics;
 
     if (showAccountSelection) {
       return (
@@ -187,9 +177,7 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
       >
         <div
           className={`overflow-hidden transition-all duration-300 ${
-            shouldShowBiometricOption &&
-            accountSupportsBiometrics &&
-            !keyboardOpen
+            accountSupportsBiometrics && !keyboardOpen
               ? 'max-h-40 opacity-100'
               : 'max-h-0 opacity-0'
           }`}

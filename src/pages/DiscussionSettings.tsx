@@ -26,6 +26,7 @@ import { ROUTES } from '../constants/routes';
 import { useManualRenewDiscussion } from '../hooks/useManualRenew';
 import type { Contact } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../hooks/useGossipSdk';
+import toast from 'react-hot-toast';
 
 const DiscussionSettings: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -141,6 +142,10 @@ const DiscussionSettings: React.FC = () => {
   const handleSelectRetention = useCallback(
     async (value: number | null) => {
       if (!discussion?.id || !discussion?.contactUserId) return;
+      const previous = {
+        messageRetentionDuration: discussion.messageRetentionDuration ?? null,
+        retentionPolicySetAt: discussion.retentionPolicySetAt ?? null,
+      };
       // Optimistically update the store so the label is instant here and in
       // the discussion header when navigating back.
       patchDiscussion(discussion.id, {
@@ -148,20 +153,34 @@ const DiscussionSettings: React.FC = () => {
         retentionPolicySetAt: Date.now(),
       });
       setIsRetentionModalOpen(false);
-      await gossip.discussions.setRetentionPolicy(
-        discussion.contactUserId,
-        value
-      );
+      try {
+        await gossip.discussions.setRetentionPolicy(
+          discussion.contactUserId,
+          value
+        );
+      } catch (error) {
+        // Roll back — the UI must not keep showing a policy the backend
+        // never accepted.
+        logger.error('Failed to set retention policy:', error);
+        patchDiscussion(discussion.id, previous);
+        toast.error(t('settings.retention_update_failed'));
+      }
     },
-    [gossip, discussion?.id, discussion?.contactUserId, patchDiscussion]
+    [gossip, discussion, patchDiscussion, t]
   );
 
   const handleToggleMute = useCallback(async () => {
     if (!discussion?.id) return;
     const newMuted = !discussion.mutedNotifications;
     patchDiscussion(discussion.id, { mutedNotifications: newMuted });
-    await gossip.discussions.setMuted(discussion.id, newMuted);
-  }, [gossip, discussion?.id, discussion?.mutedNotifications, patchDiscussion]);
+    try {
+      await gossip.discussions.setMuted(discussion.id, newMuted);
+    } catch (error) {
+      logger.error('Failed to toggle mute:', error);
+      patchDiscussion(discussion.id, { mutedNotifications: !newMuted });
+      toast.error(t('settings.mute_update_failed'));
+    }
+  }, [gossip, discussion?.id, discussion?.mutedNotifications, patchDiscussion, t]);
 
   const handleNavigateToContact = useCallback(
     (contact: Contact) => {

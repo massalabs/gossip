@@ -17,7 +17,7 @@ const QRCodeSwitcher: React.FC = () => {
   const gossip = useGossipSdk();
   const navigate = useNavigate();
   const { signalReady } = useOverlayReady();
-  const { userProfile } = useAccountStore();
+  const userProfile = useAccountStore.use.userProfile();
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const mnsDomains = useAppStore(s => s.mnsDomains);
   const [showScanner, setShowScanner] = useState(false);

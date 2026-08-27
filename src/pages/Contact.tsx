@@ -40,17 +40,18 @@ const Contact: React.FC = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [proposedName, setProposedName] = useState(contact?.name || '');
-  const [displayName, setDisplayName] = useState(contact?.name || '');
+  // Contact renames don't emit an SDK event, so the store's `contact.name`
+  // can be stale right after a rename — prefer the locally confirmed name.
+  const [renamed, setRenamed] = useState<{
+    userId: string;
+    name: string;
+  } | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
-
-  React.useEffect(() => {
-    if (contact) {
-      setProposedName(contact.name);
-      setDisplayName(contact.name);
-    }
-  }, [contact]);
   const [showSuccessCheck, setShowSuccessCheck] = useState(false);
+
+  const displayName =
+    (renamed?.userId === contact?.userId ? renamed?.name : contact?.name) ??
+    '';
 
   const contactPublicKeys = useMemo(() => {
     if (!contact?.publicKeys) return null;
@@ -62,13 +63,12 @@ const Contact: React.FC = () => {
     }
   }, [contact]);
 
-  const canEditName = useMemo(() => !!ownerUserId, [ownerUserId]);
+  const canEditName = !!ownerUserId;
 
   const handleOpenEditName = useCallback(() => {
-    setProposedName(displayName || '');
     setNameError(null);
     setIsNameModalOpen(true);
-  }, [displayName]);
+  }, []);
 
   const handleSaveName = useCallback(
     async (name: string) => {
@@ -84,7 +84,7 @@ const Contact: React.FC = () => {
         setNameError(t('remove_modal.rename_failed'));
         return;
       }
-      setDisplayName(result.trimmedName);
+      setRenamed({ userId: contact.userId, name: result.trimmedName });
       setIsNameModalOpen(false);
       setShowSuccessCheck(true);
     },
@@ -222,7 +222,7 @@ const Contact: React.FC = () => {
         isOpen={isNameModalOpen}
         onClose={() => setIsNameModalOpen(false)}
         title={t('edit_name')}
-        initialName={proposedName}
+        initialName={displayName}
         confirmLabel={t('common:save')}
         error={nameError}
         onConfirm={async name => {

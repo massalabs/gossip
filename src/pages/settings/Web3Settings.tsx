@@ -18,7 +18,8 @@ const Web3Settings: React.FC = () => {
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const setMnsEnabled = useAppStore(s => s.setMnsEnabled);
   const fetchMnsDomains = useAppStore(s => s.fetchMnsDomains);
-  const { userProfile, provider } = useAccountStore();
+  const userProfile = useAccountStore.use.userProfile();
+  const provider = useAccountStore.use.provider();
   const [mnsUrl, setMnsUrl] = useState<string | null>(null);
 
   useEffect(() => {

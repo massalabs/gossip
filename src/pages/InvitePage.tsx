@@ -169,27 +169,6 @@ export const InvitePage: React.FC = () => {
     }
   }, [userId, searchParams, setPendingDeepLinkInfo, navigate]);
 
-  // /**
-  //  * Handle install from iOS App Store
-  //  */
-  // const handleInstallIOS = useCallback(() => {
-  //   window.open(APPLE_APP_STORE_URL, '_blank');
-  // }, []);
-
-  // /**
-  //  * Handle install from Google Play Store
-  //  */
-  // const handleInstallAndroid = useCallback(() => {
-  //   window.open(GOOGLE_PLAY_STORE_URL, '_blank');
-  // }, []);
-
-  // /**
-  //  * Handle download APK directly
-  //  */
-  // const handleDownloadAPK = useCallback(() => {
-  //   window.open(LAST_APK_GITHUB_URL, '_blank');
-  // }, []);
-
   // Auto-click the "Open in App" button on mount
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
@@ -287,56 +266,6 @@ export const InvitePage: React.FC = () => {
             Learn more about Gossip
           </Button>
         </div>
-
-        {/* Install Section */}
-        {/* <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
-            <div className="text-center mb-6">
-              <h3 className="text-lg font-semibold text-foreground mb-2">
-                Don't have the app?
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Install Gossip to get the best experience
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              <Button
-                onClick={handleInstallIOS}
-                variant="ghost"
-                fullWidth
-                size="lg"
-                className="justify-start gap-3 hover:bg-accent/50"
-              >
-                <Smartphone className="w-6 h-6" />
-                <span className="flex-1 text-left">Install for iOS</span>
-                <ChevronRight className="w-5 h-5 text-muted-foreground" />
-              </Button>
-
-              <Button
-                onClick={handleInstallAndroid}
-                variant="ghost"
-                fullWidth
-                size="lg"
-                className="justify-start gap-3 hover:bg-accent/50"
-              >
-                <Smartphone className="w-6 h-6" />
-                <span className="flex-1 text-left">Install for Android</span>
-                <ChevronRight className="w-5 h-5 text-muted-foreground" />
-              </Button>
-
-              <Button
-                onClick={handleDownloadAPK}
-                variant="ghost"
-                fullWidth
-                size="lg"
-                className="justify-start gap-3 hover:bg-accent/50"
-              >
-                <GitHub className="w-6 h-6" />
-                <span className="flex-1 text-left">Download Last Release</span>
-                <ChevronRight className="w-5 h-5 text-muted-foreground" />
-              </Button>
-            </div>
-          </div> */}
       </div>
     </PageLayout>
   );

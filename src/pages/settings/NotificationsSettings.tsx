@@ -54,15 +54,24 @@ const NotificationsSettings: React.FC = () => {
   // may have been granted or revoked outside our process.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
+    let cancelled = false;
     let handle: PluginListenerHandle | null = null;
     void (async () => {
-      handle = await App.addListener('appStateChange', state => {
+      const listener = await App.addListener('appStateChange', state => {
         if (state.isActive) {
           void refreshPrefs();
         }
       });
+      // The effect may have been cleaned up while addListener was pending —
+      // remove the listener immediately so it doesn't leak.
+      if (cancelled) {
+        void listener.remove();
+        return;
+      }
+      handle = listener;
     })();
     return () => {
+      cancelled = true;
       if (handle) void handle.remove();
     };
   }, [refreshPrefs]);

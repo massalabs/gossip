@@ -31,8 +31,11 @@ import { useAutoLock } from './hooks/useAutoLock';
 import PageLayout from './components/ui/Layout/PageLayout.tsx';
 
 const AppContent: React.FC = () => {
-  const { isLoading, userProfile } = useAccountStore();
-  const { isInitialized } = useAppStore();
+  // Field selectors: subscribing to the whole store would re-render the
+  // entire route tree on any account-store change.
+  const isLoading = useAccountStore(s => s.isLoading);
+  const userProfile = useAccountStore(s => s.userProfile);
+  const isInitialized = useAppStore(s => s.isInitialized);
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
   useStoreInit(); // Initialize all stores when user profile is available
@@ -101,9 +104,17 @@ function App() {
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
+    let disposed = false;
 
     const initialize = async () => {
       const cleanupFn = await initTheme();
+      // The effect may already be cleaned up (StrictMode first mount,
+      // unmount during init) — dispose immediately instead of leaking the
+      // theme listener.
+      if (disposed) {
+        cleanupFn?.();
+        return;
+      }
       cleanup = cleanupFn;
       await initOnlineStore();
     };
@@ -111,6 +122,7 @@ function App() {
     void initialize();
 
     return () => {
+      disposed = true;
       cleanup?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

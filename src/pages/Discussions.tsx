@@ -81,7 +81,13 @@ const Discussions: React.FC = () => {
       if (contactUserId === SELF_CONTACT_ID) {
         if (pendingForwardMessageId != null) {
           navigate(ROUTES.selfDiscussion(), {
-            state: { forwardFromMessageId: pendingForwardMessageId },
+            // forwardNonce identifies THIS navigation: forwarding the same
+            // message twice must be handled twice, while remounts of the
+            // same history entry must be handled once.
+            state: {
+              forwardFromMessageId: pendingForwardMessageId,
+              forwardNonce: Date.now(),
+            },
             replace: false,
           });
           setPendingSharedContent(null);

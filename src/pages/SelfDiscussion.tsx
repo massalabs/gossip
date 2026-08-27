@@ -28,9 +28,11 @@ import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
 import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useUiStore } from '../stores/uiStore';
 
-// Module-level guard so a given forward id is processed once across remounts
-// (StrictMode, route animation, back/forward nav).
-const handledForwardIds = new Set<number>();
+// Module-level guard so a given forward NAVIGATION is processed once across
+// remounts (StrictMode, route animation, back/forward nav). Keyed by the
+// navigation nonce, not the message id — forwarding the same message again
+// later is a new navigation and must work.
+const handledForwardNonces = new Set<number>();
 
 const RETENTION_OPTIONS: {
   labelKey: string;
@@ -114,9 +116,10 @@ const SelfDiscussion: React.FC = () => {
     retentionInfo,
   } = useRetentionPolicy(t);
 
-  const forwardFromMessageId = (
-    location.state as { forwardFromMessageId?: number } | undefined
-  )?.forwardFromMessageId;
+  const { forwardFromMessageId, forwardNonce } =
+    (location.state as
+      | { forwardFromMessageId?: number; forwardNonce?: number }
+      | undefined) ?? {};
 
   // Prefill the MessageInput with the forwarded content instead of sending
   // immediately — user reviews/edits and hits send to confirm.
@@ -126,8 +129,9 @@ const SelfDiscussion: React.FC = () => {
 
   useEffect(() => {
     if (forwardFromMessageId == null) return;
-    if (handledForwardIds.has(forwardFromMessageId)) return;
-    handledForwardIds.add(forwardFromMessageId);
+    const nonce = forwardNonce ?? forwardFromMessageId;
+    if (handledForwardNonces.has(nonce)) return;
+    handledForwardNonces.add(nonce);
 
     const idToForward = forwardFromMessageId;
     navigate(ROUTES.selfDiscussion(), { replace: true, state: {} });
@@ -138,7 +142,7 @@ const SelfDiscussion: React.FC = () => {
         setForwardDraft(msg.content);
       }
     })();
-  }, [forwardFromMessageId, navigate]);
+  }, [forwardFromMessageId, forwardNonce, navigate]);
 
   useEffect(() => {
     void loadMessages();
