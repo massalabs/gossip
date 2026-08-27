@@ -265,20 +265,23 @@ describe('runMigrations', () => {
       )
     ) as { id: string; prevId: string };
     expect(previousSnapshot.prevId).toBe(initialSnapshot.id);
-    const latestSnapshot = JSON.parse(
+    const accountSettingsSnapshot = JSON.parse(
       readFileSync(
         new URL('../../drizzle/meta/0006_snapshot.json', import.meta.url),
         'utf8'
       )
     ) as {
+      id: string;
       prevId: string;
       tables: Record<string, { columns: Record<string, unknown> }>;
     };
-    expect(latestSnapshot.prevId).toBe(previousSnapshot.id);
-    expect(Object.keys(latestSnapshot.tables.messages.columns)).toEqual(
-      expect.arrayContaining(['editOf', 'reactionOf'])
-    );
-    expect(Object.keys(latestSnapshot.tables.discussions.columns)).toEqual(
+    expect(accountSettingsSnapshot.prevId).toBe(previousSnapshot.id);
+    expect(
+      Object.keys(accountSettingsSnapshot.tables.messages.columns)
+    ).toEqual(expect.arrayContaining(['editOf', 'reactionOf']));
+    expect(
+      Object.keys(accountSettingsSnapshot.tables.discussions.columns)
+    ).toEqual(
       expect.arrayContaining([
         'pinned',
         'messageRetentionDuration',
@@ -286,12 +289,28 @@ describe('runMigrations', () => {
         'mutedNotifications',
       ])
     );
-    expect(Object.keys(latestSnapshot.tables.accountSettings.columns)).toEqual([
+    expect(
+      Object.keys(accountSettingsSnapshot.tables.accountSettings.columns)
+    ).toEqual([
       'userId',
       'formatVersion',
       'mnsEnabled',
       'defaultRetentionDuration',
     ]);
+
+    const latestSnapshot = JSON.parse(
+      readFileSync(
+        new URL('../../drizzle/meta/0007_snapshot.json', import.meta.url),
+        'utf8'
+      )
+    ) as {
+      prevId: string;
+      tables: Record<string, { columns: Record<string, unknown> }>;
+    };
+    expect(latestSnapshot.prevId).toBe(accountSettingsSnapshot.id);
+    expect(Object.keys(latestSnapshot.tables.privateMigration.columns)).toEqual(
+      ['id', 'formatVersion', 'installationEpoch', 'completedPhase']
+    );
   });
 
   it('does no transaction work for the complete known prefix', async () => {
