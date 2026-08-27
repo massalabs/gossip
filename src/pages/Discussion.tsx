@@ -21,7 +21,7 @@ import { Message, SessionStatus } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useDiscussionScrollToMessage } from '../hooks/useDiscussionScrollToMessage';
-import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
+import { useHeaderScrollDetection } from '../hooks/useHeaderScroll';
 import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useForwardPreview } from '../hooks/useForwardPreview';
 import { useDiscussionActions } from '../hooks/useDiscussionActions';
@@ -228,6 +228,12 @@ const DiscussionInner: React.FC = () => {
   }, [finalPrefilledMessage]);
 
   const contactUserId = contact?.userId ?? null;
+  // Tracked via a ref so the unmount cleanup below sees the LATEST store
+  // value, not the one captured when the effect ran.
+  const storeCurrentContact = useMessageStore(s => s.currentContactUserId);
+  const storeCurrentContactRef = useRef(storeCurrentContact);
+  storeCurrentContactRef.current = storeCurrentContact;
+
   useEffect(() => {
     void setCurrentContact(contactUserId);
     return () => {
@@ -235,7 +241,7 @@ const DiscussionInner: React.FC = () => {
       // contact. Guard against clobbering a newer value: with exit
       // animations, this cleanup can run after the next page already set
       // its own contact.
-      if (useMessageStore.getState().currentContactUserId === contactUserId) {
+      if (storeCurrentContactRef.current === contactUserId) {
         void setCurrentContact(null);
       }
     };

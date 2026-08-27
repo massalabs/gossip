@@ -469,6 +469,25 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       ]
     );
 
+    // Lazy row factory for virtua: elements are only created for rows the
+    // list actually renders, instead of building all N elements per render.
+    // The stable per-message key survives the optimistic → persisted swap
+    // (virtua respects the returned element's key).
+    const renderRow = useCallback(
+      (item: VirtualItem, index: number) => {
+        const key = getItemKey(index);
+        return (
+          <div
+            key={key}
+            className={animatingKeys.has(key) ? 'msg-appear' : undefined}
+          >
+            {renderItem(item, index)}
+          </div>
+        );
+      },
+      [getItemKey, animatingKeys, renderItem]
+    );
+
     if (isLoading) {
       return (
         <SignalReadyOnMount signalReady={signalReady}>
@@ -498,18 +517,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             style={{ overflow: 'auto' }}
             onScroll={handleScroll}
             onScrollEnd={handleScrollEnd}
+            data={virtualItems}
           >
-            {virtualItems.map((item, index) => {
-              const key = getItemKey(index);
-              return (
-                <div
-                  key={key}
-                  className={animatingKeys.has(key) ? 'msg-appear' : undefined}
-                >
-                  {renderItem(item, index)}
-                </div>
-              );
-            })}
+            {renderRow}
           </VList>
         )}
 

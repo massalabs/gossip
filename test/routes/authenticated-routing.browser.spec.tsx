@@ -369,25 +369,25 @@ describe('AuthenticatedRoutes', () => {
 
     it('shows bottom navigation on /discussions', async () => {
       await renderAtRoute('/discussions');
-      const nav = page.getByRole('navigation', { name: 'Main navigation' });
+      const nav = page.getByRole('navigation', { name: 'navigation.label' });
       await expect.element(nav).toBeInTheDocument();
     });
 
     it('shows bottom navigation on /settings', async () => {
       await renderAtRoute('/settings');
-      const nav = page.getByRole('navigation', { name: 'Main navigation' });
+      const nav = page.getByRole('navigation', { name: 'navigation.label' });
       await expect.element(nav).toBeInTheDocument();
     });
 
     it('hides bottom navigation on /discussion/:userId', async () => {
       await renderAtRoute('/discussion/user123');
-      const nav = page.getByRole('navigation', { name: 'Main navigation' });
+      const nav = page.getByRole('navigation', { name: 'navigation.label' });
       await expect.element(nav).not.toBeInTheDocument();
     });
 
     it('hides bottom navigation on settings sub-pages', async () => {
       await renderAtRoute('/settings/security');
-      const nav = page.getByRole('navigation', { name: 'Main navigation' });
+      const nav = page.getByRole('navigation', { name: 'navigation.label' });
       await expect.element(nav).not.toBeInTheDocument();
     });
   });

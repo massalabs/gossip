@@ -24,7 +24,7 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import SelectionHeader from '../components/discussions/SelectionHeader';
 import { useRetentionPolicy } from '../hooks/useRetentionPolicy';
 import { useKeyboardStore } from '../stores/keyboardStore';
-import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
+import { useHeaderScrollDetection } from '../hooks/useHeaderScroll';
 import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useUiStore } from '../stores/uiStore';
 import OptionBottomSheet from '../components/ui/OptionBottomSheet';
