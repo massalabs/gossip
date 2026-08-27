@@ -62,9 +62,7 @@ export const useHeaderScroll = (options?: UseHeaderScrollOptions) => {
   useEffect(() => {
     const container =
       scrollContainer ??
-      (scrollContainerId
-        ? document.getElementById(scrollContainerId)
-        : null);
+      (scrollContainerId ? document.getElementById(scrollContainerId) : null);
     if (!container) return;
     return attachHeaderScrollListener(container, setHeaderIsScrolled);
   }, [setHeaderIsScrolled, scrollContainer, scrollContainerId]);

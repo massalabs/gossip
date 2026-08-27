@@ -3,9 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Contact } from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../stores/accountStore';
-import { useAppStore } from '../stores/appStore';
 import {
-  validateUserIdFormat,
   encodeUserId,
   UserPublicKeys,
   AnnouncementPayload,
@@ -13,42 +11,27 @@ import {
 import { validateUsernameFormat } from '../utils/validation';
 import { useGossipSdk } from './useGossipSdk';
 import { useFileShareContact } from './useFileShareContact';
-import { mnsService, isMnsDomain } from '../services/mns';
+import { useUserIdResolution, FieldState } from './useUserIdResolution';
 import toast from 'react-hot-toast';
 import { ROUTES } from '../constants/routes';
-
-type FieldState = {
-  value: string;
-  error?: string;
-  loading: boolean;
-};
-
-type MnsState = {
-  /** Whether an MNS domain resolution is in progress */
-  isResolving: boolean;
-  /** The resolved gossip ID (if successful) */
-  resolvedGossipId: string | null;
-  /** The original MNS domain that was resolved */
-  resolvedDomain: string | null;
-};
 
 export function useContactForm() {
   const gossip = useGossipSdk();
   const navigate = useNavigate();
   const userProfile = useAccountStore(s => s.userProfile);
-  const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const { importFileContact, fileState } = useFileShareContact();
 
-  const publicKeysCache = useRef<Map<string, UserPublicKeys>>(new Map());
-
-  // Sequence counter so stale async lookups can't overwrite newer input
-  const requestSeqRef = useRef(0);
+  const {
+    userId,
+    setUserId,
+    publicKeys,
+    setPublicKeys,
+    mnsState,
+    handleUserIdChange,
+    cachePublicKey,
+  } = useUserIdResolution();
 
   const [name, setName] = useState<FieldState>({
-    value: '',
-    loading: false,
-  });
-  const [userId, setUserId] = useState<FieldState>({
     value: '',
     loading: false,
   });
@@ -75,36 +58,8 @@ export function useContactForm() {
     }
   }, [userProfile?.username]);
 
-  const [publicKeys, setPublicKeys] = useState<UserPublicKeys | null>(null);
-
-  const [mnsState, setMnsState] = useState<MnsState>({
-    isResolving: false,
-    resolvedGossipId: null,
-    resolvedDomain: null,
-  });
-
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const getPublicKey = useCallback(
-    async (uid: string): Promise<UserPublicKeys> => {
-      const cached = publicKeysCache.current.get(uid);
-
-      if (cached) {
-        return cached;
-      }
-
-      // Check if SDK is initialized before accessing auth service
-      if (!gossip.isInitialized) {
-        throw new Error('SDK not initialized');
-      }
-
-      const publicKey = await gossip.auth.fetchPublicKeyByUserId(uid);
-      publicKeysCache.current.set(uid, publicKey);
-      return publicKey;
-    },
-    [gossip.auth, gossip.isInitialized]
-  );
 
   const canSubmit =
     !name.error &&
@@ -131,164 +86,6 @@ export function useContactForm() {
       loading: false,
     }));
   }, []);
-
-  const handleUserIdChange = useCallback(
-    async (value: string) => {
-      const trimmed = value.trim();
-      const seq = ++requestSeqRef.current;
-
-      setPublicKeys(null);
-      setUserId(prev => ({ ...prev, value: trimmed }));
-      setMnsState({
-        isResolving: false,
-        resolvedGossipId: null,
-        resolvedDomain: null,
-      });
-
-      if (!trimmed) return;
-      // Check if the input looks like an MNS domain (ends with .massa)
-      // Only resolve MNS domains if MNS support is enabled
-      if (mnsEnabled && isMnsDomain(trimmed)) {
-        setUserId(prev => ({
-          ...prev,
-          error: undefined,
-          loading: true,
-        }));
-        setMnsState(prev => ({ ...prev, isResolving: true }));
-
-        // Resolve MNS domain to gossip ID
-        const mnsResult = await mnsService.resolveToGossipId(trimmed);
-        if (seq !== requestSeqRef.current) return;
-
-        if (!mnsResult.success) {
-          setUserId(_ => ({
-            value: trimmed,
-            error: mnsResult.error,
-            loading: false,
-          }));
-          setMnsState({
-            isResolving: false,
-            resolvedGossipId: null,
-            resolvedDomain: null,
-          });
-          return;
-        }
-
-        const resolvedGossipId = mnsResult.gossipId;
-
-        // Prevent adding own user ID as a contact
-        if (userProfile?.userId && resolvedGossipId === userProfile.userId) {
-          setUserId(_ => ({
-            value: trimmed,
-            error: 'You cannot add yourself as a contact',
-            loading: false,
-          }));
-          setMnsState({
-            isResolving: false,
-            resolvedGossipId: null,
-            resolvedDomain: null,
-          });
-          return;
-        }
-
-        // Store the resolved gossip ID and continue with public key fetching
-        setMnsState({
-          isResolving: false,
-          resolvedGossipId,
-          resolvedDomain: trimmed,
-        });
-
-        try {
-          // Fetch public key for the resolved gossip ID
-          const publicKey = await getPublicKey(resolvedGossipId);
-          if (seq !== requestSeqRef.current) return;
-
-          const existing = await gossip.contacts.get(resolvedGossipId);
-          if (seq !== requestSeqRef.current) return;
-          if (existing) {
-            setUserId(prev => ({
-              ...prev,
-              error: 'This user is already in your contacts',
-              loading: false,
-            }));
-            return;
-          }
-
-          setPublicKeys(publicKey);
-          setUserId(prev => ({ ...prev, loading: false }));
-          return;
-        } catch (error) {
-          if (seq !== requestSeqRef.current) return;
-          logger.error('Failed to fetch public key:', error);
-          setUserId(prev => ({
-            ...prev,
-            error:
-              'Unable to load public key for this user ID. Please check it.',
-            loading: false,
-          }));
-          return;
-        }
-      }
-
-      // Not an MNS domain - handle as regular gossip ID
-      // Prevent adding own user ID as a contact
-      if (userProfile?.userId && trimmed === userProfile.userId) {
-        setUserId(_ => ({
-          value: trimmed,
-          error: 'You cannot add yourself as a contact',
-          loading: false,
-        }));
-        return;
-      }
-
-      setUserId(prev => ({
-        ...prev,
-        error: undefined,
-        loading: true,
-      }));
-
-      const result = validateUserIdFormat(trimmed);
-
-      if (!result.valid) {
-        setUserId(_ => ({
-          value: trimmed,
-          error: mnsEnabled
-            ? 'Invalid format — must be a valid user ID or MNS (name.massa)'
-            : 'Invalid format — must be a valid user ID',
-          loading: false,
-        }));
-        return;
-      }
-
-      try {
-        const publicKey = await getPublicKey(trimmed);
-        if (seq !== requestSeqRef.current) return;
-
-        const existing = await gossip.contacts.get(trimmed);
-        if (seq !== requestSeqRef.current) return;
-        if (existing) {
-          setUserId(prev => ({
-            ...prev,
-            error: 'This user is already in your contacts',
-            loading: false,
-          }));
-          return;
-        }
-
-        setPublicKeys(publicKey);
-        setUserId(prev => ({ ...prev, loading: false }));
-      } catch (error) {
-        if (seq !== requestSeqRef.current) return;
-        logger.error('Failed to fetch public key:', error);
-        setUserId(prev => ({
-          ...prev,
-          error: 'Unable to load public key for this user ID. Please check it.',
-          loading: false,
-        }));
-      }
-    },
-    [getPublicKey, gossip.contacts, userProfile?.userId, mnsEnabled]
-  );
 
   const handleMessageChange = useCallback((value: string) => {
     setMessage({ value, loading: false });
@@ -331,7 +128,7 @@ export function useContactForm() {
       }
 
       setPublicKeys(pubKeys);
-      publicKeysCache.current.set(derivedUserId, pubKeys);
+      cachePublicKey(derivedUserId, pubKeys);
 
       if (fileContact.userName) {
         handleNameChange(fileContact.userName);
@@ -339,7 +136,15 @@ export function useContactForm() {
 
       setUserId({ value: derivedUserId, loading: false });
     },
-    [userProfile?.userId, importFileContact, gossip.contacts, handleNameChange]
+    [
+      userProfile?.userId,
+      importFileContact,
+      gossip.contacts,
+      handleNameChange,
+      setPublicKeys,
+      cachePublicKey,
+      setUserId,
+    ]
   );
 
   const handleSubmit = useCallback(async () => {
@@ -493,6 +298,7 @@ export function useContactForm() {
     message.value,
     gossip,
     navigate,
+    setUserId,
   ]);
 
   return {
