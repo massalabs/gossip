@@ -338,6 +338,19 @@ function readDurableAuthority(): {
  * committed when the process dies, authoritative empty storage recreates the
  * first-install grant on startup; committed locked storage never does.
  */
+export async function resetOnboardingAuthorityAfterStorageReset(): Promise<void> {
+  await withOnboardingModeLock(() => {
+    const storage = durableStorage();
+    storage?.removeItem(AUTHORITY_CONSUMED_KEY);
+    storage?.removeItem(CREATION_COMMITTED_KEY);
+    storage?.removeItem(ONBOARDING_MODE_KEY);
+    storage?.removeItem(PRIVATE_MIGRATION_EPOCH_KEY);
+    const state = useAppStore.getState();
+    state.setSecureStartupRouting(false, false);
+    state.setSecureAccountCreationAllowed(true);
+  });
+}
+
 export function createOnboardingPortableImportAuthorization(): PortableImportAuthorization {
   let lease: OnboardingStorageModeLease | null = null;
   return {

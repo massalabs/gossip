@@ -15,6 +15,12 @@ import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
 import secureStorageWasmUrl from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
+import UnsupportedStorageReset from './components/UnsupportedStorageReset';
+import {
+  isUnsupportedStorageResetRequested,
+  isUnsupportedStorageVersionError,
+  requestUnsupportedStorageReset,
+} from './services/unsupportedStorageReset';
 
 // Must run before createSdk() so the SDK's SQLite worker is wrapped.
 installSafariWorkerDedup();
@@ -121,35 +127,48 @@ async function bootstrap() {
   return sdk;
 }
 
-bootstrap()
-  .then(async sdk => {
-    useSdkStore.getState().setSdk(sdk);
-    try {
-      await establishFirstInstallCreationGrant(sdk);
-    } catch (error) {
-      if (sdk.isSecureStorage && sdk.storageState === 'locked') {
-        const appState = useAppStore.getState();
-        appState.setSecureStartupRouting(appState.isInitialized, true);
-      } else {
-        throw error;
-      }
-    }
+const renderUnsupportedStorageReset = () => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <UnsupportedStorageReset />
+    </StrictMode>
+  );
+};
 
-    createRoot(document.getElementById('root')!).render(
-      <StrictMode>
-        <App />
-      </StrictMode>
-    );
-  })
-  .catch(error => {
-    // PD: do not log the raw error in production. The error message and
-    // stack can carry state-specific text (e.g. "namespace allocation
-    // failed: existing data") that an observer of the browser console
-    // history can use to fingerprint storage state. In DEV we keep the
-    // detail for debugging; the user-facing showInitError() renders one
-    // of two generic strings.
-    if (import.meta.env.DEV) {
-      logger.error('[Gossip] Failed to initialize:', error);
+async function start() {
+  if (isUnsupportedStorageResetRequested()) {
+    renderUnsupportedStorageReset();
+    return;
+  }
+  const sdk = await bootstrap();
+  useSdkStore.getState().setSdk(sdk);
+  try {
+    await establishFirstInstallCreationGrant(sdk);
+  } catch (error) {
+    if (sdk.isSecureStorage && sdk.storageState === 'locked') {
+      const appState = useAppStore.getState();
+      appState.setSecureStartupRouting(appState.isInitialized, true);
+    } else {
+      throw error;
     }
-    showInitError(error);
-  });
+  }
+
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  );
+}
+
+void start().catch(error => {
+  if (isUnsupportedStorageVersionError(error)) {
+    requestUnsupportedStorageReset();
+    return;
+  }
+  // PD: do not log raw production errors: state-specific text can reveal
+  // storage state. Development keeps details for diagnostics.
+  if (import.meta.env.DEV) {
+    logger.error('[Gossip] Failed to initialize:', error);
+  }
+  showInitError(error);
+});

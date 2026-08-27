@@ -5,6 +5,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAccountStore } from '../../stores/accountStore';
 import { ROUTES } from '../../constants/routes';
 import { MessagingSessionRecoveryRequiredError } from '@massalabs/gossip-sdk';
+import {
+  isUnsupportedStorageVersionError,
+  requestUnsupportedStorageReset,
+} from '../../services/unsupportedStorageReset';
 
 interface UseLoginFormOptions {
   onAccountSelected: () => void;
@@ -54,6 +58,11 @@ export function useLoginForm({
           throw new Error('Failed to load account');
         }
       } catch (error) {
+        if (isUnsupportedStorageVersionError(error)) {
+          setPassword('');
+          requestUnsupportedStorageReset();
+          return;
+        }
         logger.error('Password authentication failed:', error);
         if (error instanceof MessagingSessionRecoveryRequiredError) {
           setMessagingRecoveryRequired(true);

@@ -1,4 +1,8 @@
 import { logger } from '../../utils/logger.ts';
+import {
+  isUnsupportedStorageVersionError,
+  requestUnsupportedStorageReset,
+} from '../../services/unsupportedStorageReset';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useTranslation } from 'react-i18next';
@@ -96,6 +100,10 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           throw new Error('Failed to load account');
         }
       } catch (error) {
+        if (isUnsupportedStorageVersionError(error)) {
+          requestUnsupportedStorageReset();
+          return;
+        }
         if (
           error instanceof MessagingSessionRecoveryRequiredError &&
           recoveredPassword !== null

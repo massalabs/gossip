@@ -63,7 +63,9 @@ thread_local! {
 }
 
 fn map_err(e: SecureStorageError) -> JsValue {
-    JsValue::from_str(&e.to_string())
+    let error = js_sys::Error::new(&e.to_string());
+    error.set_name(e.code());
+    error.into()
 }
 
 // Shared precision-aware JS `number` <-> Rust integer conversions.

@@ -112,14 +112,20 @@ fn unlock_session_inner<S: BlockStorage + KeypairStorage>(
 
     let mut result: Option<UnlockedSession> = None;
     let mut match_count = 0_usize;
+    let mut unsupported_version: Option<SecureStorageError> = None;
 
     for i in indices {
         let Ok(session) = SessionIndex::new(i) else {
             continue;
         };
 
-        let Ok(kf) = read_session_keypair(storage, session) else {
-            continue;
+        let kf = match read_session_keypair(storage, session) {
+            Ok(kf) => kf,
+            Err(error @ SecureStorageError::UnsupportedVersion(_)) => {
+                unsupported_version = Some(error);
+                continue;
+            }
+            Err(_) => continue,
         };
 
         let nonce = crypto_aead::Nonce::from(kf.sk_nonce);
@@ -155,6 +161,10 @@ fn unlock_session_inner<S: BlockStorage + KeypairStorage>(
                 });
             }
         }
+    }
+
+    if let Some(error) = unsupported_version {
+        return Err(error);
     }
 
     if require_unique && match_count != 1 {
@@ -329,6 +339,23 @@ mod tests {
                 .unwrap();
 
             assert!(unlock_session(&storage, DOMAIN, PASSWORD).is_err());
+        });
+    }
+
+    #[test]
+    fn unlock_propagates_unsupported_slot_version() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let session = SessionIndex::new(1).unwrap();
+            provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+            let mut encoded = storage.read_keypair(session).unwrap();
+            encoded[..4].copy_from_slice(&2_u32.to_be_bytes());
+            storage.write_keypair(session, &encoded).unwrap();
+
+            assert!(matches!(
+                unlock_session(&storage, DOMAIN, PASSWORD),
+                Err(SecureStorageError::UnsupportedVersion(2))
+            ));
         });
     }
 

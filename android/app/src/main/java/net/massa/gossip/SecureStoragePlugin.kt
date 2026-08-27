@@ -68,6 +68,21 @@ class SecureStoragePlugin : Plugin() {
         }
     }
 
+    @PluginMethod
+    fun resetStorage(call: PluginCall) {
+        executor.execute {
+            try {
+                val storage = context.filesDir.resolve("secure-storage")
+                if (storage.exists() && !storage.deleteRecursively()) {
+                    throw IllegalStateException("secure storage could not be deleted")
+                }
+                call.resolve()
+            } catch (e: Exception) {
+                call.reject("secure storage reset failed", "RESET_FAILED", e)
+            }
+        }
+    }
+
     /** Rewrite the JSON's `path` field from relative to absolute. */
     private fun resolveInitPath(argsRaw: String): String {
         val json = JSONObject(argsRaw)

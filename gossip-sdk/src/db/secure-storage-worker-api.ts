@@ -99,6 +99,7 @@ export interface ExecResult {
 interface QueuedCoverOperation {
   kind: 'cover';
   resolve: () => void;
+  reject: (reason: unknown) => void;
 }
 
 interface QueuedLifecycleOperation {
@@ -164,6 +165,14 @@ export class SecureStorageWorkerApi {
 
   private isGenerationMismatch(error: unknown): boolean {
     return String(error).includes('secure-storage generation changed');
+  }
+
+  private isUnsupportedStorageVersion(error: unknown): boolean {
+    const candidate = error as { code?: unknown; name?: unknown } | null;
+    return (
+      candidate?.code === 'UNSUPPORTED_VERSION' ||
+      candidate?.name === 'UNSUPPORTED_VERSION'
+    );
   }
 
   private markGenerationStale(): void {
@@ -400,6 +409,15 @@ export class SecureStorageWorkerApi {
               this.rejectQueuedForStaleGeneration();
               return;
             }
+            if (this.isUnsupportedStorageVersion(error)) {
+              this.operationQueue.splice(queuedIndex, 1);
+              queued.reject(error);
+              this.closeRequested = true;
+              for (const pending of this.operationQueue.splice(0)) {
+                pending.reject(error);
+              }
+              return;
+            }
             throw error;
           }
           if (!persisted) {
@@ -469,7 +487,13 @@ export class SecureStorageWorkerApi {
     try {
       await this.ensureDurableStorageRecovered();
     } catch (error) {
-      if (this.isGenerationMismatch(error) || this.generationStale) throw error;
+      if (
+        this.isUnsupportedStorageVersion(error) ||
+        this.isGenerationMismatch(error) ||
+        this.generationStale
+      ) {
+        throw error;
+      }
       logger.debug('[SecureStorage] durable cover recovery failed', error);
       return false;
     }
@@ -481,7 +505,12 @@ export class SecureStorageWorkerApi {
       await this.flushEncryptedFenced();
       return true;
     } catch (error) {
-      if (this.isGenerationMismatch(error)) throw error;
+      if (
+        this.isUnsupportedStorageVersion(error) ||
+        this.isGenerationMismatch(error)
+      ) {
+        throw error;
+      }
       logger.debug('[SecureStorage] cover traffic tick failed', error);
       return false;
     }
@@ -493,8 +522,8 @@ export class SecureStorageWorkerApi {
         ? Promise.resolve()
         : Promise.reject(new Error('Secure storage worker is closing'));
     }
-    return new Promise<void>(resolve => {
-      this.operationQueue.push({ kind: 'cover', resolve });
+    return new Promise<void>((resolve, reject) => {
+      this.operationQueue.push({ kind: 'cover', resolve, reject });
       this.pumpOperationQueue();
     });
   }

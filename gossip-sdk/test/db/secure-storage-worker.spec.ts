@@ -923,6 +923,26 @@ describe('SecureStorageWorkerApi password cleanup', () => {
     expect(wasmMock.closeDatabase).toHaveBeenCalledOnce();
   });
 
+  it('rejects cover and queued close on an unsupported storage version', async () => {
+    const { SecureStorageWorkerApi } =
+      await import('../../src/db/secure-storage-worker-api');
+    const api = new SecureStorageWorkerApi();
+    const unsupported = new Error('unsupported version');
+    unsupported.name = 'UNSUPPORTED_VERSION';
+    wasmMock.coverTrafficTick.mockImplementationOnce(() => {
+      throw unsupported;
+    });
+
+    const cover = api.cover();
+    const close = api.close();
+    await expect(cover).rejects.toMatchObject({
+      name: 'UNSUPPORTED_VERSION',
+    });
+    await expect(close).rejects.toMatchObject({
+      name: 'UNSUPPORTED_VERSION',
+    });
+  });
+
   it('recovers rejected lifecycle state before closing and permits retry', async () => {
     const { SecureStorageWorkerApi } =
       await import('../../src/db/secure-storage-worker-api');
