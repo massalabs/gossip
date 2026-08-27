@@ -47,7 +47,10 @@ function withoutSqlComments(sql: string): string | null {
     }
     if (character === '-' && next === '-') {
       index += 2;
-      while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') {
+      // SQLite keeps `--` active through CR and ends it only at LF or
+      // end-of-input. Treating CR as a terminator can make transaction text
+      // that SQLite comments out look executable to the ownership classifier.
+      while (index < sql.length && sql[index] !== '\n') {
         index++;
       }
       result += ' ';

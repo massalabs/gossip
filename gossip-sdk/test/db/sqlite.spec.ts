@@ -97,6 +97,9 @@ describe('DatabaseConnection transaction classification', () => {
     ['COMMIT\u0085', 'other'],
     [';;BEGIN', 'other'],
     ["; /* empty */ UPDATE user_profile SET username = 'ignored'", 'other'],
+    ['BEGIN -- trace\rROLLBACK', 'begin'],
+    ['ROLLBACK -- trace\rTO SAVEPOINT ignored', 'rollback'],
+    ['BEGIN -- trace\r\nROLLBACK', 'other'],
   ] as const)(
     'matches the Rust SQL boundary contract for %j',
     (sql, expected) => {

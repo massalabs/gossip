@@ -389,6 +389,39 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       )
     ).resolves.toMatchObject({ rows: [['durable single statement']] });
 
+    const rawConnection = connection as unknown as {
+      execRawDirect(sql: string, params?: unknown[]): Promise<unknown[][]>;
+      state: { txDepth: number };
+    };
+    await rawConnection.execRawDirect(
+      'BEGIN IMMEDIATE -- ROLLBACK remains commented\rROLLBACK'
+    );
+    expect(rawConnection.state.txDepth).toBe(1);
+    await rawConnection.execRawDirect('ROLLBACK');
+    expect(rawConnection.state.txDepth).toBe(0);
+
+    await testProxy(connection).exec(
+      'CREATE TABLE lexical_audit (value TEXT NOT NULL)'
+    );
+    await testProxy(connection).exec(
+      '/* leading comment */ \ufeffCREATE TRIGGER lexical_trigger ' +
+        'AFTER UPDATE ON userProfile BEGIN INSERT INTO lexical_audit ' +
+        "VALUES ('triggered;value'); END;"
+    );
+    await testProxy(connection).exec(
+      "UPDATE userProfile SET username = 'quoted;value' WHERE userId = ?",
+      ['gossip1singlestatement']
+    );
+    await expect(
+      testProxy(connection).exec('SELECT value FROM lexical_audit')
+    ).resolves.toMatchObject({ rows: [['triggered;value']] });
+    await expect(
+      testProxy(connection).exec(
+        'SELECT username FROM userProfile WHERE userId = ?',
+        ['gossip1singlestatement']
+      )
+    ).resolves.toMatchObject({ rows: [['quoted;value']] });
+
     await connection.db
       .update(userProfile)
       .set({ username: 'durable after rejected tails' });

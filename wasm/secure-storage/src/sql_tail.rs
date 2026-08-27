@@ -25,6 +25,51 @@ fn is_ecmascript_whitespace(character: char) -> bool {
     )
 }
 
+const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
+
+/// SQLite accepts U+FEFF as whitespace at the beginning of a statement, even
+/// after leading comments, but `sqlite3_complete` does not preserve trigger
+/// recognition in that form. Mask only statement-leading BOM bytes in the
+/// side-effect-free completion copy; execution still receives the original
+/// SQL and BOM bytes inside tokens remain untouched.
+fn mask_statement_leading_boms(input: &mut [u8]) {
+    let mut index = 0;
+    loop {
+        while input.get(index).is_some_and(u8::is_ascii_whitespace) {
+            index += 1;
+        }
+        if input
+            .get(index..)
+            .is_some_and(|tail| tail.starts_with(b"--"))
+        {
+            let Some(newline) = input[index + 2..].iter().position(|byte| *byte == b'\n') else {
+                return;
+            };
+            index += newline + 3;
+            continue;
+        }
+        if input
+            .get(index..)
+            .is_some_and(|tail| tail.starts_with(b"/*"))
+        {
+            let Some(end) = input[index + 2..].windows(2).position(|pair| pair == b"*/") else {
+                return;
+            };
+            index += end + 4;
+            continue;
+        }
+        if input
+            .get(index..)
+            .is_some_and(|tail| tail.starts_with(UTF8_BOM))
+        {
+            input[index..index + UTF8_BOM.len()].fill(b' ');
+            index += UTF8_BOM.len();
+            continue;
+        }
+        return;
+    }
+}
+
 fn consume_ignorable(mut input: &[u8], allow_empty_statements: bool) -> Option<()> {
     loop {
         while input.first().is_some_and(u8::is_ascii_whitespace) {
@@ -40,7 +85,7 @@ fn consume_ignorable(mut input: &[u8], allow_empty_statements: bool) -> Option<(
         if input.starts_with(b"--") {
             input = input
                 .iter()
-                .position(|byte| *byte == b'\n' || *byte == b'\r')
+                .position(|byte| *byte == b'\n')
                 .map_or(&[], |newline| &input[newline + 1..]);
             continue;
         }
@@ -91,6 +136,7 @@ where
     }
 
     let mut prefix = sql.as_bytes().to_vec();
+    mask_statement_leading_boms(&mut prefix);
     prefix.push(0);
     for index in sql
         .as_bytes()
@@ -128,6 +174,8 @@ mod tests {
     fn accepts_only_whitespace_and_complete_comments() {
         assert!(is_ignorable(b""));
         assert!(is_ignorable(b"  \n\t-- trace\n/* done */ "));
+        assert!(is_ignorable(b"-- trace\rSELECT remains commented"));
+        assert!(!is_ignorable(b"-- trace\r\nSELECT is executable"));
         assert!(!is_ignorable(b" SELECT 1"));
         assert!(!is_ignorable(b";"));
         assert!(!is_ignorable(b"/* unterminated"));
@@ -152,6 +200,18 @@ mod tests {
         assert_eq!(
             validate("BEGIN\u{85}", |_| false),
             Err(UNSUPPORTED_BOUNDARY_WHITESPACE)
+        );
+    }
+
+    #[test]
+    fn masks_only_statement_leading_boms_for_sqlite_completion() {
+        let mut sql =
+            b"/* lead */ \xef\xbb\xbf \xef\xbb\xbf CREATE TRIGGER t; quoted '\xef\xbb\xbf'"
+                .to_vec();
+        mask_statement_leading_boms(&mut sql);
+        assert_eq!(
+            sql,
+            b"/* lead */         CREATE TRIGGER t; quoted '\xef\xbb\xbf'"
         );
     }
 

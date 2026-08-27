@@ -791,8 +791,9 @@ mod tests {
         exec_sql_one(&conn, "CREATE TABLE tail_audit (value TEXT)", &[]).unwrap();
         exec_sql_one(
             &conn,
-            "CREATE TRIGGER tail_trigger AFTER UPDATE ON tail_test \
-             BEGIN INSERT INTO tail_audit VALUES ('semi;colon'); END; -- trigger",
+            "/* leading comment */ \u{feff}CREATE TRIGGER tail_trigger \
+             AFTER UPDATE ON tail_test BEGIN INSERT INTO tail_audit \
+             VALUES ('semi;colon'); END; -- trigger",
             &[],
         )
         .unwrap();
@@ -802,6 +803,17 @@ mod tests {
         assert_eq!(result.rows, vec![vec![serde_json::json!(8)]]);
         let audit = exec_sql_one(&conn, "SELECT value FROM tail_audit", &[]).unwrap();
         assert_eq!(audit.rows, vec![vec![serde_json::json!("semi;colon")]]);
+
+        let carriage_return_comment = exec_sql_one(
+            &conn,
+            "SELECT 'quoted;value'; -- SELECT remains commented\r SELECT 'ignored'",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            carriage_return_comment.rows,
+            vec![vec![serde_json::json!("quoted;value")]]
+        );
     }
 
     #[test]
