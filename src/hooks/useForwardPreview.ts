@@ -1,49 +1,56 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { GossipSdk, Contact } from '@massalabs/gossip-sdk';
+import type { GossipSdk } from '@massalabs/gossip-sdk';
+import { getForwardSourceContent } from '../utils/messages';
 
 interface UseForwardPreviewParams {
   gossip: GossipSdk;
-  contact: Contact | undefined;
-  initialForwardFromMessageId: number | undefined;
+  initialForwardFromMessageIds: number[] | undefined;
   setReplyingTo: (msg: import('@massalabs/gossip-sdk').Message | null) => void;
+}
+
+async function loadForwardSourceContent(
+  gossip: GossipSdk,
+  messageId: number
+): Promise<string | null> {
+  // Notes first (SelfMessageService); avoids MessageService plaintext JSON
+  // parse of encrypted Notes forwardOf.
+  const selfMsg = await gossip.selfMessages.get(messageId);
+  if (selfMsg) {
+    return getForwardSourceContent(selfMsg) || null;
+  }
+  const row = await gossip.messages.get(messageId);
+  return row ? getForwardSourceContent(row) || null : null;
 }
 
 export function useForwardPreview({
   gossip,
-  contact,
-  initialForwardFromMessageId,
+  initialForwardFromMessageIds,
   setReplyingTo,
 }: UseForwardPreviewParams) {
   const [forwardPreviewText, setForwardPreviewText] = useState<string | null>(
     null
   );
-  const [forwardPreviewMode, setForwardPreviewMode] = useState<
-    'forward' | 'reply'
-  >('forward');
-  const [forwardFromMessageId, setForwardFromMessageId] = useState<
-    number | undefined
-  >(initialForwardFromMessageId);
+  const [forwardFromMessageIds, setForwardFromMessageIds] = useState<number[]>(
+    initialForwardFromMessageIds ?? []
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     const loadForwardPreview = async () => {
-      if (forwardFromMessageId == null) {
+      if (forwardFromMessageIds.length === 0) {
         setForwardPreviewText(null);
-        setForwardPreviewMode('forward');
         return;
       }
 
       // Reply and forward are mutually exclusive
       setReplyingTo(null);
-      const original = await gossip.messages.get(forwardFromMessageId);
+      const content = await loadForwardSourceContent(
+        gossip,
+        forwardFromMessageIds[0]
+      );
       if (!cancelled) {
-        setForwardPreviewText(original?.content ?? null);
-        if (original && contact && original.contactUserId === contact.userId) {
-          setForwardPreviewMode('reply');
-        } else {
-          setForwardPreviewMode('forward');
-        }
+        setForwardPreviewText(content);
       }
     };
 
@@ -52,18 +59,18 @@ export function useForwardPreview({
     return () => {
       cancelled = true;
     };
-  }, [forwardFromMessageId, contact, gossip, setReplyingTo]);
+  }, [forwardFromMessageIds, gossip, setReplyingTo]);
 
   const clearForward = useCallback(() => {
-    setForwardFromMessageId(undefined);
+    setForwardFromMessageIds([]);
     setForwardPreviewText(null);
   }, []);
 
   return {
-    forwardFromMessageId,
-    setForwardFromMessageId,
+    forwardFromMessageIds,
+    setForwardFromMessageIds,
     forwardPreviewText,
-    forwardPreviewMode,
+    forwardPreviewMode: 'forward' as const,
     clearForward,
   };
 }

@@ -11,6 +11,7 @@ interface DiscussionTopSectionSelectionProps {
   canDeleteSelected: boolean;
   onClearSelection: () => void;
   onCopySelected: () => void;
+  onForwardSelected: () => void;
   onDeleteSelected: () => void;
 }
 
@@ -55,6 +56,7 @@ const DiscussionTopSection: React.FC<DiscussionTopSectionProps> = ({
             count={selection.selectedCount}
             onClear={selection.onClearSelection}
             onCopy={selection.onCopySelected}
+            onForward={selection.onForwardSelected}
             onDelete={selection.onDeleteSelected}
             canDelete={selection.canDeleteSelected}
           />

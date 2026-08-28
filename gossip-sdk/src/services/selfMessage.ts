@@ -90,9 +90,91 @@ export class SelfMessageService {
     return new TextDecoder().decode(plaintextBytes);
   }
 
-  async send(content: string): Promise<Message> {
+  private serializeForwardOf(forwardOf: Message['forwardOf']): string | null {
+    if (!forwardOf) return null;
+    return JSON.stringify({
+      originalContent: forwardOf.originalContent,
+      originalContactId: forwardOf.originalContactId
+        ? encodeToBase64(forwardOf.originalContactId)
+        : undefined,
+    });
+  }
+
+  private deserializeForwardOf(
+    json: string | null | undefined
+  ): Message['forwardOf'] {
+    if (!json) return undefined;
+    try {
+      const parsed = JSON.parse(json) as {
+        originalContent?: string;
+        originalContactId?: string;
+      };
+      return {
+        originalContent: parsed.originalContent,
+        originalContactId: parsed.originalContactId
+          ? decodeFromBase64(parsed.originalContactId)
+          : undefined,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Encrypt forwardOf JSON for at-rest storage (same AEAD as content). */
+  private async encryptForwardOf(
+    forwardOf: Message['forwardOf']
+  ): Promise<string | null> {
+    const json = this.serializeForwardOf(forwardOf);
+    if (!json) return null;
+    return this.encryptContent(json);
+  }
+
+  /** Decrypt forwardOf from DB; null/empty stays undefined (legacy Notes rows). */
+  private async decryptForwardOf(
+    stored: string | null | undefined
+  ): Promise<Message['forwardOf']> {
+    if (!stored) return undefined;
+    try {
+      const json = await this.decryptContent(stored);
+      return this.deserializeForwardOf(json);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Get a self-message by DB id with decrypted content. */
+  async get(id: number): Promise<Message | undefined> {
+    const row = await this.queries.messages.getById(id);
+    if (!row || row.contactUserId !== SELF_CONTACT_ID) return undefined;
+    try {
+      const plaintext = await this.decryptContent(row.content);
+      return {
+        id: row.id,
+        ownerUserId: row.ownerUserId,
+        contactUserId: row.contactUserId,
+        content: plaintext,
+        type: row.type,
+        direction: MessageDirection.OUTGOING,
+        status: row.status,
+        timestamp: row.timestamp,
+        forwardOf: await this.decryptForwardOf(row.forwardOf as string | null),
+        metadata: row.metadata
+          ? (JSON.parse(row.metadata as string) as Record<string, unknown>)
+          : undefined,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  async send(
+    content: string,
+    options?: { forwardOf?: Message['forwardOf'] }
+  ): Promise<Message> {
     const encryptedContent = await this.encryptContent(content);
     const now = new Date();
+    const forwardOf = options?.forwardOf;
+    const encryptedForwardOf = await this.encryptForwardOf(forwardOf);
 
     const id = await this.queries.messages.insert({
       ownerUserId: this.ownerUserId,
@@ -102,6 +184,7 @@ export class SelfMessageService {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: now,
+      forwardOf: encryptedForwardOf,
     });
 
     const discussion = await this.queries.discussions.getByOwnerAndContact(
@@ -127,6 +210,7 @@ export class SelfMessageService {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: now,
+      forwardOf,
     };
   }
 
@@ -150,6 +234,9 @@ export class SelfMessageService {
           direction: MessageDirection.OUTGOING,
           status: row.status,
           timestamp: row.timestamp,
+          forwardOf: await this.decryptForwardOf(
+            row.forwardOf as string | null
+          ),
         });
       } catch {
         // Skip messages that cannot be decrypted

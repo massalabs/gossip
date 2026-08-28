@@ -13,6 +13,7 @@
   "message_input": {
     "replying_to": "Replying to",
     "forwarding": "Forwarding message",
+    "forwarding_count": "Forwarding {{count}} messages",
     "editing": "Editing message",
     "placeholder": "Type a message",
     "cancel_reply": "Cancel reply",
@@ -47,6 +48,7 @@
   },
   "selection": {
     "clear": "Clear selection",
+    "forward_messages": "Forward selected messages",
     "copy_messages": "Copy selected messages",
     "delete_messages": "Delete selected messages"
   },

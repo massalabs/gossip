@@ -2,7 +2,7 @@ import { logger } from '../utils/logger.ts';
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Message } from '@massalabs/gossip-sdk';
+import { Message, MessageType } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 import { useAppStore } from '../stores/appStore';
 import { useMessageStore } from '../stores/messageStore';
@@ -12,18 +12,24 @@ interface UseDiscussionActionsParams {
   contact: { userId: string } | undefined;
   isSelecting: boolean;
   t: TFunction;
-  forwardFromMessageId: number | undefined;
+  forwardFromMessageIds: number[];
   setReplyingTo: (msg: Message | null) => void;
   setEditingMessage: (msg: Message | null) => void;
   setInputPrefill: (text: string | undefined) => void;
   clearForward: () => void;
 }
 
+function getForwardableMessages(messages: Message[]): Message[] {
+  return messages
+    .filter(m => m.id != null && m.id !== 0 && m.type !== MessageType.DELETED)
+    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+}
+
 export function useDiscussionActions({
   contact,
   isSelecting,
   t,
-  forwardFromMessageId,
+  forwardFromMessageIds,
   setReplyingTo,
   setEditingMessage,
   setInputPrefill,
@@ -34,25 +40,34 @@ export function useDiscussionActions({
   const deleteMessage = useMessageStore(s => s.deleteMessage);
   const editMessage = useMessageStore(s => s.editMessage);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
-  const setPendingForwardMessageId = useAppStore(
-    s => s.setPendingForwardMessageId
+  const setPendingForwardMessageIds = useAppStore(
+    s => s.setPendingForwardMessageIds
   );
 
   const handleSendMessage = useCallback(
     async (text: string, replyToId?: number) => {
       if (isSelecting) return;
       if (!contact?.userId) return;
+      const idsToForward = [...forwardFromMessageIds];
       setReplyingTo(null);
       setEditingMessage(null);
       clearForward();
       setInputPrefill(undefined);
       try {
-        await sendMessage(
-          contact.userId,
-          text,
-          replyToId,
-          forwardFromMessageId
-        );
+        if (idsToForward.length === 0) {
+          await sendMessage(contact.userId, text, replyToId);
+          return;
+        }
+        // Send each selected message as its own forward (timestamp order).
+        // Optional composer text attaches to the first forward only.
+        for (let i = 0; i < idsToForward.length; i++) {
+          await sendMessage(
+            contact.userId,
+            i === 0 ? text : '',
+            i === 0 ? replyToId : undefined,
+            idsToForward[i]
+          );
+        }
       } catch (error) {
         toast.error(t('failed_to_send'));
         logger.error('Failed to send message:', error);
@@ -62,7 +77,7 @@ export function useDiscussionActions({
       isSelecting,
       sendMessage,
       contact?.userId,
-      forwardFromMessageId,
+      forwardFromMessageIds,
       t,
       clearForward,
       setReplyingTo,
@@ -81,17 +96,25 @@ export function useDiscussionActions({
     [setReplyingTo, setEditingMessage, clearForward]
   );
 
-  const handleForwardMessage = useCallback(
-    (message: Message) => {
-      if (!message.id) return;
+  const handleForwardMessages = useCallback(
+    (messages: Message[]) => {
+      const eligible = getForwardableMessages(messages);
+      if (eligible.length === 0) return;
       // Set pending forward state, then go to discussions list for recipient selection.
       // replace: true avoids pushing a duplicate /discussions entry so back navigation
       // after forwarding returns cleanly to the discussions list.
-      setPendingSharedContent(message.content);
-      setPendingForwardMessageId(message.id);
+      setPendingSharedContent(eligible[0].content);
+      setPendingForwardMessageIds(eligible.map(m => m.id!));
       navigate(ROUTES.discussions(), { replace: true });
     },
-    [navigate, setPendingForwardMessageId, setPendingSharedContent]
+    [navigate, setPendingForwardMessageIds, setPendingSharedContent]
+  );
+
+  const handleForwardMessage = useCallback(
+    (message: Message) => {
+      handleForwardMessages([message]);
+    },
+    [handleForwardMessages]
   );
 
   const handleEditMessage = useCallback(
@@ -150,6 +173,7 @@ export function useDiscussionActions({
     handleSendMessage,
     handleReplyToMessage,
     handleForwardMessage,
+    handleForwardMessages,
     handleEditMessage,
     handleDeleteMessage,
     handleCancelReply,

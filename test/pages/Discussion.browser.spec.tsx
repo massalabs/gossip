@@ -49,6 +49,9 @@ vi.mock('../../src/hooks/useGossipSdk', () => ({
       get: vi.fn().mockResolvedValue(null),
       deleteMessage: mockDeleteMessage,
     },
+    selfMessages: {
+      get: vi.fn().mockResolvedValue(null),
+    },
   }),
 }));
 
@@ -77,7 +80,7 @@ vi.mock('../../src/stores/appStore', () => ({
       showDebugOption: false,
       pendingSharedContent: null,
       setPendingSharedContent: vi.fn(),
-      setPendingForwardMessageId: vi.fn(),
+      setPendingForwardMessageIds: vi.fn(),
     }),
 }));
 
@@ -105,14 +108,19 @@ vi.mock('../../src/components/discussions/SelectionHeader', () => ({
   default: ({
     count,
     onDelete,
+    onForward,
     canDelete,
   }: {
     count: number;
     onDelete?: () => void;
+    onForward?: () => void;
     canDelete?: boolean;
   }) => (
     <div data-testid="selection-header">
       Selecting {count}
+      <button type="button" aria-label="mock multi forward" onClick={onForward}>
+        Forward selected
+      </button>
       {canDelete ? (
         <button type="button" aria-label="mock multi delete" onClick={onDelete}>
           Delete selected

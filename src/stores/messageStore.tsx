@@ -6,6 +6,7 @@ import {
   MessageStatus,
   MessageType,
   decodeUserId,
+  SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
@@ -31,6 +32,7 @@ import {
   patchReactionCache,
 } from './messageStore.helpers';
 import { createEventHandlers } from './messageStore.events';
+import { getForwardSourceContent } from '../utils/messages';
 
 const createStoreId = (): string => {
   if (
@@ -44,11 +46,10 @@ const createStoreId = (): string => {
 
 /**
  * Resolve the optional replyTo / forwardOf fields for a new outgoing message.
- * A forward to the same contact collapses into a reply (quoting that contact's
- * own message). A forward to a different contact stays a forward.
+ * Explicit forwards always produce forwardOf (including same-conversation
+ * forwards). Replies are only created via replyToId.
  */
 async function resolveReplyAndForward(
-  contactUserId: string,
   replyToId: number | undefined,
   forwardFromMessageId: number | undefined
 ): Promise<{
@@ -66,17 +67,39 @@ async function resolveReplyAndForward(
     replyTo = { originalMsgId: orig.messageId };
   }
 
-  if (forwardFromMessageId) {
-    const orig = await getSdk().messages.get(forwardFromMessageId);
+  if (forwardFromMessageId != null) {
+    // Notes are owned by SelfMessageService (encrypted forwardOf). Probe that
+    // path first so ciphertext never hits MessageService's plaintext JSON parser.
+    const orig =
+      (await getSdk().selfMessages.get(forwardFromMessageId)) ??
+      (await getSdk().messages.get(forwardFromMessageId));
+
     if (!orig) {
-      logger.warn('Forward target not found, sending as regular message');
+      throw new Error('Forward target not found');
+    }
+
+    const originalContent = getForwardSourceContent(orig);
+    if (!originalContent) {
+      throw new Error('Cannot forward a message with no visible content');
+    }
+
+    if (orig.contactUserId === SELF_CONTACT_ID) {
+      // Notes have no peer contactUserId; cite the owner's public user id so
+      // MESSAGE_TYPE_FORWARD still carries a valid 32-byte citedContactId.
+      // Conv→Notes may leave content empty and store the body in forwardOf.
+      const { userProfile } = useAccountStore.getState();
+      if (!userProfile?.userId) {
+        throw new Error('Cannot forward Notes without an owner user id');
+      }
+      forwardOf = {
+        originalContent,
+        originalContactId: decodeUserId(userProfile.userId),
+      };
     } else if (!orig.messageId) {
       throw new Error('Cannot forward a message that has no messageId');
-    } else if (orig.contactUserId === contactUserId) {
-      replyTo = { originalMsgId: orig.messageId };
     } else {
       forwardOf = {
-        originalContent: orig.content,
+        originalContent,
         originalContactId: decodeUserId(orig.contactUserId),
       };
     }
@@ -154,6 +177,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         const msgMap = new Map<string, StoreMessage[]>();
         const rxnMap = new Map<string, StoreMessage[]>();
         for (const d of discussions) {
+          // Notes are owned by SelfMessageService / selfMessageStore.
+          if (d.contactUserId === SELF_CONTACT_ID) continue;
           const msgs = await sdk.messages.getVisibleMessages(d.contactUserId);
           const rxns = await sdk.messages.getReactions(d.contactUserId);
           if (msgs.length > 0) {
@@ -194,7 +219,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     forwardFromMessageId?
   ) => {
     const { userProfile } = useAccountStore.getState();
-    const isForward = !!forwardFromMessageId;
+    const isForward = forwardFromMessageId != null;
     if (
       !userProfile?.userId ||
       (!content.trim() && !isForward) ||
@@ -203,7 +228,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       return;
 
     const { replyTo, forwardOf } = await resolveReplyAndForward(
-      contactUserId,
       replyToId,
       forwardFromMessageId
     );

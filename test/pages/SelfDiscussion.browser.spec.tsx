@@ -5,12 +5,15 @@ import React from 'react';
 import { render } from 'vitest-browser-react';
 import { act } from 'react';
 
-let mockLocationState: { forwardFromMessageId?: number } = {
-  forwardFromMessageId: 42,
+let mockLocationState: {
+  forwardFromMessageIds?: number[];
+} = {
+  forwardFromMessageIds: [42],
 };
 
 const mockNavigate = vi.fn();
 const mockGetMessage = vi.fn();
+const mockGetSelfMessage = vi.fn();
 const mockSendSelfMessage = vi.fn().mockResolvedValue(undefined);
 const mockGetSelfRetentionInfo = vi
   .fn()
@@ -22,10 +25,14 @@ const mockSdk = {
     get: mockGetMessage,
   },
   selfMessages: {
+    get: mockGetSelfMessage,
     getRetentionInfo: mockGetSelfRetentionInfo,
     setRetentionPolicy: mockSetSelfRetentionPolicy,
   },
 };
+
+let latestForwardPreview: string | null | undefined;
+let latestForwardCount: number | undefined;
 
 vi.mock('react-router-dom', () => ({
   useLocation: () => ({ state: mockLocationState }),
@@ -39,6 +46,14 @@ vi.mock('../../src/stores/sdkStore', () => ({
       sdk: () => mockSdk,
     },
   },
+}));
+
+vi.mock('../../src/stores/appStore', () => ({
+  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      setPendingSharedContent: vi.fn(),
+      setPendingForwardMessageIds: vi.fn(),
+    }),
 }));
 
 vi.mock('../../src/stores/selfMessageStore', () => ({
@@ -68,15 +83,27 @@ vi.mock('../../src/components/ui/BackButton', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { duration?: string }) =>
-      options?.duration ? `${key}:${options.duration}` : key,
+    t: (key: string, options?: { duration?: string; count?: number }) =>
+      options?.duration
+        ? `${key}:${options.duration}`
+        : options?.count != null
+          ? `${key}:${options.count}`
+          : key,
     i18n: { language: 'en' },
   }),
   initReactI18next: { type: '3rdParty', init: () => {} },
 }));
 
 vi.mock('../../src/components/discussions/MessageInput', () => ({
-  default: () => {
+  default: ({
+    forwardPreview,
+    forwardCount,
+  }: {
+    forwardPreview?: string | null;
+    forwardCount?: number;
+  }) => {
+    latestForwardPreview = forwardPreview;
+    latestForwardCount = forwardCount;
     return <div data-testid="mock-message-input" />;
   },
 }));
@@ -86,24 +113,68 @@ import SelfDiscussion from '../../src/pages/SelfDiscussion';
 describe('SelfDiscussion forward to self notes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockLocationState = { forwardFromMessageId: 42 };
+    latestForwardPreview = undefined;
+    latestForwardCount = undefined;
+    mockLocationState = { forwardFromMessageIds: [42] };
+    mockGetSelfMessage.mockResolvedValue(undefined);
     mockGetMessage.mockResolvedValue({
       id: 42,
       content: 'Forwarded note content',
+      contactUserId:
+        'gossip1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
     });
     mockSendSelfMessage.mockResolvedValue(undefined);
     mockGetSelfRetentionInfo.mockResolvedValue({ duration: null, setAt: null });
     mockSetSelfRetentionPolicy.mockResolvedValue(undefined);
   });
 
-  it('prefills the input with the forwarded content (no auto-send)', async () => {
+  it('shows conversation forward preview from messages.get content', async () => {
     render(<SelfDiscussion />);
     await act(async () => {});
+    await act(async () => {});
 
-    // The message is fetched from the SDK but NOT auto-sent; the user reviews
-    // and hits send explicitly.
+    expect(mockGetSelfMessage).toHaveBeenCalledWith(42);
     expect(mockGetMessage).toHaveBeenCalledWith(42);
     expect(mockSendSelfMessage).not.toHaveBeenCalled();
+    expect(latestForwardPreview).toBe('Forwarded note content');
+    expect(latestForwardCount).toBe(1);
+  });
+
+  it('previews Conv→Notes empty-content notes via nested forwardOf.originalContent', async () => {
+    mockGetSelfMessage.mockResolvedValue({
+      id: 42,
+      content: '',
+      contactUserId: '__self__',
+      forwardOf: {
+        originalContent: 'original conversation message',
+      },
+    });
+
+    render(<SelfDiscussion />);
+    await act(async () => {});
+    await act(async () => {});
+
+    expect(mockGetSelfMessage).toHaveBeenCalledWith(42);
+    expect(mockGetMessage).not.toHaveBeenCalled();
+    expect(latestForwardPreview).toBe('original conversation message');
+    expect(latestForwardCount).toBe(1);
+  });
+
+  it('previews user-authored Notes via content', async () => {
+    mockGetSelfMessage.mockResolvedValue({
+      id: 42,
+      content: 'my personal note',
+      contactUserId: '__self__',
+    });
+
+    render(<SelfDiscussion />);
+    await act(async () => {});
+    await act(async () => {});
+
+    expect(mockGetSelfMessage).toHaveBeenCalledWith(42);
+    expect(mockGetMessage).not.toHaveBeenCalled();
+    expect(latestForwardPreview).toBe('my personal note');
+    expect(latestForwardCount).toBe(1);
   });
 
   it('loads and updates self retention duration from settings', async () => {

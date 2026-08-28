@@ -95,6 +95,68 @@ describe('SelfMessageService', () => {
     expect(msg.status).toBe(MessageStatus.SENT);
   });
 
+  it('encrypts forwardOf at rest and decrypts via get / getMessages', async () => {
+    const queries = getTestQueries();
+    const encKey = await generateEncryptionKey();
+    const ownerUserId = 'owner-self-forward';
+    const service = new SelfMessageService(queries, ownerUserId, encKey);
+
+    await service.ensureDiscussionExists();
+
+    const originalContactId = new Uint8Array(32).fill(9);
+    const forwardOf = {
+      originalContent: 'secret forwarded body',
+      originalContactId,
+    };
+    const result = await service.send('optional comment', { forwardOf });
+
+    expect(result.forwardOf).toEqual(forwardOf);
+    expect(result.content).toBe('optional comment');
+
+    const rows = await queries.messages.getByOwnerAndContact(
+      ownerUserId,
+      SELF_CONTACT_ID
+    );
+    expect(rows).toHaveLength(1);
+    const stored = rows[0];
+    expect(stored.forwardOf).toBeTruthy();
+    expect(stored.forwardOf).not.toContain('secret forwarded body');
+    expect(() => JSON.parse(stored.forwardOf as string)).toThrow();
+
+    const byId = await service.get(result.id!);
+    expect(byId?.forwardOf?.originalContent).toBe('secret forwarded body');
+    expect(byId?.forwardOf?.originalContactId).toEqual(originalContactId);
+
+    const listed = await service.getMessages();
+    expect(listed).toHaveLength(1);
+    expect(listed[0].forwardOf?.originalContent).toBe('secret forwarded body');
+    expect(listed[0].forwardOf?.originalContactId).toEqual(originalContactId);
+  });
+
+  it('keeps Notes without forwardOf readable', async () => {
+    const queries = getTestQueries();
+    const encKey = await generateEncryptionKey();
+    const ownerUserId = 'owner-self-no-forward';
+    const service = new SelfMessageService(queries, ownerUserId, encKey);
+
+    await service.ensureDiscussionExists();
+    const result = await service.send('plain note');
+
+    const rows = await queries.messages.getByOwnerAndContact(
+      ownerUserId,
+      SELF_CONTACT_ID
+    );
+    expect(rows[0].forwardOf == null || rows[0].forwardOf === '').toBe(true);
+
+    const byId = await service.get(result.id!);
+    expect(byId?.content).toBe('plain note');
+    expect(byId?.forwardOf).toBeUndefined();
+
+    const listed = await service.getMessages();
+    expect(listed[0].content).toBe('plain note');
+    expect(listed[0].forwardOf).toBeUndefined();
+  });
+
   it('editMessage updates content and sets edited metadata', async () => {
     const queries = getTestQueries();
     const encKey = await generateEncryptionKey();

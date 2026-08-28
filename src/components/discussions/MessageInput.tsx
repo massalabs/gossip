@@ -21,6 +21,7 @@ interface MessageInputProps {
   forwardPreview?: string | null;
   onCancelForward?: () => void;
   forwardMode?: 'forward' | 'reply';
+  forwardCount?: number;
   editingMessage?: Message | null;
   onCancelEdit?: () => void;
   onConfirmEdit?: (newContent: string, message: Message) => void;
@@ -39,6 +40,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   forwardPreview,
   onCancelForward,
   forwardMode = 'forward',
+  forwardCount = 0,
   editingMessage,
   onCancelEdit,
   onConfirmEdit,
@@ -86,7 +88,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     return () => clearTimeout(timer);
   }, [isKeyboardVisible, textareaRef]);
 
-  const isForwarding = !!forwardPreview;
+  const isForwarding = !!forwardPreview || forwardCount > 0;
   const sendButtonDisabled = disabled || (!newMessage.trim() && !isForwarding);
   const replyToId = replyingTo?.id;
 
@@ -178,11 +180,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
         cancelAriaLabel={t('message_input.cancel_reply')}
       />
       <InputPreviewBanner
-        isVisible={!!forwardPreview}
+        isVisible={isForwarding}
         label={
-          forwardMode === 'reply'
-            ? t('message_input.replying_to')
-            : t('message_input.forwarding')
+          forwardCount > 1
+            ? t('message_input.forwarding_count', { count: forwardCount })
+            : forwardMode === 'reply'
+              ? t('message_input.replying_to')
+              : t('message_input.forwarding')
         }
         content={forwardPreview ?? ''}
         onCancel={onCancelForward}

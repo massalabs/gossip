@@ -50,7 +50,18 @@ vi.mock('../../src/hooks/useGossipSdk', () => ({
       get: vi.fn().mockResolvedValue(null),
       deleteMessage: vi.fn().mockResolvedValue(true),
     },
+    selfMessages: {
+      get: vi.fn().mockResolvedValue(null),
+    },
   }),
+}));
+
+vi.mock('../../src/stores/appStore', () => ({
+  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      setPendingSharedContent: vi.fn(),
+      setPendingForwardMessageIds: vi.fn(),
+    }),
 }));
 
 vi.mock('../../src/stores/selfMessageStore', () => ({
@@ -79,12 +90,14 @@ vi.mock('../../src/components/discussions/SelectionHeader', () => ({
     count,
     onClear,
     onCopy,
+    onForward,
     onDelete,
     canDelete,
   }: {
     count: number;
     onClear: () => void;
     onCopy: () => void;
+    onForward: () => void;
     onDelete: () => void;
     canDelete?: boolean;
   }) => (
@@ -92,6 +105,9 @@ vi.mock('../../src/components/discussions/SelectionHeader', () => ({
       <span data-testid="selection-count">{count}</span>
       <button type="button" aria-label="clear selection" onClick={onClear}>
         Clear
+      </button>
+      <button type="button" aria-label="forward selected" onClick={onForward}>
+        Forward
       </button>
       <button type="button" aria-label="copy selected" onClick={onCopy}>
         Copy
@@ -158,7 +174,7 @@ describe('SelfDiscussion message selection', () => {
     ];
   });
 
-  it('shows SelectionHeader with copy and delete buttons when a message is selected', async () => {
+  it('shows SelectionHeader with forward, copy and delete buttons when a message is selected', async () => {
     await render(<SelfDiscussion />);
 
     // Initially no selection header
@@ -179,7 +195,10 @@ describe('SelfDiscussion message selection', () => {
       .element(page.getByTestId('selection-count'))
       .toHaveTextContent('1');
 
-    // Copy and delete buttons should be present
+    // Forward, copy and delete buttons should be present
+    await expect
+      .element(page.getByRole('button', { name: 'forward selected' }))
+      .toBeInTheDocument();
     await expect
       .element(page.getByRole('button', { name: 'copy selected' }))
       .toBeInTheDocument();

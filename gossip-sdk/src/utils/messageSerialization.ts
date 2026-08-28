@@ -119,6 +119,9 @@ export function serializeForwardMessage(
   messageId: Uint8Array,
   originalContactId?: Uint8Array
 ): Uint8Array {
+  if (!forwardedContent) {
+    throw new Error('forwardedContent must not be empty');
+  }
   if (messageId.length !== MESSAGE_ID_SIZE) {
     throw new Error(`messageId must be ${MESSAGE_ID_SIZE} bytes`);
   }

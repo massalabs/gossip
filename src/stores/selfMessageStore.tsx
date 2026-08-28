@@ -5,6 +5,8 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  decodeUserId,
+  SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
@@ -19,6 +21,7 @@ import {
   restoreReactionGroup,
   type ReactionsMap,
 } from './selfMessageStore.helpers';
+import { getForwardSourceContent } from '../utils/messages';
 
 interface SelfMessageStore {
   messages: Message[];
@@ -27,7 +30,10 @@ interface SelfMessageStore {
   isSending: boolean;
   loadMessages: () => Promise<void>;
   loadReactions: () => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (
+    content: string,
+    forwardFromMessageId?: number
+  ) => Promise<void>;
   editMessage: (id: number, newContent: string) => Promise<void>;
   deleteMessage: (id: number) => Promise<void>;
   sendReaction: (emoji: string, messageDbId: number) => Promise<void>;
@@ -74,14 +80,43 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     }
   },
 
-  sendMessage: async (content: string) => {
+  sendMessage: async (content: string, forwardFromMessageId?: number) => {
     const trimmed = content.trim();
-    if (!trimmed) return;
+    const isForward = forwardFromMessageId != null;
+    if (!trimmed && !isForward) return;
 
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
     const userProfile = useAccountStore.getState().userProfile;
     if (!userProfile?.userId) return;
+
+    let forwardOf: Message['forwardOf'];
+    if (forwardFromMessageId != null) {
+      const orig =
+        (await sdk.selfMessages.get(forwardFromMessageId)) ??
+        (await sdk.messages.get(forwardFromMessageId));
+      if (!orig) {
+        throw new Error('Forward target not found');
+      }
+
+      const originalContent = getForwardSourceContent(orig);
+      if (!originalContent) {
+        throw new Error('Cannot forward a message with no visible content');
+      }
+
+      const originalContactUserId =
+        orig.contactUserId === SELF_CONTACT_ID
+          ? userProfile.userId
+          : orig.contactUserId;
+      try {
+        forwardOf = {
+          originalContent,
+          originalContactId: decodeUserId(originalContactUserId),
+        };
+      } catch {
+        forwardOf = { originalContent };
+      }
+    }
 
     set({ isSending: true });
 
@@ -98,12 +133,13 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       status: MessageStatus.SENT,
       timestamp: new Date(),
       messageId: localMessageId,
+      forwardOf,
     };
     set(state => ({ messages: [...state.messages, optimistic] }));
     set({ isSending: false });
 
     try {
-      const message = await sdk.selfMessages.send(trimmed);
+      const message = await sdk.selfMessages.send(trimmed, { forwardOf });
       set(state => ({
         messages: state.messages.map(m =>
           m === optimistic ? { ...message, messageId: localMessageId } : m
