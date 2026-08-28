@@ -3,7 +3,6 @@ import { PlusCircle, Upload } from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import Button from '../ui/Button';
 import PageLayout from '../ui/Layout/PageLayout';
-import appLogo from '../../assets/gossip_face.svg';
 
 interface SecureOnboardingChoiceProps {
   onCreate: () => void;
@@ -19,7 +18,11 @@ const SecureOnboardingChoice: React.FC<SecureOnboardingChoiceProps> = ({
     <PageLayout contentClassName="px-6 py-8">
       <div className="app-max-w mx-auto min-h-full flex flex-col justify-center gap-6">
         <div className="text-center space-y-3">
-          <img src={appLogo} alt="" className="w-20 h-20 mx-auto" />
+          <img
+            src="/logo.svg"
+            alt="Gossip"
+            className="w-44 h-auto mx-auto dark:invert"
+          />
           <h1 className="text-3xl font-bold text-foreground">
             {t('onboarding_choice.title')}
           </h1>
