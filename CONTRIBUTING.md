@@ -165,12 +165,12 @@ Before changing an existing format or interface, consider how existing clients, 
 
 Preserve Gossip's existing security properties, including:
 
-* Post-Quantum Cryptography (PQC)
-* Perfect Forward Secrecy (PFS)
-* Post-Compromise Security (PCS)
-* Plausible deniability
-* Encryption at rest
-* Message authentication and integrity
+- Post-Quantum Cryptography (PQC)
+- Perfect Forward Secrecy (PFS)
+- Post-Compromise Security (PCS)
+- Plausible deniability
+- Encryption at rest
+- Message authentication and integrity
 
 Do not introduce new plaintext representations of data that was previously protected by encryption, or bypass existing cryptographic protections.
 
