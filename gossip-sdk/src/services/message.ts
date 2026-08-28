@@ -521,11 +521,13 @@ export class MessageService {
           // Delete control messages are handled at storage time; keep them in decrypted array
 
           if (
-            !deserialized.messageId ||
-            deserialized.messageId.length !== MESSAGE_ID_SIZE
+            deserialized.type !== MessageType.RETENTION_POLICY &&
+            (!deserialized.messageId ||
+              deserialized.messageId.length !== MESSAGE_ID_SIZE)
           ) {
             log.warn('missing or invalid messageId, skipping message', {
               messageId: deserialized.messageId,
+              type: deserialized.type,
             });
           }
 

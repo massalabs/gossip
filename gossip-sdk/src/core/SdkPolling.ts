@@ -6,8 +6,10 @@
 
 import type { SdkConfig } from '../config/sdk.js';
 import { SdkEventEmitter, SdkEventType } from './SdkEventEmitter.js';
+import { Logger } from '../utils/logs.js';
 
 const SESSION_STATUS_POLL_INTERVAL_MS = 3000;
+const logger = new Logger('SdkPolling');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -60,7 +62,7 @@ export class SdkPolling {
     this.callbacks = callbacks;
     this.eventEmitter = eventEmitter;
 
-    console.log('[SdkPolling] Starting polling', {
+    logger.info('[SdkPolling] Starting polling', {
       messagesIntervalMs: config.polling.messagesIntervalMs,
       announcementsIntervalMs: config.polling.announcementsIntervalMs,
       sessionRefreshIntervalMs: config.polling.sessionRefreshIntervalMs,
