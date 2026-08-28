@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 export interface BottomSheetOption {
   label: string;
@@ -15,6 +15,8 @@ interface OptionBottomSheetProps {
   onClose: () => void;
 }
 
+const EXIT_ANIMATION_MS = 250;
+
 /**
  * Bottom-sheet single-choice picker shared by the retention and auto-lock
  * settings (previously copy-pasted on four pages).
@@ -28,15 +30,38 @@ const OptionBottomSheet: React.FC<OptionBottomSheetProps> = ({
   onSelect,
   onClose,
 }) => {
-  if (!isOpen) return null;
+  // `render` keeps the sheet mounted during the exit transition;
+  // `mounted` drives the enter/exit transition classes.
+  const [render, setRender] = useState(isOpen);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setRender(true);
+      const id = requestAnimationFrame(() => setMounted(true));
+      return () => cancelAnimationFrame(id);
+    }
+    setMounted(false);
+    const timer = setTimeout(() => setRender(false), EXIT_ANIMATION_MS);
+    return () => clearTimeout(timer);
+  }, [isOpen]);
+
+  if (!render) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-end justify-center"
       onClick={onClose}
     >
       <div
-        className="bg-background w-full max-w-md rounded-t-2xl p-6 pb-8"
+        className={`absolute inset-0 bg-black/50 transition-opacity duration-200 ${
+          mounted ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
+      <div
+        className={`relative bg-background w-full max-w-md rounded-t-2xl p-6 pb-8 transform transition-transform duration-300 ease-out ${
+          mounted ? 'translate-y-0' : 'translate-y-full'
+        }`}
         onClick={e => e.stopPropagation()}
       >
         <h3
@@ -54,7 +79,7 @@ const OptionBottomSheet: React.FC<OptionBottomSheetProps> = ({
             <button
               key={String(option.value)}
               onClick={() => onSelect(option.value)}
-              className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
+              className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors active:scale-[0.98] ${
                 selectedValue === option.value
                   ? 'bg-accent-soft text-accent-soft-foreground font-medium'
                   : 'hover:bg-muted text-foreground'

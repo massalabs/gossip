@@ -16,7 +16,8 @@ export const LoginLayout: React.FC<LoginLayoutProps> = ({
 }) => {
   return (
     <div className="bg-background max-h-full flex min-h-0 w-full app-max-w flex-col overflow-y-auto overflow-x-hidden px-4 py-8 md:py-0">
-      <div className="flex min-h-full w-full flex-col items-center justify-center">
+      {/* Gentle entrance for the whole auth card */}
+      <div className="flex min-h-full w-full flex-col items-center justify-center animate-fade-in-up">
         <div className="w-full max-w-md text-center">
           <div
             className=" overflow-hidden"

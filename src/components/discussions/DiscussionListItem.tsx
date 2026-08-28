@@ -190,7 +190,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     {t('list.refuse')}
                   </Button>
                   {discussion.unreadCount > 0 && (
-                    <span className="ml-auto inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full">
+                    <span className="ml-auto inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full animate-badge-pop">
                       {discussion.unreadCount}
                     </span>
                   )}
@@ -263,7 +263,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                   </p>
                 )}
                 {discussion.unreadCount > 0 && (
-                  <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full">
+                  <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full animate-badge-pop">
                     {discussion.unreadCount}
                   </span>
                 )}

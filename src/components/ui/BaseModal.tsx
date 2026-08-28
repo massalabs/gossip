@@ -11,13 +11,17 @@ interface BaseModalProps {
   children: ReactNode;
 }
 
+const EXIT_ANIMATION_MS = 250;
+
 const BaseModal: React.FC<BaseModalProps> = ({
   isOpen,
   onClose,
   title,
   children,
 }) => {
-  // Animation mount flag (animate on open)
+  // `render` keeps the modal mounted while the exit transition plays;
+  // `mounted` drives the enter/exit transition classes.
+  const [render, setRender] = useState(isOpen);
   const [mounted, setMounted] = useState(false);
   const { onEsc } = useKeyDown({ enabled: isOpen });
 
@@ -27,14 +31,17 @@ const BaseModal: React.FC<BaseModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setRender(true);
       // next tick to allow transition
       const id = requestAnimationFrame(() => setMounted(true));
       return () => cancelAnimationFrame(id);
     }
     setMounted(false);
+    const timer = setTimeout(() => setRender(false), EXIT_ANIMATION_MS);
+    return () => clearTimeout(timer);
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!render) return null;
 
   const modalContent = (
     <div
@@ -43,7 +50,9 @@ const BaseModal: React.FC<BaseModalProps> = ({
     >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/50 dark:bg-black/60 transition-opacity"
+        className={`absolute inset-0 bg-black/50 dark:bg-black/60 transition-opacity duration-200 ${
+          mounted ? 'opacity-100' : 'opacity-0'
+        }`}
         onClick={onClose}
       />
 
