@@ -19,9 +19,9 @@ const SecureOnboardingChoice: React.FC<SecureOnboardingChoiceProps> = ({
       <div className="app-max-w mx-auto min-h-full flex flex-col justify-center gap-6">
         <div className="text-center space-y-3">
           <img
-            src="/logo.svg"
+            src="/favicon/favicon.svg"
             alt="Gossip"
-            className="w-44 h-auto mx-auto dark:invert"
+            className="w-20 h-20 mx-auto"
           />
           <h1 className="text-3xl font-bold text-foreground">
             {t('onboarding_choice.title')}
