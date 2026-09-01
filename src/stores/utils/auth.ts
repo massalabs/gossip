@@ -85,7 +85,8 @@ export function wipePreparedPasswordAccount(
 
 export async function preparePasswordAccount(
   mnemonic: string,
-  password: string
+  password: string,
+  mnemonicAlreadyBackedUp = false
 ): Promise<PreparedPasswordAccount> {
   const mnemonicBytes = new TextEncoder().encode(mnemonic);
   let security: UserProfile['security'] | undefined;
@@ -102,6 +103,7 @@ export async function preparePasswordAccount(
       mnemonic,
       password
     ));
+    security.mnemonicBackup.backedUp = mnemonicAlreadyBackedUp;
     // Prove the password decrypts the exact in-RAM identity before any account
     // data reaches durable storage.
     const authenticated = await auth({ security } as UserProfile, password);

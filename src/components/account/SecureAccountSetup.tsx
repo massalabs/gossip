@@ -31,14 +31,17 @@ import Button from '../ui/Button';
 import ICloudSyncModal from '../ui/ICloudSyncModal';
 import { PrivacyGraphic } from '../graphics';
 import SecureAccountForm from './SecureAccountForm';
+import type { AccountCreationResult } from './AccountCreationForm';
 import {
   preparePasswordAccount,
   type PreparedPasswordAccount,
   wipePreparedPasswordAccount,
 } from '../../stores/utils/auth';
 import {
+  readStagedMnemonic,
   readStagedPassword,
   stageAccount,
+  stagedMnemonicsEqual,
   stagedPasswordsEqual,
   StagedAccount,
   wipeStagedAccounts,
@@ -154,16 +157,29 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const remainingSlots = MAX_SECURE_ACCOUNTS - stagedAccounts.length;
   const canAddMore = remainingSlots > 0;
 
-  const handleAddAccount = (creds: { username: string; password: string }) => {
-    const account = stageAccount(creds.username, creds.password);
-    const collides = stagedAccounts.some(existing =>
+  const handleAddAccount = (result: AccountCreationResult) => {
+    const account = stageAccount(
+      result.username,
+      result.password,
+      result.mnemonic
+    );
+    const passwordCollides = stagedAccounts.some(existing =>
       stagedPasswordsEqual(existing, account)
     );
+    const identityCollides = stagedAccounts.some(existing =>
+      stagedMnemonicsEqual(existing, account)
+    );
 
-    if (collides) {
-      account.passwordBytes.fill(0);
+    if (passwordCollides || identityCollides) {
+      wipeStagedAccounts([account]);
       setAddingAccount(false);
-      setError(t('secure_setup.password_in_use'));
+      setError(
+        t(
+          passwordCollides
+            ? 'secure_setup.password_in_use'
+            : 'secure_setup.mnemonic_in_use'
+        )
+      );
       return;
     }
 
@@ -247,10 +263,12 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       // Nothing reaches durable account storage until every confirmed password
       // has decrypted and reopened its exact generated identity/session in RAM.
       for (const account of stagedAccounts) {
+        const importedMnemonic = readStagedMnemonic(account);
         preparedAccounts.push(
           await preparePasswordAccount(
-            generateMnemonic(256),
-            readStagedPassword(account)
+            importedMnemonic ?? generateMnemonic(256),
+            readStagedPassword(account),
+            importedMnemonic !== null
           )
         );
       }

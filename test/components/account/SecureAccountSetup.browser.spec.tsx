@@ -137,9 +137,7 @@ async function addAccount(username: string, password: string) {
     page.getByPlaceholder('create.confirm_password'),
     password
   );
-  await userEvent.click(
-    page.getByRole('button', { name: 'secure_setup.create_account' })
-  );
+  await userEvent.click(page.getByRole('button', { name: 'create.title' }));
   await userEvent.click(
     page.getByRole('button', { name: 'create.password_confirm_validate' })
   );
@@ -185,6 +183,38 @@ describe('SecureAccountSetup', () => {
     await vi.waitFor(() =>
       expect(account.passwordBytes.every(byte => byte === 0)).toBe(true)
     );
+  });
+
+  it('prepares an imported identity as an already-backed-up mnemonic', async () => {
+    const mnemonic =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const account = stageAccount('restored', 'restored-password', mnemonic);
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.preparePasswordAccount).toHaveBeenCalledWith(
+        mnemonic,
+        'restored-password',
+        true
+      );
+      expect(mocks.initializePreparedAccountsAtomically).toHaveBeenCalledWith([
+        expect.objectContaining({
+          username: 'restored',
+          password: 'restored-password',
+        }),
+      ]);
+    });
   });
 
   it('defers unmount wiping until an in-flight atomic commit releases credentials', async () => {
@@ -546,6 +576,56 @@ describe('SecureAccountSetup', () => {
     expect(mocks.initializePreparedAccountsAtomically).not.toHaveBeenCalled();
     expect(fillSpy).toHaveBeenCalledWith(0);
     fillSpy.mockRestore();
+  });
+
+  it('rejects a duplicate imported identity before persistence', async () => {
+    const mnemonic =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const account = stageAccount('alice', 'alice-password', mnemonic);
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.add_account' })
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_tab' })
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.mnemonic_placeholder'),
+      mnemonic
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.enter_username'),
+      'duplicate'
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.enter_password'),
+      'different-password'
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.confirm_password'),
+      'different-password'
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_account' })
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.password_confirm_import' })
+    );
+
+    await expect
+      .element(page.getByText('secure_setup.mnemonic_in_use'))
+      .toBeInTheDocument();
+    expect(mocks.initializePreparedAccountsAtomically).not.toHaveBeenCalled();
+    const rejected = mocks.stagedAccounts.at(-1);
+    expect(rejected?.passwordBytes.every(byte => byte === 0)).toBe(true);
+    expect(rejected?.mnemonicBytes?.every(byte => byte === 0)).toBe(true);
   });
 
   it.each([

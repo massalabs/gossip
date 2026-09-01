@@ -120,6 +120,48 @@ describe('AccountCreationForm mandatory password', () => {
     });
   });
 
+  it('stages a validated mnemonic through the individual account form', async () => {
+    const onSubmit = vi.fn(async () => {});
+    await render(
+      <AccountCreationForm onSubmit={onSubmit} allowMnemonicImport />
+    );
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_tab' })
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.mnemonic_placeholder'),
+      'ABANDON abandon abandon abandon abandon abandon\nabandon abandon abandon abandon abandon about'
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.enter_username'),
+      'restored'
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.enter_password'),
+      'valid-password'
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.confirm_password'),
+      'valid-password'
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_account' })
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.password_confirm_import' })
+    );
+
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        username: 'restored',
+        password: 'valid-password',
+        mnemonic:
+          'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      });
+    });
+  });
+
   it('forwards confirmed credentials through classic account creation', async () => {
     const onComplete = vi.fn();
     mocks.initializeAccount.mockResolvedValue(undefined);
