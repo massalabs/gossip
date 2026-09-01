@@ -22,10 +22,10 @@
     "feedback": "发送反馈"
   },
   "delete_account": {
-    "button": "删除账户",
-    "title": "删除账户",
-    "confirm": "确定要删除此账户吗？",
-    "warning": "此操作无法撤销"
+    "button": "删除所有账户",
+    "title": "删除所有账户",
+    "confirm": "永久删除此设备上的所有 Gossip 账户？",
+    "warning": "消息、会话、生物识别登录和中断的导入数据也会被删除。外部备份文件不会改变。此操作无法撤销。"
   },
   "edit_username_modal": {
     "title": "修改用户名",

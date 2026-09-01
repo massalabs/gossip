@@ -14,6 +14,7 @@ import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
 import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
 import { getPortableImportMigrationEpoch } from '../services/portableImportAuthorization';
+import { resetAllAccountStorage } from '../services/unsupportedStorageReset';
 
 import {
   Provider,
@@ -898,92 +899,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     },
 
     resetAccount: async () => {
+      set({ isLoading: true });
       try {
-        set({ isLoading: true });
-
-        const sdk = getSdk();
-        let accountUserId: string | undefined;
-        try {
-          accountUserId = sdk.userId;
-        } catch {
-          // Session may already be closed
-        }
-
-        // Close the SDK session first (Olm cleanup, drain background
-        // persists). secureStorageDestroy below has the same
-        // "no SESSION_OPEN" precondition as secureStorageLock.
-        if (sdk.isSessionOpen) {
-          await sdk.closeSession();
-        }
-
-        useDiscussionStore.getState().cleanup();
-        useMessageStore.getState().cleanup();
-        useSelfMessageStore.getState().clearMessages();
-
-        // Deliberately preserve the global biometric credential for every
-        // backend. Inspecting or clearing it here would reveal whether it
-        // belonged to this account and could disable biometric login for a
-        // different account. A credential for the destroyed account instead
-        // fails generically until explicitly replaced from another account.
-        if (sdk.isSecureStorage) {
-          // Atomic destroy: rotates the slot's keypair to a dummy and
-          // overwrites every block of [SQL_NAMESPACE, SESSION_BLOB_NAMESPACE]
-          // with cover blocks under the new PK, in a single backing-store
-          // transaction. After this resolves, the old secret no longer
-          // unlocks the slot — fixing the trap where biometric login
-          // would land on the deleted slot's still-valid keypair and
-          // leave the SDK in 'unlocked' over an empty DB.
-          //
-          // Block-count parity is preserved (cover repad), so snapshots
-          // before/after look like a routine cover-traffic burst.
-          // Process killed mid-destroy: backing-store rolls back, slot
-          // intact, user retries.
-          try {
-            await sdk.secureStorageDestroy();
-          } catch (e) {
-            logger.error('secureStorageDestroy failed:', e);
-            // Best-effort lock so we don't leave the storage in
-            // 'unlocked' after a partial wipe.
-            if (sdk.storageState === 'unlocked') {
-              try {
-                await sdk.secureStorageLock();
-              } catch (lockErr) {
-                logger.error('Recovery lock also failed:', lockErr);
-              }
-            }
-            throw e;
-          }
-        } else {
-          // wa-sqlite (non-secure-storage) path: shared SQL DB, no
-          // per-slot ciphertext to wipe. Clear rows the old way.
-          let nbAccounts = 0;
-          try {
-            if (accountUserId) {
-              await sdk.clearAccountData(accountUserId);
-            } else {
-              await sdk.clearAllTables();
-            }
-            await sdk.clearSessionBlob();
-            nbAccounts = await sdk.profiles.getCount();
-          } catch (e) {
-            logger.error('Error clearing account data:', e);
-          }
-          useAppStore.getState().setIsInitialized(nbAccounts > 0);
-          useAppStore.getState().resetAccountSettings();
-          set(clearAccountState());
-          return;
-        }
-
-        // Secure-storage post-destroy routing: storageState is 'locked'
-        // and the SDK can't tell from JS whether other slots hold real
-        // accounts (PD by design). Default to the login screen — if no
-        // slot unlocks, the user can fall through to onboarding via
-        // the import button.
-        useAppStore.getState().resetAccountSettings();
-        set(clearAccountState());
-        useAppStore.getState().setIsInitialized(true);
+        await resetAllAccountStorage();
       } catch (error) {
-        logger.error('Error resetting account:', error);
+        logger.error('Error resetting all accounts:', error);
         set({ isLoading: false });
         throw error;
       }

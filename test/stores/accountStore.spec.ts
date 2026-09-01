@@ -17,6 +17,7 @@ const configureBiometricSpy = vi.hoisted(() => vi.fn());
 const appState = vi.hoisted(() => ({ secureAccountCreationAllowed: true }));
 const derivedAccountKeys = vi.hoisted(() => [] as Uint8Array[]);
 const encodeUserIdSpy = vi.hoisted(() => vi.fn(() => 'mock-user-id'));
+const resetAllAccountsSpy = vi.hoisted(() => vi.fn(async () => {}));
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
@@ -137,6 +138,10 @@ function mockProfile(session = new Uint8Array([9, 9])) {
 }
 
 // Mock getSdk to avoid real SDK initialization
+vi.mock('../../src/services/unsupportedStorageReset', () => ({
+  resetAllAccountStorage: resetAllAccountsSpy,
+}));
+
 vi.mock('../../src/stores/sdkStore', () => ({
   getSdk: () => getSdkMock(),
 }));
@@ -815,13 +820,10 @@ describe('AccountStore session cleanup', () => {
     expect(selfClearMessages).toHaveBeenCalledTimes(1);
   });
 
-  it('clears discussion, message, and selfMessage stores on resetAccount', async () => {
-    const resetAccount = useAccountStore.getState().resetAccount;
-    await resetAccount();
+  it('delegates resetAccount to the complete all-account wipe', async () => {
+    await useAccountStore.getState().resetAccount();
 
-    expect(discussionCleanup).toHaveBeenCalledTimes(1);
-    expect(messageCleanup).toHaveBeenCalledTimes(1);
-    expect(selfClearMessages).toHaveBeenCalledTimes(1);
+    expect(resetAllAccountsSpy).toHaveBeenCalledOnce();
   });
 });
 

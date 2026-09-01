@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   setPassword: vi.fn(),
   userProfile: null as Record<string, unknown> | null,
   privateMigrationPhase: null as number | null,
+  resetAllAccountStorage: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -26,6 +27,12 @@ vi.mock('react-i18next', () => ({
     i18n: { language: 'en' },
   }),
   initReactI18next: { type: '3rdParty', init: () => {} },
+}));
+
+vi.mock('../../../src/services/unsupportedStorageReset', () => ({
+  isUnsupportedStorageVersionError: () => false,
+  requestUnsupportedStorageReset: vi.fn(),
+  resetAllAccountStorage: mocks.resetAllAccountStorage,
 }));
 
 vi.mock('../../../src/services/biometricService', () => ({
@@ -63,6 +70,7 @@ vi.mock('../../../src/pages/Login/useLoginForm', () => ({
 describe('password-only biometric login wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resetAllAccountStorage.mockResolvedValue(undefined);
     mocks.userProfile = null;
     mocks.privateMigrationPhase = null;
     mocks.messagingRecoveryRequired = false;
@@ -215,6 +223,30 @@ describe('password-only biometric login wiring', () => {
       expect(onAccountSelected).toHaveBeenCalledOnce();
     });
     expect(mocks.loadAccount.mock.calls[0][0]).not.toHaveProperty('userId');
+  });
+
+  it('requires a separated confirmation screen before wiping all accounts', async () => {
+    await render(
+      <SecureLogin onCreateNewAccount={vi.fn()} onAccountSelected={vi.fn()} />
+    );
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'storage_reset.action' })
+    );
+    expect(mocks.resetAllAccountStorage).not.toHaveBeenCalled();
+
+    const confirm = page.getByRole('button', {
+      name: 'storage_reset.confirm',
+    });
+    const cancel = page.getByRole('button', { name: 'storage_reset.cancel' });
+    await expect.element(confirm).toBeVisible();
+    await expect.element(cancel).toBeVisible();
+    expect((cancel.element().parentElement as HTMLElement).className).toContain(
+      'pt-16'
+    );
+
+    await userEvent.click(confirm);
+    expect(mocks.resetAllAccountStorage).toHaveBeenCalledOnce();
   });
 
   it('keeps secure password login available after biometric failure', async () => {

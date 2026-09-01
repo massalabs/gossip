@@ -2,6 +2,7 @@ import { logger } from '../../utils/logger.ts';
 import {
   isUnsupportedStorageVersionError,
   requestUnsupportedStorageReset,
+  resetAllAccountStorage,
 } from '../../services/unsupportedStorageReset';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
@@ -38,6 +39,10 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
     const [biometricLoading, setBiometricLoading] = useState(false);
     const [showSessionResetConfirm, setShowSessionResetConfirm] =
       useState(false);
+    const [showStorageResetConfirm, setShowStorageResetConfirm] =
+      useState(false);
+    const [storageResetBusy, setStorageResetBusy] = useState(false);
+    const [storageResetFailed, setStorageResetFailed] = useState(false);
 
     const {
       isLoading: passwordLoading,
@@ -204,6 +209,56 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       );
     }
 
+    if (showStorageResetConfirm) {
+      return (
+        <LoginLayout title={t('storage_reset.title')} subtitle="">
+          <div className="space-y-5">
+            <p className="text-sm font-medium text-destructive">
+              {t('storage_reset.warning')}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {t('storage_reset.scope')}
+            </p>
+            <Button
+              type="button"
+              variant="danger"
+              fullWidth
+              loading={storageResetBusy}
+              disabled={storageResetBusy}
+              onClick={() => {
+                setStorageResetBusy(true);
+                setStorageResetFailed(false);
+                void resetAllAccountStorage().catch(() => {
+                  setStorageResetBusy(false);
+                  setStorageResetFailed(true);
+                });
+              }}
+            >
+              {t('storage_reset.confirm')}
+            </Button>
+            {storageResetFailed && (
+              <p role="alert" className="text-sm text-destructive">
+                {t('storage_reset.failed')}
+              </p>
+            )}
+            {/* Keep the safe target where a rapid second tap is most likely;
+                the irreversible action is intentionally higher on this page. */}
+            <div className="pt-16">
+              <Button
+                type="button"
+                variant="outline"
+                fullWidth
+                disabled={storageResetBusy}
+                onClick={() => setShowStorageResetConfirm(false)}
+              >
+                {t('storage_reset.cancel')}
+              </Button>
+            </div>
+          </div>
+        </LoginLayout>
+      );
+    }
+
     if (privateMigrationPhase) {
       return (
         <LoginLayout title={t('private_migration.title')} subtitle="">
@@ -278,6 +333,20 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
             {t('login.backup_all_accounts')}
           </Button>
         )}
+
+        <Button
+          type="button"
+          variant="outline"
+          fullWidth
+          className="h-[51px] rounded-full border-destructive/40 text-destructive"
+          disabled={biometricLoading || passwordLoading}
+          onClick={() => {
+            setStorageResetFailed(false);
+            setShowStorageResetConfirm(true);
+          }}
+        >
+          {t('storage_reset.action')}
+        </Button>
       </LoginLayout>
     );
   }

@@ -46,7 +46,29 @@ function deleteBrowserSecureStorage(): Promise<void> {
   });
 }
 
-export async function resetUnsupportedSecureStorage(): Promise<void> {
+async function closeSdkBeforeStorageReset(): Promise<void> {
+  const { getSdk } = await import('../stores/sdkStore');
+  let sdk: ReturnType<typeof getSdk>;
+  try {
+    sdk = getSdk();
+  } catch {
+    return;
+  }
+  if (!sdk.isInitialized) return;
+
+  if (!sdk.isSecureStorage) {
+    if (sdk.isSessionOpen) await sdk.closeSession();
+    await sdk.clearAllTables();
+    await sdk.clearSessionBlob();
+  }
+  await sdk.destroy();
+}
+
+/**
+ * Irreversibly remove every account-owned local artifact while preserving
+ * language, appearance, and other non-account preferences.
+ */
+export async function resetAllAccountStorage(): Promise<void> {
   localStorage.setItem(RESET_PENDING_KEY, 'confirmed');
   const [cleanup, authorization] = await Promise.all([
     import('./portableImportCleanup'),
@@ -54,6 +76,7 @@ export async function resetUnsupportedSecureStorage(): Promise<void> {
   ]);
   cleanup.markPortableImportCleanupPending();
   await cleanup.blockPortableImportAccountOutputs();
+  await closeSdkBeforeStorageReset();
 
   if (Capacitor.isNativePlatform()) {
     await SecureStorageNative.resetStorage();
@@ -65,5 +88,9 @@ export async function resetUnsupportedSecureStorage(): Promise<void> {
   await authorization.resetOnboardingAuthorityAfterStorageReset();
   localStorage.removeItem(RESET_PENDING_KEY);
   sessionStorage.removeItem(RESET_MODE_KEY);
-  window.location.assign('/');
+  window.location.replace('/');
+}
+
+export async function resetUnsupportedSecureStorage(): Promise<void> {
+  await resetAllAccountStorage();
 }

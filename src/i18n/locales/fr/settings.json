@@ -22,10 +22,10 @@
     "feedback": "Envoyer des commentaires"
   },
   "delete_account": {
-    "button": "Supprimer le compte",
-    "title": "Supprimer le compte",
-    "confirm": "Es-tu sûr de vouloir supprimer ce compte ?",
-    "warning": "Cette action est irréversible"
+    "button": "Supprimer tous les comptes",
+    "title": "Supprimer tous les comptes",
+    "confirm": "Supprimer définitivement tous les comptes Gossip de cet appareil ?",
+    "warning": "Les messages, les sessions, la connexion biométrique et les données d’importation interrompue seront également supprimés. Les sauvegardes externes ne seront pas modifiées. Cette action est irréversible."
   },
   "edit_username_modal": {
     "title": "Modifier le nom d'utilisateur",
