@@ -749,26 +749,11 @@ async function switchActiveGeneration(
 }
 
 export async function portableImportInstalledWeb(): Promise<boolean> {
-  if (!navigator.locks) {
-    const db = await openDatabase();
-    try {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const value = await request(
-        tx.objectStore(STORE_NAME).get(PORTABLE_IMPORT_INSTALLED_KEY)
-      );
-      await transactionDone(tx);
-      return value === true;
-    } finally {
-      db.close();
-    }
-  }
-  // Wait for any cross-tab export/import owner. Authority reconciliation must
-  // observe either the pre-commit installation or its atomic marker, never an
-  // in-flight gap between the two.
-  const lease = await acquireExportLease();
-  let db: IDBDatabase | null = null;
+  // The marker and active generation are written in one IndexedDB transaction,
+  // so this read cannot observe a partially installed generation and must not
+  // queue behind the import's non-reentrant export lease during recovery.
+  const db = await openDatabase();
   try {
-    db = await openDatabase();
     const tx = db.transaction(STORE_NAME, 'readonly');
     const value = await request(
       tx.objectStore(STORE_NAME).get(PORTABLE_IMPORT_INSTALLED_KEY)
@@ -776,9 +761,7 @@ export async function portableImportInstalledWeb(): Promise<boolean> {
     await transactionDone(tx);
     return value === true;
   } finally {
-    db?.close();
-    lease.release();
-    await lease.completion;
+    db.close();
   }
 }
 
@@ -1403,47 +1386,50 @@ export class PortableWebImport {
     }
     this.installing = true;
     const installation = this.enqueue(async () => {
-      if (!this.db) this.db = await openDatabase();
-      if (!navigator.locks) {
-        throw new Error('This browser cannot safely install a backup');
-      }
-      const generation = this.stagedGeneration ?? randomTransferId();
-      if (!this.stagedGeneration) {
-        await stageCandidateGeneration(
-          this.db,
-          this.migrationPrefix ?? `${IMPORT_SPOOL_PREFIX}${this.transferId}:`,
-          generation
-        );
-        this.stagedGeneration = generation;
-      }
-      await navigator.locks.request(
-        INSTALLATION_FENCE_LOCK_NAME,
-        { mode: 'exclusive' },
-        async () => {
-          if (!this.db) throw new Error('Portable import is closed');
-          await switchActiveGeneration(
-            this.db,
-            this.sourceGeneration,
-            generation,
-            [
-              `${IMPORT_SPOOL_PREFIX}${this.transferId}:`,
-              this.sourceGeneration === LEGACY_GENERATION
-                ? 's:'
-                : activeRecordPrefix(this.sourceGeneration),
-            ]
-          );
+      try {
+        if (!this.db) this.db = await openDatabase();
+        if (!navigator.locks) {
+          throw new Error('This browser cannot safely install a backup');
         }
-      );
-      // The marker, exact source spool, and previous generation changed in
-      // one transaction, so success never leaves omitted accounts durable.
-      this.db.close();
-      this.db = null;
-      this.stage = 'closed';
-      const lease = this.lease;
-      this.lease = null;
-      lease?.release();
-      if (lease) await lease.completion;
-      return { generation };
+        const generation = this.stagedGeneration ?? randomTransferId();
+        if (!this.stagedGeneration) {
+          await stageCandidateGeneration(
+            this.db,
+            this.migrationPrefix ?? `${IMPORT_SPOOL_PREFIX}${this.transferId}:`,
+            generation
+          );
+          this.stagedGeneration = generation;
+        }
+        await navigator.locks.request(
+          INSTALLATION_FENCE_LOCK_NAME,
+          { mode: 'exclusive' },
+          async () => {
+            if (!this.db) throw new Error('Portable import is closed');
+            await switchActiveGeneration(
+              this.db,
+              this.sourceGeneration,
+              generation,
+              [
+                `${IMPORT_SPOOL_PREFIX}${this.transferId}:`,
+                this.sourceGeneration === LEGACY_GENERATION
+                  ? 's:'
+                  : activeRecordPrefix(this.sourceGeneration),
+              ]
+            );
+          }
+        );
+        // The marker, exact source spool, and previous generation changed in
+        // one transaction, so success never leaves omitted accounts durable.
+        this.db.close();
+        this.db = null;
+        this.stage = 'closed';
+        return { generation };
+      } finally {
+        const lease = this.lease;
+        this.lease = null;
+        lease?.release();
+        if (lease) await lease.completion;
+      }
     });
     void installation.catch(() => {
       this.installing = false;

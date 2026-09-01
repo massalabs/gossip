@@ -1,4 +1,12 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import fixtureUrl from '../../wasm/secure-storage/tests/fixtures/portable-v1-minimal.gossipbackup?url';
 import initSecureStorageWasm from '../../gossip-sdk/src/assets/generated/wasm-secureStorage/secureStorage.js';
 import secureStorageWasmUrlRaw from '../../gossip-sdk/src/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
@@ -570,6 +578,52 @@ describe('PortableWebImport', () => {
     )) as Uint8Array;
     expect(installedKeypair).not.toEqual(records(expected)[0][1]);
     expect(new DataView(installedKeypair.buffer).getUint32(0, false)).toBe(1);
+  });
+
+  it('releases the export lease when the final installation transaction fails', async () => {
+    const expected = await fixture();
+    const transfer = await PortableWebImport.begin(validators);
+    await transfer.push(expected);
+    await transfer.finishValidation();
+    await stageOuterMigration(transfer);
+
+    const originalTransaction = IDBDatabase.prototype.transaction;
+    let abortNextWrite = true;
+    const transactionSpy = vi
+      .spyOn(IDBDatabase.prototype, 'transaction')
+      .mockImplementation(function (storeNames, mode, options) {
+        const transaction = originalTransaction.call(
+          this,
+          storeNames,
+          mode,
+          options
+        );
+        if (abortNextWrite && mode === 'readwrite') {
+          abortNextWrite = false;
+          queueMicrotask(() => transaction.abort());
+        }
+        return transaction;
+      });
+
+    try {
+      await expect(transfer.install()).rejects.toBeDefined();
+    } finally {
+      transactionSpy.mockRestore();
+    }
+
+    const installedProbe = portableImportInstalledWeb();
+    try {
+      const outcome = await Promise.race([
+        installedProbe.then(value => ({ settled: true, value })),
+        new Promise<{ settled: false }>(resolve =>
+          setTimeout(() => resolve({ settled: false }), 100)
+        ),
+      ]);
+      expect(outcome).toEqual({ settled: true, value: false });
+    } finally {
+      await transfer.close();
+      await installedProbe;
+    }
   });
 
   it('rejects a stale candidate generation without changing active storage', async () => {
