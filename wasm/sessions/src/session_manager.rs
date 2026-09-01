@@ -261,7 +261,7 @@ impl SessionManager {
     /// ```
     pub fn from_encrypted_blob(encrypted_blob: &[u8], key: &crypto_aead::Key) -> Option<Self> {
         if encrypted_blob.get(..8) != Some(SESSION_BLOB_MAGIC.as_slice()) {
-            return Self::from_released_versionless_blob(encrypted_blob, key);
+            return None;
         }
         let prefix = encrypted_blob.get(..16)?;
         let envelope_version = u64::from_be_bytes(prefix[8..16].try_into().ok()?);
@@ -269,20 +269,6 @@ impl SessionManager {
             SESSION_BLOB_ENVELOPE_VERSION => Self::from_encrypted_blob_v1(encrypted_blob, key),
             _ => None,
         }
-    }
-
-    fn from_released_versionless_blob(
-        encrypted_blob: &[u8],
-        key: &crypto_aead::Key,
-    ) -> Option<Self> {
-        let nonce_end = crypto_aead::NONCE_SIZE;
-        let nonce_bytes: [u8; crypto_aead::NONCE_SIZE] =
-            encrypted_blob.get(..nonce_end)?.try_into().ok()?;
-        let ciphertext = encrypted_blob.get(nonce_end..)?;
-        validated_session_ciphertext_len(u64::try_from(ciphertext.len()).ok()?)?;
-        let nonce = crypto_aead::Nonce::from(nonce_bytes);
-        let decrypted_blob = Zeroizing::new(crypto_aead::decrypt(key, &nonce, ciphertext, b"")?);
-        Self::decode_payload_v1(&decrypted_blob)
     }
 
     fn from_encrypted_blob_v1(encrypted_blob: &[u8], key: &crypto_aead::Key) -> Option<Self> {
@@ -1617,19 +1603,13 @@ mod tests {
     }
 
     #[test]
-    fn test_encrypted_blob_decodes_released_versionless_framing() {
+    fn test_encrypted_blob_rejects_versionless_framing() {
         let manager = SessionManager::new(create_test_config());
         let key = generate_test_key();
         let payload = manager.encode_payload_v1().unwrap();
-        let legacy_blob = encrypt_released_versionless_payload(&payload, &key);
+        let versionless = encrypt_released_versionless_payload(&payload, &key);
 
-        let restored = SessionManager::from_encrypted_blob(&legacy_blob, &key).unwrap();
-
-        assert_eq!(restored.peers.len(), manager.peers.len());
-        assert_eq!(
-            restored.config.max_session_lag_length,
-            manager.config.max_session_lag_length
-        );
+        assert!(SessionManager::from_encrypted_blob(&versionless, &key).is_none());
     }
 
     #[test]
