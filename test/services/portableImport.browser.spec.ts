@@ -54,6 +54,9 @@ describe('browser portable import transport', () => {
     }
     expect(reconstructed).toEqual(expected);
     expect(admitted.length).toBeGreaterThan(1);
+    expect(new Set(admitted.map(chunk => chunk.buffer)).size).toBe(
+      admitted.length
+    );
     expect(admitted.every(chunk => chunk.byteLength <= 256 * 1024)).toBe(true);
     expect(admitted.every(chunk => chunk.every(byte => byte === 0))).toBe(true);
     expect(finish).toHaveBeenCalledOnce();

@@ -60,8 +60,9 @@ export async function selectBrowserBackupSource(): Promise<FileSystemFileHandle>
  * Stream one user-owned backup into an isolated validator.
  *
  * The source handle is read-only and is never deleted, truncated, or written.
- * Each receiver call owns at most 256 KiB until it settles; the same mutable
- * buffer is wiped immediately afterward. `finishValidation` runs only after
+ * Each receiver call receives a fresh mutable buffer of at most 256 KiB. That
+ * individual buffer is wiped immediately after the call settles.
+ * `finishValidation` runs only after
  * the exact file length has been admitted.
  */
 export async function streamBrowserBackupImport(
