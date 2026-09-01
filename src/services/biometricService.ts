@@ -400,10 +400,22 @@ export async function configureBiometricLogin(
   password: string,
   syncToICloud = false
 ): Promise<BiometricSetupResult> {
-  const { success, error } = await configureBiometricLoginWithRollback(
+  const result = await configureBiometricLoginWithRollback(
     password,
     syncToICloud
   );
+  if (!result.success && result.rollback) {
+    try {
+      await result.rollback();
+    } catch (rollbackError) {
+      logger.error(
+        'Failed to retry previous biometric credential restoration:',
+        rollbackError
+      );
+      return { success: false, error: 'biometric_restoration_failed' };
+    }
+  }
+  const { success, error } = result;
   return error === undefined ? { success } : { success, error };
 }
 

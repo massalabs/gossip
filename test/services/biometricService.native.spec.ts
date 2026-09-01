@@ -214,6 +214,42 @@ describe('native biometric password storage', () => {
     );
   });
 
+  it('retries interrupted restoration before the simple wrapper returns', async () => {
+    mocks.platform = 'android';
+    mocks.get.mockResolvedValue('previous-password');
+    mocks.set
+      .mockRejectedValueOnce(new Error('replacement failed'))
+      .mockRejectedValueOnce(new Error('restore failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      configureBiometricLogin('new-password', false)
+    ).resolves.toEqual({ success: false, error: 'replacement failed' });
+    expect(mocks.set).toHaveBeenNthCalledWith(
+      3,
+      BIOMETRIC_STORAGE_KEY,
+      'previous-password',
+      true,
+      false
+    );
+  });
+
+  it('reports a repeated restoration failure distinctly', async () => {
+    mocks.platform = 'android';
+    mocks.get.mockResolvedValue('previous-password');
+    mocks.set
+      .mockRejectedValueOnce(new Error('replacement failed'))
+      .mockRejectedValueOnce(new Error('restore failed'))
+      .mockRejectedValueOnce(new Error('retry failed'));
+
+    await expect(
+      configureBiometricLogin('new-password', false)
+    ).resolves.toEqual({
+      success: false,
+      error: 'biometric_restoration_failed',
+    });
+  });
+
   it('restores both iOS Keychain locations when replacement fails', async () => {
     mocks.get
       .mockResolvedValueOnce('previous-local')
