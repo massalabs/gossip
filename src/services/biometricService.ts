@@ -54,11 +54,57 @@ export interface BiometricSetupTransactionResult extends BiometricSetupResult {
   rollback?: () => Promise<void>;
 }
 
+const WEBAUTHN_PASSWORD_PAYLOAD_VERSION = 2 as const;
+const MAX_WEBAUTHN_PASSWORD_BYTES = 1024;
+const WEBAUTHN_PASSWORD_ENVELOPE_BYTES = 2 + MAX_WEBAUTHN_PASSWORD_BYTES;
+
 interface WebAuthnPasswordPayload {
-  version: 1;
+  version: typeof WEBAUTHN_PASSWORD_PAYLOAD_VERSION;
   credentialId: string;
   salt: string;
   ciphertext: string;
+}
+
+function encodeWebAuthnPasswordEnvelope(password: string): string {
+  const passwordBytes = new TextEncoder().encode(password);
+  const envelope = new Uint8Array(WEBAUTHN_PASSWORD_ENVELOPE_BYTES);
+  try {
+    if (passwordBytes.byteLength > MAX_WEBAUTHN_PASSWORD_BYTES) {
+      throw new Error('Password is too long for biometric storage');
+    }
+    crypto.getRandomValues(envelope);
+    new DataView(envelope.buffer).setUint16(0, passwordBytes.byteLength, false);
+    envelope.set(passwordBytes, 2);
+    return encodeToBase64(envelope);
+  } finally {
+    passwordBytes.fill(0);
+    envelope.fill(0);
+  }
+}
+
+function decodeWebAuthnPasswordEnvelope(encoded: string): string {
+  let envelope: Uint8Array | undefined;
+  try {
+    envelope = decodeFromBase64(encoded);
+    if (envelope.byteLength !== WEBAUTHN_PASSWORD_ENVELOPE_BYTES) {
+      throw new Error('Stored biometric password is invalid');
+    }
+    const passwordLength = new DataView(
+      envelope.buffer,
+      envelope.byteOffset,
+      envelope.byteLength
+    ).getUint16(0, false);
+    if (passwordLength === 0 || passwordLength > MAX_WEBAUTHN_PASSWORD_BYTES) {
+      throw new Error('Stored biometric password is invalid');
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(
+      envelope.subarray(2, 2 + passwordLength)
+    );
+  } catch {
+    throw new Error('Stored biometric password is invalid');
+  } finally {
+    envelope?.fill(0);
+  }
 }
 
 class BiometricRestorationRequiredError extends Error {
@@ -208,7 +254,8 @@ function parseWebAuthnPayload(raw: string | null): WebAuthnPasswordPayload {
   if (
     !value ||
     typeof value !== 'object' ||
-    (value as Partial<WebAuthnPasswordPayload>).version !== 1 ||
+    (value as Partial<WebAuthnPasswordPayload>).version !==
+      WEBAUTHN_PASSWORD_PAYLOAD_VERSION ||
     typeof (value as Partial<WebAuthnPasswordPayload>).credentialId !==
       'string' ||
     !(value as Partial<WebAuthnPasswordPayload>).credentialId ||
@@ -239,13 +286,14 @@ async function storeWebAuthnPassword(
 
   try {
     encryptionSalt = (await generateNonce()).to_bytes();
+    const paddedPassword = encodeWebAuthnPasswordEnvelope(password);
     const { encryptedData } = await encrypt(
-      password,
+      paddedPassword,
       encryptionKey,
       encryptionSalt
     );
     const payload: WebAuthnPasswordPayload = {
-      version: 1,
+      version: WEBAUTHN_PASSWORD_PAYLOAD_VERSION,
       credentialId,
       salt: encodeToBase64(encryptionSalt),
       ciphertext: encodeToBase64(encryptedData),
@@ -310,7 +358,12 @@ async function retrieveWebAuthnPassword(): Promise<string> {
     } catch {
       throw new Error('Stored biometric password is invalid');
     }
-    return await decrypt(ciphertext, encryptionSalt, encryptionKey);
+    const paddedPassword = await decrypt(
+      ciphertext,
+      encryptionSalt,
+      encryptionKey
+    );
+    return decodeWebAuthnPasswordEnvelope(paddedPassword);
   } finally {
     encryptionSalt?.fill(0);
     ciphertext?.fill(0);

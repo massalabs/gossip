@@ -73,7 +73,7 @@ describe('WebAuthn biometric password encryption integration', () => {
     expect(legacyCredentialRecord).toBeNull();
     expect(encryptedRecord).not.toContain(password);
     expect(JSON.parse(encryptedRecord ?? '{}')).toMatchObject({
-      version: 1,
+      version: 2,
       credentialId: 'anonymous-credential-handle',
     });
 
@@ -81,5 +81,25 @@ describe('WebAuthn biometric password encryption integration', () => {
       success: true,
       data: { password },
     });
+  });
+
+  it('stores equal-length ciphertexts for different password lengths', async () => {
+    expect(await configureBiometricLogin('short-password')).toEqual({
+      success: true,
+    });
+    const shortRecord = JSON.parse(
+      localStorage.getItem(WEBAUTHN_PASSWORD_KEY) ?? '{}'
+    ) as { ciphertext: string };
+
+    expect(await configureBiometricLogin('long-password-'.repeat(40))).toEqual({
+      success: true,
+    });
+    const longRecord = JSON.parse(
+      localStorage.getItem(WEBAUTHN_PASSWORD_KEY) ?? '{}'
+    ) as { ciphertext: string };
+
+    expect(atob(shortRecord.ciphertext)).toHaveLength(
+      atob(longRecord.ciphertext).length
+    );
   });
 });

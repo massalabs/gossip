@@ -62,6 +62,14 @@ const encryptionKey = {
   free: mocks.free,
 };
 
+function encodedPasswordEnvelope(password: string): string {
+  const passwordBytes = new TextEncoder().encode(password);
+  const envelope = new Uint8Array(1026).fill(7);
+  new DataView(envelope.buffer).setUint16(0, passwordBytes.byteLength, false);
+  envelope.set(passwordBytes, 2);
+  return btoa(String.fromCharCode(...envelope));
+}
+
 describe('WebAuthn biometric password storage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -74,7 +82,9 @@ describe('WebAuthn biometric password storage', () => {
     mocks.encrypt.mockResolvedValue({
       encryptedData: new Uint8Array([9, 8, 7]),
     });
-    mocks.decrypt.mockResolvedValue('account-password');
+    mocks.decrypt.mockResolvedValue(
+      encodedPasswordEnvelope('account-password')
+    );
     mocks.generateNonce.mockResolvedValue({
       to_bytes: () => new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
     });
@@ -90,11 +100,12 @@ describe('WebAuthn biometric password storage', () => {
     expect(
       JSON.parse(localStorage.getItem(WEBAUTHN_PASSWORD_KEY) ?? '{}')
     ).toEqual({
-      version: 1,
+      version: 2,
       credentialId: 'credential-handle',
       salt: expect.any(String),
       ciphertext: expect.any(String),
     });
+    expect(atob(mocks.encrypt.mock.calls[0][0])).toHaveLength(1026);
     expect(mocks.free).toHaveBeenCalledTimes(1);
   });
 
@@ -128,7 +139,7 @@ describe('WebAuthn biometric password storage', () => {
     );
     expect(replacementWrites).toHaveLength(1);
     expect(JSON.parse(replacementWrites[0][1])).toMatchObject({
-      version: 1,
+      version: 2,
       credentialId: 'credential-handle',
     });
     expect(localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY)).toBeNull();
@@ -330,6 +341,24 @@ describe('WebAuthn biometric password storage', () => {
     expect(mocks.free).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects oversized biometric passwords before encryption', async () => {
+    await expect(configureBiometricLogin('x'.repeat(1025))).resolves.toEqual({
+      success: false,
+      error: 'Password is too long for biometric storage',
+    });
+    expect(mocks.encrypt).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed decrypted password envelope', async () => {
+    await configureBiometricLogin('account-password');
+    mocks.decrypt.mockResolvedValue(btoa('too short'));
+
+    await expect(authenticateBiometricLogin('webauthn')).resolves.toEqual({
+      success: false,
+      error: 'Stored biometric password is invalid',
+    });
+  });
+
   it.each([
     ['salt', '%%%invalid%%%', btoa('ciphertext')],
     ['ciphertext', btoa('encryption-salt'), '%%%invalid%%%'],
@@ -339,7 +368,7 @@ describe('WebAuthn biometric password storage', () => {
       localStorage.setItem(
         WEBAUTHN_PASSWORD_KEY,
         JSON.stringify({
-          version: 1,
+          version: 2,
           credentialId: 'credential-handle',
           salt,
           ciphertext,
