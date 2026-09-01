@@ -142,6 +142,27 @@ describe('profile password encryption integration', () => {
     created.encryptionKey.free();
   });
 
+  it('rejects malformed mnemonic envelopes before password derivation', async () => {
+    const mnemonic = await generateMnemonic();
+    const created = await createPasswordSecurity(mnemonic, 'correct-password');
+    const profile = buildProfile(created.security);
+    const security = profile.security as unknown as Record<string, unknown>;
+    const originalMnemonicBackup = security.mnemonicBackup;
+    const deriveSpy = vi.spyOn(EncryptionKey, 'from_seed');
+
+    for (const malformed of [undefined, null, 'invalid', {}]) {
+      security.mnemonicBackup = malformed;
+      await expect(auth(profile, 'correct-password')).rejects.toThrow(
+        'Account has an invalid encrypted mnemonic'
+      );
+    }
+
+    security.mnemonicBackup = originalMnemonicBackup;
+    expect(deriveSpy).not.toHaveBeenCalled();
+    deriveSpy.mockRestore();
+    created.encryptionKey.free();
+  });
+
   it('preflights an encrypted session entirely in RAM and wipes it', async () => {
     const mnemonic = await generateMnemonic();
     const password = 'RAM preflight password 2026!';

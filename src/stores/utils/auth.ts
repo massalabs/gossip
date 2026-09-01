@@ -175,7 +175,15 @@ export async function auth(
   profile: UserProfile,
   password?: string
 ): Promise<AuthResult> {
-  const security = profile.security;
+  const rawSecurity = profile.security as unknown;
+  if (
+    typeof rawSecurity !== 'object' ||
+    rawSecurity === null ||
+    Array.isArray(rawSecurity)
+  ) {
+    throw new Error('Unsupported account security format');
+  }
+  const security = rawSecurity as Partial<UserProfile['security']>;
   if (
     security.formatVersion !== PROFILE_SECURITY_FORMAT_VERSION ||
     security.passwordKdfVersion !== PROFILE_PASSWORD_KDF_VERSION ||
@@ -187,7 +195,13 @@ export async function auth(
   }
 
   const salt = security.encKeySalt;
-  const encryptedMnemonic = security.mnemonicBackup.encryptedMnemonic;
+  const mnemonicBackup = security.mnemonicBackup as unknown;
+  const encryptedMnemonic =
+    typeof mnemonicBackup === 'object' &&
+    mnemonicBackup !== null &&
+    !Array.isArray(mnemonicBackup)
+      ? (mnemonicBackup as Record<string, unknown>).encryptedMnemonic
+      : undefined;
   if (!(salt instanceof Uint8Array) || salt.length !== 16) {
     throw new Error(
       'Account is missing encryption key salt. Please re-authenticate and re-create your account after updating the app.'
