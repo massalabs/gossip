@@ -69,6 +69,9 @@ impl OuterMigrationPlan {
     /// destination slots. Selected and dummy public keys therefore change
     /// uniformly across the final snapshot.
     pub fn finalize(self) -> Result<OuterMigration> {
+        if self.loaded.iter().all(Option::is_none) {
+            return Err(SecureStorageError::InvalidPassword);
+        }
         let mut loaded = self.loaded;
         let mut destinations = Vec::with_capacity(SESSION_COUNT);
         let mut keypairs: [Zeroizing<Vec<u8>>; SESSION_COUNT] =
@@ -474,11 +477,24 @@ mod tests {
         });
     }
 
-    fn migrate_without_admission(
+    #[test]
+    fn rejects_finalize_without_an_admitted_password() {
+        run_with_stack(|| {
+            let (_, keypairs) = legacy_source();
+            let plan = OuterMigrationPlan::new(DOMAIN, keypairs).unwrap();
+            assert!(matches!(
+                plan.finalize(),
+                Err(SecureStorageError::InvalidPassword)
+            ));
+        });
+    }
+
+    fn migrate_with_one_admission(
         source: &MemoryStorage,
         keypairs: &[Vec<u8>; SESSION_COUNT],
     ) -> MemoryStorage {
-        let plan = OuterMigrationPlan::new(DOMAIN, keypairs.clone()).unwrap();
+        let mut plan = OuterMigrationPlan::new(DOMAIN, keypairs.clone()).unwrap();
+        plan.admit_password(PASSWORD).unwrap();
         let mut migration = plan.finalize().unwrap();
         let mut destination = MemoryStorage::new();
         for (index, keypair) in migration.keypairs().into_iter().enumerate() {
@@ -531,7 +547,7 @@ mod tests {
             let (mut source, keypairs) = legacy_source();
             // Canonical PQ cover with invalid account AEAD proves omitted
             // payloads are never decrypted after archive validation.
-            let slot = SessionIndex::new(1).unwrap();
+            let slot = SessionIndex::new(2).unwrap();
             let keypair = read_session_keypair(&source, slot).unwrap();
             let public = PqPublicKey::from_bytes(&keypair.pq_pk).unwrap();
             let mut aad_root = String::new();
@@ -541,8 +557,8 @@ mod tests {
                 .write_block(slot, 0, 0, cover.as_slice().try_into().unwrap())
                 .unwrap();
 
-            let first = migrate_without_admission(&source, &keypairs);
-            let second = migrate_without_admission(&source, &keypairs);
+            let first = migrate_with_one_admission(&source, &keypairs);
+            let second = migrate_with_one_admission(&source, &keypairs);
             for index in 0..SESSION_COUNT {
                 let slot = SessionIndex::new(index as u8).unwrap();
                 let source_keypair = source.read_keypair(slot).unwrap();
@@ -563,10 +579,10 @@ mod tests {
                     }
                 }
             }
-            for password in [PASSWORD, OMITTED_PASSWORD] {
-                assert!(unlock_session(&first, DOMAIN, password).is_err());
-                assert!(unlock_session(&second, DOMAIN, password).is_err());
-            }
+            assert!(unlock_session(&first, DOMAIN, PASSWORD).is_ok());
+            assert!(unlock_session(&second, DOMAIN, PASSWORD).is_ok());
+            assert!(unlock_session(&first, DOMAIN, OMITTED_PASSWORD).is_err());
+            assert!(unlock_session(&second, DOMAIN, OMITTED_PASSWORD).is_err());
         });
     }
 
