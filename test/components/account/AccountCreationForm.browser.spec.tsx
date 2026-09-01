@@ -129,8 +129,17 @@ describe('AccountCreationForm mandatory password', () => {
     await userEvent.click(
       page.getByRole('button', { name: 'create.import_tab' })
     );
+    const mnemonicInput = page.getByLabelText('create.mnemonic_label');
+    await expect
+      .element(mnemonicInput)
+      .toHaveAttribute('aria-invalid', 'false');
+    await expect
+      .element(mnemonicInput)
+      .toHaveAttribute('aria-describedby', 'account-mnemonic-error');
+    await userEvent.fill(mnemonicInput, 'not a valid mnemonic');
+    await expect.element(mnemonicInput).toHaveAttribute('aria-invalid', 'true');
     await userEvent.fill(
-      page.getByPlaceholder('create.mnemonic_placeholder'),
+      mnemonicInput,
       'ABANDON abandon abandon abandon abandon abandon\nabandon abandon abandon abandon abandon about'
     );
     await userEvent.fill(

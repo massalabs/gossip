@@ -36,12 +36,15 @@ type ValidationResult = { valid: boolean; error?: string };
 function FieldErrorHint({
   hasError,
   message,
+  id,
 }: {
   hasError: boolean;
   message: string;
+  id?: string;
 }) {
   return (
     <p
+      id={id}
       className={`text-xs text-center mt-1 h-4 ${hasError ? 'text-destructive' : 'invisible'}`}
     >
       {hasError ? message : '\u00A0'}
@@ -54,20 +57,28 @@ function FormFieldRow({
   label,
   children,
   errorHint,
+  inputId,
+  errorHintId,
 }: {
   label: React.ReactNode;
   children: React.ReactNode;
   errorHint: { hasError: boolean; message: string };
+  inputId?: string;
+  errorHintId?: string;
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-foreground mb-1.5">
+      <label
+        htmlFor={inputId}
+        className="block text-sm font-medium text-foreground mb-1.5"
+      >
         {label}
       </label>
       {children}
       <FieldErrorHint
         hasError={errorHint.hasError}
         message={errorHint.message}
+        id={errorHintId}
       />
     </div>
   );
@@ -223,12 +234,17 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
           {identityMode === 'import' && (
             <FormFieldRow
               label={t('create.mnemonic_label')}
+              inputId="account-mnemonic"
+              errorHintId="account-mnemonic-error"
               errorHint={{
                 hasError: !!mnemonicError,
                 message: mnemonicError || '',
               }}
             >
               <textarea
+                id="account-mnemonic"
+                aria-invalid={!!mnemonicError}
+                aria-describedby="account-mnemonic-error"
                 value={mnemonic}
                 onChange={event => {
                   const value = event.target.value;
