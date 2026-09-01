@@ -13,13 +13,14 @@ use std::marker::PhantomData;
 use std::ptr;
 
 use sqlite_wasm_rs::{
-    SQLITE_BLOB, SQLITE_DONE, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_NULL, SQLITE_OK,
-    SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE, SQLITE_ROW, SQLITE_TEXT, SQLITE_TRANSIENT, sqlite3,
-    sqlite3_bind_blob, sqlite3_bind_double, sqlite3_bind_int64, sqlite3_bind_null,
-    sqlite3_bind_text, sqlite3_close, sqlite3_column_blob, sqlite3_column_bytes,
+    SQLITE_BLOB, SQLITE_DBCONFIG_DEFENSIVE, SQLITE_DONE, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_NULL,
+    SQLITE_OK, SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE, SQLITE_ROW, SQLITE_TEXT,
+    SQLITE_TRANSIENT, sqlite3, sqlite3_bind_blob, sqlite3_bind_double, sqlite3_bind_int64,
+    sqlite3_bind_null, sqlite3_bind_text, sqlite3_close, sqlite3_column_blob, sqlite3_column_bytes,
     sqlite3_column_count, sqlite3_column_double, sqlite3_column_int64, sqlite3_column_text,
-    sqlite3_column_type, sqlite3_complete, sqlite3_errmsg, sqlite3_exec, sqlite3_finalize,
-    sqlite3_last_insert_rowid, sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step, sqlite3_stmt,
+    sqlite3_column_type, sqlite3_complete, sqlite3_db_config, sqlite3_errmsg, sqlite3_exec,
+    sqlite3_finalize, sqlite3_last_insert_rowid, sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step,
+    sqlite3_stmt,
 };
 
 // ── Errors ─────────────────────────────────────────────────────────
@@ -134,6 +135,35 @@ impl SafeDb {
         };
         if rc != SQLITE_OK {
             return Err(errmsg(self.handle));
+        }
+        Ok(())
+    }
+
+    /// Enable SQLite's defensive mode for an untrusted database image.
+    pub fn enable_defensive(&self) -> SqlResult<()> {
+        let mut enabled: c_int = 0;
+        // SAFETY: self.handle is valid. SQLITE_DBCONFIG_DEFENSIVE takes an
+        // integer setting and writable integer result pointer.
+        let rc =
+            unsafe { sqlite3_db_config(self.handle, SQLITE_DBCONFIG_DEFENSIVE, 1, &mut enabled) };
+        if rc != SQLITE_OK || enabled != 1 {
+            return Err(format!(
+                "sqlite3_db_config defensive mode failed: rc={rc}, enabled={enabled}"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Require `PRAGMA quick_check` to return exactly one `ok` row.
+    pub fn validate_integrity(&self) -> SqlResult<()> {
+        let statement = self
+            .prepare("PRAGMA quick_check")?
+            .ok_or_else(|| "quick_check produced no statement".to_string())?;
+        if !matches!(statement.step()?, StepStatus::Row)
+            || !matches!(statement.column(0), SqlValue::Text(value) if value == "ok")
+            || !matches!(statement.step()?, StepStatus::Done)
+        {
+            return Err("candidate SQLite integrity check failed".into());
         }
         Ok(())
     }

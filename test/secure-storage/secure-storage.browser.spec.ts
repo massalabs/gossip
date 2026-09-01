@@ -211,6 +211,76 @@ describe('secure storage pipeline', () => {
     await restored.close();
   }, 120_000);
 
+  it('rejects a portable preview with corruption outside the profile query', async () => {
+    const password = 'corrupt-preview-password';
+    const domain = 'vitest-corrupt-portable-preview';
+    const userId =
+      'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s';
+    const now = new Date(1234);
+    const conn = await DatabaseConnection.create(config(domain));
+    await conn.secureStorageCreate(0, password);
+    await conn.db.insert(userProfile).values({
+      userId,
+      username: 'Alice',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+      security: JSON.stringify({
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
+        authMethod: 'password',
+        encKeySalt: Array.from({ length: 16 }, (_, index) => index),
+        mnemonicBackup: {
+          encryptedMnemonic: Array.from({ length: 17 }, (_, index) => index),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          backedUp: false,
+        },
+      }),
+      session: new Uint8Array([0]),
+    });
+    const raw = conn as unknown as {
+      execRawDirect(sql: string, params?: unknown[]): Promise<unknown[][]>;
+    };
+    await raw.execRawDirect(
+      'CREATE TABLE unrelated_preview_data (payload BLOB NOT NULL)'
+    );
+    await raw.execRawDirect(
+      'INSERT INTO unrelated_preview_data VALUES (zeroblob(8192))'
+    );
+    await raw.execRawDirect('PRAGMA writable_schema = ON');
+    await raw.execRawDirect(
+      'UPDATE sqlite_schema SET rootpage = (' +
+        "SELECT rootpage FROM sqlite_schema WHERE name = 'userProfile'" +
+        ") WHERE name = 'unrelated_preview_data'"
+    );
+    await raw.execRawDirect('PRAGMA writable_schema = OFF');
+    await conn.secureStorageFlush();
+    await conn.secureStorageLock();
+
+    const archive: Uint8Array[] = [];
+    await conn.secureStorageExportPortableV1(chunk => {
+      archive.push(chunk.slice());
+    });
+    await conn.secureStorageBeginPortableImport();
+    try {
+      for (const chunk of archive) {
+        await conn.secureStoragePushPortableImportChunk(chunk);
+      }
+      await conn.secureStorageValidatePortableImport();
+      await expect(
+        conn.secureStorageAuthenticatePortableImportCandidate(
+          new TextEncoder().encode(password)
+        )
+      ).rejects.toThrow();
+    } finally {
+      await conn.secureStorageAbortPortableImport();
+      await conn.close();
+    }
+  }, 120_000);
+
   it('data persists across close/reopen', async () => {
     const password = 'test-persist';
     const domain = 'vitest-persist';

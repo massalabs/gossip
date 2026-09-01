@@ -196,10 +196,10 @@ export interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure69_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
-  readonly wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (a: number, b: number) => void;
-  readonly closure698_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure81_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
   readonly closure123_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure698_externref_shim: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (a: number, b: number) => void;
   readonly closure754_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;

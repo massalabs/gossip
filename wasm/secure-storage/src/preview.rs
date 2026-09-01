@@ -169,11 +169,19 @@ pub(crate) fn valid_user_id(value: &str) -> bool {
 pub fn query_imported_account_preview(
     mut database: Zeroizing<Vec<u8>>,
 ) -> Result<ImportedAccountPreview> {
-    if database.is_empty() || database.len() > i64::MAX as usize {
+    if database.is_empty()
+        || database.len() > i64::MAX as usize
+        || database.len() as u64 > crate::read::MAX_PREVIEW_DATABASE_BYTES
+    {
         return Err(invalid_profile());
     }
     let connection = Connection::open_in_memory()
         .map_err(|error| SecureStorageError::Storage(format!("preview sqlite open: {error}")))?;
+    connection
+        .set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)
+        .map_err(|error| {
+            SecureStorageError::Storage(format!("preview sqlite defensive mode: {error}"))
+        })?;
     let len = database.len();
     let schema: &CStr = c"main";
     // SAFETY: database remains alive and uniquely owned until after the
@@ -201,6 +209,31 @@ pub fn query_imported_account_preview(
             .map_err(|error| {
                 SecureStorageError::Storage(format!("preview sqlite pragma: {error}"))
             })?;
+        let mut integrity = connection.prepare("PRAGMA quick_check").map_err(|error| {
+            SecureStorageError::Storage(format!("preview sqlite integrity prepare: {error}"))
+        })?;
+        let mut integrity_rows = integrity.query([]).map_err(|error| {
+            SecureStorageError::Storage(format!("preview sqlite integrity rows: {error}"))
+        })?;
+        let first = integrity_rows
+            .next()
+            .map_err(|error| {
+                SecureStorageError::Storage(format!("preview sqlite integrity row: {error}"))
+            })?
+            .ok_or_else(invalid_profile)?;
+        if first.get::<_, String>(0).map_err(|_| invalid_profile())? != "ok"
+            || integrity_rows
+                .next()
+                .map_err(|error| {
+                    SecureStorageError::Storage(format!("preview sqlite integrity row: {error}"))
+                })?
+                .is_some()
+        {
+            return Err(invalid_profile());
+        }
+        drop(integrity_rows);
+        drop(integrity);
+
         let mut statement = connection
             .prepare(
                 "SELECT userId, username, avatar, createdAt, security \
@@ -333,6 +366,45 @@ mod tests {
             .unwrap();
         let serialized = connection.serialize(rusqlite::DatabaseName::Main).unwrap();
         assert!(query_imported_account_preview(Zeroizing::new(serialized.to_vec())).is_err());
+    }
+
+    #[test]
+    fn rejects_structural_corruption_outside_the_profile_query() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA page_size = 4096;
+                 CREATE TABLE userProfile (
+                    userId TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    avatar TEXT,
+                    createdAt INTEGER NOT NULL,
+                    security TEXT NOT NULL
+                 );
+                 CREATE TABLE unrelated(payload BLOB NOT NULL);",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO userProfile VALUES (?1, 'Alice', NULL, 1234, ?2)",
+                (USER_ID, SECURITY),
+            )
+            .unwrap();
+        connection
+            .execute("INSERT INTO unrelated VALUES (zeroblob(8192))", [])
+            .unwrap();
+        let root_page: usize = connection
+            .query_row(
+                "SELECT rootpage FROM sqlite_schema WHERE name = 'unrelated'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let serialized = connection.serialize(rusqlite::DatabaseName::Main).unwrap();
+        let mut corrupted = serialized.to_vec();
+        corrupted[(root_page - 1) * 4096] = 0xff;
+
+        assert!(query_imported_account_preview(Zeroizing::new(corrupted)).is_err());
     }
 
     #[test]

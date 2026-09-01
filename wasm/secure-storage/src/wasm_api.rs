@@ -937,8 +937,14 @@ fn open_database_readonly() -> Result<(), JsValue> {
         let handle = SafeDb::open(DB_NAME, VFS_NAME_C)
             .map_err(|e| JsValue::from_str(&format!("candidate SQLite open failed: {e}")))?;
         handle
+            .enable_defensive()
+            .map_err(|e| JsValue::from_str(&format!("candidate defensive mode failed: {e}")))?;
+        handle
             .exec(READONLY_PRAGMAS)
             .map_err(|e| JsValue::from_str(&format!("read-only PRAGMA exec failed: {e}")))?;
+        handle
+            .validate_integrity()
+            .map_err(|e| JsValue::from_str(&format!("candidate integrity check failed: {e}")))?;
         *slot = Some(handle);
         Ok(())
     })
