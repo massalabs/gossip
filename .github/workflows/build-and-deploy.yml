@@ -177,6 +177,9 @@ jobs:
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/android/app/keystore.jks
           echo "ANDROID_KEYSTORE_FILE=${{ github.workspace }}/android/app/keystore.jks" >> $GITHUB_ENV
 
+      - name: Pin shared Android versionCode
+        run: echo "ANDROID_VERSION_CODE=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Build Android Release (AAB)
         env:
           ANDROID_KEYSTORE_FILE: ${{ env.ANDROID_KEYSTORE_FILE }}
