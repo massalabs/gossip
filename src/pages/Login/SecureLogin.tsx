@@ -216,9 +216,6 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
             <p className="text-sm font-medium text-destructive">
               {t('storage_reset.warning')}
             </p>
-            <p className="text-sm text-muted-foreground">
-              {t('storage_reset.scope')}
-            </p>
             <Button
               type="button"
               variant="danger"
@@ -236,6 +233,9 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
             >
               {t('storage_reset.confirm')}
             </Button>
+            <p className="text-sm text-muted-foreground">
+              {t('storage_reset.scope')}
+            </p>
             {storageResetFailed && (
               <p role="alert" className="text-sm text-destructive">
                 {t('storage_reset.failed')}
