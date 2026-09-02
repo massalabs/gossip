@@ -137,8 +137,12 @@ function pickFreeSlot(): number {
   if (free.length === 0) {
     throw new Error('No free secure-storage slot');
   }
-  const rand = crypto.getRandomValues(new Uint8Array(1))[0];
-  return free[rand % free.length];
+  const sample = new Uint8Array(1);
+  const unbiasedLimit = 256 - (256 % free.length);
+  do {
+    crypto.getRandomValues(sample);
+  } while (sample[0] >= unbiasedLimit);
+  return free[sample[0] % free.length];
 }
 
 const useAccountStoreBase = create<AccountState>((set, get) => {

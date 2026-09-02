@@ -1003,6 +1003,36 @@ describe('AccountStore secure-storage account provisioning', () => {
     }
   });
 
+  it('rejects biased random bytes when choosing among three slots', async () => {
+    const sdk = makeSdkMock();
+    const allocatedSlots: number[] = [];
+    const samples = [255, 2];
+    const randomSpy = vi
+      .spyOn(crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+        if (array instanceof Uint8Array) array[0] = samples.shift() ?? 0;
+        return array;
+      });
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async slot => {
+      allocatedSlots.push(slot);
+      sdk.storageState = 'unlocked';
+    });
+    getSdkMock.mockReturnValue(sdk);
+
+    try {
+      await useAccountStore
+        .getState()
+        .initializeAccount('alice', 'alice-password');
+      expect(randomSpy).toHaveBeenCalledTimes(2);
+      expect(allocatedSlots).toEqual([2]);
+    } finally {
+      randomSpy.mockRestore();
+      await useAccountStore.getState().logout();
+    }
+  });
+
   it('releases a slot after post-open persistence failure so retry can reuse it', async () => {
     const sdk = makeSdkMock();
     const allocatedSlots: number[] = [];
