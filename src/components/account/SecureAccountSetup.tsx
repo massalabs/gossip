@@ -2,6 +2,8 @@ import { logger } from '../../utils/logger.ts';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
+import toast from 'react-hot-toast';
 import {
   Shield,
   AlertTriangle,
@@ -102,6 +104,27 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   stagedAccountsRef.current = stagedAccounts;
+
+  useEffect(() => {
+    if (!isFinalizing || Capacitor.getPlatform() !== 'android') return;
+
+    let disposed = false;
+    let removeListener: (() => Promise<void>) | undefined;
+    void App.addListener('backButton', () => {
+      toast(t('secure_setup.finalization_cannot_cancel'));
+    }).then(handle => {
+      if (disposed) {
+        void handle.remove();
+        return;
+      }
+      removeListener = () => handle.remove();
+    });
+
+    return () => {
+      disposed = true;
+      void removeListener?.();
+    };
+  }, [isFinalizing, t]);
 
   useEffect(() => {
     mounted.current = true;

@@ -33,6 +33,9 @@ const mocks = vi.hoisted(() => ({
   logout: vi.fn(),
   consumeCreationAuthority: vi.fn(),
   restoreCreationAuthority: vi.fn(),
+  addAppListener: vi.fn(),
+  appBackHandler: null as (() => void) | null,
+  toast: vi.fn(),
   stagedAccounts: [] as Array<{ passwordBytes: Uint8Array }>,
 }));
 
@@ -49,6 +52,12 @@ vi.mock('@capacitor/core', () => ({
     getPlatform: () => mocks.platform,
   },
 }));
+
+vi.mock('@capacitor/app', () => ({
+  App: { addListener: mocks.addAppListener },
+}));
+
+vi.mock('react-hot-toast', () => ({ default: mocks.toast }));
 
 vi.mock('@massalabs/gossip-sdk', async () => {
   const actual = await vi.importActual<typeof import('@massalabs/gossip-sdk')>(
@@ -137,6 +146,13 @@ describe('SecureAccountSetup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.platform = 'web';
+    mocks.appBackHandler = null;
+    mocks.addAppListener.mockImplementation(
+      (event: string, handler: () => void) => {
+        if (event === 'backButton') mocks.appBackHandler = handler;
+        return Promise.resolve({ remove: vi.fn() });
+      }
+    );
     mocks.stagedAccounts.length = 0;
     useAppStore.getState().setSecureAccountCreationAllowed(true);
     mocks.checkBiometricAvailability.mockResolvedValue({
@@ -482,6 +498,61 @@ describe('SecureAccountSetup', () => {
     for (const staged of mocks.stagedAccounts) {
       expect(staged.passwordBytes.every(byte => byte === 0)).toBe(true);
     }
+  });
+
+  it('keeps Android finalization active and explains why Back is unavailable', async () => {
+    const account = stageAccount('alice', 'alice-password');
+    let releasePreparation!: () => void;
+    mocks.platform = 'android';
+    mocks.preparePasswordAccount.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          releasePreparation = () =>
+            resolve({
+              mnemonicBytes: new Uint8Array([1]),
+              security: {
+                formatVersion: 1,
+                passwordKdfVersion: 1,
+                mnemonicEncryptionVersion: 1,
+                identityDerivationVersion: 1,
+                authMethod: 'password',
+                encKeySalt: new Uint8Array(16).fill(2),
+                mnemonicBackup: {
+                  encryptedMnemonic: new Uint8Array(32).fill(3),
+                  createdAt: new Date(),
+                  backedUp: false,
+                },
+              },
+              encryptedSession: new Uint8Array([4]),
+            });
+        })
+    );
+
+    await render(
+      <SecureAccountSetup
+        initialAccount={account}
+        onComplete={vi.fn()}
+        onRestart={vi.fn()}
+      />
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'secure_setup.skip' })
+    );
+    await vi.waitFor(() =>
+      expect(mocks.preparePasswordAccount).toHaveBeenCalledOnce()
+    );
+
+    expect(mocks.addAppListener).toHaveBeenCalledWith(
+      'backButton',
+      expect.any(Function)
+    );
+    mocks.appBackHandler?.();
+    expect(mocks.toast).toHaveBeenCalledWith(
+      'secure_setup.finalization_cannot_cancel'
+    );
+    expect(mocks.initializePreparedAccount).not.toHaveBeenCalled();
+
+    releasePreparation();
   });
 
   it('restarts after the first persistence failure and wipes credentials', async () => {
