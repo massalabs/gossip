@@ -196,6 +196,12 @@ export class PortableImportCoordinator {
     });
   }
 
+  disposePasswords(): void {
+    // Installation state is unknown. Dispose only coordinator-owned secrets;
+    // do not mutate the candidate or replacement authority.
+    this.previews.dispose();
+  }
+
   async finalizeAttestedInstallation(): Promise<void> {
     // The backend marker proves the replacement committed even when the
     // original install promise rejected during application-state release.

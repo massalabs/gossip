@@ -26,10 +26,13 @@ const mocks = vi.hoisted(() => {
       return true;
     }),
     install: vi.fn().mockResolvedValue(undefined),
+    disposePasswords: vi.fn(),
     cancel: vi.fn().mockResolvedValue(undefined),
   };
   return {
-    sdk: {},
+    sdk: {
+      wasPortableImportInstalled: vi.fn().mockResolvedValue(false),
+    },
     handle: { name: 'accounts.gossipbackup' },
     coordinator,
     begin: vi.fn().mockResolvedValue(coordinator),
@@ -118,6 +121,9 @@ describe('portable import onboarding page', () => {
     vi.clearAllMocks();
     mocks.reset();
     mocks.selectSource.mockResolvedValue(mocks.handle);
+    mocks.coordinator.install.mockResolvedValue(undefined);
+    mocks.coordinator.disposePasswords.mockImplementation(() => {});
+    mocks.sdk.wasPortableImportInstalled.mockResolvedValue(false);
     mocks.stream.mockImplementation(
       async (
         _handle: unknown,
@@ -170,6 +176,30 @@ describe('portable import onboarding page', () => {
 
     expect(mocks.coordinator.install).toHaveBeenCalledOnce();
     await expect.element(page.getByText('import.success_title')).toBeVisible();
+  });
+
+  it('wipes retained passwords when installation and recovery probing both fail', async () => {
+    mocks.coordinator.install.mockRejectedValueOnce(
+      new Error('install failed')
+    );
+    mocks.sdk.wasPortableImportInstalled.mockRejectedValueOnce(
+      new Error('probe failed')
+    );
+
+    await render(<PortableImport onBack={mocks.onBack} />);
+    await userEvent.click(
+      page.getByRole('button', { name: 'import.choose_file' })
+    );
+    await userEvent.fill(page.getByPlaceholder('import.password'), 'secret');
+    await userEvent.click(page.getByRole('button', { name: 'import.load' }));
+    await userEvent.click(page.getByRole('button', { name: 'import.review' }));
+    await userEvent.click(page.getByRole('button', { name: 'import.confirm' }));
+
+    await expect
+      .element(page.getByText('import.retry_restart_title'))
+      .toBeVisible();
+    expect(mocks.coordinator.disposePasswords).toHaveBeenCalledOnce();
+    expect(mocks.coordinator.cancel).not.toHaveBeenCalled();
   });
 
   it('wipes coordinator ownership and restarts the terminal browser runtime', async () => {

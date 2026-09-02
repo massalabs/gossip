@@ -432,6 +432,7 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
             }
           }
         } catch {
+          coordinator.disposePasswords();
           coordinatorRef.current = null;
           terminalFailure = true;
           nextPhase = 'restart';
