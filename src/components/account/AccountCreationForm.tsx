@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Key, PlusCircle, Zap } from 'react-feather';
 import { validateMnemonic, validatePassword } from '@massalabs/gossip-sdk';
@@ -84,6 +84,9 @@ function FormFieldRow({
   );
 }
 
+const normalizeMnemonic = (value: string) =>
+  value.trim().toLowerCase().split(/\s+/).join(' ');
+
 const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
   onSubmit,
   onBack,
@@ -110,11 +113,14 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
   const [mnemonic, setMnemonic] = useState('');
   const [mnemonicError, setMnemonicError] = useState<string | null>(null);
 
-  const normalizeMnemonic = (value: string) =>
-    value.trim().toLowerCase().split(/\s+/).join(' ');
-  const normalizedMnemonic = normalizeMnemonic(mnemonic);
-  const mnemonicIsValid =
-    identityMode === 'create' || validateMnemonic(normalizedMnemonic);
+  // Cache only the non-sensitive result. The normalized mnemonic remains a
+  // submission-local value rather than an additional long-lived React value.
+  const mnemonicIsValid = useMemo(
+    () =>
+      identityMode === 'create' ||
+      validateMnemonic(normalizeMnemonic(mnemonic)),
+    [identityMode, mnemonic]
+  );
 
   const handleValidatedChange = useCallback(
     (
@@ -166,7 +172,9 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
       await onSubmit({
         username,
         password,
-        ...(identityMode === 'import' ? { mnemonic: normalizedMnemonic } : {}),
+        ...(identityMode === 'import'
+          ? { mnemonic: normalizeMnemonic(mnemonic) }
+          : {}),
       });
       setPassword('');
       setConfirmPassword('');
