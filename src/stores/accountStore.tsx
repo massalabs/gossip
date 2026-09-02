@@ -13,7 +13,7 @@ import { generateMnemonic, EncryptionKey } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
 import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
-import { getPortableImportMigrationEpoch } from '../services/portableImportAuthorization';
+import { finalizeCommittedAccountGenerationAuthority } from '../services/portableImportAuthorization';
 import { resetAllAccountStorage } from '../services/unsupportedStorageReset';
 
 import {
@@ -50,9 +50,10 @@ export type LoginMethod = {
   resetMessagingSessions?: boolean;
 };
 
-export interface OnboardingRollbackResult {
-  failedPasswordIndexes: number[];
-  lockFailed: boolean;
+export interface PreparedOnboardingAccount {
+  username: string;
+  password: string;
+  prepared: PreparedPasswordAccount;
 }
 
 export class IncompleteOnboardingSlotCleanupError extends Error {
@@ -84,14 +85,9 @@ interface AccountState {
   evmAddress: string | null;
   provider: Provider | null;
   initializeAccount: (username: string, password: string) => Promise<void>;
-  initializePreparedAccount: (
-    username: string,
-    password: string,
-    prepared: PreparedPasswordAccount
+  initializePreparedAccountsAtomically: (
+    accounts: readonly PreparedOnboardingAccount[]
   ) => Promise<void>;
-  rollbackInitializedAccounts: (
-    passwords: readonly string[]
-  ) => Promise<OnboardingRollbackResult>;
   loadAccount: (method: LoginMethod) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
   finalizeOnboarding: () => Promise<void>;
@@ -215,6 +211,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     skipHistorical?: boolean;
     prepared?: PreparedPasswordAccount;
     publishPublicKey?: boolean;
+    deferExternalSideEffects?: boolean;
   }
 
   const setupAccount = async ({
@@ -224,6 +221,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     skipHistorical = false,
     prepared,
     publishPublicKey = true,
+    deferExternalSideEffects = false,
   }: SetupAccountParams): Promise<void> => {
     await cleanupSession();
 
@@ -444,7 +442,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       });
       accountTransferred = true;
 
-      fetchMnsDomainsIfEnabled(profile, get().provider);
+      if (!deferExternalSideEffects) {
+        fetchMnsDomainsIfEnabled(profile, get().provider);
+      }
     } catch (error) {
       let sessionClosed = !sdk.isSessionOpen;
       let allocatedSlotRemoved = allocatedSlot === null;
@@ -531,78 +531,62 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
 
-    initializePreparedAccount: async (username, password, prepared) => {
+    initializePreparedAccountsAtomically: async accounts => {
+      const sdk = getSdk();
+      if (!sdk.isSecureStorage || accounts.length === 0) {
+        throw new Error('Atomic onboarding requires secure account data');
+      }
+
+      let candidateActive = false;
       try {
         set({ isLoading: true });
-        const mnemonic = new TextDecoder().decode(prepared.mnemonicBytes);
-        await setupAccount({
-          username,
-          mnemonic,
-          password,
-          skipHistorical: true,
-          prepared,
-          publishPublicKey: false,
-        });
+        onboardingAllocatedSlots.clear();
+        await sdk.secureStorageBeginOnboardingCandidate();
+        candidateActive = true;
+
+        for (const account of accounts) {
+          const mnemonic = new TextDecoder().decode(
+            account.prepared.mnemonicBytes
+          );
+          await setupAccount({
+            username: account.username,
+            mnemonic,
+            password: account.password,
+            skipHistorical: true,
+            prepared: account.prepared,
+            publishPublicKey: false,
+            deferExternalSideEffects: true,
+          });
+          await cleanupSession();
+        }
+
+        await sdk.secureStorageCommitOnboardingCandidate();
+        candidateActive = false;
+        finalizeCommittedAccountGenerationAuthority();
+        onboardingAllocatedSlots.clear();
+        useAppStore.getState().resetAccountSettings();
+        set(clearAccountState());
       } catch (error) {
-        logger.error('Error persisting prepared user profile:', error);
-        set({ isLoading: false });
-        throw error;
-      }
-    },
-
-    rollbackInitializedAccounts: async passwords => {
-      const sdk = getSdk();
-      const failedPasswordIndexes: number[] = [];
-      let lockFailed = false;
-
-      try {
-        await cleanupSession();
-      } catch (error) {
-        logger.error('Failed to close onboarding session for rollback:', error);
-        lockFailed = true;
-        failedPasswordIndexes.push(...passwords.map((_, index) => index));
-      }
-
-      if (!lockFailed) {
-        for (let index = passwords.length - 1; index >= 0; index -= 1) {
+        try {
+          await cleanupSession();
+        } catch (cleanupError) {
+          logger.error(
+            'Failed to close onboarding candidate session:',
+            cleanupError
+          );
+        }
+        if (candidateActive) {
           try {
-            if (sdk.storageState === 'unlocked') {
-              await sdk.secureStorageLock();
-            }
-            const unlocked = await sdk.secureStorageUnlock(passwords[index]);
-            // The prior destroy may have committed while its response was
-            // lost. A known batch password that no longer discovers a slot
-            // already satisfies the rollback invariant.
-            if (!unlocked) continue;
-            await sdk.secureStorageDestroy();
-          } catch (error) {
-            failedPasswordIndexes.push(index);
-            logger.error('Failed to destroy an onboarding account:', error);
-            try {
-              if (sdk.storageState === 'unlocked') {
-                await sdk.secureStorageLock();
-              }
-            } catch (lockError) {
-              lockFailed = true;
-              logger.error(
-                'Failed to lock an onboarding account after rollback error:',
-                lockError
-              );
-            }
+            await sdk.secureStorageAbortOnboardingCandidate();
+          } catch (abortError) {
+            logger.error('Failed to discard onboarding candidate:', abortError);
           }
         }
-      }
-
-      if (failedPasswordIndexes.length === 0 && !lockFailed) {
         onboardingAllocatedSlots.clear();
+        useAppStore.getState().resetAccountSettings();
+        set({ ...clearAccountState(), isLoading: false });
+        throw error;
       }
-      useAppStore.getState().resetAccountSettings();
-      set(clearAccountState());
-
-      return {
-        failedPasswordIndexes: failedPasswordIndexes.sort((a, b) => a - b),
-        lockFailed,
-      };
     },
 
     loadAccount: async (method: LoginMethod) => {
@@ -634,14 +618,15 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           unlockedThisCall = true;
         }
 
-        const importedInstallation = sdk.isSecureStorage
-          ? await sdk.wasPortableImportInstalled()
-          : false;
-        const migrationEpoch = importedInstallation
-          ? getPortableImportMigrationEpoch()
+        const migrationEpoch = sdk.isSecureStorage
+          ? sdk.accountGenerationEpoch
           : null;
-        if (importedInstallation && !migrationEpoch) {
-          throw new Error('Imported account migration epoch is unavailable');
+        if (
+          sdk.isSecureStorage &&
+          sdk.accountGenerationState === 'committed' &&
+          !migrationEpoch
+        ) {
+          throw new Error('Account generation epoch is unavailable');
         }
         let migrationState = migrationEpoch
           ? await sdk.queries.privateMigration.begin(migrationEpoch)
@@ -720,7 +705,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (migrationActive) await completeMigrationPhase(2);
 
         const appState = useAppStore.getState();
-        const legacyAccountSettings = importedInstallation
+        const legacyAccountSettings = sdk.isSecureStorage
           ? null
           : appState.legacyAccountSettingsMigration;
         const accountSettings = await sdk.queries.accountSettings.getOrCreate(
@@ -757,9 +742,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
               usedLegacySessionFallback = encryptedSession !== undefined;
               if (!encryptedSession && sessionMigrationPending) {
                 throw new MessagingSessionRecoveryRequiredError('missing');
-              }
-              if (!encryptedSession && importedInstallation) {
-                throw new Error('Imported messaging session is missing');
               }
             } else {
               encryptedSession = ns;
@@ -822,7 +804,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
           await sdk.persistSessionBlob(sdk.getEncryptedSession());
           sessionPersistenceEnabled = true;
-        } else if (importedInstallation && usedLegacySessionFallback) {
+        } else if (migrationActive && usedLegacySessionFallback) {
           // Promote the readable legacy SQL fallback before clearing it. A
           // crash after this atomic namespace write simply resumes phase 4.
           await sdk.persistSessionBlob(sdk.getEncryptedSession());
@@ -834,7 +816,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         const lastSeen = new Date();
         const updatedProfile = {
           ...profile,
-          session: importedInstallation ? new Uint8Array(0) : profile.session,
+          session: migrationState ? new Uint8Array(0) : profile.session,
           lastSeen,
         };
         await getSdk().profiles.save(updatedProfile);

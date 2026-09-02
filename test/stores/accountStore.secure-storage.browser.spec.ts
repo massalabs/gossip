@@ -46,7 +46,6 @@ import { useAppStore } from '../../src/stores/appStore';
 import { shouldInitializeSecureStorage } from '../../src/hooks/useProfileLoader';
 import { STORAGE_KEYS } from '../../src/utils/localStorage';
 import {
-  createPasswordSecurity,
   preparePasswordAccount,
   wipePreparedPasswordAccount,
 } from '../../src/stores/utils/auth';
@@ -121,16 +120,13 @@ async function provisionProfile(
 ): Promise<void> {
   const mnemonic = await generateMnemonic();
   const userId = await userIdFromMnemonic(mnemonic);
-  const { security, encryptionKey } = await createPasswordSecurity(
-    mnemonic,
-    password
-  );
+  const prepared = await preparePasswordAccount(mnemonic, password);
   const now = new Date();
   const profile: UserProfile = {
     userId,
     username,
-    security,
-    session: new Uint8Array(0),
+    security: prepared.security,
+    session: prepared.encryptedSession.slice(),
     status: 'online',
     lastSeen: now,
     createdAt: now,
@@ -143,7 +139,7 @@ async function provisionProfile(
     await sdk.flush();
     await sdk.secureStorageLock();
   } finally {
-    encryptionKey.free();
+    wipePreparedPasswordAccount(prepared);
   }
 }
 
@@ -195,17 +191,15 @@ describe('secure biometric account-store login integration', () => {
       mnemonic,
       'prepared-password'
     );
-    await useAccountStore
-      .getState()
-      .initializePreparedAccount(
-        'prepared-alice',
-        'prepared-password',
-        prepared
-      );
-    const stableUserId = sdk.userId;
+    await useAccountStore.getState().initializePreparedAccountsAtomically([
+      {
+        username: 'prepared-alice',
+        password: 'prepared-password',
+        prepared,
+      },
+    ]);
 
     wipePreparedPasswordAccount(prepared);
-    await useAccountStore.getState().logout({ lockedByUser: false });
     await useAccountStore.getState().loadAccount({
       type: 'password',
       password: 'prepared-password',
@@ -214,6 +208,12 @@ describe('secure biometric account-store login integration', () => {
     expect(useAccountStore.getState().userProfile?.username).toBe(
       'prepared-alice'
     );
+    const stableUserId = sdk.userId;
+    await useAccountStore.getState().logout({ lockedByUser: false });
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'prepared-password',
+    });
     expect(sdk.userId).toBe(stableUserId);
 
     await useAccountStore.getState().logout({ lockedByUser: false });
@@ -240,7 +240,7 @@ describe('secure biometric account-store login integration', () => {
     expect(await reopened.secureStorageUnlock('prepared-password')).toBe(true);
   }, 180_000);
 
-  it('keeps a completed rollback authorized after a real backend relaunch', async () => {
+  it('discards a failed account batch and permits a clean retry after relaunch', async () => {
     const domain = 'account-store-rollback-integration';
     const sdk = new GossipSdk();
     mocks.sdk = sdk;
@@ -255,32 +255,23 @@ describe('secure biometric account-store login integration', () => {
 
     const alice = await preparePasswordAccount(
       await generateMnemonic(),
-      'alice-password'
+      'shared-password'
     );
     const decoy = await preparePasswordAccount(
       await generateMnemonic(),
-      'decoy-password'
+      'shared-password'
     );
-    await useAccountStore
-      .getState()
-      .initializePreparedAccount('alice', 'alice-password', alice);
-    await useAccountStore
-      .getState()
-      .initializePreparedAccount('decoy', 'decoy-password', decoy);
-
-    const rollback = await useAccountStore
-      .getState()
-      .rollbackInitializedAccounts(['alice-password', 'decoy-password']);
+    await expect(
+      useAccountStore.getState().initializePreparedAccountsAtomically([
+        { username: 'alice', password: 'shared-password', prepared: alice },
+        { username: 'decoy', password: 'shared-password', prepared: decoy },
+      ])
+    ).rejects.toThrow('Password already in use by another account');
     wipePreparedPasswordAccount(alice);
     wipePreparedPasswordAccount(decoy);
 
-    expect(rollback).toEqual({
-      failedPasswordIndexes: [],
-      lockFailed: false,
-    });
-    expect(sdk.storageState).toBe('locked');
-    expect(await sdk.secureStorageUnlock('alice-password')).toBe(false);
-    expect(await sdk.secureStorageUnlock('decoy-password')).toBe(false);
+    expect(sdk.accountGenerationState).toBe('empty');
+    expect(sdk.storageState).toBe('empty');
 
     const persistedValue = localStorage.getItem(STORAGE_KEYS.APP_STORE);
     if (!persistedValue) throw new Error('persisted creation grant missing');
@@ -289,44 +280,35 @@ describe('secure biometric account-store login integration', () => {
     mocks.sdk = reopened;
     await rehydrateCreationGrant(persistedValue, true);
 
-    expect(reopened.storageState).toBe('locked');
+    expect(reopened.accountGenerationState).toBe('empty');
+    expect(reopened.storageState).toBe('empty');
     expect(
       shouldInitializeSecureStorage(
         reopened.storageState,
         useAppStore.getState().secureAccountCreationAllowed
       )
     ).toBe(false);
-    expect(await reopened.secureStorageUnlock('alice-password')).toBe(false);
-    expect(await reopened.secureStorageUnlock('decoy-password')).toBe(false);
 
     const replacement = await preparePasswordAccount(
       await generateMnemonic(),
       'replacement-password'
     );
     try {
-      await useAccountStore
-        .getState()
-        .initializePreparedAccount(
-          'replacement',
-          'replacement-password',
-          replacement
-        );
-      const replacementUserId = reopened.userId;
-      expect(useAccountStore.getState().userProfile?.username).toBe(
-        'replacement'
-      );
-
-      await useAccountStore.getState().logout({ lockedByUser: false });
-      expect(reopened.storageState).toBe('locked');
+      await useAccountStore.getState().initializePreparedAccountsAtomically([
+        {
+          username: 'replacement',
+          password: 'replacement-password',
+          prepared: replacement,
+        },
+      ]);
+      expect(reopened.accountGenerationState).toBe('committed');
       await useAccountStore.getState().loadAccount({
         type: 'password',
         password: 'replacement-password',
       });
-
       expect(useAccountStore.getState().userProfile?.username).toBe(
         'replacement'
       );
-      expect(reopened.userId).toBe(replacementUserId);
     } finally {
       if (reopened.isSessionOpen) {
         await useAccountStore.getState().logout({ lockedByUser: false });
@@ -347,11 +329,13 @@ describe('secure biometric account-store login integration', () => {
       },
     });
 
+    await sdk.secureStorageBeginOnboardingCandidate();
     await provisionProfile(sdk, 0, 'alice', 'alice-password');
     await provisionProfile(sdk, 1, 'decoy', 'decoy-password');
     await sdk.secureStorageCreate(2, 'empty-slot-password');
     await sdk.flush();
     await sdk.secureStorageLock();
+    await sdk.secureStorageCommitOnboardingCandidate();
 
     expect(sdk.storageState).toBe('locked');
     await useAccountStore.getState().loadAccount({

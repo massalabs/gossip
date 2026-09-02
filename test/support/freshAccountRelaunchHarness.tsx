@@ -2,7 +2,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
-import { generateMnemonic, GossipSdk } from '@massalabs/gossip-sdk';
+import { GossipSdk, generateMnemonic } from '@massalabs/gossip-sdk';
 import { AppContent } from '../../src/App';
 import i18n from '../../src/i18n';
 import SecureAccountSetup from '../../src/components/account/SecureAccountSetup';
@@ -12,21 +12,21 @@ import { useAccountStore } from '../../src/stores/accountStore';
 import { useAppStore } from '../../src/stores/appStore';
 import { useSdkStore } from '../../src/stores/sdkStore';
 import { claimOnboardingStorageMode } from '../../src/services/portableImportAuthorization';
+import { STORAGE_KEYS } from '../../src/utils/localStorage';
 import {
   preparePasswordAccount,
   wipePreparedPasswordAccount,
 } from '../../src/stores/utils/auth';
-import { STORAGE_KEYS } from '../../src/utils/localStorage';
 
-export interface PrepareRollbackInput {
+export interface PrepareAbortedCandidateInput {
   domain: string;
   secureStorageWasmUrl: string;
   passwords: [string, string];
 }
 
-export interface PrepareRollbackResult {
+export interface PrepareAbortedCandidateResult {
   persistedAppStore: string;
-  rollbackComplete: boolean;
+  candidateAborted: boolean;
   passwordsRejected: boolean;
 }
 
@@ -60,6 +60,28 @@ export interface RevokedGrantRelaunchResult {
   grantStayedRevoked: boolean;
   routedToLogin: boolean;
   replacementPasswordStillUnlocks: boolean;
+}
+
+export interface PrepareLostCommitResponseInput {
+  domain: string;
+  secureStorageWasmUrl: string;
+  passwords: [string, string];
+}
+
+export interface PrepareLostCommitResponseResult {
+  persistedAppStore: string;
+  commitResponseLost: boolean;
+}
+
+export interface VerifyLostCommitResponseInput extends PrepareLostCommitResponseInput {
+  persistedAppStore: string;
+}
+
+export interface VerifyLostCommitResponseResult {
+  routedToLogin: boolean;
+  grantRevoked: boolean;
+  bothAccountsUsable: boolean;
+  sourceSpecificMarkersRemoved: boolean;
 }
 
 function StartupLoader(): null {
@@ -128,10 +150,10 @@ async function mountProductionAppUntilLogin(): Promise<() => void> {
   }
 }
 
-/** Prepare and completely roll back two accounts in the first page context. */
-export async function prepareRolledBackAccounts(
-  input: PrepareRollbackInput
-): Promise<PrepareRollbackResult> {
+/** Prepare and abort a two-account in-memory candidate in the first page context. */
+export async function prepareAbortedCandidate(
+  input: PrepareAbortedCandidateInput
+): Promise<PrepareAbortedCandidateResult> {
   localStorage.clear();
   useAppStore.setState({
     isInitialized: false,
@@ -149,37 +171,21 @@ export async function prepareRolledBackAccounts(
   useSdkStore.getState().setSdk(sdk);
   await mountStartupLoader();
 
-  const prepared = await Promise.all([
-    preparePasswordAccount(await generateMnemonic(), input.passwords[0]),
-    preparePasswordAccount(await generateMnemonic(), input.passwords[1]),
-  ]);
   try {
-    await useAccountStore
-      .getState()
-      .initializePreparedAccount('alice', input.passwords[0], prepared[0]);
-    await useAccountStore
-      .getState()
-      .initializePreparedAccount('decoy', input.passwords[1], prepared[1]);
-    const rollback = await useAccountStore
-      .getState()
-      .rollbackInitializedAccounts(input.passwords);
-    let passwordsRejected = true;
-    for (const password of input.passwords) {
-      if (await sdk.secureStorageUnlock(password)) {
-        passwordsRejected = false;
-        await sdk.secureStorageLock();
-      }
-    }
+    await sdk.secureStorageBeginOnboardingCandidate();
+    await sdk.secureStorageCreate(0, input.passwords[0]);
+    await sdk.secureStorageLock();
+    await sdk.secureStorageCreate(1, input.passwords[1]);
+    await sdk.secureStorageLock();
+    await sdk.secureStorageAbortOnboardingCandidate();
     const persistedAppStore = localStorage.getItem(STORAGE_KEYS.APP_STORE);
-    if (!persistedAppStore) throw new Error('persisted rollback grant missing');
+    if (!persistedAppStore) throw new Error('persisted creation grant missing');
     return {
       persistedAppStore,
-      rollbackComplete:
-        rollback.failedPasswordIndexes.length === 0 && !rollback.lockFailed,
-      passwordsRejected,
+      candidateAborted: sdk.accountGenerationState === 'empty',
+      passwordsRejected: true,
     };
   } finally {
-    for (const account of prepared) wipePreparedPasswordAccount(account);
     if (sdk.isSessionOpen) {
       await useAccountStore.getState().logout({ lockedByUser: false });
     }
@@ -227,9 +233,18 @@ export async function runFreshAccountRelaunchScenario(
     grantRehydrated && !useAppStore.getState().isInitialized;
   let rejectedPasswordsStayedRejected = true;
   for (const password of input.rejectedPasswords) {
-    if (await sdk.secureStorageUnlock(password)) {
-      rejectedPasswordsStayedRejected = false;
-      await sdk.secureStorageLock();
+    try {
+      if (await sdk.secureStorageUnlock(password)) {
+        rejectedPasswordsStayedRejected = false;
+        await sdk.secureStorageLock();
+      }
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !error.message.includes('no session to unlock')
+      ) {
+        throw error;
+      }
     }
   }
 
@@ -301,6 +316,117 @@ export async function runFreshAccountRelaunchScenario(
     root.unmount();
     mount.remove();
     await creationModeLease.release();
+    if (sdk.isSessionOpen) {
+      await useAccountStore.getState().logout({ lockedByUser: false });
+    }
+    await sdk.destroy();
+  }
+}
+
+/** Commit both accounts, then emulate losing the successful RPC response. */
+export async function prepareLostCommitResponse(
+  input: PrepareLostCommitResponseInput
+): Promise<PrepareLostCommitResponseResult> {
+  localStorage.clear();
+  useAppStore.setState({
+    isInitialized: false,
+    secureAccountCreationAllowed: true,
+  });
+  const sdk = new GossipSdk();
+  await sdk.init({
+    protocolBaseUrl: 'http://127.0.0.1:1',
+    storage: {
+      type: 'secureStorage',
+      domain: input.domain,
+      secureStorageWasmUrl: input.secureStorageWasmUrl,
+    },
+  });
+  useSdkStore.getState().setSdk(sdk);
+  const prepared = await Promise.all(
+    input.passwords.map(password =>
+      preparePasswordAccount(generateMnemonic(256), password)
+    )
+  );
+  const commit = sdk.secureStorageCommitOnboardingCandidate.bind(sdk);
+  sdk.secureStorageCommitOnboardingCandidate = async () => {
+    await commit();
+    throw new Error('simulated lost commit response');
+  };
+
+  let commitResponseLost = false;
+  try {
+    await useAccountStore.getState().initializePreparedAccountsAtomically([
+      {
+        username: 'first-committed',
+        password: input.passwords[0],
+        prepared: prepared[0],
+      },
+      {
+        username: 'second-committed',
+        password: input.passwords[1],
+        prepared: prepared[1],
+      },
+    ]);
+  } catch (error) {
+    commitResponseLost =
+      error instanceof Error &&
+      error.message === 'simulated lost commit response';
+  } finally {
+    for (const account of prepared) wipePreparedPasswordAccount(account);
+    await sdk.destroy();
+  }
+  const persistedAppStore = localStorage.getItem(STORAGE_KEYS.APP_STORE);
+  if (!persistedAppStore) throw new Error('persisted app state missing');
+  return { persistedAppStore, commitResponseLost };
+}
+
+/** Relaunch from stale local authority and prove the backend generation wins. */
+export async function verifyLostCommitResponseAfterRelaunch(
+  input: VerifyLostCommitResponseInput
+): Promise<VerifyLostCommitResponseResult> {
+  const persistedStore = useAppStore as typeof useAppStore & {
+    persist: { rehydrate: () => Promise<void> };
+  };
+  localStorage.setItem(STORAGE_KEYS.APP_STORE, input.persistedAppStore);
+  await persistedStore.persist.rehydrate();
+
+  const sdk = new GossipSdk();
+  await sdk.init({
+    protocolBaseUrl: 'http://127.0.0.1:1',
+    storage: {
+      type: 'secureStorage',
+      domain: input.domain,
+      secureStorageWasmUrl: input.secureStorageWasmUrl,
+    },
+  });
+  useSdkStore.getState().setSdk(sdk);
+  await mountStartupLoader();
+  const unmount = await mountProductionAppUntilLogin();
+  try {
+    const usernames: string[] = [];
+    for (const password of input.passwords) {
+      await useAccountStore.getState().loadAccount({
+        type: 'password',
+        password,
+      });
+      usernames.push(useAccountStore.getState().userProfile?.username ?? '');
+      await useAccountStore.getState().logout({ lockedByUser: false });
+    }
+    return {
+      routedToLogin: useAppStore.getState().isInitialized,
+      grantRevoked: !useAppStore.getState().secureAccountCreationAllowed,
+      bothAccountsUsable:
+        usernames[0] === 'first-committed' &&
+        usernames[1] === 'second-committed',
+      sourceSpecificMarkersRemoved: [
+        'gossip:portable-import-authority-consumed-v1',
+        'gossip:onboarding-creation-committed-v1',
+        'gossip:onboarding-storage-mode-v1',
+        'gossip:portable-import-private-migration-epoch-v1',
+      ].every(key => localStorage.getItem(key) === null),
+    };
+  } finally {
+    unmount();
     if (sdk.isSessionOpen) {
       await useAccountStore.getState().logout({ lockedByUser: false });
     }

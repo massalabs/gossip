@@ -72,20 +72,51 @@ describe('secure account reload with fresh application modules', () => {
     localStorage.clear();
   }, 60_000);
 
-  it('routes a rolled-back install to onboarding and consumes its grant', async () => {
-    const domain = 'fresh-page-rollback-integration';
+  it('recovers a committed generation after its success response is lost', async () => {
+    const domain = 'fresh-page-lost-commit-response';
     const passwords: [string, string] = [
-      'fresh-alice-password',
-      'fresh-decoy-password',
+      'lost-response-first-password',
+      'lost-response-second-password',
     ];
     const prepared = await withFreshPage(harness =>
-      harness.prepareRolledBackAccounts({
+      harness.prepareLostCommitResponse({
         domain,
         secureStorageWasmUrl,
         passwords,
       })
     );
-    expect(prepared.rollbackComplete).toBe(true);
+    expect(prepared.commitResponseLost).toBe(true);
+
+    const relaunched = await withFreshPage(harness =>
+      harness.verifyLostCommitResponseAfterRelaunch({
+        domain,
+        secureStorageWasmUrl,
+        passwords,
+        persistedAppStore: prepared.persistedAppStore,
+      })
+    );
+    expect(relaunched).toEqual({
+      routedToLogin: true,
+      grantRevoked: true,
+      bothAccountsUsable: true,
+      sourceSpecificMarkersRemoved: true,
+    });
+  }, 180_000);
+
+  it('routes an aborted candidate to onboarding and consumes its grant', async () => {
+    const domain = 'fresh-page-abort-integration';
+    const passwords: [string, string] = [
+      'fresh-alice-password',
+      'fresh-decoy-password',
+    ];
+    const prepared = await withFreshPage(harness =>
+      harness.prepareAbortedCandidate({
+        domain,
+        secureStorageWasmUrl,
+        passwords,
+      })
+    );
+    expect(prepared.candidateAborted).toBe(true);
     expect(prepared.passwordsRejected).toBe(true);
 
     const relaunched = await withFreshPage(harness =>

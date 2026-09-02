@@ -24,6 +24,8 @@ const makeSdkMock = () => ({
   isSessionOpen: false,
   isSecureStorage: false,
   storageState: 'locked',
+  accountGenerationState: null as 'empty' | 'committed' | null,
+  accountGenerationEpoch: null as string | null,
   usesSessionBlobNamespace: false,
   closeSession: vi.fn(),
   clearAllTables: vi.fn(),
@@ -31,7 +33,6 @@ const makeSdkMock = () => ({
   secureStorageLock: vi.fn(async () => {}),
   secureStorageCreate: vi.fn(async () => {}),
   secureStorageDestroy: vi.fn(async () => {}),
-  wasPortableImportInstalled: vi.fn(async () => false),
   openSession: vi.fn(async () => {}),
   startPublicKeyPublication: vi.fn(),
   polling: { start: vi.fn(), stop: vi.fn(), isRunning: false },
@@ -263,6 +264,9 @@ vi.mock('../../src/stores/appStore', () => ({
     getState: () => ({
       mnsEnabled: false,
       secureAccountCreationAllowed: appState.secureAccountCreationAllowed,
+      setSecureAccountCreationAllowed: vi.fn((value: boolean) => {
+        appState.secureAccountCreationAllowed = value;
+      }),
       setIsInitialized: vi.fn(),
       hydrateAccountSettings: vi.fn(),
       resetAccountSettings: vi.fn(),
@@ -301,7 +305,7 @@ vi.mock('../../src/stores/utils/auth', () => ({
 }));
 
 beforeEach(() => {
-  localStorage.removeItem('gossip:portable-import-private-migration-epoch-v1');
+  appState.secureAccountCreationAllowed = true;
   derivedAccountKeys.length = 0;
   encodeUserIdSpy.mockReset();
   encodeUserIdSpy.mockReturnValue('mock-user-id');
@@ -457,7 +461,7 @@ describe('AccountStore classic password discovery', () => {
     expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
   });
 
-  it('durably gates imported login through all five phases', async () => {
+  it('durably gates each account generation through all five phases', async () => {
     const sdk = makeSdkMock();
     const profile = mockProfile();
     sdk.isSecureStorage = true;
@@ -466,17 +470,14 @@ describe('AccountStore classic password discovery', () => {
       sdk.storageState = 'unlocked';
       return true;
     });
-    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    sdk.accountGenerationState = 'committed';
+    sdk.accountGenerationEpoch = '00112233445566778899aabbccddeeff';
     sdk.profiles.get.mockResolvedValue(profile);
     getSdkMock.mockReturnValue(sdk);
     authSpy.mockResolvedValue({
       mnemonic: 'word '.repeat(24).trim(),
       encryptionKey: { type: 'mock-key' },
     });
-    localStorage.setItem(
-      'gossip:portable-import-private-migration-epoch-v1',
-      '00112233445566778899aabbccddeeff'
-    );
 
     await useAccountStore.getState().loadAccount({
       type: 'password',
@@ -498,7 +499,65 @@ describe('AccountStore classic password discovery', () => {
     expect(useAccountStore.getState().privateMigrationPhase).toBeNull();
   });
 
-  it('requires explicit recovery for a missing imported session namespace', async () => {
+  it('resumes migration independently for each account in one generation', async () => {
+    const epoch = '00112233445566778899aabbccddeeff';
+    const completedAccount = makeSdkMock();
+    const interruptedAccount = makeSdkMock();
+    for (const sdk of [completedAccount, interruptedAccount]) {
+      sdk.isSecureStorage = true;
+      sdk.storageState = 'locked';
+      sdk.accountGenerationState = 'committed';
+      sdk.accountGenerationEpoch = epoch;
+      sdk.secureStorageUnlock.mockImplementation(async () => {
+        sdk.storageState = 'unlocked';
+        return true;
+      });
+      sdk.profiles.get.mockResolvedValue(mockProfile());
+    }
+    completedAccount.queries.privateMigration.begin.mockResolvedValue({
+      formatVersion: 1,
+      installationEpoch: epoch,
+      completedPhase: 5,
+    });
+    interruptedAccount.queries.privateMigration.begin.mockResolvedValue({
+      formatVersion: 1,
+      installationEpoch: epoch,
+      completedPhase: 2,
+    });
+    let activeSdk = completedAccount;
+    getSdkMock.mockImplementation(() => activeSdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { type: 'mock-key' },
+    });
+
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'first-account-password',
+      userId: 'mock-user-id',
+    });
+    activeSdk = interruptedAccount;
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'second-account-password',
+      userId: 'mock-user-id',
+    });
+
+    expect(
+      completedAccount.queries.privateMigration.begin
+    ).toHaveBeenCalledWith(epoch);
+    expect(
+      completedAccount.queries.privateMigration.completePhase
+    ).not.toHaveBeenCalled();
+    expect(
+      interruptedAccount.queries.privateMigration.begin
+    ).toHaveBeenCalledWith(epoch);
+    expect(
+      interruptedAccount.queries.privateMigration.completePhase.mock.calls
+    ).toEqual([3, 4, 5].map(phase => [epoch, phase]));
+  });
+
+  it('requires explicit recovery for a missing generation session namespace', async () => {
     const sdk = makeSdkMock();
     const profile = mockProfile(new Uint8Array(0));
     sdk.isSecureStorage = true;
@@ -511,7 +570,8 @@ describe('AccountStore classic password discovery', () => {
     sdk.secureStorageLock.mockImplementation(async () => {
       sdk.storageState = 'locked';
     });
-    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    sdk.accountGenerationState = 'committed';
+    sdk.accountGenerationEpoch = '00112233445566778899aabbccddeeff';
     sdk.profiles.get.mockResolvedValue(profile);
     sdk.readSessionBlob.mockResolvedValue(null);
     getSdkMock.mockReturnValue(sdk);
@@ -519,10 +579,6 @@ describe('AccountStore classic password discovery', () => {
       mnemonic: 'word '.repeat(24).trim(),
       encryptionKey: { __wbg_ptr: 1, free: vi.fn() },
     });
-    localStorage.setItem(
-      'gossip:portable-import-private-migration-epoch-v1',
-      '00112233445566778899aabbccddeeff'
-    );
 
     await expect(
       useAccountStore.getState().loadAccount({
@@ -549,7 +605,8 @@ describe('AccountStore classic password discovery', () => {
       sdk.storageState = 'unlocked';
       return true;
     });
-    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    sdk.accountGenerationState = 'committed';
+    sdk.accountGenerationEpoch = '00112233445566778899aabbccddeeff';
     sdk.profiles.get.mockResolvedValue(profile);
     sdk.queries.privateMigration.begin.mockResolvedValue({
       formatVersion: 1,
@@ -566,10 +623,6 @@ describe('AccountStore classic password discovery', () => {
       mnemonic: 'word '.repeat(24).trim(),
       encryptionKey: { type: 'mock-key' },
     });
-    localStorage.setItem(
-      'gossip:portable-import-private-migration-epoch-v1',
-      '00112233445566778899aabbccddeeff'
-    );
 
     await useAccountStore.getState().loadAccount({
       type: 'password',
@@ -614,7 +667,8 @@ describe('AccountStore classic password discovery', () => {
     sdk.secureStorageLock.mockImplementation(async () => {
       sdk.storageState = 'locked';
     });
-    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    sdk.accountGenerationState = 'committed';
+    sdk.accountGenerationEpoch = '00112233445566778899aabbccddeeff';
     sdk.profiles.get.mockResolvedValue(profile);
     sdk.queries.privateMigration.completePhase.mockImplementation(
       async (installationEpoch: string, completedPhase: number) => {
@@ -627,10 +681,6 @@ describe('AccountStore classic password discovery', () => {
       mnemonic: 'word '.repeat(24).trim(),
       encryptionKey: { __wbg_ptr: 1, free: vi.fn() },
     });
-    localStorage.setItem(
-      'gossip:portable-import-private-migration-epoch-v1',
-      '00112233445566778899aabbccddeeff'
-    );
 
     await expect(
       useAccountStore.getState().loadAccount({
@@ -648,7 +698,7 @@ describe('AccountStore classic password discovery', () => {
     expect(useAccountStore.getState().privateMigrationPhase).toBeNull();
   });
 
-  it('fails closed when imported attestation has no destination epoch', async () => {
+  it('fails closed when a committed generation has no epoch', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
     sdk.storageState = 'locked';
@@ -659,7 +709,7 @@ describe('AccountStore classic password discovery', () => {
     sdk.secureStorageLock.mockImplementation(async () => {
       sdk.storageState = 'locked';
     });
-    sdk.wasPortableImportInstalled.mockResolvedValue(true);
+    sdk.accountGenerationState = 'committed';
     getSdkMock.mockReturnValue(sdk);
 
     await expect(
@@ -667,7 +717,7 @@ describe('AccountStore classic password discovery', () => {
         type: 'password',
         password: 'account-password',
       })
-    ).rejects.toThrow('migration epoch is unavailable');
+    ).rejects.toThrow('Account generation epoch is unavailable');
 
     expect(sdk.queries.privateMigration.begin).not.toHaveBeenCalled();
     expect(sdk.openSession).not.toHaveBeenCalled();
@@ -878,47 +928,6 @@ describe('AccountStore secure-storage account provisioning', () => {
     });
   });
 
-  it('persists a prepared session without publishing its tentative key', async () => {
-    const sdk = makeSdkMock();
-    const mnemonic = 'word '.repeat(24).trim();
-    const encryptedSession = new Uint8Array([4, 5, 6]);
-    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
-    const prepared = {
-      mnemonicBytes: new TextEncoder().encode(mnemonic),
-      security: mockProfile().security,
-      encryptedSession,
-    };
-    authSpy.mockResolvedValue({ mnemonic, encryptionKey });
-    sdk.isSecureStorage = true;
-    sdk.storageState = 'empty';
-    sdk.secureStorageCreate.mockImplementation(async () => {
-      sdk.storageState = 'unlocked';
-    });
-    sdk.openSession.mockImplementation(async () => {
-      sdk.isSessionOpen = true;
-    });
-    getSdkMock.mockReturnValue(sdk);
-
-    try {
-      await useAccountStore
-        .getState()
-        .initializePreparedAccount('alice', 'alice-password', prepared);
-      await Promise.resolve();
-
-      expect(sdk.openSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          mnemonic,
-          encryptedSession,
-          encryptionKey,
-          publishPublicKey: false,
-        })
-      );
-      expect(sdk.auth.publishPublicKey).not.toHaveBeenCalled();
-    } finally {
-      await useAccountStore.getState().logout();
-    }
-  });
-
   it('retains the in-flight password when rejected creation cleanup is unproved', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
@@ -949,115 +958,6 @@ describe('AccountStore secure-storage account provisioning', () => {
       useAccountStore.getState().initializeAccount('alice', 'alice-password')
     ).rejects.toThrow('Secure account creation is not currently authorized');
     expect(sdk.secureStorageCreate).not.toHaveBeenCalled();
-  });
-
-  it('frees the candidate key when collision re-locking fails', async () => {
-    const sdk = makeSdkMock();
-    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
-    const prepared = {
-      mnemonicBytes: new TextEncoder().encode('word '.repeat(24).trim()),
-      security: mockProfile().security,
-      encryptedSession: new Uint8Array([1, 2, 3]),
-    };
-    sdk.isSecureStorage = true;
-    sdk.storageState = 'locked';
-    sdk.secureStorageUnlock.mockResolvedValue(true);
-    sdk.secureStorageLock.mockRejectedValue(new Error('lock failed'));
-    authSpy.mockResolvedValue({
-      mnemonic: new TextDecoder().decode(prepared.mnemonicBytes),
-      encryptionKey,
-    });
-    getSdkMock.mockReturnValue(sdk);
-
-    await expect(
-      useAccountStore
-        .getState()
-        .initializePreparedAccount('alice', 'existing-password', prepared)
-    ).rejects.toThrow('lock failed');
-
-    expect(encryptionKey.free).toHaveBeenCalledOnce();
-    expect(sdk.secureStorageCreate).not.toHaveBeenCalled();
-  });
-
-  it('destroys every committed batch account in reverse order', async () => {
-    const sdk = makeSdkMock();
-    sdk.isSecureStorage = true;
-    sdk.storageState = 'locked';
-    sdk.secureStorageUnlock.mockResolvedValue(true);
-    getSdkMock.mockReturnValue(sdk);
-
-    const result = await useAccountStore
-      .getState()
-      .rollbackInitializedAccounts(['alice-password', 'decoy-password']);
-
-    expect(result).toEqual({ failedPasswordIndexes: [], lockFailed: false });
-
-    expect(sdk.secureStorageUnlock.mock.calls).toEqual([
-      ['decoy-password'],
-      ['alice-password'],
-    ]);
-    expect(sdk.secureStorageDestroy).toHaveBeenCalledTimes(2);
-    expect(useAccountStore.getState().userProfile).toBeNull();
-  });
-
-  it('continues reverse rollback after one destroy fails and re-locks', async () => {
-    const sdk = makeSdkMock();
-    sdk.isSecureStorage = true;
-    sdk.storageState = 'locked';
-    sdk.secureStorageUnlock.mockImplementation(async () => {
-      sdk.storageState = 'unlocked';
-      return true;
-    });
-    sdk.secureStorageLock.mockImplementation(async () => {
-      sdk.storageState = 'locked';
-    });
-    sdk.secureStorageDestroy
-      .mockRejectedValueOnce(new Error('decoy destroy failed'))
-      .mockImplementationOnce(async () => {
-        sdk.storageState = 'locked';
-      });
-    getSdkMock.mockReturnValue(sdk);
-
-    const result = await useAccountStore
-      .getState()
-      .rollbackInitializedAccounts(['alice-password', 'decoy-password']);
-
-    expect(result).toEqual({
-      failedPasswordIndexes: [1],
-      lockFailed: false,
-    });
-    expect(sdk.secureStorageUnlock.mock.calls).toEqual([
-      ['decoy-password'],
-      ['alice-password'],
-    ]);
-    expect(sdk.secureStorageDestroy).toHaveBeenCalledTimes(2);
-    expect(sdk.secureStorageLock).toHaveBeenCalledOnce();
-    expect(sdk.storageState).toBe('locked');
-  });
-
-  it('treats an undiscoverable batch password as already rolled back', async () => {
-    const sdk = makeSdkMock();
-    sdk.isSecureStorage = true;
-    sdk.storageState = 'locked';
-    sdk.secureStorageUnlock
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
-    getSdkMock.mockReturnValue(sdk);
-
-    const result = await useAccountStore
-      .getState()
-      .rollbackInitializedAccounts(['alice-password', 'decoy-password']);
-
-    expect(result).toEqual({
-      failedPasswordIndexes: [],
-      lockFailed: false,
-    });
-
-    expect(sdk.secureStorageUnlock.mock.calls).toEqual([
-      ['decoy-password'],
-      ['alice-password'],
-    ]);
-    expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
   });
 
   it('allocates all onboarding accounts to distinct secure-storage slots', async () => {
@@ -1101,87 +1001,6 @@ describe('AccountStore secure-storage account provisioning', () => {
     } finally {
       await useAccountStore.getState().logout();
     }
-  });
-
-  it('marks the in-flight slot for recovery when immediate cleanup fails', async () => {
-    const sdk = makeSdkMock();
-    sdk.isSecureStorage = true;
-    sdk.storageState = 'empty';
-    sdk.secureStorageCreate.mockImplementation(async () => {
-      sdk.storageState = 'unlocked';
-    });
-    sdk.openSession.mockImplementation(async () => {
-      sdk.isSessionOpen = true;
-    });
-    sdk.profiles.createOrUpdate.mockRejectedValue(
-      new Error('profile persistence failed')
-    );
-    sdk.closeSession.mockRejectedValue(new Error('close failed'));
-    getSdkMock.mockReturnValue(sdk);
-
-    await expect(
-      useAccountStore.getState().initializeAccount('alice', 'alice-password')
-    ).rejects.toBeInstanceOf(IncompleteOnboardingSlotCleanupError);
-
-    expect(sdk.secureStorageDestroy).not.toHaveBeenCalled();
-    expect(sdk.storageState).toBe('unlocked');
-
-    sdk.closeSession.mockImplementation(async () => {
-      sdk.isSessionOpen = false;
-    });
-    sdk.secureStorageLock.mockImplementation(async () => {
-      sdk.storageState = 'locked';
-    });
-    sdk.secureStorageUnlock.mockImplementation(async () => {
-      sdk.storageState = 'unlocked';
-      return true;
-    });
-    sdk.secureStorageDestroy.mockImplementation(async () => {
-      sdk.storageState = 'locked';
-    });
-    await useAccountStore
-      .getState()
-      .rollbackInitializedAccounts(['alice-password']);
-  });
-
-  it('marks the in-flight slot for recovery when immediate destroy fails', async () => {
-    const sdk = makeSdkMock();
-    sdk.isSecureStorage = true;
-    sdk.storageState = 'empty';
-    sdk.secureStorageCreate.mockImplementation(async () => {
-      sdk.storageState = 'unlocked';
-    });
-    sdk.openSession.mockImplementation(async () => {
-      sdk.isSessionOpen = true;
-    });
-    sdk.profiles.createOrUpdate.mockRejectedValue(
-      new Error('profile persistence failed')
-    );
-    sdk.closeSession.mockImplementation(async () => {
-      sdk.isSessionOpen = false;
-    });
-    sdk.secureStorageDestroy.mockRejectedValue(new Error('destroy failed'));
-    sdk.secureStorageLock.mockImplementation(async () => {
-      sdk.storageState = 'locked';
-    });
-    getSdkMock.mockReturnValue(sdk);
-
-    await expect(
-      useAccountStore.getState().initializeAccount('alice', 'alice-password')
-    ).rejects.toBeInstanceOf(IncompleteOnboardingSlotCleanupError);
-
-    expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
-
-    sdk.secureStorageUnlock.mockImplementation(async () => {
-      sdk.storageState = 'unlocked';
-      return true;
-    });
-    sdk.secureStorageDestroy.mockImplementation(async () => {
-      sdk.storageState = 'locked';
-    });
-    await useAccountStore
-      .getState()
-      .rollbackInitializedAccounts(['alice-password']);
   });
 
   it('releases a slot after post-open persistence failure so retry can reuse it', async () => {

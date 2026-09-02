@@ -32,7 +32,8 @@ const mocks = vi.hoisted(() => {
   };
   return {
     sdk: {
-      wasPortableImportInstalled: vi.fn().mockResolvedValue(false),
+      accountGenerationState: 'empty' as 'empty' | 'committed',
+      refreshAccountGenerationState: vi.fn().mockResolvedValue('empty'),
     },
     handle: { name: 'accounts.gossipbackup' },
     coordinator,
@@ -124,7 +125,8 @@ describe('portable import onboarding page', () => {
     mocks.selectSource.mockResolvedValue(mocks.handle);
     mocks.coordinator.install.mockResolvedValue(undefined);
     mocks.coordinator.disposePasswords.mockImplementation(() => {});
-    mocks.sdk.wasPortableImportInstalled.mockResolvedValue(false);
+    mocks.sdk.accountGenerationState = 'empty';
+    mocks.sdk.refreshAccountGenerationState.mockResolvedValue('empty');
     mocks.stream.mockImplementation(
       async (
         _handle: unknown,
@@ -228,7 +230,7 @@ describe('portable import onboarding page', () => {
     mocks.coordinator.install.mockRejectedValueOnce(
       new Error('install failed')
     );
-    mocks.sdk.wasPortableImportInstalled.mockRejectedValueOnce(
+    mocks.sdk.refreshAccountGenerationState.mockRejectedValueOnce(
       new Error('probe failed')
     );
 

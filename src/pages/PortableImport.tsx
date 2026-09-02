@@ -424,7 +424,7 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
         nextError = t('import.terminal_failed');
       } else {
         try {
-          if (await sdk.wasPortableImportInstalled()) {
+          if ((await sdk.refreshAccountGenerationState()) === 'committed') {
             await coordinator.finalizeAttestedInstallation();
             coordinatorRef.current = null;
             postCommitCleanupRef.current = true;

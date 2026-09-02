@@ -6,7 +6,7 @@ import type { PortableImportAuthorization } from './portableImportCoordinator';
 const AUTHORITY_CONSUMED_KEY = 'gossip:portable-import-authority-consumed-v1';
 const CREATION_COMMITTED_KEY = 'gossip:onboarding-creation-committed-v1';
 const ONBOARDING_MODE_KEY = 'gossip:onboarding-storage-mode-v1';
-const PRIVATE_MIGRATION_EPOCH_KEY =
+const LEGACY_PRIVATE_MIGRATION_EPOCH_KEY =
   'gossip:portable-import-private-migration-epoch-v1';
 const ONBOARDING_MODE_LOCK = 'gossip-onboarding-storage-mode-v1';
 type OnboardingStorageMode = 'create' | 'import';
@@ -61,30 +61,6 @@ async function withOnboardingModeLock<T>(
     }
   }
   return await operation();
-}
-
-export function getPortableImportMigrationEpoch(): string | null {
-  const epoch = durableStorage()?.getItem(PRIVATE_MIGRATION_EPOCH_KEY) ?? null;
-  if (epoch === null) return null;
-  if (!/^[0-9a-f]{32}$/u.test(epoch)) {
-    throw new Error('Invalid portable import migration epoch');
-  }
-  return epoch;
-}
-
-export function ensurePortableImportMigrationEpoch(): string {
-  const current = getPortableImportMigrationEpoch();
-  if (current) return current;
-  const storage = durableStorage();
-  if (!storage)
-    throw new Error('Portable import migration storage unavailable');
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  const epoch = Array.from(bytes, byte =>
-    byte.toString(16).padStart(2, '0')
-  ).join('');
-  storage.setItem(PRIVATE_MIGRATION_EPOCH_KEY, epoch);
-  return epoch;
 }
 
 export function portableImportAuthorityWasConsumed(): boolean {
@@ -156,31 +132,47 @@ export function restoreOnboardingCreationAuthorityAfterRollback(
   storage?.removeItem(CREATION_COMMITTED_KEY);
 }
 
+export function finalizeCommittedAccountGenerationAuthority(): void {
+  const state = useAppStore.getState();
+  const storage = durableStorage();
+  state.setSecureAccountCreationAllowed(false);
+  storage?.removeItem(AUTHORITY_CONSUMED_KEY);
+  storage?.removeItem(CREATION_COMMITTED_KEY);
+  storage?.removeItem(ONBOARDING_MODE_KEY);
+  storage?.removeItem(LEGACY_PRIVATE_MIGRATION_EPOCH_KEY);
+}
+
 export async function reconcilePortableImportAuthority(
-  readImported: () => Promise<boolean>,
+  accountGenerationState: 'empty' | 'committed' | null,
   storageState: 'empty' | 'locked' | 'unlocked' | null
 ): Promise<void> {
   await withOnboardingModeLock(async () => {
-    const imported = await readImported();
     const durable = readDurableAuthority();
     const state = useAppStore.getState();
+    const storage = durableStorage();
     if (
-      imported ||
+      accountGenerationState === 'committed' ||
       durable.isInitialized ||
-      durableStorage()?.getItem(CREATION_COMMITTED_KEY) !== null
+      storage?.getItem(CREATION_COMMITTED_KEY) !== null
     ) {
-      if (imported) ensurePortableImportMigrationEpoch();
-      state.setSecureAccountCreationAllowed(false);
+      if (accountGenerationState === 'committed') {
+        // The backend is authoritative after either onboarding or import.
+        // Remove every source-specific recovery artifact so committed devices
+        // retain no durable setup-provenance trace outside encrypted accounts.
+        finalizeCommittedAccountGenerationAuthority();
+      } else {
+        state.setSecureAccountCreationAllowed(false);
+      }
       return;
     }
     if (
+      accountGenerationState === 'empty' ||
       storageState === 'empty' ||
       durable.secureAccountCreationAllowed ||
       portableImportAuthorityWasConsumed()
     ) {
       // Persist restoration before deleting its recovery proof.
       state.setSecureAccountCreationAllowed(true);
-      const storage = durableStorage();
       storage?.removeItem(AUTHORITY_CONSUMED_KEY);
       storage?.removeItem(ONBOARDING_MODE_KEY);
     }
@@ -344,7 +336,7 @@ export async function resetOnboardingAuthorityAfterStorageReset(): Promise<void>
     storage?.removeItem(AUTHORITY_CONSUMED_KEY);
     storage?.removeItem(CREATION_COMMITTED_KEY);
     storage?.removeItem(ONBOARDING_MODE_KEY);
-    storage?.removeItem(PRIVATE_MIGRATION_EPOCH_KEY);
+    storage?.removeItem(LEGACY_PRIVATE_MIGRATION_EPOCH_KEY);
     const state = useAppStore.getState();
     state.setSecureStartupRouting(false, false);
     state.setSecureAccountCreationAllowed(true);

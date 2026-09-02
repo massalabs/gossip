@@ -44,8 +44,9 @@ const PortableBackupStartupGate: React.FC<React.PropsWithChildren> = ({
       }
       setState('checking');
       if (cleanupPending) {
-        const imported = await getSdk().wasPortableImportInstalled();
-        if (imported) {
+        const generationCommitted =
+          getSdk().accountGenerationState === 'committed';
+        if (generationCommitted) {
           await runPortableImportPostCommitCleanup();
           window.location.reload();
           return;

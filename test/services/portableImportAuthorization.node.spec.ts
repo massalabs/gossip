@@ -17,7 +17,6 @@ import {
   claimOnboardingStorageMode,
   consumeOnboardingCreationAuthority,
   createOnboardingPortableImportAuthorization,
-  getPortableImportMigrationEpoch,
   isOnboardingStorageCreationAuthorized,
   reconcilePortableImportAuthority,
   restoreOnboardingCreationAuthorityAfterRollback,
@@ -50,19 +49,23 @@ describe('onboarding portable import authorization', () => {
     vi.clearAllMocks();
   });
 
-  it('creates one opaque destination epoch while reconciling an import', async () => {
-    await reconcilePortableImportAuthority(
-      () => Promise.resolve(true),
-      'locked'
+  it('removes source-specific recovery traces after any generation commits', async () => {
+    storage.set('gossip:portable-import-authority-consumed-v1', 'consumed');
+    storage.set('gossip:onboarding-creation-committed-v1', '{"owner":"old"}');
+    storage.set('gossip:onboarding-storage-mode-v1', '{"mode":"import"}');
+    storage.set(
+      'gossip:portable-import-private-migration-epoch-v1',
+      '0123456789abcdef0123456789abcdef'
     );
-    const epoch = getPortableImportMigrationEpoch();
-    expect(epoch).toMatch(/^[0-9a-f]{32}$/u);
-    await reconcilePortableImportAuthority(
-      () => Promise.resolve(true),
-      'locked'
-    );
-    expect(getPortableImportMigrationEpoch()).toBe(epoch);
+
+    await reconcilePortableImportAuthority('committed', 'locked');
+
     expect(state.setSecureAccountCreationAllowed).toHaveBeenCalledWith(false);
+    expect(
+      [...storage.keys()].filter(key =>
+        /portable-import|onboarding-(?:creation|storage-mode)/u.test(key)
+      )
+    ).toEqual([]);
   });
 
   it('reads current durable authority instead of a stale tab cache', async () => {

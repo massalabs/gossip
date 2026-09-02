@@ -10,14 +10,24 @@ const PROFILE_LOAD_DELAY_MS = 100;
 
 export async function establishFirstInstallCreationGrant(
   sdk: Pick<GossipSdk, 'isSecureStorage' | 'storageState'> &
-    Partial<Pick<GossipSdk, 'wasPortableImportInstalled'>>
+    Partial<Pick<GossipSdk, 'accountGenerationState'>>
 ): Promise<void> {
   if (!sdk.isSecureStorage) return;
+  if (sdk.accountGenerationState === 'empty') {
+    const state = useAppStore.getState();
+    state.setSecureStartupRouting(false, false);
+    state.setSecureAccountCreationAllowed(true);
+    // Reconcile fallible web-layer state only after the backend has made the
+    // routing decision. In particular, process death may leave an orphaned
+    // creation-mode lease that must not block the next onboarding attempt.
+    await reconcilePortableImportAuthority(
+      sdk.accountGenerationState,
+      sdk.storageState
+    );
+    return;
+  }
   await reconcilePortableImportAuthority(
-    () =>
-      sdk.wasPortableImportInstalled
-        ? sdk.wasPortableImportInstalled()
-        : Promise.resolve(false),
+    sdk.accountGenerationState ?? null,
     sdk.storageState
   );
 }
