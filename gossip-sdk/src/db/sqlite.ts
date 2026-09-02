@@ -1056,9 +1056,15 @@ export class DatabaseConnection {
         password
       );
     } else {
-      await this.requireSecureProxy().admitPortableOuterMigrationPassword(
-        password
-      );
+      const once = password.slice();
+      try {
+        await this.requireSecureProxy().admitPortableOuterMigrationPassword(
+          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: move a single-use password copy so the coordinator-owned retry buffer remains attached and no serialization copy lingers in the MessagePort queue.
+          Comlink.transfer(once, [once.buffer])
+        );
+      } finally {
+        if (once.byteLength > 0) once.fill(0);
+      }
     }
   }
 
@@ -1084,9 +1090,15 @@ export class DatabaseConnection {
         password,
       });
     }
-    return this.requireSecureProxy().authenticatePortableImportCandidate(
-      password
-    );
+    const once = password.slice();
+    try {
+      return await this.requireSecureProxy().authenticatePortableImportCandidate(
+        // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: move a single-use password copy so the coordinator-owned retry buffer remains attached and no serialization copy lingers in the MessagePort queue.
+        Comlink.transfer(once, [once.buffer])
+      );
+    } finally {
+      if (once.byteLength > 0) once.fill(0);
+    }
   }
 
   async secureStorageInstallPortableImport(): Promise<void> {

@@ -69,6 +69,52 @@ function deferred<T>() {
 }
 
 describe('DatabaseConnection portable lifecycle fencing', () => {
+  it('sends single-use password copies to browser import workers', async () => {
+    const preview = {
+      userId: 'gossip1test',
+      username: 'Alice',
+      avatar: null,
+      createdAtMs: 1,
+    };
+    let admittedObserved: number[] = [];
+    let authenticatedObserved: number[] = [];
+    const proxy = {
+      admitPortableOuterMigrationPassword: vi.fn((value: Uint8Array) => {
+        admittedObserved = Array.from(value);
+        return Promise.resolve();
+      }),
+      authenticatePortableImportCandidate: vi.fn((value: Uint8Array) => {
+        authenticatedObserved = Array.from(value);
+        return Promise.resolve(preview);
+      }),
+    };
+    const connection = portableConnection({
+      useNativePlugin: false,
+      secureProxy: proxy,
+      portableTransferActive: true,
+    });
+    const admitted = new Uint8Array([1, 2, 3]);
+    const authenticated = new Uint8Array([4, 5, 6]);
+
+    await connection.secureStorageAdmitPortableOuterMigrationPassword(admitted);
+    await connection.secureStorageAuthenticatePortableImportCandidate(
+      authenticated
+    );
+
+    const admittedOnce = proxy.admitPortableOuterMigrationPassword.mock
+      .calls[0][0] as Uint8Array;
+    const authenticatedOnce = proxy.authenticatePortableImportCandidate.mock
+      .calls[0][0] as Uint8Array;
+    expect(admittedOnce).not.toBe(admitted);
+    expect(authenticatedOnce).not.toBe(authenticated);
+    expect(admittedObserved).toEqual([1, 2, 3]);
+    expect(authenticatedObserved).toEqual([4, 5, 6]);
+    expect(Array.from(admittedOnce)).toEqual([0, 0, 0]);
+    expect(Array.from(authenticatedOnce)).toEqual([0, 0, 0]);
+    expect(Array.from(admitted)).toEqual([1, 2, 3]);
+    expect(Array.from(authenticated)).toEqual([4, 5, 6]);
+  });
+
   it('keeps browser close retryable while an export is active', async () => {
     const beginning = deferred<{ totalBytes: number }>();
     const proxy = {
