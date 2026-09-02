@@ -12,10 +12,7 @@ import {
   Plus,
   Check,
 } from 'react-feather';
-import {
-  IncompleteOnboardingSlotCleanupError,
-  useAccountStore,
-} from '../../stores/accountStore';
+import { useAccountStore } from '../../stores/accountStore';
 import { useAppStore } from '../../stores/appStore';
 import {
   checkBiometricAvailability,
@@ -47,13 +44,6 @@ import {
   wipeStagedAccounts,
 } from './stagedAccount';
 
-interface FailureRecovery {
-  pendingAccountIndexes: number[];
-  rollbackBiometric?: () => Promise<void>;
-  biometricRestored: boolean;
-  creationAuthorityOwner: string | null;
-}
-
 interface SecureAccountSetupProps {
   initialAccount: StagedAccount;
   onComplete: () => void | Promise<void>;
@@ -72,13 +62,9 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const { t } = useTranslation('auth');
   const operationChangeRef = useRef(onCredentialOperationChange);
   operationChangeRef.current = onCredentialOperationChange;
-  const initializePreparedAccount = useAccountStore(
-    state => state.initializePreparedAccount
+  const initializePreparedAccountsAtomically = useAccountStore(
+    state => state.initializePreparedAccountsAtomically
   );
-  const rollbackInitializedAccounts = useAccountStore(
-    state => state.rollbackInitializedAccounts
-  );
-  const logout = useAccountStore(state => state.logout);
 
   const [stagedAccounts, setStagedAccounts] = useState<StagedAccount[]>([
     initialAccount,
@@ -86,8 +72,6 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const stagedAccountsRef = useRef<StagedAccount[]>([initialAccount]);
   const mounted = useRef(false);
   const activeCredentialOperations = useRef(0);
-  const unmountedRecoveryRunning = useRef(false);
-  const continueUnmountedCleanup = useRef<() => void>(() => {});
   const [selectedBiometricIndex, setSelectedBiometricIndex] = useState<
     number | null
   >(null);
@@ -96,11 +80,12 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   );
   const [addingAccount, setAddingAccount] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
-  const [lockRecoveryPending, setLockRecoveryPending] = useState(false);
-  const lockRecoveryRequired = useRef(false);
-  const [failureRecoveryPending, setFailureRecoveryPending] = useState(false);
-  const failureRecovery = useRef<FailureRecovery | null>(null);
   const [showICloudModal, setShowICloudModal] = useState(false);
+  const [biometricCommitPending, setBiometricCommitPending] = useState(false);
+  const pendingBiometricRollback = useRef<(() => Promise<void>) | undefined>(
+    undefined
+  );
+  const pendingBiometricSync = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   stagedAccountsRef.current = stagedAccounts;
@@ -134,18 +119,13 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
 
     return () => {
       mounted.current = false;
-      if (
-        activeCredentialOperations.current === 0 &&
-        (failureRecovery.current || lockRecoveryRequired.current)
-      ) {
-        operationChangeRef.current?.(true);
-      }
       // React StrictMode immediately replays effects in development. Delay the
-      // ownership check by one microtask so that simulated cleanup cannot wipe
+      // ownership check by one microtask so simulated cleanup cannot wipe
       // credentials from the still-mounted component.
       queueMicrotask(() => {
         if (!mounted.current && activeCredentialOperations.current === 0) {
-          continueUnmountedCleanup.current();
+          wipeStagedAccounts(stagedAccountsRef.current);
+          operationChangeRef.current?.(false);
         }
       });
     };
@@ -163,15 +143,10 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     } finally {
       activeCredentialOperations.current -= 1;
       if (activeCredentialOperations.current === 0) {
-        if (
-          mounted.current &&
-          !failureRecovery.current &&
-          !lockRecoveryRequired.current
-        ) {
-          operationChangeRef.current?.(false);
-        } else if (!mounted.current) {
-          continueUnmountedCleanup.current();
+        if (!mounted.current) {
+          wipeStagedAccounts(stagedAccountsRef.current);
         }
+        operationChangeRef.current?.(false);
       }
     }
   };
@@ -201,134 +176,63 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     setError(null);
   };
 
-  const lockPersistedAccountsAndComplete = async () => {
-    setIsFinalizing(true);
-    setLockRecoveryPending(false);
-    try {
-      await logout({ lockedByUser: false });
-      await onComplete();
-      lockRecoveryRequired.current = false;
-    } catch (logoutError) {
-      logger.error(
-        'Failed to lock persisted onboarding accounts:',
-        logoutError
-      );
-      lockRecoveryRequired.current = true;
-      setLockRecoveryPending(true);
-      setIsFinalizing(false);
-    }
-  };
-
-  const retryFailureRecovery = async (recovery = failureRecovery.current) => {
-    if (!recovery) return;
-
-    setIsFinalizing(true);
-    setFailureRecoveryPending(false);
-    let incomplete = false;
-
-    if (recovery.pendingAccountIndexes.length > 0) {
-      try {
-        const attemptedIndexes = recovery.pendingAccountIndexes;
-        const result = await rollbackInitializedAccounts(
-          attemptedIndexes.map(index =>
-            readStagedPassword(stagedAccountsRef.current[index])
-          )
-        );
-        recovery.pendingAccountIndexes = result.failedPasswordIndexes.map(
-          index => attemptedIndexes[index]
-        );
-        incomplete =
-          result.lockFailed || recovery.pendingAccountIndexes.length > 0;
-      } catch (rollbackError) {
-        incomplete = true;
-        logger.error(
-          'Failed to roll back onboarding account batch:',
-          rollbackError
-        );
-      }
-    }
-
-    if (!recovery.biometricRestored && recovery.rollbackBiometric) {
-      try {
-        await recovery.rollbackBiometric();
-        recovery.biometricRestored = true;
-      } catch (rollbackError) {
-        incomplete = true;
-        logger.error(
-          'Failed to restore biometric login after onboarding error:',
-          rollbackError
-        );
-      }
-    }
-
-    if (!incomplete) {
-      try {
-        await logout({ lockedByUser: false });
-      } catch (logoutError) {
-        incomplete = true;
-        logger.error('Failed to lock after onboarding error:', logoutError);
-      }
-    }
-
-    if (incomplete) {
-      failureRecovery.current = recovery;
-      setFailureRecoveryPending(true);
-      setIsFinalizing(false);
-      return;
-    }
-
-    try {
-      restoreOnboardingCreationAuthorityAfterRollback(
-        recovery.creationAuthorityOwner
-      );
-    } catch (restoreError) {
-      logger.error('Failed to restore onboarding authority:', restoreError);
-      failureRecovery.current = recovery;
-      setFailureRecoveryPending(true);
-      setIsFinalizing(false);
-      return;
-    }
-    failureRecovery.current = null;
+  const completeCommittedSetup = async () => {
+    pendingBiometricRollback.current = undefined;
+    setBiometricCommitPending(false);
     wipeStagedAccounts(stagedAccountsRef.current);
-    const appState = useAppStore.getState();
-    appState.setIsInitialized(!appState.secureAccountCreationAllowed);
-    onRestart(t('secure_setup.batch_failed'));
+    await onComplete();
   };
 
-  const finishCleanupAfterUnmount = async () => {
-    if (mounted.current || unmountedRecoveryRunning.current) return;
-    unmountedRecoveryRunning.current = true;
+  const restorePendingBiometric = async (): Promise<boolean> => {
+    const rollback = pendingBiometricRollback.current;
+    if (!rollback) return true;
     try {
-      while (
-        !mounted.current &&
-        (failureRecovery.current || lockRecoveryRequired.current)
-      ) {
-        if (failureRecovery.current) {
-          await retryFailureRecovery(failureRecovery.current);
-        } else if (lockRecoveryRequired.current) {
-          await lockPersistedAccountsAndComplete();
-        }
-        if (failureRecovery.current || lockRecoveryRequired.current) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-      if (!mounted.current && activeCredentialOperations.current === 0) {
-        wipeStagedAccounts(stagedAccountsRef.current);
-      }
-    } finally {
-      unmountedRecoveryRunning.current = false;
-      if (
-        !mounted.current &&
-        activeCredentialOperations.current === 0 &&
-        !failureRecovery.current &&
-        !lockRecoveryRequired.current
-      ) {
-        operationChangeRef.current?.(false);
-      }
+      await rollback();
+      pendingBiometricRollback.current = undefined;
+      return true;
+    } catch (rollbackError) {
+      logger.error('Failed to restore biometric login:', rollbackError);
+      setError(t('secure_setup.biometric_retry_failed'));
+      return false;
     }
   };
-  continueUnmountedCleanup.current = () => {
-    void finishCleanupAfterUnmount();
+
+  const retryCommittedBiometric = async () => {
+    setIsFinalizing(true);
+    setError(null);
+    if (!(await restorePendingBiometric())) {
+      setIsFinalizing(false);
+      return;
+    }
+    const selected =
+      selectedBiometricIndex === null
+        ? null
+        : stagedAccountsRef.current[selectedBiometricIndex];
+    if (!selected) {
+      await completeCommittedSetup();
+      return;
+    }
+    const result = await configureBiometricLoginWithRollback(
+      readStagedPassword(selected),
+      pendingBiometricSync.current
+    );
+    if (!result.success) {
+      pendingBiometricRollback.current = result.rollback;
+      setError(result.error || t('secure_setup.biometric_retry_failed'));
+      setIsFinalizing(false);
+      return;
+    }
+    await completeCommittedSetup();
+  };
+
+  const continueWithoutBiometric = async () => {
+    setIsFinalizing(true);
+    setError(null);
+    if (!(await restorePendingBiometric())) {
+      setIsFinalizing(false);
+      return;
+    }
+    await completeCommittedSetup();
   };
 
   const finalizeAccounts = async (syncToICloud = false) => {
@@ -336,10 +240,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     setError(null);
 
     const preparedAccounts: PreparedPasswordAccount[] = [];
-    let persistedAccounts = 0;
-    let currentPersistenceIndex: number | null = null;
     let failure: unknown;
-    let rollbackBiometric: (() => Promise<void>) | undefined;
     let creationAuthorityOwner: string | null = null;
 
     try {
@@ -354,55 +255,18 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
         );
       }
 
-      if (selectedBiometricIndex !== null) {
-        const selected = stagedAccounts[selectedBiometricIndex];
-        const result = await configureBiometricLoginWithRollback(
-          readStagedPassword(selected),
-          syncToICloud
-        );
-        // A failed replacement can still carry a retry closure when restoring
-        // the previous singleton credential was incomplete.
-        rollbackBiometric = result.rollback;
-        if (!result.success) {
-          throw new Error(result.error || 'Biometric setup failed');
-        }
-      }
-
-      // Consume overwrite authority before the first durable account write.
-      // A verified full rollback restores it; a crash fails closed.
       creationAuthorityOwner =
         consumeOnboardingCreationAuthority(creationModeLease);
-      for (const [index, account] of stagedAccounts.entries()) {
-        currentPersistenceIndex = index;
-        await initializePreparedAccount(
-          account.username,
-          readStagedPassword(account),
-          preparedAccounts[index]
-        );
-        persistedAccounts += 1;
-        currentPersistenceIndex = null;
-      }
+      await initializePreparedAccountsAtomically(
+        stagedAccounts.map((account, index) => ({
+          username: account.username,
+          password: readStagedPassword(account),
+          prepared: preparedAccounts[index],
+        }))
+      );
     } catch (caught) {
       failure = caught;
       logger.error('Error finalizing secure account setup:', caught);
-
-      const pendingAccountIndexes = Array.from(
-        { length: persistedAccounts },
-        (_, index) => index
-      );
-      if (
-        caught instanceof IncompleteOnboardingSlotCleanupError &&
-        currentPersistenceIndex !== null
-      ) {
-        pendingAccountIndexes.push(currentPersistenceIndex);
-      }
-
-      failureRecovery.current = {
-        pendingAccountIndexes,
-        rollbackBiometric,
-        biometricRestored: rollbackBiometric === undefined,
-        creationAuthorityOwner,
-      };
     } finally {
       for (const prepared of preparedAccounts) {
         wipePreparedPasswordAccount(prepared);
@@ -410,17 +274,38 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     }
 
     if (failure) {
-      await retryFailureRecovery();
+      try {
+        restoreOnboardingCreationAuthorityAfterRollback(creationAuthorityOwner);
+      } catch (restoreError) {
+        logger.error('Failed to restore onboarding authority:', restoreError);
+      }
+      // The atomic installer either exposes no candidate account or the whole
+      // committed generation. Never erase individual slots after an ambiguous
+      // commit response, because doing so would reintroduce partial survival.
+      wipeStagedAccounts(stagedAccountsRef.current);
+      useAppStore.getState().setIsInitialized(false);
+      onRestart(t('secure_setup.batch_failed'));
       return;
     }
 
-    // Revoke creation before fallible logout/locking. A detected lock failure
-    // must never leave durable accounts alongside overwrite authorization.
     useAppStore.getState().setSecureAccountCreationAllowed(false);
-    wipeStagedAccounts(stagedAccounts);
-    // Every account, including a single-account batch, returns to login. Only a
-    // real post-onboarding unlock may publish that stable account's public key.
-    await lockPersistedAccountsAndComplete();
+    if (selectedBiometricIndex !== null) {
+      const selected = stagedAccounts[selectedBiometricIndex];
+      const result = await configureBiometricLoginWithRollback(
+        readStagedPassword(selected),
+        syncToICloud
+      );
+      if (!result.success) {
+        pendingBiometricRollback.current = result.rollback;
+        pendingBiometricSync.current = syncToICloud;
+        setError(result.error || t('secure_setup.biometric_retry_failed'));
+        setBiometricCommitPending(true);
+        setIsFinalizing(false);
+        return;
+      }
+    }
+
+    await completeCommittedSetup();
   };
 
   const handleFinalize = () => {
@@ -431,17 +316,17 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     void runCredentialOperation(() => finalizeAccounts(false));
   };
 
-  if (failureRecoveryPending) {
+  if (biometricCommitPending) {
     return (
       <PageLayout
-        header={<PageHeader title={t('secure_setup.cleanup_failed_title')} />}
+        header={<PageHeader title={t('secure_setup.biometric_failed_title')} />}
         className="app-max-w mx-auto"
         contentClassName="p-4 flex flex-col justify-center"
       >
         <div className="text-center space-y-6">
           <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto" />
           <p className="text-sm text-muted-foreground">
-            {t('secure_setup.cleanup_failed')}
+            {error || t('secure_setup.biometric_failed')}
           </p>
           <Button
             type="button"
@@ -449,39 +334,20 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
             fullWidth
             loading={isFinalizing}
             disabled={isFinalizing}
-            onClick={() =>
-              void runCredentialOperation(() => retryFailureRecovery())
-            }
+            onClick={() => void runCredentialOperation(retryCommittedBiometric)}
           >
-            {t('secure_setup.retry_cleanup')}
+            {t('secure_setup.retry_biometric')}
           </Button>
-        </div>
-      </PageLayout>
-    );
-  }
-
-  if (lockRecoveryPending) {
-    return (
-      <PageLayout
-        header={<PageHeader title={t('secure_setup.lock_failed_title')} />}
-        className="app-max-w mx-auto"
-        contentClassName="p-4 flex flex-col justify-center"
-      >
-        <div className="text-center space-y-6">
-          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto" />
-          <p className="text-sm text-muted-foreground">
-            {t('secure_setup.lock_failed')}
-          </p>
           <Button
-            onClick={() =>
-              void runCredentialOperation(lockPersistedAccountsAndComplete)
-            }
-            variant="primary"
-            size="custom"
+            type="button"
+            variant="secondary"
             fullWidth
-            className="h-12 rounded-full text-sm font-medium"
+            disabled={isFinalizing}
+            onClick={() =>
+              void runCredentialOperation(continueWithoutBiometric)
+            }
           >
-            {t('secure_setup.retry_lock')}
+            {t('secure_setup.continue_password_only')}
           </Button>
         </div>
       </PageLayout>
