@@ -15,6 +15,9 @@ pub enum SecureStorageError {
     #[error("unsupported version")]
     UnsupportedVersion(u32),
 
+    #[error("Unsupported secure-storage account generation state")]
+    UnsupportedAccountGenerationState,
+
     #[error("unsupported portable backup version")]
     UnsupportedPortableVersion(u64),
 
@@ -71,7 +74,9 @@ impl SecureStorageError {
         match self {
             Self::InvalidPassword => "INVALID_PASSWORD",
             Self::OutOfBounds => "OUT_OF_BOUNDS",
-            Self::UnsupportedVersion(_) => "UNSUPPORTED_VERSION",
+            Self::UnsupportedVersion(_) | Self::UnsupportedAccountGenerationState => {
+                "UNSUPPORTED_VERSION"
+            }
             Self::UnsupportedPortableVersion(_) => "UNSUPPORTED_PORTABLE_VERSION",
             Self::InvalidPortableArchive => "INVALID_PORTABLE_ARCHIVE",
             Self::PortableArchiveTooLarge => "PORTABLE_ARCHIVE_TOO_LARGE",

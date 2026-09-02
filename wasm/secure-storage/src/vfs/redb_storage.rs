@@ -15,6 +15,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use rand::RngCore;
 use redb::{Database, ReadableTable, TableDefinition};
 use zeroize::Zeroizing;
 
@@ -33,8 +34,68 @@ use crate::types::SessionIndex;
 const BLOCKS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("blocks");
 const KEYPAIRS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("keypairs");
 const METADATA: TableDefinition<&[u8], &[u8]> = TableDefinition::new("metadata");
-const PORTABLE_IMPORT_INSTALLED_KEY: &[u8] = b"portable-import-installed-v1";
-const PORTABLE_IMPORT_INSTALLED_VALUE: &[u8] = b"yes";
+const LEGACY_PORTABLE_IMPORT_INSTALLED_KEY: &[u8] = b"portable-import-installed-v1";
+const ACCOUNT_GENERATION_STATE_KEY: &[u8] = b"account-generation-state-v1";
+const EMPTY_ACCOUNT_GENERATION: &[u8] = b"empty-v1";
+const COMMITTED_ACCOUNT_GENERATION_PREFIX: &[u8] = b"committed-v1:";
+const GENERATION_EPOCH_BYTES: usize = 16;
+const GENERATION_EPOCH_HEX_BYTES: usize = GENERATION_EPOCH_BYTES * 2;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum AccountGenerationState {
+    Empty,
+    Committed,
+}
+
+impl AccountGenerationState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::Committed => "committed",
+        }
+    }
+
+    fn decode(value: &[u8]) -> Result<Self> {
+        if value == EMPTY_ACCOUNT_GENERATION {
+            return Ok(Self::Empty);
+        }
+        decode_committed_generation_epoch(value)?;
+        Ok(Self::Committed)
+    }
+}
+
+fn new_generation_epoch() -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut bytes = [0_u8; GENERATION_EPOCH_BYTES];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    let mut epoch = String::with_capacity(GENERATION_EPOCH_HEX_BYTES);
+    for byte in bytes {
+        epoch.push(HEX[usize::from(byte >> 4)] as char);
+        epoch.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    epoch
+}
+
+fn committed_generation_value(epoch: &str) -> Vec<u8> {
+    let mut value =
+        Vec::with_capacity(COMMITTED_ACCOUNT_GENERATION_PREFIX.len() + GENERATION_EPOCH_HEX_BYTES);
+    value.extend_from_slice(COMMITTED_ACCOUNT_GENERATION_PREFIX);
+    value.extend_from_slice(epoch.as_bytes());
+    value
+}
+
+fn decode_committed_generation_epoch(value: &[u8]) -> Result<String> {
+    let epoch = value
+        .strip_prefix(COMMITTED_ACCOUNT_GENERATION_PREFIX)
+        .filter(|epoch| {
+            epoch.len() == GENERATION_EPOCH_HEX_BYTES
+                && epoch.iter().all(u8::is_ascii_hexdigit)
+                && epoch.iter().all(|byte| !byte.is_ascii_uppercase())
+        })
+        .ok_or(SecureStorageError::UnsupportedAccountGenerationState)?;
+    String::from_utf8(epoch.to_vec())
+        .map_err(|_| SecureStorageError::UnsupportedAccountGenerationState)
+}
 
 // ── Buffered write ───────────────────────────────────────────────────
 
@@ -145,7 +206,8 @@ impl RedbStorage {
     /// Return true if the on-disk database already has any keypair
     /// entries; used to gate `provision` at boot so we don't wipe
     /// existing slots by re-provisioning random throwaway keys.
-    pub fn portable_import_installed(&self) -> Result<bool> {
+    #[cfg(test)]
+    pub fn legacy_portable_import_marker_exists(&self) -> Result<bool> {
         let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
         let table = match txn.open_table(METADATA) {
             Ok(table) => table,
@@ -153,9 +215,9 @@ impl RedbStorage {
             Err(error) => return Err(redb_err("metadata table")(error)),
         };
         Ok(table
-            .get(PORTABLE_IMPORT_INSTALLED_KEY)
+            .get(LEGACY_PORTABLE_IMPORT_INSTALLED_KEY)
             .map_err(redb_err("metadata read"))?
-            .is_some_and(|value| value.value() == PORTABLE_IMPORT_INSTALLED_VALUE))
+            .is_some())
     }
 
     pub fn has_data(&self) -> Result<bool> {
@@ -167,6 +229,60 @@ impl RedbStorage {
         };
         let mut iter = table.iter().map_err(redb_err("iter"))?;
         Ok(iter.next().is_some())
+    }
+
+    pub fn account_generation_state(&self) -> Result<Option<AccountGenerationState>> {
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
+        let table = match txn.open_table(METADATA) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(redb_err("metadata table")(error)),
+        };
+        table
+            .get(ACCOUNT_GENERATION_STATE_KEY)
+            .map_err(redb_err("account generation state read"))?
+            .map(|value| AccountGenerationState::decode(value.value()))
+            .transpose()
+    }
+
+    pub fn account_generation_epoch(&self) -> Result<Option<String>> {
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
+        let table = match txn.open_table(METADATA) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(redb_err("metadata table")(error)),
+        };
+        let Some(value) = table
+            .get(ACCOUNT_GENERATION_STATE_KEY)
+            .map_err(redb_err("account generation epoch read"))?
+        else {
+            return Ok(None);
+        };
+        if value.value() == EMPTY_ACCOUNT_GENERATION {
+            return Ok(None);
+        }
+        decode_committed_generation_epoch(value.value()).map(Some)
+    }
+
+    pub fn initialize_empty_account_generation(&mut self) -> Result<AccountGenerationState> {
+        if let Some(state) = self.account_generation_state()? {
+            return Ok(state);
+        }
+        if self.has_data()? {
+            return Err(SecureStorageError::UnsupportedVersion(0));
+        }
+        let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
+        {
+            let mut metadata = txn
+                .open_table(METADATA)
+                .map_err(redb_err("metadata table"))?;
+            metadata
+                .insert(ACCOUNT_GENERATION_STATE_KEY, EMPTY_ACCOUNT_GENERATION)
+                .map_err(redb_err("account generation state insert"))?;
+        }
+        txn.commit()
+            .map_err(redb_err("account generation state commit"))?;
+        Ok(AccountGenerationState::Empty)
     }
 
     /// Batch-flush pending keypairs, deletes, and inserts in a single
@@ -388,6 +504,8 @@ impl RedbStorage {
     /// including its digest, has validated and the write transaction commits.
     pub fn import_portable<R: Read>(&mut self, input: R) -> Result<R> {
         self.commit()?;
+        let generation_epoch = new_generation_epoch();
+        let committed_generation = committed_generation_value(&generation_epoch);
         let mut reader = PortableArchiveReader::new(input)?;
         let txn = self
             .db
@@ -411,11 +529,14 @@ impl RedbStorage {
                 .retain(|_, _| false)
                 .map_err(redb_err("portable clear blocks"))?;
             metadata
+                .remove(LEGACY_PORTABLE_IMPORT_INSTALLED_KEY)
+                .map_err(redb_err("legacy portable metadata removal"))?;
+            metadata
                 .insert(
-                    PORTABLE_IMPORT_INSTALLED_KEY,
-                    PORTABLE_IMPORT_INSTALLED_VALUE,
+                    ACCOUNT_GENERATION_STATE_KEY,
+                    committed_generation.as_slice(),
                 )
-                .map_err(redb_err("portable metadata marker"))?;
+                .map_err(redb_err("account generation state marker"))?;
 
             while let Some(record) = reader.read_record()? {
                 match record.kind {
@@ -697,6 +818,34 @@ mod tests {
     // ── Basics ───────────────────────────────────────────────────────
 
     #[test]
+    fn account_generation_state_is_versioned_and_fails_closed() {
+        let (mut storage, _dir) = make_storage();
+        assert_eq!(storage.account_generation_state().unwrap(), None);
+        assert_eq!(
+            storage.initialize_empty_account_generation().unwrap(),
+            AccountGenerationState::Empty
+        );
+        assert_eq!(
+            storage.account_generation_state().unwrap(),
+            Some(AccountGenerationState::Empty)
+        );
+        assert_eq!(storage.account_generation_epoch().unwrap(), None);
+
+        let txn = storage.db.begin_write().unwrap();
+        {
+            let mut metadata = txn.open_table(METADATA).unwrap();
+            metadata
+                .insert(ACCOUNT_GENERATION_STATE_KEY, b"future-state".as_slice())
+                .unwrap();
+        }
+        txn.commit().unwrap();
+        assert!(matches!(
+            storage.account_generation_state(),
+            Err(SecureStorageError::UnsupportedAccountGenerationState)
+        ));
+    }
+
+    #[test]
     fn portable_fixture_import_export_roundtrip() {
         let (mut storage, _dir) = make_storage();
         let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
@@ -706,6 +855,14 @@ mod tests {
             .unwrap();
         let exported = storage.export_portable(Vec::new()).unwrap();
 
+        assert_eq!(
+            storage.account_generation_state().unwrap(),
+            Some(AccountGenerationState::Committed)
+        );
+        let epoch = storage.account_generation_epoch().unwrap().unwrap();
+        assert_eq!(epoch.len(), GENERATION_EPOCH_HEX_BYTES);
+        assert!(epoch.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert!(!storage.legacy_portable_import_marker_exists().unwrap());
         assert_eq!(exported, fixture);
         assert_eq!(storage.block_counts[0].get(&0), Some(&1));
         assert_eq!(storage.block_counts[1].get(&0), Some(&1));
@@ -719,6 +876,7 @@ mod tests {
         storage
             .import_portable(std::io::Cursor::new(fixture.as_slice()))
             .unwrap();
+        let original_epoch = storage.account_generation_epoch().unwrap();
 
         let mut corrupted = fixture.to_vec();
         let wrapped_secret = 40 + 26 + 4 + 65_536 + 16;
@@ -727,6 +885,7 @@ mod tests {
             storage.import_portable(std::io::Cursor::new(corrupted)),
             Err(SecureStorageError::PortableChecksumMismatch)
         ));
+        assert_eq!(storage.account_generation_epoch().unwrap(), original_epoch);
 
         drop(storage);
         let mut reopened = RedbStorage::open(dir.path()).unwrap();

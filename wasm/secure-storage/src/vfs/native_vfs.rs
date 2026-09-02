@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::mem::size_of;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -121,8 +121,201 @@ impl PortableTransfer {
     }
 }
 
+struct NativeBackend {
+    durable: RedbStorage,
+    candidate: Option<MemoryStorage>,
+}
+
+impl NativeBackend {
+    fn new(durable: RedbStorage) -> Self {
+        Self {
+            durable,
+            candidate: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn legacy_portable_import_marker_exists(&self) -> Result<bool> {
+        self.durable.legacy_portable_import_marker_exists()
+    }
+
+    fn has_data(&self) -> Result<bool> {
+        self.durable.has_data()
+    }
+
+    fn account_generation_state(
+        &self,
+    ) -> Result<Option<super::redb_storage::AccountGenerationState>> {
+        self.durable.account_generation_state()
+    }
+
+    fn account_generation_epoch(&self) -> Result<Option<String>> {
+        self.durable.account_generation_epoch()
+    }
+
+    fn initialize_empty_account_generation(
+        &mut self,
+    ) -> Result<super::redb_storage::AccountGenerationState> {
+        self.durable.initialize_empty_account_generation()
+    }
+
+    fn commit(&mut self) -> Result<()> {
+        self.durable.commit()
+    }
+
+    fn onboarding_candidate_active(&self) -> bool {
+        self.candidate.is_some()
+    }
+
+    fn discard_pending(&mut self) {
+        self.durable.discard_pending();
+    }
+
+    fn begin_onboarding_candidate(&mut self, domain: &str) -> Result<()> {
+        if self.account_generation_state()?
+            != Some(super::redb_storage::AccountGenerationState::Empty)
+        {
+            return Err(SecureStorageError::Storage(
+                "onboarding candidate is not available".into(),
+            ));
+        }
+        let mut candidate = MemoryStorage::new();
+        crate::lifecycle::provision_storage_for_domain(&mut candidate, domain)?;
+        self.candidate = Some(candidate);
+        Ok(())
+    }
+
+    fn abort_onboarding_candidate(&mut self) -> Result<()> {
+        self.candidate.take().ok_or_else(|| {
+            SecureStorageError::Storage("onboarding candidate is not active".into())
+        })?;
+        Ok(())
+    }
+
+    fn commit_onboarding_candidate(&mut self) -> Result<String> {
+        let candidate = self.candidate.as_ref().ok_or_else(|| {
+            SecureStorageError::Storage("onboarding candidate is not active".into())
+        })?;
+        let archive = Zeroizing::new(candidate.export_portable(Vec::new())?);
+        self.durable
+            .import_portable(Cursor::new(archive.as_slice()))?;
+        let generation_epoch = self
+            .durable
+            .account_generation_epoch()?
+            .ok_or(SecureStorageError::UnsupportedAccountGenerationState)?;
+        self.candidate = None;
+        Ok(generation_epoch)
+    }
+
+    fn cover_tick(&mut self, domain: &str, namespace: u8) -> Result<()> {
+        if let Some(candidate) = self.candidate.as_mut() {
+            crate::cover_traffic_tick(&mut self.durable, domain, namespace)?;
+            crate::cover_traffic_tick(candidate, domain, namespace)
+        } else {
+            crate::cover_traffic_tick(&mut self.durable, domain, namespace)
+        }
+    }
+
+    fn export_portable<W: Write>(&mut self, output: W) -> Result<W> {
+        if self.candidate.is_some() {
+            return Err(SecureStorageError::PortableTransferInProgress);
+        }
+        self.durable.export_portable(output)
+    }
+
+    fn import_portable<R: Read>(&mut self, input: R) -> Result<R> {
+        if self.candidate.is_some() {
+            return Err(SecureStorageError::PortableTransferInProgress);
+        }
+        self.durable.import_portable(input)
+    }
+}
+
+impl BlockStorage for NativeBackend {
+    fn read_block(
+        &self,
+        session: SessionIndex,
+        namespace: u8,
+        block: u64,
+    ) -> Result<Box<[u8; crate::BLOCK_SIZE]>> {
+        match &self.candidate {
+            Some(candidate) => candidate.read_block(session, namespace, block),
+            None => self.durable.read_block(session, namespace, block),
+        }
+    }
+
+    fn write_block(
+        &mut self,
+        session: SessionIndex,
+        namespace: u8,
+        block: u64,
+        data: &[u8; crate::BLOCK_SIZE],
+    ) -> Result<()> {
+        match &mut self.candidate {
+            Some(candidate) => candidate.write_block(session, namespace, block, data),
+            None => self.durable.write_block(session, namespace, block, data),
+        }
+    }
+
+    fn append_block(
+        &mut self,
+        session: SessionIndex,
+        namespace: u8,
+        data: &[u8; crate::BLOCK_SIZE],
+    ) -> Result<()> {
+        match &mut self.candidate {
+            Some(candidate) => candidate.append_block(session, namespace, data),
+            None => self.durable.append_block(session, namespace, data),
+        }
+    }
+
+    fn block_count(&self, session: SessionIndex, namespace: u8) -> Result<u64> {
+        match &self.candidate {
+            Some(candidate) => candidate.block_count(session, namespace),
+            None => self.durable.block_count(session, namespace),
+        }
+    }
+
+    fn fsync(&self, session: SessionIndex, namespace: u8) -> Result<()> {
+        match &self.candidate {
+            Some(candidate) => candidate.fsync(session, namespace),
+            None => self.durable.fsync(session, namespace),
+        }
+    }
+
+    fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
+        match &mut self.candidate {
+            Some(candidate) => candidate.reset_blockstream(session, namespace),
+            None => self.durable.reset_blockstream(session, namespace),
+        }
+    }
+
+    fn namespaces_with_data(&self, session: SessionIndex) -> Result<Vec<u8>> {
+        match &self.candidate {
+            Some(candidate) => candidate.namespaces_with_data(session),
+            None => self.durable.namespaces_with_data(session),
+        }
+    }
+}
+
+impl KeypairStorage for NativeBackend {
+    fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
+        match &self.candidate {
+            Some(candidate) => candidate.read_keypair(session),
+            None => self.durable.read_keypair(session),
+        }
+    }
+
+    fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
+        match &mut self.candidate {
+            Some(candidate) => candidate.write_keypair(session, data),
+            None => self.durable.write_keypair(session, data),
+        }
+    }
+}
+
 struct VfsState {
-    backend: RedbStorage,
+    backend: NativeBackend,
     base_path: PathBuf,
     domain: String,
     transfer: Option<PortableTransfer>,
@@ -247,7 +440,7 @@ pub fn init_native(path: &str, domain: &str) -> Result<()> {
     }
     let storage = RedbStorage::open(&base_path)?;
     *guard = Some(VfsState {
-        backend: storage,
+        backend: NativeBackend::new(storage),
         base_path,
         domain: domain.to_string(),
         transfer: None,
@@ -321,15 +514,14 @@ pub fn register() -> Result<()> {
     }
 }
 
-/// Return true if the backing redb database already has keypair data.
-/// Used by the plugin layer to gate `provision` at boot.
-pub fn portable_import_installed() -> Result<bool> {
+#[cfg(test)]
+fn legacy_portable_import_marker_exists() -> Result<bool> {
     let mutex = state_mutex();
     let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_ref()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
-    st.backend.portable_import_installed()
+    st.backend.legacy_portable_import_marker_exists()
 }
 
 pub fn has_data() -> Result<bool> {
@@ -340,6 +532,85 @@ pub fn has_data() -> Result<bool> {
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
     st.require_transfer_idle()?;
     st.backend.has_data()
+}
+
+pub fn account_generation_state() -> Result<Option<&'static str>> {
+    let mutex = state_mutex();
+    let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    Ok(st
+        .backend
+        .account_generation_state()?
+        .map(|state| state.as_str()))
+}
+
+pub fn account_generation_epoch() -> Result<Option<String>> {
+    let mutex = state_mutex();
+    let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    st.backend.account_generation_epoch()
+}
+
+pub fn initialize_empty_account_generation() -> Result<&'static str> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    Ok(st.backend.initialize_empty_account_generation()?.as_str())
+}
+
+pub fn begin_onboarding_candidate() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    if st.session.is_some() {
+        return Err(SecureStorageError::Storage(
+            "onboarding candidate requires locked storage".into(),
+        ));
+    }
+    st.backend.begin_onboarding_candidate(&st.domain)?;
+    st.main_file = EncryptedFileCore::new();
+    st.namespace_states.clear();
+    Ok(())
+}
+
+pub fn commit_onboarding_candidate() -> Result<String> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    let generation_epoch = st.backend.commit_onboarding_candidate()?;
+    st.main_file = EncryptedFileCore::new();
+    st.session = None;
+    st.namespace_states.clear();
+    Ok(generation_epoch)
+}
+
+pub fn abort_onboarding_candidate() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    st.backend.abort_onboarding_candidate()?;
+    st.main_file = EncryptedFileCore::new();
+    st.session = None;
+    st.namespace_states.clear();
+    Ok(())
 }
 
 /// Provision all session slots.
@@ -369,6 +640,14 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
     st.require_transfer_idle()?;
+    if st.backend.account_generation_state()?
+        == Some(super::redb_storage::AccountGenerationState::Empty)
+        && !st.backend.onboarding_candidate_active()
+    {
+        return Err(SecureStorageError::Storage(
+            "atomic onboarding candidate is not active".into(),
+        ));
+    }
     // Flush pending writes to the CURRENT session before switching.
     // Otherwise the `main_file` reset below would drop data that was
     // buffered but not yet synced to redb - e.g. during multi-account
@@ -1071,7 +1350,7 @@ fn transform_portable_candidate(
 
 /// Revalidate and atomically replace active redb storage from a validated
 /// candidate. A failure leaves the old installation selected.
-pub fn install_portable_import() -> Result<()> {
+pub fn install_portable_import() -> Result<String> {
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
@@ -1093,16 +1372,21 @@ pub fn install_portable_import() -> Result<()> {
     let result = (|| {
         let input = File::open(&path)?;
         st.backend.import_portable(input)?;
-        Ok(())
+        st.backend
+            .account_generation_epoch()?
+            .ok_or(SecureStorageError::UnsupportedAccountGenerationState)
     })();
-    if let Err(error) = result {
-        // Pre-commit failures leave the exact validated candidate retryable.
-        st.transfer = Some(PortableTransfer::ValidatedImport {
-            path,
-            source_path: Some(source_path),
-        });
-        return Err(error);
-    }
+    let generation_epoch = match result {
+        Ok(generation_epoch) => generation_epoch,
+        Err(error) => {
+            // Pre-commit failures leave the exact validated candidate retryable.
+            st.transfer = Some(PortableTransfer::ValidatedImport {
+                path,
+                source_path: Some(source_path),
+            });
+            return Err(error);
+        }
+    };
 
     // Replacement has committed. A later spool-cleanup error must not be
     // reported as an install failure, which would misrepresent active state.
@@ -1133,7 +1417,7 @@ pub fn install_portable_import() -> Result<()> {
             paths: pending_cleanup,
         })
     };
-    Ok(())
+    Ok(generation_epoch)
 }
 
 fn cleanup_portable_paths(
@@ -1289,7 +1573,7 @@ pub fn cover_tick() -> Result<()> {
         let st = guard
             .as_mut()
             .ok_or_else(|| SecureStorageError::NotInitialized)?;
-        crate::cover_traffic_tick(&mut st.backend, &st.domain, ns)?;
+        st.backend.cover_tick(&st.domain, ns)?;
         // `guard` drops here at the end of the loop iteration, releasing
         // the mutex before the next namespace's tick.
     }
@@ -2274,7 +2558,7 @@ mod tests {
             finish_portable_outer_migration().unwrap();
 
             let migrated_path = destination.path().join(PORTABLE_MIGRATION_SPOOL);
-            assert!(!portable_import_installed().unwrap());
+            assert!(!legacy_portable_import_marker_exists().unwrap());
             assert!(migrated_path.exists());
             assert!(destination.path().join(PORTABLE_IMPORT_SPOOL).exists());
             let mut reader =
@@ -2289,8 +2573,12 @@ mod tests {
             }
             drop(reader);
 
-            install_portable_import().unwrap();
-            assert!(portable_import_installed().unwrap());
+            let generation_epoch = install_portable_import().unwrap();
+            assert!(!legacy_portable_import_marker_exists().unwrap());
+            assert_eq!(
+                account_generation_epoch().unwrap().as_deref(),
+                Some(generation_epoch.as_str())
+            );
             assert!(!destination.path().join(PORTABLE_IMPORT_SPOOL).exists());
             assert!(!migrated_path.exists());
             assert!(unlock(b"password").unwrap());
@@ -3213,6 +3501,78 @@ mod tests {
                 cover_was_committed,
                 "locked cover tick should be committed to redb before restart"
             );
+        });
+    }
+
+    #[test]
+    fn test_onboarding_candidate_survives_only_after_atomic_commit() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            ensure_registered();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            init_native(&path, "candidate-test").unwrap();
+            assert_eq!(initialize_empty_account_generation().unwrap(), "empty");
+            provision().unwrap();
+            begin_onboarding_candidate().unwrap();
+            allocate(0, b"first-password").unwrap();
+            {
+                let conn = open_db().unwrap();
+                conn.execute_batch(
+                    "CREATE TABLE profile (name TEXT NOT NULL);\n                     INSERT INTO profile VALUES ('first');",
+                )
+                .unwrap();
+            }
+            flush().unwrap();
+            lock().unwrap();
+
+            // A process death drops the complete in-memory candidate and leaves
+            // the durable all-cover generation authoritative.
+            reset_state();
+            init_native(&path, "candidate-test").unwrap();
+            assert_eq!(account_generation_state().unwrap(), Some("empty"));
+            assert!(!unlock(b"first-password").unwrap());
+
+            begin_onboarding_candidate().unwrap();
+            for (slot, password, name) in [
+                (0, b"first-password".as_slice(), "first"),
+                (2, b"second-password".as_slice(), "second"),
+            ] {
+                allocate(slot, password).unwrap();
+                let conn = open_db().unwrap();
+                conn.execute_batch(&format!(
+                    "CREATE TABLE profile (name TEXT NOT NULL);\n                     INSERT INTO profile VALUES ('{name}');"
+                ))
+                .unwrap();
+                drop(conn);
+                flush().unwrap();
+                lock().unwrap();
+            }
+            let generation_epoch = commit_onboarding_candidate().unwrap();
+            assert!(!legacy_portable_import_marker_exists().unwrap());
+            assert_eq!(
+                account_generation_epoch().unwrap().as_deref(),
+                Some(generation_epoch.as_str())
+            );
+
+            reset_state();
+            init_native(&path, "candidate-test").unwrap();
+            assert_eq!(account_generation_state().unwrap(), Some("committed"));
+            for (password, expected) in [
+                (b"first-password".as_slice(), "first"),
+                (b"second-password".as_slice(), "second"),
+            ] {
+                assert!(unlock(password).unwrap());
+                let conn = open_db().unwrap();
+                let name: String = conn
+                    .query_row("SELECT name FROM profile", [], |row| row.get(0))
+                    .unwrap();
+                assert_eq!(name, expected);
+                drop(conn);
+                lock().unwrap();
+            }
         });
     }
 

@@ -267,9 +267,32 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             let has = native_vfs::has_data()?;
             Ok(serde_json::to_string(&has)?)
         }
-        "portableImportInstalled" => {
-            let installed = native_vfs::portable_import_installed()?;
-            Ok(serde_json::to_string(&installed)?)
+        "accountGenerationState" => {
+            let state = native_vfs::account_generation_state()?;
+            Ok(serde_json::to_string(&state)?)
+        }
+        "accountGenerationEpoch" => {
+            let epoch = native_vfs::account_generation_epoch()?;
+            Ok(serde_json::to_string(&epoch)?)
+        }
+        "initializeEmptyAccountGeneration" => {
+            let state = native_vfs::initialize_empty_account_generation()?;
+            Ok(serde_json::to_string(&state)?)
+        }
+        "beginOnboardingCandidate" => {
+            drop_open_database()?;
+            native_vfs::begin_onboarding_candidate()?;
+            Ok("null".into())
+        }
+        "commitOnboardingCandidate" => {
+            drop_open_database()?;
+            let epoch = native_vfs::commit_onboarding_candidate()?;
+            Ok(serde_json::to_string(&epoch)?)
+        }
+        "abortOnboardingCandidate" => {
+            drop_open_database()?;
+            native_vfs::abort_onboarding_candidate()?;
+            Ok("null".into())
         }
         "allocateSession" => {
             let a: AllocateArgs = parse(args)?;
@@ -380,8 +403,8 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             Ok("null".into())
         }
         "installPortableImport" => {
-            native_vfs::install_portable_import()?;
-            Ok("null".into())
+            let epoch = native_vfs::install_portable_import()?;
+            Ok(serde_json::to_string(&epoch)?)
         }
         "abortPortableTransfer" => {
             native_vfs::abort_portable_transfer()?;
@@ -528,11 +551,16 @@ fn unlock(password: &[u8]) -> Result<bool> {
     Ok(ok)
 }
 
-fn lock() -> Result<()> {
+fn drop_open_database() -> Result<()> {
     let mut guard = db_mutex()
         .lock()
         .map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = None;
+    Ok(())
+}
+
+fn lock() -> Result<()> {
+    drop_open_database()?;
     native_vfs::lock()?;
     Ok(())
 }

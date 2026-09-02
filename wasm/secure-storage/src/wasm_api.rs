@@ -124,6 +124,93 @@ pub async fn init_secure_storage(domain: &str, backend: &str) -> Result<(), JsVa
     Ok(())
 }
 
+#[wasm_bindgen(js_name = beginOnboardingCandidate)]
+pub fn begin_onboarding_candidate() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        let previous = std::mem::replace(&mut state.backend, Backend::Memory(MemoryStorage::new()));
+        let durable = match previous {
+            Backend::Idb(durable) | Backend::Onboarding { durable, .. } => durable,
+            other => {
+                state.backend = other;
+                return Err(JsValue::from_str(
+                    "onboarding candidate requires IndexedDB storage",
+                ));
+            }
+        };
+        let mut candidate = MemoryStorage::new();
+        crate::lifecycle::provision_storage_for_domain(&mut candidate, &state.domain)
+            .map_err(map_err)?;
+        state.backend = Backend::Onboarding { durable, candidate };
+        state.session = None;
+        state.namespace_states.clear();
+        Ok(())
+    })
+}
+
+#[wasm_bindgen(js_name = exportOnboardingCandidate)]
+pub fn export_onboarding_candidate() -> Result<Vec<u8>, JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        state.session = None;
+        state.namespace_states.clear();
+        match &state.backend {
+            Backend::Onboarding { candidate, .. } => {
+                candidate.export_portable(Vec::new()).map_err(map_err)
+            }
+            _ => Err(JsValue::from_str("onboarding candidate is not active")),
+        }
+    })
+}
+
+#[wasm_bindgen(js_name = activateOnboardingGeneration)]
+pub async fn activate_onboarding_generation() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        let previous = std::mem::replace(&mut state.backend, Backend::Memory(MemoryStorage::new()));
+        match previous {
+            Backend::Onboarding { .. } => {
+                state.session = None;
+                state.namespace_states.clear();
+                Ok(())
+            }
+            other => {
+                state.backend = other;
+                Err(JsValue::from_str("onboarding candidate is not active"))
+            }
+        }
+    })?;
+    let active_backend = IdbBlockStorage::open().await?;
+    with_app_state(|app| {
+        app.state.borrow_mut().backend = Backend::Idb(active_backend);
+        Ok(())
+    })
+}
+
+#[wasm_bindgen(js_name = endOnboardingCandidate)]
+pub fn end_onboarding_candidate() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        let previous = std::mem::replace(&mut state.backend, Backend::Memory(MemoryStorage::new()));
+        match previous {
+            Backend::Onboarding { durable, .. } => {
+                state.backend = Backend::Idb(durable);
+                state.session = None;
+                state.namespace_states.clear();
+                Ok(())
+            }
+            other => {
+                state.backend = other;
+                Err(JsValue::from_str("onboarding candidate is not active"))
+            }
+        }
+    })
+}
+
 /// Replace this terminal worker's active backend with an isolated in-memory
 /// portable candidate and authenticate its keypairs without exposing the
 /// matched slot to JavaScript.
@@ -615,7 +702,13 @@ pub fn cover_traffic_tick(namespace: u8) -> Result<(), JsValue> {
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         let domain = state.domain.clone();
-        crate::cover_traffic_tick(&mut state.backend, &domain, namespace).map_err(map_err)
+        match &mut state.backend {
+            Backend::Onboarding { durable, candidate } => {
+                crate::cover_traffic_tick(durable, &domain, namespace).map_err(map_err)?;
+                crate::cover_traffic_tick(candidate, &domain, namespace).map_err(map_err)
+            }
+            backend => crate::cover_traffic_tick(backend, &domain, namespace).map_err(map_err),
+        }
     })
 }
 
@@ -767,6 +860,7 @@ pub async fn verify_storage_generation() -> Result<(), JsValue> {
         let state = app.state.borrow();
         Ok(match &state.backend {
             Backend::Idb(idb) => Some(idb as *const _),
+            Backend::Onboarding { durable, .. } => Some(durable as *const _),
             Backend::Memory(_) => None,
         })
     })?;
@@ -788,6 +882,7 @@ async fn reload_idb_backend() -> Result<(), JsValue> {
         let state = app.state.borrow();
         Ok(match &state.backend {
             Backend::Idb(idb) => Some(idb as *const _),
+            Backend::Onboarding { durable, .. } => Some(durable as *const _),
             Backend::Memory(_) => None,
         })
     })?;
@@ -873,6 +968,7 @@ pub async fn flush_encrypted() -> Result<(), JsValue> {
         let state = app.state.borrow();
         let out = match &state.backend {
             Backend::Idb(idb) => Some(idb as *const _),
+            Backend::Onboarding { durable, .. } => Some(durable as *const _),
             Backend::Memory(_) => None,
         };
         Ok(out)
