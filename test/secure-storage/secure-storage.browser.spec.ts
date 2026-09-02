@@ -34,6 +34,27 @@ async function clearSecureStorageIdb(): Promise<void> {
   });
 }
 
+async function writeAccountGenerationMarker(value: string): Promise<void> {
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(SECURE_STORAGE_IDB_NAME);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('blocks', 'readwrite');
+      transaction
+        .objectStore('blocks')
+        .put(value, 'm:account-generation-state-v1');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
 describe('secure storage pipeline', () => {
   beforeEach(async () => {
     await clearSecureStorageIdb();
@@ -45,12 +66,48 @@ describe('secure storage pipeline', () => {
     expect(conn.isSecureStorage).toBe(true);
     expect(conn.storageState).toBe(`empty`);
     expect(conn.isOpen).toBe(false);
+    await expect(
+      conn.secureStorageCreate(0, 'unbounded-allocation-password')
+    ).rejects.toThrow('atomic onboarding candidate');
 
+    await conn.secureStorageBeginOnboardingCandidate();
     await conn.secureStorageCreate(0, 'test-password-1234');
 
     expect(conn.isOpen).toBe(true);
 
     await conn.close();
+  }, 120_000);
+
+  it('fails closed on an unsupported account-generation marker', async () => {
+    const domain = 'vitest-unsupported-generation';
+    const connection = await DatabaseConnection.create(config(domain));
+    await connection.close();
+    await writeAccountGenerationMarker('future-generation-state');
+
+    await expect(
+      DatabaseConnection.create(config(domain))
+    ).rejects.toMatchObject({
+      name: 'UNSUPPORTED_VERSION',
+      message: 'Unsupported secure-storage account generation state',
+    });
+  }, 120_000);
+
+  it('discards an uncommitted onboarding candidate across worker restart', async () => {
+    const domain = 'vitest-interrupted-onboarding';
+    const conn = await DatabaseConnection.create(config(domain));
+    expect(conn.accountGenerationState).toBe('empty');
+    await conn.secureStorageBeginOnboardingCandidate();
+    await conn.secureStorageCreate(0, 'interrupted-password');
+    await conn.secureStorageFlush();
+    await conn.close();
+
+    const relaunched = await DatabaseConnection.create(config(domain));
+    expect(relaunched.accountGenerationState).toBe('empty');
+    expect(relaunched.storageState).toBe('empty');
+    await expect(
+      relaunched.secureStorageUnlock('interrupted-password')
+    ).rejects.toThrow('no session to unlock');
+    await relaunched.close();
   }, 120_000);
 
   it('second run with correct password: unlock opens the database', async () => {
@@ -59,7 +116,10 @@ describe('secure storage pipeline', () => {
 
     {
       const conn = await DatabaseConnection.create(config(domain));
+      await conn.secureStorageBeginOnboardingCandidate();
       await conn.secureStorageCreate(0, password);
+      await conn.secureStorageLock();
+      await conn.secureStorageCommitOnboardingCandidate();
       await conn.close();
     }
 
@@ -81,7 +141,10 @@ describe('secure storage pipeline', () => {
 
     {
       const conn = await DatabaseConnection.create(config(domain));
+      await conn.secureStorageBeginOnboardingCandidate();
       await conn.secureStorageCreate(0, 'correct-password');
+      await conn.secureStorageLock();
+      await conn.secureStorageCommitOnboardingCandidate();
       await conn.close();
     }
 
@@ -107,6 +170,7 @@ describe('secure storage pipeline', () => {
     const now = new Date();
 
     const writer = await DatabaseConnection.create(config(domain));
+    await writer.secureStorageBeginOnboardingCandidate();
     for (const account of accounts) {
       await writer.secureStorageCreate(account.slot, account.password);
       await writer.db.insert(userProfile).values({
@@ -122,6 +186,7 @@ describe('secure storage pipeline', () => {
       await writer.secureStorageFlush();
       await writer.secureStorageLock();
     }
+    await writer.secureStorageCommitOnboardingCandidate();
     await writer.close();
 
     const reader = await DatabaseConnection.create(config(domain));
@@ -143,6 +208,7 @@ describe('secure storage pipeline', () => {
       'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s';
     const now = new Date(1234);
     const conn = await DatabaseConnection.create(config(domain));
+    await conn.secureStorageBeginOnboardingCandidate();
     await conn.secureStorageCreate(0, password);
     await conn.db.insert(userProfile).values({
       userId,
@@ -168,6 +234,7 @@ describe('secure storage pipeline', () => {
     });
     await conn.secureStorageFlush();
     await conn.secureStorageLock();
+    await conn.secureStorageCommitOnboardingCandidate();
     const archive: Uint8Array[] = [];
     await conn.secureStorageExportPortableV1(chunk => {
       archive.push(chunk.slice());
@@ -218,6 +285,7 @@ describe('secure storage pipeline', () => {
       'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s';
     const now = new Date(1234);
     const conn = await DatabaseConnection.create(config(domain));
+    await conn.secureStorageBeginOnboardingCandidate();
     await conn.secureStorageCreate(0, password);
     await conn.db.insert(userProfile).values({
       userId,
@@ -259,6 +327,7 @@ describe('secure storage pipeline', () => {
     await raw.execRawDirect('PRAGMA writable_schema = OFF');
     await conn.secureStorageFlush();
     await conn.secureStorageLock();
+    await conn.secureStorageCommitOnboardingCandidate();
 
     const archive: Uint8Array[] = [];
     await conn.secureStorageExportPortableV1(chunk => {
@@ -288,6 +357,7 @@ describe('secure storage pipeline', () => {
 
     {
       const conn = await DatabaseConnection.create(config(domain));
+      await conn.secureStorageBeginOnboardingCandidate();
       await conn.secureStorageCreate(0, password);
 
       await conn.db.insert(userProfile).values({
@@ -302,6 +372,8 @@ describe('secure storage pipeline', () => {
       });
 
       await conn.secureStorageFlush();
+      await conn.secureStorageLock();
+      await conn.secureStorageCommitOnboardingCandidate();
       await conn.close();
     }
 

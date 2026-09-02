@@ -17,11 +17,24 @@
   account state are intentionally not migrated by this release. Users upgrading
   from those formats must reset local app storage and create their accounts
   again; legacy import is not supported.
+- Secure-storage onboarding now requires the atomic candidate lifecycle exposed
+  by `secureStorageBeginOnboardingCandidate()`,
+  `secureStorageCommitOnboardingCandidate()`, and
+  `secureStorageAbortOnboardingCandidate()`. Every created account must be
+  locked before one final commit or abort, and commit/abort reject with
+  `SESSION_OPEN` while an SDK session remains open. Fresh stores also require
+  versioned backend account-generation metadata.
 
 ### Security and reliability
 
 - Account passwords are mandatory and biometric login stores one password-only
   credential without account metadata.
+- Onboarding and portable import commit the same source-neutral generation
+  record with a fresh random epoch for idempotent encrypted-account migration.
+- Onboarding prepares all accounts and fresh cover slots in a bounded in-memory
+  candidate, then installs the complete three-slot generation atomically.
+  Process death before activation exposes no account; death after activation
+  preserves the whole batch.
 - Onboarding rollback and transient/session key disposal preserve cleanup and
   ownership boundaries.
 - Secure-storage allocation, cover traffic, namespace writes, SQL transactions,

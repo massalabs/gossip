@@ -22,7 +22,12 @@ import {
 import {
   PortableWebExport,
   PortableWebImport,
-  portableImportInstalledWeb,
+  accountGenerationEpochWeb,
+  accountGenerationMetadataWeb,
+  accountGenerationStateWeb,
+  initializeEmptyAccountGenerationWeb,
+  installOnboardingGenerationWeb,
+  type AccountGenerationState,
 } from './secure-storage-portable-web.js';
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -51,6 +56,10 @@ import init, {
   validatePortableKeypair,
   validatePortableBlock,
   beginCandidatePreview,
+  beginOnboardingCandidate as beginOnboardingCandidateWasm,
+  exportOnboardingCandidate,
+  activateOnboardingGeneration,
+  endOnboardingCandidate,
   appendCandidatePreviewBlock,
   finishCandidatePreview,
   queryCandidatePreview,
@@ -86,8 +95,10 @@ export interface ImportedAccountPreview {
 }
 
 export interface InitResult {
-  /** True when IDB already holds keypairs from a prior run. */
+  /** True when IDB already holds physical secure-storage records. */
   hasExistingData: boolean;
+  accountGenerationState: AccountGenerationState;
+  accountGenerationEpoch: string | null;
   backend: 'idb';
 }
 
@@ -593,6 +604,9 @@ export class SecureStorageWorkerApi {
     // post-lease durable image before this worker admits cover or lifecycle work.
     await reloadDurableStorage();
     const hasExistingData = await wasmIdbHasData();
+    const accountGeneration = hasExistingData
+      ? await accountGenerationMetadataWeb()
+      : await initializeEmptyAccountGenerationWeb();
     if (!hasExistingData) {
       provisionStorage();
     }
@@ -605,7 +619,63 @@ export class SecureStorageWorkerApi {
     // not expose real writes that may happen right after init returns.
     await this.runCoverTick();
     this.startCoverTraffic();
-    return { hasExistingData, backend: 'idb' };
+    return {
+      hasExistingData,
+      accountGenerationState: accountGeneration.state,
+      accountGenerationEpoch: accountGeneration.epoch,
+      backend: 'idb',
+    };
+  }
+
+  accountGenerationMetadata() {
+    return accountGenerationMetadataWeb();
+  }
+
+  accountGenerationState(): Promise<AccountGenerationState> {
+    return accountGenerationStateWeb();
+  }
+
+  accountGenerationEpoch(): Promise<string | null> {
+    return accountGenerationEpochWeb();
+  }
+
+  async beginOnboardingCandidate(): Promise<void> {
+    await this.enqueueLifecycleOperation(async () => {
+      if ((await accountGenerationStateWeb()) !== 'empty') {
+        throw new Error('Onboarding generation is no longer empty');
+      }
+      beginOnboardingCandidateWasm();
+    });
+  }
+
+  async commitOnboardingCandidate(): Promise<string> {
+    return this.enqueueLifecycleOperation(async () => {
+      const archive = exportOnboardingCandidate();
+      try {
+        const install = () =>
+          installOnboardingGenerationWeb(archive, {
+            validateKeypair: validatePortableKeypair,
+            validateBlock: validatePortableBlock,
+          });
+        const generationEpoch = navigator.locks
+          ? await navigator.locks.request(
+              STORAGE_INSTALLATION_FENCE_LOCK_NAME,
+              { mode: 'exclusive' },
+              install
+            )
+          : await install();
+        await activateOnboardingGeneration();
+        return generationEpoch;
+      } finally {
+        archive.fill(0);
+      }
+    });
+  }
+
+  async abortOnboardingCandidate(): Promise<void> {
+    await this.enqueueLifecycleOperation(async () => {
+      endOnboardingCandidate();
+    });
   }
 
   provision(): void {
@@ -974,10 +1044,6 @@ export class SecureStorageWorkerApi {
     this.portableExport = null;
   }
 
-  portableImportInstalled(): Promise<boolean> {
-    return portableImportInstalledWeb();
-  }
-
   async beginPortableImport(): Promise<void> {
     if (
       this.portableImportStarting ||
@@ -1124,7 +1190,10 @@ export class SecureStorageWorkerApi {
     await transfer.finalizeOuterMigration();
   }
 
-  async installPortableImport(): Promise<{ generation: string }> {
+  async installPortableImport(): Promise<{
+    generation: string;
+    generationEpoch: string;
+  }> {
     await this.portablePreviewTail;
     await this.restorePortablePreviewBackend();
     const transfer = this.portableImport;

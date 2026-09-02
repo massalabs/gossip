@@ -61,6 +61,40 @@ describe('GossipSdk lifecycle', () => {
     resetLoggingForTests();
   });
 
+  it('rejects onboarding candidate commit and abort while a session is open', async () => {
+    const connection = {
+      secureStorageCommitOnboardingCandidate: vi
+        .fn()
+        .mockResolvedValue(undefined),
+      secureStorageAbortOnboardingCandidate: vi
+        .fn()
+        .mockResolvedValue(undefined),
+    };
+    const internals = sdk as unknown as {
+      state: { status: SdkStatus };
+      _conn: typeof connection;
+    };
+    internals.state = { status: SdkStatus.SESSION_OPEN };
+    internals._conn = connection;
+
+    try {
+      await expect(
+        sdk.secureStorageCommitOnboardingCandidate()
+      ).rejects.toThrow('SESSION_OPEN');
+      await expect(sdk.secureStorageAbortOnboardingCandidate()).rejects.toThrow(
+        'SESSION_OPEN'
+      );
+      expect(
+        connection.secureStorageCommitOnboardingCandidate
+      ).not.toHaveBeenCalled();
+      expect(
+        connection.secureStorageAbortOnboardingCandidate
+      ).not.toHaveBeenCalled();
+    } finally {
+      internals.state = { status: SdkStatus.INITIALIZED };
+    }
+  });
+
   it('owns an authorized portable import through terminal installation', async () => {
     let authorized = true;
     const connection = {

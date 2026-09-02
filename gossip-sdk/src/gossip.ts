@@ -81,6 +81,7 @@ import {
   DatabaseConnection,
   SESSION_BLOB_NAMESPACE,
   SQL_NAMESPACE,
+  type AccountGenerationState,
   type SecureStorageState,
 } from './db/sqlite.js';
 import { Queries } from './db/queries/index.js';
@@ -1004,8 +1005,9 @@ class GossipSdk {
 
   /**
    * Lifecycle of the secure-storage session.
-   * - `'empty'`: decoy slots provisioned, no real session yet. UI should
-   *   route to signup; consumer calls `secureStorageCreate(slot, password)`.
+   * - `'empty'`: decoy slots provisioned, no committed account generation.
+   *   UI should route to signup. Consumers must begin one atomic onboarding
+   *   candidate before calling `secureStorageCreate(slot, password)`.
    * - `'locked'`: real session exists, encrypted, key not in memory.
    *   UI should route to login; consumer calls `secureStorageUnlock(password)`.
    * - `'unlocked'`: session key remains available. During retryable lock
@@ -1015,6 +1017,24 @@ class GossipSdk {
    */
   get storageState(): SecureStorageState | null {
     return this._conn?.storageState ?? null;
+  }
+
+  get accountGenerationState(): AccountGenerationState | null {
+    return this._conn?.accountGenerationState ?? null;
+  }
+
+  /**
+   * Source-neutral identifier for the active committed account generation.
+   * Every onboarding and portable-import commit receives a fresh epoch; an
+   * empty generation has no epoch.
+   */
+  get accountGenerationEpoch(): string | null {
+    return this._conn?.accountGenerationEpoch ?? null;
+  }
+
+  /** Re-read source-neutral generation metadata after an ambiguous commit. */
+  async refreshAccountGenerationState(): Promise<AccountGenerationState | null> {
+    return this.requireConn().refreshSecureStorageAccountGeneration();
   }
 
   private requireConn(): DatabaseConnection {
@@ -1041,8 +1061,59 @@ class GossipSdk {
   }
 
   /**
-   * Open a brand-new encrypted session in the given slot, deriving the
-   * key from `password`. Use during signup, when `storageState === 'empty'`.
+   * Begin a bounded in-memory onboarding generation. Create and lock every
+   * account inside this candidate, then commit the complete generation once or
+   * abort it. Direct creation against fresh durable storage is forbidden.
+   */
+  async secureStorageBeginOnboardingCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageBeginOnboardingCandidate();
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Commit the complete candidate atomically. Call `closeSession()` first. */
+  async secureStorageCommitOnboardingCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot commit an onboarding candidate while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageCommitOnboardingCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Discard the candidate from memory. Call `closeSession()` first. */
+  async secureStorageAbortOnboardingCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot abort an onboarding candidate while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageAbortOnboardingCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * Open a brand-new encrypted session in the given slot, deriving the key
+   * from `password`. Fresh storage requires an active onboarding candidate;
+   * finish all account writes and locks before committing that candidate.
    * Transitions state to `'unlocked'` on success and makes `queries` /
    * `profiles` available.
    *
@@ -1228,12 +1299,6 @@ class GossipSdk {
     } finally {
       this._portableExportActive = false;
     }
-  }
-
-  /** Return whether the active locked installation came from portable import. */
-  async wasPortableImportInstalled(): Promise<boolean> {
-    if (this.state.status !== SdkStatus.INITIALIZED) return false;
-    return this.requireConn().secureStoragePortableImportInstalled();
   }
 
   /**

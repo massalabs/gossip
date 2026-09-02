@@ -111,7 +111,16 @@ export interface SecureStorageNativePlugin {
   initSecureStorage(options: { path: string; domain: string }): Promise<void>;
   provisionStorage(): Promise<void>;
   hasData(): Promise<{ hasData: boolean }>;
-  portableImportInstalled(): Promise<{ installed: boolean }>;
+  accountGenerationState(): Promise<{
+    state: 'empty' | 'committed' | null;
+  }>;
+  accountGenerationEpoch(): Promise<{ epoch: string | null }>;
+  initializeEmptyAccountGeneration(): Promise<{
+    state: 'empty' | 'committed';
+  }>;
+  beginOnboardingCandidate(): Promise<void>;
+  commitOnboardingCandidate(): Promise<{ epoch: string }>;
+  abortOnboardingCandidate(): Promise<void>;
   // Binary payloads (passwords, namespace blobs) are typed as Uint8Array
   // end-to-end. Going through `number[]` was an O(n) memcopy in each
   // direction with no benefit: the plugin internally base64-encodes
@@ -169,7 +178,7 @@ export interface SecureStorageNativePlugin {
   beginPortableOuterMigration(): Promise<void>;
   admitPortableOuterMigrationPassword(password: Uint8Array): Promise<void>;
   finishPortableOuterMigration(): Promise<void>;
-  installPortableImport(): Promise<void>;
+  installPortableImport(): Promise<{ epoch: string }>;
   abortPortableTransfer(): Promise<void>;
 
   /** Project one profile from an already validated isolated candidate. */
@@ -234,9 +243,31 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
     const hasData = await callNative<boolean>('hasData');
     return { hasData };
   },
-  async portableImportInstalled() {
-    const installed = await callNative<boolean>('portableImportInstalled');
-    return { installed };
+  async accountGenerationState() {
+    const state = await callNative<'empty' | 'committed' | null>(
+      'accountGenerationState'
+    );
+    return { state };
+  },
+  async accountGenerationEpoch() {
+    const epoch = await callNative<string | null>('accountGenerationEpoch');
+    return { epoch };
+  },
+  async initializeEmptyAccountGeneration() {
+    const state = await callNative<'empty' | 'committed'>(
+      'initializeEmptyAccountGeneration'
+    );
+    return { state };
+  },
+  async beginOnboardingCandidate() {
+    await callNative('beginOnboardingCandidate');
+  },
+  async commitOnboardingCandidate() {
+    const epoch = await callNative<string>('commitOnboardingCandidate');
+    return { epoch };
+  },
+  async abortOnboardingCandidate() {
+    await callNative('abortOnboardingCandidate');
   },
   async allocateSession({ slot, password }) {
     await callNative('allocateSession', {
@@ -381,7 +412,10 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
     );
   },
   async installPortableImport() {
-    await runPortableImportOperation(() => callNative('installPortableImport'));
+    const epoch = await runPortableImportOperation(() =>
+      callNative<string>('installPortableImport')
+    );
+    return { epoch };
   },
   async abortPortableTransfer() {
     await runPortableImportOperation(() => callNative('abortPortableTransfer'));

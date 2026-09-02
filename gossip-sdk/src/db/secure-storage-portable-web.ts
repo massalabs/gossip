@@ -20,7 +20,9 @@ const MAGIC = new TextEncoder().encode('GOSSIPBK');
 const EXPORT_SPOOL_PREFIX = 'x:portable-export:';
 const IMPORT_SPOOL_PREFIX = 'x:portable-import:';
 const ACTIVE_GENERATION_KEY = 'm:active-generation';
-const PORTABLE_IMPORT_INSTALLED_KEY = 'm:portable-import-installed-v1';
+const ACCOUNT_GENERATION_STATE_KEY = 'm:account-generation-state-v1';
+const EMPTY_ACCOUNT_GENERATION = 'empty-v1';
+const COMMITTED_ACCOUNT_GENERATION_PREFIX = 'committed-v1:';
 const LEGACY_GENERATION = 'legacy';
 const MAX_TRANSFER_CHUNK_BYTES = 1024 * 1024;
 const MAX_KEYPAIR_VALUE_BYTES = 16 * 1024 * 1024;
@@ -724,7 +726,8 @@ async function switchActiveGeneration(
   expectedGeneration: string,
   nextGeneration: string,
   erasedPrefixes: string[]
-): Promise<void> {
+): Promise<string> {
+  const generationEpoch = randomTransferId();
   const tx = db.transaction(STORE_NAME, 'readwrite');
   const done = transactionDone(tx);
   void done.catch(() => {});
@@ -740,27 +743,266 @@ async function switchActiveGeneration(
       await deletePrefixFromStore(store, prefix);
     }
     store.put(nextGeneration, ACTIVE_GENERATION_KEY);
-    store.put(true, PORTABLE_IMPORT_INSTALLED_KEY);
+    store.delete('m:portable-import-installed-v1');
+    store.put(
+      `${COMMITTED_ACCOUNT_GENERATION_PREFIX}${generationEpoch}`,
+      ACCOUNT_GENERATION_STATE_KEY
+    );
     await done;
+    return generationEpoch;
   } catch (error) {
     abortTransaction(tx);
     throw error;
   }
 }
 
-export async function portableImportInstalledWeb(): Promise<boolean> {
-  // The marker and active generation are written in one IndexedDB transaction,
-  // so this read cannot observe a partially installed generation and must not
-  // queue behind the import's non-reentrant export lease during recovery.
+export type AccountGenerationState = 'empty' | 'committed';
+
+export interface AccountGenerationMetadata {
+  state: AccountGenerationState;
+  epoch: string | null;
+}
+
+function unsupportedAccountGenerationState(): Error {
+  const error = new Error(
+    'Unsupported secure-storage account generation state'
+  );
+  error.name = 'UNSUPPORTED_VERSION';
+  return error;
+}
+
+function decodeAccountGenerationMetadata(
+  value: unknown
+): AccountGenerationMetadata {
+  if (value === EMPTY_ACCOUNT_GENERATION) {
+    return { state: 'empty', epoch: null };
+  }
+  if (
+    typeof value === 'string' &&
+    value.startsWith(COMMITTED_ACCOUNT_GENERATION_PREFIX)
+  ) {
+    const epoch = value.slice(COMMITTED_ACCOUNT_GENERATION_PREFIX.length);
+    if (/^[0-9a-f]{32}$/u.test(epoch)) {
+      return { state: 'committed', epoch };
+    }
+  }
+  throw unsupportedAccountGenerationState();
+}
+
+export async function accountGenerationMetadataWeb(): Promise<AccountGenerationMetadata> {
   const db = await openDatabase();
   try {
     const tx = db.transaction(STORE_NAME, 'readonly');
     const value = await request(
-      tx.objectStore(STORE_NAME).get(PORTABLE_IMPORT_INSTALLED_KEY)
+      tx.objectStore(STORE_NAME).get(ACCOUNT_GENERATION_STATE_KEY)
     );
     await transactionDone(tx);
-    return value === true;
+    return decodeAccountGenerationMetadata(value);
   } finally {
+    db.close();
+  }
+}
+
+export async function accountGenerationStateWeb(): Promise<AccountGenerationState> {
+  return (await accountGenerationMetadataWeb()).state;
+}
+
+export async function accountGenerationEpochWeb(): Promise<string | null> {
+  return (await accountGenerationMetadataWeb()).epoch;
+}
+
+export async function initializeEmptyAccountGenerationWeb(): Promise<AccountGenerationMetadata> {
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const done = transactionDone(tx);
+    void done.catch(() => {});
+    const store = tx.objectStore(STORE_NAME);
+    const existing = await request(store.get(ACCOUNT_GENERATION_STATE_KEY));
+    if (existing !== undefined) {
+      const metadata = decodeAccountGenerationMetadata(existing);
+      await done;
+      return metadata;
+    }
+
+    const generation =
+      (await request(store.get(ACTIVE_GENERATION_KEY))) ?? LEGACY_GENERATION;
+    const count = await request(
+      store.count(prefixRange(`${activeRecordPrefix(generation)}s:`))
+    );
+    if (count !== 0) {
+      abortTransaction(tx);
+      throw unsupportedAccountGenerationState();
+    }
+    store.put(EMPTY_ACCOUNT_GENERATION, ACCOUNT_GENERATION_STATE_KEY);
+    await done;
+    return { state: 'empty', epoch: null };
+  } finally {
+    db.close();
+  }
+}
+
+export async function installOnboardingGenerationWeb(
+  archive: Uint8Array,
+  validators: PortableWebValidators
+): Promise<string> {
+  if (
+    archive.byteLength < HEADER_BYTES + DIGEST_BYTES ||
+    archive.byteLength > 256 * 1024 * 1024
+  ) {
+    throw new Error('Invalid onboarding generation size');
+  }
+  if (!equalBytes(archive.subarray(0, MAGIC.byteLength), MAGIC)) {
+    throw new Error('Invalid onboarding generation magic');
+  }
+  const header = new DataView(archive.buffer, archive.byteOffset, HEADER_BYTES);
+  if (
+    readPortableU64(header, 8) !== 1 ||
+    readPortableU64(header, 16) !== SESSION_COUNT
+  ) {
+    throw new Error('Unsupported onboarding generation format');
+  }
+  const recordCount = readPortableU64(header, 24);
+  const recordBytes = readPortableU64(header, 32);
+  const digestOffset = checkedAdd(HEADER_BYTES, recordBytes);
+  if (
+    checkedAdd(digestOffset, DIGEST_BYTES) !== archive.byteLength ||
+    recordCount < SESSION_COUNT
+  ) {
+    throw new Error('Invalid onboarding generation layout');
+  }
+  const expectedDigest = archive.subarray(digestOffset);
+  const actualDigest = sha256(archive.subarray(0, digestOffset));
+  if (!equalBytes(expectedDigest, actualDigest)) {
+    throw new Error('Invalid onboarding generation digest');
+  }
+
+  const records: Array<{ key: LogicalKey; value: Uint8Array }> = [];
+  let offset = HEADER_BYTES;
+  let parsedRecords = 0;
+  let keypairSlot = 0;
+  let blockNamespace = 0;
+  let blockIndex = 0;
+  let blockSlot = 0;
+  let namespaceZeroBlocks = 0;
+  while (offset < digestOffset) {
+    if (digestOffset - offset < FRAME_BYTES) {
+      throw new Error('Truncated onboarding generation record');
+    }
+    const frame = new DataView(
+      archive.buffer,
+      archive.byteOffset + offset,
+      FRAME_BYTES
+    );
+    const kind = archive[offset];
+    const slot = archive[offset + 1];
+    const namespace = readPortableU64(frame, 2);
+    const encodedBlockIndex = readPortableU64(frame, 10);
+    const valueLength = readPortableU64(frame, 18);
+    const end = checkedAdd(offset, checkedAdd(FRAME_BYTES, valueLength));
+    if (end > digestOffset || parsedRecords >= recordCount) {
+      throw new Error('Invalid onboarding generation record');
+    }
+    let key: LogicalKey;
+    if (kind === 0) {
+      if (
+        keypairSlot >= SESSION_COUNT ||
+        slot !== keypairSlot ||
+        namespace !== 0 ||
+        encodedBlockIndex !== 0 ||
+        valueLength < 4 ||
+        valueLength > MAX_KEYPAIR_VALUE_BYTES
+      ) {
+        throw new Error('Non-canonical onboarding keypair record');
+      }
+      key = { kind: 'keypair', slot };
+      keypairSlot += 1;
+    } else {
+      if (
+        kind !== 1 ||
+        keypairSlot !== SESSION_COUNT ||
+        slot >= SESSION_COUNT
+      ) {
+        throw new Error('Non-canonical onboarding block record');
+      }
+      if (
+        blockNamespace === 0 &&
+        blockSlot === 0 &&
+        blockIndex > 0 &&
+        namespace === 1 &&
+        encodedBlockIndex === 0 &&
+        slot === 0
+      ) {
+        blockNamespace = 1;
+        blockIndex = 0;
+      }
+      if (
+        valueLength !== BLOCK_BYTES ||
+        namespace !== blockNamespace ||
+        encodedBlockIndex !== blockIndex ||
+        slot !== blockSlot
+      ) {
+        throw new Error('Non-canonical onboarding block order');
+      }
+      key = { kind: 'block', slot, namespace, blockIndex };
+      if (namespace === 0) namespaceZeroBlocks += 1;
+      blockSlot += 1;
+      if (blockSlot === SESSION_COUNT) {
+        blockSlot = 0;
+        blockIndex += 1;
+      }
+    }
+    const value = archive.subarray(offset + FRAME_BYTES, end);
+    if (key.kind === 'keypair') validators.validateKeypair(value);
+    else validators.validateBlock(value);
+    records.push({ key, value });
+    parsedRecords += 1;
+    offset = end;
+  }
+  if (
+    parsedRecords !== recordCount ||
+    keypairSlot !== SESSION_COUNT ||
+    blockSlot !== 0 ||
+    namespaceZeroBlocks === 0
+  ) {
+    throw new Error('Incomplete onboarding generation');
+  }
+
+  const generationEpoch = randomTransferId();
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const done = transactionDone(tx);
+    void done.catch(() => {});
+    const store = tx.objectStore(STORE_NAME);
+    const metadata = decodeAccountGenerationMetadata(
+      await request(store.get(ACCOUNT_GENERATION_STATE_KEY))
+    );
+    if (metadata.state !== 'empty') {
+      abortTransaction(tx);
+      throw new Error('Onboarding generation is no longer empty');
+    }
+    const sourceGeneration =
+      (await request(store.get(ACTIVE_GENERATION_KEY))) ?? LEGACY_GENERATION;
+    const nextGeneration = randomTransferId();
+    const nextPrefix = activeRecordPrefix(nextGeneration);
+    for (const record of records) {
+      store.put(record.value, `${nextPrefix}${encodedKey(record.key)}`);
+    }
+    await deletePrefixFromStore(
+      store,
+      `${activeRecordPrefix(sourceGeneration)}s:`
+    );
+    store.put(nextGeneration, ACTIVE_GENERATION_KEY);
+    store.delete('m:portable-import-installed-v1');
+    store.put(
+      `${COMMITTED_ACCOUNT_GENERATION_PREFIX}${generationEpoch}`,
+      ACCOUNT_GENERATION_STATE_KEY
+    );
+    await done;
+    return generationEpoch;
+  } finally {
+    records.length = 0;
     db.close();
   }
 }
@@ -1366,7 +1608,7 @@ export class PortableWebImport {
     });
   }
 
-  install(): Promise<{ generation: string }> {
+  install(): Promise<{ generation: string; generationEpoch: string }> {
     if (
       !this.digestVerified ||
       this.closing ||
@@ -1400,12 +1642,12 @@ export class PortableWebImport {
           );
           this.stagedGeneration = generation;
         }
-        await navigator.locks.request(
+        const generationEpoch = await navigator.locks.request(
           INSTALLATION_FENCE_LOCK_NAME,
           { mode: 'exclusive' },
           async () => {
             if (!this.db) throw new Error('Portable import is closed');
-            await switchActiveGeneration(
+            return switchActiveGeneration(
               this.db,
               this.sourceGeneration,
               generation,
@@ -1423,7 +1665,7 @@ export class PortableWebImport {
         this.db.close();
         this.db = null;
         this.stage = 'closed';
-        return { generation };
+        return { generation, generationEpoch };
       } finally {
         const lease = this.lease;
         this.lease = null;

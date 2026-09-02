@@ -119,7 +119,7 @@ function expectCoverChangedEverySlot(
   for (const namespace of COVER_TRAFFIC_NAMESPACES) {
     const changedSessions = new Set<number>();
     for (const [key, oldValue] of before) {
-      const match = /^s:(\d+):n:(\d+):b:(\d+)$/.exec(key);
+      const match = /^(?:g:[0-9a-f]{32}:)?s:(\d+):n:(\d+):b:(\d+)$/.exec(key);
       if (!match || Number(match[2]) !== namespace) continue;
       const newValue = after.get(key);
       if (
@@ -195,7 +195,11 @@ describe('secure-storage real IndexedDB failure recovery', () => {
         protocolBaseUrl: 'http://127.0.0.1:1',
         storage: config('sdk-rejected-lock-readiness').storage,
       });
+      await sdk.secureStorageBeginOnboardingCandidate();
       await sdk.secureStorageCreate(0, password);
+      await sdk.secureStorageLock();
+      await sdk.secureStorageCommitOnboardingCandidate();
+      expect(await sdk.secureStorageUnlock(password)).toBe(true);
       const connection = sdkConnection(sdk);
       await testProxy(connection).stopPeriodicCoverForTesting();
       expect(sdk.dbReady).toBe(true);
@@ -223,6 +227,51 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     }
   }, 120_000);
 
+  it('keeps the empty generation active when onboarding installation aborts', async () => {
+    const domain = 'onboarding-install-abort';
+    const firstPassword = 'aborted-candidate-password';
+    const secondPassword = 'aborted-candidate-decoy';
+    let connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    await connection.secureStorageBeginOnboardingCandidate();
+    await connection.secureStorageCreate(0, firstPassword);
+    await connection.secureStorageLock();
+    await connection.secureStorageCreate(1, secondPassword);
+    await connection.secureStorageLock();
+    await testProxy(connection).injectIndexedDbFaultsForTesting({
+      readwrite: 1,
+    });
+
+    await expect(
+      connection.secureStorageCommitOnboardingCandidate()
+    ).rejects.toBeDefined();
+    expect(connection.accountGenerationState).toBe('empty');
+
+    await connection.close();
+    openConnections.delete(connection);
+    connection = await openConnection(domain);
+    await testProxy(connection).stopPeriodicCoverForTesting();
+    expect(connection.accountGenerationState).toBe('empty');
+    await expect(connection.secureStorageUnlock(firstPassword)).rejects.toThrow(
+      'no session to unlock'
+    );
+    await expect(
+      connection.secureStorageUnlock(secondPassword)
+    ).rejects.toThrow('no session to unlock');
+
+    const retryPassword = 'retry-candidate-password';
+    await connection.secureStorageBeginOnboardingCandidate();
+    await connection.secureStorageCreate(2, retryPassword);
+    await connection.secureStorageLock();
+    await connection.secureStorageCommitOnboardingCandidate();
+    expect(connection.accountGenerationState).toBe('committed');
+    expect(connection.accountGenerationEpoch).toMatch(/^[0-9a-f]{32}$/);
+    await expect(connection.secureStorageUnlock(retryPassword)).resolves.toBe(
+      true
+    );
+    await connection.secureStorageLock();
+  }, 120_000);
+
   it('discards a rejected autocommit mutation before retry or relaunch', async () => {
     const domain = 'rejected-autocommit-recovery';
     const password = 'autocommit-password';
@@ -230,6 +279,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     const now = new Date();
     let connection = await openConnection(domain);
     await testProxy(connection).stopPeriodicCoverForTesting();
+    await connection.secureStorageBeginOnboardingCandidate();
     await connection.secureStorageCreate(0, password);
     await connection.db.insert(userProfile).values({
       userId,
@@ -241,6 +291,9 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       security: '{}',
       session: new Uint8Array([1, 2, 3]),
     });
+    await connection.secureStorageLock();
+    await connection.secureStorageCommitOnboardingCandidate();
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
 
     await testProxy(connection).injectIndexedDbFaultsForTesting({
       readwrite: 1,
@@ -284,6 +337,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     const now = new Date();
     let connection = await openConnection(domain);
     await testProxy(connection).stopPeriodicCoverForTesting();
+    await connection.secureStorageBeginOnboardingCandidate();
     await connection.secureStorageCreate(0, password);
     await connection.db.insert(userProfile).values({
       userId: 'gossip1singlestatement',
@@ -295,6 +349,9 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       security: '{}',
       session: new Uint8Array([2, 4, 6]),
     });
+    await connection.secureStorageLock();
+    await connection.secureStorageCommitOnboardingCandidate();
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
 
     for (const sql of [
       'BEGIN IMMEDIATE; SELECT 1',
@@ -508,6 +565,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     const now = new Date();
     let connection = await openConnection(domain);
     await testProxy(connection).stopPeriodicCoverForTesting();
+    await connection.secureStorageBeginOnboardingCandidate();
     await connection.secureStorageCreate(0, password);
     await connection.db.insert(userProfile).values({
       userId: 'gossip1publictransaction',
@@ -519,6 +577,9 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       security: '{}',
       session: new Uint8Array([5, 6, 7]),
     });
+    await connection.secureStorageLock();
+    await connection.secureStorageCommitOnboardingCandidate();
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
 
     let coverSettled = false;
     let queuedCover!: Promise<void>;
@@ -603,6 +664,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     const namespaceData = new Uint8Array([4, 3, 2, 1]);
     let connection = await openConnection(domain);
     await testProxy(connection).stopPeriodicCoverForTesting();
+    await connection.secureStorageBeginOnboardingCandidate();
     await connection.secureStorageCreate(0, password);
     const now = new Date();
     await connection.db.insert(userProfile).values({
@@ -620,6 +682,9 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       0,
       namespaceData
     );
+    await connection.secureStorageLock();
+    await connection.secureStorageCommitOnboardingCandidate();
+    expect(await connection.secureStorageUnlock(password)).toBe(true);
     const beforePoisonedRollback = await snapshotSecureStorage();
 
     await testProxy(connection).exec('BEGIN IMMEDIATE');
@@ -689,6 +754,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
     let connection = await openConnection(domain);
     await testProxy(connection).stopPeriodicCoverForTesting();
 
+    await connection.secureStorageBeginOnboardingCandidate();
     await connection.secureStorageCreate(0, baselinePassword);
     const now = new Date();
     await connection.db.insert(userProfile).values({
@@ -707,6 +773,7 @@ describe('secure-storage real IndexedDB failure recovery', () => {
       namespaceData
     );
     await connection.secureStorageLock();
+    await connection.secureStorageCommitOnboardingCandidate();
 
     const beforeCover = await snapshotSecureStorage();
     await testProxy(connection).injectIndexedDbFaultsForTesting({

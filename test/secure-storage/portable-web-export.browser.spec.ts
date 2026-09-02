@@ -13,7 +13,6 @@ import secureStorageWasmUrlRaw from '../../gossip-sdk/src/assets/generated/wasm-
 import {
   PortableWebExport,
   PortableWebImport,
-  portableImportInstalledWeb,
 } from '../../gossip-sdk/src/db/secure-storage-portable-web';
 
 const DB_NAME = 'secure_storage';
@@ -523,9 +522,11 @@ describe('PortableWebImport', () => {
     const { generation } = await transfer.install();
     expect(generation).toMatch(/^[0-9a-f]{32}$/);
     expect(await getValue('m:active-generation')).toBe(generation);
-    expect(await getValue('m:portable-import-installed-v1')).toBe(true);
-    await expect(portableImportInstalledWeb()).resolves.toBe(true);
-    // The marker switch fences stale tabs before legacy records are removed.
+    expect(await getValue('m:portable-import-installed-v1')).toBeUndefined();
+    expect(await getValue('m:account-generation-state-v1')).toMatch(
+      /^committed-v1:[0-9a-f]{32}$/
+    );
+    // The generation switch fences stale tabs before legacy records are removed.
     expect(await getValue('s:0:sentinel')).toBeUndefined();
     const installedRecords: [string, Uint8Array][] = [];
     for (const [key, value] of records(expected)) {
@@ -614,18 +615,18 @@ describe('PortableWebImport', () => {
       transactionSpy.mockRestore();
     }
 
-    const installedProbe = portableImportInstalledWeb();
+    const generationProbe = getValue('m:account-generation-state-v1');
     try {
       const outcome = await Promise.race([
-        installedProbe.then(value => ({ settled: true, value })),
+        generationProbe.then(value => ({ settled: true, value })),
         new Promise<{ settled: false }>(resolve =>
           setTimeout(() => resolve({ settled: false }), 100)
         ),
       ]);
-      expect(outcome).toEqual({ settled: true, value: false });
+      expect(outcome).toEqual({ settled: true, value: undefined });
     } finally {
       await transfer.close();
-      await installedProbe;
+      await generationProbe;
     }
   });
 

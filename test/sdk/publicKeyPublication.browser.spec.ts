@@ -169,6 +169,7 @@ describe('durable public-key publication timestamp', () => {
           secureStorageWasmUrl,
         },
       });
+      await first.secureStorageBeginOnboardingCandidate();
       await first.secureStorageCreate(0, password);
 
       const firstInternals = first as unknown as {
@@ -250,6 +251,7 @@ describe('durable public-key publication timestamp', () => {
 
       await first.closeSession();
       await first.secureStorageLock();
+      await first.secureStorageCommitOnboardingCandidate();
       await first.destroy();
       await new Promise(resolve => setTimeout(resolve, 0));
 
