@@ -25,6 +25,10 @@ import {
 import { createOnboardingPortableImportAuthorization } from '../services/portableImportAuthorization';
 import { PortableImportCoordinator } from '../services/portableImportCoordinator';
 import {
+  PortableImportInvalidPasswordError,
+  PortableImportRestartRequiredError,
+} from '../services/portableImportErrors';
+import {
   isNativeBackupSelectionCancellation,
   releaseNativeBackupSource,
   selectNativeBackupSource,
@@ -239,14 +243,11 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
         }
       }
       if (isCurrent()) {
-        const startupAuthorityChanged =
+        const startupRestartRequired =
           sourceSelected &&
           !coordinator &&
-          caught instanceof Error &&
-          /(authorized|authority|ownership|replaceable|already active|already started)/i.test(
-            caught.message
-          );
-        if (startupAuthorityChanged) {
+          caught instanceof PortableImportRestartRequiredError;
+        if (startupRestartRequired) {
           restartAfterPortableBackup(ROUTES.default());
           return;
         }
@@ -279,12 +280,26 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
     try {
       await coordinator.authenticate(submitted);
       refreshPreviews();
-    } catch {
-      setError(t('import.invalid_password'));
+    } catch (caught) {
+      if (caught instanceof PortableImportInvalidPasswordError) {
+        setError(t('import.invalid_password'));
+      } else if (caught instanceof PortableImportRestartRequiredError) {
+        coordinator.disposePasswords();
+        if (coordinatorRef.current === coordinator) {
+          coordinatorRef.current = null;
+        }
+        setPreviews([]);
+        setSourceName(null);
+        setInstallAttempted(false);
+        setError(t('import.terminal_failed'));
+        updatePhase('restart');
+      } else {
+        setError(t('import.failed'));
+      }
     } finally {
       setBusy(false);
     }
-  }, [busy, password, refreshPreviews, t]);
+  }, [busy, password, refreshPreviews, t, updatePhase]);
 
   const removePreview = useCallback(
     (preview: LoadedImportedAccountPreview) => {
@@ -399,8 +414,9 @@ const PortableImport: React.FC<PortableImportProps> = ({ onBack }) => {
       }
     } catch (caught) {
       if (
-        caught instanceof Error &&
-        caught.name === 'PortableImportTerminalError'
+        caught instanceof PortableImportRestartRequiredError ||
+        (caught instanceof Error &&
+          caught.name === 'PortableImportTerminalError')
       ) {
         coordinatorRef.current = null;
         terminalFailure = true;

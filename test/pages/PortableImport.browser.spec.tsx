@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 import PortableImport from '../../src/pages/PortableImport';
+import { PortableImportRestartRequiredError } from '../../src/services/portableImportErrors';
 
 const mocks = vi.hoisted(() => {
   const preview = {
@@ -152,6 +153,51 @@ describe('portable import onboarding page', () => {
     await expect
       .element(page.getByText('import.possession_notice'))
       .toBeVisible();
+  });
+
+  it('does not infer startup outcomes from unrelated error prose', async () => {
+    mocks.begin.mockRejectedValueOnce(
+      new Error('SDK lifecycle operation is already active')
+    );
+
+    await render(<PortableImport onBack={mocks.onBack} />);
+    await userEvent.click(
+      page.getByRole('button', { name: 'import.choose_file' })
+    );
+
+    await expect.element(page.getByText('import.invalid_file')).toBeVisible();
+    expect(mocks.restart).not.toHaveBeenCalled();
+  });
+
+  it('restarts only for a typed startup outcome', async () => {
+    mocks.begin.mockRejectedValueOnce(
+      new PortableImportRestartRequiredError('runtime changed')
+    );
+
+    await render(<PortableImport onBack={mocks.onBack} />);
+    await userEvent.click(
+      page.getByRole('button', { name: 'import.choose_file' })
+    );
+
+    await vi.waitFor(() => expect(mocks.restart).toHaveBeenCalledOnce());
+  });
+
+  it('reports preview backend failures separately from invalid passwords', async () => {
+    mocks.coordinator.authenticate.mockRejectedValueOnce(
+      new Error('preview backend failed')
+    );
+
+    await render(<PortableImport onBack={mocks.onBack} />);
+    await userEvent.click(
+      page.getByRole('button', { name: 'import.choose_file' })
+    );
+    await userEvent.fill(page.getByPlaceholder('import.password'), 'secret');
+    await userEvent.click(page.getByRole('button', { name: 'import.load' }));
+
+    await expect.element(page.getByText('import.failed')).toBeVisible();
+    await expect
+      .element(page.getByText('import.invalid_password'))
+      .not.toBeInTheDocument();
   });
 
   it('validates, authenticates a preview, confirms, and installs', async () => {

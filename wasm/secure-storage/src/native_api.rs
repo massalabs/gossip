@@ -352,8 +352,11 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
         "authenticatePortableImportCandidate" => {
             let a: UnlockArgs = parse(args)?;
             let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
-            let preview = native_vfs::preview_portable_import(&password)?;
-            Ok(serde_json::to_string(&preview)?)
+            match native_vfs::preview_portable_import(&password) {
+                Ok(preview) => Ok(serde_json::to_string(&preview)?),
+                Err(SecureStorageError::InvalidPassword) => Ok("null".into()),
+                Err(error) => Err(error.into()),
+            }
         }
         "beginPortableOuterMigration" => {
             native_vfs::begin_portable_outer_migration()?;

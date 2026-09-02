@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GossipSdk, PortableImportCandidate } from '@massalabs/gossip-sdk';
 import { PortableImportCoordinator } from '../../src/services/portableImportCoordinator';
+import { PortableImportRestartRequiredError } from '../../src/services/portableImportErrors';
 
 const preview = {
   userId: 'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s',
@@ -200,6 +201,23 @@ describe('PortableImportCoordinator', () => {
     release?.();
     await installing;
     expect(h.commitSuccess).toHaveBeenCalledOnce();
+  });
+
+  it('returns a typed restart outcome when authorization changes during authentication', async () => {
+    const h = harness();
+    vi.mocked(h.candidate.authenticate).mockImplementation(async () => {
+      h.revoke();
+      throw new Error('preview backend interrupted');
+    });
+    const coordinator = await PortableImportCoordinator.begin(
+      h.sdk,
+      h.authorization
+    );
+
+    await expect(
+      coordinator.authenticate('racing-password')
+    ).rejects.toBeInstanceOf(PortableImportRestartRequiredError);
+    expect(h.candidate.abort).toHaveBeenCalledOnce();
   });
 
   it('retries backend cleanup after revoked authorization', async () => {

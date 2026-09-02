@@ -1,5 +1,6 @@
 import { isValidUserId } from '@massalabs/gossip-sdk';
 import { ImportPasswords, type ImportPasswordId } from './importPasswords';
+import { PortableImportInvalidPasswordError } from './portableImportErrors';
 
 export interface ImportedAccountPreview {
   userId: string;
@@ -15,7 +16,7 @@ export interface LoadedImportedAccountPreview extends ImportedAccountPreview {
 
 export type ImportedAccountAuthenticator = (
   password: Uint8Array
-) => Promise<ImportedAccountPreview>;
+) => Promise<ImportedAccountPreview | null>;
 
 function publicPreview(value: ImportedAccountPreview): ImportedAccountPreview {
   if (
@@ -57,7 +58,9 @@ export class ImportedAccountPreviews {
     if (this.disposed)
       throw new Error('Imported account previews are disposed');
     const loaded = await this.passwords.load(passwordText, async candidate => {
-      const authenticated = publicPreview(await authenticate(candidate));
+      const outcome = await authenticate(candidate);
+      if (outcome === null) throw new PortableImportInvalidPasswordError();
+      const authenticated = publicPreview(outcome);
       if (
         [...this.previews.values()].some(
           existing => existing.userId === authenticated.userId

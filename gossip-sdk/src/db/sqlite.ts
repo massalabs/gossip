@@ -1081,7 +1081,7 @@ export class DatabaseConnection {
 
   async secureStorageAuthenticatePortableImportCandidate(
     password: Uint8Array
-  ): Promise<ImportedAccountPreview> {
+  ): Promise<ImportedAccountPreview | null> {
     if (!this.state.portableTransferActive) {
       throw new Error('Portable import is not active');
     }

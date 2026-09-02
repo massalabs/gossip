@@ -3,6 +3,7 @@ import {
   ImportedAccountPreviews,
   type LoadedImportedAccountPreview,
 } from './importedAccountPreviews';
+import { PortableImportRestartRequiredError } from './portableImportErrors';
 
 export interface PortableImportAuthorization {
   claim(): Promise<void>;
@@ -46,7 +47,14 @@ export class PortableImportCoordinator {
     sdk: GossipSdk,
     authorization: PortableImportAuthorization
   ): Promise<PortableImportCoordinator> {
-    await authorization.claim();
+    try {
+      await authorization.claim();
+    } catch (error) {
+      throw new PortableImportRestartRequiredError(
+        'Portable import authority could not be claimed',
+        { cause: error }
+      );
+    }
     const gate = { active: true, commitPrepared: false };
     let candidate: PortableImportCandidate;
     try {
@@ -64,7 +72,10 @@ export class PortableImportCoordinator {
       });
     } catch (error) {
       await authorization.release().catch(() => {});
-      throw error;
+      throw new PortableImportRestartRequiredError(
+        'Portable import runtime could not be started',
+        { cause: error }
+      );
     }
     return new PortableImportCoordinator(candidate, authorization, gate);
   }
@@ -77,7 +88,12 @@ export class PortableImportCoordinator {
         await this.candidate.push(chunk);
         await this.requireAuthorized();
       } catch (error) {
-        await this.disposeIfRevoked();
+        if (await this.disposeIfRevoked()) {
+          throw new PortableImportRestartRequiredError(
+            'Portable import authorization changed while receiving data',
+            { cause: error }
+          );
+        }
         throw error;
       }
     });
@@ -91,7 +107,12 @@ export class PortableImportCoordinator {
         await this.candidate.finishValidation();
         await this.requireAuthorized();
       } catch (error) {
-        await this.disposeIfRevoked();
+        if (await this.disposeIfRevoked()) {
+          throw new PortableImportRestartRequiredError(
+            'Portable import authorization changed during validation',
+            { cause: error }
+          );
+        }
         throw error;
       }
     });
@@ -100,7 +121,11 @@ export class PortableImportCoordinator {
   authenticate(passwordText: string): Promise<LoadedImportedAccountPreview> {
     this.requireOpen();
     if (this.installAttempted) {
-      return Promise.reject(new Error('Portable import account set is frozen'));
+      return Promise.reject(
+        new PortableImportRestartRequiredError(
+          'Portable import account set is frozen'
+        )
+      );
     }
     return this.enqueue(async () => {
       this.requireOpen();
@@ -113,7 +138,12 @@ export class PortableImportCoordinator {
         await this.requireAuthorized();
         return loaded;
       } catch (error) {
-        await this.disposeIfRevoked();
+        if (await this.disposeIfRevoked()) {
+          throw new PortableImportRestartRequiredError(
+            'Portable import authorization changed during authentication',
+            { cause: error }
+          );
+        }
         throw error;
       }
     });
@@ -148,7 +178,9 @@ export class PortableImportCoordinator {
       this.requireOpen();
       if (!this.authorizationValid()) {
         await this.revokeAndAbort();
-        throw new Error('Portable import is not currently authorized');
+        throw new PortableImportRestartRequiredError(
+          'Portable import is not currently authorized'
+        );
       }
       if (this.previews.list().length === 0) {
         throw new Error('Load at least one account before importing');
@@ -183,8 +215,11 @@ export class PortableImportCoordinator {
           error.name === 'PortableImportTerminalError'
         ) {
           await this.revokeAndAbort();
-        } else {
-          await this.disposeIfRevoked();
+        } else if (await this.disposeIfRevoked()) {
+          throw new PortableImportRestartRequiredError(
+            'Portable import authorization changed during installation',
+            { cause: error }
+          );
         }
         throw error;
       } finally {
@@ -266,18 +301,23 @@ export class PortableImportCoordinator {
         // cancel() remains available to retry cleanup.
       }
     );
-    throw new Error('Portable import is not currently authorized');
+    throw new PortableImportRestartRequiredError(
+      'Portable import is not currently authorized'
+    );
   }
 
   private async requireAuthorized(): Promise<void> {
     if (this.authorizationValid() && !this.cancelRequested) return;
     await this.revokeAndAbort();
-    throw new Error('Portable import is not currently authorized');
+    throw new PortableImportRestartRequiredError(
+      'Portable import is not currently authorized'
+    );
   }
 
-  private async disposeIfRevoked(): Promise<void> {
-    if (this.authorizationValid() && !this.cancelRequested) return;
+  private async disposeIfRevoked(): Promise<boolean> {
+    if (this.authorizationValid() && !this.cancelRequested) return false;
     await this.revokeAndAbort();
+    return true;
   }
 
   private async revokeAndAbort(): Promise<void> {
@@ -296,7 +336,7 @@ export class PortableImportCoordinator {
 
   private requireOpen(): void {
     if (this.closed || this.cancelRequested) {
-      throw new Error('Portable import is closed');
+      throw new PortableImportRestartRequiredError('Portable import is closed');
     }
   }
 }

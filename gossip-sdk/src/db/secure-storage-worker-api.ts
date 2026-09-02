@@ -1050,8 +1050,8 @@ export class SecureStorageWorkerApi {
 
   async authenticatePortableImportCandidate(
     password: Uint8Array
-  ): Promise<ImportedAccountPreview> {
-    const operation = async (): Promise<ImportedAccountPreview> => {
+  ): Promise<ImportedAccountPreview | null> {
+    const operation = async (): Promise<ImportedAccountPreview | null> => {
       let previewStarted = false;
       let failed = false;
       let failure: unknown;
@@ -1068,11 +1068,10 @@ export class SecureStorageWorkerApi {
           (slot, namespace, blockIndex, value) =>
             appendCandidatePreviewBlock(slot, namespace, blockIndex, value)
         );
-        if (!authenticated) {
-          throw new Error('Imported account password was not accepted');
+        if (authenticated) {
+          finishCandidatePreview();
+          preview = queryCandidatePreview() as ImportedAccountPreview;
         }
-        finishCandidatePreview();
-        preview = queryCandidatePreview() as ImportedAccountPreview;
       } catch (error) {
         failed = true;
         failure = error;
@@ -1088,8 +1087,6 @@ export class SecureStorageWorkerApi {
         }
       }
       if (failed) throw failure;
-      if (preview === null)
-        throw new Error('Imported account preview is unavailable');
       return preview;
     };
     const result = this.portablePreviewTail.then(operation, operation);

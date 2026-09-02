@@ -136,7 +136,7 @@ export class PortableImportTerminalError extends Error {
 export interface PortableImportCandidate {
   push(chunk: Uint8Array): Promise<void>;
   finishValidation(): Promise<void>;
-  authenticate(password: Uint8Array): Promise<ImportedAccountPreview>;
+  authenticate(password: Uint8Array): Promise<ImportedAccountPreview | null>;
   install(
     admitPasswords: (
       admit: (password: Uint8Array) => Promise<void>
@@ -1390,7 +1390,7 @@ class GossipSdk {
             await closeCandidate().catch(() => {});
             throw error;
           }
-          let preview: ImportedAccountPreview;
+          let preview: ImportedAccountPreview | null;
           try {
             preview =
               await conn.secureStorageAuthenticatePortableImportCandidate(

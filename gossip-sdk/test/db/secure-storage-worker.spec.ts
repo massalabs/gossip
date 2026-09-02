@@ -1192,7 +1192,7 @@ describe('SecureStorageWorkerApi password cleanup', () => {
 
     await expect(
       api.authenticatePortableImportCandidate(password)
-    ).rejects.toThrow('password was not accepted');
+    ).resolves.toBeNull();
     expect(Array.from(password)).toEqual([0, 0, 0]);
     expect(wasmMock.endCandidatePreview).toHaveBeenCalledOnce();
     expect(transfer.close).not.toHaveBeenCalled();

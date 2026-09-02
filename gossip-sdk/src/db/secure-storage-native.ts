@@ -180,7 +180,7 @@ export interface SecureStorageNativePlugin {
     username: string;
     avatar: string | null;
     createdAtMs: number;
-  }>;
+  } | null>;
 
   // Namespace data API - parity with the WASM worker. Enables the SDK
   // to persist the session blob on the native path without going
