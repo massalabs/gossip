@@ -182,7 +182,7 @@ describe('secure storage pipeline', () => {
       conn.secureStorageAuthenticatePortableImportCandidate(
         new TextEncoder().encode('wrong-password')
       )
-    ).rejects.toThrow('password was not accepted');
+    ).resolves.toBeNull();
     await expect(
       conn.secureStorageAuthenticatePortableImportCandidate(
         new TextEncoder().encode(password)
