@@ -3,8 +3,6 @@
 use rand::seq::SliceRandom;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-#[cfg(test)]
-use crate::domain;
 use crate::error::{Result, SecureStorageError};
 use crate::kdf::derive_session_keys;
 use crate::keypair::read_session_keypair;
@@ -180,7 +178,7 @@ mod tests {
     use crate::block::encrypt_block;
     use crate::constants::LENGTH_HDR_SIZE;
     use crate::kdf::{derive_block_aead_key, derive_session_keys};
-    use crate::keypair::KeypairFile;
+    use crate::keypair::{CURRENT_SESSION_VERSION, KeypairFile};
     use crate::pq::pq_keygen;
     use crate::run_with_stack;
     use crate::storage::MemoryStorage;
@@ -195,22 +193,23 @@ mod tests {
         domain: &str,
         password: &[u8],
         session: SessionIndex,
-        version: u32,
     ) -> (PqPublicKey, PqSecretKey) {
         let (pq_pk, pq_sk) = pq_keygen();
 
         let keys = derive_session_keys(domain, password);
-        let aad = domain::sk_wrap_aad(domain, version, session);
         let wrap_key = crypto_aead::Key::from_ref(&keys.sk_wrap_key);
 
-        let kf = KeypairFile::build_wrapped(
-            version,
+        let kf = KeypairFile::build_current_wrapped(
+            domain,
+            session,
             pq_pk.to_bytes(),
             &wrap_key,
             &pq_sk.to_bytes(),
-            aad.as_bytes(),
-        );
-        storage.write_keypair(session, &kf.serialize()).unwrap();
+        )
+        .unwrap();
+        storage
+            .write_keypair(session, &kf.serialize().unwrap())
+            .unwrap();
 
         (pq_pk, pq_sk)
     }
@@ -219,7 +218,6 @@ mod tests {
     fn write_block_0(
         storage: &mut MemoryStorage,
         domain: &str,
-        version: u32,
         session: SessionIndex,
         password: &[u8],
         pq_pk: &PqPublicKey,
@@ -232,7 +230,7 @@ mod tests {
 
         let (aead_key, aad_root) = derive_block_aead_key(
             domain,
-            version,
+            CURRENT_SESSION_VERSION,
             session,
             DEFAULT_NAMESPACE,
             &*keys.root_aead_key,
@@ -251,12 +249,12 @@ mod tests {
         run_with_stack(|| {
             let mut storage = MemoryStorage::new();
             let session = SessionIndex::new(0).unwrap();
-            let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
-            write_block_0(&mut storage, DOMAIN, 0, session, PASSWORD, &pq_pk, 0);
+            let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session);
+            write_block_0(&mut storage, DOMAIN, session, PASSWORD, &pq_pk, 0);
 
             let unlocked = unlock_session(&storage, DOMAIN, PASSWORD).unwrap();
             assert_eq!(unlocked.session_index, session);
-            assert_eq!(unlocked.session_version, 0);
+            assert_eq!(unlocked.session_version, CURRENT_SESSION_VERSION);
             let ns_state =
                 load_namespace_state(&storage, DOMAIN, &unlocked, DEFAULT_NAMESPACE).unwrap();
             assert_eq!(ns_state.total_data_length, 0);
@@ -268,8 +266,8 @@ mod tests {
         run_with_stack(|| {
             let mut storage = MemoryStorage::new();
             let session = SessionIndex::new(0).unwrap();
-            let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
-            write_block_0(&mut storage, DOMAIN, 0, session, PASSWORD, &pq_pk, 0);
+            let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session);
+            write_block_0(&mut storage, DOMAIN, session, PASSWORD, &pq_pk, 0);
 
             let result = unlock_session(&storage, DOMAIN, b"wrong-password");
             assert!(result.is_err());
@@ -281,8 +279,8 @@ mod tests {
         run_with_stack(|| {
             let mut storage = MemoryStorage::new();
             let session = SessionIndex::new(2).unwrap();
-            let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
-            write_block_0(&mut storage, DOMAIN, 0, session, PASSWORD, &pq_pk, 0);
+            let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session);
+            write_block_0(&mut storage, DOMAIN, session, PASSWORD, &pq_pk, 0);
 
             let unlocked = unlock_session(&storage, DOMAIN, PASSWORD).unwrap();
             assert_eq!(unlocked.session_index.as_u8(), 2);
@@ -298,10 +296,10 @@ mod tests {
             let pw1 = b"password-one";
             let pw2 = b"password-two";
 
-            let (pk1, _) = provision_test_session(&mut storage, DOMAIN, pw1, s1, 0);
-            write_block_0(&mut storage, DOMAIN, 0, s1, pw1, &pk1, 0);
-            let (pk4, _) = provision_test_session(&mut storage, DOMAIN, pw2, s2, 0);
-            write_block_0(&mut storage, DOMAIN, 0, s2, pw2, &pk4, 0);
+            let (pk1, _) = provision_test_session(&mut storage, DOMAIN, pw1, s1);
+            write_block_0(&mut storage, DOMAIN, s1, pw1, &pk1, 0);
+            let (pk4, _) = provision_test_session(&mut storage, DOMAIN, pw2, s2);
+            write_block_0(&mut storage, DOMAIN, s2, pw2, &pk4, 0);
 
             let u1 = unlock_session(&storage, DOMAIN, pw1).unwrap();
             assert_eq!(u1.session_index.as_u8(), 1);
@@ -317,7 +315,7 @@ mod tests {
             let mut storage = MemoryStorage::new();
             for slot in [0, 2] {
                 let session = SessionIndex::new(slot).unwrap();
-                provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+                provision_test_session(&mut storage, DOMAIN, PASSWORD, session);
             }
 
             assert!(unlock_session(&storage, DOMAIN, PASSWORD).is_ok());
@@ -326,16 +324,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_unlock_rejects_substituted_public_key() {
+    fn current_unlock_rejects_substituted_public_key() {
         run_with_stack(|| {
             let mut storage = MemoryStorage::new();
             let session = SessionIndex::new(0).unwrap();
-            provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+            provision_test_session(&mut storage, DOMAIN, PASSWORD, session);
             let mut keypair = read_session_keypair(&storage, session).unwrap();
             let (other_public, _other_secret) = pq_keygen();
             keypair.pq_pk = other_public.to_bytes();
             storage
-                .write_keypair(session, &keypair.serialize())
+                .write_keypair(session, &keypair.serialize().unwrap())
                 .unwrap();
 
             assert!(unlock_session(&storage, DOMAIN, PASSWORD).is_err());
@@ -347,7 +345,7 @@ mod tests {
         run_with_stack(|| {
             let mut storage = MemoryStorage::new();
             let session = SessionIndex::new(1).unwrap();
-            provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+            provision_test_session(&mut storage, DOMAIN, PASSWORD, session);
             let mut encoded = storage.read_keypair(session).unwrap();
             encoded[..4].copy_from_slice(&2_u32.to_be_bytes());
             storage.write_keypair(session, &encoded).unwrap();
@@ -373,8 +371,8 @@ mod tests {
         run_with_stack(|| {
             let mut storage = MemoryStorage::new();
             let session = SessionIndex::new(0).unwrap();
-            let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
-            write_block_0(&mut storage, DOMAIN, 0, session, PASSWORD, &pq_pk, 42);
+            let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session);
+            write_block_0(&mut storage, DOMAIN, session, PASSWORD, &pq_pk, 42);
 
             let unlocked = unlock_session(&storage, DOMAIN, PASSWORD).unwrap();
             let ns_state =

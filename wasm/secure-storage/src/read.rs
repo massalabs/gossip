@@ -236,6 +236,7 @@ mod tests {
     use super::*;
     use crate::DEFAULT_NAMESPACE;
     use crate::block::encrypt_block;
+    use crate::keypair::CURRENT_SESSION_VERSION;
     use crate::pq::pq_keygen;
     use crate::storage::MemoryStorage;
     use crate::types::SessionIndex;
@@ -248,7 +249,7 @@ mod tests {
 
         UnlockedSession {
             session_index: SessionIndex::new(0).unwrap(),
-            session_version: 0,
+            session_version: CURRENT_SESSION_VERSION,
             pq_rerand_pk: pq_pk,
             pq_rerand_sk: pq_sk,
             root_aead_key: Zeroizing::new(root_aead_key),

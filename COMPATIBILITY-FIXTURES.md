@@ -16,8 +16,9 @@ bytes carry a persisted meaning. CI verifies both the hashes and complete manife
 The account-security vector fixes the password KDF, mnemonic encryption, identity derivation, and
 expected Gossip, EVM, and Massa identities. The keypair fixture freezes the version-first lengths,
 public-key-bound wrapping AAD, and a usable pq-rerand keypair under public test password
-`keypair-v1-password` and domain `keypair-v1-fixture`. These are deliberately public test data, never
-live user material.
+`keypair-v1-password` and domain `keypair-v1-fixture`. The portable archive similarly has one usable
+test slot under password `portable-v1-password` and domain `portable-v1-fixture`. These are
+deliberately public test data, never live user material.
 
 ## Update policy
 

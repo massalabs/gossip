@@ -525,7 +525,7 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
 mod tests {
     use super::*;
     use crate::DEFAULT_NAMESPACE;
-    use crate::keypair::KeypairFile;
+    use crate::keypair::{CURRENT_SESSION_VERSION, KeypairFile};
     use crate::pq::{PqPublicKey, PqSecretKey, pq_keygen};
     use crate::read::read_session_data;
     use crate::run_with_stack;
@@ -548,17 +548,19 @@ mod tests {
             let (pk, sk) = pq_keygen();
             let session = SessionIndex::new(i).unwrap();
 
-            let aad = domain::sk_wrap_aad(DOMAIN, 0, session);
             let wrap_key = crypto_aead::Key::from([0xBB; crypto_aead::KEY_SIZE]);
 
-            let kf = KeypairFile::build_wrapped(
-                0,
+            let kf = KeypairFile::build_current_wrapped(
+                DOMAIN,
+                session,
                 pk.to_bytes(),
                 &wrap_key,
                 &sk.to_bytes(),
-                aad.as_bytes(),
-            );
-            storage.write_keypair(session, &kf.serialize()).unwrap();
+            )
+            .unwrap();
+            storage
+                .write_keypair(session, &kf.serialize().unwrap())
+                .unwrap();
             all_keys.push((pk, sk));
         }
 
@@ -566,7 +568,7 @@ mod tests {
         let (ref pk, ref sk) = all_keys[0];
         let session = UnlockedSession {
             session_index: SessionIndex::new(0).unwrap(),
-            session_version: 0,
+            session_version: CURRENT_SESSION_VERSION,
             pq_rerand_pk: PqPublicKey::from_bytes(&pk.to_bytes()).unwrap(),
             pq_rerand_sk: PqSecretKey::from_bytes(&sk.to_bytes()).unwrap(),
             root_aead_key,

@@ -162,7 +162,7 @@ async function expandedFixture(blockCount: number): Promise<Uint8Array> {
 
 const validators = {
   validateKeypair(value: Uint8Array) {
-    expect([98_340, 98_352]).toContain(value.byteLength);
+    expect(value.byteLength).toBe(98_352);
   },
   validateBlock(value: Uint8Array) {
     expect(value.byteLength).toBe(65_536);
@@ -170,7 +170,10 @@ const validators = {
 };
 
 async function stageOuterMigration(transfer: PortableWebImport): Promise<void> {
-  await transfer.beginOuterMigration('portable-web-test');
+  await transfer.beginOuterMigration('portable-v1-fixture');
+  await transfer.admitOuterMigrationPassword(
+    new TextEncoder().encode('portable-v1-password')
+  );
   await transfer.finalizeOuterMigration();
 }
 

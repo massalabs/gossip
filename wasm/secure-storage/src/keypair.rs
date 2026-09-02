@@ -1,11 +1,6 @@
 //! Versioned keypair-envelope serialization.
 //!
-//! Legacy v0 (frozen decoder):
-//! ```text
-//! [version: u32 BE] [pq_pk] [sk_nonce: 16] [sk_ct]
-//! ```
-//!
-//! Current v1:
+//! Phase 3 v1:
 //! ```text
 //! [version: u32 BE] [pk_len: u32 BE] [nonce_len: u32 BE]
 //! [sk_ct_len: u32 BE] [pq_pk] [sk_nonce] [sk_ct]
@@ -17,17 +12,12 @@ use crate::pq::{PqPublicKey, PqSecretKey};
 use crate::storage::KeypairStorage;
 use crate::types::SessionIndex;
 
-pub const LEGACY_SESSION_VERSION: u32 = 0;
 pub const CURRENT_SESSION_VERSION: u32 = 1;
 
 const VERSION_SIZE: usize = 4;
 const V1_LENGTHS_SIZE: usize = 12;
 const V1_HEADER_SIZE: usize = VERSION_SIZE + V1_LENGTHS_SIZE;
 const EXPECTED_SECRET_CIPHERTEXT_SIZE: usize = PqSecretKey::byte_size() + AEAD_TAG_SIZE;
-const LEGACY_VALUE_SIZE: usize = VERSION_SIZE
-    + PqPublicKey::byte_size()
-    + crypto_aead::NONCE_SIZE
-    + EXPECTED_SECRET_CIPHERTEXT_SIZE;
 const CURRENT_VALUE_SIZE: usize = V1_HEADER_SIZE
     + PqPublicKey::byte_size()
     + crypto_aead::NONCE_SIZE
@@ -36,16 +26,16 @@ const V1_AAD_MAGIC: &[u8; 8] = b"GOSSIPKP";
 
 #[must_use]
 pub fn is_supported_session_version(version: u32) -> bool {
-    matches!(version, LEGACY_SESSION_VERSION | CURRENT_SESSION_VERSION)
+    version == CURRENT_SESSION_VERSION
 }
 
 #[cfg(feature = "native")]
 #[must_use]
 pub const fn serialized_keypair_size(version: u32) -> Option<usize> {
-    match version {
-        LEGACY_SESSION_VERSION => Some(LEGACY_VALUE_SIZE),
-        CURRENT_SESSION_VERSION => Some(CURRENT_VALUE_SIZE),
-        _ => None,
+    if version == CURRENT_SESSION_VERSION {
+        Some(CURRENT_VALUE_SIZE)
+    } else {
+        None
     }
 }
 
@@ -58,9 +48,8 @@ pub struct KeypairFile {
 }
 
 impl KeypairFile {
-    /// Build a keypair file by AEAD-wrapping a secret key.
-    pub fn build_wrapped(
-        version: u32,
+    /// Build the supported keypair envelope by AEAD-wrapping a secret key.
+    fn build_wrapped(
         pq_pk_bytes: Vec<u8>,
         wrap_key: &crypto_aead::Key,
         sk_plaintext: &[u8],
@@ -71,7 +60,7 @@ impl KeypairFile {
         let nonce = crypto_aead::Nonce::from(sk_nonce);
         let sk_ct = crypto_aead::encrypt(wrap_key, &nonce, sk_plaintext, aad);
         Self {
-            version,
+            version: CURRENT_SESSION_VERSION,
             pq_pk: pq_pk_bytes,
             sk_nonce,
             sk_ct,
@@ -94,7 +83,6 @@ impl KeypairFile {
         }
         let aad = current_wrap_aad(domain, slot, &pq_pk_bytes)?;
         Ok(Self::build_wrapped(
-            CURRENT_SESSION_VERSION,
             pq_pk_bytes,
             wrap_key,
             sk_plaintext,
@@ -105,35 +93,25 @@ impl KeypairFile {
     /// Reconstruct the exact wrapping AAD selected by the envelope version.
     pub fn wrap_aad(&self, domain: &str, slot: SessionIndex) -> Result<Vec<u8>> {
         match self.version {
-            LEGACY_SESSION_VERSION => {
-                Ok(crate::domain::sk_wrap_aad(domain, LEGACY_SESSION_VERSION, slot).into_bytes())
-            }
             CURRENT_SESSION_VERSION => current_wrap_aad(domain, slot, &self.pq_pk),
             version => Err(SecureStorageError::UnsupportedVersion(version)),
         }
     }
 
-    /// Serialize using the version-selected frozen layout.
-    #[must_use]
-    pub fn serialize(&self) -> Vec<u8> {
-        if self.version == CURRENT_SESSION_VERSION {
-            let mut buf = Vec::with_capacity(CURRENT_VALUE_SIZE);
-            buf.extend_from_slice(&self.version.to_be_bytes());
-            buf.extend_from_slice(&(self.pq_pk.len() as u32).to_be_bytes());
-            buf.extend_from_slice(&(self.sk_nonce.len() as u32).to_be_bytes());
-            buf.extend_from_slice(&(self.sk_ct.len() as u32).to_be_bytes());
-            buf.extend_from_slice(&self.pq_pk);
-            buf.extend_from_slice(&self.sk_nonce);
-            buf.extend_from_slice(&self.sk_ct);
-            return buf;
+    /// Serialize the explicitly supported Phase 3 layout.
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        if self.version != CURRENT_SESSION_VERSION {
+            return Err(SecureStorageError::UnsupportedVersion(self.version));
         }
-
-        let mut buf = Vec::with_capacity(LEGACY_VALUE_SIZE);
+        let mut buf = Vec::with_capacity(CURRENT_VALUE_SIZE);
         buf.extend_from_slice(&self.version.to_be_bytes());
+        buf.extend_from_slice(&(self.pq_pk.len() as u32).to_be_bytes());
+        buf.extend_from_slice(&(self.sk_nonce.len() as u32).to_be_bytes());
+        buf.extend_from_slice(&(self.sk_ct.len() as u32).to_be_bytes());
         buf.extend_from_slice(&self.pq_pk);
         buf.extend_from_slice(&self.sk_nonce);
         buf.extend_from_slice(&self.sk_ct);
-        buf
+        Ok(buf)
     }
 
     /// Deserialize only after dispatching on the leading version.
@@ -147,17 +125,9 @@ impl KeypairFile {
                 .map_err(|_| SecureStorageError::CorruptedBlock)?,
         );
         match version {
-            LEGACY_SESSION_VERSION => Self::deserialize_legacy(data),
             CURRENT_SESSION_VERSION => Self::deserialize_current(data),
             version => Err(SecureStorageError::UnsupportedVersion(version)),
         }
-    }
-
-    fn deserialize_legacy(data: &[u8]) -> Result<Self> {
-        if data.len() != LEGACY_VALUE_SIZE {
-            return Err(SecureStorageError::CorruptedBlock);
-        }
-        Self::from_parts(LEGACY_SESSION_VERSION, data, VERSION_SIZE)
     }
 
     fn deserialize_current(data: &[u8]) -> Result<Self> {
@@ -282,7 +252,7 @@ mod tests {
         let bytes = include_bytes!("../tests/fixtures/keypair-v1.bin");
         let parsed = KeypairFile::deserialize(bytes).unwrap();
         assert_eq!(parsed.version, CURRENT_SESSION_VERSION);
-        assert_eq!(parsed.serialize(), bytes);
+        assert_eq!(parsed.serialize().unwrap(), bytes);
         let slot = SessionIndex::new(1).unwrap();
         let keys = crate::kdf::derive_session_keys("keypair-v1-fixture", b"keypair-v1-password");
         let aad = parsed.wrap_aad("keypair-v1-fixture", slot).unwrap();
@@ -316,13 +286,13 @@ mod tests {
         .unwrap();
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/keypair-v1.bin");
-        std::fs::write(path, keypair.serialize()).unwrap();
+        std::fs::write(path, keypair.serialize().unwrap()).unwrap();
     }
 
     #[test]
     fn current_roundtrip_and_aad_open() {
         let file = current_file();
-        let bytes = file.serialize();
+        let bytes = file.serialize().unwrap();
         assert_eq!(bytes.len(), CURRENT_VALUE_SIZE);
         let parsed = KeypairFile::deserialize(&bytes).unwrap();
         let aad = parsed
@@ -344,7 +314,7 @@ mod tests {
     #[test]
     fn current_aad_rejects_public_key_substitution() {
         let file = current_file();
-        let mut bytes = file.serialize();
+        let mut bytes = file.serialize().unwrap();
         let (other_pk, _other_sk) = pq_keygen();
         bytes[V1_HEADER_SIZE..V1_HEADER_SIZE + PqPublicKey::byte_size()]
             .copy_from_slice(&other_pk.to_bytes());
@@ -365,24 +335,13 @@ mod tests {
     }
 
     #[test]
-    fn legacy_decoder_roundtrip() {
-        let (pk, sk) = pq_keygen();
-        let wrap = crypto_aead::Key::from([3; crypto_aead::KEY_SIZE]);
-        let aad = crate::domain::sk_wrap_aad(
-            "test",
-            LEGACY_SESSION_VERSION,
-            SessionIndex::new(0).unwrap(),
-        );
-        let file = KeypairFile::build_wrapped(
-            LEGACY_SESSION_VERSION,
-            pk.to_bytes(),
-            &wrap,
-            &sk.to_bytes(),
-            aad.as_bytes(),
-        );
-        let parsed = KeypairFile::deserialize(&file.serialize()).unwrap();
-        assert_eq!(parsed.version, LEGACY_SESSION_VERSION);
-        assert_eq!(parsed.serialize().len(), LEGACY_VALUE_SIZE);
+    fn rejects_version_zero_before_layout() {
+        let mut version_zero = vec![0_u8; CURRENT_VALUE_SIZE];
+        version_zero[..4].copy_from_slice(&0_u32.to_be_bytes());
+        assert!(matches!(
+            KeypairFile::deserialize(&version_zero),
+            Err(SecureStorageError::UnsupportedVersion(0))
+        ));
     }
 
     #[test]
@@ -391,11 +350,17 @@ mod tests {
             KeypairFile::deserialize(&2_u32.to_be_bytes()),
             Err(SecureStorageError::UnsupportedVersion(2))
         ));
+        let mut file = current_file();
+        file.version = 2;
+        assert!(matches!(
+            file.serialize(),
+            Err(SecureStorageError::UnsupportedVersion(2))
+        ));
     }
 
     #[test]
     fn rejects_current_length_mismatch() {
-        let mut bytes = current_file().serialize();
+        let mut bytes = current_file().serialize().unwrap();
         bytes[4..8].copy_from_slice(&1_u32.to_be_bytes());
         assert!(KeypairFile::deserialize(&bytes).is_err());
     }

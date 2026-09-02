@@ -91,7 +91,7 @@ impl OuterMigrationPlan {
                     &wrap,
                     &secret_bytes,
                 )?;
-                keypairs[slot_index] = Zeroizing::new(keypair.serialize());
+                keypairs[slot_index] = Zeroizing::new(keypair.serialize()?);
                 destinations.push(DestinationSlot {
                     public_key: destination_pk,
                     selected: Some(SelectedDestination {
@@ -114,7 +114,7 @@ impl OuterMigrationPlan {
                     &dummy_wrap_key,
                     &dummy_secret,
                 )?;
-                keypairs[slot_index] = Zeroizing::new(keypair.serialize());
+                keypairs[slot_index] = Zeroizing::new(keypair.serialize()?);
                 destinations.push(DestinationSlot {
                     public_key: destination_pk,
                     selected: None,
@@ -317,9 +317,7 @@ fn required_block_count(total_length: u64) -> Result<u64> {
 mod tests {
     use super::*;
     use crate::block::rerandomize_block;
-    use crate::kdf::derive_session_keys;
-    use crate::keypair::{LEGACY_SESSION_VERSION, read_session_keypair};
-    use crate::pq::pq_keygen;
+    use crate::keypair::read_session_keypair;
     use crate::read::read_session_data;
     use crate::run_with_stack;
     use crate::storage::{BlockStorage, KeypairStorage, MemoryStorage};
@@ -330,29 +328,12 @@ mod tests {
     const PASSWORD: &[u8] = b"selected-password";
     const OMITTED_PASSWORD: &[u8] = b"omitted-hidden-password";
 
-    fn legacy_source() -> (MemoryStorage, [Vec<u8>; SESSION_COUNT]) {
+    fn current_source() -> (MemoryStorage, [Vec<u8>; SESSION_COUNT]) {
         let mut storage = MemoryStorage::new();
         crate::lifecycle::provision_storage_for_domain(&mut storage, DOMAIN).unwrap();
         let slot = SessionIndex::new(1).unwrap();
-        let (pk, sk) = pq_keygen();
-        let keys = derive_session_keys(DOMAIN, PASSWORD);
-        let aad = crate::domain::sk_wrap_aad(DOMAIN, LEGACY_SESSION_VERSION, slot);
-        let keypair = KeypairFile::build_wrapped(
-            LEGACY_SESSION_VERSION,
-            pk.to_bytes(),
-            &crypto_aead::Key::from_ref(&keys.sk_wrap_key),
-            &sk.to_bytes(),
-            aad.as_bytes(),
-        );
-        storage.write_keypair(slot, &keypair.serialize()).unwrap();
-        let session = UnlockedSession {
-            session_index: slot,
-            session_version: LEGACY_SESSION_VERSION,
-            pq_rerand_pk: pk,
-            pq_rerand_sk: sk,
-            root_aead_key: keys.root_aead_key.clone(),
-        };
-        for (namespace, value) in [(0, b"sqlite-v0".as_slice()), (1, b"session-v0".as_slice())] {
+        let session = crate::allocate_session(&mut storage, DOMAIN, slot, PASSWORD).unwrap();
+        for (namespace, value) in [(0, b"sqlite-v1".as_slice()), (1, b"session-v1".as_slice())] {
             let mut state = NamespaceState::empty();
             write_session_data(
                 &mut storage,
@@ -390,9 +371,9 @@ mod tests {
     }
 
     #[test]
-    fn migrates_selected_legacy_data_and_rotates_every_slot() {
+    fn migrates_selected_current_data_and_rotates_every_slot() {
         run_with_stack(|| {
-            let (source, source_keypairs) = legacy_source();
+            let (source, source_keypairs) = current_source();
             let source_public_keys = source_keypairs
                 .each_ref()
                 .map(|bytes| KeypairFile::deserialize(bytes).unwrap().pq_pk);
@@ -446,7 +427,7 @@ mod tests {
             let selected = unlock_session(&destination, DOMAIN, PASSWORD).unwrap();
             assert_eq!(selected.session_version, CURRENT_SESSION_VERSION);
             for (namespace, expected) in
-                [(0, b"sqlite-v0".as_slice()), (1, b"session-v0".as_slice())]
+                [(0, b"sqlite-v1".as_slice()), (1, b"session-v1".as_slice())]
             {
                 let state =
                     crate::unlock::load_namespace_state(&destination, DOMAIN, &selected, namespace)
@@ -480,7 +461,7 @@ mod tests {
     #[test]
     fn rejects_finalize_without_an_admitted_password() {
         run_with_stack(|| {
-            let (_, keypairs) = legacy_source();
+            let (_, keypairs) = current_source();
             let plan = OuterMigrationPlan::new(DOMAIN, keypairs).unwrap();
             assert!(matches!(
                 plan.finalize(),
@@ -544,14 +525,14 @@ mod tests {
     #[test]
     fn replaces_every_unadmitted_slot_with_fresh_current_cover() {
         run_with_stack(|| {
-            let (mut source, keypairs) = legacy_source();
+            let (mut source, keypairs) = current_source();
             // Canonical PQ cover with invalid account AEAD proves omitted
             // payloads are never decrypted after archive validation.
             let slot = SessionIndex::new(2).unwrap();
             let keypair = read_session_keypair(&source, slot).unwrap();
             let public = PqPublicKey::from_bytes(&keypair.pq_pk).unwrap();
             let mut aad_root = String::new();
-            crate::domain::block_scope(&mut aad_root, DOMAIN, LEGACY_SESSION_VERSION, slot, 0, 0);
+            crate::domain::block_scope(&mut aad_root, DOMAIN, CURRENT_SESSION_VERSION, slot, 0, 0);
             let cover = create_cover_block(&public, &aad_root);
             source
                 .write_block(slot, 0, 0, cover.as_slice().try_into().unwrap())
@@ -589,7 +570,7 @@ mod tests {
     #[test]
     fn rejects_corruption_inside_authenticated_logical_range() {
         run_with_stack(|| {
-            let (mut source, keypairs) = legacy_source();
+            let (mut source, keypairs) = current_source();
             let mut plan = OuterMigrationPlan::new(DOMAIN, keypairs).unwrap();
             plan.admit_password(PASSWORD).unwrap();
             let mut migration = plan.finalize().unwrap();
@@ -600,7 +581,7 @@ mod tests {
             crate::domain::block_scope(
                 &mut aad_root,
                 DOMAIN,
-                LEGACY_SESSION_VERSION,
+                CURRENT_SESSION_VERSION,
                 selected,
                 0,
                 0,

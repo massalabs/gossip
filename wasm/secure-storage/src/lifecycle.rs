@@ -56,7 +56,7 @@ pub fn provision_storage_for_domain<S: BlockStorage + KeypairStorage>(
             &dummy_wrap_key,
             &dummy_sk,
         )?;
-        storage.write_keypair(slot, &kf.serialize())?;
+        storage.write_keypair(slot, &kf.serialize()?)?;
         storage.reset_blockstream(slot, DEFAULT_NAMESPACE)?;
     }
 
@@ -93,7 +93,7 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
         &sk_wrap_aead_key,
         &sk_bytes,
     )?;
-    storage.write_keypair(slot, &kf.serialize())?;
+    storage.write_keypair(slot, &kf.serialize()?)?;
 
     let session = UnlockedSession {
         session_index: slot,
@@ -199,7 +199,7 @@ pub fn destroy_session<S: BlockStorage + KeypairStorage>(
         &dummy_wrap_key,
         &dummy_sk,
     )?;
-    storage.write_keypair(slot, &kf.serialize())?;
+    storage.write_keypair(slot, &kf.serialize()?)?;
 
     // 2. Snapshot-symmetric camouflage. For each namespace, sweep every
     //    block index across all slots; the destroyed slot is forced

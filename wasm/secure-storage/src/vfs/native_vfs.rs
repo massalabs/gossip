@@ -2073,6 +2073,9 @@ mod tests {
     use super::*;
     use crate::run_with_stack;
 
+    const PORTABLE_FIXTURE_DOMAIN: &str = "portable-v1-fixture";
+    const PORTABLE_FIXTURE_PASSWORD: &[u8] = b"portable-v1-password";
+
     fn ensure_registered() {
         register().unwrap();
     }
@@ -2113,7 +2116,7 @@ mod tests {
             let _guard = test_mutex().lock().unwrap();
             reset_state();
             let dir = tempfile::tempdir().unwrap();
-            init_native(dir.path().to_str().unwrap(), "test").unwrap();
+            init_native(dir.path().to_str().unwrap(), PORTABLE_FIXTURE_DOMAIN).unwrap();
             let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
 
             begin_portable_import().unwrap();
@@ -2131,6 +2134,7 @@ mod tests {
             ));
             assert!(dir.path().join(PORTABLE_IMPORT_SPOOL).exists());
             begin_portable_outer_migration().unwrap();
+            admit_portable_outer_migration_password(PORTABLE_FIXTURE_PASSWORD).unwrap();
             finish_portable_outer_migration().unwrap();
             install_portable_import().unwrap();
             assert!(has_data().unwrap());
@@ -2325,7 +2329,7 @@ mod tests {
         let _guard = test_mutex().lock().unwrap();
         reset_state();
         let dir = tempfile::tempdir().unwrap();
-        init_native(dir.path().to_str().unwrap(), "test").unwrap();
+        init_native(dir.path().to_str().unwrap(), PORTABLE_FIXTURE_DOMAIN).unwrap();
         let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
         begin_portable_import().unwrap();
         for chunk in fixture.chunks(8192) {
@@ -2333,6 +2337,7 @@ mod tests {
         }
         finish_portable_import().unwrap();
         begin_portable_outer_migration().unwrap();
+        admit_portable_outer_migration_password(PORTABLE_FIXTURE_PASSWORD).unwrap();
         finish_portable_outer_migration().unwrap();
         let path = dir.path().join(PORTABLE_MIGRATION_SPOOL);
         let mut file = OpenOptions::new().write(true).open(&path).unwrap();
@@ -2357,7 +2362,7 @@ mod tests {
         let _guard = test_mutex().lock().unwrap();
         reset_state();
         let dir = tempfile::tempdir().unwrap();
-        init_native(dir.path().to_str().unwrap(), "test").unwrap();
+        init_native(dir.path().to_str().unwrap(), PORTABLE_FIXTURE_DOMAIN).unwrap();
         let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
         begin_portable_import().unwrap();
         for chunk in fixture.chunks(8192) {
@@ -2365,6 +2370,7 @@ mod tests {
         }
         finish_portable_import().unwrap();
         begin_portable_outer_migration().unwrap();
+        admit_portable_outer_migration_password(PORTABLE_FIXTURE_PASSWORD).unwrap();
         finish_portable_outer_migration().unwrap();
 
         let source = dir.path().join(PORTABLE_IMPORT_SPOOL);
@@ -2388,7 +2394,7 @@ mod tests {
         let _guard = test_mutex().lock().unwrap();
         reset_state();
         let dir = tempfile::tempdir().unwrap();
-        init_native(dir.path().to_str().unwrap(), "test").unwrap();
+        init_native(dir.path().to_str().unwrap(), PORTABLE_FIXTURE_DOMAIN).unwrap();
         let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
         begin_portable_import().unwrap();
         for chunk in fixture.chunks(8192) {
@@ -2396,6 +2402,7 @@ mod tests {
         }
         finish_portable_import().unwrap();
         begin_portable_outer_migration().unwrap();
+        admit_portable_outer_migration_password(PORTABLE_FIXTURE_PASSWORD).unwrap();
         finish_portable_outer_migration().unwrap();
         install_portable_import().unwrap();
 

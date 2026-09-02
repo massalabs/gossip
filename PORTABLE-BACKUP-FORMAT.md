@@ -66,16 +66,7 @@ Every record uses this uniform frame:
   logical numeric block index. The value is exactly 65,536 bytes for the version-1 secure-storage
   baseline.
 
-A version-0 keypair value is exactly 98,340 bytes:
-
-| Relative offset |  Width | Field                                                |
-| --------------: | -----: | ---------------------------------------------------- |
-|               0 |      4 | Keypair version, `0`                                 |
-|               4 | 65,536 | Canonical pq-rerand `9a5a48b` public key             |
-|          65,540 |     16 | Secret-key wrapping nonce                            |
-|          65,556 | 32,784 | Wrapped 32,768-byte secret key plus 16-byte AEAD tag |
-
-A version-1 keypair value is exactly 98,352 bytes:
+The version-1 keypair value is exactly 98,352 bytes:
 
 | Relative offset |  Width | Field                                                |
 | --------------: | -----: | ---------------------------------------------------- |
@@ -88,9 +79,9 @@ A version-1 keypair value is exactly 98,352 bytes:
 |          65,568 | 32,784 | Wrapped 32,768-byte secret key plus 16-byte AEAD tag |
 
 Version 1 binds `GOSSIPKP`, the bounded domain, slot, version, all three lengths, and the complete
-public key into the wrapping AEAD. It selects the current block KDF/AAD suite with explicit session
-version `1`. New storage emits version 1; the frozen version-0 reader exists only to migrate the
-initial portable baseline.
+public key into the wrapping AEAD. It selects the initial supported block KDF/AAD suite with explicit
+session version `1`. Phase 3 reads and writes only this keypair envelope. Version `0` and unknown
+versions are unsupported and rejected before version-specific layout parsing.
 
 The keypair version is read before applying version-specific lengths or parsers. The public key and
 every encrypted block must pass pq-rerand's strict canonical parsers. All other kinds, slots,
@@ -211,11 +202,13 @@ must never control migration.
 
 ## Version-1 test vector
 
-The committed `portable-v1-minimal.gossipbackup` fixture contains three deterministic keypairs and
-namespace `0`, block `0` for all three slots. Its final SHA-256 value is:
+The committed `portable-v1-minimal.gossipbackup` fixture contains three fixed keypairs and namespace
+`0`, block `0` for all three slots. Slot `0` is usable with public test domain
+`portable-v1-fixture` and password `portable-v1-password`; the other slots are cover. Its final
+SHA-256 value is:
 
 ```text
-8de78659f333802ba39696c4d2d9ed0b822ba374d5f204383dbce083a33d9e8f
+3eb7be05e82e6841ff7d9a8d544448bbb9b785381fdd6bd499549576da27af94
 ```
 
 The reader decodes the committed bytes independently before the writer must reproduce them exactly.

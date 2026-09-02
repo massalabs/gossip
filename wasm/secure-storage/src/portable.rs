@@ -33,16 +33,13 @@ const BLOCK_KIND: u8 = 1;
 const V1_SLOT_CAPACITY: u8 = 3;
 const V1_NAMESPACE_COUNT: u64 = 2;
 const V1_BLOCK_SIZE: usize = 65_536;
-const V1_LEGACY_KEYPAIR_VERSION: u32 = 0;
-const V1_CURRENT_KEYPAIR_VERSION: u32 = 1;
+const V1_KEYPAIR_VERSION: u32 = 1;
 const V1_PUBLIC_KEY_SIZE: usize = 65_536;
 const V1_SECRET_KEY_SIZE: usize = 32_768;
 const V1_NONCE_SIZE: usize = 16;
 const V1_AEAD_TAG_SIZE: usize = 16;
-const V1_LEGACY_KEYPAIR_VALUE_SIZE: usize =
-    4 + V1_PUBLIC_KEY_SIZE + V1_NONCE_SIZE + V1_SECRET_KEY_SIZE + V1_AEAD_TAG_SIZE;
-const V1_CURRENT_KEYPAIR_VALUE_SIZE: usize = V1_LEGACY_KEYPAIR_VALUE_SIZE + 12;
-const V1_MAX_KEYPAIR_VALUE_SIZE: u64 = 16 * 1024 * 1024;
+const V1_KEYPAIR_VALUE_SIZE: usize =
+    16 + V1_PUBLIC_KEY_SIZE + V1_NONCE_SIZE + V1_SECRET_KEY_SIZE + V1_AEAD_TAG_SIZE;
 
 // Version 1 freezes these wire values. A dependency/storage change must not
 // silently redefine its decoder or exporter.
@@ -139,16 +136,12 @@ pub(crate) fn validate_portable_keypair_value(value: &[u8]) -> Result<()> {
             .try_into()
             .map_err(|_| SecureStorageError::InvalidPortableArchive)?,
     );
-    let expected_size = match version {
-        V1_LEGACY_KEYPAIR_VERSION => V1_LEGACY_KEYPAIR_VALUE_SIZE,
-        V1_CURRENT_KEYPAIR_VERSION => V1_CURRENT_KEYPAIR_VALUE_SIZE,
-        version => {
-            return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
-                version,
-            )));
-        }
-    };
-    if value.len() != expected_size {
+    if version != V1_KEYPAIR_VERSION {
+        return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
+            version,
+        )));
+    }
+    if value.len() != V1_KEYPAIR_VALUE_SIZE {
         return Err(SecureStorageError::InvalidPortableArchive);
     }
     crate::keypair::KeypairFile::deserialize(value)
@@ -443,9 +436,7 @@ impl<R: Read> PortableArchiveReader<R> {
         let kind = PortableRecordKind::decode(frame[0])?;
         let value_len = u64::from_be_bytes(frame[18..26].try_into().expect("fixed slice"));
         match kind {
-            PortableRecordKind::Keypair
-                if !(4..=V1_MAX_KEYPAIR_VALUE_SIZE).contains(&value_len) =>
-            {
+            PortableRecordKind::Keypair if value_len != V1_KEYPAIR_VALUE_SIZE as u64 => {
                 return Err(SecureStorageError::InvalidPortableArchive);
             }
             PortableRecordKind::Block if value_len != V1_BLOCK_SIZE as u64 => {
@@ -470,16 +461,12 @@ impl<R: Read> PortableArchiveReader<R> {
             let mut version_bytes = [0_u8; 4];
             read_exact_archive(&mut self.input, &mut version_bytes)?;
             let version = u32::from_be_bytes(version_bytes);
-            let expected_size = match version {
-                V1_LEGACY_KEYPAIR_VERSION => V1_LEGACY_KEYPAIR_VALUE_SIZE,
-                V1_CURRENT_KEYPAIR_VERSION => V1_CURRENT_KEYPAIR_VALUE_SIZE,
-                version => {
-                    return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
-                        version,
-                    )));
-                }
-            };
-            if value_len != expected_size as u64 {
+            if version != V1_KEYPAIR_VERSION {
+                return Err(SecureStorageError::UnsupportedPortableVersion(u64::from(
+                    version,
+                )));
+            }
+            if value_len != V1_KEYPAIR_VALUE_SIZE as u64 {
                 return Err(SecureStorageError::InvalidPortableArchive);
             }
             let mut value = Zeroizing::new(vec![0_u8; value_size]);
@@ -533,8 +520,6 @@ impl<R: Read> PortableArchiveReader<R> {
 
 #[cfg(test)]
 mod tests {
-    const V1_KEYPAIR_VERSION: u32 = V1_LEGACY_KEYPAIR_VERSION;
-    const V1_KEYPAIR_VALUE_SIZE: usize = V1_LEGACY_KEYPAIR_VALUE_SIZE;
     use std::io::Cursor;
 
     use super::*;
@@ -546,7 +531,7 @@ mod tests {
             sk_nonce: [slot; V1_NONCE_SIZE],
             sk_ct: vec![slot; V1_SECRET_KEY_SIZE + V1_AEAD_TAG_SIZE],
         };
-        PortableRecord::keypair(slot, file.serialize())
+        PortableRecord::keypair(slot, file.serialize().unwrap())
     }
 
     fn block(slot: u8, namespace: u8, block_index: u64) -> PortableRecord {
@@ -556,14 +541,6 @@ mod tests {
             block_index,
             vec![slot.wrapping_add(namespace); V1_BLOCK_SIZE],
         )
-    }
-
-    fn minimal_records() -> Vec<PortableRecord> {
-        let mut records = (0..V1_SLOT_CAPACITY).map(keypair).collect::<Vec<_>>();
-        for slot in 0..V1_SLOT_CAPACITY {
-            records.push(block(slot, 0, 0));
-        }
-        records
     }
 
     fn records() -> Vec<PortableRecord> {
@@ -604,16 +581,78 @@ mod tests {
     #[test]
     fn committed_fixture_decodes_and_matches_the_writer() {
         let fixture = include_bytes!("../tests/fixtures/portable-v1-minimal.gossipbackup");
-        let expected = minimal_records();
         let mut reader = PortableArchiveReader::new(Cursor::new(fixture.as_slice())).unwrap();
-        let mut actual = Vec::new();
+        let mut records = Vec::new();
         while let Some(record) = reader.read_record().unwrap() {
-            actual.push(record);
+            records.push(record);
         }
         reader.finish().unwrap();
 
-        assert_eq!(actual, expected);
-        assert_eq!(encode(&expected).unwrap(), fixture);
+        assert_eq!(records.len(), 6);
+        assert_eq!(encode(&records).unwrap(), fixture);
+    }
+
+    #[test]
+    #[ignore = "fixture generation is an explicit compatibility-baseline operation"]
+    fn generate_current_portable_fixture() {
+        use crate::storage::{BlockStorage, KeypairStorage, MemoryStorage};
+        use crate::types::SessionIndex;
+        use crate::unlock::NamespaceState;
+
+        const DOMAIN: &str = "portable-v1-fixture";
+        const PASSWORD: &[u8] = b"portable-v1-password";
+
+        let mut storage = MemoryStorage::new();
+        crate::lifecycle::provision_storage_for_domain(&mut storage, DOMAIN).unwrap();
+        let session = crate::allocate_session(
+            &mut storage,
+            DOMAIN,
+            SessionIndex::new(0).unwrap(),
+            PASSWORD,
+        )
+        .unwrap();
+        let mut state = NamespaceState::empty();
+        crate::write_session_data(
+            &mut storage,
+            DOMAIN,
+            0,
+            &session,
+            &mut state,
+            0,
+            b"portable fixture",
+        )
+        .unwrap();
+
+        let mut records = Vec::new();
+        for slot in 0..V1_SLOT_CAPACITY {
+            records.push(PortableRecord::keypair(
+                slot,
+                storage
+                    .read_keypair(SessionIndex::new(slot).unwrap())
+                    .unwrap()
+                    .to_vec(),
+            ));
+        }
+        for block_index in 0..storage
+            .block_count(SessionIndex::new(0).unwrap(), 0)
+            .unwrap()
+        {
+            for slot in 0..V1_SLOT_CAPACITY {
+                records.push(PortableRecord::block(
+                    slot,
+                    0,
+                    block_index,
+                    storage
+                        .read_block(SessionIndex::new(slot).unwrap(), 0, block_index)
+                        .unwrap()
+                        .to_vec(),
+                ));
+            }
+        }
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/portable-v1-minimal.gossipbackup");
+        std::fs::write(path, encode(&records).unwrap()).unwrap();
     }
 
     #[test]
@@ -638,9 +677,9 @@ mod tests {
         assert_eq!(
             &bytes[bytes.len() - PORTABLE_DIGEST_SIZE as usize..],
             &[
-                0xb1, 0x46, 0xf7, 0xd2, 0xbb, 0x13, 0x58, 0xd0, 0x3a, 0xd7, 0xe3, 0xfe, 0x91, 0x84,
-                0x8c, 0x86, 0x7a, 0x34, 0x47, 0xd2, 0x2a, 0xb2, 0x9e, 0x97, 0x51, 0x8d, 0x6a, 0xbe,
-                0x47, 0x6a, 0xc7, 0xe3,
+                0xbb, 0xa1, 0xa7, 0x4d, 0x9d, 0x4d, 0x50, 0x38, 0xd7, 0xac, 0x32, 0x7b, 0x74, 0x21,
+                0x4c, 0xca, 0xdd, 0x9e, 0x78, 0x3a, 0x75, 0xab, 0xd9, 0x32, 0xef, 0xb2, 0x3e, 0x0a,
+                0x98, 0x02, 0x00, 0x0a,
             ]
         );
     }

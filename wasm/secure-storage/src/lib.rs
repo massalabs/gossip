@@ -47,13 +47,12 @@ pub use constants::{
 };
 pub use domain::{
     block_aead_aad, block_aead_key_label, block_kdf_salt, block_scope, password_kdf_salt, root,
-    root_aead_key_label, root_kdf_salt, session_scope, sk_wrap_aad, sk_wrap_key_label,
+    root_aead_key_label, root_kdf_salt, session_scope, sk_wrap_key_label,
 };
 pub use error::{Result, SecureStorageError};
 pub use kdf::{SessionKeys, derive_block_aead_key, derive_session_keys};
 pub use keypair::{
-    CURRENT_SESSION_VERSION, KeypairFile, LEGACY_SESSION_VERSION, read_session_keypair,
-    read_session_version_and_pk,
+    CURRENT_SESSION_VERSION, KeypairFile, read_session_keypair, read_session_version_and_pk,
 };
 pub use lifecycle::{allocate_session, cover_traffic_tick, destroy_session, provision_storage};
 pub use outer_migration::{OuterMigration, OuterMigrationPlan};

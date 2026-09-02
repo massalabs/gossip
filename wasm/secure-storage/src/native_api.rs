@@ -727,7 +727,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let init = serde_json::json!({
             "path": dir.path().to_str().unwrap(),
-            "domain": "test",
+            "domain": "portable-v1-fixture",
         });
         dispatch("initSecureStorage", &init.to_string()).unwrap();
         dispatch("beginPortableImport", "{}").unwrap();
@@ -739,6 +739,11 @@ mod tests {
         }
         dispatch("validatePortableImport", "{}").unwrap();
         dispatch("beginPortableOuterMigration", "{}").unwrap();
+        dispatch(
+            "admitPortableOuterMigrationPassword",
+            &serde_json::json!({ "password": B64.encode(b"portable-v1-password") }).to_string(),
+        )
+        .unwrap();
         dispatch("finishPortableOuterMigration", "{}").unwrap();
         dispatch("installPortableImport", "{}").unwrap();
 
