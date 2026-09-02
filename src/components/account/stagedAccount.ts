@@ -30,17 +30,21 @@ export function readStagedMnemonic(account: StagedAccount): string | null {
     : decoder.decode(account.mnemonicBytes);
 }
 
+function constantTimeBytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false;
+
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference === 0;
+}
+
 export function stagedPasswordsEqual(
   left: StagedAccount,
   right: StagedAccount
 ): boolean {
-  if (left.passwordBytes.length !== right.passwordBytes.length) return false;
-
-  let difference = 0;
-  for (let index = 0; index < left.passwordBytes.length; index += 1) {
-    difference |= left.passwordBytes[index] ^ right.passwordBytes[index];
-  }
-  return difference === 0;
+  return constantTimeBytesEqual(left.passwordBytes, right.passwordBytes);
 }
 
 export function stagedMnemonicsEqual(
@@ -50,13 +54,7 @@ export function stagedMnemonicsEqual(
   if (left.mnemonicBytes === undefined || right.mnemonicBytes === undefined) {
     return false;
   }
-  if (left.mnemonicBytes.length !== right.mnemonicBytes.length) return false;
-
-  let difference = 0;
-  for (let index = 0; index < left.mnemonicBytes.length; index += 1) {
-    difference |= left.mnemonicBytes[index] ^ right.mnemonicBytes[index];
-  }
-  return difference === 0;
+  return constantTimeBytesEqual(left.mnemonicBytes, right.mnemonicBytes);
 }
 
 export function wipeStagedAccounts(accounts: StagedAccount[]): void {
