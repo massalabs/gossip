@@ -23,5 +23,6 @@
     "allowSyntheticDefaultImports": true,
     "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/db/secure-storage-worker-test.ts"]
 }

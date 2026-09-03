@@ -16,11 +16,14 @@ use std::sync::{Mutex, OnceLock};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::error::SecureStorageError;
 use crate::js_num;
 use crate::vfs::native_vfs;
+
+const MAX_PORTABLE_BASE64_CHARS: usize =
+    native_vfs::MAX_PORTABLE_BRIDGE_CHUNK_BYTES.div_ceil(3) * 4;
 
 // ── Global DB connection ────────────────────────────────────────────
 
@@ -91,14 +94,14 @@ struct InitArgs {
     domain: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 struct AllocateArgs {
     slot: u8,
     /// base64-encoded password bytes
     password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 struct UnlockArgs {
     /// base64-encoded password bytes
     password: String,
@@ -150,6 +153,18 @@ struct NamespaceArgs {
 #[derive(Deserialize)]
 struct DestroySessionArgs {
     namespaces: Vec<u8>,
+}
+
+#[derive(Deserialize)]
+struct ReadPortableChunkArgs {
+    #[serde(rename = "maxBytes")]
+    max_bytes: usize,
+}
+
+#[derive(Deserialize)]
+struct PushPortableChunkArgs<'a> {
+    /// Base64-encoded portable container bytes borrowed from the wiped FFI buffer.
+    data: &'a str,
 }
 
 /// SQL values flow as raw JSON primitives; the one exception is BLOB,
@@ -211,8 +226,9 @@ fn validate_storage_path(path: &str) -> Result<()> {
 /// and any rusqlite path that aborts on contract violation.
 #[uniffi::export]
 pub fn native_call(method: String, args_json: String) -> Result<String> {
+    let args_json = Zeroizing::new(args_json);
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        dispatch(&method, &args_json)
+        dispatch(&method, args_json.as_str())
     })) {
         Ok(r) => r,
         Err(panic) => {
@@ -251,15 +267,42 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             let has = native_vfs::has_data()?;
             Ok(serde_json::to_string(&has)?)
         }
+        "accountGenerationState" => {
+            let state = native_vfs::account_generation_state()?;
+            Ok(serde_json::to_string(&state)?)
+        }
+        "accountGenerationEpoch" => {
+            let epoch = native_vfs::account_generation_epoch()?;
+            Ok(serde_json::to_string(&epoch)?)
+        }
+        "initializeEmptyAccountGeneration" => {
+            let state = native_vfs::initialize_empty_account_generation()?;
+            Ok(serde_json::to_string(&state)?)
+        }
+        "beginOnboardingCandidate" => {
+            drop_open_database()?;
+            native_vfs::begin_onboarding_candidate()?;
+            Ok("null".into())
+        }
+        "commitOnboardingCandidate" => {
+            drop_open_database()?;
+            let epoch = native_vfs::commit_onboarding_candidate()?;
+            Ok(serde_json::to_string(&epoch)?)
+        }
+        "abortOnboardingCandidate" => {
+            drop_open_database()?;
+            native_vfs::abort_onboarding_candidate()?;
+            Ok("null".into())
+        }
         "allocateSession" => {
             let a: AllocateArgs = parse(args)?;
-            let password = Zeroizing::new(B64.decode(a.password)?);
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
             allocate(a.slot, &password)?;
             Ok("null".into())
         }
         "unlockSession" => {
             let a: UnlockArgs = parse(args)?;
-            let password = Zeroizing::new(B64.decode(a.password)?);
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
             let ok = unlock(&password)?;
             Ok(serde_json::to_string(&ok)?)
         }
@@ -279,8 +322,92 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             native_vfs::flush()?;
             Ok("null".into())
         }
+        "prepareStorageReset" => {
+            prepare_storage_reset()?;
+            Ok("null".into())
+        }
         "close" => {
             close()?;
+            Ok("null".into())
+        }
+        "beginPortableExport" => {
+            prepare_portable_transfer()?;
+            let total_bytes = native_vfs::begin_portable_export()?;
+            Ok(serde_json::to_string(&total_bytes)?)
+        }
+        "readPortableExportChunk" => {
+            let a: ReadPortableChunkArgs = parse(args)?;
+            let chunk = native_vfs::read_portable_export_chunk(a.max_bytes)?;
+            match chunk {
+                Some(bytes) => {
+                    let bytes = Zeroizing::new(bytes);
+                    let encoded = Zeroizing::new(B64.encode(bytes.as_slice()));
+                    Ok(serde_json::to_string(encoded.as_str())?)
+                }
+                None => Ok("null".into()),
+            }
+        }
+        "finishPortableExport" => {
+            native_vfs::finish_portable_export()?;
+            Ok("null".into())
+        }
+        "beginPortableImport" => {
+            prepare_portable_transfer()?;
+            native_vfs::begin_portable_import()?;
+            Ok("null".into())
+        }
+        "pushPortableImportChunk" => {
+            let a: PushPortableChunkArgs<'_> = parse(args)?;
+            if a.data.len() > MAX_PORTABLE_BASE64_CHARS {
+                return Err(SecureStorageException::typed(
+                    "OUT_OF_BOUNDS",
+                    "portable chunk exceeds bridge limit",
+                ));
+            }
+            let bytes = Zeroizing::new(B64.decode(a.data.as_bytes())?);
+            native_vfs::push_portable_import_chunk(&bytes)?;
+            Ok("null".into())
+        }
+        "validatePortableImport" => {
+            native_vfs::finish_portable_import()?;
+            Ok("null".into())
+        }
+        "authenticatePortableImportCandidate" => {
+            let a: UnlockArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
+            match native_vfs::preview_portable_import(&password) {
+                Ok(preview) => Ok(serde_json::to_string(&preview)?),
+                Err(SecureStorageError::InvalidPassword) => Ok("null".into()),
+                Err(error) => Err(error.into()),
+            }
+        }
+        "beginPortableOuterMigration" => {
+            native_vfs::begin_portable_outer_migration()?;
+            Ok("null".into())
+        }
+        "admitPortableOuterMigrationPassword" => {
+            let a: UnlockArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
+            native_vfs::admit_portable_outer_migration_password(&password)?;
+            Ok("null".into())
+        }
+        "finishPortableOuterMigration" => {
+            native_vfs::finish_portable_outer_migration()?;
+            Ok("null".into())
+        }
+        // Preserve the original bridge command's install-and-cleanup meaning
+        // for an older embedded JS bundle running against this native binary.
+        "finishPortableImport" => {
+            native_vfs::finish_portable_import()?;
+            native_vfs::install_portable_import()?;
+            Ok("null".into())
+        }
+        "installPortableImport" => {
+            let epoch = native_vfs::install_portable_import()?;
+            Ok(serde_json::to_string(&epoch)?)
+        }
+        "abortPortableTransfer" => {
+            native_vfs::abort_portable_transfer()?;
             Ok("null".into())
         }
         "rayonThreadCount" => {
@@ -368,6 +495,28 @@ fn init_secure_storage(path: &str, domain: &str) -> Result<()> {
     Ok(())
 }
 
+fn prepare_storage_reset() -> Result<()> {
+    {
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = None;
+    }
+    native_vfs::release_for_storage_reset()?;
+    Ok(())
+}
+
+fn prepare_portable_transfer() -> Result<()> {
+    {
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = None;
+    }
+    native_vfs::lock()?;
+    Ok(())
+}
+
 fn allocate(slot: u8, password: &[u8]) -> Result<()> {
     // Drop the previous rusqlite connection BEFORE switching sessions.
     // SQLite flushes dirty pages via `xWrite` during `sqlite3_close`,
@@ -402,11 +551,16 @@ fn unlock(password: &[u8]) -> Result<bool> {
     Ok(ok)
 }
 
-fn lock() -> Result<()> {
+fn drop_open_database() -> Result<()> {
     let mut guard = db_mutex()
         .lock()
         .map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = None;
+    Ok(())
+}
+
+fn lock() -> Result<()> {
+    drop_open_database()?;
     native_vfs::lock()?;
     Ok(())
 }
@@ -471,6 +625,16 @@ fn exec_sql_batch(stmts: &[ExecSqlArgs]) -> Result<Vec<QueryResultJson>> {
     Ok(out)
 }
 
+/// Validate statement boundaries with SQLite's side-effect-free lexical
+/// parser before rusqlite can prepare against the live connection.
+fn validate_sql(sql: &str) -> Result<&str> {
+    crate::sql_tail::validate(sql, |candidate| {
+        // SAFETY: candidate is a valid NUL-terminated SQL prefix.
+        unsafe { rusqlite::ffi::sqlite3_complete(candidate.as_ptr()) != 0 }
+    })
+    .map_err(|message| SecureStorageException::typed("SQLITE", message))
+}
+
 fn exec_sql_one(
     conn: &rusqlite::Connection,
     sql: &str,
@@ -481,7 +645,9 @@ fn exec_sql_one(
     // `prepare_cached` keeps a per-connection LRU of prepared statements
     // keyed by SQL text. The SDK reuses the same INSERT/UPDATE strings
     // for every message send, so the parser/planner cost is paid once per
-    // statement shape instead of every call.
+    // statement shape instead of every call. Validate before binding/step so
+    // SQLite and the JS classifier always observe the same single statement.
+    let sql = validate_sql(sql)?;
     let mut stmt = conn.prepare_cached(sql)?;
     let column_count = stmt.column_count();
     let columns: Vec<String> = (0..column_count)
@@ -585,6 +751,78 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dispatcher_roundtrips_portable_chunks() {
+        let _guard = native_vfs::test_mutex().lock().unwrap();
+        native_vfs::reset_state();
+        *db_mutex().lock().unwrap() = None;
+        let dir = tempfile::tempdir().unwrap();
+        let init = serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+            "domain": "portable-v1-fixture",
+        });
+        dispatch("initSecureStorage", &init.to_string()).unwrap();
+        dispatch("beginPortableImport", "{}").unwrap();
+
+        let fixture = include_bytes!("../tests/fixtures/portable-v1-minimal.gossipbackup");
+        for chunk in fixture.chunks(128 * 1024) {
+            let args = serde_json::json!({ "data": B64.encode(chunk) });
+            dispatch("pushPortableImportChunk", &args.to_string()).unwrap();
+        }
+        dispatch("validatePortableImport", "{}").unwrap();
+        dispatch("beginPortableOuterMigration", "{}").unwrap();
+        dispatch(
+            "admitPortableOuterMigrationPassword",
+            &serde_json::json!({ "password": B64.encode(b"portable-v1-password") }).to_string(),
+        )
+        .unwrap();
+        dispatch("finishPortableOuterMigration", "{}").unwrap();
+        dispatch("installPortableImport", "{}").unwrap();
+
+        dispatch("beginPortableExport", "{}").unwrap();
+        let mut exported = Vec::new();
+        loop {
+            let value = dispatch(
+                "readPortableExportChunk",
+                &serde_json::json!({ "maxBytes": 32 * 1024 }).to_string(),
+            )
+            .unwrap();
+            let encoded: Option<String> = serde_json::from_str(&value).unwrap();
+            let Some(encoded) = encoded else { break };
+            exported.extend_from_slice(&B64.decode(encoded).unwrap());
+        }
+        dispatch("finishPortableExport", "{}").unwrap();
+
+        assert_ne!(exported, fixture);
+        let mut reader = crate::portable::PortableArchiveReader::new(exported.as_slice()).unwrap();
+        while reader.read_record().unwrap().is_some() {}
+        reader.finish().unwrap();
+        native_vfs::reset_state();
+    }
+
+    #[test]
+    fn legacy_finish_portable_import_rejects_unmigrated_candidate() {
+        let _guard = native_vfs::test_mutex().lock().unwrap();
+        native_vfs::reset_state();
+        *db_mutex().lock().unwrap() = None;
+        let dir = tempfile::tempdir().unwrap();
+        let init = serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+            "domain": "test",
+        });
+        dispatch("initSecureStorage", &init.to_string()).unwrap();
+        dispatch("beginPortableImport", "{}").unwrap();
+        let fixture = include_bytes!("../tests/fixtures/portable-v1-minimal.gossipbackup");
+        for chunk in fixture.chunks(128 * 1024) {
+            let args = serde_json::json!({ "data": B64.encode(chunk) });
+            dispatch("pushPortableImportChunk", &args.to_string()).unwrap();
+        }
+        assert!(dispatch("finishPortableImport", "{}").is_err());
+        dispatch("abortPortableTransfer", "{}").unwrap();
+        assert_eq!(dispatch("hasData", "{}").unwrap(), "false");
+        native_vfs::reset_state();
+    }
+
+    #[test]
     fn native_call_catches_panic_and_returns_error() {
         let r = native_call("__panic_test".into(), "{}".into());
         let err = r.expect_err("panic should surface as an Err, not unwind");
@@ -620,7 +858,209 @@ mod tests {
     }
 
     #[test]
+    fn native_sql_rejects_additional_statements_before_execution() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        exec_sql_one(
+            &conn,
+            "CREATE TABLE tail_test (value INTEGER NOT NULL)",
+            &[],
+        )
+        .unwrap();
+        exec_sql_one(&conn, "INSERT INTO tail_test VALUES (1)", &[]).unwrap();
+
+        let begin = exec_sql_one(&conn, "BEGIN IMMEDIATE; SELECT 1", &[])
+            .err()
+            .expect("additional BEGIN statement should fail");
+        assert!(begin.to_string().contains("multiple SQL statements"));
+        assert!(conn.is_autocommit());
+
+        exec_sql_one(&conn, "BEGIN IMMEDIATE", &[]).unwrap();
+        let commit = exec_sql_one(&conn, "COMMIT; SELECT 1", &[])
+            .err()
+            .expect("additional COMMIT statement should fail");
+        assert!(commit.to_string().contains("multiple SQL statements"));
+        assert!(!conn.is_autocommit());
+        let rollback = exec_sql_one(&conn, "ROLLBACK; SELECT 1", &[])
+            .err()
+            .expect("additional ROLLBACK statement should fail");
+        assert!(rollback.to_string().contains("multiple SQL statements"));
+        assert!(!conn.is_autocommit());
+        exec_sql_one(&conn, "ROLLBACK", &[]).unwrap();
+
+        let mutation = exec_sql_one(
+            &conn,
+            "UPDATE tail_test SET value = ?; SELECT 1",
+            &[serde_json::json!(2)],
+        )
+        .err()
+        .expect("additional mutation statement should fail");
+        assert!(mutation.to_string().contains("multiple SQL statements"));
+        let value: i64 = conn
+            .query_row("SELECT value FROM tail_test", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, 1);
+
+        for (setting, statement) in [
+            ("query_only", "PRAGMA query_only=ON; SELECT 1"),
+            ("foreign_keys", "PRAGMA foreign_keys=ON; SELECT 1"),
+            (
+                "recursive_triggers",
+                "PRAGMA recursive_triggers=ON; SELECT 1",
+            ),
+        ] {
+            let before: i64 = conn
+                .query_row(&format!("PRAGMA {setting}"), [], |row| row.get(0))
+                .unwrap();
+            let error = exec_sql_one(&conn, statement, &[])
+                .err()
+                .expect("additional PRAGMA statement should fail");
+            assert!(error.to_string().contains("multiple SQL statements"));
+            let after: i64 = conn
+                .query_row(&format!("PRAGMA {setting}"), [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(after, before, "rejected {setting} changed connection state");
+        }
+
+        exec_sql_one(&conn, "PRAGMA query_only=ON", &[]).unwrap();
+        let enabled: i64 = conn
+            .query_row("PRAGMA query_only", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(enabled, 1);
+        exec_sql_one(&conn, "PRAGMA query_only=OFF", &[]).unwrap();
+    }
+
+    #[test]
+    fn native_sql_rejects_nul_and_normalizes_boundary_whitespace() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        exec_sql_one(
+            &conn,
+            "CREATE TABLE boundary_test (value INTEGER NOT NULL)",
+            &[],
+        )
+        .unwrap();
+        exec_sql_one(&conn, "INSERT INTO boundary_test VALUES (1)", &[]).unwrap();
+
+        for sql in [
+            "BEGIN\0ignored",
+            "UPDATE boundary_test SET value = 2\0ignored",
+            "PRAGMA query_only=ON\0ignored",
+        ] {
+            let error = exec_sql_one(&conn, sql, &[])
+                .err()
+                .expect("NUL-bearing SQL should fail");
+            assert!(error.to_string().contains("sql contains nul byte"));
+        }
+        for sql in ["\u{85}BEGIN IMMEDIATE", "BEGIN IMMEDIATE\u{85}"] {
+            let error = exec_sql_one(&conn, sql, &[])
+                .err()
+                .expect("Rust-only boundary whitespace should fail");
+            assert!(
+                error
+                    .to_string()
+                    .contains("unsupported sql boundary whitespace")
+            );
+        }
+        for sql in [";;BEGIN IMMEDIATE", "; UPDATE boundary_test SET value = 2"] {
+            let error = exec_sql_one(&conn, sql, &[])
+                .err()
+                .expect("leading empty statements should fail");
+            assert!(
+                error
+                    .to_string()
+                    .contains("leading empty SQL statements are not allowed")
+            );
+        }
+        for sql in [
+            "\u{a0}BEGIN IMMEDIATE; SELECT 1",
+            "\u{a0}UPDATE boundary_test SET value = 2; SELECT 1\u{a0}",
+        ] {
+            let error = exec_sql_one(&conn, sql, &[])
+                .err()
+                .expect("additional Unicode-bounded statement should fail");
+            assert!(error.to_string().contains("multiple SQL statements"));
+        }
+        for sql in [
+            "\u{a0}SELECT value FROM boundary_test\u{a0}",
+            "\u{feff}SELECT value FROM boundary_test\u{feff}",
+        ] {
+            let normalized = exec_sql_one(&conn, sql, &[])
+                .expect("ECMAScript Unicode-bounded SQL should be normalized");
+            assert_eq!(normalized.rows, vec![vec![serde_json::json!(1)]]);
+        }
+
+        assert!(conn.is_autocommit());
+        let value: i64 = conn
+            .query_row("SELECT value FROM boundary_test", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, 1);
+        let query_only: i64 = conn
+            .query_row("PRAGMA query_only", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(query_only, 0);
+    }
+
+    #[test]
+    fn native_sql_accepts_single_statements_with_ignorable_tails() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        exec_sql_one(
+            &conn,
+            "CREATE TABLE tail_test (value INTEGER NOT NULL); -- schema\n",
+            &[],
+        )
+        .unwrap();
+        exec_sql_one(
+            &conn,
+            "INSERT INTO tail_test VALUES (?); /* inserted */ \n -- done",
+            &[serde_json::json!(7)],
+        )
+        .unwrap();
+        exec_sql_one(
+            &conn,
+            "UPDATE tail_test SET value = 8 /* terminated by EOF",
+            &[],
+        )
+        .unwrap();
+        exec_sql_one(&conn, "CREATE TABLE tail_audit (value TEXT)", &[]).unwrap();
+        exec_sql_one(
+            &conn,
+            "/* leading comment */ \u{feff}CREATE TRIGGER tail_trigger \
+             AFTER UPDATE ON tail_test BEGIN INSERT INTO tail_audit \
+             VALUES ('semi;colon'); END; -- trigger",
+            &[],
+        )
+        .unwrap();
+        exec_sql_one(
+            &conn,
+            "UPDATE tail_test SET value = 9; /* terminated by EOF",
+            &[],
+        )
+        .unwrap();
+
+        let result = exec_sql_one(&conn, "SELECT value FROM tail_test", &[]).unwrap();
+        assert_eq!(result.rows, vec![vec![serde_json::json!(9)]]);
+        let audit = exec_sql_one(&conn, "SELECT value FROM tail_audit", &[]).unwrap();
+        assert_eq!(audit.rows, vec![vec![serde_json::json!("semi;colon")]]);
+
+        let carriage_return_comment = exec_sql_one(
+            &conn,
+            "SELECT 'quoted;value'; -- SELECT remains commented\r SELECT 'ignored'",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            carriage_return_comment.rows,
+            vec![vec![serde_json::json!("quoted;value")]]
+        );
+
+        exec_sql_one(&conn, "BEGIN IMMEDIATE /* terminated by EOF", &[]).unwrap();
+        assert!(!conn.is_autocommit());
+        exec_sql_one(&conn, "ROLLBACK; /* terminated by EOF", &[]).unwrap();
+        assert!(conn.is_autocommit());
+    }
+
+    #[test]
     fn native_lock_session_surfaces_vfs_errors() {
+        let _guard = crate::vfs::native_vfs::test_mutex().lock().unwrap();
         crate::vfs::native_vfs::reset_state();
 
         let err = dispatch("lockSession", "{}").expect_err("lockSession should surface VFS errors");
@@ -632,6 +1072,7 @@ mod tests {
 
     #[test]
     fn native_close_surfaces_flush_errors() {
+        let _guard = crate::vfs::native_vfs::test_mutex().lock().unwrap();
         crate::vfs::native_vfs::reset_state();
 
         let err = dispatch("close", "{}").expect_err("close should surface flush errors");

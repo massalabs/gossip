@@ -1,6 +1,6 @@
 {
   "name": "@massalabs/gossip-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Gossip SDK for automation, chatbot, and integration use cases",
   "type": "module",
   "main": "./dist/index.js",
@@ -8,6 +8,7 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.txt"
   ],
@@ -27,8 +28,9 @@
   },
   "scripts": {
     "prebuild": "rimraf dist",
-    "build": "tsc && npm run copy:wasm",
+    "build": "tsc && npm run copy:wasm && npm run audit:production-worker",
     "copy:wasm": "mkdir -p dist/assets/generated/wasm dist/assets/generated/wasm-secureStorage && cp -R src/assets/generated/wasm/. dist/assets/generated/wasm/ && cp -R src/assets/generated/wasm-secureStorage/. dist/assets/generated/wasm-secureStorage/",
+    "audit:production-worker": "node scripts/audit-production-worker.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -54,6 +56,7 @@
   },
   "dependencies": {
     "@massalabs/massa-web3": "^5.3.0",
+    "@noble/hashes": "^1.8.0",
     "@scure/base": "^2.0.0",
     "@scure/bip39": "^2.0.1",
     "comlink": "^4.4.2",

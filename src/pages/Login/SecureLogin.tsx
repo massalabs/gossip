@@ -1,10 +1,16 @@
 import { logger } from '../../utils/logger.ts';
+import {
+  isUnsupportedStorageVersionError,
+  requestUnsupportedStorageReset,
+  resetAllAccountStorage,
+} from '../../services/unsupportedStorageReset';
 import React, { useState, useEffect, useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../../stores/accountStore';
 import {
   checkBiometricAvailability,
-  authenticateSecureLogin,
+  authenticateBiometricLogin,
 } from '../../services/biometricService';
 import Button from '../../components/ui/Button';
 import { ROUTES } from '../../constants/routes';
@@ -13,20 +19,30 @@ import { useLoginForm } from './useLoginForm';
 import { PasswordForm } from './PasswordForm';
 import { ErrorDisplay } from './ErrorDisplay';
 import { LoginLayout } from './LoginLayout';
+import { MessagingSessionRecoveryRequiredError } from '@massalabs/gossip-sdk';
 
 // ─────────────────────────────────────────────────────────────────
-// Secure-storage Login: password + biometric derived encryption key
+// Secure-storage Login: manual or biometric-recovered account password
 // ─────────────────────────────────────────────────────────────────
 
 export const SecureLogin: React.FC<LoginProps> = React.memo(
   ({ onAccountSelected, persistentError = null, onErrorChange }) => {
     const { t } = useTranslation('auth');
     const loadAccount = useAccountStore(state => state.loadAccount);
+    const privateMigrationPhase = useAccountStore(
+      state => state.privateMigrationPhase
+    );
     const [biometricAvailable, setBiometricAvailable] = useState(false);
     const [biometricMethod, setBiometricMethod] = useState<
       'capacitor' | 'webauthn' | 'none'
     >('none');
     const [biometricLoading, setBiometricLoading] = useState(false);
+    const [showSessionResetConfirm, setShowSessionResetConfirm] =
+      useState(false);
+    const [showStorageResetConfirm, setShowStorageResetConfirm] =
+      useState(false);
+    const [storageResetBusy, setStorageResetBusy] = useState(false);
+    const [storageResetFailed, setStorageResetFailed] = useState(false);
 
     const {
       isLoading: passwordLoading,
@@ -34,6 +50,10 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       setPassword,
       passwordInputRef,
       handlePasswordAuth,
+      messagingRecoveryRequired,
+      beginMessagingSessionRecovery,
+      retryMessagingSessions,
+      resetMessagingSessions,
       navigate,
     } = useLoginForm({
       onAccountSelected,
@@ -63,17 +83,19 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
     const handleBiometricAuth = useCallback(async () => {
       setBiometricLoading(true);
       onErrorChange?.(null);
+      let recoveredPassword: string | null = null;
 
       try {
-        const result = await authenticateSecureLogin(biometricMethod);
+        const result = await authenticateBiometricLogin(biometricMethod);
 
-        if (!result.success || !result.data?.encryptionKey) {
+        if (!result.success || !result.data?.password) {
           throw new Error(result.error || 'Biometric authentication failed');
         }
 
+        recoveredPassword = result.data.password;
         await loadAccount({
-          type: 'encryptionKey',
-          encryptionKey: result.data.encryptionKey,
+          type: 'password',
+          password: recoveredPassword,
         });
 
         const state = useAccountStore.getState();
@@ -83,19 +105,22 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           throw new Error('Failed to load account');
         }
       } catch (error) {
-        // PD: the previous version auto-purged `BIOMETRIC_STORAGE_KEY`
-        // when the OS biometric prompt succeeded but `secureStorageUnlock`
-        // returned false, on the assumption "credential must be stale".
-        // The assumption is wrong:
-        //   1. Slot probing means a valid credential for a wiped slot
-        //      legitimately fails — purging it is permanent and breaks
-        //      the button forever, even after the user reinstalls.
-        //   2. We can't (and shouldn't, by PD) tell from the login
-        //      screen whether the selected account uses biometric — so
-        //      we can't decide on the user's behalf that the credential
-        //      is "stale". Leave it alone.
-        // If the user wants to remove a stale credential they can do so
-        // explicitly from settings; we never silently nuke it here.
+        if (isUnsupportedStorageVersionError(error)) {
+          requestUnsupportedStorageReset();
+          return;
+        }
+        if (
+          error instanceof MessagingSessionRecoveryRequiredError &&
+          recoveredPassword !== null
+        ) {
+          beginMessagingSessionRecovery(recoveredPassword);
+          return;
+        }
+        // Never purge the singleton credential after login failure. It may
+        // reference a deliberately deleted account, and pre-profile login
+        // cannot determine that without creating an account-association oracle.
+        // Leave replacement to an explicit setup action in an authenticated
+        // account.
         logger.error('Biometric authentication failed:', error);
         onErrorChange?.(t('login.biometric_failed_use_password'));
         if (window.location.pathname !== ROUTES.welcome()) {
@@ -107,6 +132,7 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       }
     }, [
       biometricMethod,
+      beginMessagingSessionRecovery,
       loadAccount,
       onAccountSelected,
       onErrorChange,
@@ -114,6 +140,144 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       t,
       passwordInputRef,
     ]);
+
+    if (messagingRecoveryRequired) {
+      return (
+        <LoginLayout title={t('session_recovery.title')} subtitle="">
+          <div className="space-y-5 text-center">
+            <p className="text-sm text-muted-foreground">
+              {t('session_recovery.body')}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {t('session_recovery.keys_warning')}
+            </p>
+            <ErrorDisplay
+              error={persistentError}
+              onDismiss={() => onErrorChange?.(null)}
+            />
+            <div className="space-y-3">
+              <Button
+                type="button"
+                variant="primary"
+                fullWidth
+                loading={passwordLoading}
+                disabled={passwordLoading}
+                onClick={() => void retryMessagingSessions()}
+              >
+                {t('session_recovery.retry')}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                fullWidth
+                disabled={passwordLoading}
+                onClick={() => setShowSessionResetConfirm(true)}
+              >
+                {t('session_recovery.reset')}
+              </Button>
+            </div>
+          </div>
+          {showSessionResetConfirm && (
+            <div className="mt-6 space-y-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+              <p className="text-sm font-medium text-foreground">
+                {t('session_recovery.confirm_body')}
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  fullWidth
+                  disabled={passwordLoading}
+                  onClick={() => setShowSessionResetConfirm(false)}
+                >
+                  {t('session_recovery.cancel')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  fullWidth
+                  loading={passwordLoading}
+                  disabled={passwordLoading}
+                  onClick={() => void resetMessagingSessions()}
+                >
+                  {t('session_recovery.confirm')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </LoginLayout>
+      );
+    }
+
+    if (showStorageResetConfirm) {
+      return (
+        <LoginLayout title={t('storage_reset.title')} subtitle="">
+          <div className="space-y-5">
+            <p className="text-sm font-medium text-destructive">
+              {t('storage_reset.warning')}
+            </p>
+            <Button
+              type="button"
+              variant="danger"
+              fullWidth
+              loading={storageResetBusy}
+              disabled={storageResetBusy}
+              onClick={() => {
+                setStorageResetBusy(true);
+                setStorageResetFailed(false);
+                void resetAllAccountStorage().catch(() => {
+                  setStorageResetBusy(false);
+                  setStorageResetFailed(true);
+                });
+              }}
+            >
+              {t('storage_reset.confirm')}
+            </Button>
+            <p className="text-sm text-muted-foreground">
+              {t('storage_reset.scope')}
+            </p>
+            {storageResetFailed && (
+              <p role="alert" className="text-sm text-destructive">
+                {t('storage_reset.failed')}
+              </p>
+            )}
+            {/* Keep the safe target where a rapid second tap is most likely;
+                the irreversible action is intentionally higher on this page. */}
+            <div className="pt-16">
+              <Button
+                type="button"
+                variant="outline"
+                fullWidth
+                disabled={storageResetBusy}
+                onClick={() => setShowStorageResetConfirm(false)}
+              >
+                {t('storage_reset.cancel')}
+              </Button>
+            </div>
+          </div>
+        </LoginLayout>
+      );
+    }
+
+    if (privateMigrationPhase) {
+      return (
+        <LoginLayout title={t('private_migration.title')} subtitle="">
+          <div
+            className="flex min-h-52 flex-col items-center justify-center gap-6 text-center"
+            role="status"
+            aria-live="polite"
+          >
+            <div
+              className="h-12 w-12 animate-spin rounded-full border-[3px] border-border border-t-primary"
+              aria-hidden="true"
+            />
+            <p className="text-sm font-medium text-foreground">
+              {t(`private_migration.phase_${privateMigrationPhase}`)}
+            </p>
+          </div>
+        </LoginLayout>
+      );
+    }
 
     return (
       <LoginLayout title={t('login.welcome')} subtitle="">
@@ -156,6 +320,33 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           error={persistentError}
           onDismiss={() => onErrorChange?.(null)}
         />
+
+        {['web', 'android', 'ios'].includes(Capacitor.getPlatform()) && (
+          <Button
+            type="button"
+            variant="outline"
+            fullWidth
+            className="h-[51px] rounded-full"
+            disabled={biometricLoading || passwordLoading}
+            onClick={() => navigate(ROUTES.portableBackup())}
+          >
+            {t('login.backup_all_accounts')}
+          </Button>
+        )}
+
+        <Button
+          type="button"
+          variant="outline"
+          fullWidth
+          className="h-[51px] rounded-full border-destructive/40 text-destructive"
+          disabled={biometricLoading || passwordLoading}
+          onClick={() => {
+            setStorageResetFailed(false);
+            setShowStorageResetConfirm(true);
+          }}
+        >
+          {t('storage_reset.action')}
+        </Button>
       </LoginLayout>
     );
   }

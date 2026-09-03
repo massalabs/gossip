@@ -15,7 +15,10 @@ import {
 export class ProfileService {
   private queries: Queries;
 
-  constructor(queries: Queries) {
+  constructor(
+    queries: Queries,
+    private onProfileSaved?: (userId: string) => Promise<void>
+  ) {
     this.queries = queries;
   }
 
@@ -40,6 +43,7 @@ export class ProfileService {
 
   async save(profile: UserProfile): Promise<void> {
     await this.queries.userProfiles.upsert(userProfileToRow(profile));
+    await this.onProfileSaved?.(profile.userId);
   }
 
   delete(userId: string): Promise<void> {
@@ -85,6 +89,7 @@ export class ProfileService {
         updatedAt: new Date(),
       };
       await this.queries.userProfiles.upsert(userProfileToRow(updatedProfile));
+      await this.onProfileSaved?.(updatedProfile.userId);
       return updatedProfile;
     }
 
@@ -99,6 +104,7 @@ export class ProfileService {
       updatedAt: new Date(),
     };
     await this.queries.userProfiles.upsert(userProfileToRow(newProfile));
+    await this.onProfileSaved?.(newProfile.userId);
     return newProfile;
   }
 }

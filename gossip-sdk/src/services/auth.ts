@@ -10,9 +10,14 @@ import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 import { IAuthProtocol } from '../api/authProtocol.js';
 import type { Queries } from '../db/queries/index.js';
 
-const REPUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const PUBLIC_KEY_REPUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS = 60 * 1000;
 
 export class AuthService {
+  private publicationInFlight = new Map<string, Promise<number>>();
+  private successfulPublicationTimes = new Map<string, number>();
+  private pendingTimestampPersistence = new Map<string, number>();
+
   constructor(public authProtocol: IAuthProtocol) {}
 
   /**
@@ -42,19 +47,110 @@ export class AuthService {
     userId: string,
     queries: Queries
   ): Promise<void> {
+    // Snapshot before the first await so logout can deterministically dispose
+    // the live WASM wrapper without racing an in-flight publication. Preserve
+    // the established Promise<void> API; only the scheduler consumes delay.
+    await this.publishPublicKeyBytes(
+      new Uint8Array(publicKeys.to_bytes()),
+      userId,
+      queries
+    );
+  }
+
+  publishPublicKeyBytes(
+    publicKeyBytes: Uint8Array,
+    userId: string,
+    queries: Queries
+  ): Promise<number> {
+    const existing = this.publicationInFlight.get(userId);
+    if (existing) return existing;
+
+    const publication = this.performPublicKeyPublication(
+      publicKeyBytes,
+      userId,
+      queries
+    ).finally(() => {
+      if (this.publicationInFlight.get(userId) === publication) {
+        this.publicationInFlight.delete(userId);
+      }
+    });
+    this.publicationInFlight.set(userId, publication);
+    return publication;
+  }
+
+  async persistPendingPublicationTimestamp(
+    userId: string,
+    queries: Queries
+  ): Promise<boolean> {
+    const pendingTimestamp = this.pendingTimestampPersistence.get(userId);
+    if (pendingTimestamp === undefined) return false;
+
+    const updated = await queries.userProfiles.updateLastPublicKeyPushMax(
+      userId,
+      new Date(pendingTimestamp)
+    );
+    if (
+      updated &&
+      this.pendingTimestampPersistence.get(userId) === pendingTimestamp
+    ) {
+      this.pendingTimestampPersistence.delete(userId);
+    }
+    return updated;
+  }
+
+  private async performPublicKeyPublication(
+    publicKeyBytes: Uint8Array,
+    userId: string,
+    queries: Queries
+  ): Promise<number> {
     const profile = await queries.userProfiles.getById(userId);
-    if (profile?.lastPublicKeyPush) {
-      const elapsed = Date.now() - profile.lastPublicKeyPush.getTime();
-      if (elapsed < REPUBLISH_INTERVAL_MS) return;
+    const durablePublicationTime = profile?.lastPublicKeyPush?.getTime();
+    const inMemoryPublicationTime = this.successfulPublicationTimes.get(userId);
+    const lastPublicationTime = Math.max(
+      durablePublicationTime ?? Number.NEGATIVE_INFINITY,
+      inMemoryPublicationTime ?? Number.NEGATIVE_INFINITY
+    );
+    const now = Date.now();
+    const elapsed = now - lastPublicationTime;
+
+    if (elapsed < PUBLIC_KEY_REPUBLISH_INTERVAL_MS) {
+      const pendingTimestamp = this.pendingTimestampPersistence.get(userId);
+      if (pendingTimestamp !== undefined) {
+        if (
+          durablePublicationTime === undefined ||
+          durablePublicationTime < pendingTimestamp
+        ) {
+          // Persist the actual confirmed POST time, not the later retry time.
+          // This timestamp is local scheduling metadata and is never sent to
+          // the auth server or Agraphon bulletin.
+          const updated = await this.persistPendingPublicationTimestamp(
+            userId,
+            queries
+          );
+          if (!updated) return PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS;
+        } else if (
+          this.pendingTimestampPersistence.get(userId) === pendingTimestamp
+        ) {
+          this.pendingTimestampPersistence.delete(userId);
+        }
+      }
+      return PUBLIC_KEY_REPUBLISH_INTERVAL_MS - Math.max(0, elapsed);
     }
 
-    await this.authProtocol.postPublicKey(
-      encodeToBase64(publicKeys.to_bytes())
-    );
+    await this.authProtocol.postPublicKey(encodeToBase64(publicKeyBytes));
 
-    await queries.userProfiles.updateById(userId, {
-      lastPublicKeyPush: new Date(),
-    });
+    // Record confirmed server success before the fallible local timestamp
+    // update. Timers and online events still invoke this method, but while the
+    // marker is current they retry only persistence instead of POSTing again.
+    const publishedAt = Date.now();
+    this.successfulPublicationTimes.set(userId, publishedAt);
+    this.pendingTimestampPersistence.set(userId, publishedAt);
+    const updated = await this.persistPendingPublicationTimestamp(
+      userId,
+      queries
+    );
+    if (!updated) return PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS;
+    return PUBLIC_KEY_REPUBLISH_INTERVAL_MS;
   }
 }
 

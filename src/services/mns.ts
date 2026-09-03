@@ -41,6 +41,10 @@ export type MnsResolutionResult =
 class MnsService {
   private cachedMns: MNS | null = null;
 
+  reset(): void {
+    this.cachedMns = null;
+  }
+
   /**
    * Get or create an MNS instance using the provider from AccountStore.
    * Caches the instance to avoid recreating it on every call.

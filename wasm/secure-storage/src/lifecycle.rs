@@ -10,7 +10,7 @@ use crate::constants::{DEFAULT_NAMESPACE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSI
 use crate::domain;
 use crate::error::{Result, SecureStorageError};
 use crate::kdf::derive_session_keys;
-use crate::keypair::{KeypairFile, read_session_version_and_pk};
+use crate::keypair::{CURRENT_SESSION_VERSION, KeypairFile, read_session_version_and_pk};
 use crate::pq::{PqPublicKey, PqSecretKey, pq_keygen};
 use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
@@ -27,6 +27,13 @@ use crate::write::{encrypt_session_data_block, ensure_block_count, repair_blocks
 /// are created for each slot; other namespaces are created lazily on
 /// first write.
 pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> Result<()> {
+    provision_storage_for_domain(storage, "")
+}
+
+pub fn provision_storage_for_domain<S: BlockStorage + KeypairStorage>(
+    storage: &mut S,
+    domain: &str,
+) -> Result<()> {
     for i in 0..SESSION_COUNT as u8 {
         let slot = SessionIndex::new(i).unwrap();
         let (pk, _sk) = pq_keygen();
@@ -42,8 +49,14 @@ pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> R
         let mut dummy_sk = Zeroizing::new(vec![0u8; PqSecretKey::byte_size()]);
         rand::rngs::OsRng.fill_bytes(dummy_sk.as_mut());
 
-        let kf = KeypairFile::build_wrapped(0, pk.to_bytes(), &dummy_wrap_key, &dummy_sk, b"");
-        storage.write_keypair(slot, &kf.serialize())?;
+        let kf = KeypairFile::build_current_wrapped(
+            domain,
+            slot,
+            pk.to_bytes(),
+            &dummy_wrap_key,
+            &dummy_sk,
+        )?;
+        storage.write_keypair(slot, &kf.serialize()?)?;
         storage.reset_blockstream(slot, DEFAULT_NAMESPACE)?;
     }
 
@@ -69,19 +82,18 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
 
     let keys = derive_session_keys(domain, password);
 
-    let version: u32 = 0;
-    let sk_wrap_aad = domain::sk_wrap_aad(domain, version, slot);
+    let version = CURRENT_SESSION_VERSION;
     let sk_wrap_aead_key = crypto_aead::Key::from_ref(&keys.sk_wrap_key);
     let sk_bytes = Zeroizing::new(pq_rerand_sk.to_bytes());
 
-    let kf = KeypairFile::build_wrapped(
-        version,
+    let kf = KeypairFile::build_current_wrapped(
+        domain,
+        slot,
         pq_rerand_pk.to_bytes(),
         &sk_wrap_aead_key,
         &sk_bytes,
-        sk_wrap_aad.as_bytes(),
-    );
-    storage.write_keypair(slot, &kf.serialize())?;
+    )?;
+    storage.write_keypair(slot, &kf.serialize()?)?;
 
     let session = UnlockedSession {
         session_index: slot,
@@ -180,8 +192,14 @@ pub fn destroy_session<S: BlockStorage + KeypairStorage>(
     });
     let mut dummy_sk = Zeroizing::new(vec![0u8; PqSecretKey::byte_size()]);
     rand::rngs::OsRng.fill_bytes(dummy_sk.as_mut());
-    let kf = KeypairFile::build_wrapped(0, pk.to_bytes(), &dummy_wrap_key, &dummy_sk, b"");
-    storage.write_keypair(slot, &kf.serialize())?;
+    let kf = KeypairFile::build_current_wrapped(
+        domain,
+        slot,
+        pk.to_bytes(),
+        &dummy_wrap_key,
+        &dummy_sk,
+    )?;
+    storage.write_keypair(slot, &kf.serialize()?)?;
 
     // 2. Snapshot-symmetric camouflage. For each namespace, sweep every
     //    block index across all slots; the destroyed slot is forced
@@ -241,7 +259,12 @@ fn rerandomize_block_across_all_slots<S: BlockStorage + KeypairStorage>(
             create_cover_block(&cur_pk, &cur_aad_root)
         } else {
             match storage.read_block(cur_session, namespace, block_index) {
-                Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
+                // Noncanonical ciphertext has no recoverable plaintext through
+                // the current format. Keeping it would leave one slot unchanged;
+                // aborting would let that slot block cover/destroy work for every
+                // session. Fresh cover preserves all-slot symmetry and progress.
+                Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct)
+                    .unwrap_or_else(|_| create_cover_block(&cur_pk, &cur_aad_root)),
                 Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
             }
         };
@@ -333,7 +356,7 @@ mod tests {
                 let s = SessionIndex::new(i).unwrap();
                 let data = storage.read_keypair(s).unwrap();
                 let kf = KeypairFile::deserialize(&data).unwrap();
-                assert_eq!(kf.version, 0);
+                assert_eq!(kf.version, CURRENT_SESSION_VERSION);
                 assert_eq!(kf.pq_pk.len(), PqPublicKey::byte_size());
             }
         });
@@ -484,6 +507,45 @@ mod tests {
 
             for _ in 0..10 {
                 cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
+            }
+
+            let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
+            let ns_state = load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            assert_eq!(ns_state.total_data_length, 0);
+        });
+    }
+
+    #[test]
+    fn cover_tick_rerandomizes_post_allocation_block_zero() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            let allocated = SessionIndex::new(1).unwrap();
+            allocate_session(&mut storage, DOMAIN, allocated, b"pw").unwrap();
+            assert_eq!(
+                crate::write::get_global_block_count(&storage, NS).unwrap(),
+                1
+            );
+
+            let before: Vec<_> = (0..SESSION_COUNT as u8)
+                .map(|i| {
+                    storage
+                        .read_block(SessionIndex::new(i).unwrap(), NS, 0)
+                        .unwrap()
+                })
+                .collect();
+
+            cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
+
+            for i in 0..SESSION_COUNT as u8 {
+                let after = storage
+                    .read_block(SessionIndex::new(i).unwrap(), NS, 0)
+                    .unwrap();
+                assert_ne!(
+                    *after, *before[i as usize],
+                    "slot {i} block 0 must be rerandomized after allocation"
+                );
             }
 
             let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();

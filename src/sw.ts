@@ -89,21 +89,60 @@ class ServiceWorkerMessageReception {
 
   async fetchAllDiscussions(): Promise<{
     success: boolean;
+    blocked?: boolean;
+    outputGeneration: number;
     newMessagesCount: number;
   }> {
+    let generation = -1;
     try {
-      // Read active seekers from IndexedDB bridge (written by main app)
+      // Bind this fetch to the output generation that owned its seekers.
+      generation = (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
+      if (await bridgeGet<boolean>('accountCleanupBlocked')) {
+        return {
+          success: false,
+          blocked: true,
+          outputGeneration: generation,
+          newMessagesCount: 0,
+        };
+      }
       const raw = await bridgeGet<number[][]>('activeSeekers');
       if (!raw || raw.length === 0) {
-        return { success: true, newMessagesCount: 0 };
+        const blocked = await bridgeGet<boolean>('accountCleanupBlocked');
+        return {
+          success: !blocked,
+          blocked: blocked === true,
+          outputGeneration: generation,
+          newMessagesCount: 0,
+        };
       }
 
       const seekers = raw.map(arr => new Uint8Array(arr));
       const messages = await this.protocol.fetchMessages(seekers);
-      return { success: true, newMessagesCount: messages.length };
+      const currentGeneration =
+        (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
+      if (
+        currentGeneration !== generation ||
+        (await bridgeGet<boolean>('accountCleanupBlocked'))
+      ) {
+        return {
+          success: false,
+          blocked: true,
+          outputGeneration: generation,
+          newMessagesCount: 0,
+        };
+      }
+      return {
+        success: true,
+        outputGeneration: generation,
+        newMessagesCount: messages.length,
+      };
     } catch (error) {
       logger.error('Service Worker: Failed to fetch messages:', error);
-      return { success: false, newMessagesCount: 0 };
+      return {
+        success: false,
+        outputGeneration: generation,
+        newMessagesCount: 0,
+      };
     }
   }
 }
@@ -124,28 +163,44 @@ self.addEventListener('message', event => {
     return;
   }
 
-  // Handle SEND_NOTIFICATION message for showing notifications from service worker
+  // V2 requires output-generation fencing; older workers ignore this type.
   // This is required for Android PWA and preferred for all platforms
   // see: https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API#browser_compatibility
-  if (event.data && event.data.type === 'SEND_NOTIFICATION') {
-    const { title, body, tag, requireInteraction, data } =
+  if (event.data && event.data.type === 'SEND_NOTIFICATION_V2') {
+    const { title, body, tag, requireInteraction, data, outputGeneration } =
       event.data.payload || {};
 
     if (!title) {
-      logger.error('Service Worker: SEND_NOTIFICATION missing title');
+      logger.error('Service Worker: SEND_NOTIFICATION_V2 missing title');
       return;
     }
 
     event.waitUntil(
       (async () => {
-        await showNotificationIfAllowed(title, {
-          body: body || '',
-          icon: '/favicon/favicon-96x96.png',
-          badge: '/favicon/favicon-96x96.png',
-          tag: tag || 'gossip-notification',
-          requireInteraction: requireInteraction || false,
-          data: data || {},
-        });
+        const locks = self.navigator.locks;
+        if (!locks) return;
+        await locks.request(
+          'gossip-account-output-v1',
+          { mode: 'shared' },
+          async () => {
+            const currentGeneration =
+              (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
+            if (
+              outputGeneration !== currentGeneration ||
+              (await bridgeGet<boolean>('accountCleanupBlocked'))
+            ) {
+              return;
+            }
+            await showNotificationIfAllowed(title, {
+              body: body || '',
+              icon: '/favicon/favicon-96x96.png',
+              badge: '/favicon/favicon-96x96.png',
+              tag: tag || 'gossip-notification',
+              requireInteraction: requireInteraction || false,
+              data: data || {},
+            });
+          }
+        );
       })()
     );
     return;
@@ -171,8 +226,6 @@ async function handleSyncEvent(event: SyncEvent): Promise<void> {
         // App is in background - perform sync
         try {
           await performSyncAndNotify();
-          // Update last sync timestamp after successful sync
-          await updateLastSyncTimestamp();
         } catch (error) {
           logger.error('Service Worker: Periodic sync failed', error);
         }
@@ -296,7 +349,16 @@ async function shouldPerformSync(): Promise<boolean> {
   return true;
 }
 
-async function updateLastSyncTimestamp(): Promise<void> {
+async function updateLastSyncTimestamp(
+  expectedGeneration: number
+): Promise<void> {
+  const generation = (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
+  if (
+    generation !== expectedGeneration ||
+    (await bridgeGet<boolean>('accountCleanupBlocked'))
+  ) {
+    return;
+  }
   await bridgeSet('lastSyncTimestamp', Date.now());
 }
 
@@ -389,18 +451,43 @@ async function showNotificationIfAllowed(
 /**
  * Perform sync and, if needed, show a notification
  */
-async function performSyncAndNotify(): Promise<void> {
+async function performSyncAndNotify(): Promise<number | null> {
+  const locks = self.navigator.locks;
+  if (!locks) return null;
+  return locks.request(
+    'gossip-account-output-v1',
+    { mode: 'shared' },
+    performSyncAndNotifyUnlocked
+  );
+}
+
+async function performSyncAndNotifyUnlocked(): Promise<number | null> {
   try {
     const result = await messageReception.fetchAllDiscussions();
 
+    if (result.blocked) return null;
     if (result.success && result.newMessagesCount > 0) {
       const isActive = await hasActiveClients();
-      if (!isActive) {
+      const currentGeneration =
+        (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
+      if (
+        !isActive &&
+        currentGeneration === result.outputGeneration &&
+        !(await bridgeGet<boolean>('accountCleanupBlocked'))
+      ) {
         await showNewMessagesNotification(result.newMessagesCount);
       }
     }
+    const finalGeneration =
+      (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
+    if (result.success && finalGeneration === result.outputGeneration) {
+      await updateLastSyncTimestamp(result.outputGeneration);
+      return result.outputGeneration;
+    }
+    return null;
   } catch (error) {
     logger.error('Service Worker: Sync failed', error);
+    return null;
   }
 }
 
@@ -444,8 +531,6 @@ function scheduleBackgroundSync(): void {
     }
 
     await performSyncAndNotify();
-    // Update last sync timestamp after successful sync
-    await updateLastSyncTimestamp();
     // Schedule next sync (will re-check app state)
     scheduleNextSync();
   }, FALLBACK_SYNC_INTERVAL_MS);

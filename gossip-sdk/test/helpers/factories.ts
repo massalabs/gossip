@@ -5,7 +5,11 @@ const defaultUserProfile: UserProfile = {
   userId: 'gossip1gcqd2ssurzah4w2uxag2mlhpgpppv8aghl9vsu9x4ru9u5pg7ssq6g7jn2',
   username: 'testuser',
   security: {
-    encKeySalt: new Uint8Array(32).fill(1),
+    formatVersion: 1,
+    passwordKdfVersion: 1,
+    mnemonicEncryptionVersion: 1,
+    identityDerivationVersion: 1,
+    encKeySalt: new Uint8Array(16).fill(1),
     authMethod: 'password',
     mnemonicBackup: {
       encryptedMnemonic: new Uint8Array(64).fill(2),
@@ -26,6 +30,10 @@ export function makeUserProfile(
   return {
     ...defaultUserProfile,
     security: {
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
       ...defaultUserProfile.security,
       mnemonicBackup: { ...defaultUserProfile.security.mnemonicBackup },
     },

@@ -15,17 +15,36 @@ import {
   authenticateWithWebAuthn,
 } from '../crypto/webauthn';
 import {
+  decrypt,
+  encrypt,
+  generateNonce,
+  decodeFromBase64,
+  encodeToBase64,
   EncryptionKey,
-  encryptionKeyFromBytes,
-  generateEncryptionKey,
-  encodeUserId,
 } from '@massalabs/gossip-sdk';
-import { encodeToBase64, decodeFromBase64 } from '@massalabs/gossip-sdk';
 import {
   BIOMETRIC_STORAGE_KEY,
   WEBAUTHN_CREDENTIAL_ID_KEY,
+  WEBAUTHN_PASSWORD_KEY,
   getBiometricSalt,
 } from '../constants/biometric';
+
+export async function clearBiometricLoginCredential(): Promise<void> {
+  if (isNative) {
+    const locations =
+      Capacitor.getPlatform() === 'ios' ? [false, true] : [false];
+    const results = await Promise.allSettled(
+      locations.map(syncToICloud => removeNativePassword(syncToICloud))
+    );
+    if (results.some(result => result.status === 'rejected')) {
+      throw new Error('Failed to clear biometric login credential');
+    }
+    return;
+  }
+
+  localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
+  localStorage.removeItem(WEBAUTHN_PASSWORD_KEY);
+}
 
 export interface BiometricAvailability {
   available: boolean;
@@ -34,12 +53,7 @@ export interface BiometricAvailability {
 }
 
 export interface BiometricCredentials {
-  encryptionKey: EncryptionKey;
-}
-
-export interface BiometricCreationData extends BiometricCredentials {
-  authMethod: 'capacitor' | 'webauthn';
-  credentialId?: string;
+  password: string;
 }
 
 export interface BiometricResult {
@@ -48,13 +62,83 @@ export interface BiometricResult {
   data?: BiometricCredentials;
 }
 
-export interface BiometricCreationResult {
+export interface BiometricSetupResult {
   success: boolean;
   error?: string;
-  data?: BiometricCreationData;
 }
 
-const ENCRYPTION_KEY_PREFIX = 'gossip_encryption_key_';
+export interface BiometricSetupTransactionResult extends BiometricSetupResult {
+  rollback?: () => Promise<void>;
+}
+
+const WEBAUTHN_PASSWORD_PAYLOAD_VERSION = 2 as const;
+const MAX_WEBAUTHN_PASSWORD_BYTES = 1024;
+const WEBAUTHN_PASSWORD_ENVELOPE_BYTES = 2 + MAX_WEBAUTHN_PASSWORD_BYTES;
+
+interface WebAuthnPasswordPayload {
+  version: typeof WEBAUTHN_PASSWORD_PAYLOAD_VERSION;
+  credentialId: string;
+  salt: string;
+  ciphertext: string;
+}
+
+function encodeWebAuthnPasswordEnvelope(password: string): string {
+  const passwordBytes = new TextEncoder().encode(password);
+  const envelope = new Uint8Array(WEBAUTHN_PASSWORD_ENVELOPE_BYTES);
+  try {
+    if (passwordBytes.byteLength > MAX_WEBAUTHN_PASSWORD_BYTES) {
+      throw new Error('Password is too long for biometric storage');
+    }
+    crypto.getRandomValues(envelope);
+    new DataView(envelope.buffer).setUint16(0, passwordBytes.byteLength, false);
+    envelope.set(passwordBytes, 2);
+    return encodeToBase64(envelope);
+  } finally {
+    passwordBytes.fill(0);
+    envelope.fill(0);
+  }
+}
+
+function decodeWebAuthnPasswordEnvelope(encoded: string): string {
+  let envelope: Uint8Array | undefined;
+  try {
+    envelope = decodeFromBase64(encoded);
+    if (envelope.byteLength !== WEBAUTHN_PASSWORD_ENVELOPE_BYTES) {
+      throw new Error('Stored biometric password is invalid');
+    }
+    const passwordLength = new DataView(
+      envelope.buffer,
+      envelope.byteOffset,
+      envelope.byteLength
+    ).getUint16(0, false);
+    if (passwordLength === 0 || passwordLength > MAX_WEBAUTHN_PASSWORD_BYTES) {
+      throw new Error('Stored biometric password is invalid');
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(
+      envelope.subarray(2, 2 + passwordLength)
+    );
+  } catch {
+    throw new Error('Stored biometric password is invalid');
+  } finally {
+    envelope?.fill(0);
+  }
+}
+
+class BiometricRestorationRequiredError extends Error {
+  declare readonly originalError: unknown;
+  declare readonly rollback: () => Promise<void>;
+
+  constructor(originalError: unknown, rollback: () => Promise<void>) {
+    super('Previous biometric credential restoration is required');
+    this.name = 'BiometricRestorationRequiredError';
+    // Keep the recovery closure and underlying error out of enumerable log
+    // payloads: native rollback may close over the previous password.
+    Object.defineProperties(this, {
+      originalError: { value: originalError },
+      rollback: { value: rollback },
+    });
+  }
+}
 
 const isNative = Capacitor.isNativePlatform();
 
@@ -73,88 +157,234 @@ const biometryTypeMap: Partial<Record<BiometryType, 'fingerprint' | 'face'>> = {
   [BiometryType.faceAuthentication]: 'face',
 };
 
-function storageKey(userId: string): string {
-  return `${ENCRYPTION_KEY_PREFIX}${userId}`;
-}
-
-async function storeEncryptionKey(
-  userId: string,
-  encryptionKey: EncryptionKey,
-  syncToiCloud = false
-): Promise<void> {
-  const keyBytes = encryptionKey.to_bytes();
-  const keyBase64 = encodeToBase64(keyBytes);
-  keyBytes.fill(0);
-  await SecureStorage.set(storageKey(userId), keyBase64, syncToiCloud);
-}
-
-async function retrieveEncryptionKey(
-  userId: string,
-  syncFromiCloud = false
-): Promise<EncryptionKey> {
-  const keyBase64 = await SecureStorage.get(storageKey(userId), syncFromiCloud);
-  if (!keyBase64 || typeof keyBase64 !== 'string') {
-    throw new Error('Encryption key not found in secure storage');
-  }
-  const keyBytes = decodeFromBase64(keyBase64);
-  const key = await encryptionKeyFromBytes(keyBytes);
-  keyBytes.fill(0);
-  return key;
-}
-
-export async function hasExistingCredential(
-  nativeStorageKey: string
-): Promise<boolean> {
-  if (isCapacitorAvailable()) {
-    try {
-      const value = await SecureStorage.get(nativeStorageKey);
-      return value != null && value !== '';
-    } catch {
-      return false;
-    }
-  }
-
-  // On web, credentials are WebAuthn passkeys; the credential ID is stored
-  // in localStorage under a fixed key (not the native storage key).
-  if (isWebAuthnSupported()) {
-    return localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY) !== null;
-  }
-
-  return false;
-}
-
-export async function removeEncryptionKey(
-  userId: string,
-  syncToiCloud = false
-): Promise<void> {
-  try {
-    await SecureStorage.remove(storageKey(userId), syncToiCloud);
-  } catch (error) {
-    logger.error('Failed to remove encryption key:', error);
+function freeEncryptionKey(key: EncryptionKey): void {
+  const pointer = (key as unknown as { __wbg_ptr?: number }).__wbg_ptr;
+  if (pointer === undefined || pointer !== 0) {
+    key.free();
   }
 }
 
 /**
- * Remove the SecureLogin-discovery credentials (Capacitor secure-storage
- * blob and the WebAuthn credential id) that surface the biometric button
- * on the login screen. Call this when the credential is known to no
- * longer map to a valid secure-storage slot — otherwise the biometric
- * button keeps appearing for an account whose slot was already rotated
- * out (resetAccount, slot wipe, etc.) and login attempts dead-end on
- * "Secure storage unlock failed".
+ * Native biometric authentication is an application-level gate around an
+ * ordinary OS-protected secure-storage read. It is not cryptographically bound
+ * to a Keychain access-control item or Android BiometricPrompt CryptoObject.
+ * That stricter hardware-backed design requires separate native integration and
+ * device testing and is tracked as follow-up security hardening.
+ *
+ * Device PIN/pattern/passcode fallback is deliberately disabled: Gossip's
+ * account threat model must not inherit the security of a potentially weak
+ * device credential. The account-password form remains the fallback.
  */
-export async function clearLoginBiometricCredentials(): Promise<void> {
-  if (isCapacitorAvailable()) {
-    try {
-      await SecureStorage.remove(BIOMETRIC_STORAGE_KEY);
-    } catch (error) {
-      logger.error('Failed to remove biometric storage key:', error);
-    }
-  }
+async function authenticateNative(reason: string): Promise<void> {
+  await BiometricAuth.authenticate({
+    reason,
+    allowDeviceCredential: false,
+    iosFallbackTitle: '',
+  });
+}
+
+async function readNativePassword(
+  syncFromICloud: boolean
+): Promise<string | null> {
+  // Passwords are opaque strings. Date coercion would turn an ISO-looking
+  // password into a Date and make a valid stored credential unreadable.
+  const value = await SecureStorage.get(
+    BIOMETRIC_STORAGE_KEY,
+    false,
+    syncFromICloud
+  );
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+async function removeNativePassword(syncToICloud: boolean): Promise<void> {
+  await SecureStorage.remove(BIOMETRIC_STORAGE_KEY, syncToICloud);
+}
+
+async function storeNativePassword(
+  password: string,
+  syncToICloud: boolean
+): Promise<void> {
+  // A synchronizable entry contains the account password itself. This preserves
+  // the existing optional iCloud convenience, but expands exposure beyond one
+  // device and must remain an explicit user choice.
+  await SecureStorage.set(BIOMETRIC_STORAGE_KEY, password, true, syncToICloud);
+}
+
+async function restoreNativePasswords(
+  previousLocal: string | null,
+  previousCloud: string | null,
+  isIOS: boolean
+): Promise<void> {
+  await removeNativePassword(false);
+  if (isIOS) await removeNativePassword(true);
+  if (previousLocal) await storeNativePassword(previousLocal, false);
+  if (isIOS && previousCloud) await storeNativePassword(previousCloud, true);
+}
+
+async function replaceNativePassword(
+  password: string,
+  syncToICloud: boolean
+): Promise<() => Promise<void>> {
+  const isIOS = Capacitor.getPlatform() === 'ios';
+  const [previousLocal, previousCloud] = isIOS
+    ? await Promise.all([readNativePassword(false), readNativePassword(true)])
+    : [await readNativePassword(false), null];
+  const rollback = () =>
+    restoreNativePasswords(previousLocal, previousCloud, isIOS);
+
   try {
-    localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
+    // The selected location is discoverable before a profile is known by
+    // probing local and synchronizable Keychain namespaces. Keep exactly one
+    // entry so lookup cannot return an older password from another namespace.
+    await removeNativePassword(false);
+    if (isIOS) await removeNativePassword(true);
+    await storeNativePassword(password, isIOS ? syncToICloud : false);
+    return rollback;
   } catch (error) {
-    logger.error('Failed to remove webauthn credential id:', error);
+    // Best-effort rollback avoids silently losing a previously working global
+    // credential when replacement storage fails after authentication.
+    try {
+      await rollback();
+    } catch (rollbackError) {
+      logger.error(
+        'Failed to restore previous biometric credential:',
+        rollbackError
+      );
+      throw new BiometricRestorationRequiredError(error, rollback);
+    }
+    throw error;
+  }
+}
+
+function parseWebAuthnPayload(raw: string | null): WebAuthnPasswordPayload {
+  if (!raw) {
+    throw new Error('Biometric password not found');
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error('Stored biometric password is invalid');
+  }
+
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    (value as Partial<WebAuthnPasswordPayload>).version !==
+      WEBAUTHN_PASSWORD_PAYLOAD_VERSION ||
+    typeof (value as Partial<WebAuthnPasswordPayload>).credentialId !==
+      'string' ||
+    !(value as Partial<WebAuthnPasswordPayload>).credentialId ||
+    typeof (value as Partial<WebAuthnPasswordPayload>).salt !== 'string' ||
+    typeof (value as Partial<WebAuthnPasswordPayload>).ciphertext !== 'string'
+  ) {
+    throw new Error('Stored biometric password is invalid');
+  }
+
+  return value as WebAuthnPasswordPayload;
+}
+
+function restoreWebAuthnPassword(record: string | null): void {
+  if (record === null) {
+    localStorage.removeItem(WEBAUTHN_PASSWORD_KEY);
+  } else {
+    localStorage.setItem(WEBAUTHN_PASSWORD_KEY, record);
+  }
+}
+
+async function storeWebAuthnPassword(
+  password: string
+): Promise<() => Promise<void>> {
+  const prfSalt = await getBiometricSalt();
+  const { credentialId, encryptionKey } =
+    await createWebAuthnCredential(prfSalt);
+  let encryptionSalt: Uint8Array | undefined;
+
+  try {
+    encryptionSalt = (await generateNonce()).to_bytes();
+    const paddedPassword = encodeWebAuthnPasswordEnvelope(password);
+    const { encryptedData } = await encrypt(
+      paddedPassword,
+      encryptionKey,
+      encryptionSalt
+    );
+    const payload: WebAuthnPasswordPayload = {
+      version: WEBAUTHN_PASSWORD_PAYLOAD_VERSION,
+      credentialId,
+      salt: encodeToBase64(encryptionSalt),
+      ciphertext: encodeToBase64(encryptedData),
+    };
+
+    const previousRecord = localStorage.getItem(WEBAUTHN_PASSWORD_KEY);
+    const rollback = async () => {
+      restoreWebAuthnPassword(previousRecord);
+    };
+    try {
+      // The authenticator handle and its ciphertext are one logical record.
+      // A single Web Storage mutation cannot expose a mismatched pair after
+      // process termination.
+      localStorage.setItem(WEBAUTHN_PASSWORD_KEY, JSON.stringify(payload));
+
+      // Released pre-password builds used this handle-only key. It cannot
+      // unlock the new password format and is intentionally ignored. Cleanup
+      // is best-effort because the complete replacement is already committed.
+      try {
+        localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
+      } catch (cleanupError) {
+        logger.warn(
+          'Failed to remove legacy WebAuthn credential:',
+          cleanupError
+        );
+      }
+      return rollback;
+    } catch (error) {
+      try {
+        await rollback();
+      } catch (rollbackError) {
+        logger.error(
+          'Failed to restore previous WebAuthn credential:',
+          rollbackError
+        );
+        throw new BiometricRestorationRequiredError(error, rollback);
+      }
+      throw error;
+    }
+  } finally {
+    encryptionSalt?.fill(0);
+    freeEncryptionKey(encryptionKey);
+  }
+}
+
+async function retrieveWebAuthnPassword(): Promise<string> {
+  const payload = parseWebAuthnPayload(
+    localStorage.getItem(WEBAUTHN_PASSWORD_KEY)
+  );
+  const prfSalt = await getBiometricSalt();
+  const { encryptionKey } = await authenticateWithWebAuthn(
+    payload.credentialId,
+    prfSalt
+  );
+  let encryptionSalt: Uint8Array | undefined;
+  let ciphertext: Uint8Array | undefined;
+
+  try {
+    try {
+      encryptionSalt = decodeFromBase64(payload.salt);
+      ciphertext = decodeFromBase64(payload.ciphertext);
+    } catch {
+      throw new Error('Stored biometric password is invalid');
+    }
+    const paddedPassword = await decrypt(
+      ciphertext,
+      encryptionSalt,
+      encryptionKey
+    );
+    return decodeWebAuthnPasswordEnvelope(paddedPassword);
+  } finally {
+    encryptionSalt?.fill(0);
+    ciphertext?.fill(0);
+    freeEncryptionKey(encryptionKey);
   }
 }
 
@@ -189,10 +419,7 @@ export async function checkBiometricAvailability(): Promise<BiometricAvailabilit
       }
       logger.info(
         '[biometric][availability] WebAuthn unavailable after preflight',
-        {
-          platformAvailable,
-          prfSupported,
-        }
+        { platformAvailable, prfSupported }
       );
     } catch (error) {
       logger.warn('WebAuthn not available:', error);
@@ -202,53 +429,64 @@ export async function checkBiometricAvailability(): Promise<BiometricAvailabilit
   return { available: false, biometryType: 'none', method: 'none' };
 }
 
-export async function createCredential(
-  username: string,
-  userId: Uint8Array,
-  salt: Uint8Array,
-  syncToiCloud = false
-): Promise<BiometricCreationResult> {
+export async function configureBiometricLoginWithRollback(
+  password: string,
+  syncToICloud = false
+): Promise<BiometricSetupTransactionResult> {
+  if (!password.trim()) {
+    return { success: false, error: 'Password is required' };
+  }
+
   try {
     if (isCapacitorAvailable()) {
-      await BiometricAuth.authenticate({
-        reason: 'Authenticate to complete account setup',
-        allowDeviceCredential: true,
-      });
-
-      const encryptionKey = await generateEncryptionKey();
-      const userIdStr = encodeUserId(userId);
-      await storeEncryptionKey(userIdStr, encryptionKey, syncToiCloud);
-      // Also store under the fixed biometric key for SecureLogin discovery
-      const keyBytes = encryptionKey.to_bytes();
-      const keyBase64 = encodeToBase64(keyBytes);
-      keyBytes.fill(0);
-      await SecureStorage.set(BIOMETRIC_STORAGE_KEY, keyBase64, syncToiCloud);
-
-      return {
-        success: true,
-        data: { encryptionKey, authMethod: 'capacitor' },
-      };
+      await authenticateNative('Authenticate to enable biometric login');
+      const rollback = await replaceNativePassword(password, syncToICloud);
+      return { success: true, rollback };
     }
 
-    const result = await createWebAuthnCredential(username, userId, salt);
-    return {
-      success: true,
-      data: {
-        credentialId: result.credentialId,
-        encryptionKey: result.encryptionKey,
-        authMethod: 'webauthn',
-      },
-    };
+    if (isWebAuthnSupported()) {
+      const rollback = await storeWebAuthnPassword(password);
+      return { success: true, rollback };
+    }
+
+    throw new Error('Biometric authentication is not available');
   } catch (error) {
-    logger.error('Biometric credential creation failed:', error);
+    logger.error('Biometric credential setup failed:', error);
+    if (error instanceof BiometricRestorationRequiredError) {
+      return {
+        success: false,
+        error: classifyError(error.originalError),
+        rollback: error.rollback,
+      };
+    }
     return {
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Failed to create biometric credential',
+      error: classifyError(error),
     };
   }
+}
+
+export async function configureBiometricLogin(
+  password: string,
+  syncToICloud = false
+): Promise<BiometricSetupResult> {
+  const result = await configureBiometricLoginWithRollback(
+    password,
+    syncToICloud
+  );
+  if (!result.success && result.rollback) {
+    try {
+      await result.rollback();
+    } catch (rollbackError) {
+      logger.error(
+        'Failed to retry previous biometric credential restoration:',
+        rollbackError
+      );
+      return { success: false, error: 'biometric_restoration_failed' };
+    }
+  }
+  const { success, error } = result;
+  return error === undefined ? { success } : { success, error };
 }
 
 function classifyError(error: unknown): string {
@@ -276,50 +514,12 @@ function classifyError(error: unknown): string {
     : 'Biometric authentication failed';
 }
 
-export async function authenticate(
-  method: 'capacitor' | 'webauthn',
-  userIdOrCredentialId?: string,
-  salt?: Uint8Array,
-  syncFromiCloud = false
-): Promise<BiometricResult> {
-  try {
-    if (method === 'capacitor' && isCapacitorAvailable()) {
-      if (!userIdOrCredentialId) {
-        throw new Error('User ID is required for Capacitor authentication');
-      }
-      await BiometricAuth.authenticate({
-        reason: 'Authenticate to access your account',
-        allowDeviceCredential: true,
-      });
-      const encryptionKey = await retrieveEncryptionKey(
-        userIdOrCredentialId,
-        syncFromiCloud
-      );
-      return { success: true, data: { encryptionKey } };
-    }
-
-    if (method === 'webauthn' && isWebAuthnSupported()) {
-      if (!userIdOrCredentialId || !salt) {
-        throw new Error(
-          'Credential ID and salt are required for WebAuthn authentication'
-        );
-      }
-      const data = await authenticateWithWebAuthn(userIdOrCredentialId, salt);
-      return { success: true, data };
-    }
-
-    throw new Error(`Invalid or not available authentication method ${method}`);
-  } catch (error) {
-    logger.error('Biometric authentication failed:', error);
-    return { success: false, error: classifyError(error) };
-  }
-}
-
 /**
- * High-level biometric auth for SecureLogin.
- * Encapsulates storage keys, salt derivation, and credential ID lookup.
+ * Recover the singleton password after biometric authentication. The result
+ * deliberately contains no account/profile/slot identifier; normal login uses
+ * the password to discover the matching secure slot or classic profile.
  */
-export async function authenticateSecureLogin(
+export async function authenticateBiometricLogin(
   method: 'capacitor' | 'webauthn' | 'none'
 ): Promise<BiometricResult> {
   if (method === 'none') {
@@ -328,26 +528,28 @@ export async function authenticateSecureLogin(
       error: 'Biometric authentication is not available',
     };
   }
+
   try {
-    if (method === 'capacitor') {
-      await BiometricAuth.authenticate({
-        reason: 'Authenticate to access your account',
-        allowDeviceCredential: true,
-      });
-      // Read directly from the fixed biometric key (no userId prefix)
-      const keyBase64 = await SecureStorage.get(BIOMETRIC_STORAGE_KEY);
-      if (!keyBase64 || typeof keyBase64 !== 'string') {
-        throw new Error('Encryption key not found in secure storage');
+    if (method === 'capacitor' && isCapacitorAvailable()) {
+      await authenticateNative('Authenticate to access your account');
+
+      // The location choice is intentionally not profile metadata: login runs
+      // before an account is known. Exactly one namespace should contain the
+      // credential; probing local then iCloud reliably finds either choice.
+      const localPassword = await readNativePassword(false);
+      const password = localPassword ?? (await readNativePassword(true));
+      if (!password) {
+        throw new Error('Biometric password not found');
       }
-      const keyBytes = decodeFromBase64(keyBase64);
-      const encryptionKey = await encryptionKeyFromBytes(keyBytes);
-      keyBytes.fill(0);
-      return { success: true, data: { encryptionKey } };
+      return { success: true, data: { password } };
     }
-    const credentialId =
-      localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY) ?? undefined;
-    const salt = await getBiometricSalt();
-    return authenticate('webauthn', credentialId, salt);
+
+    if (method === 'webauthn' && isWebAuthnSupported()) {
+      const password = await retrieveWebAuthnPassword();
+      return { success: true, data: { password } };
+    }
+
+    throw new Error(`Invalid or unavailable authentication method ${method}`);
   } catch (error) {
     logger.error('Biometric authentication failed:', error);
     return { success: false, error: classifyError(error) };

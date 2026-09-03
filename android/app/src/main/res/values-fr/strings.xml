@@ -4,5 +4,10 @@
     <string name="foreground_sync_channel_desc">Maintient la synchronisation des messages quand ce mode est activé</string>
     <string name="foreground_sync_notification_title">Gossip se synchronise</string>
     <string name="foreground_sync_notification_body">Synchronisation en arrière-plan pour garder vos messages à jour</string>
+    <string name="portable_backup_channel_name">Sauvegardes Gossip</string>
+    <string name="portable_backup_channel_desc">Progression d’une sauvegarde en cours d’écriture et de vérification</string>
+    <string name="portable_backup_notification_title">Sauvegarde sécurisée Gossip</string>
+    <string name="portable_backup_notification_preparing">Préparation de la sauvegarde</string>
+    <string name="portable_backup_notification_writing">Écriture de la sauvegarde</string>
     <string name="qr_scanner_close">Fermer le scanner</string>
 </resources>

@@ -900,9 +900,9 @@ License: MIT OR Apache-2.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 License text references: 0218327e7a480793, 4cada0bd02ea3692
 
-Cargo: pq-rerand@0.1.0
+Cargo: pq-rerand@0.2.0
 License: NOASSERTION (UNRESOLVED)
-Source: git+https://github.com/massalabs/pq-rerand?rev=1d5f9d1afd6f06383fffc0aa3a362774ba35d45f#1d5f9d1afd6f06383fffc0aa3a362774ba35d45f
+Source: git+https://github.com/massalabs/pq-rerand?rev=9a5a48beb0af01b0f23e5b68e2c6b53e38e7eb2a#9a5a48beb0af01b0f23e5b68e2c6b53e38e7eb2a
 License text references: none found
 Review note: No license declaration or license file was found at the pinned revision.
 
@@ -986,11 +986,6 @@ License: MIT OR Apache-2.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 License text references: 90eb64f0279b0d94, 6df43f6f4b5d4587, 209fbbe0ad52d923
 
-Cargo: rand_distr@0.4.3
-License: MIT OR Apache-2.0
-Source: registry+https://github.com/rust-lang/crates.io-index
-License text references: 90eb64f0279b0d94, 6df43f6f4b5d4587, a771e4354f6b3ad4
-
 Cargo: rand_xorshift@0.4.0
 License: MIT OR Apache-2.0
 Source: registry+https://github.com/rust-lang/crates.io-index
@@ -1001,7 +996,7 @@ License: MIT OR Apache-2.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 License text references: d902d7d4433c0809, d7bb236e93b1117d
 
-Cargo: rayon@1.11.0
+Cargo: rayon@1.12.0
 License: MIT OR Apache-2.0
 Source: registry+https://github.com/rust-lang/crates.io-index
 License text references: a60eea8175145316, 0621878e61f0d0fd
@@ -3800,7 +3795,7 @@ SOFTWARE.
 Text reference: 0621878e61f0d0fd
 SHA-256: 0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720
 File names: LICENSE-MIT
-Used by: Cargo:rayon-core@1.13.0, Cargo:rayon@1.11.0
+Used by: Cargo:rayon-core@1.13.0, Cargo:rayon@1.12.0
 
 Copyright (c) 2010 The Rust Project Developers
 
@@ -12033,7 +12028,7 @@ SOFTWARE.
 Text reference: 6df43f6f4b5d4587
 SHA-256: 6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51
 File names: LICENSE-APACHE
-Used by: Cargo:rand_core@0.6.4, Cargo:rand_core@0.9.3, Cargo:rand_distr@0.4.3
+Used by: Cargo:rand_core@0.6.4, Cargo:rand_core@0.9.3
 
                               Apache License
                         Version 2.0, January 2004
@@ -14687,7 +14682,7 @@ SOFTWARE.
 Text reference: 90eb64f0279b0d94
 SHA-256: 90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5
 File names: COPYRIGHT
-Used by: Cargo:rand@0.8.5, Cargo:rand@0.9.2, Cargo:rand_chacha@0.3.1, Cargo:rand_chacha@0.9.0, Cargo:rand_core@0.6.4, Cargo:rand_core@0.9.3, Cargo:rand_distr@0.4.3, Cargo:rand_xorshift@0.4.0
+Used by: Cargo:rand@0.8.5, Cargo:rand@0.9.2, Cargo:rand_chacha@0.3.1, Cargo:rand_chacha@0.9.0, Cargo:rand_core@0.6.4, Cargo:rand_core@0.9.3, Cargo:rand_xorshift@0.4.0
 
 Copyrights in the Rand project are retained by their contributors. No
 copyright assignment is required to contribute to the Rand project.
@@ -15438,7 +15433,7 @@ SOFTWARE.
 Text reference: a60eea8175145316
 SHA-256: a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
 File names: LICENSE-APACHE
-Used by: Cargo:ark-ff-asm@0.3.0, Cargo:ark-ff-macros@0.3.0, Cargo:ark-ff@0.3.0, Cargo:ark-serialize@0.3.0, Cargo:ark-std@0.3.0, Cargo:ark-std@0.4.0, Cargo:ark-std@0.5.0, Cargo:arrayvec@0.7.6, Cargo:autocfg@1.5.0, Cargo:bitflags@2.11.0, Cargo:bs58@0.5.1, Cargo:bumpalo@3.19.0, Cargo:camino@1.2.2, Cargo:cc@1.2.39, Cargo:cfg-if@1.0.3, Cargo:crossbeam-deque@0.8.6, Cargo:crossbeam-epoch@0.9.18, Cargo:crossbeam-utils@0.8.21, Cargo:curve25519-dalek-derive@0.1.1, Cargo:derivative@2.2.0, Cargo:displaydoc@0.2.5, Cargo:either@1.15.0, Cargo:equivalent@1.0.2, Cargo:errno@0.3.14, Cargo:fastrand@2.4.1, Cargo:ff@0.13.1, Cargo:find-msvc-tools@0.1.2, Cargo:fnv@1.0.7, Cargo:fs-err@2.11.0, Cargo:glob@0.3.3, Cargo:group@0.13.0, Cargo:hashbrown@0.16.1, Cargo:heck@0.5.0, Cargo:indexmap@2.13.1, Cargo:itertools@0.10.5, Cargo:itertools@0.13.0, Cargo:js-sys@0.3.81, Cargo:linux-raw-sys@0.11.0, Cargo:log@0.4.28, Cargo:num-bigint@0.4.6, Cargo:num-complex@0.4.6, Cargo:num-integer@0.1.46, Cargo:num-iter@0.1.45, Cargo:num-rational@0.4.2, Cargo:num-traits@0.2.19, Cargo:num@0.4.3, Cargo:once_cell@1.21.3, Cargo:percent-encoding@2.3.2, Cargo:pest@2.8.6, Cargo:plain@0.2.3, Cargo:proptest@1.11.0, Cargo:rayon-core@1.13.0, Cargo:rayon@1.11.0, Cargo:regex-syntax@0.8.10, Cargo:rustc-hex@2.1.0, Cargo:rustc_version@0.3.3, Cargo:rustc_version@0.4.1, Cargo:rustix@1.1.2, Cargo:rusty-fork@0.3.1, Cargo:semver-parser@0.10.3, Cargo:semver@0.11.0, Cargo:syn@1.0.109, Cargo:tempfile@3.23.0, Cargo:ucd-trie@0.1.7, Cargo:unicode-segmentation@1.13.2, Cargo:unicode-xid@0.2.6, Cargo:uuid@1.18.1, Cargo:version_check@0.9.5, Cargo:wait-timeout@0.2.1, Cargo:wasi@0.11.1+wasi-snapshot-preview1, Cargo:wasi@0.14.7+wasi-0.2.4, Cargo:wasm-bindgen-backend@0.2.104, Cargo:wasm-bindgen-macro-support@0.2.104, Cargo:wasm-bindgen-macro@0.2.104, Cargo:wasm-bindgen-shared@0.2.104, Cargo:wasm-bindgen@0.2.104, Cargo:web-sys@0.3.81, Cargo:wit-bindgen@0.46.0
+Used by: Cargo:ark-ff-asm@0.3.0, Cargo:ark-ff-macros@0.3.0, Cargo:ark-ff@0.3.0, Cargo:ark-serialize@0.3.0, Cargo:ark-std@0.3.0, Cargo:ark-std@0.4.0, Cargo:ark-std@0.5.0, Cargo:arrayvec@0.7.6, Cargo:autocfg@1.5.0, Cargo:bitflags@2.11.0, Cargo:bs58@0.5.1, Cargo:bumpalo@3.19.0, Cargo:camino@1.2.2, Cargo:cc@1.2.39, Cargo:cfg-if@1.0.3, Cargo:crossbeam-deque@0.8.6, Cargo:crossbeam-epoch@0.9.18, Cargo:crossbeam-utils@0.8.21, Cargo:curve25519-dalek-derive@0.1.1, Cargo:derivative@2.2.0, Cargo:displaydoc@0.2.5, Cargo:either@1.15.0, Cargo:equivalent@1.0.2, Cargo:errno@0.3.14, Cargo:fastrand@2.4.1, Cargo:ff@0.13.1, Cargo:find-msvc-tools@0.1.2, Cargo:fnv@1.0.7, Cargo:fs-err@2.11.0, Cargo:glob@0.3.3, Cargo:group@0.13.0, Cargo:hashbrown@0.16.1, Cargo:heck@0.5.0, Cargo:indexmap@2.13.1, Cargo:itertools@0.10.5, Cargo:itertools@0.13.0, Cargo:js-sys@0.3.81, Cargo:linux-raw-sys@0.11.0, Cargo:log@0.4.28, Cargo:num-bigint@0.4.6, Cargo:num-complex@0.4.6, Cargo:num-integer@0.1.46, Cargo:num-iter@0.1.45, Cargo:num-rational@0.4.2, Cargo:num-traits@0.2.19, Cargo:num@0.4.3, Cargo:once_cell@1.21.3, Cargo:percent-encoding@2.3.2, Cargo:pest@2.8.6, Cargo:plain@0.2.3, Cargo:proptest@1.11.0, Cargo:rayon-core@1.13.0, Cargo:rayon@1.12.0, Cargo:regex-syntax@0.8.10, Cargo:rustc-hex@2.1.0, Cargo:rustc_version@0.3.3, Cargo:rustc_version@0.4.1, Cargo:rustix@1.1.2, Cargo:rusty-fork@0.3.1, Cargo:semver-parser@0.10.3, Cargo:semver@0.11.0, Cargo:syn@1.0.109, Cargo:tempfile@3.23.0, Cargo:ucd-trie@0.1.7, Cargo:unicode-segmentation@1.13.2, Cargo:unicode-xid@0.2.6, Cargo:uuid@1.18.1, Cargo:version_check@0.9.5, Cargo:wait-timeout@0.2.1, Cargo:wasi@0.11.1+wasi-snapshot-preview1, Cargo:wasi@0.14.7+wasi-0.2.4, Cargo:wasm-bindgen-backend@0.2.104, Cargo:wasm-bindgen-macro-support@0.2.104, Cargo:wasm-bindgen-macro@0.2.104, Cargo:wasm-bindgen-shared@0.2.104, Cargo:wasm-bindgen@0.2.104, Cargo:web-sys@0.3.81, Cargo:wit-bindgen@0.46.0
 
                               Apache License
                         Version 2.0, January 2004
@@ -16110,39 +16105,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-------------------------------------------------------------------------------
-
-Text reference: a771e4354f6b3ad4
-SHA-256: a771e4354f6b3ad4c92da1a5c9a239b6c291527db869632ecea4f20e24ca1135
-File names: LICENSE-MIT
-Used by: Cargo:rand_distr@0.4.3
-
-Copyright 2018 Developers of the Rand project
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 

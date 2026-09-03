@@ -22,7 +22,15 @@ interface BackgroundRunnerStoragePlugin {
    *
    * @param options - Object with key and optional value
    */
-  set(options: { key: string; value?: string | null }): Promise<void>;
+  get(options: { key: string }): Promise<{ value?: string | null }>;
+  cancelNotifications(): Promise<void>;
+  clearIfValue(options: { key: string; expected: string }): Promise<void>;
+  set(options: {
+    key: string;
+    value?: string | null;
+    strict?: boolean;
+    scope?: 'runner' | 'app';
+  }): Promise<void>;
 }
 
 // Register the plugin
@@ -50,6 +58,37 @@ class BackgroundRunnerStorageService {
    * @param key - The storage key
    * @param value - The value to store (null/undefined to remove)
    */
+  async getStrict(key: string): Promise<string | null> {
+    if (!this.isAvailable()) return null;
+    const result = await BackgroundRunnerStorage.get({ key });
+    return result && typeof result.value === 'string' ? result.value : null;
+  }
+
+  async cancelNotifications(): Promise<void> {
+    if (!this.isAvailable()) return;
+    await BackgroundRunnerStorage.cancelNotifications();
+  }
+
+  async clearIfValue(key: string, expected: string): Promise<void> {
+    if (!this.isAvailable()) return;
+    await BackgroundRunnerStorage.clearIfValue({ key, expected });
+  }
+
+  async setAppStrict(key: string, value?: string | null): Promise<void> {
+    if (!this.isAvailable()) return;
+    await BackgroundRunnerStorage.set({
+      key,
+      value,
+      strict: true,
+      scope: 'app',
+    });
+  }
+
+  async setStrict(key: string, value?: string | null): Promise<void> {
+    if (!this.isAvailable()) return;
+    await BackgroundRunnerStorage.set({ key, value, strict: true });
+  }
+
   async set(key: string, value?: string | null): Promise<void> {
     if (!this.isAvailable()) {
       return;

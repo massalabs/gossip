@@ -41,7 +41,7 @@ CREATE TABLE `discussions` (
 	`unreadCount` integer DEFAULT 0 NOT NULL,
 	`killedNextRetryAt` integer,
 	`saturatedRetryAt` integer,
-	`saturatedRetryDone` integer DEFAULT false NOT NULL,
+	`saturatedRetryDone` integer DEFAULT 0 NOT NULL,
 	`createdAt` integer NOT NULL,
 	`updatedAt` integer NOT NULL
 );

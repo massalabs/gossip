@@ -3,8 +3,41 @@ import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { getSdk } from '../stores/sdkStore';
+import type { GossipSdk } from '@massalabs/gossip-sdk';
+import { reconcilePortableImportAuthority } from '../services/portableImportAuthorization';
 
 const PROFILE_LOAD_DELAY_MS = 100;
+
+export async function establishFirstInstallCreationGrant(
+  sdk: Pick<GossipSdk, 'isSecureStorage' | 'storageState'> &
+    Partial<Pick<GossipSdk, 'accountGenerationState'>>
+): Promise<void> {
+  if (!sdk.isSecureStorage) return;
+  if (sdk.accountGenerationState === 'empty') {
+    const state = useAppStore.getState();
+    state.setSecureStartupRouting(false, false);
+    state.setSecureAccountCreationAllowed(true);
+    // Reconcile fallible web-layer state only after the backend has made the
+    // routing decision. In particular, process death may leave an orphaned
+    // creation-mode lease that must not block the next onboarding attempt.
+    await reconcilePortableImportAuthority(
+      sdk.accountGenerationState,
+      sdk.storageState
+    );
+    return;
+  }
+  await reconcilePortableImportAuthority(
+    sdk.accountGenerationState ?? null,
+    sdk.storageState
+  );
+}
+
+export function shouldInitializeSecureStorage(
+  storageState: 'empty' | 'locked' | 'unlocked' | null,
+  accountCreationAllowed: boolean
+): boolean {
+  return storageState === 'locked' && !accountCreationAllowed;
+}
 
 /**
  * Hook to load user profile from SQLite on app start
@@ -17,22 +50,43 @@ export function useProfileLoader() {
       try {
         setLoading(true);
 
+        // Persist first-install authorization before the UI delay. Bootstrap
+        // also calls this immediately after SDK initialization, before React
+        // mounts, to minimize the unavoidable cross-store process-kill window.
+        await establishFirstInstallCreationGrant(getSdk());
+
         // Add a small delay to ensure database is ready
         await new Promise(resolve =>
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
         );
 
-        // Secure-storage: the SDK has no open session at boot, so any
-        // profile query would throw "SDK not initialized". We decide
-        // the initial route purely from `storageState`:
-        //   - 'locked' → existing data, go to SecureLogin.
-        //   - 'empty'  → fresh install, go to onboarding (create account).
-        // Profile hydration happens later, after login/signup.
+        // Secure-storage provisioning writes dummy slots even before an
+        // account exists, so a later boot reports `locked` for both a real
+        // account and a first-install flow that was cancelled or completely
+        // rolled back. Preserve a dedicated first-install creation grant to
+        // keep that dummy-only state reachable as onboarding. The grant starts
+        // only from the backend's authoritative `empty` state and is revoked
+        // after a complete account batch, so clearing unrelated app state can
+        // never authorize overwriting unknown hidden slots.
+        // Profile hydration still happens later, after login/signup.
         const sdk = getSdk();
         if (sdk.isSecureStorage) {
-          useAppStore
-            .getState()
-            .setIsInitialized(sdk.storageState === 'locked');
+          const appState = useAppStore.getState();
+          if (
+            useAccountStore.getState().userProfile !== null ||
+            sdk.storageState === 'unlocked'
+          ) {
+            appState.setSecureStartupRouting(true, false);
+            return;
+          }
+          appState.setSecureStartupRouting(
+            shouldInitializeSecureStorage(
+              sdk.storageState,
+              sdk.storageState === 'empty' ||
+                appState.secureAccountCreationAllowed
+            ),
+            false
+          );
           return;
         }
 
@@ -47,7 +101,19 @@ export function useProfileLoader() {
         }
       } catch (error) {
         logger.error('Error loading user profile from SQLite:', error);
-        useAppStore.getState().setIsInitialized(false);
+        let initializeLockedStorage = false;
+        try {
+          const sdk = getSdk();
+          initializeLockedStorage =
+            sdk.isSecureStorage && sdk.storageState === 'locked';
+        } catch {
+          // SDK bootstrap has not completed; retain onboarding fallback.
+        }
+        const appState = useAppStore.getState();
+        appState.setSecureStartupRouting(
+          appState.isInitialized,
+          initializeLockedStorage
+        );
       } finally {
         setLoading(false);
       }

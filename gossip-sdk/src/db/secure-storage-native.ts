@@ -21,6 +21,17 @@ interface RawPlugin {
 
 const raw = registerPlugin<RawPlugin>('SecureStorageNative');
 
+const PORTABLE_CHUNK_BYTES = 256 * 1024;
+
+export type PortableChunkWriter = (chunk: Uint8Array) => void | Promise<void>;
+export interface PortableTransferProgress {
+  writtenBytes: number;
+  totalBytes: number;
+}
+export type PortableProgressCallback = (
+  progress: PortableTransferProgress
+) => void;
+
 // ── base64 helpers ────────────────────────────────────────────────
 
 function u8ToBase64(bytes: Uint8Array | number[]): string {
@@ -52,6 +63,29 @@ async function callNative<T = unknown>(
   return JSON.parse(result) as T;
 }
 
+let portableTransferTail: Promise<void> = Promise.resolve();
+let portableImportOperationTail: Promise<void> = Promise.resolve();
+
+function runPortableTransfer<T>(operation: () => Promise<T>): Promise<T> {
+  const result = portableTransferTail.then(operation, operation);
+  portableTransferTail = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
+function runPortableImportOperation<T>(
+  operation: () => Promise<T>
+): Promise<T> {
+  const result = portableImportOperationTail.then(operation, operation);
+  portableImportOperationTail = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 // ── SQL value encoding ────────────────────────────────────────────
 // Rust accepts raw JSON primitives (null/bool/number/string) directly
 // for SQL params. BLOBs travel as the sentinel `{blob: "<base64>"}` —
@@ -77,6 +111,16 @@ export interface SecureStorageNativePlugin {
   initSecureStorage(options: { path: string; domain: string }): Promise<void>;
   provisionStorage(): Promise<void>;
   hasData(): Promise<{ hasData: boolean }>;
+  accountGenerationState(): Promise<{
+    state: 'empty' | 'committed' | null;
+  }>;
+  accountGenerationEpoch(): Promise<{ epoch: string | null }>;
+  initializeEmptyAccountGeneration(): Promise<{
+    state: 'empty' | 'committed';
+  }>;
+  beginOnboardingCandidate(): Promise<void>;
+  commitOnboardingCandidate(): Promise<{ epoch: string }>;
+  abortOnboardingCandidate(): Promise<void>;
   // Binary payloads (passwords, namespace blobs) are typed as Uint8Array
   // end-to-end. Going through `number[]` was an O(n) memcopy in each
   // direction with no benefit: the plugin internally base64-encodes
@@ -120,6 +164,32 @@ export interface SecureStorageNativePlugin {
   >;
   flush(): Promise<void>;
   close(): Promise<void>;
+
+  /** Stream a locked whole-store snapshot without materializing it in JS. */
+  exportPortableV1(
+    write: PortableChunkWriter,
+    onProgress?: PortableProgressCallback,
+    signal?: AbortSignal
+  ): Promise<void>;
+
+  beginPortableImport(): Promise<void>;
+  pushPortableImportChunk(data: Uint8Array): Promise<void>;
+  validatePortableImport(): Promise<void>;
+  beginPortableOuterMigration(): Promise<void>;
+  admitPortableOuterMigrationPassword(password: Uint8Array): Promise<void>;
+  finishPortableOuterMigration(): Promise<void>;
+  installPortableImport(): Promise<{ epoch: string }>;
+  abortPortableTransfer(): Promise<void>;
+
+  /** Project one profile from an already validated isolated candidate. */
+  authenticatePortableImportCandidate(options: {
+    password: Uint8Array;
+  }): Promise<{
+    userId: string;
+    username: string;
+    avatar: string | null;
+    createdAtMs: number;
+  } | null>;
 
   // Namespace data API - parity with the WASM worker. Enables the SDK
   // to persist the session blob on the native path without going
@@ -172,6 +242,32 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   async hasData() {
     const hasData = await callNative<boolean>('hasData');
     return { hasData };
+  },
+  async accountGenerationState() {
+    const state = await callNative<'empty' | 'committed' | null>(
+      'accountGenerationState'
+    );
+    return { state };
+  },
+  async accountGenerationEpoch() {
+    const epoch = await callNative<string | null>('accountGenerationEpoch');
+    return { epoch };
+  },
+  async initializeEmptyAccountGeneration() {
+    const state = await callNative<'empty' | 'committed'>(
+      'initializeEmptyAccountGeneration'
+    );
+    return { state };
+  },
+  async beginOnboardingCandidate() {
+    await callNative('beginOnboardingCandidate');
+  },
+  async commitOnboardingCandidate() {
+    const epoch = await callNative<string>('commitOnboardingCandidate');
+    return { epoch };
+  },
+  async abortOnboardingCandidate() {
+    await callNative('abortOnboardingCandidate');
   },
   async allocateSession({ slot, password }) {
     await callNative('allocateSession', {
@@ -230,6 +326,106 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   },
   async close() {
     await callNative('close');
+  },
+  async exportPortableV1(write, onProgress, signal) {
+    return runPortableTransfer(async () => {
+      let begun = false;
+      let finished = false;
+      let writtenBytes = 0;
+      try {
+        if (signal?.aborted) {
+          throw new DOMException('Backup cancelled', 'AbortError');
+        }
+        const totalBytes = await callNative<number>('beginPortableExport');
+        begun = true;
+        if (signal?.aborted) {
+          throw new DOMException('Backup cancelled', 'AbortError');
+        }
+        onProgress?.({ writtenBytes, totalBytes });
+        while (true) {
+          if (signal?.aborted) {
+            throw new DOMException('Backup cancelled', 'AbortError');
+          }
+          const encoded = await callNative<string | null>(
+            'readPortableExportChunk',
+            { maxBytes: PORTABLE_CHUNK_BYTES }
+          );
+          if (signal?.aborted) {
+            throw new DOMException('Backup cancelled', 'AbortError');
+          }
+          if (encoded === null) break;
+          const chunk = base64ToU8(encoded);
+          await write(chunk);
+          writtenBytes += chunk.byteLength;
+          onProgress?.({ writtenBytes, totalBytes });
+        }
+        if (writtenBytes !== totalBytes) {
+          throw new Error('Native portable export length changed');
+        }
+        await callNative('finishPortableExport');
+        finished = true;
+      } finally {
+        if (begun && !finished) {
+          await callNative('abortPortableTransfer').catch(() => {});
+        }
+      }
+    });
+  },
+  async beginPortableImport() {
+    await runPortableImportOperation(() => callNative('beginPortableImport'));
+  },
+  async pushPortableImportChunk(data) {
+    await runPortableImportOperation(async () => {
+      for (
+        let offset = 0;
+        offset < data.length;
+        offset += PORTABLE_CHUNK_BYTES
+      ) {
+        await callNative('pushPortableImportChunk', {
+          data: u8ToBase64(
+            data.subarray(offset, offset + PORTABLE_CHUNK_BYTES)
+          ),
+        });
+      }
+    });
+  },
+  async validatePortableImport() {
+    await runPortableImportOperation(() =>
+      callNative('validatePortableImport')
+    );
+  },
+  async beginPortableOuterMigration() {
+    await runPortableImportOperation(() =>
+      callNative('beginPortableOuterMigration')
+    );
+  },
+  async admitPortableOuterMigrationPassword(password) {
+    await runPortableImportOperation(() =>
+      callNative('admitPortableOuterMigrationPassword', {
+        password: u8ToBase64(password),
+      })
+    );
+  },
+  async finishPortableOuterMigration() {
+    await runPortableImportOperation(() =>
+      callNative('finishPortableOuterMigration')
+    );
+  },
+  async installPortableImport() {
+    const epoch = await runPortableImportOperation(() =>
+      callNative<string>('installPortableImport')
+    );
+    return { epoch };
+  },
+  async abortPortableTransfer() {
+    await runPortableImportOperation(() => callNative('abortPortableTransfer'));
+  },
+  async authenticatePortableImportCandidate({ password }) {
+    return runPortableImportOperation(() =>
+      callNative('authenticatePortableImportCandidate', {
+        password: u8ToBase64(password),
+      })
+    );
   },
   async writeNamespaceData({ namespace, offset, data }) {
     await callNative('writeNamespaceData', {

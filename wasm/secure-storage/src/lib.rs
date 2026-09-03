@@ -13,8 +13,11 @@ pub mod js_num;
 mod kdf;
 mod keypair;
 mod lifecycle;
+mod outer_migration;
+mod portable;
 mod pq;
 mod read;
+mod sql_tail;
 pub mod storage;
 mod types;
 mod unlock;
@@ -31,6 +34,8 @@ mod wasm_api;
 
 #[cfg(feature = "native")]
 mod native_api;
+#[cfg(any(feature = "native", feature = "wasm"))]
+mod preview;
 
 #[cfg(feature = "native")]
 uniffi::setup_scaffolding!();
@@ -42,14 +47,23 @@ pub use constants::{
 };
 pub use domain::{
     block_aead_aad, block_aead_key_label, block_kdf_salt, block_scope, password_kdf_salt, root,
-    root_aead_key_label, root_kdf_salt, session_scope, sk_wrap_aad, sk_wrap_key_label,
+    root_aead_key_label, root_kdf_salt, session_scope, sk_wrap_key_label,
 };
 pub use error::{Result, SecureStorageError};
 pub use kdf::{SessionKeys, derive_block_aead_key, derive_session_keys};
-pub use keypair::{KeypairFile, read_session_keypair, read_session_version_and_pk};
+pub use keypair::{
+    CURRENT_SESSION_VERSION, KeypairFile, read_session_keypair, read_session_version_and_pk,
+};
 pub use lifecycle::{allocate_session, cover_traffic_tick, destroy_session, provision_storage};
+pub use outer_migration::{OuterMigration, OuterMigrationPlan};
+pub use portable::{
+    MAX_PORTABLE_ARCHIVE_BYTES, PORTABLE_DIGEST_SIZE, PORTABLE_HEADER_SIZE, PORTABLE_MAGIC,
+    PORTABLE_RECORD_HEADER_SIZE, PORTABLE_VERSION, PortableArchiveReader, PortableArchiveWriter,
+    PortableHeader, PortableRecord, PortableRecordKind,
+};
 pub use pq::{
-    PQ_CT_SIZE, PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_keygen, pq_rerand,
+    PQ_CT_SIZE, PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_keygen,
+    pq_rerand, validate_pq_ciphertext,
 };
 pub use read::{decrypt_session_data_block, read_session_data, read_total_length};
 pub use types::SessionIndex;
@@ -59,14 +73,14 @@ pub use write::{
     repair_blockstream_lengths, shrink_session_data, write_session_data,
 };
 
-/// Run a test closure on a thread with a 4 MiB stack.
+/// Run a test closure on a thread with a 16 MiB stack.
 ///
 /// PQ (ML-KEM) operations use large stack allocations that can overflow
 /// the default Rust test thread stack (~2 MiB on macOS).
 #[cfg(test)]
 pub(crate) fn run_with_stack<F: FnOnce() + Send + 'static>(f: F) {
     std::thread::Builder::new()
-        .stack_size(4 * 1024 * 1024)
+        .stack_size(16 * 1024 * 1024)
         .spawn(f)
         .unwrap()
         .join()

@@ -1,29 +1,21 @@
 import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
-import { encodeUserId, UserProfile } from '@massalabs/gossip-sdk';
-
 import {
-  encrypt,
-  deriveKey,
-  generateMnemonic,
-  EncryptionKey,
-  generateNonce,
-  encodeToBase64,
+  encodeUserId,
+  UserProfile,
+  SecureStorageRecoveryRequiredError,
+  MessagingSessionRecoveryRequiredError,
+  SELF_CONTACT_ID,
+  UnreadableMessagingSessionError,
 } from '@massalabs/gossip-sdk';
+
+import { generateMnemonic, EncryptionKey } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
-import { isWebAuthnSupported } from '../crypto/webauthn';
-import {
-  checkBiometricAvailability,
-  createCredential,
-  clearLoginBiometricCredentials,
-  hasExistingCredential,
-} from '../services/biometricService';
-import {
-  BIOMETRIC_STORAGE_KEY,
-  getBiometricSalt,
-  WEBAUTHN_CREDENTIAL_ID_KEY,
-} from '../constants/biometric';
+import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
+import { finalizeCommittedAccountGenerationAuthority } from '../services/portableImportAuthorization';
+import { resetAllAccountStorage } from '../services/unsupportedStorageReset';
+
 import {
   Provider,
   Account,
@@ -35,168 +27,81 @@ import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
 
 import { getActiveOrFirstProfile } from './utils/getAccount';
-import { auth } from './utils/auth';
+import {
+  auth,
+  createPasswordSecurity,
+  type PreparedPasswordAccount,
+} from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
 import { useSelfMessageStore } from './selfMessageStore';
 import {
   deriveAccountFromMnemonic,
   fetchMnsDomainsIfEnabled,
+  wipeAccountPrivateKey,
 } from './utils/accountHelpers';
 
-export type LoginMethod =
-  | { type: 'password'; password: string; userId?: string }
-  | { type: 'biometric'; userId?: string }
-  | { type: 'encryptionKey'; encryptionKey: EncryptionKey };
+export type PrivateMigrationPhase = 1 | 2 | 3 | 4 | 5;
 
-type accountProvisionResult = {
-  encryptionKey: EncryptionKey;
-  security: UserProfile['security'];
+export type LoginMethod = {
+  type: 'password';
+  password: string;
+  userId?: string;
+  resetMessagingSessions?: boolean;
 };
 
-async function provisionAccount(
-  username: string,
-  mnemonic: string | undefined,
-  userIdBytes: Uint8Array,
-  opts: { useBiometrics: boolean; password?: string; iCloudSync?: boolean }
-): Promise<accountProvisionResult> {
-  if (opts.useBiometrics) {
-    return await buildSecurityFromBiometrics(
-      mnemonic,
-      username,
-      userIdBytes,
-      opts.iCloudSync ?? false
+export interface PreparedOnboardingAccount {
+  username: string;
+  password: string;
+  prepared: PreparedPasswordAccount;
+}
+
+export class IncompleteOnboardingSlotCleanupError extends Error {
+  readonly originalCause: unknown;
+
+  constructor(cause: unknown) {
+    super(
+      cause instanceof Error ? cause.message : 'Account persistence failed'
     );
-  } else {
-    const password = opts.password?.trim();
-    if (!password) {
-      throw new Error('Password is required');
-    }
-    return await buildSecurityFromPassword(mnemonic, password);
+    this.name = 'IncompleteOnboardingSlotCleanupError';
+    this.originalCause = cause;
   }
 }
 
-// Helpers to build security blobs and in-memory keys
-async function buildSecurityFromPassword(
-  mnemonic: string | undefined,
-  password: string
-): Promise<{
-  security: UserProfile['security'];
-  encryptionKey: EncryptionKey;
-}> {
-  const salt = (await generateNonce()).to_bytes();
-  const key = await deriveKey(password, salt);
-
-  if (!mnemonic) {
-    throw new Error('Mnemonic is required for account creation');
+function freeEncryptionKey(key: EncryptionKey): void {
+  const pointer = (key as unknown as { __wbg_ptr?: number }).__wbg_ptr;
+  if (pointer === undefined || pointer !== 0) {
+    key.free();
   }
-
-  const { encryptedData: encryptedMnemonic } = await encrypt(
-    mnemonic,
-    key,
-    salt
-  );
-  const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
-    encryptedMnemonic,
-    createdAt: new Date(),
-    backedUp: false,
-  };
-
-  const security: UserProfile['security'] = {
-    authMethod: 'password',
-    encKeySalt: salt,
-    mnemonicBackup,
-  };
-
-  return { security, encryptionKey: key };
-}
-
-async function buildSecurityFromBiometrics(
-  mnemonic: string | undefined,
-  username: string,
-  userIdBytes: Uint8Array,
-  iCloudSync = false
-): Promise<{
-  security: UserProfile['security'];
-  encryptionKey: EncryptionKey;
-}> {
-  if (!mnemonic) {
-    throw new Error('Mnemonic is required for account creation');
-  }
-
-  // WebAuthn PRF needs the fixed biometric salt; Capacitor ignores it.
-  // Mnemonic encryption uses a separate random salt.
-  const prfSalt = await getBiometricSalt();
-  const encSalt = (await generateNonce()).to_bytes();
-
-  const credentialResult = await createCredential(
-    `Gossip:${username}`,
-    userIdBytes,
-    prfSalt,
-    iCloudSync
-  );
-
-  if (!credentialResult.success || !credentialResult.data) {
-    throw new Error(
-      credentialResult.error || 'Failed to create biometric credential'
-    );
-  }
-
-  const { credentialId, encryptionKey, authMethod } = credentialResult.data;
-
-  // Persist WebAuthn credential ID for login discovery
-  if (credentialId) {
-    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
-  }
-
-  const { encryptedData } = await encrypt(mnemonic, encryptionKey, encSalt);
-
-  const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
-    encryptedMnemonic: encryptedData,
-    createdAt: new Date(),
-    backedUp: false,
-  };
-
-  const security: UserProfile['security'] = {
-    authMethod,
-    webauthn: credentialId
-      ? {
-          credentialId,
-        }
-      : undefined,
-    iCloudSync,
-    encKeySalt: encSalt,
-    mnemonicBackup,
-  };
-
-  return { security, encryptionKey };
 }
 
 interface AccountState {
   userProfile: UserProfile | null;
   encryptionKey: EncryptionKey | null;
   isLoading: boolean;
+  privateMigrationPhase: PrivateMigrationPhase | null;
   lockedByUser: boolean;
-  webauthnSupported: boolean;
-  platformAuthenticatorAvailable: boolean;
   account: Account | null;
   evmAddress: string | null;
   provider: Provider | null;
-  initializeAccountWithBiometrics: (
-    username: string,
-    iCloudSync?: boolean
-  ) => Promise<void>;
   initializeAccount: (username: string, password: string) => Promise<void>;
+  initializePreparedAccountsAtomically: (
+    accounts: readonly PreparedOnboardingAccount[]
+  ) => Promise<void>;
   loadAccount: (method: LoginMethod) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
   finalizeOnboarding: () => Promise<void>;
+  configureBiometricLogin: (
+    password: string,
+    syncToICloud?: boolean
+  ) => Promise<void>;
   resetAccount: () => Promise<void>;
   setLoading: (loading: boolean) => void;
 
   // Mnemonic backup methods
-  showBackup: (password?: string) => Promise<{
+  showBackup: (password: string) => Promise<{
     mnemonic: string;
-    account: Account;
+    privateKey: string;
   }>;
   getMnemonicBackupInfo: () => { createdAt: Date; backedUp: boolean } | null;
   markMnemonicBackupComplete: () => Promise<void>;
@@ -232,8 +137,12 @@ function pickFreeSlot(): number {
   if (free.length === 0) {
     throw new Error('No free secure-storage slot');
   }
-  const rand = crypto.getRandomValues(new Uint8Array(1))[0];
-  return free[rand % free.length];
+  const sample = new Uint8Array(1);
+  const unbiasedLimit = 256 - (256 % free.length);
+  do {
+    crypto.getRandomValues(sample);
+  } while (sample[0] >= unbiasedLimit);
+  return free[sample[0] % free.length];
 }
 
 const useAccountStoreBase = create<AccountState>((set, get) => {
@@ -257,16 +166,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     // Free the WASM EncryptionKey to zero its memory before dropping.
     // Guard against double-free: closeSession() may have already freed it,
     // leaving __wbg_ptr === 0 which would pass a null pointer to WASM.
-    const key = get().encryptionKey;
-    if (key && (key as unknown as { __wbg_ptr: number }).__wbg_ptr !== 0) {
-      key.free();
-    }
+    const current = get();
+    wipeAccountPrivateKey(current.account);
+    const key = current.encryptionKey;
+    if (key) freeEncryptionKey(key);
     return {
       account: null,
       evmAddress: null,
       userProfile: null,
       encryptionKey: null,
       isLoading: false,
+      privateMigrationPhase: null,
     };
   };
 
@@ -301,62 +211,97 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   interface SetupAccountParams {
     username: string;
     mnemonic: string;
-    provisionOpts: {
-      useBiometrics: boolean;
-      password?: string;
-      iCloudSync?: boolean;
-    };
-    extraState?: Partial<AccountState>;
+    password: string;
     skipHistorical?: boolean;
+    prepared?: PreparedPasswordAccount;
+    publishPublicKey?: boolean;
+    deferExternalSideEffects?: boolean;
   }
 
   const setupAccount = async ({
     username,
     mnemonic,
-    provisionOpts,
-    extraState = {},
+    password,
     skipHistorical = false,
+    prepared,
+    publishPublicKey = true,
+    deferExternalSideEffects = false,
   }: SetupAccountParams): Promise<void> => {
     await cleanupSession();
 
-    const { account, userIdBytes, evmAddress } =
-      await deriveAccountFromMnemonic(mnemonic);
-    const userId = encodeUserId(userIdBytes);
-
     const sdk = getSdk();
-    if (sdk.isSecureStorage && provisionOpts.useBiometrics) {
-      // SecureLogin intentionally has one fixed biometric discovery
-      // credential for PD: the login screen must not expose an account or
-      // slot inventory. A second biometric account would overwrite that
-      // singleton and make the earlier biometric slot unreachable.
-      const hasBiometricAccount = await hasExistingCredential(
-        BIOMETRIC_STORAGE_KEY
+    if (!password.trim()) {
+      throw new Error('Password is required');
+    }
+
+    let encryptionKey: EncryptionKey;
+    let security: UserProfile['security'];
+    if (prepared) {
+      const recovered = await auth(
+        { security: prepared.security } as UserProfile,
+        password
       );
-      if (hasBiometricAccount) {
-        throw new Error('Only one biometric secure-storage account is allowed');
+      if (recovered.mnemonic !== mnemonic) {
+        freeEncryptionKey(recovered.encryptionKey);
+        throw new Error('Prepared account identity mismatch');
+      }
+      encryptionKey = recovered.encryptionKey;
+      security = prepared.security;
+    } else {
+      ({ encryptionKey, security } = await createPasswordSecurity(
+        mnemonic,
+        password
+      ));
+    }
+
+    // Passwords must identify exactly one account because the global biometric
+    // credential deliberately stores no profile ID. Secure storage checks this
+    // by probing slots below; classic storage checks existing profiles here.
+    if (!sdk.isSecureStorage) {
+      let profiles: UserProfile[];
+      try {
+        profiles = await sdk.profiles.getAll();
+      } catch (error) {
+        freeEncryptionKey(encryptionKey);
+        throw error;
+      }
+      for (const profile of profiles) {
+        try {
+          const existing = await auth(profile, password);
+          const pointer = (
+            existing.encryptionKey as unknown as { __wbg_ptr?: number }
+          ).__wbg_ptr;
+          if (pointer === undefined || pointer !== 0) {
+            existing.encryptionKey.free();
+          }
+          freeEncryptionKey(encryptionKey);
+          throw new Error('Password already in use by another account');
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === 'Password already in use by another account'
+          ) {
+            throw error;
+          }
+          // Authentication failure means this password belongs to neither
+          // this profile nor its mnemonic backup; continue checking.
+        }
       }
     }
 
-    const { encryptionKey, security } = await provisionAccount(
-      username,
-      mnemonic,
-      userIdBytes,
-      provisionOpts
-    );
+    let allocatedSlot: number | null = null;
 
-    // Secure-storage mode: create the slot with the user's credential
-    // before any DB access. Queries created by openSession need the
-    // backend unlocked. In the password path we use the password
-    // directly; in the biometric path we use the biometric-derived
-    // encryption key bytes (base64'd) - deterministic, so a later
-    // unlock with the same biometric yields the same secret.
+    // Secure-storage mode: create the slot with the user's password before
+    // any DB access. Queries created by openSession need the backend unlocked.
     if (sdk.isSecureStorage) {
-      const secret = provisionOpts.useBiometrics
-        ? encodeToBase64(encryptionKey.to_bytes())
-        : (provisionOpts.password ?? '');
-      if (!secret) {
-        throw new Error('Secure storage requires a password or biometric key');
+      if (
+        sdk.storageState !== 'empty' &&
+        !useAppStore.getState().secureAccountCreationAllowed
+      ) {
+        freeEncryptionKey(encryptionKey);
+        throw new Error('Secure account creation is not currently authorized');
       }
+      const secret = password;
       // Reject duplicate passwords across slots. The KDF takes only
       // (domain, password) — no slot index — so the same password on
       // two slots would derive the same wrap key and unlock both. The
@@ -364,9 +309,21 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // other becomes effectively unreachable. `storageState === 'empty'`
       // means no slot has ever been allocated, so the check is moot.
       if (sdk.storageState === 'locked') {
-        const collides = await sdk.secureStorageUnlock(secret);
+        let collides: boolean;
+        try {
+          collides = await sdk.secureStorageUnlock(secret);
+        } catch (error) {
+          freeEncryptionKey(encryptionKey);
+          throw error;
+        }
         if (collides) {
-          await sdk.secureStorageLock();
+          try {
+            await sdk.secureStorageLock();
+          } finally {
+            // The candidate key is still caller-owned. A rejected re-lock must
+            // not strand it while the existing slot remains retryably unlocked.
+            freeEncryptionKey(encryptionKey);
+          }
           throw new Error('Password already in use by another account');
         }
         // unlock returned false → state stays 'locked', nothing to undo.
@@ -377,50 +334,176 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // previously-allocated slot (that would silently overwrite the
       // earlier account). The in-memory `onboardingAllocatedSlots`
       // set guards against that.
-      const slot = pickFreeSlot();
-      await sdk.secureStorageCreate(slot, secret);
-      onboardingAllocatedSlots.add(slot);
+      let slot: number;
+      try {
+        slot = pickFreeSlot();
+      } catch (error) {
+        freeEncryptionKey(encryptionKey);
+        throw error;
+      }
+      allocatedSlot = slot;
+      try {
+        await sdk.secureStorageCreate(slot, secret);
+        onboardingAllocatedSlots.add(slot);
+      } catch (error) {
+        let cleanupIncomplete =
+          error instanceof SecureStorageRecoveryRequiredError;
+
+        try {
+          if (sdk.storageState === 'unlocked') {
+            await sdk.secureStorageDestroy();
+            cleanupIncomplete = false;
+          }
+        } catch (destroyError) {
+          cleanupIncomplete = true;
+          logger.error(
+            'Failed to destroy interrupted secure account:',
+            destroyError
+          );
+        }
+
+        // A rejected lifecycle RPC may have committed or rolled back before
+        // its response was lost. Probe with the known in-flight password: a
+        // miss proves the tentative slot is already absent.
+        if (cleanupIncomplete && sdk.storageState === 'locked') {
+          try {
+            const unlocked = await sdk.secureStorageUnlock(secret);
+            if (!unlocked) {
+              cleanupIncomplete = false;
+            } else {
+              await sdk.secureStorageDestroy();
+              cleanupIncomplete = false;
+            }
+          } catch (cleanupError) {
+            logger.error(
+              'Failed to verify interrupted secure account cleanup:',
+              cleanupError
+            );
+          }
+        }
+
+        freeEncryptionKey(encryptionKey);
+        if (cleanupIncomplete) {
+          throw new IncompleteOnboardingSlotCleanupError(error);
+        }
+        throw error;
+      }
     }
 
-    await sdk.openSession({
-      mnemonic,
-      encryptionKey,
-      onPersist: createOnPersist(userId),
-      // Don't poll during onboarding — we may open the session just to
-      // write the profile and then close it again to create another
-      // account in a different slot. Polling is re-enabled on the real
-      // login (loadAccount), which defaults to `autoStartPolling: true`.
-      autoStartPolling: false,
-    });
+    let sessionOpened = false;
+    let derivedAccount: Account | undefined;
+    let accountTransferred = false;
+    try {
+      const derived = await deriveAccountFromMnemonic(
+        mnemonic,
+        security.identityDerivationVersion
+      );
+      derivedAccount = derived.account;
+      const userId = encodeUserId(derived.userIdBytes);
 
-    const session = sdk.getEncryptedSession();
-    let profileSession = session;
-    if (sdk.usesSessionBlobNamespace) {
-      await sdk.persistSessionBlob(session);
-      profileSession = new Uint8Array(0);
+      await sdk.openSession({
+        mnemonic,
+        identityDerivationVersion: security.identityDerivationVersion,
+        encryptedSession: prepared?.encryptedSession,
+        encryptionKey,
+        onPersist: createOnPersist(userId),
+        // Don't poll during onboarding — we may open the session just to
+        // write the profile and then close it again to create another
+        // account in a different slot. Polling is re-enabled on the real
+        // login (loadAccount), which defaults to `autoStartPolling: true`.
+        autoStartPolling: false,
+        publishPublicKey,
+      });
+      sessionOpened = true;
+
+      const session = sdk.getEncryptedSession();
+      let profileSession = session;
+      if (sdk.usesSessionBlobNamespace) {
+        await sdk.persistSessionBlob(session);
+        profileSession = new Uint8Array(0);
+      }
+
+      const profile = await sdk.profiles.createOrUpdate(
+        username,
+        userId,
+        security,
+        profileSession
+      );
+      const accountSettings = await sdk.queries.accountSettings.create(userId);
+
+      if (skipHistorical) {
+        await getSdk().announcements.skipHistorical();
+      }
+
+      useAppStore.getState().hydrateAccountSettings(accountSettings);
+      wipeAccountPrivateKey(get().account);
+      set({
+        userProfile: profile,
+        encryptionKey,
+        account: derivedAccount,
+        evmAddress: derived.evmAddress,
+        isLoading: false,
+      });
+      accountTransferred = true;
+
+      if (!deferExternalSideEffects) {
+        fetchMnsDomainsIfEnabled(profile, get().provider);
+      }
+    } catch (error) {
+      let sessionClosed = !sdk.isSessionOpen;
+      let allocatedSlotRemoved = allocatedSlot === null;
+
+      // Account provisioning is a commit point for staged onboarding. If any
+      // later write fails, destroy the newly allocated secure slot so a retry
+      // cannot leave an unreachable partial account or overwrite it after the
+      // in-memory slot reservation is cleared.
+      if (sdk.isSessionOpen) {
+        try {
+          await sdk.closeSession();
+          sessionClosed = true;
+        } catch (closeError) {
+          logger.error('Failed to close partial account session:', closeError);
+        }
+      } else if (!sessionOpened) {
+        freeEncryptionKey(encryptionKey);
+      }
+
+      if (allocatedSlot !== null && sessionClosed) {
+        try {
+          if (sdk.storageState === 'locked') {
+            const unlocked = await sdk.secureStorageUnlock(password);
+            if (!unlocked) {
+              throw new Error('Failed to reopen partial onboarding account');
+            }
+          }
+          if (sdk.storageState !== 'unlocked') {
+            throw new Error('Partial onboarding account is not unlocked');
+          }
+          await sdk.secureStorageDestroy();
+          onboardingAllocatedSlots.delete(allocatedSlot);
+          allocatedSlotRemoved = true;
+        } catch (destroyError) {
+          logger.error(
+            'Failed to destroy partial secure account:',
+            destroyError
+          );
+          try {
+            if (sdk.storageState === 'unlocked') {
+              await sdk.secureStorageLock();
+            }
+          } catch (lockError) {
+            logger.error('Failed to lock partial secure account:', lockError);
+          }
+        }
+      }
+
+      if (!allocatedSlotRemoved) {
+        throw new IncompleteOnboardingSlotCleanupError(error);
+      }
+      throw error;
+    } finally {
+      if (!accountTransferred) wipeAccountPrivateKey(derivedAccount);
     }
-
-    const profile = await sdk.profiles.createOrUpdate(
-      username,
-      encodeUserId(userIdBytes),
-      security,
-      profileSession
-    );
-
-    if (skipHistorical) {
-      await getSdk().announcements.skipHistorical();
-    }
-
-    set({
-      userProfile: profile,
-      encryptionKey,
-      account,
-      evmAddress,
-      isLoading: false,
-      ...extraState,
-    });
-
-    fetchMnsDomainsIfEnabled(profile, get().provider);
   };
 
   return {
@@ -428,9 +511,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     userProfile: null,
     encryptionKey: null,
     isLoading: true,
+    privateMigrationPhase: null,
     lockedByUser: false,
-    webauthnSupported: isWebAuthnSupported(),
-    platformAuthenticatorAvailable: false,
     account: null,
     evmAddress: null,
     provider: null,
@@ -443,7 +525,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await setupAccount({
           username,
           mnemonic,
-          provisionOpts: { useBiometrics: false, password },
+          password,
           skipHistorical: true,
         });
       } catch (error) {
@@ -453,8 +535,70 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
 
+    initializePreparedAccountsAtomically: async accounts => {
+      const sdk = getSdk();
+      if (!sdk.isSecureStorage || accounts.length === 0) {
+        throw new Error('Atomic onboarding requires secure account data');
+      }
+
+      let candidateActive = false;
+      try {
+        set({ isLoading: true });
+        onboardingAllocatedSlots.clear();
+        await sdk.secureStorageBeginOnboardingCandidate();
+        candidateActive = true;
+
+        for (const account of accounts) {
+          const mnemonic = new TextDecoder().decode(
+            account.prepared.mnemonicBytes
+          );
+          await setupAccount({
+            username: account.username,
+            mnemonic,
+            password: account.password,
+            skipHistorical: true,
+            prepared: account.prepared,
+            publishPublicKey: false,
+            deferExternalSideEffects: true,
+          });
+          await cleanupSession();
+        }
+
+        await sdk.secureStorageCommitOnboardingCandidate();
+        candidateActive = false;
+        finalizeCommittedAccountGenerationAuthority();
+        onboardingAllocatedSlots.clear();
+        useAppStore.getState().resetAccountSettings();
+        set(clearAccountState());
+      } catch (error) {
+        try {
+          await cleanupSession();
+        } catch (cleanupError) {
+          logger.error(
+            'Failed to close onboarding candidate session:',
+            cleanupError
+          );
+        }
+        if (candidateActive) {
+          try {
+            await sdk.secureStorageAbortOnboardingCandidate();
+          } catch (abortError) {
+            logger.error('Failed to discard onboarding candidate:', abortError);
+          }
+        }
+        onboardingAllocatedSlots.clear();
+        useAppStore.getState().resetAccountSettings();
+        set({ ...clearAccountState(), isLoading: false });
+        throw error;
+      }
+    },
+
     loadAccount: async (method: LoginMethod) => {
       let unlockedThisCall = false;
+      let callerOwnedEncryptionKey: EncryptionKey | null = null;
+      let derivedAccount: Account | null = null;
+      let accountTransferred = false;
+      let sessionOpenedThisCall = false;
       try {
         set({ isLoading: true });
 
@@ -466,99 +610,147 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // session before re-opening.
         await cleanupSession();
 
-        // Secure-storage mode: unlock the slot FIRST. Profile queries
-        // fail (DB locked) until we provide the secret, so we can't
-        // fetch the profile before this. Password path uses the
-        // user-typed password; encryptionKey path uses the biometric-
-        // derived key bytes, which were computed outside of the DB
-        // (WebAuthn PRF / Capacitor Keychain) so no profile lookup is
-        // needed to get them. The legacy 'biometric' branch is used
-        // only by ClassicLogin (non-secure-storage), which can still
-        // read the profile without unlocking.
+        // Secure-storage mode: unlock the slot first. Profile queries fail
+        // while the database is locked, so manual and biometric login both
+        // supply a password and let native slot probing discover the match.
         const sdk = getSdk();
         if (sdk.storageState === 'locked') {
-          const secret =
-            method.type === 'password'
-              ? method.password
-              : method.type === 'encryptionKey'
-                ? encodeToBase64(method.encryptionKey.to_bytes())
-                : null;
-          if (!secret) {
-            throw new Error(
-              'Secure storage requires password or encryption-key login'
-            );
-          }
-          const ok = await sdk.secureStorageUnlock(secret);
+          const ok = await sdk.secureStorageUnlock(method.password);
           if (!ok) {
             throw new Error('Secure storage unlock failed');
           }
           unlockedThisCall = true;
         }
 
-        const userId =
-          method.type !== 'encryptionKey' ? method.userId : undefined;
-        let profile: UserProfile | null;
-        if (userId) {
-          profile = await getSdk().profiles.get(userId);
-        } else {
+        const migrationEpoch = sdk.isSecureStorage
+          ? sdk.accountGenerationEpoch
+          : null;
+        if (
+          sdk.isSecureStorage &&
+          sdk.accountGenerationState === 'committed' &&
+          !migrationEpoch
+        ) {
+          throw new Error('Account generation epoch is unavailable');
+        }
+        let migrationState = migrationEpoch
+          ? await sdk.queries.privateMigration.begin(migrationEpoch)
+          : null;
+        const migrationActive =
+          migrationState !== null && migrationState.completedPhase < 5;
+        const messagingResetAuthorizedAtStart =
+          migrationState?.completedPhase === 3;
+        if (migrationState && migrationState.completedPhase < 5) {
+          set({
+            privateMigrationPhase: (migrationState.completedPhase +
+              1) as PrivateMigrationPhase,
+          });
+        }
+        const completeMigrationPhase = async (
+          phase: PrivateMigrationPhase
+        ): Promise<void> => {
+          if (!migrationEpoch || !migrationState) return;
+          if (migrationState.completedPhase < phase) {
+            migrationState = await sdk.queries.privateMigration.completePhase(
+              migrationEpoch,
+              phase
+            );
+          }
+          if (migrationState.completedPhase === phase) {
+            set({
+              privateMigrationPhase:
+                phase === 5 ? null : ((phase + 1) as PrivateMigrationPhase),
+            });
+          }
+        };
+
+        let profile: UserProfile | null = null;
+        let authResult: Awaited<ReturnType<typeof auth>> | null = null;
+
+        if (method.userId) {
+          profile = await sdk.profiles.get(method.userId);
+        } else if (sdk.isSecureStorage) {
           profile = await getActiveOrFirstProfile();
+        } else {
+          // A global biometric credential contains only a password, never an
+          // account ID. Probe classic profiles in memory and retain only the
+          // matching result so classic and secure-storage login share the same
+          // account-association privacy model.
+          const profiles = await sdk.profiles.getAll();
+          for (const candidate of profiles) {
+            try {
+              authResult = await auth(candidate, method.password);
+              profile = candidate;
+              break;
+            } catch {
+              // Wrong profile for this password; keep probing.
+            }
+          }
         }
 
         if (!profile) {
-          throw new Error('No user profile found');
+          throw new Error('No user profile found for this password');
+        }
+        authResult ??= await auth(profile, method.password);
+        const { mnemonic, encryptionKey } = authResult;
+        callerOwnedEncryptionKey = encryptionKey;
+
+        const derived = await deriveAccountFromMnemonic(
+          mnemonic,
+          profile.security.identityDerivationVersion
+        );
+        derivedAccount = derived.account;
+        if (encodeUserId(derived.userIdBytes) !== profile.userId) {
+          throw new Error('Authenticated profile identity mismatch');
+        }
+        if (migrationActive) await completeMigrationPhase(1);
+
+        // Authentication succeeds before the retained versionless decoder is
+        // rewritten by the profile save below.
+        if (migrationActive) await completeMigrationPhase(2);
+
+        const appState = useAppStore.getState();
+        const legacyAccountSettings = sdk.isSecureStorage
+          ? null
+          : appState.legacyAccountSettingsMigration;
+        const accountSettings = await sdk.queries.accountSettings.getOrCreate(
+          profile.userId,
+          legacyAccountSettings ?? undefined
+        );
+        if (legacyAccountSettings) {
+          appState.clearLegacyAccountSettingsMigration();
+        }
+        if (migrationActive) await completeMigrationPhase(3);
+
+        const sessionMigrationPending = migrationState?.completedPhase === 3;
+        if (
+          method.resetMessagingSessions &&
+          (!sessionMigrationPending || !messagingResetAuthorizedAtStart)
+        ) {
+          throw new Error(
+            'Messaging session reset is not currently authorized'
+          );
         }
 
-        let mnemonic: string;
-        let encryptionKey: EncryptionKey;
-
-        switch (method.type) {
-          case 'password': {
-            const result = await auth(profile, method.password);
-            mnemonic = result.mnemonic;
-            encryptionKey = result.encryptionKey;
-            break;
-          }
-          case 'biometric': {
-            const result = await auth(profile);
-            mnemonic = result.mnemonic;
-            encryptionKey = result.encryptionKey;
-            break;
-          }
-          case 'encryptionKey': {
-            const result = await auth(profile, undefined, method.encryptionKey);
-            mnemonic = result.mnemonic;
-            encryptionKey = result.encryptionKey;
-            break;
-          }
-        }
-
-        const { account, evmAddress } =
-          await deriveAccountFromMnemonic(mnemonic);
-
-        // Prefer the secure-storage namespace blob when available; fall
-        // back to the SQL profile column on the wa-sqlite backend. When
-        // both are empty (fresh allocate pre-first-persist) leave
-        // `encryptedSession` undefined so `openSession` generates a new
-        // session instead of trying to decrypt zero bytes.
-        //
-        // Invariant (PD): when `usesSessionBlobNamespace` is true, the
-        // SQL `profile.session` fallback is read-only legacy data left
-        // over from the wa-sqlite era; writers in `createOnPersist`
-        // already gate on this flag and never persist into the SQL
-        // column. A future writer that forgets the gate would inject
-        // stale-or-stolen bytes into the namespace fallback path here.
-        // If you change `createOnPersist` to write to SQL again, you
-        // must also drop this fallback or it can resurrect the wrong
-        // session blob (regression worth a debug assertion).
         let encryptedSession: Uint8Array | undefined;
+        let usedLegacySessionFallback = false;
         if (sdk.usesSessionBlobNamespace) {
-          const ns = await sdk.readSessionBlob();
-          encryptedSession =
-            ns && ns.length > 0
-              ? ns
-              : profile.session && profile.session.length > 0
-                ? profile.session
-                : undefined;
+          if (method.resetMessagingSessions) {
+            await sdk.queries.messagingSessionRecovery.prepareReset();
+          } else {
+            const ns = await sdk.readSessionBlob();
+            if (!ns || ns.length === 0) {
+              encryptedSession =
+                profile.session && profile.session.length > 0
+                  ? profile.session
+                  : undefined;
+              usedLegacySessionFallback = encryptedSession !== undefined;
+              if (!encryptedSession && sessionMigrationPending) {
+                throw new MessagingSessionRecoveryRequiredError('missing');
+              }
+            } else {
+              encryptedSession = ns;
+            }
+          }
         } else {
           encryptedSession =
             profile.session && profile.session.length > 0
@@ -566,32 +758,104 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
               : undefined;
         }
 
-        await sdk.openSession({
-          mnemonic,
-          encryptedSession,
-          encryptionKey,
-          onPersist: createOnPersist(profile.userId),
-        });
+        const persistOpenedSession = createOnPersist(profile.userId);
+        let sessionPersistenceEnabled = !method.resetMessagingSessions;
+        try {
+          await sdk.openSession({
+            mnemonic,
+            identityDerivationVersion:
+              profile.security.identityDerivationVersion,
+            encryptedSession,
+            encryptionKey,
+            onPersist: async (blob, key) => {
+              if (sessionPersistenceEnabled) {
+                await persistOpenedSession(blob, key);
+              }
+            },
+            // Start only after the migration journal and lastSeen save commit.
+            publishPublicKey: false,
+            autoStartPolling: migrationActive ? false : undefined,
+          });
+        } catch (error) {
+          if (
+            sessionMigrationPending &&
+            !method.resetMessagingSessions &&
+            error instanceof UnreadableMessagingSessionError
+          ) {
+            throw new MessagingSessionRecoveryRequiredError('unreadable');
+          }
+          throw error;
+        }
+        sessionOpenedThisCall = true;
+
+        if (method.resetMessagingSessions) {
+          const discussions = await sdk.queries.discussions.getByOwner(
+            profile.userId
+          );
+          for (const discussion of discussions) {
+            if (
+              !discussion.weAccepted ||
+              discussion.contactUserId === SELF_CONTACT_ID
+            ) {
+              continue;
+            }
+            const reopened = await sdk.discussions.createSessionForContact(
+              discussion.contactUserId,
+              new Uint8Array(0),
+              { resetQueue: false, triggerRefresh: false }
+            );
+            if (!reopened.success) throw reopened.error;
+          }
+          await sdk.persistSessionBlob(sdk.getEncryptedSession());
+          sessionPersistenceEnabled = true;
+        } else if (migrationActive && usedLegacySessionFallback) {
+          // Promote the readable legacy SQL fallback before clearing it. A
+          // crash after this atomic namespace write simply resumes phase 4.
+          await sdk.persistSessionBlob(sdk.getEncryptedSession());
+        }
+
+        if (migrationActive) await completeMigrationPhase(4);
+        callerOwnedEncryptionKey = null;
 
         const lastSeen = new Date();
         const updatedProfile = {
           ...profile,
+          session: migrationState ? new Uint8Array(0) : profile.session,
           lastSeen,
         };
         await getSdk().profiles.save(updatedProfile);
+        if (migrationActive) await completeMigrationPhase(5);
+        sdk.startPublicKeyPublication();
+        if (migrationActive) sdk.polling.start();
 
         useAppStore.getState().setIsInitialized(true);
+        wipeAccountPrivateKey(get().account);
+        useAppStore.getState().hydrateAccountSettings(accountSettings);
         set({
           userProfile: updatedProfile,
-          account,
-          evmAddress,
+          account: derivedAccount,
+          evmAddress: derived.evmAddress,
           encryptionKey,
           isLoading: false,
           lockedByUser: false,
         });
+        accountTransferred = true;
 
         fetchMnsDomainsIfEnabled(updatedProfile, get().provider);
       } catch (error) {
+        const sdk = getSdk();
+        if (sessionOpenedThisCall && sdk.isSessionOpen) {
+          try {
+            await sdk.closeSession();
+          } catch (closeError) {
+            logger.error('Failed to close rejected login session:', closeError);
+          }
+        } else if (callerOwnedEncryptionKey) {
+          freeEncryptionKey(callerOwnedEncryptionKey);
+          callerOwnedEncryptionKey = null;
+        }
+        if (!accountTransferred) wipeAccountPrivateKey(derivedAccount);
+
         // If we unlocked the slot during this call but failed before
         // openSession, re-lock so the next attempt re-probes from
         // 'locked'. Without this, an attempt that lands on a deleted
@@ -600,7 +864,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // login skips the unlock step (state-machine guard) and keeps
         // reading the wrong slot until the app is restarted.
         if (unlockedThisCall) {
-          const sdk = getSdk();
           if (sdk.isSecureStorage && sdk.storageState === 'unlocked') {
             try {
               if (sdk.isSessionOpen) {
@@ -616,96 +879,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         }
         logger.error('Error loading account:', error);
-        set({ isLoading: false });
+        set({ isLoading: false, privateMigrationPhase: null });
         throw error;
       }
     },
 
     resetAccount: async () => {
+      set({ isLoading: true });
       try {
-        set({ isLoading: true });
-
-        const sdk = getSdk();
-        let accountUserId: string | undefined;
-        try {
-          accountUserId = sdk.userId;
-        } catch {
-          // Session may already be closed
-        }
-
-        // Close the SDK session first (Olm cleanup, drain background
-        // persists). secureStorageDestroy below has the same
-        // "no SESSION_OPEN" precondition as secureStorageLock.
-        if (sdk.isSessionOpen) {
-          await sdk.closeSession();
-        }
-
-        useDiscussionStore.getState().cleanup();
-        useMessageStore.getState().cleanup();
-        useSelfMessageStore.getState().clearMessages();
-
-        if (sdk.isSecureStorage) {
-          // Atomic destroy: rotates the slot's keypair to a dummy and
-          // overwrites every block of [SQL_NAMESPACE, SESSION_BLOB_NAMESPACE]
-          // with cover blocks under the new PK, in a single backing-store
-          // transaction. After this resolves, the old secret no longer
-          // unlocks the slot — fixing the trap where biometric login
-          // would land on the deleted slot's still-valid keypair and
-          // leave the SDK in 'unlocked' over an empty DB.
-          //
-          // Block-count parity is preserved (cover repad), so snapshots
-          // before/after look like a routine cover-traffic burst.
-          // Process killed mid-destroy: backing-store rolls back, slot
-          // intact, user retries.
-          try {
-            await sdk.secureStorageDestroy();
-          } catch (e) {
-            logger.error('secureStorageDestroy failed:', e);
-            // Best-effort lock so we don't leave the storage in
-            // 'unlocked' after a partial wipe.
-            if (sdk.storageState === 'unlocked') {
-              try {
-                await sdk.secureStorageLock();
-              } catch (lockErr) {
-                logger.error('Recovery lock also failed:', lockErr);
-              }
-            }
-            throw e;
-          }
-          // Drop the SecureLogin-discovery credentials. Without this,
-          // the biometric button reappears for the deleted account but
-          // the slot's wrap key has been rotated → unlock fails and the
-          // user dead-ends on the password screen with no password.
-          await clearLoginBiometricCredentials();
-        } else {
-          // wa-sqlite (non-secure-storage) path: shared SQL DB, no
-          // per-slot ciphertext to wipe. Clear rows the old way.
-          let nbAccounts = 0;
-          try {
-            if (accountUserId) {
-              await sdk.clearAccountData(accountUserId);
-            } else {
-              await sdk.clearAllTables();
-            }
-            await sdk.clearSessionBlob();
-            nbAccounts = await sdk.profiles.getCount();
-          } catch (e) {
-            logger.error('Error clearing account data:', e);
-          }
-          useAppStore.getState().setIsInitialized(nbAccounts > 0);
-          set(clearAccountState());
-          return;
-        }
-
-        // Secure-storage post-destroy routing: storageState is 'locked'
-        // and the SDK can't tell from JS whether other slots hold real
-        // accounts (PD by design). Default to the login screen — if no
-        // slot unlocks, the user can fall through to onboarding via
-        // the import button.
-        set(clearAccountState());
-        useAppStore.getState().setIsInitialized(true);
+        await resetAllAccountStorage();
       } catch (error) {
-        logger.error('Error resetting account:', error);
+        logger.error('Error resetting all accounts:', error);
         set({ isLoading: false });
         throw error;
       }
@@ -720,6 +904,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
         onboardingAllocatedSlots.clear();
+        useAppStore.getState().resetAccountSettings();
 
         set({
           ...clearAccountState(),
@@ -741,9 +926,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // skips the side-effects normally tied to login (lastSeen update).
       // Patch those onto the existing session — we can't re-run the full
       // `loadAccount` path because the secure-storage slot was wrapped
-      // with the user's auth credential (password or biometric-derived
-      // bytes), and `finalizeOnboarding` doesn't have access to it after
-      // setupAccount drops it from scope.
+      // with the user's password, and `finalizeOnboarding` doesn't have
+      // access to it after setupAccount drops it from scope.
       //
       // Multi-account flows that already called `logout` (handleFinalize)
       // hit the no-op branch: `userProfile` is null and the user is on
@@ -761,42 +945,29 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       set({ userProfile: updated });
     },
 
-    initializeAccountWithBiometrics: async (
-      username: string,
-      iCloudSync = false
-    ) => {
-      try {
-        set({ isLoading: true });
+    configureBiometricLogin: async (password: string, syncToICloud = false) => {
+      const profile = get().userProfile;
+      if (!profile || !getSdk().isSessionOpen) {
+        throw new Error('No authenticated user');
+      }
 
-        const availability = await checkBiometricAvailability();
-        if (!availability.available) {
-          throw new Error(
-            'Biometric authentication is not available on this device'
-          );
-        }
+      // Verify against the active profile before replacing the singleton. This
+      // action intentionally does not inspect which account the existing
+      // credential opens, so Settings cannot become an association oracle.
+      const verified = await auth(profile, password);
+      freeEncryptionKey(verified.encryptionKey);
 
-        const mnemonic = generateMnemonic(256);
-        await setupAccount({
-          username,
-          mnemonic,
-          provisionOpts: { useBiometrics: true, iCloudSync },
-          skipHistorical: true,
-          extraState: {
-            platformAuthenticatorAvailable: availability.available,
-          },
-        });
-      } catch (error) {
-        logger.error('Error creating user profile with biometrics:', error);
-        set({ isLoading: false });
-        throw error;
+      const result = await storeBiometricPassword(password, syncToICloud);
+      if (!result.success) {
+        throw new Error(result.error || 'Biometric setup failed');
       }
     },
 
     showBackup: async (
-      password?: string
+      password: string
     ): Promise<{
       mnemonic: string;
-      account: Account;
+      privateKey: string;
     }> => {
       try {
         const state = get();
@@ -805,10 +976,22 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           throw new Error('No authenticated user');
         }
 
-        const { mnemonic } = await auth(profile, password);
-        const { account } = await deriveAccountFromMnemonic(mnemonic);
-
-        return { mnemonic, account };
+        const authenticated = await auth(profile, password);
+        let backupAccount: Account | undefined;
+        try {
+          const derived = await deriveAccountFromMnemonic(
+            authenticated.mnemonic,
+            profile.security.identityDerivationVersion
+          );
+          backupAccount = derived.account;
+          return {
+            mnemonic: authenticated.mnemonic,
+            privateKey: backupAccount.privateKey.toString(),
+          };
+        } finally {
+          wipeAccountPrivateKey(backupAccount);
+          freeEncryptionKey(authenticated.encryptionKey);
+        }
       } catch (error) {
         logger.error('Error showing mnemonic backup:', error);
         throw error;
@@ -968,22 +1151,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
   };
-});
-
-useAccountStoreBase.subscribe(async (state, prevState) => {
-  const current = state.userProfile;
-  const previous = prevState.userProfile;
-
-  const sdk = getSdk();
-  if (!current || !sdk.isSessionOpen) return;
-  if (current === previous) return;
-  if (previous && current.userId === previous.userId) return;
-
-  try {
-    await sdk.auth.publishPublicKey(sdk.publicKeys, sdk.userId, sdk.queries);
-  } catch (error) {
-    logger.error('Error publishing public key:', error);
-  }
 });
 
 // Subscribe to account changes to initialize provider

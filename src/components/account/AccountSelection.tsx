@@ -1,7 +1,7 @@
 import { logger } from '../../utils/logger.ts';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, Key, Check as CheckIcon, User, Plus } from 'react-feather';
+import { Key, Check as CheckIcon, User, Plus } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import { UserProfile } from '@massalabs/gossip-sdk';
 import { formatDate } from '../../utils/timeUtils';
@@ -55,31 +55,11 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
     onAccountSelected(account);
   };
 
-  const formatAccountType = (account: UserProfile) => {
-    const authMethod = account.security?.authMethod;
-    if (authMethod === 'capacitor' || authMethod === 'webauthn') {
-      return t('select.biometric');
-    } else {
-      return t('select.password');
-    }
-  };
-
-  const getAccountIcon = (account: UserProfile) => {
-    const authMethod = account.security?.authMethod;
-    if (authMethod === 'capacitor' || authMethod === 'webauthn') {
-      return (
-        <div className="w-10 h-10 bg-accent-soft rounded-full flex items-center justify-center shrink-0">
-          <Shield className="w-5 h-5 text-accent-soft-foreground" />
-        </div>
-      );
-    } else {
-      return (
-        <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center shrink-0">
-          <Key className="w-5 h-5 text-muted-foreground" />
-        </div>
-      );
-    }
-  };
+  const getAccountIcon = () => (
+    <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center shrink-0">
+      <Key className="w-5 h-5 text-muted-foreground" />
+    </div>
+  );
 
   if (isLoading) {
     return (
@@ -157,13 +137,13 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
                 onClick={() => handleAccountSelect(account)}
               >
                 <div className="flex items-center gap-3">
-                  {getAccountIcon(account)}
+                  {getAccountIcon()}
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-foreground truncate">
                       {account.username}
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                      {formatAccountType(account)} • {t('select.created')}{' '}
+                      {t('select.password')} • {t('select.created')}{' '}
                       {account.createdAt
                         ? formatDate(new Date(account.createdAt))
                         : t('select.unknown')}

@@ -48,8 +48,7 @@ pub struct PqSecretKey(pq_rerand::keygen::SecretKey);
 
 impl Zeroize for PqSecretKey {
     fn zeroize(&mut self) {
-        self.0.s_t.zeroize();
-        self.0.s_q2.zeroize();
+        self.0.zeroize();
     }
 }
 
@@ -93,30 +92,55 @@ pub fn pq_encrypt(pk: &PqPublicKey, message: &[u8; PQ_MSG_SIZE]) -> Vec<u8> {
 
 /// Decrypt a ciphertext block back to the original message.
 ///
-/// Ring-LWE always decrypts — it is the AEAD layer above that detects
-/// tampering. The returned bytes may be garbage if the ciphertext was
-/// modified.
-#[must_use]
-pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Zeroizing<Vec<u8>> {
+/// Rejects ciphertexts whose serialized coefficients are noncanonical.
+/// Canonically encoded tampering may still decrypt to arbitrary message
+/// bytes; the AEAD layer above authenticates those bytes. Both failures
+/// surface as [`SecureStorageError::CorruptedBlock`].
+pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Result<Zeroizing<Vec<u8>>> {
     let ctx = &NTT_CTX;
-    let ct = pq_rerand::serialize::deserialize_slot(ciphertext);
+    let ct = pq_rerand::serialize::deserialize_slot(ciphertext)
+        .ok_or(SecureStorageError::CorruptedBlock)?;
     let coeffs = Zeroizing::new(pq_rerand::decrypt::decrypt_slot(ctx, &sk.0, &ct));
-    Zeroizing::new(pq_rerand::encoding::decode(&coeffs))
+    Ok(Zeroizing::new(pq_rerand::encoding::decode(&coeffs)))
 }
 
 /// Re-randomize a ciphertext block using only the public key.
 ///
 /// The decrypted plaintext is unchanged but the ciphertext bytes differ.
+pub fn validate_pq_ciphertext(ciphertext: &[u8]) -> Result<()> {
+    pq_rerand::serialize::deserialize_slot(ciphertext)
+        .map(|_| ())
+        .ok_or(SecureStorageError::CorruptedBlock)
+}
+
+/// Verify that a parsed public and secret key form a usable pair without
+/// relying on unauthenticated clear public-key bytes alone.
 #[must_use]
-pub fn pq_rerand(pk: &PqPublicKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Vec<u8> {
+pub fn keypair_matches(pk: &PqPublicKey, sk: &PqSecretKey) -> bool {
+    let challenge = Zeroizing::new([0xA5_u8; PQ_MSG_SIZE]);
+    let ciphertext = pq_encrypt(pk, &challenge);
+    let Ok(ciphertext) = <&[u8; PQ_CT_SIZE]>::try_from(ciphertext.as_slice()) else {
+        return false;
+    };
+    pq_decrypt(sk, ciphertext).is_ok_and(|plaintext| plaintext.as_slice() == challenge.as_slice())
+}
+
+pub fn pq_rerand(pk: &PqPublicKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Result<Vec<u8>> {
     let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;
-    let ct = pq_rerand::serialize::deserialize_slot(ciphertext);
+    let ct = pq_rerand::serialize::deserialize_slot(ciphertext)
+        .ok_or(SecureStorageError::CorruptedBlock)?;
     let ct_new = pq_rerand::rerandomize::rerandomize_slot(&mut rng, ctx, &pk.0, &ct);
-    pq_rerand::serialize::serialize_slot(&ct_new)
+    Ok(pq_rerand::serialize::serialize_slot(&ct_new))
 }
 
 impl PqPublicKey {
+    // Persistence compatibility boundary: pq-rerand serializes public keys in
+    // its internal NTT representation. Revision 9a5a48b is the baseline for
+    // persisted storage; an earlier NTT layout cannot be used directly with it.
+    // Before bumping pq-rerand again, verify a persisted 9a5a48b key fixture can
+    // still encrypt and rerandomize, or add an explicitly versioned migration.
+
     /// Serialized byte size of a public key.
     #[must_use]
     pub const fn byte_size() -> usize {
@@ -174,7 +198,7 @@ mod tests {
         let ct = pq_encrypt(&pk, &msg);
         assert_eq!(ct.len(), PQ_CT_SIZE);
         let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-        let decrypted = pq_decrypt(&sk, ct_arr);
+        let decrypted = pq_decrypt(&sk, ct_arr).unwrap();
         assert_eq!(*decrypted, msg);
     }
 
@@ -186,9 +210,9 @@ mod tests {
         msg[PQ_MSG_SIZE - 1] = 0xFF;
         let ct = pq_encrypt(&pk, &msg);
         let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-        let ct2 = pq_rerand(&pk, ct_arr);
+        let ct2 = pq_rerand(&pk, ct_arr).unwrap();
         let ct2_arr: &[u8; PQ_CT_SIZE] = ct2.as_slice().try_into().unwrap();
-        let decrypted = pq_decrypt(&sk, ct2_arr);
+        let decrypted = pq_decrypt(&sk, ct2_arr).unwrap();
         assert_eq!(*decrypted, msg);
     }
 
@@ -200,10 +224,10 @@ mod tests {
         let mut ct = pq_encrypt(&pk, &msg);
         for _ in 0..10 {
             let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-            ct = pq_rerand(&pk, ct_arr);
+            ct = pq_rerand(&pk, ct_arr).unwrap();
         }
         let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-        let decrypted = pq_decrypt(&sk, ct_arr);
+        let decrypted = pq_decrypt(&sk, ct_arr).unwrap();
         assert_eq!(*decrypted, msg);
     }
 
@@ -213,8 +237,17 @@ mod tests {
         let msg = [0u8; PQ_MSG_SIZE];
         let ct = pq_encrypt(&pk, &msg);
         let ct_arr: &[u8; PQ_CT_SIZE] = ct.as_slice().try_into().unwrap();
-        let ct2 = pq_rerand(&pk, ct_arr);
+        let ct2 = pq_rerand(&pk, ct_arr).unwrap();
         assert_ne!(ct, ct2);
+    }
+
+    #[test]
+    fn malformed_ciphertext_is_rejected() {
+        let (pk, sk) = pq_keygen();
+        let ciphertext = [u8::MAX; PQ_CT_SIZE];
+
+        assert!(pq_decrypt(&sk, &ciphertext).is_err());
+        assert!(pq_rerand(&pk, &ciphertext).is_err());
     }
 
     #[test]
@@ -231,6 +264,17 @@ mod tests {
         let bytes = sk.to_bytes();
         let sk2 = PqSecretKey::from_bytes(&bytes).unwrap();
         assert_eq!(*sk.to_bytes(), *sk2.to_bytes());
+    }
+
+    #[test]
+    fn explicit_sk_zeroize_clears_all_representations() {
+        let (_pk, mut sk) = pq_keygen();
+        sk.zeroize();
+
+        assert!(sk.0.s_t.iter().all(|&value| value == 0));
+        assert!(sk.0.s_q2.iter().all(|&value| value == 0));
+        assert!(sk.0.s_ntt_t.iter().all(|&value| value == 0));
+        assert!(sk.0.s_ntt_q2.iter().all(|&value| value == 0));
     }
 
     #[test]

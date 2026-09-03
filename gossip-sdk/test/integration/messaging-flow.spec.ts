@@ -20,7 +20,9 @@ import {
   MessageDirection,
   MessageType,
   Contact,
+  type UserProfile,
 } from '../../src/db';
+import { userProfileToRow } from '../../src/db/queries';
 import { MockMessageProtocol } from '../mocks';
 import {
   setupSession,
@@ -2348,20 +2350,24 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
   let discussionService: DiscussionService;
   let announcementService: AnnouncementService;
 
-  function createUserProfile(userId: string) {
+  function createUserProfile(userId: string): UserProfile {
     return {
       userId,
       username: 'test',
       security: {
-        encKeySalt: new Uint8Array(),
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
+        encKeySalt: new Uint8Array(16),
         authMethod: 'password' as const,
         mnemonicBackup: {
-          encryptedMnemonic: new Uint8Array(),
+          encryptedMnemonic: new Uint8Array(32),
           createdAt: new Date(),
           backedUp: false,
         },
       },
-      session: new Uint8Array(),
+      session: new Uint8Array([0]),
       status: 'online' as const,
       lastSeen: new Date(),
       createdAt: new Date(),
@@ -2391,16 +2397,7 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     });
 
     const profile = createUserProfile(alice.session.userIdEncoded);
-    await q.userProfiles.insert({
-      userId: profile.userId,
-      username: profile.username,
-      security: JSON.stringify(profile.security),
-      session: new Uint8Array([0]),
-      status: profile.status,
-      lastSeen: profile.lastSeen,
-      createdAt: profile.createdAt,
-      updatedAt: profile.updatedAt,
-    });
+    await q.userProfiles.insert(userProfileToRow(profile));
     announcementService = new AnnouncementService(
       mockProtocol,
       alice.session,
