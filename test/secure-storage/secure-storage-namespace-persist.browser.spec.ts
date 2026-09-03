@@ -60,6 +60,7 @@ describe('session blob namespace persist', () => {
 
     {
       const conn = await DatabaseConnection.create(config(domain));
+      await conn.secureStorageBeginOnboardingCandidate();
       await conn.secureStorageCreate(0, password);
       await conn.secureStorageWriteNamespaceData(
         SESSION_BLOB_NAMESPACE,
@@ -67,6 +68,8 @@ describe('session blob namespace persist', () => {
         blob
       );
       await conn.secureStorageFlush();
+      await conn.secureStorageLock();
+      await conn.secureStorageCommitOnboardingCandidate();
       await conn.close();
     }
 
@@ -101,6 +104,7 @@ describe('session blob namespace persist', () => {
     const expectedBytes = Array.from(blob);
 
     const conn = await DatabaseConnection.create(config(domain));
+    await conn.secureStorageBeginOnboardingCandidate();
     await conn.secureStorageCreate(0, password);
 
     // Write via SQL VFS (namespace 0).
@@ -139,6 +143,8 @@ describe('session blob namespace persist', () => {
     );
     expect(Array.from(read)).toEqual(expectedBytes);
 
+    await conn.secureStorageLock();
+    await conn.secureStorageCommitOnboardingCandidate();
     await conn.close();
   }, 180_000);
 });

@@ -4,6 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useAccountStore } from '../../stores/accountStore';
 import { ROUTES } from '../../constants/routes';
+import { MessagingSessionRecoveryRequiredError } from '@massalabs/gossip-sdk';
+import {
+  isUnsupportedStorageVersionError,
+  requestUnsupportedStorageReset,
+} from '../../services/unsupportedStorageReset';
 
 interface UseLoginFormOptions {
   onAccountSelected: () => void;
@@ -23,6 +28,8 @@ export function useLoginForm({
 
   const [isLoading, setIsLoading] = useState(false);
   const [password, setPassword] = useState('');
+  const [messagingRecoveryRequired, setMessagingRecoveryRequired] =
+    useState(false);
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
   const handlePasswordAuth = useCallback(
@@ -42,6 +49,7 @@ export function useLoginForm({
 
         await loadAccount({ type: 'password', password, userId });
         setPassword('');
+        setMessagingRecoveryRequired(false);
 
         const state = useAccountStore.getState();
         if (state.userProfile) {
@@ -50,7 +58,18 @@ export function useLoginForm({
           throw new Error('Failed to load account');
         }
       } catch (error) {
+        if (isUnsupportedStorageVersionError(error)) {
+          setPassword('');
+          requestUnsupportedStorageReset();
+          return;
+        }
         logger.error('Password authentication failed:', error);
+        if (error instanceof MessagingSessionRecoveryRequiredError) {
+          setMessagingRecoveryRequired(true);
+          onErrorChange?.(null);
+          return;
+        }
+        setMessagingRecoveryRequired(false);
         onErrorChange?.(t('login.invalid_password'));
         setPassword('');
         if (window.location.pathname !== ROUTES.welcome()) {
@@ -71,6 +90,43 @@ export function useLoginForm({
     ]
   );
 
+  const beginMessagingSessionRecovery = useCallback(
+    (recoveredPassword: string) => {
+      setPassword(recoveredPassword);
+      setMessagingRecoveryRequired(true);
+      onErrorChange?.(null);
+    },
+    [onErrorChange]
+  );
+
+  const retryMessagingSessions = useCallback(async () => {
+    setMessagingRecoveryRequired(false);
+    await handlePasswordAuth();
+  }, [handlePasswordAuth]);
+
+  const resetMessagingSessions = useCallback(async () => {
+    setIsLoading(true);
+    onErrorChange?.(null);
+    try {
+      await loadAccount({
+        type: 'password',
+        password,
+        userId,
+        resetMessagingSessions: true,
+      });
+      setPassword('');
+      setMessagingRecoveryRequired(false);
+      if (useAccountStore.getState().userProfile) onAccountSelected();
+    } catch (error) {
+      logger.error('Messaging session reset failed:', error);
+      setMessagingRecoveryRequired(false);
+      setPassword('');
+      onErrorChange?.(t('session_recovery.reset_failed'));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [loadAccount, onAccountSelected, onErrorChange, password, t, userId]);
+
   return {
     isLoading,
     setIsLoading,
@@ -78,6 +134,10 @@ export function useLoginForm({
     setPassword,
     passwordInputRef,
     handlePasswordAuth,
+    messagingRecoveryRequired,
+    beginMessagingSessionRecovery,
+    retryMessagingSessions,
+    resetMessagingSessions,
     navigate,
   };
 }

@@ -1,4 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import * as Comlink from 'comlink';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  classifyStatement,
+  DatabaseConnection,
+  SecureStorageRecoveryRequiredError,
+} from '../../src/db/sqlite';
+import { SECURE_STORAGE_RECOVERY_REQUIRED } from '../../src/db/secure-storage-errors';
 import { getTestConnection } from '../testDb';
 
 type RawConnection = {
@@ -9,6 +16,524 @@ type RawConnection = {
 function rawConnection(): RawConnection {
   return getTestConnection() as unknown as RawConnection;
 }
+
+type LifecycleProxy = {
+  create: ReturnType<typeof vi.fn>;
+  unlock: ReturnType<typeof vi.fn>;
+  lock: ReturnType<typeof vi.fn>;
+  destroy: ReturnType<typeof vi.fn>;
+};
+
+function lifecycleConnection(proxy: LifecycleProxy): DatabaseConnection {
+  const connection = Object.create(
+    DatabaseConnection.prototype
+  ) as DatabaseConnection;
+  const internals = connection as unknown as {
+    state: {
+      drizzleDb: unknown;
+      storageState: 'empty' | 'locked' | 'unlocked';
+      useNativePlugin: boolean;
+      secureProxy: LifecycleProxy;
+    };
+  };
+  internals.state = {
+    drizzleDb: {},
+    storageState: 'locked',
+    useNativePlugin: false,
+    secureProxy: proxy,
+  };
+  return connection;
+}
+
+function portableConnection(state: Record<PropertyKey, unknown>) {
+  const connection = Object.create(
+    DatabaseConnection.prototype
+  ) as DatabaseConnection;
+  (connection as unknown as { state: Record<PropertyKey, unknown> }).state = {
+    storageState: 'locked',
+    portableTransferActive: false,
+    closeActive: false,
+    ...state,
+  };
+  return connection;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+describe('DatabaseConnection portable lifecycle fencing', () => {
+  it('sends single-use password copies to browser import workers', async () => {
+    const preview = {
+      userId: 'gossip1test',
+      username: 'Alice',
+      avatar: null,
+      createdAtMs: 1,
+    };
+    let admittedObserved: number[] = [];
+    let authenticatedObserved: number[] = [];
+    const proxy = {
+      admitPortableOuterMigrationPassword: vi.fn((value: Uint8Array) => {
+        admittedObserved = Array.from(value);
+        return Promise.resolve();
+      }),
+      authenticatePortableImportCandidate: vi.fn((value: Uint8Array) => {
+        authenticatedObserved = Array.from(value);
+        return Promise.resolve(preview);
+      }),
+    };
+    const connection = portableConnection({
+      useNativePlugin: false,
+      secureProxy: proxy,
+      portableTransferActive: true,
+    });
+    const admitted = new Uint8Array([1, 2, 3]);
+    const authenticated = new Uint8Array([4, 5, 6]);
+
+    await connection.secureStorageAdmitPortableOuterMigrationPassword(admitted);
+    await connection.secureStorageAuthenticatePortableImportCandidate(
+      authenticated
+    );
+
+    const admittedOnce = proxy.admitPortableOuterMigrationPassword.mock
+      .calls[0][0] as Uint8Array;
+    const authenticatedOnce = proxy.authenticatePortableImportCandidate.mock
+      .calls[0][0] as Uint8Array;
+    expect(admittedOnce).not.toBe(admitted);
+    expect(authenticatedOnce).not.toBe(authenticated);
+    expect(admittedObserved).toEqual([1, 2, 3]);
+    expect(authenticatedObserved).toEqual([4, 5, 6]);
+    expect(Array.from(admittedOnce)).toEqual([0, 0, 0]);
+    expect(Array.from(authenticatedOnce)).toEqual([0, 0, 0]);
+    expect(Array.from(admitted)).toEqual([1, 2, 3]);
+    expect(Array.from(authenticated)).toEqual([4, 5, 6]);
+  });
+
+  it('keeps browser close retryable while an export is active', async () => {
+    const beginning = deferred<{ totalBytes: number }>();
+    const proxy = {
+      beginPortableExport: vi.fn(() => beginning.promise),
+      readPortableExportChunk: vi.fn().mockResolvedValue(null),
+      finishPortableExport: vi.fn().mockResolvedValue(undefined),
+      abortPortableTransfer: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      [Comlink.releaseProxy]: vi.fn(),
+    };
+    const worker = { terminate: vi.fn() };
+    const connection = portableConnection({
+      useNativePlugin: false,
+      secureProxy: proxy,
+      worker,
+    });
+
+    const exporting = connection.secureStorageExportPortableV1(() => {});
+    await expect(connection.close()).rejects.toThrow(
+      'Cannot close secure storage during portable transfer'
+    );
+    expect(proxy.close).not.toHaveBeenCalled();
+
+    beginning.resolve({ totalBytes: 0 });
+    await exporting;
+    await expect(connection.close()).resolves.toBeUndefined();
+    expect(proxy.close).toHaveBeenCalledOnce();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('keeps browser import retryable after a pending close fails', async () => {
+    const closing = deferred<void>();
+    const proxy = {
+      close: vi.fn(() => closing.promise),
+      beginPortableImport: vi.fn().mockResolvedValue(undefined),
+      abortPortableTransfer: vi.fn().mockResolvedValue(undefined),
+      [Comlink.releaseProxy]: vi.fn(),
+    };
+    const connection = portableConnection({
+      useNativePlugin: false,
+      secureProxy: proxy,
+      worker: { terminate: vi.fn() },
+    });
+
+    const closePromise = connection.close();
+    await expect(connection.secureStorageBeginPortableImport()).rejects.toThrow(
+      'Secure storage is closing'
+    );
+    expect(proxy.beginPortableImport).not.toHaveBeenCalled();
+
+    closing.reject(new Error('close failed'));
+    await expect(closePromise).rejects.toThrow('close failed');
+    await expect(
+      connection.secureStorageBeginPortableImport()
+    ).resolves.toBeUndefined();
+    await connection.secureStorageAbortPortableImport();
+    expect(proxy.beginPortableImport).toHaveBeenCalledOnce();
+  });
+
+  it('keeps native close retryable while an export is active', async () => {
+    const exporting = deferred<void>();
+    const plugin = {
+      exportPortableV1: vi.fn(() => exporting.promise),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const connection = portableConnection({
+      useNativePlugin: true,
+      nativePlugin: plugin,
+    });
+
+    const exportPromise = connection.secureStorageExportPortableV1(() => {});
+    await expect(connection.close()).rejects.toThrow(
+      'Cannot close secure storage during portable transfer'
+    );
+    expect(plugin.close).not.toHaveBeenCalled();
+
+    exporting.resolve();
+    await exportPromise;
+    await expect(connection.close()).resolves.toBeUndefined();
+    expect(plugin.close).toHaveBeenCalledOnce();
+  });
+
+  it('keeps native import retryable after a pending close fails', async () => {
+    const closing = deferred<void>();
+    const plugin = {
+      close: vi.fn(() => closing.promise),
+      beginPortableImport: vi.fn().mockResolvedValue(undefined),
+      abortPortableTransfer: vi.fn().mockResolvedValue(undefined),
+    };
+    const connection = portableConnection({
+      useNativePlugin: true,
+      nativePlugin: plugin,
+    });
+
+    const closePromise = connection.close();
+    await expect(connection.secureStorageBeginPortableImport()).rejects.toThrow(
+      'Secure storage is closing'
+    );
+    expect(plugin.beginPortableImport).not.toHaveBeenCalled();
+
+    closing.reject(new Error('close failed'));
+    await expect(closePromise).rejects.toThrow('close failed');
+    await expect(
+      connection.secureStorageBeginPortableImport()
+    ).resolves.toBeUndefined();
+    await connection.secureStorageAbortPortableImport();
+    expect(plugin.beginPortableImport).toHaveBeenCalledOnce();
+  });
+});
+
+describe('DatabaseConnection secure lifecycle recovery', () => {
+  it('retains failed portable install ownership until cleanup succeeds', async () => {
+    const proxy = {
+      installPortableImport: vi
+        .fn()
+        .mockRejectedValue(new Error('install failed')),
+      abortPortableTransfer: vi.fn().mockResolvedValue(undefined),
+    };
+    const connection = Object.create(
+      DatabaseConnection.prototype
+    ) as DatabaseConnection;
+    const internals = connection as unknown as {
+      state: {
+        storageState: 'locked';
+        useNativePlugin: false;
+        secureProxy: typeof proxy;
+        portableTransferActive: boolean;
+      };
+    };
+    internals.state = {
+      storageState: 'locked',
+      useNativePlugin: false,
+      secureProxy: proxy,
+      portableTransferActive: true,
+    };
+
+    await expect(
+      connection.secureStorageInstallPortableImport()
+    ).rejects.toThrow('install failed');
+    expect(internals.state.portableTransferActive).toBe(true);
+
+    await connection.secureStorageAbortPortableImport();
+    expect(proxy.abortPortableTransfer).toHaveBeenCalledOnce();
+    expect(internals.state.portableTransferActive).toBe(false);
+  });
+
+  it('re-locks when post-unlock migration validation rejects', async () => {
+    const unlock = vi.fn().mockResolvedValue(true);
+    const lock = vi.fn().mockResolvedValue(undefined);
+    const connection = lifecycleConnection({
+      create: vi.fn(),
+      unlock,
+      lock,
+      destroy: vi.fn(),
+    });
+    const finalizeError = new Error('Unsupported database migration history');
+    (connection as unknown as { finalize: () => Promise<void> }).finalize = vi
+      .fn()
+      .mockRejectedValue(finalizeError);
+
+    await expect(connection.secureStorageUnlock('password')).rejects.toBe(
+      finalizeError
+    );
+    expect(lock).toHaveBeenCalledOnce();
+    expect(connection.storageState).toBe('locked');
+  });
+
+  it('keeps a rejected underlying lock retryable', async () => {
+    const lock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('flush failed'))
+      .mockResolvedValueOnce(undefined);
+    const connection = lifecycleConnection({
+      create: vi.fn(),
+      unlock: vi.fn(),
+      lock,
+      destroy: vi.fn(),
+    });
+    const state = connection as unknown as {
+      state: { storageState: string };
+    };
+    state.state.storageState = 'unlocked';
+
+    await expect(connection.secureStorageLock()).rejects.toThrow(
+      'flush failed'
+    );
+    expect(connection.storageState).toBe('unlocked');
+
+    await expect(connection.secureStorageLock()).resolves.toBeUndefined();
+    expect(lock).toHaveBeenCalledTimes(2);
+    expect(connection.storageState).toBe('locked');
+  });
+
+  it('destroys a new slot when post-create migration validation rejects', async () => {
+    const finalizeError = new Error('Unsupported database migration history');
+    const destroy = vi.fn().mockResolvedValue(undefined);
+    const connection = lifecycleConnection({
+      create: vi.fn().mockResolvedValue(undefined),
+      unlock: vi.fn(),
+      lock: vi.fn(),
+      destroy,
+    });
+    (connection as unknown as { finalize: () => Promise<void> }).finalize = vi
+      .fn()
+      .mockRejectedValue(finalizeError);
+
+    await expect(
+      connection.secureStorageCreate(0, 'test-password')
+    ).rejects.toBe(finalizeError);
+    expect(destroy).toHaveBeenCalledWith(Uint8Array.from([0, 1]));
+    expect(connection.storageState).toBe('locked');
+  });
+
+  it('surfaces worker allocation recovery as a typed error', async () => {
+    const create = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(`${SECURE_STORAGE_RECOVERY_REQUIRED} reload failed`)
+      );
+    const connection = lifecycleConnection({
+      create,
+      unlock: vi.fn(),
+      lock: vi.fn(),
+      destroy: vi.fn(),
+    });
+
+    await expect(
+      connection.secureStorageCreate(0, 'test-password')
+    ).rejects.toBeInstanceOf(SecureStorageRecoveryRequiredError);
+    expect(connection.storageState).toBe('unlocked');
+  });
+});
+
+describe('DatabaseConnection transaction classification', () => {
+  it.each([
+    'ROLLBACK',
+    'ROLLBACK TRANSACTION;',
+    'ROLLBACK; -- trace',
+    'ROLLBACK TRANSACTION /* reason */',
+    '/* before */ ROLLBACK /* middle */ TRANSACTION; -- after',
+  ])('recognizes a complete rollback boundary: %s', sql => {
+    expect(classifyStatement(sql)).toBe('rollback');
+  });
+
+  it.each([
+    ['\u00a0BEGIN IMMEDIATE\u00a0', 'begin'],
+    ['\ufeffCOMMIT\ufeff', 'commit'],
+    ['END TRANSACTION; -- alias', 'commit'],
+    ['SAVEPOINT outer', 'savepoint'],
+    ['ANALYZE userProfile', 'mutation'],
+    ['REINDEX', 'mutation'],
+    ['\u0085BEGIN', 'other'],
+    ['COMMIT\u0085', 'other'],
+    [';;BEGIN', 'other'],
+    ["; /* empty */ UPDATE user_profile SET username = 'ignored'", 'other'],
+    ['BEGIN -- trace\rROLLBACK', 'begin'],
+    ['ROLLBACK -- trace\rTO SAVEPOINT ignored', 'rollback'],
+    ['BEGIN -- trace\r\nROLLBACK', 'other'],
+    ['BEGIN IMMEDIATE /* terminated by EOF', 'begin'],
+    ['COMMIT; /* terminated by EOF', 'commit'],
+    ['ROLLBACK /* terminated by EOF', 'rollback'],
+    [
+      "UPDATE userProfile SET username = 'changed' /* terminated by EOF",
+      'mutation',
+    ],
+  ] as const)(
+    'matches the Rust SQL boundary contract for %j',
+    (sql, expected) => {
+      expect(classifyStatement(sql)).toBe(expected);
+    }
+  );
+
+  it('tracks commit aliases and nested savepoint rollbacks through real SQLite', async () => {
+    const connection = getTestConnection();
+    const state = connection as unknown as { state: { txDepth: number } };
+
+    await connection.execRawDirect('BEGIN IMMEDIATE');
+    await connection.execRawDirect('END TRANSACTION; -- release outer');
+    expect(state.state.txDepth).toBe(0);
+
+    await connection.execRawDirect('BEGIN IMMEDIATE');
+    await connection.execRawDirect('SAVEPOINT sp_comment');
+    await connection.execRawDirect(
+      'ROLLBACK /* nested */ TO SAVEPOINT sp_comment; -- keep outer'
+    );
+    expect(state.state.txDepth).toBe(1);
+    await connection.execRawDirect('RELEASE SAVEPOINT sp_comment');
+    await connection.execRawDirect('ROLLBACK TRANSACTION; -- release outer');
+    expect(state.state.txDepth).toBe(0);
+  });
+
+  it('rejects an outermost savepoint while preserving nested savepoints', async () => {
+    const connection = getTestConnection();
+    await expect(connection.execRawDirect('SAVEPOINT outer')).rejects.toThrow(
+      'Top-level savepoints are not supported'
+    );
+
+    await connection.execRawDirect('BEGIN IMMEDIATE');
+    await expect(connection.execRawDirect('SAVEPOINT nested')).resolves.toEqual(
+      []
+    );
+    await connection.execRawDirect('RELEASE SAVEPOINT nested');
+    await connection.execRawDirect('ROLLBACK');
+  });
+
+  it.each([
+    'ROLLBACK TO SAVEPOINT sp_0',
+    'ROLLBACK TRANSACTION TO sp_0',
+    'ROLLBACK /* keep ownership */ TO SAVEPOINT sp_0; -- nested',
+    'ROLLBACK LATER',
+    'ROLLBACK; SELECT 1',
+    "SELECT 'ROLLBACK; -- data'",
+  ])('does not release ownership for a rollback lookalike: %s', sql => {
+    expect(classifyStatement(sql)).toBe('other');
+  });
+});
+
+describe('DatabaseConnection transaction callback guards', () => {
+  it('rejects reentrant secure-storage operations without closing the transaction', async () => {
+    const connection = getTestConnection();
+    const error =
+      'Secure storage operations are not allowed inside a transaction callback';
+    const operations = [
+      () => connection.secureStorageProvision(),
+      () => connection.secureStorageCreate(0, 'password'),
+      () => connection.secureStorageUnlock('password'),
+      () => connection.secureStorageLock(),
+      () => connection.secureStorageDestroy([0, 1]),
+      () => connection.secureStorageCoverTick(),
+      () => connection.secureStorageFlush(),
+      () => connection.secureStorageWriteNamespaceData(1, 0, new Uint8Array()),
+      () => connection.secureStorageClearNamespace(1),
+      () => connection.secureStorageReplaceNamespaceData(1, new Uint8Array()),
+      () => connection.close(),
+    ];
+
+    await connection.withTransaction(async () => {
+      for (const operation of operations) {
+        await expect(operation()).rejects.toThrow(error);
+      }
+    });
+    await expect(
+      connection.withTransaction(async () => undefined)
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not flush a native backend reentrantly before commit', async () => {
+    const execSql = vi.fn(async () => ({ rows: [], lastInsertRowId: 0 }));
+    const flush = vi.fn(async () => undefined);
+    const readNamespaceData = vi.fn(async () => ({
+      data: new Uint8Array([4, 2]),
+    }));
+    const namespaceDataLength = vi.fn(async () => ({ length: 2 }));
+    const connection = Object.create(
+      DatabaseConnection.prototype
+    ) as DatabaseConnection;
+    const internals = connection as unknown as {
+      state: Record<string, unknown>;
+    };
+    internals.state = {
+      worker: null,
+      msgId: 0,
+      pending: new Map(),
+      lastInsertRowIdCache: 0,
+      sqlite3: null,
+      dbHandle: null,
+      useWorker: false,
+      isSecureStorage: true,
+      storageState: 'unlocked',
+      drizzleDb: null,
+      dbLock: Promise.resolve(),
+      txScopeGuard: null,
+      transactionCallbackDepth: 0,
+      txDepth: 0,
+      secureProxy: null,
+      nativePlugin: {
+        execSql,
+        flush,
+        readNamespaceData,
+        namespaceDataLength,
+      },
+      useNativePlugin: true,
+    };
+
+    await connection.withTransaction(async () => {
+      await expect(
+        connection.secureStorageReadNamespaceData(1, 0, 2)
+      ).resolves.toEqual(new Uint8Array([4, 2]));
+      await expect(
+        connection.secureStorageNamespaceDataLength(1)
+      ).resolves.toBe(2);
+      await expect(connection.secureStorageFlush()).rejects.toThrow(
+        'Secure storage operations are not allowed inside a transaction callback'
+      );
+      expect(flush).not.toHaveBeenCalled();
+    });
+
+    expect(flush).toHaveBeenCalledOnce();
+
+    const raw = connection as unknown as RawConnection;
+    await raw.execRawDirect('ANALYZE');
+    await raw.execRawDirect('REINDEX');
+    await raw.execRawDirect('BEGIN IMMEDIATE');
+    await raw.execRawDirect('END TRANSACTION');
+    await expect(raw.execRawDirect('SAVEPOINT outer')).rejects.toThrow(
+      'Top-level savepoints are not supported'
+    );
+
+    expect(execSql.mock.calls.map(([request]) => request.sql)).toEqual([
+      'BEGIN IMMEDIATE',
+      'COMMIT',
+      'ANALYZE',
+      'REINDEX',
+      'BEGIN IMMEDIATE',
+      'END TRANSACTION',
+    ]);
+    expect(flush).toHaveBeenCalledTimes(4);
+  });
+});
 
 describe('DatabaseConnection raw execution guards', () => {
   it('rejects undefined bind params on the public raw path', async () => {

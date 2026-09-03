@@ -266,7 +266,8 @@ export class DiscussionService {
 
   async createSessionForContact(
     contactUserId: string,
-    userData: Uint8Array
+    userData: Uint8Array,
+    options: { resetQueue?: boolean; triggerRefresh?: boolean } = {}
   ): Promise<Result<Uint8Array, Error>> {
     const log = logger.forMethod('createSessionForContact');
     const ownerUserId = this.session.userIdEncoded;
@@ -315,8 +316,10 @@ export class DiscussionService {
         updatedAt: now,
       });
 
-      // reset all messages in send queue to WAITING_SESSION for this contact
-      await this.queries.messages.resetSendQueue(ownerUserId, contactUserId);
+      // Bulk recovery prepares all queues in one prior SQL transaction.
+      if (options.resetQueue !== false) {
+        await this.queries.messages.resetSendQueue(ownerUserId, contactUserId);
+      }
     } catch (error) {
       return {
         success: false,
@@ -327,8 +330,11 @@ export class DiscussionService {
     try {
       /* trigger a state update to send the new announcement
       If the stateUpdate function is already running, it will be skipped.
+      Explicit restoration keeps this disabled until its durable phase-5 gate.
       */
-      await this.refreshService?.stateUpdate();
+      if (options.triggerRefresh !== false) {
+        await this.refreshService?.stateUpdate();
+      }
     } catch (error) {
       return {
         success: false,

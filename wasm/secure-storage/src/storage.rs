@@ -1,6 +1,7 @@
 //! Storage abstraction for secureStorage.
 
 use std::collections::HashMap;
+use std::io::Write;
 
 use zeroize::Zeroizing;
 
@@ -105,6 +106,81 @@ impl MemoryStorage {
                 .collect(),
             blockstreams: (0..SESSION_COUNT).map(|_| HashMap::new()).collect(),
         }
+    }
+
+    pub fn export_portable<W: Write>(&self, output: W) -> Result<W> {
+        use crate::portable::{
+            MAX_PORTABLE_ARCHIVE_BYTES, PORTABLE_DIGEST_SIZE, PORTABLE_HEADER_SIZE,
+            PortableArchiveWriter, PortableHeader, PortableRecord, validate_portable_block_value,
+            validate_portable_keypair_value,
+        };
+
+        let mut counts = [[0_u64; 2]; SESSION_COUNT];
+        let mut record_count = SESSION_COUNT as u64;
+        let mut record_section_length = 0_u64;
+        for keypair in &self.keypairs {
+            validate_portable_keypair_value(keypair)?;
+            record_section_length = record_section_length
+                .checked_add(26 + keypair.len() as u64)
+                .ok_or(SecureStorageError::Overflow)?;
+        }
+        for (slot, streams) in self.blockstreams.iter().enumerate() {
+            if streams.keys().any(|namespace| *namespace > 1) {
+                return Err(SecureStorageError::InvalidPortableArchive);
+            }
+            for namespace in 0..=1_u8 {
+                let blocks = streams.get(&namespace).map(Vec::as_slice).unwrap_or(&[]);
+                counts[slot][usize::from(namespace)] = blocks.len() as u64;
+                for block in blocks {
+                    validate_portable_block_value(block.as_slice())?;
+                    record_count = record_count
+                        .checked_add(1)
+                        .ok_or(SecureStorageError::Overflow)?;
+                    record_section_length = record_section_length
+                        .checked_add(26 + BLOCK_SIZE as u64)
+                        .ok_or(SecureStorageError::Overflow)?;
+                }
+            }
+        }
+        if counts[0][0] == 0
+            || counts[1] != counts[0]
+            || counts[2] != counts[0]
+            || (counts[0][1] > 0 && counts[0][0] == 0)
+            || record_section_length
+                > MAX_PORTABLE_ARCHIVE_BYTES - PORTABLE_HEADER_SIZE - PORTABLE_DIGEST_SIZE
+        {
+            return Err(SecureStorageError::InvalidPortableArchive);
+        }
+
+        let mut writer = PortableArchiveWriter::new(
+            output,
+            PortableHeader {
+                record_count,
+                record_section_length,
+            },
+        )?;
+        for slot in 0..SESSION_COUNT as u8 {
+            writer.write_record(&PortableRecord::keypair(
+                slot,
+                self.keypairs[usize::from(slot)].to_vec(),
+            ))?;
+        }
+        for (namespace, count) in counts[0].into_iter().enumerate() {
+            for block_index in 0..count {
+                for slot in 0..SESSION_COUNT as u8 {
+                    let block = self.blockstreams[usize::from(slot)][&(namespace as u8)]
+                        [block_index as usize]
+                        .to_vec();
+                    writer.write_record(&PortableRecord::block(
+                        slot,
+                        namespace as u8,
+                        block_index,
+                        block,
+                    ))?;
+                }
+            }
+        }
+        writer.finish()
     }
 }
 

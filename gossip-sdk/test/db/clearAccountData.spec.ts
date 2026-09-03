@@ -80,10 +80,14 @@ async function seedUserProfile(userId: string) {
       userId,
       username: `user-${userId}`,
       security: JSON.stringify({
-        encKeySalt: [],
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
+        encKeySalt: new Array(16).fill(1),
         authMethod: 'password',
         mnemonicBackup: {
-          encryptedMnemonic: [],
+          encryptedMnemonic: new Array(32).fill(2),
           createdAt: Date.now(),
           backedUp: false,
         },

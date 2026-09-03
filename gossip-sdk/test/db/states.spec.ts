@@ -5,6 +5,7 @@
  * pending announcements, and contact deletion cleanup.
  */
 
+import { eq } from 'drizzle-orm';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   DiscussionDirection,
@@ -12,7 +13,11 @@ import {
   MessageStatus,
   MessageType,
 } from '../../src/db';
-import { rowToUserProfile, userProfileToRow } from '../../src/db/queries';
+import {
+  rowToUserProfile,
+  userProfileToRow,
+  type UserProfileRow,
+} from '../../src/db/queries';
 import { clearAllTables, getTestDb, getTestQueries } from '../testDb';
 import * as schema from '../../src/db/schema';
 import type { UserProfile } from '../../src/db';
@@ -315,10 +320,14 @@ describe('Session Blob Round-Trip', () => {
     userId: 'gossip1testsession',
     username: 'testuser',
     security: {
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
       authMethod: 'password',
-      encKeySalt: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+      encKeySalt: new Uint8Array(16).fill(1),
       mnemonicBackup: {
-        encryptedMnemonic: new Uint8Array([10, 20, 30]),
+        encryptedMnemonic: new Uint8Array(32).fill(2),
         createdAt: new Date(),
         backedUp: false,
       },
@@ -328,6 +337,116 @@ describe('Session Blob Round-Trip', () => {
     lastSeen: new Date(),
     createdAt: new Date(),
     updatedAt: new Date(),
+  });
+
+  it('rejects unknown profile security and nested crypto versions', () => {
+    const row = userProfileToRow(makeProfile(new Uint8Array()));
+    for (const field of [
+      'formatVersion',
+      'passwordKdfVersion',
+      'mnemonicEncryptionVersion',
+      'identityDerivationVersion',
+    ]) {
+      const security = JSON.parse(row.security as string) as Record<
+        string,
+        unknown
+      >;
+      security[field] = 2;
+      expect(() =>
+        rowToUserProfile({ ...row, security: JSON.stringify(security) })
+      ).toThrow('Unsupported account security format');
+    }
+  });
+
+  it('decodes the released versionless profile security shape as V1', () => {
+    const row = userProfileToRow(makeProfile(new Uint8Array()));
+    const security = JSON.parse(row.security as string) as Record<
+      string,
+      unknown
+    >;
+    delete security.formatVersion;
+    delete security.passwordKdfVersion;
+    delete security.mnemonicEncryptionVersion;
+    delete security.identityDerivationVersion;
+
+    const restored = rowToUserProfile({
+      ...row,
+      security: JSON.stringify(security),
+    });
+
+    expect(restored.security).toMatchObject({
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
+    });
+  });
+
+  it('rejects partially versioned profile security shapes', () => {
+    const row = userProfileToRow(makeProfile(new Uint8Array()));
+    const security = JSON.parse(row.security as string) as Record<
+      string,
+      unknown
+    >;
+    delete security.identityDerivationVersion;
+
+    expect(() =>
+      rowToUserProfile({ ...row, security: JSON.stringify(security) })
+    ).toThrow('Unsupported account security format');
+  });
+
+  it('allowlists security fields instead of invoking serialization hooks', () => {
+    const profile = makeProfile(new Uint8Array());
+    (profile.security as unknown as Record<string, unknown>).toJSON = () => ({
+      formatVersion: 999,
+    });
+    (
+      profile.security.mnemonicBackup.createdAt as unknown as Record<
+        string,
+        unknown
+      >
+    ).toJSON = () => 'invalid';
+    profile.security.encKeySalt[Symbol.iterator] = function* () {
+      yield 255;
+    };
+
+    const row = userProfileToRow(profile);
+    const restored = rowToUserProfile(row as UserProfileRow);
+    expect(restored.security.formatVersion).toBe(1);
+    expect(restored.security.encKeySalt).toEqual(new Uint8Array(16).fill(1));
+    expect(
+      Number.isFinite(restored.security.mnemonicBackup.createdAt.getTime())
+    ).toBe(true);
+  });
+
+  it('strictly rejects malformed profile security fields', () => {
+    const row = userProfileToRow(makeProfile(new Uint8Array()));
+    const expectRejected = (
+      mutate: (security: Record<string, unknown>) => void
+    ) => {
+      const security = JSON.parse(row.security as string) as Record<
+        string,
+        unknown
+      >;
+      mutate(security);
+      expect(() =>
+        rowToUserProfile({ ...row, security: JSON.stringify(security) })
+      ).toThrow();
+    };
+
+    expectRejected(security => {
+      security.encKeySalt = new Array(15).fill(1);
+    });
+    expectRejected(security => {
+      (security.mnemonicBackup as Record<string, unknown>).encryptedMnemonic =
+        new Array(16).fill(2);
+    });
+    expectRejected(security => {
+      security.authMethod = 'webauthn';
+    });
+    expectRejected(security => {
+      (security.mnemonicBackup as Record<string, unknown>).backedUp = 'false';
+    });
   });
 
   it('should store and retrieve a small session blob (62 bytes)', async () => {
@@ -400,5 +519,83 @@ describe('Session Blob Round-Trip', () => {
     const profile = rowToUserProfile(row!);
     expect(profile.session.length).toBe(15_000);
     expect(profile.session.every(b => b === 4)).toBe(true);
+  });
+});
+
+describe('Account settings', () => {
+  beforeEach(clearAllTables);
+
+  it('creates encrypted per-account defaults and updates them durably', async () => {
+    const created = await q().accountSettings.create('gossip1settings');
+    expect(created).toEqual({
+      userId: 'gossip1settings',
+      formatVersion: 1,
+      mnsEnabled: false,
+      defaultRetentionDuration: 2_592_000,
+    });
+
+    await q().accountSettings.update('gossip1settings', {
+      mnsEnabled: true,
+      defaultRetentionDuration: null,
+    });
+    await expect(
+      q().accountSettings.getOrCreate('gossip1settings')
+    ).resolves.toEqual({
+      userId: 'gossip1settings',
+      formatVersion: 1,
+      mnsEnabled: true,
+      defaultRetentionDuration: null,
+    });
+  });
+
+  it('atomically seeds a missing row from released device-global settings', async () => {
+    await expect(
+      q().accountSettings.getOrCreate('gossip1legacysettings', {
+        mnsEnabled: true,
+        defaultRetentionDuration: null,
+      })
+    ).resolves.toEqual({
+      userId: 'gossip1legacysettings',
+      formatVersion: 1,
+      mnsEnabled: true,
+      defaultRetentionDuration: null,
+    });
+
+    await expect(
+      q().accountSettings.getOrCreate('gossip1legacysettings', {
+        mnsEnabled: false,
+        defaultRetentionDuration: 86_400,
+      })
+    ).resolves.toMatchObject({
+      mnsEnabled: true,
+      defaultRetentionDuration: null,
+    });
+  });
+
+  it('targets one account and rejects missing or unknown-version rows before writes', async () => {
+    await expect(
+      q().accountSettings.update('gossip1missing', { mnsEnabled: true })
+    ).rejects.toThrow('row is missing');
+
+    await q().accountSettings.create('gossip1first');
+    await q().accountSettings.create('gossip1second');
+    await q().accountSettings.update('gossip1first', { mnsEnabled: true });
+    await expect(
+      q().accountSettings.get('gossip1second')
+    ).resolves.toMatchObject({ mnsEnabled: false });
+
+    await db()
+      .update(schema.accountSettings)
+      .set({ formatVersion: 2 })
+      .where(eq(schema.accountSettings.userId, 'gossip1first'));
+    await expect(
+      q().accountSettings.update('gossip1first', { mnsEnabled: false })
+    ).rejects.toThrow('Unsupported account settings format');
+    const raw = await db()
+      .select()
+      .from(schema.accountSettings)
+      .where(eq(schema.accountSettings.userId, 'gossip1first'))
+      .get();
+    expect(raw?.mnsEnabled).toBe(true);
   });
 });

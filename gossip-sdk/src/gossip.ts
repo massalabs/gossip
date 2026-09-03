@@ -49,7 +49,7 @@ import {
   startWasmInitialization,
   ensureWasmInitialized,
 } from './wasm/loader.js';
-import { generateUserKeys, UserKeys } from './wasm/userKeys.js';
+import { generateUserKeys } from './wasm/userKeys.js';
 import { SessionModule } from './wasm/session.js';
 import {
   EncryptionKey,
@@ -59,7 +59,10 @@ import { AnnouncementService } from './services/announcement.js';
 import { DiscussionService } from './services/discussion.js';
 import { MessageService } from './services/message.js';
 import { RefreshService } from './services/refresh.js';
-import { AuthService } from './services/auth.js';
+import {
+  AuthService,
+  PUBLIC_KEY_REPUBLISH_INTERVAL_MS,
+} from './services/auth.js';
 import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
 import { SelfMessageService } from './services/selfMessage.js';
@@ -69,11 +72,16 @@ import {
 } from './utils/validation.js';
 import { QueueManager } from './utils/queue.js';
 import { encodeUserId, decodeUserId } from './utils/userId.js';
-import { type StorageConfig, MessageStatus } from './db/index.js';
+import {
+  IDENTITY_DERIVATION_VERSION,
+  type StorageConfig,
+  MessageStatus,
+} from './db/index.js';
 import {
   DatabaseConnection,
   SESSION_BLOB_NAMESPACE,
   SQL_NAMESPACE,
+  type AccountGenerationState,
   type SecureStorageState,
 } from './db/sqlite.js';
 import { Queries } from './db/queries/index.js';
@@ -88,15 +96,74 @@ import {
   type SdkEvents,
 } from './core/SdkEventEmitter.js';
 import { SdkPolling } from './core/SdkPolling.js';
+import type {
+  PortableChunkWriter,
+  PortableProgressCallback,
+} from './db/secure-storage-native.js';
+import type { ImportedAccountPreview } from './db/secure-storage-worker-api.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+export type PortableImportAuthorization = () => boolean;
+
+export class UnreadableMessagingSessionError extends Error {
+  constructor() {
+    super(
+      '[GossipSdk] Failed to load encrypted session. Please provide a valid encryptedSession and encryptionKey.'
+    );
+    this.name = 'UnreadableMessagingSessionError';
+  }
+}
+
+export class MessagingSessionRecoveryRequiredError extends Error {
+  constructor(readonly reason: 'missing' | 'unreadable') {
+    super('Messaging sessions could not be restored');
+    this.name = 'MessagingSessionRecoveryRequiredError';
+  }
+}
+
+export class PortableImportTerminalError extends Error {
+  readonly cause: unknown;
+
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = 'PortableImportTerminalError';
+    this.cause = options?.cause;
+  }
+}
+
+export interface PortableImportCandidate {
+  push(chunk: Uint8Array): Promise<void>;
+  finishValidation(): Promise<void>;
+  authenticate(password: Uint8Array): Promise<ImportedAccountPreview | null>;
+  install(
+    admitPasswords: (
+      admit: (password: Uint8Array) => Promise<void>
+    ) => void | Promise<void>
+  ): Promise<void>;
+  abort(): Promise<void>;
+}
+
 export enum SdkStatus {
   UNINITIALIZED = 'uninitialized',
   INITIALIZED = 'initialized',
   SESSION_OPEN = 'session_open',
+}
+
+async function generateIdentityUserKeysV1(mnemonic: string) {
+  return generateUserKeys(mnemonic);
+}
+
+async function generateVersionedIdentityUserKeys(
+  mnemonic: string,
+  identityDerivationVersion: number
+) {
+  if (identityDerivationVersion !== IDENTITY_DERIVATION_VERSION) {
+    throw new Error('Unsupported identity derivation version');
+  }
+  return generateIdentityUserKeysV1(mnemonic);
 }
 
 export interface GossipSdkInitOptions {
@@ -111,6 +178,8 @@ export interface GossipSdkInitOptions {
 export interface OpenSessionOptions {
   /** BIP39 mnemonic phrase */
   mnemonic: string;
+  /** Frozen mnemonic-to-identity derivation suite. */
+  identityDerivationVersion?: number;
   /** Existing encrypted session blob (for restoring session) */
   encryptedSession?: Uint8Array;
   /** Encryption key for decrypting session and storage. Will be created if not provided. */
@@ -131,6 +200,12 @@ export interface OpenSessionOptions {
    * authenticated.
    */
   autoStartPolling?: boolean;
+  /**
+   * Publish the session public key while opening. Defaults to `true`.
+   * Set to `false` only for tentative in-memory/onboarding sessions whose
+   * identity must not become externally visible before a later durable commit.
+   */
+  publishPublicKey?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,7 +225,6 @@ type SdkStateSessionOpen = {
   messageProtocol: IMessageProtocol;
   config: SdkConfig;
   session: SessionModule;
-  userKeys: UserKeys;
   encryptionKey?: EncryptionKey;
   onPersist?: (
     encryptedBlob: Uint8Array,
@@ -189,6 +263,31 @@ class GossipSdk {
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
 
+  private createProfileService(queries: Queries): ProfileService {
+    return new ProfileService(queries, async userId => {
+      try {
+        await this._auth?.persistPendingPublicationTimestamp(userId, queries);
+      } catch (error) {
+        // The profile upsert is already durable. Keep the confirmed timestamp
+        // pending for the publication scheduler instead of falsely rejecting
+        // a successful public profile mutation.
+        this.eventEmitter.emit(SdkEventType.ERROR, {
+          error: error instanceof Error ? error : new Error(String(error)),
+          context: 'persistPublicKeyPublicationTimestamp',
+        });
+      }
+    });
+  }
+
+  // Public-key publication is session-scoped. One immediate attempt is
+  // followed by due-time refreshes; failed attempts retry and the browser's
+  // online event triggers an immediate opportunity.
+  private static readonly PUBLIC_KEY_PUBLICATION_RETRY_MS = 60_000;
+  private _publicKeyPublicationTimer: ReturnType<typeof setTimeout> | null =
+    null;
+  private _publicKeyOnlineHandler: (() => void) | null = null;
+  private _publicKeyPublicationGeneration = 0;
+
   // ─── Session persist debouncer ──────────────────────────────────
   //
   // The SessionModule WASM calls our persist callback before every network
@@ -225,6 +324,34 @@ class GossipSdk {
   private _persistInFlightPromise: Promise<void> | null = null;
   /** Back-off state after a failed persist; reset on every success. */
   private _persistBackoffMs = 0;
+  private _portableExportActive = false;
+  private _portableExportTerminal = false;
+  private _portableImportActive = false;
+  private _portableImportTerminal = false;
+  private _portableImportStartupCleanup = false;
+  private _portableImportBeginActive = false;
+  private _lifecycleCloseActive = false;
+  private _accountLifecycleActive = false;
+
+  private reserveAccountLifecycle(): () => void {
+    if (this._portableExportActive || this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
+    if (this._portableImportActive || this._portableImportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable import; reload first'
+      );
+    }
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK account lifecycle operation is already active');
+    }
+    this._accountLifecycleActive = true;
+    return () => {
+      this._accountLifecycleActive = false;
+    };
+  }
 
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -275,7 +402,9 @@ class GossipSdk {
 
     // Create services that don't need a session
     this._auth = new AuthService(createAuthProtocol());
-    this._profile = this._queries ? new ProfileService(this._queries) : null;
+    this._profile = this._queries
+      ? this.createProfileService(this._queries)
+      : null;
 
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -302,6 +431,14 @@ class GossipSdk {
   }
 
   async openSession(options: OpenSessionOptions): Promise<void> {
+    if (this._portableImportActive || this._portableImportTerminal) {
+      throw new Error('Cannot open a session during or after portable import');
+    }
+    if (this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
     if (this.state.status === SdkStatus.UNINITIALIZED) {
       throw new Error('SDK not initialized. Call init() first.');
     }
@@ -324,169 +461,305 @@ class GossipSdk {
       );
     }
 
-    // Derive encryption key from mnemonic when not provided
-    const encryptionKey =
-      options.encryptionKey ??
-      (await generateEncryptionKeyFromSeed(
-        options.mnemonic,
-        new Uint8Array(32).fill(0)
-      ));
+    const identityDerivationVersion =
+      options.identityDerivationVersion ?? IDENTITY_DERIVATION_VERSION;
+    if (identityDerivationVersion !== IDENTITY_DERIVATION_VERSION) {
+      throw new Error('Unsupported identity derivation version');
+    }
 
-    const { messageProtocol } = this.state;
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    const initializedState = this.state;
+    const ownsEncryptionKey = options.encryptionKey === undefined;
+    let encryptionKey: EncryptionKey | undefined;
+    let session: SessionModule | undefined;
+    let committed = false;
 
-    // Ensure WASM is ready
-    await ensureWasmInitialized();
+    try {
+      // Derive encryption key from mnemonic when not provided.
+      encryptionKey =
+        options.encryptionKey ??
+        (await generateEncryptionKeyFromSeed(
+          options.mnemonic,
+          new Uint8Array(32).fill(0)
+        ));
 
-    // Validate that encryptedSession can be decrypted with the provided key
-    if (options.encryptedSession) {
-      try {
-        const sessionManager = SessionManagerWrapper.from_encrypted_blob(
-          options.encryptedSession,
-          encryptionKey
-        );
-        // We only create this wrapper for validation, free it immediately
-        sessionManager.free();
-      } catch {
-        throw new Error(
-          '[GossipSdk] Failed to load encrypted session. Please provide a valid encryptedSession and encryptionKey.'
-        );
+      const { messageProtocol } = initializedState;
+
+      // Ensure WASM is ready
+      await ensureWasmInitialized();
+
+      // Validate that encryptedSession can be decrypted with the provided key
+      if (options.encryptedSession) {
+        try {
+          const sessionManager = SessionManagerWrapper.from_encrypted_blob(
+            options.encryptedSession,
+            encryptionKey
+          );
+          // We only create this wrapper for validation, free it immediately
+          sessionManager.free();
+        } catch {
+          throw new UnreadableMessagingSessionError();
+        }
       }
+
+      // Generate keys from mnemonic
+      const userKeys = await generateVersionedIdentityUserKeys(
+        options.mnemonic,
+        identityDerivationVersion
+      );
+
+      // Create session with persistence callback.
+      //
+      // The callback is awaited by the session module before each network
+      // send. We coalesce persists into a 500 ms-debounced background flush
+      // so the await resolves instantly: `handleSessionPersist` only marks
+      // the state dirty and schedules the actual write. See the
+      // `_persistDirty`/`flushPersist` machinery below and `closeSession`
+      // for the synchronous drain.
+      try {
+        session = new SessionModule(
+          userKeys,
+          async () => {
+            this.handleSessionPersist();
+          },
+          options.sessionConfig
+        );
+      } finally {
+        // SessionModule extracts independent key wrappers; the combined bundle
+        // contains a second serialized copy of the secret identity material.
+        userKeys.free();
+      }
+
+      // Restore existing session state if provided
+      if (options.encryptedSession) {
+        session.load(options.encryptedSession, encryptionKey);
+      }
+
+      // Get config from initialized state
+      const { config } = this.state;
+
+      // Create services with config (refreshService will be set after creation)
+      const queries = this._queries!;
+
+      this._announcement = new AnnouncementService(
+        messageProtocol,
+        session,
+        this.eventEmitter,
+        config,
+        queries
+      );
+
+      this._discussion = new DiscussionService(
+        this._announcement,
+        session,
+        this.eventEmitter,
+        queries
+      );
+
+      this._message = new MessageService(
+        messageProtocol,
+        session,
+        this.eventEmitter,
+        config,
+        queries
+      );
+      // Wire the immediate-persist callback so the send hot path can
+      // run the session-blob persist in parallel with the network write
+      // (see `MessageService.processSendQueueForContact`). Done as a
+      // setter rather than a constructor arg to avoid a circular
+      // dependency on `this` during MessageService construction.
+      this._message.setPersistFlusher(() => this.awaitPendingPersist());
+
+      // Same plumbing for the incoming-announcement path: forces the
+      // session-blob persist between the Rust state mutation and the
+      // SQL inserts so a crash in between can't leave an orphan
+      // Discussion. See `AnnouncementService._processIncomingAnnouncement`
+      // for rationale.
+      this._announcement.setPersistFlusher(() => this.awaitPendingPersist());
+
+      this._discussion.setMessageService(this._message);
+
+      this._refresh = new RefreshService(
+        this._message,
+        this._discussion,
+        this._announcement,
+        session,
+        this.eventEmitter,
+        queries,
+        this.config
+      );
+
+      this._selfMessage = new SelfMessageService(
+        queries,
+        session.userIdEncoded,
+        encryptionKey
+      );
+      await this._selfMessage.ensureDiscussionExists();
+
+      // Now set refreshService on services (circular dependency resolved via setter)
+      this._discussion.setRefreshService(this._refresh);
+      this._announcement.setRefreshService(this._refresh);
+
+      // Reset any messages stuck in SENDING status to WAITING_SESSION
+      // This handles app crash/close during message send
+      await this.resetStuckSendingMessages(session.userIdEncoded);
+
+      // Update SDK state to reflect the newly opened session.
+      this.state = {
+        status: SdkStatus.SESSION_OPEN,
+        messageProtocol,
+        config,
+        session,
+        encryptionKey,
+        onPersist: options.onPersist,
+      };
+
+      // Wire up cross-service dependencies
+      this._contact = new ContactService(
+        session,
+        queries,
+        this._auth!,
+        this.eventEmitter
+      );
+      this._message.setQueueManager(this.messageQueues);
+      this._discussion.setAuthService(this._auth!);
+
+      // Auto-start polling if enabled in config AND the caller didn't opt
+      // out via `autoStartPolling: false`. The opt-out is used by the app
+      // during multi-account onboarding, where we open each account's
+      // session just long enough to write its profile — polling during
+      // that window would race with session switches.
+      if (config.polling.enabled && options.autoStartPolling !== false) {
+        this.startPolling();
+      }
+
+      // Start publication only after every fallible session-opening step has
+      // committed. Tentative onboarding explicitly opts out and the app starts
+      // it after its own profile save has committed.
+      if (options.publishPublicKey !== false) {
+        this.startPublicKeyPublication();
+      }
+      committed = true;
+    } catch (error) {
+      if (!committed) {
+        this.stopPublicKeyPublication();
+        this.pollingManager.stop();
+        session?.dispose();
+        if (ownsEncryptionKey) encryptionKey?.free();
+        this._announcement = null;
+        this._discussion = null;
+        this._message = null;
+        this._refresh = null;
+        this._contact = null;
+        this._selfMessage = null;
+        this.messageQueues.clear();
+        if (this._persistTimer !== null) {
+          clearTimeout(this._persistTimer);
+          this._persistTimer = null;
+        }
+        this._persistDirty = false;
+        this._persistInFlight = false;
+        this._persistInFlightPromise = null;
+        this._persistBackoffMs = 0;
+        this.state = initializedState;
+      }
+      throw error;
+    } finally {
+      releaseLifecycle();
     }
+  }
 
-    // Generate keys from mnemonic
-    const userKeys = await generateUserKeys(options.mnemonic);
+  /**
+   * Start the session-scoped public-key publisher after consumer-side login
+   * persistence has committed. Safe to call more than once: prior timers and
+   * listeners are replaced, while AuthService coalesces any in-flight post.
+   */
+  startPublicKeyPublication(): void {
+    const state = this.requireSession();
+    this.stopPublicKeyPublication();
 
-    // Create session with persistence callback.
-    //
-    // The callback is awaited by the session module before each network
-    // send. We coalesce persists into a 500 ms-debounced background flush
-    // so the await resolves instantly: `handleSessionPersist` only marks
-    // the state dirty and schedules the actual write. See the
-    // `_persistDirty`/`flushPersist` machinery below and `closeSession`
-    // for the synchronous drain.
-    const session = new SessionModule(
-      userKeys,
-      async () => {
-        this.handleSessionPersist();
-      },
-      options.sessionConfig
-    );
-
-    // Restore existing session state if provided
-    if (options.encryptedSession) {
-      session.load(options.encryptedSession, encryptionKey);
-    }
-
-    // Get config from initialized state
-    const { config } = this.state;
-
-    // Create services with config (refreshService will be set after creation)
+    const generation = this._publicKeyPublicationGeneration;
+    const publicKeyBytes = new Uint8Array(state.session.ourPk.to_bytes());
+    const userId = state.session.userIdEncoded;
     const queries = this._queries!;
 
-    this._announcement = new AnnouncementService(
-      messageProtocol,
-      session,
-      this.eventEmitter,
-      config,
-      queries
-    );
+    const schedule = (delayMs: number) => {
+      if (
+        generation !== this._publicKeyPublicationGeneration ||
+        this.state.status !== SdkStatus.SESSION_OPEN
+      ) {
+        return;
+      }
+      if (this._publicKeyPublicationTimer !== null) {
+        clearTimeout(this._publicKeyPublicationTimer);
+      }
+      const delay = Number.isFinite(delayMs)
+        ? Math.max(0, delayMs)
+        : PUBLIC_KEY_REPUBLISH_INTERVAL_MS;
+      const timer = setTimeout(() => {
+        this._publicKeyPublicationTimer = null;
+        void publish();
+      }, delay);
+      this._publicKeyPublicationTimer = timer;
 
-    this._discussion = new DiscussionService(
-      this._announcement,
-      session,
-      this.eventEmitter,
-      queries
-    );
-
-    this._message = new MessageService(
-      messageProtocol,
-      session,
-      this.eventEmitter,
-      config,
-      queries
-    );
-    // Wire the immediate-persist callback so the send hot path can
-    // run the session-blob persist in parallel with the network write
-    // (see `MessageService.processSendQueueForContact`). Done as a
-    // setter rather than a constructor arg to avoid a circular
-    // dependency on `this` during MessageService construction.
-    this._message.setPersistFlusher(() => this.awaitPendingPersist());
-
-    // Same plumbing for the incoming-announcement path: forces the
-    // session-blob persist between the Rust state mutation and the
-    // SQL inserts so a crash in between can't leave an orphan
-    // Discussion. See `AnnouncementService._processIncomingAnnouncement`
-    // for rationale.
-    this._announcement.setPersistFlusher(() => this.awaitPendingPersist());
-
-    this._discussion.setMessageService(this._message);
-
-    this._refresh = new RefreshService(
-      this._message,
-      this._discussion,
-      this._announcement,
-      session,
-      this.eventEmitter,
-      queries,
-      this.config
-    );
-
-    this._selfMessage = new SelfMessageService(
-      queries,
-      session.userIdEncoded,
-      encryptionKey
-    );
-    await this._selfMessage.ensureDiscussionExists();
-
-    // Publish gossip ID (public key) on messageProtocol so the user is discoverable.
-    // Non-blocking: login must succeed even when the API is unreachable.
-    this._auth!.publishPublicKey(
-      session.ourPk,
-      session.userIdEncoded,
-      queries
-    ).catch(err => {
-      this.eventEmitter.emit(SdkEventType.ERROR, {
-        error: err instanceof Error ? err : new Error(String(err)),
-        context: 'publishPublicKey',
-      });
-    });
-    // Now set refreshService on services (circular dependency resolved via setter)
-    this._discussion.setRefreshService(this._refresh);
-    this._announcement.setRefreshService(this._refresh);
-
-    // Reset any messages stuck in SENDING status to WAITING_SESSION
-    // This handles app crash/close during message send
-    await this.resetStuckSendingMessages(session.userIdEncoded);
-
-    // Update SDK state to reflect the newly opened session.
-    this.state = {
-      status: SdkStatus.SESSION_OPEN,
-      messageProtocol,
-      config,
-      session,
-      userKeys,
-      encryptionKey,
-      onPersist: options.onPersist,
+      // A session may be used by short-lived Node automation with polling
+      // disabled. Keep publication scheduled while the process has other work,
+      // but do not let this timer alone keep Node alive for up to 24 hours.
+      const nodeTimer = timer as typeof timer & { unref?: () => void };
+      nodeTimer.unref?.();
     };
 
-    // Wire up cross-service dependencies
-    this._contact = new ContactService(
-      session,
-      queries,
-      this._auth!,
-      this.eventEmitter
-    );
-    this._message.setQueueManager(this.messageQueues);
-    this._discussion.setAuthService(this._auth!);
+    const publish = async () => {
+      if (
+        generation !== this._publicKeyPublicationGeneration ||
+        this.state.status !== SdkStatus.SESSION_OPEN ||
+        this.state.session.userIdEncoded !== userId
+      ) {
+        return;
+      }
 
-    // Auto-start polling if enabled in config AND the caller didn't opt
-    // out via `autoStartPolling: false`. The opt-out is used by the app
-    // during multi-account onboarding, where we open each account's
-    // session just long enough to write its profile — polling during
-    // that window would race with session switches.
-    if (config.polling.enabled && options.autoStartPolling !== false) {
-      this.startPolling();
+      try {
+        const nextDelay = await this._auth!.publishPublicKeyBytes(
+          publicKeyBytes,
+          userId,
+          queries
+        );
+        schedule(nextDelay);
+      } catch (error) {
+        this.eventEmitter.emit(SdkEventType.ERROR, {
+          error: error instanceof Error ? error : new Error(String(error)),
+          context: 'publishPublicKey',
+        });
+        schedule(GossipSdk.PUBLIC_KEY_PUBLICATION_RETRY_MS);
+      }
+    };
+
+    this._publicKeyOnlineHandler = () => {
+      if (this._publicKeyPublicationTimer !== null) {
+        clearTimeout(this._publicKeyPublicationTimer);
+        this._publicKeyPublicationTimer = null;
+      }
+      void publish();
+    };
+    if (typeof globalThis.addEventListener === 'function') {
+      globalThis.addEventListener('online', this._publicKeyOnlineHandler);
     }
+    void publish();
+  }
+
+  private stopPublicKeyPublication(): void {
+    this._publicKeyPublicationGeneration += 1;
+    if (this._publicKeyPublicationTimer !== null) {
+      clearTimeout(this._publicKeyPublicationTimer);
+      this._publicKeyPublicationTimer = null;
+    }
+    if (
+      this._publicKeyOnlineHandler &&
+      typeof globalThis.removeEventListener === 'function'
+    ) {
+      globalThis.removeEventListener('online', this._publicKeyOnlineHandler);
+    }
+    this._publicKeyOnlineHandler = null;
   }
 
   /**
@@ -494,26 +767,65 @@ class GossipSdk {
    * The database connection is kept open so a new session can be opened.
    * Call `destroy()` to release the database connection entirely.
    */
-  async closeSession(): Promise<void> {
+  private async closeSessionInternal(
+    forceSecureNamespacePersistence = false
+  ): Promise<void> {
     if (this.state.status !== SdkStatus.SESSION_OPEN) {
       return;
     }
 
-    // Stop polling first
+    // Stop session-scoped background work first.
+    this.stopPublicKeyPublication();
     this.pollingManager.stop();
 
-    // Drain any pending session persist before tearing down state.
-    // The debounced background flush may have queued writes that haven't
-    // run yet; this guarantees durability on graceful shutdown. We keep
-    // `status = SESSION_OPEN` during the drain so `flushPersist` can
-    // still read `session`/`encryptionKey`, and loop until the dirty
-    // flag stays clear — any persist callback firing between the await
-    // and `cleanup()` below re-sets it, and without a loop we'd lose
-    // that final state.
-    await this.flushSessionPersistSync();
+    if (forceSecureNamespacePersistence && this._conn?.isSecureStorage) {
+      let persistedStableState = false;
+      for (
+        let attempt = 0;
+        attempt < GossipSdk.MAX_PERSIST_DRAIN_LOOPS;
+        attempt++
+      ) {
+        if (this._persistTimer !== null) {
+          clearTimeout(this._persistTimer);
+          this._persistTimer = null;
+        }
+        if (this._persistInFlightPromise) {
+          await this._persistInFlightPromise;
+        }
+        // Any SessionModule callback that lands while the async namespace write
+        // is in flight sets this flag again, forcing another exact snapshot.
+        this._persistDirty = false;
+        const { encryptionKey, session } = this.state;
+        if (!encryptionKey) {
+          throw new Error('Cannot export without a messaging-session key');
+        }
+        const blob = session.toEncryptedBlob(encryptionKey);
+        try {
+          await this._conn.secureStorageReplaceNamespaceData(
+            SESSION_BLOB_NAMESPACE,
+            blob
+          );
+        } finally {
+          blob.fill(0);
+        }
+        if (!this._persistDirty && this._persistInFlightPromise === null) {
+          persistedStableState = true;
+          break;
+        }
+      }
+      if (!persistedStableState) {
+        throw new Error(
+          'Unable to freeze the latest messaging session state for export'
+        );
+      }
+    } else {
+      // Ordinary logout retains consumer callback semantics and drains its
+      // debounced writes before tearing down the session.
+      await this.flushSessionPersistSync();
+    }
 
-    // Cleanup session
-    this.state.session.cleanup();
+    // Cleanup the manager and both identity-key wrappers deterministically.
+    this.state.session.dispose();
 
     // Free the encryption key WASM object to zero its memory before dropping
     this.state.encryptionKey?.free();
@@ -537,18 +849,50 @@ class GossipSdk {
     };
   }
 
+  async closeSession(): Promise<void> {
+    if (this._portableImportActive) {
+      throw new Error('Cannot close a session during portable import');
+    }
+    if (this._portableExportActive) {
+      throw new Error('Cannot close session during portable export');
+    }
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK lifecycle operation is already active');
+    }
+    this._lifecycleCloseActive = true;
+    try {
+      await this.closeSessionInternal();
+    } finally {
+      this._lifecycleCloseActive = false;
+    }
+  }
+
   /**
    * Close the session and release the database connection.
    * After calling this, the instance cannot be reused — create a new one.
    */
   async destroy(): Promise<void> {
-    await this.closeSession();
-    this._queries = null;
-    if (this._conn) {
-      await this._conn.close();
-      this._conn = null;
+    if (this._portableImportActive) {
+      throw new Error('Cannot destroy SDK during portable import');
     }
-    this.state = { status: SdkStatus.UNINITIALIZED };
+    if (this._portableExportActive) {
+      throw new Error('Cannot destroy SDK during portable export');
+    }
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK lifecycle operation is already active');
+    }
+    this._lifecycleCloseActive = true;
+    try {
+      await this.closeSessionInternal();
+      this._queries = null;
+      if (this._conn) {
+        await this._conn.close();
+        this._conn = null;
+      }
+      this.state = { status: SdkStatus.UNINITIALIZED };
+    } finally {
+      this._lifecycleCloseActive = false;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -567,7 +911,15 @@ class GossipSdk {
     return state.session.userId;
   }
 
-  /** User's public keys. Throws if no session is open. */
+  /**
+   * User's public keys, borrowed from the active session.
+   *
+   * The returned WASM wrapper remains valid only until `closeSession()` or
+   * `destroy()` begins disposing that session. Callers must not retain or use
+   * it after logout and must not free it themselves.
+   *
+   * @throws If no session is open.
+   */
   get publicKeys(): UserPublicKeys {
     const state = this.requireSession();
     return state.session.ourPk;
@@ -648,21 +1000,41 @@ class GossipSdk {
    * for callers gating UI on this getter.
    */
   get dbReady(): boolean {
-    if (this._conn?.storageState === 'locked') return false;
-    return this._queries !== null;
+    return this._conn?.isOpen === true && this._queries !== null;
   }
 
   /**
    * Lifecycle of the secure-storage session.
-   * - `'empty'`: decoy slots provisioned, no real session yet. UI should
-   *   route to signup; consumer calls `secureStorageCreate(slot, password)`.
+   * - `'empty'`: decoy slots provisioned, no committed account generation.
+   *   UI should route to signup. Consumers must begin one atomic onboarding
+   *   candidate before calling `secureStorageCreate(slot, password)`.
    * - `'locked'`: real session exists, encrypted, key not in memory.
    *   UI should route to login; consumer calls `secureStorageUnlock(password)`.
-   * - `'unlocked'`: session open, `queries`/`profiles` available.
+   * - `'unlocked'`: session key remains available. During retryable lock
+   *   recovery the database may already be closed, so use `dbReady` before
+   *   accessing `queries` or `profiles`.
    * - `null`: not a secure-storage connection (other backend selected).
    */
   get storageState(): SecureStorageState | null {
     return this._conn?.storageState ?? null;
+  }
+
+  get accountGenerationState(): AccountGenerationState | null {
+    return this._conn?.accountGenerationState ?? null;
+  }
+
+  /**
+   * Source-neutral identifier for the active committed account generation.
+   * Every onboarding and portable-import commit receives a fresh epoch; an
+   * empty generation has no epoch.
+   */
+  get accountGenerationEpoch(): string | null {
+    return this._conn?.accountGenerationEpoch ?? null;
+  }
+
+  /** Re-read source-neutral generation metadata after an ambiguous commit. */
+  async refreshAccountGenerationState(): Promise<AccountGenerationState | null> {
+    return this.requireConn().refreshSecureStorageAccountGeneration();
   }
 
   private requireConn(): DatabaseConnection {
@@ -680,12 +1052,68 @@ class GossipSdk {
    * `init()` provisions decoys automatically when storage is empty.
    */
   async secureStorageProvision(): Promise<void> {
-    await this.requireConn().secureStorageProvision();
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageProvision();
+    } finally {
+      releaseLifecycle();
+    }
   }
 
   /**
-   * Open a brand-new encrypted session in the given slot, deriving the
-   * key from `password`. Use during signup, when `storageState === 'empty'`.
+   * Begin a bounded in-memory onboarding generation. Create and lock every
+   * account inside this candidate, then commit the complete generation once or
+   * abort it. Direct creation against fresh durable storage is forbidden.
+   */
+  async secureStorageBeginOnboardingCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageBeginOnboardingCandidate();
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Commit the complete candidate atomically. Call `closeSession()` first. */
+  async secureStorageCommitOnboardingCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot commit an onboarding candidate while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageCommitOnboardingCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Discard the candidate from memory. Call `closeSession()` first. */
+  async secureStorageAbortOnboardingCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot abort an onboarding candidate while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageAbortOnboardingCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * Open a brand-new encrypted session in the given slot, deriving the key
+   * from `password`. Fresh storage requires an active onboarding candidate;
+   * finish all account writes and locks before committing that candidate.
    * Transitions state to `'unlocked'` on success and makes `queries` /
    * `profiles` available.
    *
@@ -699,11 +1127,16 @@ class GossipSdk {
    *   underlying allocation fails.
    */
   async secureStorageCreate(slot: number, password: string): Promise<void> {
-    const conn = this.requireConn();
-    await conn.secureStorageCreate(slot, password);
-    if (!this._queries) {
-      this._queries = new Queries(conn);
-      this._profile = new ProfileService(this._queries);
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      const conn = this.requireConn();
+      await conn.secureStorageCreate(slot, password);
+      if (!this._queries) {
+        this._queries = new Queries(conn);
+        this._profile = this.createProfileService(this._queries);
+      }
+    } finally {
+      releaseLifecycle();
     }
   }
 
@@ -720,13 +1153,18 @@ class GossipSdk {
    *   storage IO failure, empty password).
    */
   async secureStorageUnlock(password: string): Promise<boolean> {
-    const conn = this.requireConn();
-    const ok = await conn.secureStorageUnlock(password);
-    if (ok && !this._queries) {
-      this._queries = new Queries(conn);
-      this._profile = new ProfileService(this._queries);
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      const conn = this.requireConn();
+      const ok = await conn.secureStorageUnlock(password);
+      if (ok && !this._queries) {
+        this._queries = new Queries(conn);
+        this._profile = this.createProfileService(this._queries);
+      }
+      return ok;
+    } finally {
+      releaseLifecycle();
     }
-    return ok;
   }
 
   /**
@@ -740,20 +1178,26 @@ class GossipSdk {
    * unlocked invariant other parts of the SDK rely on.
    */
   async secureStorageLock(): Promise<void> {
-    // Invariant: locking storage while a session is open would leave
-    // the SDK in SESSION_OPEN + storageState='locked', which the data
-    // services do not expect (they assume SESSION_OPEN implies
-    // unlocked storage and only check session status). Force the
-    // caller to closeSession first.
-    if (this.state.status === SdkStatus.SESSION_OPEN) {
-      throw new Error(
-        'Cannot lock secure storage while a session is open. ' +
-          'Call closeSession() first.'
-      );
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      // Invariant: locking storage while a session is open would leave
+      // the SDK in SESSION_OPEN + storageState='locked', which the data
+      // services do not expect (they assume SESSION_OPEN implies
+      // unlocked storage and only check session status). Force the
+      // caller to closeSession first.
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'Cannot lock secure storage while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      // The connection closes Drizzle before its fallible durable flush.
+      this._queries = null;
+      this._profile = null;
+      await this.requireConn().secureStorageLock();
+    } finally {
+      releaseLifecycle();
     }
-    await this.requireConn().secureStorageLock();
-    this._queries = null;
-    this._profile = null;
   }
 
   /**
@@ -772,25 +1216,355 @@ class GossipSdk {
    * on. After this resolves, storageState is 'locked'.
    */
   async secureStorageDestroy(): Promise<void> {
-    if (this.state.status === SdkStatus.SESSION_OPEN) {
-      throw new Error(
-        'Cannot destroy secure storage while a session is open. ' +
-          'Call closeSession() first.'
-      );
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'Cannot destroy secure storage while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageDestroy([
+        SQL_NAMESPACE,
+        SESSION_BLOB_NAMESPACE,
+      ]);
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
     }
-    await this.requireConn().secureStorageDestroy([
-      SQL_NAMESPACE,
-      SESSION_BLOB_NAMESPACE,
-    ]);
-    this._queries = null;
-    this._profile = null;
   }
 
   /** Force-flush dirty encrypted blocks to the backing store. */
   async flush(): Promise<void> {
-    if (this._conn?.isSecureStorage) {
-      await this._conn.secureStorageFlush();
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this._conn?.isSecureStorage) {
+        await this._conn.secureStorageFlush();
+      }
+    } finally {
+      releaseLifecycle();
     }
+  }
+
+  /**
+   * End the current runtime session, force its debounced SessionManager state
+   * through namespace 1, lock storage, and stream one portable snapshot.
+   *
+   * This is intentionally one-way for this SDK runtime. Success, destination
+   * failure, and cancellation all leave storage locked; callers must route to
+   * login/reload rather than reopen stale services.
+   */
+  async exportPortableV1(
+    write: PortableChunkWriter,
+    onProgress?: PortableProgressCallback,
+    signal?: AbortSignal
+  ): Promise<void> {
+    if (signal?.aborted) {
+      throw new DOMException('Backup cancelled', 'AbortError');
+    }
+    if (this._portableImportActive || this._portableImportTerminal) {
+      throw new Error('Cannot export during or after portable import');
+    }
+    if (this._portableExportActive) {
+      throw new Error('Portable export is already active');
+    }
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK lifecycle operation is already active');
+    }
+    this._portableExportActive = true;
+    try {
+      const conn = this.requireConn();
+      if (!conn.isSecureStorage) {
+        throw new Error('Portable export requires secure storage');
+      }
+      if (conn.storageState === 'empty') {
+        throw new Error(
+          'Portable export requires an existing locked installation'
+        );
+      }
+      this._portableExportTerminal = true;
+      await this.closeSessionInternal(true);
+      if (conn.storageState === 'unlocked') {
+        this._queries = null;
+        this._profile = null;
+        await conn.secureStorageLock();
+      }
+      if (conn.storageState !== 'locked') {
+        throw new Error(
+          'Portable export requires an existing locked installation'
+        );
+      }
+      await conn.secureStorageExportPortableV1(write, onProgress, signal);
+    } finally {
+      this._portableExportActive = false;
+    }
+  }
+
+  /**
+   * Start one replacement-only portable import under an application-owned
+   * onboarding authorization check. The returned object is the sole runtime
+   * capability for the candidate and serializes every operation.
+   */
+  async beginPortableImport(
+    isAuthorized: PortableImportAuthorization
+  ): Promise<PortableImportCandidate> {
+    if (this._portableImportBeginActive) {
+      throw new Error('Portable import startup is already active');
+    }
+    this._portableImportBeginActive = true;
+    try {
+      return await this.beginPortableImportInternal(isAuthorized);
+    } finally {
+      this._portableImportBeginActive = false;
+    }
+  }
+
+  private async beginPortableImportInternal(
+    isAuthorized: PortableImportAuthorization
+  ): Promise<PortableImportCandidate> {
+    if (this._portableImportStartupCleanup) {
+      await this.requireConn().secureStorageAbortPortableImport();
+      this._portableImportStartupCleanup = false;
+      this._portableImportActive = false;
+    }
+    if (this._portableImportActive || this._portableImportTerminal) {
+      throw new Error('Portable import is already active or completed');
+    }
+    if (this._portableExportActive || this._portableExportTerminal) {
+      throw new Error('Portable import is unavailable after export');
+    }
+    if (this._lifecycleCloseActive || this._accountLifecycleActive) {
+      throw new Error('SDK lifecycle operation is already active');
+    }
+    if (this.state.status !== SdkStatus.INITIALIZED) {
+      throw new Error('Portable import requires an initialized SDK');
+    }
+    const conn = this.requireConn();
+    if (
+      !conn.isSecureStorage ||
+      (conn.storageState !== 'empty' && conn.storageState !== 'locked')
+    ) {
+      throw new Error('Portable import requires replaceable secure storage');
+    }
+    if (!isAuthorized()) {
+      throw new Error('Portable import is not currently authorized');
+    }
+
+    this._portableImportActive = true;
+    try {
+      await conn.secureStorageBeginPortableImport();
+    } catch (error) {
+      this._portableImportActive = false;
+      throw error;
+    }
+    let authorizedAfterStart: boolean;
+    try {
+      authorizedAfterStart = isAuthorized();
+    } catch (error) {
+      try {
+        await conn.secureStorageAbortPortableImport();
+        this._portableImportActive = false;
+      } catch {
+        this._portableImportStartupCleanup = true;
+      }
+      throw error;
+    }
+    if (!authorizedAfterStart) {
+      try {
+        await conn.secureStorageAbortPortableImport();
+        this._portableImportActive = false;
+      } catch (error) {
+        this._portableImportStartupCleanup = true;
+        throw error;
+      }
+      throw new Error('Portable import is not currently authorized');
+    }
+
+    type ImportStage = 'receiving' | 'validated' | 'ready' | 'closed';
+    let stage: ImportStage = 'receiving';
+    let closing = false;
+    let operationTail = Promise.resolve();
+    const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+      const result = operationTail.then(operation, operation);
+      operationTail = result.then(
+        () => undefined,
+        () => undefined
+      );
+      return result;
+    };
+    const closeCandidate = async (): Promise<void> => {
+      if (stage === 'closed') return;
+      closing = true;
+      await conn.secureStorageAbortPortableImport();
+      stage = 'closed';
+      this._portableImportActive = false;
+    };
+    let authorizationDenied = false;
+    const requireAuthorization = (): void => {
+      if (authorizationDenied) {
+        throw new Error('Portable import is not currently authorized');
+      }
+      try {
+        if (!isAuthorized()) {
+          authorizationDenied = true;
+          throw new Error('Portable import is not currently authorized');
+        }
+      } catch (error) {
+        authorizationDenied = true;
+        throw error;
+      }
+    };
+
+    return Object.freeze({
+      push: (chunk: Uint8Array) =>
+        enqueue(async () => {
+          if (closing || stage !== 'receiving') {
+            throw new Error('Portable import is not receiving data');
+          }
+          try {
+            requireAuthorization();
+            await conn.secureStoragePushPortableImportChunk(chunk);
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+        }),
+      finishValidation: () =>
+        enqueue(async () => {
+          if (closing || stage !== 'receiving') {
+            throw new Error('Portable import cannot be validated');
+          }
+          try {
+            requireAuthorization();
+            await conn.secureStorageValidatePortableImport();
+            stage = 'validated';
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+        }),
+      authenticate: (password: Uint8Array) =>
+        enqueue(async () => {
+          if (closing || stage !== 'validated') {
+            throw new Error('Portable import is not validated');
+          }
+          try {
+            requireAuthorization();
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+          let preview: ImportedAccountPreview | null;
+          try {
+            preview =
+              await conn.secureStorageAuthenticatePortableImportCandidate(
+                password
+              );
+          } catch (error) {
+            try {
+              requireAuthorization();
+            } catch (authorizationError) {
+              await closeCandidate().catch(() => {});
+              throw authorizationError;
+            }
+            throw error;
+          }
+          try {
+            requireAuthorization();
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+          return preview;
+        }),
+      install: (
+        admitPasswords: Parameters<PortableImportCandidate['install']>[0]
+      ) =>
+        enqueue(async () => {
+          if (closing || (stage !== 'validated' && stage !== 'ready')) {
+            throw new Error('Portable import cannot be installed');
+          }
+          try {
+            requireAuthorization();
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+
+          if (stage === 'validated') {
+            await conn.secureStorageBeginPortableOuterMigration();
+            let accepting = true;
+            let admitActive = false;
+            const admissions: Promise<void>[] = [];
+            const admit = (password: Uint8Array): Promise<void> => {
+              if (!accepting || admitActive) {
+                const rejected = Promise.reject<void>(
+                  new Error('Portable import password admission is invalid')
+                );
+                admissions.push(rejected);
+                return rejected;
+              }
+              requireAuthorization();
+              admitActive = true;
+              const admission =
+                conn.secureStorageAdmitPortableOuterMigrationPassword(password);
+              admissions.push(admission);
+              void admission.then(
+                () => {
+                  admitActive = false;
+                },
+                () => {
+                  admitActive = false;
+                }
+              );
+              return admission;
+            };
+            try {
+              await admitPasswords(admit);
+              accepting = false;
+              await Promise.all(admissions);
+              if (admissions.length === 0) {
+                throw new Error('Portable import requires an admitted account');
+              }
+            } catch (error) {
+              accepting = false;
+              await closeCandidate().catch(() => {});
+              throw new PortableImportTerminalError(
+                'Portable import password admission failed',
+                { cause: error }
+              );
+            }
+            try {
+              requireAuthorization();
+            } catch (error) {
+              await closeCandidate().catch(() => {});
+              throw error;
+            }
+            try {
+              await conn.secureStorageFinishPortableOuterMigration();
+              stage = 'ready';
+            } catch (error) {
+              // Finalization failures restore the exact validated source, so
+              // retained application-owned passwords can retry.
+              stage = 'validated';
+              throw error;
+            }
+          }
+
+          try {
+            requireAuthorization();
+          } catch (error) {
+            await closeCandidate().catch(() => {});
+            throw error;
+          }
+          await conn.secureStorageInstallPortableImport();
+          stage = 'closed';
+          this._portableImportActive = false;
+          this._portableImportTerminal = true;
+        }),
+      abort: () => enqueue(closeCandidate),
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -827,6 +1601,11 @@ class GossipSdk {
    * need to reuse the bytes must clone before calling.
    */
   async persistSessionBlob(blob: Uint8Array): Promise<void> {
+    if (this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
     const conn = this._conn;
     if (!conn?.isSecureStorage) return;
     // The debounce + dirty-flag coalescing infrastructure already lives
@@ -864,6 +1643,11 @@ class GossipSdk {
 
   /** Truncate the session blob namespace (e.g. on account reset). */
   async clearSessionBlob(): Promise<void> {
+    if (this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
     const conn = this._conn;
     if (!conn?.isSecureStorage) return;
     await conn.secureStorageClearNamespace(SESSION_BLOB_NAMESPACE);
@@ -1045,6 +1829,11 @@ class GossipSdk {
   // ─────────────────────────────────────────────────────────────────
 
   private requireSession(): SdkStateSessionOpen {
+    if (this._portableExportTerminal) {
+      throw new Error(
+        'This SDK runtime ended for portable export; reload first'
+      );
+    }
     if (this.state.status !== SdkStatus.SESSION_OPEN) {
       throw new Error('No session open. Call openSession() first.');
     }
@@ -1192,6 +1981,16 @@ class GossipSdk {
         await this.flushPersist();
       }
     }
+    if (
+      !this._persistDirty &&
+      this._persistTimer === null &&
+      this._persistInFlightPromise === null
+    ) {
+      return;
+    }
+    throw new Error(
+      'Unable to durably persist the latest messaging session state'
+    );
   }
 
   /**

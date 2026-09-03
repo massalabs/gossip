@@ -7,6 +7,7 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "SecureStorageNative"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "call", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "resetStorage", returnType: CAPPluginReturnPromise),
     ]
 
     /// Dedicated 8 MB-stack worker thread draining a single FIFO queue.
@@ -53,6 +54,25 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject(msg, code)
             } catch {
                 call.reject(error.localizedDescription, "INTERNAL")
+            }
+        }
+    }
+
+    @objc func resetStorage(_ call: CAPPluginCall) {
+        Self.worker.enqueue {
+            do {
+                _ = try nativeCall(method: "prepareStorageReset", argsJson: "{}")
+                let base = FileManager.default.urls(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask
+                ).first!
+                let storage = base.appendingPathComponent("secure-storage")
+                if FileManager.default.fileExists(atPath: storage.path) {
+                    try FileManager.default.removeItem(at: storage)
+                }
+                call.resolve()
+            } catch {
+                call.reject("secure storage reset failed", "RESET_FAILED")
             }
         }
     }

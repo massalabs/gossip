@@ -4,15 +4,21 @@ import { logger } from '../utils/logger.ts';
  */
 
 import {
-  BiometricCreationData,
-  BiometricCredentials,
-} from '../services/biometricService';
-import {
+  EncryptionKey,
   generateEncryptionKeyFromSeed,
   decodeFromBase64Url,
   encodeToBase64,
   encodeToBase64Url,
 } from '@massalabs/gossip-sdk';
+
+export interface WebAuthnCreationData {
+  credentialId: string;
+  encryptionKey: EncryptionKey;
+}
+
+export interface WebAuthnCredentials {
+  encryptionKey: EncryptionKey;
+}
 
 export const WEBAUTHN_PRF_UNSUPPORTED_ERROR_CODE = 'webauthn_prf_unsupported';
 /**
@@ -118,15 +124,13 @@ export async function isWebAuthnPrfSupported(): Promise<boolean> {
 }
 
 /**
- * Generate a new WebAuthn credential for account creation
- * @param username - Display name for the user
- * @param userId - Binary user ID (must be <= 64 bytes, typically 32 bytes)
+ * Generate the singleton WebAuthn credential used to protect a login password.
+ * Its random user handle and generic display name deliberately contain no
+ * Gossip account/profile/secure-storage slot identifier.
  */
 export async function createWebAuthnCredential(
-  username: string,
-  userId: Uint8Array,
   salt: Uint8Array
-): Promise<BiometricCreationData> {
+): Promise<WebAuthnCreationData> {
   if (!isWebAuthnSupported()) {
     throw new Error('WebAuthn is not supported in this browser');
   }
@@ -136,8 +140,8 @@ export async function createWebAuthnCredential(
     throw new Error('Platform authenticator (biometric) is not available');
   }
 
-  // Generate a random challenge
   const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const userHandle = crypto.getRandomValues(new Uint8Array(32));
 
   // Create credential creation options
   const rpId = window.location.hostname;
@@ -149,9 +153,9 @@ export async function createWebAuthnCredential(
         id: rpId,
       },
       user: {
-        id: userId as BufferSource,
-        name: username,
-        displayName: username,
+        id: userHandle as BufferSource,
+        name: 'Gossip biometric login',
+        displayName: 'Gossip biometric login',
       },
       pubKeyCredParams: [
         { type: 'public-key', alg: -7 }, // ES256 (ECDSA P-256)
@@ -201,11 +205,7 @@ export async function createWebAuthnCredential(
     const encryptionKey = await generateEncryptionKeyFromSeed(seed, salt);
     const credentialId = encodeToBase64Url(new Uint8Array(credential.rawId));
 
-    return {
-      credentialId,
-      encryptionKey,
-      authMethod: 'webauthn',
-    };
+    return { credentialId, encryptionKey };
   } catch (error) {
     logger.error('Error creating WebAuthn credential:', error);
     throw new Error(
@@ -218,12 +218,11 @@ export async function createWebAuthnCredential(
  * Authenticate using existing WebAuthn credential
  * @param credentialId - The credential ID to authenticate with
  * @param salt - The same salt used during credential creation (for PRF extension)
- * @param challenge - Optional challenge (random if not provided)
  */
 export async function authenticateWithWebAuthn(
   credentialId: string,
   salt: Uint8Array
-): Promise<BiometricCredentials> {
+): Promise<WebAuthnCredentials> {
   if (!isWebAuthnSupported()) {
     throw new Error('WebAuthn is not supported in this browser');
   }

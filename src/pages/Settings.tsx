@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.ts';
 import React, { useState, useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useTranslation } from 'react-i18next';
 import BaseModal from '../components/ui/BaseModal';
 import PageLayout from '../components/ui/Layout/PageLayout';
@@ -26,6 +27,7 @@ import {
   Shield,
   Clock,
   MessageSquare,
+  Download,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -224,6 +226,19 @@ const Settings = (): React.ReactElement => {
               <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
             )}
           </Button>
+          {['web', 'android', 'ios'].includes(Capacitor.getPlatform()) && (
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
+              onClick={() => navigate(ROUTES.portableBackup())}
+            >
+              <Download className="mr-5 w-5 h-5" />
+              <span className="text-[15px] font-medium flex-1 text-left">
+                {t('menu.secure_backup')}
+              </span>
+            </Button>
+          )}
           <Button
             variant="outline"
             size="custom"

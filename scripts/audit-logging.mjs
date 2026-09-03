@@ -86,6 +86,25 @@ const violations = auditFiles(
   mode === 'dist' ? distForbidden : sourceForbidden
 );
 
+if (mode === 'source') {
+  const capacitorConfig = readFileSync('capacitor.config.ts', 'utf8');
+  const loggingBehaviors = [
+    ...capacitorConfig.matchAll(
+      /\bloggingBehavior\s*:\s*(['"])(?<behavior>[^'"]+)\1/g
+    ),
+  ];
+  if (
+    loggingBehaviors.length !== 1 ||
+    loggingBehaviors[0].groups?.behavior !== 'none'
+  ) {
+    violations.push({
+      file: 'capacitor.config.ts',
+      line: 1,
+      rule: 'Capacitor bridge logging must be globally disabled',
+    });
+  }
+}
+
 if (violations.length > 0) {
   for (const violation of violations) {
     process.stderr.write(

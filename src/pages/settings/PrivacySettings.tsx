@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -31,6 +32,15 @@ const PrivacySettings: React.FC = () => {
     ],
     []
   );
+
+  const handleRetentionChange = async (duration: number | null) => {
+    try {
+      await setDefaultRetentionDuration(duration);
+      setIsRetentionModalOpen(false);
+    } catch (error) {
+      logger.error('Failed to persist default retention setting:', error);
+    }
+  };
 
   const retentionLabel = useMemo(() => {
     const option = RETENTION_OPTIONS.find(
@@ -88,10 +98,7 @@ const PrivacySettings: React.FC = () => {
               {RETENTION_OPTIONS.map(option => (
                 <button
                   key={String(option.value)}
-                  onClick={() => {
-                    setDefaultRetentionDuration(option.value);
-                    setIsRetentionModalOpen(false);
-                  }}
+                  onClick={() => void handleRetentionChange(option.value)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
                     defaultRetentionDuration === option.value
                       ? 'bg-accent-soft text-accent-soft-foreground font-medium'

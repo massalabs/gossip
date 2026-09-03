@@ -7,6 +7,8 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { SessionStatus } from '../../src/wasm/bindings';
+import { generateEncryptionKey } from '../../src/wasm/encryption';
+import { SessionModule } from '../../src/wasm/session';
 import {
   createTestSession,
   createTestSessionPair,
@@ -34,6 +36,29 @@ describe('Real WASM Session', () => {
     expect(sessionData.session.userId).toBeInstanceOf(Uint8Array);
     expect(sessionData.session.userId.length).toBe(32);
     expect(sessionData.session.userIdEncoded).toMatch(/^gossip1/);
+  });
+
+  it('emits and restores the versioned SessionManager envelope', async () => {
+    const sessionData = await createTestSession();
+    sessionsToCleanup.push(sessionData);
+    const key = await generateEncryptionKey();
+
+    try {
+      const blob = sessionData.session.toEncryptedBlob(key);
+      expect(new TextDecoder().decode(blob.subarray(0, 8))).toBe('GOSSIPSM');
+      expect(Array.from(blob.subarray(8, 16))).toEqual([
+        0, 0, 0, 0, 0, 0, 0, 1,
+      ]);
+      expect(Array.from(blob.subarray(16, 24))).toEqual([
+        0, 0, 0, 0, 0, 0, 0, 1,
+      ]);
+      const restored = new SessionModule(sessionData.userKeys);
+      restored.load(blob, key);
+      restored.dispose();
+      blob.fill(0);
+    } finally {
+      key.free();
+    }
   });
 
   it('should establish outgoing session between Alice and Bob', async () => {

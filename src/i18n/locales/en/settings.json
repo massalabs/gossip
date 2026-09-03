@@ -8,6 +8,7 @@
   "copy_mns_domain": "Copy MNS domain",
   "menu": {
     "account_backup": "Account Backup",
+    "secure_backup": "Secure Backup",
     "share_contact": "Share Contact",
     "notifications": "Notifications",
     "appearance": "Appearance",
@@ -21,10 +22,10 @@
     "feedback": "Send Feedback"
   },
   "delete_account": {
-    "button": "Delete Account",
-    "title": "Delete account",
-    "confirm": "Are you sure you want to delete this account?",
-    "warning": "This action cannot be undone"
+    "button": "Delete All Accounts",
+    "title": "Delete all accounts",
+    "confirm": "Permanently delete every Gossip account on this device?",
+    "warning": "Messages, sessions, biometric login, and interrupted import data will also be deleted. External backup files are not changed. This cannot be undone."
   },
   "edit_username_modal": {
     "title": "Edit Username",
@@ -80,6 +81,30 @@
     "password_required": "Password is required",
     "show_failed": "Failed to show backup information. Please try again."
   },
+  "portable_backup": {
+    "title": "Secure Backup",
+    "all_accounts_title": "Back up all accounts",
+    "description": "Create one portable backup containing every encrypted account slot on this device.",
+    "important": "Important: Keep Gossip open until backup verification finishes. Leaving the app may interrupt or corrupt the backup.",
+    "possession_warning": "This backup has no additional password. Anyone who obtains it can try to guess your account passwords offline. Store it securely.",
+    "choose_destination": "Choose backup destination",
+    "change_destination": "Change destination",
+    "destination": "Destination",
+    "selected_file": "the selected Gossip backup",
+    "export": "Export all account data",
+    "notification_title": "Gossip secure backup",
+    "preparing": "Preparing backup",
+    "writing": "Writing backup",
+    "verifying": "Verifying backup",
+    "success_title": "Backup verified",
+    "success_body": "Your portable backup was written and verified successfully.",
+    "continue_login": "Continue to Login",
+    "retry": "Retry backup",
+    "failed": "The backup was not completed. Any unverified output created by this attempt was removed.",
+    "interrupted": "An earlier backup to {{name}} was interrupted. Gossip must delete its incomplete output before you retry or continue.",
+    "cleanup_required": "The backup was not completed. Gossip could not remove the unverified output. Delete {{name}} manually before continuing.",
+    "unsupported": "Secure streaming backup is not available in this browser. Use a supported desktop browser."
+  },
   "debug": {
     "title": "Debug",
     "show_debug": "Show Debug Options",
@@ -91,6 +116,18 @@
   },
   "security": {
     "title": "Security",
+    "biometric_title": "Login with Biometrics",
+    "biometric_description": "Enable biometrics for this account. Your password is still required for import and recovery.",
+    "biometric_warning": "Only one account can use biometric login at a time. Setting it for this account replaces the account currently linked. For privacy, Gossip cannot show which account that is.",
+    "biometric_use_for_account": "Use for this account",
+    "biometric_password_title": "Confirm your password",
+    "biometric_password_description": "Enter this account's password before enabling biometric login.",
+    "biometric_password_placeholder": "Enter your password",
+    "biometric_password_continue": "Continue",
+    "biometric_password_cancel": "Cancel",
+    "biometric_password_invalid": "The password for this account is incorrect.",
+    "biometric_success": "Biometric login was updated.",
+    "biometric_failed": "Biometric setup failed. Please try again.",
     "native_only": "Security settings are only available on native platforms (Android and iOS).",
     "auto_lock_title": "Inactivity lock",
     "auto_lock_description": "Automatically lock the app after being in the background for a set period of time.",

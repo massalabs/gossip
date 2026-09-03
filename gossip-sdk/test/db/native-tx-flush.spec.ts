@@ -20,9 +20,11 @@ describe('classifyStatement', () => {
     expect(classifyStatement('Begin transaction')).toBe('begin');
   });
 
-  it('detects COMMIT and ROLLBACK', () => {
+  it('detects COMMIT aliases and ROLLBACK', () => {
     expect(classifyStatement('COMMIT')).toBe('commit');
     expect(classifyStatement('commit')).toBe('commit');
+    expect(classifyStatement('END')).toBe('commit');
+    expect(classifyStatement('end transaction')).toBe('commit');
     expect(classifyStatement('ROLLBACK')).toBe('rollback');
     expect(classifyStatement('rollback')).toBe('rollback');
   });
@@ -39,12 +41,15 @@ describe('classifyStatement', () => {
       'WITH cte AS (SELECT 1) UPDATE t SET x = (SELECT * FROM cte)',
       'VACUUM',
       'PRAGMA journal_mode=MEMORY',
+      'ANALYZE',
+      'REINDEX user_profile_idx',
     ]) {
       expect(classifyStatement(verb)).toBe('mutation');
     }
   });
 
-  it('classifies SELECT and others as `other`', () => {
+  it('classifies savepoints separately from other statements', () => {
+    expect(classifyStatement('SAVEPOINT outer')).toBe('savepoint');
     expect(classifyStatement('SELECT 1')).toBe('other');
     expect(classifyStatement('  EXPLAIN SELECT 1')).toBe('other');
     expect(classifyStatement('')).toBe('other');

@@ -24,6 +24,8 @@ const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
 const API_BASE_URL_KEY = 'gossip-api-base-url';
 const LAST_SYNC_TIMESTAMP_KEY = 'gossip-last-sync-timestamp';
 const SYNC_LOCK_KEY = 'gossip-sync-lock-time';
+const ACCOUNT_CLEANUP_BLOCK_KEY = 'gossip-account-cleanup-blocked-v1';
+const ACCOUNT_OUTPUT_GENERATION_KEY = 'gossip-account-output-generation-v1';
 // Must match BACKGROUND_SYNC_PRESET_KV_KEY in src/utils/preferences.ts
 const SYNC_PRESET_KEY = 'gossip-sync-preset';
 
@@ -41,6 +43,30 @@ const MIN_SYNC_INTERVAL_BALANCED_MS = 5 * 60 * 1000; // 5 minutes — fewer redu
  *
  * Returns an array of base64-encoded seeker strings, or an empty array if none found.
  */
+async function getAccountOutputGeneration() {
+  if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.get) return null;
+  try {
+    return (
+      extractKVValue(await CapacitorKV.get(ACCOUNT_OUTPUT_GENERATION_KEY)) ??
+      '0'
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function isAccountCleanupBlocked() {
+  if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.get) return true;
+  try {
+    const value = extractKVValue(
+      await CapacitorKV.get(ACCOUNT_CLEANUP_BLOCK_KEY)
+    );
+    return typeof value === 'string' && value.length > 0;
+  } catch {
+    return true;
+  }
+}
+
 async function getActiveSeekers() {
   try {
     if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.get) {
@@ -261,7 +287,7 @@ async function fetchMessages(baseUrl, seekers) {
  * Show a notification for new messages.
  * @param {number} messageCount - Number of new messages
  */
-async function showNewMessageNotification(messageCount) {
+async function showNewMessageNotification(messageCount, outputGeneration) {
   try {
     if (
       typeof CapacitorNotifications === 'undefined' ||
@@ -285,10 +311,8 @@ async function showNewMessageNotification(messageCount) {
         body,
         smallIcon: 'ic_notification',
         autoCancel: true,
-        schedule: {
-          allowWhileIdle: true,
-          at: new Date(),
-        },
+        gossipOutputGeneration: outputGeneration,
+        scheduleAt: new Date(Date.now() + 1_000),
       },
     ]);
   } catch (err) {
@@ -315,13 +339,15 @@ function isNetworkAvailable() {
 // Normal syncs should complete in seconds, so 90 seconds is generous.
 const SYNC_LOCK_TIMEOUT_MS = 90 * 1000;
 
-/**
- * Acquire the sync lock using CapacitorKV.
- * Returns true if the lock was acquired, false if another sync is running.
- *
- * Uses a timestamp-based lock with automatic expiration to handle cases
- * where the sync process crashes or doesn't complete properly.
- */
+async function ownsSyncLock(token) {
+  if (!token || typeof CapacitorKV === 'undefined' || !CapacitorKV?.get) {
+    return false;
+  }
+  const current = extractKVValue(await CapacitorKV.get(SYNC_LOCK_KEY));
+  return current === token;
+}
+
+/** Acquire an owner-tagged lock and verify that our write won. */
 async function acquireSyncLock() {
   try {
     if (
@@ -329,66 +355,79 @@ async function acquireSyncLock() {
       !CapacitorKV?.get ||
       !CapacitorKV?.set
     ) {
-      logDebug(
-        '[BackgroundSync] CapacitorKV not available, assuming lock acquired'
-      );
-      // If CapacitorKV not available, assume lock acquired (allow sync to proceed)
-      return true;
+      logDebug('[BackgroundSync] CapacitorKV unavailable; failing closed');
+      return null;
     }
-
     const currentTime = Date.now();
-
-    // Check if lock exists
-    const rawLockValue = await CapacitorKV.get(SYNC_LOCK_KEY);
-    const lockValue = extractKVValue(rawLockValue);
-
+    const lockValue = extractKVValue(await CapacitorKV.get(SYNC_LOCK_KEY));
     if (lockValue) {
       const lockTime = parseInt(lockValue, 10);
-      if (!isNaN(lockTime)) {
-        const lockAge = currentTime - lockTime;
-
-        // Check if lock is still valid (not expired)
-        if (lockAge < SYNC_LOCK_TIMEOUT_MS) {
-          return false;
-        }
+      const lockAge = currentTime - lockTime;
+      if (!isNaN(lockTime) && lockAge >= 0 && lockAge < SYNC_LOCK_TIMEOUT_MS) {
+        return null;
       }
     }
-
-    // Acquire the lock by storing current timestamp
-    await CapacitorKV.set(SYNC_LOCK_KEY, String(currentTime));
-    return true;
+    const token = `${currentTime}:${Math.random().toString(36).slice(2)}`;
+    await CapacitorKV.set(SYNC_LOCK_KEY, token);
+    return (await ownsSyncLock(token)) ? token : null;
   } catch (err) {
     logDebug('[BackgroundSync] Could not acquire sync lock:', String(err));
-    // If check fails, allow sync to proceed (better to sync than skip)
-    return true;
+    return null;
   }
 }
 
-/**
- * Release the sync lock using CapacitorKV.
- */
-async function releaseSyncLock() {
+async function refreshSyncLock(token) {
   try {
-    if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.remove) {
-      return;
-    }
+    const owner = token.substring(token.indexOf(':') + 1);
+    const refreshed = `${Date.now()}:${owner}`;
+    await CapacitorKV.set(SYNC_LOCK_KEY, refreshed);
+    return (await ownsSyncLock(refreshed)) ? refreshed : null;
+  } catch {
+    return null;
+  }
+}
 
-    await CapacitorKV.remove(SYNC_LOCK_KEY);
+/** Atomically remove the lock only if this execution still owns it. */
+async function releaseSyncLock(token) {
+  try {
+    if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.set) return;
+    await CapacitorKV.set(SYNC_LOCK_KEY, `release:${token}`);
   } catch (err) {
     logDebug('[BackgroundSync] Could not release sync lock:', String(err));
   }
 }
 
-addEventListener('backgroundSync', async (resolve, reject, args) => {
-  let lockAcquired = false;
+let syncExecutionTail = Promise.resolve();
 
+addEventListener('backgroundSync', async (resolve, reject, args) => {
+  const predecessor = syncExecutionTail;
+  let releaseExecution;
+  syncExecutionTail = new Promise(release => {
+    releaseExecution = release;
+  });
+  await predecessor;
+
+  let lockToken = null;
+  let lockHeartbeat = null;
+  let lockHeartbeatTask = Promise.resolve();
   try {
     // Acquire sync lock first to prevent concurrent executions
-    lockAcquired = await acquireSyncLock();
-    if (!lockAcquired) {
+    lockToken = await acquireSyncLock();
+    if (!lockToken) {
       logDebug(
         '[BackgroundSync] Sync lock is held, skipping sync (another sync is running)'
       );
+      resolve();
+      return;
+    }
+    lockHeartbeat = setInterval(() => {
+      lockHeartbeatTask = lockHeartbeatTask.then(async () => {
+        if (!lockToken) return;
+        lockToken = await refreshSyncLock(lockToken);
+      });
+    }, 10_000);
+
+    if (await isAccountCleanupBlocked()) {
       resolve();
       return;
     }
@@ -403,6 +442,17 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
     // Check if we should perform sync (timestamp check to avoid redundant work)
     const shouldSync = await shouldPerformSync();
     if (!shouldSync) {
+      resolve();
+      return;
+    }
+
+    if (!(await ownsSyncLock(lockToken))) {
+      resolve();
+      return;
+    }
+
+    const outputGeneration = await getAccountOutputGeneration();
+    if (outputGeneration === null) {
       resolve();
       return;
     }
@@ -429,9 +479,21 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
       return;
     }
 
+    if (!(await ownsSyncLock(lockToken))) {
+      resolve();
+      return;
+    }
+
+    // Recheck after asynchronous network work. Cleanup sets this tombstone
+    // before waiting for our lock, so no old-account result can escape.
+    if (await isAccountCleanupBlocked()) {
+      resolve();
+      return;
+    }
+
     // If new messages were found, show a notification and remove seekers
     if (messages.length > 0) {
-      await showNewMessageNotification(messages.length);
+      await showNewMessageNotification(messages.length, outputGeneration);
       logDebug(`[BackgroundSync] Found ${messages.length} new message(s)`);
 
       // Remove seekers that returned messages to avoid duplicate notifications
@@ -447,8 +509,11 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
     reject(error);
   } finally {
     // Always release the lock when sync completes (success or failure)
-    if (lockAcquired) {
-      await releaseSyncLock();
+    if (lockHeartbeat) clearInterval(lockHeartbeat);
+    await lockHeartbeatTask;
+    if (lockToken) {
+      await releaseSyncLock(lockToken);
     }
+    releaseExecution();
   }
 });

@@ -2053,11 +2053,11 @@ dependencies = [
 
 [[package]]
 name = "pq-rerand"
-version = "0.1.0"
-source = "git+https://github.com/massalabs/pq-rerand?rev=1d5f9d1afd6f06383fffc0aa3a362774ba35d45f#1d5f9d1afd6f06383fffc0aa3a362774ba35d45f"
+version = "0.2.0"
+source = "git+https://github.com/massalabs/pq-rerand?rev=9a5a48beb0af01b0f23e5b68e2c6b53e38e7eb2a#9a5a48beb0af01b0f23e5b68e2c6b53e38e7eb2a"
 dependencies = [
  "rand 0.8.5",
- "rand_distr",
+ "rayon",
  "zeroize",
 ]
 
@@ -2218,16 +2218,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rand_distr"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
-dependencies = [
- "num-traits",
- "rand 0.8.5",
-]
-
-[[package]]
 name = "rand_xorshift"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2247,9 +2237,9 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
 dependencies = [
  "either",
  "rayon-core",
@@ -2480,6 +2470,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "sqlite-wasm-rs",
  "tempfile",
  "thiserror 2.0.18",
@@ -2487,6 +2478,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-rayon",
+ "web-sys",
  "zeroize",
 ]
 
@@ -2594,6 +2586,7 @@ dependencies = [
  "massa_hash",
  "massa_signature",
  "serde",
+ "sha2",
  "web-time",
  "zeroize",
 ]

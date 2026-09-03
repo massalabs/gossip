@@ -39,6 +39,10 @@ vi.mock('../../src/pages/InvitePage', () => ({
   InvitePage: () => <div data-testid="page-invite">invite</div>,
 }));
 
+vi.mock('../../src/pages/PortableBackup', () => ({
+  default: () => <div data-testid="page-portable-backup">backup</div>,
+}));
+
 // ---------------------------------------------------------------------------
 // Mock infrastructure
 // ---------------------------------------------------------------------------
@@ -137,6 +141,13 @@ describe('UnauthenticatedRoutes', () => {
     it('renders AccountCreation page at /setup', async () => {
       await renderAtRoute('/setup');
       await expect.element(page.getByTestId('page-setup')).toBeInTheDocument();
+    });
+
+    it('renders PortableBackup at /backup', async () => {
+      await renderAtRoute('/backup');
+      await expect
+        .element(page.getByTestId('page-portable-backup'))
+        .toBeInTheDocument();
     });
 
     it('renders InvitePage at /invite/:userId', async () => {

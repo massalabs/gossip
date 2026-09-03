@@ -48,6 +48,7 @@ const route = (pattern: string): RouteBuilder => {
 export enum AppRoute {
   welcome = 'welcome',
   setup = 'setup',
+  backup = 'backup',
   invite = 'invite',
   wallet = 'wallet',
   settings = 'settings',
@@ -63,6 +64,7 @@ export const ROUTES = {
   // Public
   welcome: route(`/${AppRoute.welcome}`),
   setup: route(`/${AppRoute.setup}`),
+  portableBackup: route(`/${AppRoute.backup}`),
   // `userId` is expected to be a gossip1... encoded user ID
   invite: route(`/${AppRoute.invite}/:userId`),
 
