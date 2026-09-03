@@ -15,6 +15,24 @@ pub enum SecureStorageError {
     #[error("unsupported version")]
     UnsupportedVersion(u32),
 
+    #[error("Unsupported secure-storage account generation state")]
+    UnsupportedAccountGenerationState,
+
+    #[error("unsupported portable backup version")]
+    UnsupportedPortableVersion(u64),
+
+    #[error("invalid portable backup")]
+    InvalidPortableArchive,
+
+    #[error("portable backup is too large")]
+    PortableArchiveTooLarge,
+
+    #[error("portable backup checksum mismatch")]
+    PortableChecksumMismatch,
+
+    #[error("portable backup transfer in progress")]
+    PortableTransferInProgress,
+
     #[error("corrupted data")]
     CorruptedBlock,
 
@@ -56,7 +74,14 @@ impl SecureStorageError {
         match self {
             Self::InvalidPassword => "INVALID_PASSWORD",
             Self::OutOfBounds => "OUT_OF_BOUNDS",
-            Self::UnsupportedVersion(_) => "UNSUPPORTED_VERSION",
+            Self::UnsupportedVersion(_) | Self::UnsupportedAccountGenerationState => {
+                "UNSUPPORTED_VERSION"
+            }
+            Self::UnsupportedPortableVersion(_) => "UNSUPPORTED_PORTABLE_VERSION",
+            Self::InvalidPortableArchive => "INVALID_PORTABLE_ARCHIVE",
+            Self::PortableArchiveTooLarge => "PORTABLE_ARCHIVE_TOO_LARGE",
+            Self::PortableChecksumMismatch => "PORTABLE_CHECKSUM_MISMATCH",
+            Self::PortableTransferInProgress => "PORTABLE_TRANSFER_IN_PROGRESS",
             Self::CorruptedBlock => "CORRUPTED_DATA",
             Self::InvalidSessionIndex(_) => "INVALID_SESSION_INDEX",
             Self::Overflow => "OVERFLOW",

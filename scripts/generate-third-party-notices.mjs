@@ -28,7 +28,7 @@ const unresolvedRust = new Map([
     'No package-level license declaration; pinned Massa repository terms require legal compatibility review.',
   ],
   [
-    'pq-rerand@0.1.0',
+    'pq-rerand@0.2.0',
     'No license declaration or license file was found at the pinned revision.',
   ],
   [

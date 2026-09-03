@@ -1,5 +1,13 @@
 /* tslint:disable */
 /* eslint-disable */
+export function start(): void;
+/**
+ * Generates user keys from a passphrase.
+ *
+ * Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
+ * the passphrase crosses the JS boundary only once.
+ */
+export function generate_user_keys(passphrase: string): UserKeys;
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
@@ -33,14 +41,6 @@
  * ```
  */
 export function aead_encrypt(key: EncryptionKey, nonce: Nonce, plaintext: Uint8Array, aad: Uint8Array): Uint8Array;
-/**
- * Generates user keys from a passphrase.
- *
- * Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
- * the passphrase crosses the JS boundary only once.
- */
-export function generate_user_keys(passphrase: string): UserKeys;
-export function start(): void;
 /**
  * Decrypts data using AES-256-SIV authenticated encryption.
  *

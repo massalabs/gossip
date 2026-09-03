@@ -71,6 +71,9 @@ vi.mock('../../src/pages/SelfDiscussion', () => ({
 vi.mock('../../src/pages/InvitePage', () => ({
   InvitePage: stubPage('page-invite'),
 }));
+vi.mock('../../src/pages/PortableBackup', () => ({
+  default: stubPage('page-portable-backup'),
+}));
 
 // Settings sub-pages
 vi.mock('../../src/pages/settings/SecuritySettings', () => ({
@@ -257,6 +260,7 @@ describe('AuthenticatedRoutes', () => {
 
   describe('settings sub-pages', () => {
     const subPages = [
+      { path: '/backup', testId: 'page-portable-backup' },
       { path: '/settings/security', testId: 'page-settings-security' },
       {
         path: '/settings/notifications',

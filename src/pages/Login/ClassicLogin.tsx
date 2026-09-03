@@ -1,9 +1,12 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../../stores/accountStore';
 import { UserProfile } from '@massalabs/gossip-sdk';
-import { checkBiometricAvailability } from '../../services/biometricService';
+import {
+  authenticateBiometricLogin,
+  checkBiometricAvailability,
+} from '../../services/biometricService';
 import AccountSelection from '../../components/account/AccountSelection';
 import Button from '../../components/ui/Button';
 import { LoginProps } from './types';
@@ -12,10 +15,9 @@ import { PasswordForm } from './PasswordForm';
 import { ErrorDisplay } from './ErrorDisplay';
 import { LoginActions } from './LoginActions';
 import { LoginLayout } from './LoginLayout';
-import { useKeyboardStore } from '../../stores/keyboardStore';
 
 // ─────────────────────────────────────────────────────────────────
-// Classic Login: account selection, auto-auth biometric, password
+// Classic Login: account selection + global biometric password
 // ─────────────────────────────────────────────────────────────────
 
 export const ClassicLogin: React.FC<LoginProps> = React.memo(
@@ -27,27 +29,20 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
     onErrorChange,
   }) => {
     const { t } = useTranslation('auth');
-
     const loadAccount = useAccountStore(state => state.loadAccount);
-    const lockedByUser = useAccountStore(state => state.lockedByUser);
     const [showAccountSelection, setShowAccountSelection] = useState(false);
     const [selectedAccountInfo, setSelectedAccountInfo] =
       useState<UserProfile | null>(null);
-    const [autoAuthTriggered, setAutoAuthTriggered] = useState(false);
-    const [biometricMethodAvailable, setBiometricMethodAvailable] = useState<
-      ('capacitor' | 'webauthn' | 'none') | null
-    >(null);
-    const lastAutoAuthCredentialIdRef = useRef<string | null>(null);
-    const autoAuthAttempted = useRef(false);
+    const [biometricMethod, setBiometricMethod] = useState<
+      'capacitor' | 'webauthn' | 'none'
+    >('none');
+    const [biometricAvailable, setBiometricAvailable] = useState(false);
+    const [biometricLoading, setBiometricLoading] = useState(false);
 
     const currentAccount = selectedAccountInfo || accountInfo;
-    const usePassword = currentAccount?.security?.authMethod === 'password';
-    const [inputFocused, setInputFocused] = useState(false);
-    const keyboardOpen = useKeyboardStore(s => s.isVisible) || inputFocused;
 
     const {
-      isLoading,
-      setIsLoading,
+      isLoading: passwordLoading,
       password,
       setPassword,
       handlePasswordAuth,
@@ -58,29 +53,30 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
     });
 
     useEffect(() => {
-      (async () => {
-        try {
-          const { method } = await checkBiometricAvailability();
-          if (!method) return;
-          setBiometricMethodAvailable(method);
-        } catch {
-          // ignore
-        }
-      })();
+      const check = async () => {
+        const { available, method } = await checkBiometricAvailability();
+        if (!available || !method || method === 'none') return;
+        setBiometricAvailable(true);
+        setBiometricMethod(method);
+      };
+      check().catch(() => {});
     }, []);
 
     const handleBiometricAuth = useCallback(async () => {
-      try {
-        setIsLoading(true);
-        onErrorChange?.(null);
+      setBiometricLoading(true);
+      onErrorChange?.(null);
 
-        if (!biometricMethodAvailable) {
-          throw new Error('Biometric authentication is not available');
+      try {
+        const result = await authenticateBiometricLogin(biometricMethod);
+        if (!result.success || !result.data?.password) {
+          throw new Error(result.error || 'Biometric authentication failed');
         }
 
+        // Deliberately omit userId. The singleton credential stores only a
+        // password, and accountStore probes classic profiles for its match.
         await loadAccount({
-          type: 'biometric',
-          userId: currentAccount?.userId,
+          type: 'password',
+          password: result.data.password,
         });
         onAccountSelected();
       } catch (error) {
@@ -91,63 +87,12 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
         } else if (message === 'biometric_locked') {
           onErrorChange?.(t('login.biometric_locked'));
         } else {
-          onErrorChange?.(t('login.biometric_failed'));
+          onErrorChange?.(t('login.biometric_failed_use_password'));
         }
       } finally {
-        setIsLoading(false);
+        setBiometricLoading(false);
       }
-    }, [
-      currentAccount,
-      biometricMethodAvailable,
-      onErrorChange,
-      loadAccount,
-      onAccountSelected,
-      setIsLoading,
-      t,
-    ]);
-
-    // Auto-trigger biometric auth when account is selected from account picker
-    useEffect(() => {
-      if (autoAuthTriggered || !selectedAccountInfo) return;
-      const authMethod = selectedAccountInfo.security?.authMethod;
-      if (authMethod === 'password') return;
-      if (lastAutoAuthCredentialIdRef.current === selectedAccountInfo.userId)
-        return;
-      if (!biometricMethodAvailable) return;
-
-      lastAutoAuthCredentialIdRef.current = selectedAccountInfo.userId;
-      setAutoAuthTriggered(true);
-      handleBiometricAuth();
-    }, [
-      autoAuthTriggered,
-      selectedAccountInfo,
-      biometricMethodAvailable,
-      handleBiometricAuth,
-    ]);
-
-    // Auto-trigger biometric auth on mount if account has biometric auth enabled
-    useEffect(() => {
-      if (
-        autoAuthAttempted.current ||
-        lockedByUser ||
-        !accountInfo ||
-        selectedAccountInfo ||
-        !biometricMethodAvailable
-      )
-        return;
-
-      const authMethod = accountInfo.security?.authMethod;
-      if (authMethod === 'capacitor' || authMethod === 'webauthn') {
-        autoAuthAttempted.current = true;
-        handleBiometricAuth();
-      }
-    }, [
-      accountInfo,
-      selectedAccountInfo,
-      lockedByUser,
-      handleBiometricAuth,
-      biometricMethodAvailable,
-    ]);
+    }, [biometricMethod, loadAccount, onAccountSelected, onErrorChange, t]);
 
     const handleAccountSelected = (account: UserProfile) => {
       setSelectedAccountInfo(account);
@@ -155,9 +100,6 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
       onErrorChange?.(null);
       setPassword('');
     };
-
-    const displayUsername = currentAccount?.username;
-    const accountSupportsBiometrics = !usePassword;
 
     if (showAccountSelection) {
       return (
@@ -171,48 +113,44 @@ export const ClassicLogin: React.FC<LoginProps> = React.memo(
 
     return (
       <LoginLayout
-        title={displayUsername ? t('login.welcome_back') : t('login.welcome')}
-        username={displayUsername}
-        // subtitle={t('login.sign_in')}
+        title={
+          currentAccount?.username
+            ? t('login.welcome_back')
+            : t('login.welcome')
+        }
+        username={currentAccount?.username}
       >
-        <div
-          className={`overflow-hidden transition-all duration-300 ${
-            accountSupportsBiometrics && !keyboardOpen
-              ? 'max-h-40 opacity-100'
-              : 'max-h-0 opacity-0'
-          }`}
-        >
-          <div className="space-y-3">
+        {biometricAvailable && (
+          <>
             <Button
               onClick={handleBiometricAuth}
-              disabled={isLoading}
-              loading={isLoading}
-              variant="primary"
-              size="custom"
+              disabled={biometricLoading || passwordLoading}
+              loading={biometricLoading}
+              variant="outline"
               fullWidth
-              className="h-[51px] rounded-full text-sm font-medium"
+              className="h-[51px] rounded-full"
             >
-              {!isLoading && <span>{t('login.biometric_auth')}</span>}
+              {!biometricLoading && <span>{t('login.biometric')}</span>}
             </Button>
-            {!biometricMethodAvailable && (
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                {t('login.biometric_not_detected')}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {(!biometricMethodAvailable || usePassword) && (
-          <PasswordForm
-            password={password}
-            onPasswordChange={setPassword}
-            onSubmit={handlePasswordAuth}
-            isLoading={isLoading}
-            hasError={!!persistentError}
-            clearError={() => onErrorChange?.(null)}
-            onFocusChange={setInputFocused}
-          />
+            <div className="flex items-center gap-3 my-2">
+              <div className="flex-1 border-t border-border" />
+              <span className="text-xs text-muted-foreground">
+                {t('login.or')}
+              </span>
+              <div className="flex-1 border-t border-border" />
+            </div>
+          </>
         )}
+
+        <PasswordForm
+          password={password}
+          onPasswordChange={setPassword}
+          onSubmit={handlePasswordAuth}
+          isLoading={passwordLoading}
+          disabled={biometricLoading}
+          hasError={!!persistentError}
+          clearError={() => onErrorChange?.(null)}
+        />
 
         <ErrorDisplay
           error={persistentError}

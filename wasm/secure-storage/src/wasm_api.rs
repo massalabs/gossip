@@ -24,6 +24,7 @@ use js_sys::{Array, Uint8Array};
 use sqlite_wasm_rs::WasmOsCallback;
 use sqlite_wasm_rs::utils::{VfsAppData, register_vfs, registered_vfs};
 use wasm_bindgen::prelude::*;
+use zeroize::Zeroizing;
 
 // Re-export wasm-bindgen-rayon's `initThreadPool` so it survives DCE and
 // shows up in the generated JS bindings. The SDK worker calls it once at
@@ -34,7 +35,7 @@ pub use wasm_bindgen_rayon::init_thread_pool;
 use crate::DEFAULT_NAMESPACE;
 use crate::error::SecureStorageError;
 use crate::sqlite_handle::{SafeDb, SafeStmt, SqlResult, SqlValue, StepStatus};
-use crate::storage::MemoryStorage;
+use crate::storage::{BlockStorage, KeypairStorage, MemoryStorage};
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, load_namespace_state};
 use crate::vfs::idb_storage::IdbBlockStorage;
@@ -55,10 +56,16 @@ thread_local! {
         const { RefCell::new(None) };
     /// Open SQLite database handle (RAII — closes on drop).
     static DB: RefCell<Option<SafeDb>> = const { RefCell::new(None) };
+    /// Password-loaded import migration state. Slot matches and secrets never
+    /// cross into JavaScript; only complete all-slot batches are returned.
+    static OUTER_MIGRATION_PLAN: RefCell<Option<crate::OuterMigrationPlan>> = const { RefCell::new(None) };
+    static OUTER_MIGRATION: RefCell<Option<crate::OuterMigration>> = const { RefCell::new(None) };
 }
 
 fn map_err(e: SecureStorageError) -> JsValue {
-    JsValue::from_str(&e.to_string())
+    let error = js_sys::Error::new(&e.to_string());
+    error.set_name(e.code());
+    error.into()
 }
 
 // Shared precision-aware JS `number` <-> Rust integer conversions.
@@ -117,6 +124,455 @@ pub async fn init_secure_storage(domain: &str, backend: &str) -> Result<(), JsVa
     Ok(())
 }
 
+#[wasm_bindgen(js_name = beginOnboardingCandidate)]
+pub fn begin_onboarding_candidate() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        let previous = std::mem::replace(&mut state.backend, Backend::Memory(MemoryStorage::new()));
+        let durable = match previous {
+            Backend::Idb(durable) | Backend::Onboarding { durable, .. } => durable,
+            other => {
+                state.backend = other;
+                return Err(JsValue::from_str(
+                    "onboarding candidate requires IndexedDB storage",
+                ));
+            }
+        };
+        let mut candidate = MemoryStorage::new();
+        crate::lifecycle::provision_storage_for_domain(&mut candidate, &state.domain)
+            .map_err(map_err)?;
+        state.backend = Backend::Onboarding { durable, candidate };
+        state.session = None;
+        state.namespace_states.clear();
+        Ok(())
+    })
+}
+
+#[wasm_bindgen(js_name = exportOnboardingCandidate)]
+pub fn export_onboarding_candidate() -> Result<Vec<u8>, JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        state.session = None;
+        state.namespace_states.clear();
+        match &state.backend {
+            Backend::Onboarding { candidate, .. } => {
+                candidate.export_portable(Vec::new()).map_err(map_err)
+            }
+            _ => Err(JsValue::from_str("onboarding candidate is not active")),
+        }
+    })
+}
+
+#[wasm_bindgen(js_name = activateOnboardingGeneration)]
+pub async fn activate_onboarding_generation() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        let previous = std::mem::replace(&mut state.backend, Backend::Memory(MemoryStorage::new()));
+        match previous {
+            Backend::Onboarding { .. } => {
+                state.session = None;
+                state.namespace_states.clear();
+                Ok(())
+            }
+            other => {
+                state.backend = other;
+                Err(JsValue::from_str("onboarding candidate is not active"))
+            }
+        }
+    })?;
+    let active_backend = IdbBlockStorage::open().await?;
+    with_app_state(|app| {
+        app.state.borrow_mut().backend = Backend::Idb(active_backend);
+        Ok(())
+    })
+}
+
+#[wasm_bindgen(js_name = endOnboardingCandidate)]
+pub fn end_onboarding_candidate() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        let previous = std::mem::replace(&mut state.backend, Backend::Memory(MemoryStorage::new()));
+        match previous {
+            Backend::Onboarding { durable, .. } => {
+                state.backend = Backend::Idb(durable);
+                state.session = None;
+                state.namespace_states.clear();
+                Ok(())
+            }
+            other => {
+                state.backend = other;
+                Err(JsValue::from_str("onboarding candidate is not active"))
+            }
+        }
+    })
+}
+
+/// Replace this terminal worker's active backend with an isolated in-memory
+/// portable candidate and authenticate its keypairs without exposing the
+/// matched slot to JavaScript.
+#[wasm_bindgen(js_name = beginCandidatePreview)]
+pub fn begin_candidate_preview(
+    domain: &str,
+    password: Vec<u8>,
+    keypairs: &Array,
+) -> Result<bool, JsValue> {
+    let password = Zeroizing::new(password);
+    if keypairs.length() != crate::SESSION_COUNT as u32 {
+        return Err(JsValue::from_str("invalid candidate keypair count"));
+    }
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut memory = MemoryStorage::new();
+        for slot in 0..crate::SESSION_COUNT as u8 {
+            let value = keypairs.get(u32::from(slot));
+            let bytes = Uint8Array::new(&value).to_vec();
+            let session = SessionIndex::new(slot).map_err(map_err)?;
+            memory.write_keypair(session, &bytes).map_err(map_err)?;
+        }
+        let mut state = app.state.borrow_mut();
+        state.backend = Backend::Memory(memory);
+        state.domain = domain.to_string();
+        state.session = None;
+        state.namespace_states.clear();
+        Ok(())
+    })?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        match crate::unlock::unlock_session_unique(&state.backend, domain, &password) {
+            Ok(session) => {
+                state.session = Some(session);
+                Ok(true)
+            }
+            Err(SecureStorageError::InvalidPassword) => Ok(false),
+            Err(error) => Err(map_err(error)),
+        }
+    })
+}
+
+/// Admit one canonical candidate block. Only namespace 0 blocks belonging to
+/// the internally authenticated slot are retained; callers never learn which
+/// slot matched.
+#[wasm_bindgen(js_name = appendCandidatePreviewBlock)]
+pub fn append_candidate_preview_block(
+    slot: u8,
+    namespace: u8,
+    block_index: f64,
+    data: &[u8],
+) -> Result<(), JsValue> {
+    let block_index = safe_f64_to_u64(block_index)
+        .ok_or_else(|| JsValue::from_str("invalid candidate block index"))?;
+    let block: &[u8; crate::BLOCK_SIZE] = data
+        .try_into()
+        .map_err(|_| JsValue::from_str("invalid candidate block size"))?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        let matched = state
+            .session
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("candidate is not authenticated"))?
+            .session_index;
+        if slot != matched.as_u8() || namespace != DEFAULT_NAMESPACE {
+            return Ok(());
+        }
+        if block_index > 0 {
+            let total = state
+                .namespace_states
+                .get(&DEFAULT_NAMESPACE)
+                .ok_or_else(|| JsValue::from_str("candidate length is unavailable"))?
+                .total_data_length;
+            let required = crate::read::preview_block_count(total).map_err(map_err)?;
+            if block_index >= required {
+                return Ok(());
+            }
+        }
+        let count = state
+            .backend
+            .block_count(matched, namespace)
+            .map_err(map_err)?;
+        if block_index != count {
+            return Err(JsValue::from_str("noncontiguous candidate block"));
+        }
+        state
+            .backend
+            .append_block(matched, namespace, block)
+            .map_err(map_err)?;
+        if block_index == 0 {
+            let domain = state.domain.clone();
+            let session = state
+                .session
+                .as_ref()
+                .ok_or_else(|| JsValue::from_str("candidate is not authenticated"))?;
+            let total = crate::read::preview_total_length_from_block_zero(
+                &state.backend,
+                &domain,
+                DEFAULT_NAMESPACE,
+                session,
+            )
+            .map_err(map_err)?;
+            crate::read::preview_block_count(total).map_err(map_err)?;
+            state.namespace_states.insert(
+                DEFAULT_NAMESPACE,
+                NamespaceState {
+                    total_data_length: total,
+                },
+            );
+        }
+        Ok(())
+    })
+}
+
+/// Load the candidate namespace length and open SQLite without write authority.
+#[wasm_bindgen(js_name = finishCandidatePreview)]
+pub fn finish_candidate_preview() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let state = app.state.borrow();
+        let sql_state = state
+            .namespace_states
+            .get(&DEFAULT_NAMESPACE)
+            .ok_or_else(|| JsValue::from_str("candidate length is unavailable"))?;
+        let required =
+            crate::read::preview_block_count(sql_state.total_data_length).map_err(map_err)?;
+        let session = state
+            .session
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("candidate is not authenticated"))?;
+        if state
+            .backend
+            .block_count(session.session_index, DEFAULT_NAMESPACE)
+            .map_err(map_err)?
+            != required
+        {
+            return Err(JsValue::from_str("candidate database is truncated"));
+        }
+        Ok(())
+    })?;
+    open_database_readonly()
+}
+
+/// Project only bounded public profile fields inside WASM. The security JSON
+/// is validated and zeroized in Rust and never crosses the worker bridge.
+#[wasm_bindgen(js_name = queryCandidatePreview)]
+pub fn query_candidate_preview() -> Result<JsValue, JsValue> {
+    DB.with(|cell| {
+        let db = cell.borrow();
+        let db = db.as_ref().ok_or_else(not_initialized)?;
+        let statement = db
+            .prepare(
+                "SELECT userId, username, avatar, createdAt, security \
+                 FROM userProfile ORDER BY rowid LIMIT 2",
+            )
+            .map_err(|error| JsValue::from_str(&error))?
+            .ok_or_else(|| JsValue::from_str("imported account profile is unavailable"))?;
+        if !matches!(
+            statement
+                .step()
+                .map_err(|error| JsValue::from_str(&error))?,
+            StepStatus::Row
+        ) {
+            return Err(JsValue::from_str("imported account profile is unavailable"));
+        }
+        let user_id = match statement.column(0) {
+            SqlValue::Text(value) => value,
+            _ => return Err(JsValue::from_str("imported account profile is invalid")),
+        };
+        let username = match statement.column(1) {
+            SqlValue::Text(value) => value,
+            _ => return Err(JsValue::from_str("imported account profile is invalid")),
+        };
+        let avatar = match statement.column(2) {
+            SqlValue::Null => None,
+            SqlValue::Text(value) => Some(value),
+            _ => return Err(JsValue::from_str("imported account profile is invalid")),
+        };
+        let created_at_ms = match statement.column(3) {
+            SqlValue::Integer(value) => value,
+            _ => return Err(JsValue::from_str("imported account profile is invalid")),
+        };
+        let security = match statement.column(4) {
+            SqlValue::Text(value) => Zeroizing::new(value),
+            _ => return Err(JsValue::from_str("imported account profile is invalid")),
+        };
+        if !matches!(
+            statement
+                .step()
+                .map_err(|error| JsValue::from_str(&error))?,
+            StepStatus::Done
+        ) || !crate::preview::valid_user_id(&user_id)
+            || username.is_empty()
+            || username.len() > 128
+            || avatar
+                .as_ref()
+                .is_some_and(|value| value.len() > 1024 * 1024)
+            || !(0..=9_007_199_254_740_991).contains(&created_at_ms)
+        {
+            return Err(JsValue::from_str("imported account profile is invalid"));
+        }
+        crate::preview::validate_security(&security).map_err(map_err)?;
+
+        let result = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &result,
+            &JsValue::from_str("userId"),
+            &JsValue::from_str(&user_id),
+        )?;
+        js_sys::Reflect::set(
+            &result,
+            &JsValue::from_str("username"),
+            &JsValue::from_str(&username),
+        )?;
+        js_sys::Reflect::set(
+            &result,
+            &JsValue::from_str("avatar"),
+            &avatar.map_or(JsValue::NULL, |value| JsValue::from_str(&value)),
+        )?;
+        js_sys::Reflect::set(
+            &result,
+            &JsValue::from_str("createdAtMs"),
+            &JsValue::from_f64(created_at_ms as f64),
+        )?;
+        Ok(result.into())
+    })
+}
+
+#[wasm_bindgen(js_name = endCandidatePreview)]
+pub async fn end_candidate_preview() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        state.backend = Backend::Memory(MemoryStorage::new());
+        state.session = None;
+        state.namespace_states.clear();
+        Ok(())
+    })?;
+    let active_backend = IdbBlockStorage::open().await?;
+    with_app_state(|app| {
+        app.state.borrow_mut().backend = Backend::Idb(active_backend);
+        Ok(())
+    })
+}
+
+/// Begin password admission for one validated candidate. Only opaque plan
+/// state is retained; no transformed/mixed-version generation is emitted.
+#[wasm_bindgen(js_name = beginOuterMigration)]
+pub fn begin_outer_migration(domain: &str, keypairs: &Array) -> Result<(), JsValue> {
+    if keypairs.length() != crate::SESSION_COUNT as u32 {
+        return Err(JsValue::from_str("invalid outer migration keypairs"));
+    }
+    let mut values: [Vec<u8>; crate::SESSION_COUNT] = std::array::from_fn(|_| Vec::new());
+    for slot in 0..crate::SESSION_COUNT {
+        let value = Uint8Array::new(&keypairs.get(slot as u32));
+        values[slot] = value.to_vec();
+    }
+    let plan = crate::OuterMigrationPlan::new(domain, values).map_err(map_err)?;
+    OUTER_MIGRATION.with(|migration| migration.borrow_mut().take());
+    OUTER_MIGRATION_PLAN.with(|state| {
+        *state.borrow_mut() = Some(plan);
+    });
+    Ok(())
+}
+
+/// Admit one password with all-slot constant work. The owned WASM copy is
+/// zeroized before return and a generic false discloses no matched slot.
+#[wasm_bindgen(js_name = admitOuterMigrationPassword)]
+pub fn admit_outer_migration_password(password: Vec<u8>) -> Result<bool, JsValue> {
+    let password = Zeroizing::new(password);
+    OUTER_MIGRATION_PLAN.with(|state| {
+        let mut state = state.borrow_mut();
+        let plan = state
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("outer migration is not active"))?;
+        match plan.admit_password(&password) {
+            Ok(()) => Ok(true),
+            Err(SecureStorageError::InvalidPassword) => Ok(false),
+            Err(error) => Err(map_err(error)),
+        }
+    })
+}
+
+/// Generate fresh current-suite keypairs for all slots at once. Every public
+/// key changes, so comparing source and destination cannot reveal selection.
+#[wasm_bindgen(js_name = finalizeOuterMigration)]
+pub fn finalize_outer_migration() -> Result<Array, JsValue> {
+    let plan = OUTER_MIGRATION_PLAN
+        .with(|state| state.borrow_mut().take())
+        .ok_or_else(|| JsValue::from_str("outer migration is not active"))?;
+    let migration = plan.finalize().map_err(map_err)?;
+    let result = Array::new();
+    for keypair in migration.keypairs() {
+        result.push(&Uint8Array::from(keypair).into());
+    }
+    OUTER_MIGRATION.with(|state| *state.borrow_mut() = Some(migration));
+    Ok(result)
+}
+
+/// Transform one complete fixed-slot block coordinate.
+#[wasm_bindgen(js_name = migrateOuterBlockBatch)]
+pub fn migrate_outer_block_batch(
+    namespace: u8,
+    block_index: f64,
+    values: &Array,
+) -> Result<Array, JsValue> {
+    let block_index = safe_f64_to_u64(block_index)
+        .ok_or_else(|| JsValue::from_str("invalid outer migration block index"))?;
+    if values.length() != crate::SESSION_COUNT as u32 {
+        return Err(JsValue::from_str("invalid outer migration block batch"));
+    }
+    let inputs: [Zeroizing<Vec<u8>>; crate::SESSION_COUNT] = std::array::from_fn(|slot| {
+        Zeroizing::new(Uint8Array::new(&values.get(slot as u32)).to_vec())
+    });
+    let mut refs = Vec::with_capacity(crate::SESSION_COUNT);
+    for input in &inputs {
+        refs.push(
+            <&[u8; crate::BLOCK_SIZE]>::try_from(input.as_slice())
+                .map_err(|_| JsValue::from_str("invalid outer migration block"))?,
+        );
+    }
+    let refs: [&[u8; crate::BLOCK_SIZE]; crate::SESSION_COUNT] = refs
+        .try_into()
+        .map_err(|_| JsValue::from_str("invalid outer migration block batch"))?;
+    let migrated = OUTER_MIGRATION.with(|state| {
+        let mut state = state.borrow_mut();
+        state
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("outer migration is not finalized"))?
+            .migrate_block_batch(namespace, block_index, refs)
+            .map_err(map_err)
+    })?;
+    let result = Array::new();
+    for value in &migrated {
+        result.push(&Uint8Array::from(value.as_slice()).into());
+    }
+    Ok(result)
+}
+
+#[wasm_bindgen(js_name = finishOuterMigrationNamespace)]
+pub fn finish_outer_migration_namespace(
+    namespace: u8,
+    source_block_count: f64,
+) -> Result<(), JsValue> {
+    let source_block_count = safe_f64_to_u64(source_block_count)
+        .ok_or_else(|| JsValue::from_str("invalid outer migration block count"))?;
+    OUTER_MIGRATION.with(|state| {
+        state
+            .borrow_mut()
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("outer migration is not finalized"))?
+            .finish_namespace(namespace, source_block_count)
+            .map_err(map_err)
+    })
+}
+
+#[wasm_bindgen(js_name = endOuterMigration)]
+pub fn end_outer_migration() {
+    OUTER_MIGRATION_PLAN.with(|state| state.borrow_mut().take());
+    OUTER_MIGRATION.with(|state| state.borrow_mut().take());
+}
+
 #[wasm_bindgen(js_name = idbHasData)]
 pub async fn idb_has_data() -> Result<bool, JsValue> {
     IdbBlockStorage::has_data().await
@@ -127,7 +583,9 @@ pub fn provision_storage() -> Result<(), JsValue> {
     close_database_and_clear_files()?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
-        crate::provision_storage(&mut state.backend).map_err(map_err)?;
+        let domain = state.domain.clone();
+        crate::lifecycle::provision_storage_for_domain(&mut state.backend, &domain)
+            .map_err(map_err)?;
         state.session = None;
         state.namespace_states.clear();
         Ok(())
@@ -244,8 +702,28 @@ pub fn cover_traffic_tick(namespace: u8) -> Result<(), JsValue> {
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         let domain = state.domain.clone();
-        crate::cover_traffic_tick(&mut state.backend, &domain, namespace).map_err(map_err)
+        match &mut state.backend {
+            Backend::Onboarding { durable, candidate } => {
+                crate::cover_traffic_tick(durable, &domain, namespace).map_err(map_err)?;
+                crate::cover_traffic_tick(candidate, &domain, namespace).map_err(map_err)
+            }
+            backend => crate::cover_traffic_tick(backend, &domain, namespace).map_err(map_err),
+        }
     })
+}
+
+/// Strictly validate one version-1 logical keypair record without unlocking it.
+/// Browser streaming export/import uses this bounded bridge so TypeScript never
+/// reimplements pq-rerand's canonical parser.
+#[wasm_bindgen(js_name = validatePortableKeypair)]
+pub fn validate_portable_keypair(value: &[u8]) -> Result<(), JsValue> {
+    crate::portable::validate_portable_keypair_value(value).map_err(map_err)
+}
+
+/// Strictly validate one version-1 encrypted block record.
+#[wasm_bindgen(js_name = validatePortableBlock)]
+pub fn validate_portable_block(value: &[u8]) -> Result<(), JsValue> {
+    crate::portable::validate_portable_block_value(value).map_err(map_err)
 }
 
 // ── Generic namespace data exports ─────────────────────────────────
@@ -375,6 +853,100 @@ pub fn clear_namespace(namespace: u8) -> Result<(), JsValue> {
     })
 }
 
+/// Verify that this worker still owns the active IndexedDB generation.
+#[wasm_bindgen(js_name = verifyStorageGeneration)]
+pub async fn verify_storage_generation() -> Result<(), JsValue> {
+    let idb_ptr: Option<*const IdbBlockStorage> = with_app_state(|app| {
+        let state = app.state.borrow();
+        Ok(match &state.backend {
+            Backend::Idb(idb) => Some(idb as *const _),
+            Backend::Onboarding { durable, .. } => Some(durable as *const _),
+            Backend::Memory(_) => None,
+        })
+    })?;
+    let Some(ptr) = idb_ptr else {
+        return Err(JsValue::from_str(
+            "generation verification is only available for IndexedDB storage",
+        ));
+    };
+    // SAFETY: the backend lives in the leaked AppState and is never moved.
+    unsafe { &*ptr }.verify_generation().await
+}
+
+/// Discard pending IDB mutations and reload the last committed snapshot.
+///
+async fn reload_idb_backend() -> Result<(), JsValue> {
+    // Same program-lifetime pointer invariant as `flush_encrypted` below: the
+    // backend is initialized once and never moved or replaced.
+    let idb_ptr: Option<*const IdbBlockStorage> = with_app_state(|app| {
+        let state = app.state.borrow();
+        Ok(match &state.backend {
+            Backend::Idb(idb) => Some(idb as *const _),
+            Backend::Onboarding { durable, .. } => Some(durable as *const _),
+            Backend::Memory(_) => None,
+        })
+    })?;
+
+    let Some(ptr) = idb_ptr else {
+        return Err(JsValue::from_str(
+            "durable reload is only available for IndexedDB storage",
+        ));
+    };
+
+    // SAFETY: the backend lives in the leaked AppState and is never moved.
+    unsafe { &*ptr }.reload_durable().await
+}
+
+/// Called by the worker when an allocation or destruction transaction rejects.
+/// This prevents a later cover-traffic flush from durably carrying the failed
+/// lifecycle operation. The recovered state is always locked.
+#[wasm_bindgen(js_name = reloadDurableStorage)]
+pub async fn reload_durable_storage() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    reload_idb_backend().await?;
+
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        state.session = None;
+        state.namespace_states.clear();
+        Ok(())
+    })
+}
+
+/// Abandon a poisoned SQLite transaction and restore its last durable image
+/// while retaining the current unlocked session keys. No pending VFS bytes are
+/// flushed: closing SQLite rolls back its in-memory journal, then the IndexedDB
+/// cache is reloaded before a fresh database handle is opened.
+#[wasm_bindgen(js_name = resetSqlDatabaseToDurable)]
+pub async fn reset_sql_database_to_durable() -> Result<(), JsValue> {
+    with_app_state(|app| {
+        if app.state.borrow().session.is_none() {
+            return Err(JsValue::from_str(
+                "resetSqlDatabaseToDurable requires an unlocked session",
+            ));
+        }
+        Ok(())
+    })?;
+
+    close_database_and_clear_files()?;
+    reload_idb_backend().await?;
+    let sql_state = with_app_state(|app| {
+        let state = app.state.borrow();
+        let session = state.session.as_ref().ok_or_else(|| {
+            JsValue::from_str("resetSqlDatabaseToDurable lost the unlocked session")
+        })?;
+        load_namespace_state(&state.backend, &state.domain, session, DEFAULT_NAMESPACE)
+            .map_err(map_err)
+    })?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        state.namespace_states.clear();
+        state.namespace_states.insert(DEFAULT_NAMESPACE, sql_state);
+        Ok(())
+    })?;
+    open_database()
+}
+
 #[wasm_bindgen(js_name = flushEncrypted)]
 pub async fn flush_encrypted() -> Result<(), JsValue> {
     // We need a &IdbBlockStorage across the .await of persist_dirty().
@@ -396,6 +968,7 @@ pub async fn flush_encrypted() -> Result<(), JsValue> {
         let state = app.state.borrow();
         let out = match &state.backend {
             Backend::Idb(idb) => Some(idb as *const _),
+            Backend::Onboarding { durable, .. } => Some(durable as *const _),
             Backend::Memory(_) => None,
         };
         Ok(out)
@@ -412,11 +985,15 @@ pub async fn flush_encrypted() -> Result<(), JsValue> {
 
 const DB_NAME: &CStr = c"secure.db";
 const VFS_NAME_C: &CStr = c"secure-storage-enc";
-// Page size 4096 maps better onto the bordercrypt block plaintext capacity
+// Page size 4096 maps better onto the secure-storage block plaintext capacity
 // (PLAINTEXT_SIZE ≈ 15 844 bytes ≈ 3.86 pages per block) than 8192, which
 // straddles a block boundary every other page (15844 < 2 × 8192). With 4096
 // only ~25 % of pages straddle and three pages share one PQ-encrypted block,
 // so an INSERT touching N pages dirties fewer underlying blocks.
+const READONLY_PRAGMAS: &CStr = c"\
+    PRAGMA query_only = ON;\
+    PRAGMA trusted_schema = OFF;\
+";
 const PRAGMAS: &CStr = c"\
     PRAGMA page_size = 4096;\
     PRAGMA journal_mode = MEMORY;\
@@ -438,6 +1015,32 @@ pub fn open_database() -> Result<(), JsValue> {
         handle
             .exec(PRAGMAS)
             .map_err(|e| JsValue::from_str(&format!("PRAGMA exec failed: {e}")))?;
+        *slot = Some(handle);
+        Ok(())
+    })
+}
+
+fn open_database_readonly() -> Result<(), JsValue> {
+    DB.with(|db| {
+        let mut slot = db.borrow_mut();
+        if slot.is_some() {
+            return Ok(());
+        }
+        // This in-memory VFS has no filesystem xAccess signal, so SQLite
+        // cannot discover it with SQLITE_OPEN_READONLY. Open only the
+        // isolated candidate and enable query-only mode before any candidate
+        // SQL is admitted. No active backend or migration is bound.
+        let handle = SafeDb::open(DB_NAME, VFS_NAME_C)
+            .map_err(|e| JsValue::from_str(&format!("candidate SQLite open failed: {e}")))?;
+        handle
+            .enable_defensive()
+            .map_err(|e| JsValue::from_str(&format!("candidate defensive mode failed: {e}")))?;
+        handle
+            .exec(READONLY_PRAGMAS)
+            .map_err(|e| JsValue::from_str(&format!("read-only PRAGMA exec failed: {e}")))?;
+        handle
+            .validate_integrity()
+            .map_err(|e| JsValue::from_str(&format!("candidate integrity check failed: {e}")))?;
         *slot = Some(handle);
         Ok(())
     })

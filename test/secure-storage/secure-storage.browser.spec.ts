@@ -34,6 +34,27 @@ async function clearSecureStorageIdb(): Promise<void> {
   });
 }
 
+async function writeAccountGenerationMarker(value: string): Promise<void> {
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(SECURE_STORAGE_IDB_NAME);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('blocks', 'readwrite');
+      transaction
+        .objectStore('blocks')
+        .put(value, 'm:account-generation-state-v1');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
 describe('secure storage pipeline', () => {
   beforeEach(async () => {
     await clearSecureStorageIdb();
@@ -45,12 +66,48 @@ describe('secure storage pipeline', () => {
     expect(conn.isSecureStorage).toBe(true);
     expect(conn.storageState).toBe(`empty`);
     expect(conn.isOpen).toBe(false);
+    await expect(
+      conn.secureStorageCreate(0, 'unbounded-allocation-password')
+    ).rejects.toThrow('atomic onboarding candidate');
 
+    await conn.secureStorageBeginOnboardingCandidate();
     await conn.secureStorageCreate(0, 'test-password-1234');
 
     expect(conn.isOpen).toBe(true);
 
     await conn.close();
+  }, 120_000);
+
+  it('fails closed on an unsupported account-generation marker', async () => {
+    const domain = 'vitest-unsupported-generation';
+    const connection = await DatabaseConnection.create(config(domain));
+    await connection.close();
+    await writeAccountGenerationMarker('future-generation-state');
+
+    await expect(
+      DatabaseConnection.create(config(domain))
+    ).rejects.toMatchObject({
+      name: 'UNSUPPORTED_VERSION',
+      message: 'Unsupported secure-storage account generation state',
+    });
+  }, 120_000);
+
+  it('discards an uncommitted onboarding candidate across worker restart', async () => {
+    const domain = 'vitest-interrupted-onboarding';
+    const conn = await DatabaseConnection.create(config(domain));
+    expect(conn.accountGenerationState).toBe('empty');
+    await conn.secureStorageBeginOnboardingCandidate();
+    await conn.secureStorageCreate(0, 'interrupted-password');
+    await conn.secureStorageFlush();
+    await conn.close();
+
+    const relaunched = await DatabaseConnection.create(config(domain));
+    expect(relaunched.accountGenerationState).toBe('empty');
+    expect(relaunched.storageState).toBe('empty');
+    await expect(
+      relaunched.secureStorageUnlock('interrupted-password')
+    ).rejects.toThrow('no session to unlock');
+    await relaunched.close();
   }, 120_000);
 
   it('second run with correct password: unlock opens the database', async () => {
@@ -59,7 +116,10 @@ describe('secure storage pipeline', () => {
 
     {
       const conn = await DatabaseConnection.create(config(domain));
+      await conn.secureStorageBeginOnboardingCandidate();
       await conn.secureStorageCreate(0, password);
+      await conn.secureStorageLock();
+      await conn.secureStorageCommitOnboardingCandidate();
       await conn.close();
     }
 
@@ -81,7 +141,10 @@ describe('secure storage pipeline', () => {
 
     {
       const conn = await DatabaseConnection.create(config(domain));
+      await conn.secureStorageBeginOnboardingCandidate();
       await conn.secureStorageCreate(0, 'correct-password');
+      await conn.secureStorageLock();
+      await conn.secureStorageCommitOnboardingCandidate();
       await conn.close();
     }
 
@@ -97,6 +160,196 @@ describe('secure storage pipeline', () => {
     await conn.close();
   }, 120_000);
 
+  it('keeps all three slots distinct and discoverable by password', async () => {
+    const domain = 'vitest-all-slots';
+    const accounts = [
+      { slot: 0, password: 'alice-password', userId: 'gossip1alice' },
+      { slot: 1, password: 'decoy-password', userId: 'gossip1decoy' },
+      { slot: 2, password: 'backup-password', userId: 'gossip1backup' },
+    ];
+    const now = new Date();
+
+    const writer = await DatabaseConnection.create(config(domain));
+    await writer.secureStorageBeginOnboardingCandidate();
+    for (const account of accounts) {
+      await writer.secureStorageCreate(account.slot, account.password);
+      await writer.db.insert(userProfile).values({
+        userId: account.userId,
+        username: account.userId,
+        status: 'online',
+        lastSeen: now,
+        createdAt: now,
+        updatedAt: now,
+        security: 'classic',
+        session: new Uint8Array([account.slot]),
+      });
+      await writer.secureStorageFlush();
+      await writer.secureStorageLock();
+    }
+    await writer.secureStorageCommitOnboardingCandidate();
+    await writer.close();
+
+    const reader = await DatabaseConnection.create(config(domain));
+    for (const account of accounts) {
+      expect(await reader.secureStorageUnlock(account.password)).toBe(true);
+      const rows = await reader.db
+        .select({ userId: userProfile.userId })
+        .from(userProfile);
+      expect(rows).toEqual([{ userId: account.userId }]);
+      await reader.secureStorageLock();
+    }
+    await reader.close();
+  }, 120_000);
+
+  it('previews an authenticated portable candidate without installing it', async () => {
+    const password = 'preview-password';
+    const domain = 'vitest-portable-preview';
+    const userId =
+      'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s';
+    const now = new Date(1234);
+    const conn = await DatabaseConnection.create(config(domain));
+    await conn.secureStorageBeginOnboardingCandidate();
+    await conn.secureStorageCreate(0, password);
+    await conn.db.insert(userProfile).values({
+      userId,
+      username: 'Alice',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+      security: JSON.stringify({
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
+        authMethod: 'password',
+        encKeySalt: Array.from({ length: 16 }, (_, index) => index),
+        mnemonicBackup: {
+          encryptedMnemonic: Array.from({ length: 17 }, (_, index) => index),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          backedUp: false,
+        },
+      }),
+      session: new Uint8Array([0]),
+    });
+    await conn.secureStorageFlush();
+    await conn.secureStorageLock();
+    await conn.secureStorageCommitOnboardingCandidate();
+    const archive: Uint8Array[] = [];
+    await conn.secureStorageExportPortableV1(chunk => {
+      archive.push(chunk.slice());
+    });
+
+    await conn.secureStorageBeginPortableImport();
+    for (const chunk of archive) {
+      await conn.secureStoragePushPortableImportChunk(chunk);
+    }
+    await conn.secureStorageValidatePortableImport();
+    await expect(
+      conn.secureStorageAuthenticatePortableImportCandidate(
+        new TextEncoder().encode('wrong-password')
+      )
+    ).resolves.toBeNull();
+    await expect(
+      conn.secureStorageAuthenticatePortableImportCandidate(
+        new TextEncoder().encode(password)
+      )
+    ).resolves.toEqual({
+      userId,
+      username: 'Alice',
+      avatar: null,
+      createdAtMs: 1234,
+    });
+    await conn.secureStorageBeginPortableOuterMigration();
+    await conn.secureStorageAdmitPortableOuterMigrationPassword(
+      new TextEncoder().encode(password)
+    );
+    await conn.secureStorageFinishPortableOuterMigration();
+    await conn.secureStorageInstallPortableImport();
+    expect(conn.storageState).toBe('locked');
+    await conn.close();
+
+    const restored = await DatabaseConnection.create(config(domain));
+    expect(await restored.secureStorageUnlock(password)).toBe(true);
+    const profiles = await restored.db
+      .select({ userId: userProfile.userId, username: userProfile.username })
+      .from(userProfile);
+    expect(profiles).toEqual([{ userId, username: 'Alice' }]);
+    await restored.close();
+  }, 120_000);
+
+  it('rejects a portable preview with corruption outside the profile query', async () => {
+    const password = 'corrupt-preview-password';
+    const domain = 'vitest-corrupt-portable-preview';
+    const userId =
+      'gossip1ywzkutgadznd0509tsl4gs4xjvsudhzgjuxc46ytngvq0lacx5es2xyz5s';
+    const now = new Date(1234);
+    const conn = await DatabaseConnection.create(config(domain));
+    await conn.secureStorageBeginOnboardingCandidate();
+    await conn.secureStorageCreate(0, password);
+    await conn.db.insert(userProfile).values({
+      userId,
+      username: 'Alice',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+      security: JSON.stringify({
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
+        authMethod: 'password',
+        encKeySalt: Array.from({ length: 16 }, (_, index) => index),
+        mnemonicBackup: {
+          encryptedMnemonic: Array.from({ length: 17 }, (_, index) => index),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          backedUp: false,
+        },
+      }),
+      session: new Uint8Array([0]),
+    });
+    const raw = conn as unknown as {
+      execRawDirect(sql: string, params?: unknown[]): Promise<unknown[][]>;
+    };
+    await raw.execRawDirect(
+      'CREATE TABLE unrelated_preview_data (payload BLOB NOT NULL)'
+    );
+    await raw.execRawDirect(
+      'INSERT INTO unrelated_preview_data VALUES (zeroblob(8192))'
+    );
+    await raw.execRawDirect('PRAGMA writable_schema = ON');
+    await raw.execRawDirect(
+      'UPDATE sqlite_schema SET rootpage = (' +
+        "SELECT rootpage FROM sqlite_schema WHERE name = 'userProfile'" +
+        ") WHERE name = 'unrelated_preview_data'"
+    );
+    await raw.execRawDirect('PRAGMA writable_schema = OFF');
+    await conn.secureStorageFlush();
+    await conn.secureStorageLock();
+    await conn.secureStorageCommitOnboardingCandidate();
+
+    const archive: Uint8Array[] = [];
+    await conn.secureStorageExportPortableV1(chunk => {
+      archive.push(chunk.slice());
+    });
+    await conn.secureStorageBeginPortableImport();
+    try {
+      for (const chunk of archive) {
+        await conn.secureStoragePushPortableImportChunk(chunk);
+      }
+      await conn.secureStorageValidatePortableImport();
+      await expect(
+        conn.secureStorageAuthenticatePortableImportCandidate(
+          new TextEncoder().encode(password)
+        )
+      ).rejects.toThrow();
+    } finally {
+      await conn.secureStorageAbortPortableImport();
+      await conn.close();
+    }
+  }, 120_000);
+
   it('data persists across close/reopen', async () => {
     const password = 'test-persist';
     const domain = 'vitest-persist';
@@ -104,6 +357,7 @@ describe('secure storage pipeline', () => {
 
     {
       const conn = await DatabaseConnection.create(config(domain));
+      await conn.secureStorageBeginOnboardingCandidate();
       await conn.secureStorageCreate(0, password);
 
       await conn.db.insert(userProfile).values({
@@ -118,6 +372,8 @@ describe('secure storage pipeline', () => {
       });
 
       await conn.secureStorageFlush();
+      await conn.secureStorageLock();
+      await conn.secureStorageCommitOnboardingCandidate();
       await conn.close();
     }
 

@@ -2,4 +2,6 @@
 <full-backup-content>
     <!-- The native secure-storage redb file must not be copied to Android backup. -->
     <exclude domain="file" path="secure-storage" />
+    <!-- SAF capabilities are valid only on the device that granted them. -->
+    <exclude domain="sharedpref" path="PortableBackupPendingOutputs.xml" />
 </full-backup-content>

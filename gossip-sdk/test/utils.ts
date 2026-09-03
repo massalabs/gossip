@@ -65,7 +65,11 @@ export function createTestUserProfile(
     userId,
     username,
     security: {
-      encKeySalt: new Uint8Array(32),
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
+      encKeySalt: new Uint8Array(16),
       authMethod: 'password',
       mnemonicBackup: {
         encryptedMnemonic: new Uint8Array(64),

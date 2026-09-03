@@ -42,6 +42,10 @@ use crate::vfs::idb_storage::IdbBlockStorage;
 pub enum Backend {
     Memory(MemoryStorage),
     Idb(IdbBlockStorage),
+    Onboarding {
+        durable: IdbBlockStorage,
+        candidate: MemoryStorage,
+    },
 }
 
 impl BlockStorage for Backend {
@@ -54,6 +58,9 @@ impl BlockStorage for Backend {
         match self {
             Backend::Memory(s) => s.read_block(session, namespace, block),
             Backend::Idb(s) => s.read_block(session, namespace, block),
+            Backend::Onboarding { candidate, .. } => {
+                candidate.read_block(session, namespace, block)
+            }
         }
     }
     fn write_block(
@@ -66,6 +73,9 @@ impl BlockStorage for Backend {
         match self {
             Backend::Memory(s) => s.write_block(session, namespace, block, data),
             Backend::Idb(s) => s.write_block(session, namespace, block, data),
+            Backend::Onboarding { candidate, .. } => {
+                candidate.write_block(session, namespace, block, data)
+            }
         }
     }
     fn append_block(
@@ -77,18 +87,23 @@ impl BlockStorage for Backend {
         match self {
             Backend::Memory(s) => s.append_block(session, namespace, data),
             Backend::Idb(s) => s.append_block(session, namespace, data),
+            Backend::Onboarding { candidate, .. } => {
+                candidate.append_block(session, namespace, data)
+            }
         }
     }
     fn block_count(&self, session: SessionIndex, namespace: u8) -> crate::error::Result<u64> {
         match self {
             Backend::Memory(s) => s.block_count(session, namespace),
             Backend::Idb(s) => s.block_count(session, namespace),
+            Backend::Onboarding { candidate, .. } => candidate.block_count(session, namespace),
         }
     }
     fn fsync(&self, session: SessionIndex, namespace: u8) -> crate::error::Result<()> {
         match self {
             Backend::Memory(s) => s.fsync(session, namespace),
             Backend::Idb(s) => s.fsync(session, namespace),
+            Backend::Onboarding { candidate, .. } => candidate.fsync(session, namespace),
         }
     }
     fn reset_blockstream(
@@ -99,12 +114,16 @@ impl BlockStorage for Backend {
         match self {
             Backend::Memory(s) => s.reset_blockstream(session, namespace),
             Backend::Idb(s) => s.reset_blockstream(session, namespace),
+            Backend::Onboarding { candidate, .. } => {
+                candidate.reset_blockstream(session, namespace)
+            }
         }
     }
     fn namespaces_with_data(&self, session: SessionIndex) -> crate::error::Result<Vec<u8>> {
         match self {
             Backend::Memory(s) => s.namespaces_with_data(session),
             Backend::Idb(s) => s.namespaces_with_data(session),
+            Backend::Onboarding { candidate, .. } => candidate.namespaces_with_data(session),
         }
     }
 }
@@ -117,12 +136,14 @@ impl KeypairStorage for Backend {
         match self {
             Backend::Memory(s) => s.read_keypair(session),
             Backend::Idb(s) => s.read_keypair(session),
+            Backend::Onboarding { candidate, .. } => candidate.read_keypair(session),
         }
     }
     fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> crate::error::Result<()> {
         match self {
             Backend::Memory(s) => s.write_keypair(session, data),
             Backend::Idb(s) => s.write_keypair(session, data),
+            Backend::Onboarding { candidate, .. } => candidate.write_keypair(session, data),
         }
     }
 }

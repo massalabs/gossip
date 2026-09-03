@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter, useMatch } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
+import { reconcileDebugLogsGeneration } from './stores/useDebugLogs';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
 import { DebugConsole } from './components/ui/DebugConsole';
 import { Toaster } from 'react-hot-toast';
@@ -28,13 +29,20 @@ import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
 import PageLayout from './components/ui/Layout/PageLayout.tsx';
+import PortableBackupStartupGate from './components/PortableBackupStartupGate.tsx';
+import {
+  isPortableImportCleanupPending,
+  PORTABLE_IMPORT_CLEANUP_EVENT,
+} from './services/portableImportCleanup';
 
-const AppContent: React.FC = () => {
+export const AppContent: React.FC = () => {
   // Field selectors: subscribing to the whole store would re-render the
   // entire route tree on any account-store change.
   const isLoading = useAccountStore(s => s.isLoading);
   const userProfile = useAccountStore(s => s.userProfile);
   const isInitialized = useAppStore(s => s.isInitialized);
+  const lockedStartupFallback = useAppStore(s => s.lockedStartupFallback);
+  const routesInitialized = isInitialized || lockedStartupFallback;
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
   useStoreInit(); // Initialize all stores when user profile is available
@@ -65,7 +73,12 @@ const AppContent: React.FC = () => {
 
   // LoadingScreen only during the very first profile-loader pass — not
   // for subsequent actions that toggle isLoading (signup, login, etc.).
-  if (isLoading && !isInitialized && !userProfile && !initialLoadDone.current) {
+  if (
+    isLoading &&
+    !routesInitialized &&
+    !userProfile &&
+    !initialLoadDone.current
+  ) {
     return <LoadingScreen />;
   }
 
@@ -74,7 +87,7 @@ const AppContent: React.FC = () => {
   // Design note: If a user manually navigates to an invite URL before initialization completes,
   // the onboarding flow is skipped and the invite page is shown directly. This is to handle the
   // case where a user has the phone app and doesn't necessarily need to create an account on web or pwa.
-  if (!isInitialized && !inviteMatch) {
+  if (!routesInitialized && !inviteMatch) {
     return (
       <PageLayout>
         <Onboarding />
@@ -94,6 +107,40 @@ const AppContent: React.FC = () => {
     />
   );
 };
+
+function CleanupGatedDebugConsole() {
+  const [blocked, setBlocked] = useState(true);
+  useEffect(() => {
+    let active = true;
+    let revision = 0;
+    const refresh = async () => {
+      const currentRevision = ++revision;
+      const pending = isPortableImportCleanupPending();
+      if (pending) {
+        if (active) setBlocked(true);
+        return;
+      }
+      await reconcileDebugLogsGeneration();
+      if (
+        active &&
+        currentRevision === revision &&
+        !isPortableImportCleanupPending()
+      ) {
+        setBlocked(false);
+      }
+    };
+    const handleRefresh = () => void refresh();
+    window.addEventListener(PORTABLE_IMPORT_CLEANUP_EVENT, handleRefresh);
+    window.addEventListener('storage', handleRefresh);
+    void refresh();
+    return () => {
+      active = false;
+      window.removeEventListener(PORTABLE_IMPORT_CLEANUP_EVENT, handleRefresh);
+      window.removeEventListener('storage', handleRefresh);
+    };
+  }, []);
+  return blocked ? null : <DebugConsole />;
+}
 
 function App() {
   const { initTheme } = useTheme();
@@ -132,8 +179,13 @@ function App() {
       <ErrorBoundary>
         <KeyboardAwareWrapper>
           <AppUrlListener />
-          <AppContent />
-          <DebugConsole />
+          <PortableBackupStartupGate>
+            <AppContent />
+            <CleanupGatedDebugConsole />
+          </PortableBackupStartupGate>
+          {/* <div className="hidden">
+            <PWABadge />
+          </div> */}
         </KeyboardAwareWrapper>
         <Toaster
           position="top-center"

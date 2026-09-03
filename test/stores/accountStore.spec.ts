@@ -1,37 +1,107 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useAccountStore } from '../../src/stores/accountStore';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  IncompleteOnboardingSlotCleanupError,
+  useAccountStore,
+} from '../../src/stores/accountStore';
+import {
+  MessagingSessionRecoveryRequiredError,
+  SecureStorageRecoveryRequiredError,
+  SELF_CONTACT_ID,
+} from '@massalabs/gossip-sdk';
+import type { Account } from '@massalabs/massa-web3';
 
 // Shared spy so individual test suites can assert on it
 const skipHistoricalSpy = vi.fn();
-const hasExistingCredentialSpy = vi.hoisted(() => vi.fn(async () => false));
+const authSpy = vi.hoisted(() => vi.fn());
+const configureBiometricSpy = vi.hoisted(() => vi.fn());
+const appState = vi.hoisted(() => ({ secureAccountCreationAllowed: true }));
+const derivedAccountKeys = vi.hoisted(() => [] as Uint8Array[]);
+const encodeUserIdSpy = vi.hoisted(() => vi.fn(() => 'mock-user-id'));
+const resetAllAccountsSpy = vi.hoisted(() => vi.fn(async () => {}));
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
   isSessionOpen: false,
   isSecureStorage: false,
   storageState: 'locked',
+  accountGenerationState: null as 'empty' | 'committed' | null,
+  accountGenerationEpoch: null as string | null,
   usesSessionBlobNamespace: false,
   closeSession: vi.fn(),
   clearAllTables: vi.fn(),
   secureStorageUnlock: vi.fn(async () => false),
   secureStorageLock: vi.fn(async () => {}),
   secureStorageCreate: vi.fn(async () => {}),
+  secureStorageDestroy: vi.fn(async () => {}),
   openSession: vi.fn(async () => {}),
-  getEncryptedSession: vi.fn(() => new Uint8Array(0)),
+  startPublicKeyPublication: vi.fn(),
+  polling: { start: vi.fn(), stop: vi.fn(), isRunning: false },
+  getEncryptedSession: vi.fn(() => new Uint8Array([6, 6])),
+  readSessionBlob: vi.fn(async () => null),
   persistSessionBlob: vi.fn(async () => {}),
   userId: 'mock-user-id',
   publicKeys: {},
-  queries: {},
+  discussions: {
+    createSessionForContact: vi.fn(async () => ({
+      success: true as const,
+      data: new Uint8Array([7]),
+    })),
+  },
+  queries: {
+    messagingSessionRecovery: {
+      prepareReset: vi.fn(async () => {}),
+    },
+    discussions: {
+      getByOwner: vi.fn(async () => []),
+    },
+    privateMigration: {
+      begin: vi.fn(async (installationEpoch: string) => ({
+        formatVersion: 1 as const,
+        installationEpoch,
+        completedPhase: 0,
+      })),
+      completePhase: vi.fn(
+        async (installationEpoch: string, completedPhase: number) => ({
+          formatVersion: 1 as const,
+          installationEpoch,
+          completedPhase,
+        })
+      ),
+    },
+    accountSettings: {
+      create: vi.fn(async (userId: string) => ({
+        userId,
+        formatVersion: 1,
+        mnsEnabled: false,
+        defaultRetentionDuration: 2592000,
+      })),
+      getOrCreate: vi.fn(async (userId: string) => ({
+        userId,
+        formatVersion: 1,
+        mnsEnabled: false,
+        defaultRetentionDuration: 2592000,
+      })),
+    },
+  },
   auth: {
     publishPublicKey: vi.fn(async () => {}),
   },
   profiles: {
+    get: vi.fn(async () => null),
+    getAll: vi.fn(async () => []),
     getCount: vi.fn(async () => 0),
     save: vi.fn(async () => {}),
     createOrUpdate: vi.fn(async () => ({
       userId: 'mock-user-id',
       username: 'testuser',
-      security: { authMethod: 'password', encKeySalt: new Uint8Array(0) },
+      security: {
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
+        authMethod: 'password',
+        encKeySalt: new Uint8Array(16),
+      },
     })),
   },
   announcements: {
@@ -48,10 +118,14 @@ function mockProfile(session = new Uint8Array([9, 9])) {
     userId: 'mock-user-id',
     username: 'testuser',
     security: {
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
       authMethod: 'password' as const,
-      encKeySalt: new Uint8Array(0),
+      encKeySalt: new Uint8Array(16),
       mnemonicBackup: {
-        encryptedMnemonic: new Uint8Array(0),
+        encryptedMnemonic: new Uint8Array(32),
         createdAt: now,
         backedUp: false,
       },
@@ -65,6 +139,10 @@ function mockProfile(session = new Uint8Array([9, 9])) {
 }
 
 // Mock getSdk to avoid real SDK initialization
+vi.mock('../../src/services/unsupportedStorageReset', () => ({
+  resetAllAccountStorage: resetAllAccountsSpy,
+}));
+
 vi.mock('../../src/stores/sdkStore', () => ({
   getSdk: () => getSdkMock(),
 }));
@@ -98,7 +176,7 @@ vi.mock('../../src/stores/selfMessageStore', () => ({
   },
 }));
 
-// ── Mocks needed by initializeAccount / initializeAccountWithBiometrics ──
+// ── Mocks needed by initializeAccount ──
 
 vi.mock('@massalabs/gossip-sdk', async () => {
   const actual = await vi.importActual<typeof import('@massalabs/gossip-sdk')>(
@@ -106,24 +184,43 @@ vi.mock('@massalabs/gossip-sdk', async () => {
   );
   return {
     ...actual,
+    PROFILE_SECURITY_FORMAT_VERSION: 1,
+    PROFILE_PASSWORD_KDF_VERSION: 1,
+    PROFILE_MNEMONIC_ENCRYPTION_VERSION: 1,
+    IDENTITY_DERIVATION_VERSION: 1,
+    UnreadableMessagingSessionError: class extends Error {},
+    MessagingSessionRecoveryRequiredError: class extends Error {
+      readonly reason: 'missing' | 'unreadable';
+      constructor(reason: 'missing' | 'unreadable') {
+        super('Messaging sessions could not be restored');
+        this.reason = reason;
+      }
+    },
     generateMnemonic: vi.fn(() => 'word '.repeat(24).trim()),
     validateMnemonic: vi.fn(() => true),
     generateUserKeys: vi.fn(async () => ({
       secret_keys: () => ({
         massa_secret_key: new Uint8Array(32),
+        free: vi.fn(),
       }),
       public_keys: () => ({
         derive_id: () => new Uint8Array(32),
+        free: vi.fn(),
       }),
+      free: vi.fn(),
       evm_address: () => '0x9858EfFD232B4033E47d90003D41EC34EcaEda94',
       massa_address: () =>
         'AU1CKrPb3a1Aj3JJkeTuHJoMswGVDSdgg1ynK7QMMMKHVYjinBfq',
     })),
-    encodeUserId: vi.fn(() => 'mock-user-id'),
+    encodeUserId: encodeUserIdSpy,
     generateNonce: vi.fn(async () => ({
       to_bytes: () => new Uint8Array(16),
     })),
-    deriveKey: vi.fn(async () => ({ type: 'mock-key' })),
+    deriveKey: vi.fn(async () => ({
+      type: 'mock-key',
+      __wbg_ptr: 1,
+      free: vi.fn(),
+    })),
     encrypt: vi.fn(async () => ({ encryptedData: new Uint8Array(0) })),
   };
 });
@@ -139,9 +236,14 @@ vi.mock('@massalabs/massa-web3', async () => {
   return {
     ...actual,
     Account: {
-      fromPrivateKey: vi.fn(async () => ({
-        address: { toString: () => 'AU1mock' },
-      })),
+      fromPrivateKey: vi.fn(async () => {
+        const bytes = new Uint8Array([1, 2, 3]);
+        derivedAccountKeys.push(bytes);
+        return {
+          address: { toString: () => 'AU1mock' },
+          privateKey: { toBytes: () => bytes, toString: () => 'P1test' },
+        };
+      }),
     },
     PrivateKey: {
       fromBytes: vi.fn(() => ({})),
@@ -154,29 +256,20 @@ vi.mock('../../src/crypto/webauthn', () => ({
 }));
 
 vi.mock('../../src/services/biometricService', () => ({
-  checkBiometricAvailability: vi.fn(async () => ({
-    available: true,
-    biometryType: 'none',
-  })),
-  createCredential: vi.fn(async () => ({
-    success: true,
-    data: {
-      credentialId: 'mock-cred-id',
-      encryptionKey: {
-        type: 'mock-key',
-        to_bytes: vi.fn(() => new Uint8Array([1, 2, 3])),
-      },
-      authMethod: 'webauthn',
-    },
-  })),
-  hasExistingCredential: hasExistingCredentialSpy,
+  configureBiometricLogin: configureBiometricSpy,
 }));
 
 vi.mock('../../src/stores/appStore', () => ({
   useAppStore: {
     getState: () => ({
       mnsEnabled: false,
+      secureAccountCreationAllowed: appState.secureAccountCreationAllowed,
+      setSecureAccountCreationAllowed: vi.fn((value: boolean) => {
+        appState.secureAccountCreationAllowed = value;
+      }),
       setIsInitialized: vi.fn(),
+      hydrateAccountSettings: vi.fn(),
+      resetAccountSettings: vi.fn(),
       fetchMnsDomains: vi.fn(async () => {}),
       networkName: 'mainnet',
     }),
@@ -188,17 +281,584 @@ vi.mock('../../src/stores/utils/getAccount', () => ({
 }));
 
 vi.mock('../../src/stores/utils/auth', () => ({
-  auth: vi.fn(async () => ({
-    mnemonic: 'word '.repeat(24).trim(),
-    encryptionKey: {},
+  auth: authSpy,
+  createPasswordSecurity: vi.fn(async () => ({
+    security: {
+      formatVersion: 1,
+      passwordKdfVersion: 1,
+      mnemonicEncryptionVersion: 1,
+      identityDerivationVersion: 1,
+      authMethod: 'password',
+      encKeySalt: new Uint8Array(16),
+      mnemonicBackup: {
+        encryptedMnemonic: new Uint8Array(32),
+        createdAt: new Date(),
+        backedUp: false,
+      },
+    },
+    encryptionKey: {
+      type: 'mock-key',
+      __wbg_ptr: 1,
+      free: vi.fn(),
+    },
   })),
 }));
+
+beforeEach(() => {
+  appState.secureAccountCreationAllowed = true;
+  derivedAccountKeys.length = 0;
+  encodeUserIdSpy.mockReset();
+  encodeUserIdSpy.mockReturnValue('mock-user-id');
+});
+
+describe('AccountStore classic password discovery', () => {
+  beforeEach(() => {
+    getSdkMock.mockImplementation(makeSdkMock);
+    authSpy.mockReset();
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  afterEach(() => {
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  it('rejects duplicate passwords that would make discovery ambiguous', async () => {
+    const sdk = makeSdkMock();
+    const free = vi.fn();
+    sdk.storageState = 'unlocked';
+    sdk.profiles.getAll.mockResolvedValue([mockProfile()]);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free },
+    });
+
+    await expect(
+      useAccountStore.getState().initializeAccount('second', 'shared-password')
+    ).rejects.toThrow('Password already in use by another account');
+
+    expect(free).toHaveBeenCalledOnce();
+    expect(sdk.openSession).not.toHaveBeenCalled();
+  });
+
+  it('probes profiles when a global biometric password has no user ID', async () => {
+    const first = mockProfile();
+    const second = {
+      ...mockProfile(),
+      userId: 'second-user-id',
+      username: 'second',
+    };
+    const encryptionKey = { type: 'mock-key' };
+    const sdk = makeSdkMock();
+    sdk.storageState = 'unlocked';
+    sdk.profiles.getAll.mockResolvedValue([first, second]);
+    getSdkMock.mockReturnValue(sdk);
+    encodeUserIdSpy.mockReturnValue('second-user-id');
+    authSpy
+      .mockRejectedValueOnce(new Error('wrong profile'))
+      .mockResolvedValueOnce({
+        mnemonic: 'word '.repeat(24).trim(),
+        encryptionKey,
+      });
+
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'global-password',
+    });
+
+    expect(authSpy).toHaveBeenNthCalledWith(1, first, 'global-password');
+    expect(authSpy).toHaveBeenNthCalledWith(2, second, 'global-password');
+    expect(useAccountStore.getState().userProfile?.userId).toBe(
+      'second-user-id'
+    );
+    expect(sdk.openSession).toHaveBeenCalledWith(
+      expect.objectContaining({ publishPublicKey: false })
+    );
+    expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a profile whose decrypted mnemonic derives another identity', async () => {
+    const profile = mockProfile();
+    const free = vi.fn();
+    const sdk = makeSdkMock();
+    sdk.storageState = 'unlocked';
+    sdk.profiles.get.mockResolvedValue(profile);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free },
+    });
+    encodeUserIdSpy.mockReturnValue('different-user-id');
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'password',
+        userId: profile.userId,
+      })
+    ).rejects.toThrow('Authenticated profile identity mismatch');
+
+    expect(sdk.openSession).not.toHaveBeenCalled();
+    expect(free).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys).toHaveLength(1);
+    expect(Array.from(derivedAccountKeys[0])).toEqual([0, 0, 0]);
+  });
+
+  it('frees caller-owned keys and derived accounts before session open', async () => {
+    const sdk = makeSdkMock();
+    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
+    sdk.storageState = 'unlocked';
+    sdk.usesSessionBlobNamespace = true;
+    sdk.profiles.get.mockResolvedValue(mockProfile());
+    sdk.readSessionBlob.mockRejectedValue(new Error('blob read failed'));
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey,
+    });
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: 'mock-user-id',
+      })
+    ).rejects.toThrow('blob read failed');
+
+    expect(encryptionKey.free).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('frees caller-owned keys when SDK session opening rejects', async () => {
+    const sdk = makeSdkMock();
+    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
+    sdk.storageState = 'unlocked';
+    sdk.profiles.get.mockResolvedValue(mockProfile());
+    sdk.openSession.mockRejectedValue(new Error('open failed'));
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey,
+    });
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: 'mock-user-id',
+      })
+    ).rejects.toThrow('open failed');
+
+    expect(encryptionKey.free).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
+  });
+
+  it('durably gates each account generation through all five phases', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.accountGenerationState = 'committed';
+    sdk.accountGenerationEpoch = '00112233445566778899aabbccddeeff';
+    sdk.profiles.get.mockResolvedValue(profile);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { type: 'mock-key' },
+    });
+
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'account-password',
+      userId: profile.userId,
+    });
+
+    expect(sdk.queries.privateMigration.completePhase.mock.calls).toEqual(
+      [1, 2, 3, 4, 5].map(phase => ['00112233445566778899aabbccddeeff', phase])
+    );
+    expect(sdk.openSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        publishPublicKey: false,
+        autoStartPolling: false,
+      })
+    );
+    expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
+    expect(sdk.polling.start).toHaveBeenCalledOnce();
+    expect(useAccountStore.getState().privateMigrationPhase).toBeNull();
+  });
+
+  it('resumes migration independently for each account in one generation', async () => {
+    const epoch = '00112233445566778899aabbccddeeff';
+    const completedAccount = makeSdkMock();
+    const interruptedAccount = makeSdkMock();
+    for (const sdk of [completedAccount, interruptedAccount]) {
+      sdk.isSecureStorage = true;
+      sdk.storageState = 'locked';
+      sdk.accountGenerationState = 'committed';
+      sdk.accountGenerationEpoch = epoch;
+      sdk.secureStorageUnlock.mockImplementation(async () => {
+        sdk.storageState = 'unlocked';
+        return true;
+      });
+      sdk.profiles.get.mockResolvedValue(mockProfile());
+    }
+    completedAccount.queries.privateMigration.begin.mockResolvedValue({
+      formatVersion: 1,
+      installationEpoch: epoch,
+      completedPhase: 5,
+    });
+    interruptedAccount.queries.privateMigration.begin.mockResolvedValue({
+      formatVersion: 1,
+      installationEpoch: epoch,
+      completedPhase: 2,
+    });
+    let activeSdk = completedAccount;
+    getSdkMock.mockImplementation(() => activeSdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { type: 'mock-key' },
+    });
+
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'first-account-password',
+      userId: 'mock-user-id',
+    });
+    activeSdk = interruptedAccount;
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'second-account-password',
+      userId: 'mock-user-id',
+    });
+
+    expect(
+      completedAccount.queries.privateMigration.begin
+    ).toHaveBeenCalledWith(epoch);
+    expect(
+      completedAccount.queries.privateMigration.completePhase
+    ).not.toHaveBeenCalled();
+    expect(
+      interruptedAccount.queries.privateMigration.begin
+    ).toHaveBeenCalledWith(epoch);
+    expect(
+      interruptedAccount.queries.privateMigration.completePhase.mock.calls
+    ).toEqual([3, 4, 5].map(phase => [epoch, phase]));
+  });
+
+  it('requires explicit recovery for a missing generation session namespace', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile(new Uint8Array(0));
+    sdk.isSecureStorage = true;
+    sdk.usesSessionBlobNamespace = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.accountGenerationState = 'committed';
+    sdk.accountGenerationEpoch = '00112233445566778899aabbccddeeff';
+    sdk.profiles.get.mockResolvedValue(profile);
+    sdk.readSessionBlob.mockResolvedValue(null);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free: vi.fn() },
+    });
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: profile.userId,
+      })
+    ).rejects.toBeInstanceOf(MessagingSessionRecoveryRequiredError);
+
+    expect(sdk.openSession).not.toHaveBeenCalled();
+    expect(
+      sdk.queries.messagingSessionRecovery.prepareReset
+    ).not.toHaveBeenCalled();
+    expect(sdk.secureStorageLock).toHaveBeenCalledOnce();
+  });
+
+  it('rebuilds accepted contact sessions before durable activation', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile();
+    sdk.isSecureStorage = true;
+    sdk.usesSessionBlobNamespace = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.accountGenerationState = 'committed';
+    sdk.accountGenerationEpoch = '00112233445566778899aabbccddeeff';
+    sdk.profiles.get.mockResolvedValue(profile);
+    sdk.queries.privateMigration.begin.mockResolvedValue({
+      formatVersion: 1,
+      installationEpoch: '00112233445566778899aabbccddeeff',
+      completedPhase: 3,
+    });
+    sdk.queries.discussions.getByOwner.mockResolvedValue([
+      { weAccepted: true, contactUserId: 'accepted-contact' },
+      { weAccepted: false, contactUserId: 'pending-contact' },
+      { weAccepted: true, contactUserId: SELF_CONTACT_ID },
+    ]);
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { type: 'mock-key' },
+    });
+
+    await useAccountStore.getState().loadAccount({
+      type: 'password',
+      password: 'account-password',
+      userId: profile.userId,
+      resetMessagingSessions: true,
+    });
+
+    expect(
+      sdk.queries.messagingSessionRecovery.prepareReset
+    ).toHaveBeenCalledOnce();
+    expect(sdk.openSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedSession: undefined,
+        publishPublicKey: false,
+        autoStartPolling: false,
+      })
+    );
+    expect(sdk.discussions.createSessionForContact).toHaveBeenCalledOnce();
+    expect(sdk.discussions.createSessionForContact).toHaveBeenCalledWith(
+      'accepted-contact',
+      expect.any(Uint8Array),
+      { resetQueue: false, triggerRefresh: false }
+    );
+    expect(sdk.persistSessionBlob).toHaveBeenCalledWith(new Uint8Array([6, 6]));
+    expect(sdk.profiles.save).toHaveBeenCalledWith(
+      expect.objectContaining({ session: new Uint8Array(0) })
+    );
+    expect(sdk.startPublicKeyPublication).toHaveBeenCalledOnce();
+    expect(sdk.polling.start).toHaveBeenCalledOnce();
+  });
+
+  it('keeps migration failures locked before activation', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.accountGenerationState = 'committed';
+    sdk.accountGenerationEpoch = '00112233445566778899aabbccddeeff';
+    sdk.profiles.get.mockResolvedValue(profile);
+    sdk.queries.privateMigration.completePhase.mockImplementation(
+      async (installationEpoch: string, completedPhase: number) => {
+        if (completedPhase === 3) throw new Error('checkpoint failed');
+        return { formatVersion: 1 as const, installationEpoch, completedPhase };
+      }
+    );
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free: vi.fn() },
+    });
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: profile.userId,
+      })
+    ).rejects.toThrow('checkpoint failed');
+
+    expect(sdk.openSession).not.toHaveBeenCalled();
+    expect(sdk.startPublicKeyPublication).not.toHaveBeenCalled();
+    expect(sdk.polling.start).not.toHaveBeenCalled();
+    expect(sdk.secureStorageLock).toHaveBeenCalledOnce();
+    expect(useAccountStore.getState().userProfile).toBeNull();
+    expect(useAccountStore.getState().privateMigrationPhase).toBeNull();
+  });
+
+  it('fails closed when a committed generation has no epoch', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    sdk.secureStorageUnlock.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      return true;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.accountGenerationState = 'committed';
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+      })
+    ).rejects.toThrow('Account generation epoch is unavailable');
+
+    expect(sdk.queries.privateMigration.begin).not.toHaveBeenCalled();
+    expect(sdk.openSession).not.toHaveBeenCalled();
+    expect(sdk.startPublicKeyPublication).not.toHaveBeenCalled();
+    expect(sdk.polling.start).not.toHaveBeenCalled();
+    expect(sdk.secureStorageLock).toHaveBeenCalledOnce();
+  });
+
+  it('closes SDK-owned keys when finalization fails after session open', async () => {
+    const sdk = makeSdkMock();
+    const encryptionKey = { __wbg_ptr: 1, free: vi.fn() };
+    sdk.storageState = 'unlocked';
+    sdk.profiles.get.mockResolvedValue(mockProfile());
+    sdk.openSession.mockImplementation(async () => {
+      sdk.isSessionOpen = true;
+    });
+    sdk.profiles.save.mockRejectedValue(new Error('profile save failed'));
+    sdk.closeSession.mockImplementation(async () => {
+      sdk.isSessionOpen = false;
+      encryptionKey.free();
+    });
+    getSdkMock.mockReturnValue(sdk);
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey,
+    });
+
+    await expect(
+      useAccountStore.getState().loadAccount({
+        type: 'password',
+        password: 'account-password',
+        userId: 'mock-user-id',
+      })
+    ).rejects.toThrow('profile save failed');
+
+    expect(sdk.closeSession).toHaveBeenCalledOnce();
+    expect(encryptionKey.free).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
+  });
+});
+
+describe('AccountStore biometric settings', () => {
+  beforeEach(() => {
+    authSpy.mockReset();
+    configureBiometricSpy.mockReset();
+    configureBiometricSpy.mockResolvedValue({ success: true });
+    getSdkMock.mockImplementation(makeSdkMock);
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  afterEach(() => {
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  it('verifies the active account password before replacing biometrics', async () => {
+    const sdk = makeSdkMock();
+    const profile = mockProfile();
+    const free = vi.fn();
+    sdk.isSessionOpen = true;
+    getSdkMock.mockReturnValue(sdk);
+    useAccountStore.setState({ userProfile: profile });
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free },
+    });
+
+    await useAccountStore
+      .getState()
+      .configureBiometricLogin('current-password', true);
+
+    expect(authSpy).toHaveBeenCalledWith(profile, 'current-password');
+    expect(free).toHaveBeenCalledOnce();
+    expect(configureBiometricSpy).toHaveBeenCalledWith(
+      'current-password',
+      true
+    );
+  });
+
+  it('does not replace biometrics when password verification fails', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSessionOpen = true;
+    getSdkMock.mockReturnValue(sdk);
+    useAccountStore.setState({ userProfile: mockProfile() });
+    authSpy.mockRejectedValue(new Error('Authentication failed'));
+
+    await expect(
+      useAccountStore.getState().configureBiometricLogin('wrong-password')
+    ).rejects.toThrow('Authentication failed');
+
+    expect(configureBiometricSpy).not.toHaveBeenCalled();
+  });
+
+  it('serializes and wipes the temporary backup account key', async () => {
+    const sdk = makeSdkMock();
+    const encryptionFree = vi.fn();
+    sdk.isSessionOpen = true;
+    getSdkMock.mockReturnValue(sdk);
+    useAccountStore.setState({ userProfile: mockProfile() });
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: { __wbg_ptr: 1, free: encryptionFree },
+    });
+
+    const backup = await useAccountStore
+      .getState()
+      .showBackup('account-password');
+
+    expect(backup.privateKey).toBe('P1test');
+    expect(encryptionFree).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
+  });
+});
 
 describe('AccountStore session cleanup', () => {
   beforeEach(() => {
     discussionCleanup.mockClear();
     messageCleanup.mockClear();
     selfClearMessages.mockClear();
+  });
+
+  it('wipes the active Massa signing key on logout', async () => {
+    const privateKeyBytes = new Uint8Array([7, 8, 9]);
+    getSdkMock.mockImplementation(makeSdkMock);
+    useAccountStore.setState({
+      account: {
+        privateKey: { toBytes: () => privateKeyBytes },
+      } as unknown as Account,
+    });
+
+    await useAccountStore.getState().logout();
+
+    expect(Array.from(privateKeyBytes)).toEqual([0, 0, 0]);
+    expect(useAccountStore.getState().account).toBeNull();
   });
 
   it('clears discussion, message, and selfMessage stores on logout', async () => {
@@ -210,13 +870,10 @@ describe('AccountStore session cleanup', () => {
     expect(selfClearMessages).toHaveBeenCalledTimes(1);
   });
 
-  it('clears discussion, message, and selfMessage stores on resetAccount', async () => {
-    const resetAccount = useAccountStore.getState().resetAccount;
-    await resetAccount();
+  it('delegates resetAccount to the complete all-account wipe', async () => {
+    await useAccountStore.getState().resetAccount();
 
-    expect(discussionCleanup).toHaveBeenCalledTimes(1);
-    expect(messageCleanup).toHaveBeenCalledTimes(1);
-    expect(selfClearMessages).toHaveBeenCalledTimes(1);
+    expect(resetAllAccountsSpy).toHaveBeenCalledOnce();
   });
 });
 
@@ -243,6 +900,10 @@ describe('AccountStore logout lockedByUser', () => {
 describe('AccountStore skipHistorical behavior', () => {
   beforeEach(() => {
     skipHistoricalSpy.mockClear();
+    authSpy.mockResolvedValue({
+      mnemonic: 'word '.repeat(24).trim(),
+      encryptionKey: {},
+    });
     getSdkMock.mockImplementation(makeSdkMock);
   });
 
@@ -253,20 +914,12 @@ describe('AccountStore skipHistorical behavior', () => {
 
     expect(skipHistoricalSpy).toHaveBeenCalledTimes(1);
   });
-
-  it('initializeAccountWithBiometrics calls skipHistorical()', async () => {
-    await useAccountStore
-      .getState()
-      .initializeAccountWithBiometrics('testuser');
-
-    expect(skipHistoricalSpy).toHaveBeenCalledTimes(1);
-  });
 });
 
-describe('AccountStore secure-storage biometric singleton', () => {
+describe('AccountStore secure-storage account provisioning', () => {
   beforeEach(() => {
-    hasExistingCredentialSpy.mockReset();
-    hasExistingCredentialSpy.mockResolvedValue(false);
+    authSpy.mockReset();
+    appState.secureAccountCreationAllowed = true;
     getSdkMock.mockImplementation(makeSdkMock);
     useAccountStore.setState({
       userProfile: null,
@@ -275,18 +928,187 @@ describe('AccountStore secure-storage biometric singleton', () => {
     });
   });
 
-  it('rejects a second biometric secure-storage account', async () => {
+  it('retains the in-flight password when rejected creation cleanup is unproved', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+      throw new SecureStorageRecoveryRequiredError(
+        new Error('create recovery failed')
+      );
+    });
+    sdk.secureStorageDestroy.mockRejectedValue(new Error('destroy failed'));
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore.getState().initializeAccount('alice', 'alice-password')
+    ).rejects.toBeInstanceOf(IncompleteOnboardingSlotCleanupError);
+    expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
+  });
+
+  it('does not overwrite hidden slots without a first-install creation grant', async () => {
     const sdk = makeSdkMock();
     sdk.isSecureStorage = true;
     sdk.storageState = 'locked';
+    appState.secureAccountCreationAllowed = false;
     getSdkMock.mockReturnValue(sdk);
-    hasExistingCredentialSpy.mockResolvedValue(true);
 
     await expect(
-      useAccountStore.getState().initializeAccountWithBiometrics('testuser')
-    ).rejects.toThrow('Only one biometric secure-storage account is allowed');
-
+      useAccountStore.getState().initializeAccount('alice', 'alice-password')
+    ).rejects.toThrow('Secure account creation is not currently authorized');
     expect(sdk.secureStorageCreate).not.toHaveBeenCalled();
+  });
+
+  it('allocates all onboarding accounts to distinct secure-storage slots', async () => {
+    const sdk = makeSdkMock();
+    const allocations: Array<{ slot: number; password: string }> = [];
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async (slot, password) => {
+      allocations.push({ slot, password });
+      sdk.storageState = 'unlocked';
+    });
+    sdk.openSession.mockImplementation(async () => {
+      sdk.isSessionOpen = true;
+    });
+    sdk.closeSession.mockImplementation(async () => {
+      sdk.isSessionOpen = false;
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    getSdkMock.mockReturnValue(sdk);
+
+    try {
+      await useAccountStore
+        .getState()
+        .initializeAccount('alice', 'alice-password');
+      await useAccountStore
+        .getState()
+        .initializeAccount('decoy', 'decoy-password');
+      await useAccountStore
+        .getState()
+        .initializeAccount('backup', 'backup-password');
+
+      expect(allocations.map(({ slot }) => slot).sort()).toEqual([0, 1, 2]);
+      expect(allocations.map(({ password }) => password)).toEqual([
+        'alice-password',
+        'decoy-password',
+        'backup-password',
+      ]);
+      expect(sdk.secureStorageLock).toHaveBeenCalledTimes(2);
+    } finally {
+      await useAccountStore.getState().logout();
+    }
+  });
+
+  it('rejects biased random bytes when choosing among three slots', async () => {
+    const sdk = makeSdkMock();
+    const allocatedSlots: number[] = [];
+    const samples = [255, 2];
+    const randomSpy = vi
+      .spyOn(crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+        if (array instanceof Uint8Array) array[0] = samples.shift() ?? 0;
+        return array;
+      });
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async slot => {
+      allocatedSlots.push(slot);
+      sdk.storageState = 'unlocked';
+    });
+    getSdkMock.mockReturnValue(sdk);
+
+    try {
+      await useAccountStore
+        .getState()
+        .initializeAccount('alice', 'alice-password');
+      expect(randomSpy).toHaveBeenCalledTimes(2);
+      expect(allocatedSlots).toEqual([2]);
+    } finally {
+      randomSpy.mockRestore();
+      await useAccountStore.getState().logout();
+    }
+  });
+
+  it('releases a slot after post-open persistence failure so retry can reuse it', async () => {
+    const sdk = makeSdkMock();
+    const allocatedSlots: number[] = [];
+    const randomSpy = vi
+      .spyOn(crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+        if (array instanceof Uint8Array) array[0] = 0;
+        return array;
+      });
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async slot => {
+      allocatedSlots.push(slot);
+      sdk.storageState = 'unlocked';
+    });
+    sdk.openSession.mockImplementation(async () => {
+      sdk.isSessionOpen = true;
+    });
+    sdk.closeSession.mockImplementation(async () => {
+      sdk.isSessionOpen = false;
+    });
+    sdk.secureStorageDestroy.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.secureStorageLock.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.profiles.createOrUpdate
+      .mockRejectedValueOnce(new Error('profile persistence failed'))
+      .mockResolvedValueOnce(mockProfile());
+    getSdkMock.mockReturnValue(sdk);
+
+    try {
+      await expect(
+        useAccountStore.getState().initializeAccount('alice', 'alice-password')
+      ).rejects.toThrow('profile persistence failed');
+
+      expect(sdk.closeSession).toHaveBeenCalledOnce();
+      expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
+      expect(sdk.closeSession.mock.invocationCallOrder[0]).toBeLessThan(
+        sdk.secureStorageDestroy.mock.invocationCallOrder[0]
+      );
+      expect(sdk.storageState).toBe('locked');
+
+      await useAccountStore
+        .getState()
+        .initializeAccount('alice', 'alice-password');
+
+      expect(allocatedSlots).toEqual([0, 0]);
+      expect(sdk.profiles.createOrUpdate).toHaveBeenCalledTimes(2);
+    } finally {
+      randomSpy.mockRestore();
+      await useAccountStore.getState().logout();
+    }
+  });
+
+  it('destroys a newly allocated slot when account persistence fails', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'empty';
+    sdk.secureStorageCreate.mockImplementation(async () => {
+      sdk.storageState = 'unlocked';
+    });
+    sdk.secureStorageDestroy.mockImplementation(async () => {
+      sdk.storageState = 'locked';
+    });
+    sdk.openSession.mockRejectedValue(new Error('session setup failed'));
+    getSdkMock.mockReturnValue(sdk);
+
+    await expect(
+      useAccountStore.getState().initializeAccount('testuser', 'password123')
+    ).rejects.toThrow('session setup failed');
+
+    expect(sdk.secureStorageCreate).toHaveBeenCalledOnce();
+    expect(sdk.secureStorageDestroy).toHaveBeenCalledOnce();
+    expect(derivedAccountKeys.at(-1)?.every(byte => byte === 0)).toBe(true);
   });
 });
 

@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.ts';
 import React, { useState, useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useTranslation } from 'react-i18next';
 import BaseModal from '../components/ui/BaseModal';
 import PageLayout from '../components/ui/Layout/PageLayout';
@@ -26,6 +27,7 @@ import {
   Shield,
   Clock,
   MessageSquare,
+  Download,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -241,6 +243,14 @@ const Settings = (): React.ReactElement => {
               )
             }
           />
+          {['web', 'android', 'ios'].includes(Capacitor.getPlatform()) && (
+            <SettingsRow
+              icon={<Download />}
+              label={t('menu.secure_backup')}
+              onClick={() => navigate(ROUTES.portableBackup())}
+              withDivider
+            />
+          )}
           <SettingsRow
             icon={<Share2 />}
             label={t('menu.share_contact')}

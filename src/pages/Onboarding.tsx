@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useAppStore } from '../stores/appStore';
 import { useAccountStore } from '../stores/accountStore';
@@ -7,6 +7,15 @@ import AccountCreation from '../components/account/AccountCreation';
 import BackgroundSyncOnboarding from '../components/onboarding/BackgroundSyncOnboarding';
 import ToSAcceptance from '../components/ToSAcceptance';
 import { SECURE_STORAGE_ENABLED } from '../config/features';
+import SecureOnboardingChoice from '../components/onboarding/SecureOnboardingChoice';
+import PortableImport from './PortableImport';
+import {
+  claimOnboardingStorageMode,
+  isOnboardingStorageCreationAuthorized,
+  type OnboardingStorageModeLease,
+} from '../services/portableImportAuthorization';
+import { restartAfterPortableBackup } from '../services/portableBackup';
+import { ROUTES } from '../constants/routes';
 
 /**
  * Routes for onboarding flow (when no account exists)
@@ -23,20 +32,44 @@ export const Onboarding: React.FC = () => {
   // to the account creation form (`AccountCreation` resolves to
   // `SecureAccountCreation` under the same flag — see
   // `components/account/AccountCreation.tsx`).
-  const [showAccountCreation, setShowAccountCreation] = useState(
-    SECURE_STORAGE_ENABLED
-  );
+  const authorizedAtMount = useRef(
+    !SECURE_STORAGE_ENABLED ||
+      useAppStore.getState().secureAccountCreationAllowed
+  ).current;
+  const creationModeLeaseRef = useRef<OnboardingStorageModeLease | null>(null);
+  const mountedRef = useRef(true);
+  const creationClaimGenerationRef = useRef(0);
+  const creationOperationActiveRef = useRef(false);
+  const releaseLeaseAfterOperationRef = useRef(false);
+  const [showAccountCreation, setShowAccountCreation] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   // When non-null, finalizeOnboarding is running in the background and we
   // are showing the BackgroundSyncOnboarding screen on top so the user can
   // toggle the high-reliability mode while we wait.
   const [finalizingPromise, setFinalizingPromise] =
     useState<Promise<void> | null>(null);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      creationClaimGenerationRef.current += 1;
+      if (creationOperationActiveRef.current) {
+        releaseLeaseAfterOperationRef.current = true;
+      } else {
+        const lease = creationModeLeaseRef.current;
+        creationModeLeaseRef.current = null;
+        void lease?.release();
+      }
+    };
+  }, []);
   const tosAccepted = useAppStore.use.tosAccepted();
   const setTosAccepted = useAppStore.use.setTosAccepted();
 
   if (!tosAccepted) {
     return <ToSAcceptance onAccept={() => setTosAccepted(true)} />;
   }
+
+  if (!authorizedAtMount) return null;
 
   const finalizeOnboarding = async () => {
     // Patch the freshly-created session so it gets the polling + lastSeen
@@ -52,13 +85,26 @@ export const Onboarding: React.FC = () => {
     const hasActiveSession = useAccountStore.getState().userProfile !== null;
     const isAndroid = Capacitor.getPlatform() === 'android';
 
+    const releaseCreationMode = async () => {
+      const lease = creationModeLeaseRef.current;
+      creationModeLeaseRef.current = null;
+      await lease?.release();
+    };
+
     if (isAndroid && hasActiveSession) {
-      setFinalizingPromise(useAccountStore.getState().finalizeOnboarding());
+      setFinalizingPromise(
+        useAccountStore
+          .getState()
+          .finalizeOnboarding()
+          .then(() => useAppStore.getState().setIsInitialized(true))
+          .then(releaseCreationMode)
+      );
       return;
     }
 
     await useAccountStore.getState().finalizeOnboarding();
     useAppStore.getState().setIsInitialized(true);
+    await releaseCreationMode();
   };
 
   if (finalizingPromise) {
@@ -72,11 +118,25 @@ export const Onboarding: React.FC = () => {
     );
   }
 
+  if (showImport) {
+    return <PortableImport onBack={() => setShowImport(false)} />;
+  }
+
   if (showAccountCreation) {
     return (
       <AccountCreation
         onComplete={() => {
           void finalizeOnboarding();
+        }}
+        creationModeLease={creationModeLeaseRef.current ?? undefined}
+        onCredentialOperationChange={active => {
+          creationOperationActiveRef.current = active;
+          if (!active && releaseLeaseAfterOperationRef.current) {
+            releaseLeaseAfterOperationRef.current = false;
+            const lease = creationModeLeaseRef.current;
+            creationModeLeaseRef.current = null;
+            void lease?.release();
+          }
         }}
         onBack={() => {
           void (async () => {
@@ -87,15 +147,54 @@ export const Onboarding: React.FC = () => {
             if (hasAny) {
               // If accounts exist, go to login flow
               useAppStore.getState().setIsInitialized(true);
-            } else if (!SECURE_STORAGE_ENABLED) {
-              // Otherwise go back to onboarding slideshow — but only
-              // in the legacy path. Under secure storage the slideshow
-              // was skipped on purpose; dropping back to it here would
-              // contradict that decision, so we stay on the creation
-              // form.
+            } else {
+              const lease = creationModeLeaseRef.current;
+              creationModeLeaseRef.current = null;
+              await lease?.release();
               setShowAccountCreation(false);
             }
           })();
+        }}
+      />
+    );
+  }
+
+  if (SECURE_STORAGE_ENABLED) {
+    return (
+      <SecureOnboardingChoice
+        onCreate={() => {
+          const generation = creationClaimGenerationRef.current + 1;
+          creationClaimGenerationRef.current = generation;
+          void claimOnboardingStorageMode('create').then(
+            async lease => {
+              if (
+                !mountedRef.current ||
+                creationClaimGenerationRef.current !== generation
+              ) {
+                await lease.release();
+                return;
+              }
+              if (!isOnboardingStorageCreationAuthorized()) {
+                await lease.release();
+                restartAfterPortableBackup(ROUTES.default());
+                return;
+              }
+              creationModeLeaseRef.current = lease;
+              setShowAccountCreation(true);
+            },
+            () => {
+              if (
+                mountedRef.current &&
+                creationClaimGenerationRef.current === generation
+              ) {
+                restartAfterPortableBackup(ROUTES.default());
+              }
+            }
+          );
+        }}
+        onImport={() => {
+          creationClaimGenerationRef.current += 1;
+          setShowImport(true);
         }}
       />
     );

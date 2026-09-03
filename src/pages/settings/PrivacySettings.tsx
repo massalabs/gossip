@@ -1,3 +1,4 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -17,6 +18,15 @@ const PrivacySettings: React.FC = () => {
   );
 
   const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
+
+  const handleRetentionChange = async (duration: number | null) => {
+    try {
+      await setDefaultRetentionDuration(duration);
+      setIsRetentionModalOpen(false);
+    } catch (error) {
+      logger.error('Failed to persist default retention setting:', error);
+    }
+  };
 
   const retentionLabel = useMemo(() => {
     const option = RETENTION_OPTIONS.find(
@@ -66,10 +76,7 @@ const PrivacySettings: React.FC = () => {
           value: o.value,
         }))}
         selectedValue={defaultRetentionDuration}
-        onSelect={value => {
-          setDefaultRetentionDuration(value);
-          setIsRetentionModalOpen(false);
-        }}
+        onSelect={value => void handleRetentionChange(value)}
         onClose={() => setIsRetentionModalOpen(false)}
       />
     </PageLayout>

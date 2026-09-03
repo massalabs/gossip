@@ -1,4 +1,5 @@
 import type { DatabaseConnection } from '../sqlite.js';
+import { AccountSettingsQueries } from './accountSettings.js';
 import { ContactQueries } from './contacts.js';
 import { DiscussionQueries } from './discussions.js';
 import { MessageQueries } from './messages.js';
@@ -6,13 +7,17 @@ import { UserProfileQueries } from './userProfile.js';
 import { AnnouncementCursorQueries } from './announcementCursors.js';
 import { PendingAnnouncementQueries } from './pendingAnnouncements.js';
 import { ActiveSeekerQueries } from './activeSeekers.js';
+import { PrivateMigrationQueries } from './privateMigration.js';
+import { MessagingSessionRecoveryQueries } from './messagingSessionRecovery.js';
 
+export type { AccountSettingsV1 } from './accountSettings.js';
 export type { ContactRow } from './contacts.js';
 export type { DiscussionRow } from './discussions.js';
 export type { MessageRow, MessageInsert } from './messages.js';
 export type { UserProfileRow, UserProfileInsert } from './userProfile.js';
 export { rowToUserProfile, userProfileToRow } from './userProfile.js';
 export type { PendingAnnouncementRow } from './pendingAnnouncements.js';
+export type { PrivateMigrationStateV1 } from './privateMigration.js';
 
 /**
  * Bundle of all query classes, scoped to a single DatabaseConnection.
@@ -21,6 +26,7 @@ export type { PendingAnnouncementRow } from './pendingAnnouncements.js';
  * all database access goes through the correct connection.
  */
 export class Queries {
+  readonly accountSettings: AccountSettingsQueries;
   readonly contacts: ContactQueries;
   readonly discussions: DiscussionQueries;
   readonly messages: MessageQueries;
@@ -28,8 +34,11 @@ export class Queries {
   readonly announcementCursors: AnnouncementCursorQueries;
   readonly pendingAnnouncements: PendingAnnouncementQueries;
   readonly activeSeekers: ActiveSeekerQueries;
+  readonly privateMigration: PrivateMigrationQueries;
+  readonly messagingSessionRecovery: MessagingSessionRecoveryQueries;
 
   constructor(readonly conn: DatabaseConnection) {
+    this.accountSettings = new AccountSettingsQueries(conn);
     this.contacts = new ContactQueries(conn);
     this.discussions = new DiscussionQueries(conn);
     this.messages = new MessageQueries(conn);
@@ -37,5 +46,7 @@ export class Queries {
     this.announcementCursors = new AnnouncementCursorQueries(conn);
     this.pendingAnnouncements = new PendingAnnouncementQueries(conn);
     this.activeSeekers = new ActiveSeekerQueries(conn);
+    this.privateMigration = new PrivateMigrationQueries(conn);
+    this.messagingSessionRecovery = new MessagingSessionRecoveryQueries(conn);
   }
 }

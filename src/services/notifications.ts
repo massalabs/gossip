@@ -10,12 +10,26 @@ import { logger } from '../utils/logger.ts';
  */
 
 import { Capacitor } from '@capacitor/core';
+import { bridgeGet } from '../sw-bridge';
 import {
   LocalNotifications,
   type PermissionStatus as LocalNotificationPermissionStatus,
 } from '@capacitor/local-notifications';
 
 const NOTIFICATION_ENABLED_KEY = 'gossip-notifications-enabled';
+const directNotifications = new Set<Notification>();
+const notificationCleanupChannel =
+  typeof window !== 'undefined' && 'BroadcastChannel' in window
+    ? new BroadcastChannel('gossip-notification-cleanup-v1')
+    : null;
+const closeDirectNotifications = () => {
+  for (const notification of directNotifications) notification.close();
+  directNotifications.clear();
+};
+notificationCleanupChannel?.addEventListener(
+  'message',
+  closeDirectNotifications
+);
 
 export interface NotificationPermission {
   granted: boolean;
@@ -140,41 +154,20 @@ export class NotificationService {
   }
 
   /**
-   * Wait for the service worker registration to be ready, with a timeout.
-   * `navigator.serviceWorker.ready` can pend forever if registration failed,
-   * so race it against a timeout and let callers fall back to the non-SW path.
-   * @param timeoutMs - Maximum time to wait for the service worker (default 3s)
-   * @returns Promise resolving to the registration, or null if unavailable
+   * Check if service worker is available and ready
+   * @returns Promise resolving to service worker controller if available
    */
-  private async getServiceWorkerRegistration(
-    timeoutMs: number = 3000
-  ): Promise<ServiceWorkerRegistration | null> {
+  private async getServiceWorkerController(): Promise<ServiceWorker | null> {
     if (!('serviceWorker' in navigator)) {
       return null;
     }
 
     try {
-      return await Promise.race([
-        navigator.serviceWorker.ready,
-        new Promise<null>(resolve =>
-          setTimeout(() => resolve(null), timeoutMs)
-        ),
-      ]);
+      const registration = await navigator.serviceWorker.getRegistration();
+      return navigator.serviceWorker.controller ?? registration?.active ?? null;
     } catch {
       return null;
     }
-  }
-
-  /**
-   * Check if service worker is available and ready
-   * @returns Promise resolving to service worker controller if available
-   */
-  private async getServiceWorkerController(): Promise<ServiceWorker | null> {
-    const registration = await this.getServiceWorkerRegistration();
-    if (!registration) {
-      return null;
-    }
-    return navigator.serviceWorker.controller;
   }
 
   /**
@@ -214,33 +207,35 @@ export class NotificationService {
     const controller = await this.getServiceWorkerController();
 
     if (controller) {
+      const outputGeneration =
+        (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
       // Send notification request to service worker
       // Service worker handles navigation via data.url in notificationclick event
       controller.postMessage({
-        type: 'SEND_NOTIFICATION',
+        type: 'SEND_NOTIFICATION_V2',
         payload: {
           title,
           body,
           tag,
           requireInteraction,
           autoCloseMs,
+          outputGeneration,
           data: {
             ...data,
             url: (data?.url as string) || '/discussions',
           },
         },
       });
-    } else {
-      // Fallback to direct notification if service worker not available
-      await this.showNotificationInternal(
-        title,
-        body,
-        tag,
-        autoCloseMs,
-        onClick,
-        requireInteraction
-      );
+      return;
     }
+    await this.showNotificationInternal(
+      title,
+      body,
+      tag,
+      autoCloseMs,
+      onClick,
+      requireInteraction
+    );
   }
 
   /**
@@ -351,6 +346,8 @@ export class NotificationService {
       silent: false,
     });
 
+    directNotifications.add(notification);
+
     // Handle notification click
     notification.onclick = () => {
       window.focus();
@@ -358,11 +355,13 @@ export class NotificationService {
         onClick();
       }
       notification.close();
+      directNotifications.delete(notification);
     };
 
     // Auto-close after specified time
     setTimeout(() => {
       notification.close();
+      directNotifications.delete(notification);
     }, autoCloseMs);
   }
 
@@ -619,31 +618,45 @@ export class NotificationService {
    * Clear all notifications with Gossip tags
    */
   async clearAllNotifications(): Promise<void> {
-    // Native: service workers are not available in native WebViews, so clear
-    // delivered notifications via Capacitor LocalNotifications instead.
     if (this.isNativePlatform()) {
+      const failures: unknown[] = [];
+      try {
+        const { backgroundRunnerStorageService } =
+          await import('./backgroundRunnerStorage');
+        await backgroundRunnerStorageService.cancelNotifications();
+      } catch (error) {
+        failures.push(error);
+      }
+      try {
+        const pending = await LocalNotifications.getPending();
+        if (pending.notifications.length > 0) {
+          await LocalNotifications.cancel({
+            notifications: pending.notifications.map(({ id }) => ({ id })),
+          });
+        }
+      } catch (error) {
+        failures.push(error);
+      }
       try {
         await LocalNotifications.removeAllDeliveredNotifications();
       } catch (error) {
-        logger.error('Failed to clear native notifications:', error);
+        failures.push(error);
+      }
+      if (failures.length > 0) {
+        throw new Error('Notification cleanup is incomplete');
       }
       return;
     }
 
+    closeDirectNotifications();
+    notificationCleanupChannel?.postMessage('clear');
     if ('serviceWorker' in navigator) {
-      try {
-        const registration = await this.getServiceWorkerRegistration();
-        if (!registration) {
-          // Service worker not ready (or timed out) - nothing to clear
-          return;
-        }
-        const notifications = await registration.getNotifications();
-        notifications.forEach(notification => {
-          notification.close();
-        });
-      } catch (error) {
-        logger.error('Failed to clear notifications:', error);
-      }
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (!registration) return;
+      const notifications = await registration.getNotifications();
+      notifications.forEach(notification => {
+        notification.close();
+      });
     }
   }
 }

@@ -18,8 +18,6 @@ const Web3Settings: React.FC = () => {
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const setMnsEnabled = useAppStore(s => s.setMnsEnabled);
   const fetchMnsDomains = useAppStore(s => s.fetchMnsDomains);
-  const userProfile = useAccountStore.use.userProfile();
-  const provider = useAccountStore.use.provider();
   const [mnsUrl, setMnsUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,10 +37,15 @@ const Web3Settings: React.FC = () => {
   };
 
   const handleMnsToggle = async (enabled: boolean) => {
-    setMnsEnabled(enabled);
-    // If enabling MNS, fetch and cache domains
-    if (enabled) {
-      await fetchMnsDomains(userProfile, provider);
+    try {
+      await setMnsEnabled(enabled);
+      // If enabling MNS, fetch and cache domains
+      if (enabled) {
+        const current = useAccountStore.getState();
+        await fetchMnsDomains(current.userProfile, current.provider);
+      }
+    } catch (error) {
+      logger.error('Failed to persist MNS setting:', error);
     }
   };
 

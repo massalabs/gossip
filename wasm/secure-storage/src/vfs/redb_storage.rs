@@ -12,13 +12,20 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::Path;
 
+use rand::RngCore;
 use redb::{Database, ReadableTable, TableDefinition};
 use zeroize::Zeroizing;
 
 use crate::constants::{BLOCK_SIZE, SESSION_COUNT};
 use crate::error::{Result, SecureStorageError};
+use crate::portable::{
+    MAX_PORTABLE_ARCHIVE_BYTES, PORTABLE_DIGEST_SIZE, PORTABLE_HEADER_SIZE, PortableArchiveReader,
+    PortableArchiveWriter, PortableHeader, PortableRecord, PortableRecordKind,
+    validate_portable_block_value, validate_portable_keypair_value,
+};
 use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
 
@@ -26,6 +33,69 @@ use crate::types::SessionIndex;
 
 const BLOCKS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("blocks");
 const KEYPAIRS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("keypairs");
+const METADATA: TableDefinition<&[u8], &[u8]> = TableDefinition::new("metadata");
+const LEGACY_PORTABLE_IMPORT_INSTALLED_KEY: &[u8] = b"portable-import-installed-v1";
+const ACCOUNT_GENERATION_STATE_KEY: &[u8] = b"account-generation-state-v1";
+const EMPTY_ACCOUNT_GENERATION: &[u8] = b"empty-v1";
+const COMMITTED_ACCOUNT_GENERATION_PREFIX: &[u8] = b"committed-v1:";
+const GENERATION_EPOCH_BYTES: usize = 16;
+const GENERATION_EPOCH_HEX_BYTES: usize = GENERATION_EPOCH_BYTES * 2;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum AccountGenerationState {
+    Empty,
+    Committed,
+}
+
+impl AccountGenerationState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::Committed => "committed",
+        }
+    }
+
+    fn decode(value: &[u8]) -> Result<Self> {
+        if value == EMPTY_ACCOUNT_GENERATION {
+            return Ok(Self::Empty);
+        }
+        decode_committed_generation_epoch(value)?;
+        Ok(Self::Committed)
+    }
+}
+
+fn new_generation_epoch() -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut bytes = [0_u8; GENERATION_EPOCH_BYTES];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    let mut epoch = String::with_capacity(GENERATION_EPOCH_HEX_BYTES);
+    for byte in bytes {
+        epoch.push(HEX[usize::from(byte >> 4)] as char);
+        epoch.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    epoch
+}
+
+fn committed_generation_value(epoch: &str) -> Vec<u8> {
+    let mut value =
+        Vec::with_capacity(COMMITTED_ACCOUNT_GENERATION_PREFIX.len() + GENERATION_EPOCH_HEX_BYTES);
+    value.extend_from_slice(COMMITTED_ACCOUNT_GENERATION_PREFIX);
+    value.extend_from_slice(epoch.as_bytes());
+    value
+}
+
+fn decode_committed_generation_epoch(value: &[u8]) -> Result<String> {
+    let epoch = value
+        .strip_prefix(COMMITTED_ACCOUNT_GENERATION_PREFIX)
+        .filter(|epoch| {
+            epoch.len() == GENERATION_EPOCH_HEX_BYTES
+                && epoch.iter().all(u8::is_ascii_hexdigit)
+                && epoch.iter().all(|byte| !byte.is_ascii_uppercase())
+        })
+        .ok_or(SecureStorageError::UnsupportedAccountGenerationState)?;
+    String::from_utf8(epoch.to_vec())
+        .map_err(|_| SecureStorageError::UnsupportedAccountGenerationState)
+}
 
 // ── Buffered write ───────────────────────────────────────────────────
 
@@ -136,6 +206,20 @@ impl RedbStorage {
     /// Return true if the on-disk database already has any keypair
     /// entries; used to gate `provision` at boot so we don't wipe
     /// existing slots by re-provisioning random throwaway keys.
+    #[cfg(test)]
+    pub fn legacy_portable_import_marker_exists(&self) -> Result<bool> {
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
+        let table = match txn.open_table(METADATA) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(false),
+            Err(error) => return Err(redb_err("metadata table")(error)),
+        };
+        Ok(table
+            .get(LEGACY_PORTABLE_IMPORT_INSTALLED_KEY)
+            .map_err(redb_err("metadata read"))?
+            .is_some())
+    }
+
     pub fn has_data(&self) -> Result<bool> {
         let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
         let table = match txn.open_table(KEYPAIRS) {
@@ -145,6 +229,60 @@ impl RedbStorage {
         };
         let mut iter = table.iter().map_err(redb_err("iter"))?;
         Ok(iter.next().is_some())
+    }
+
+    pub fn account_generation_state(&self) -> Result<Option<AccountGenerationState>> {
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
+        let table = match txn.open_table(METADATA) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(redb_err("metadata table")(error)),
+        };
+        table
+            .get(ACCOUNT_GENERATION_STATE_KEY)
+            .map_err(redb_err("account generation state read"))?
+            .map(|value| AccountGenerationState::decode(value.value()))
+            .transpose()
+    }
+
+    pub fn account_generation_epoch(&self) -> Result<Option<String>> {
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
+        let table = match txn.open_table(METADATA) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(error) => return Err(redb_err("metadata table")(error)),
+        };
+        let Some(value) = table
+            .get(ACCOUNT_GENERATION_STATE_KEY)
+            .map_err(redb_err("account generation epoch read"))?
+        else {
+            return Ok(None);
+        };
+        if value.value() == EMPTY_ACCOUNT_GENERATION {
+            return Ok(None);
+        }
+        decode_committed_generation_epoch(value.value()).map(Some)
+    }
+
+    pub fn initialize_empty_account_generation(&mut self) -> Result<AccountGenerationState> {
+        if let Some(state) = self.account_generation_state()? {
+            return Ok(state);
+        }
+        if self.has_data()? {
+            return Err(SecureStorageError::UnsupportedVersion(0));
+        }
+        let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
+        {
+            let mut metadata = txn
+                .open_table(METADATA)
+                .map_err(redb_err("metadata table"))?;
+            metadata
+                .insert(ACCOUNT_GENERATION_STATE_KEY, EMPTY_ACCOUNT_GENERATION)
+                .map_err(redb_err("account generation state insert"))?;
+        }
+        txn.commit()
+            .map_err(redb_err("account generation state commit"))?;
+        Ok(AccountGenerationState::Empty)
     }
 
     /// Batch-flush pending keypairs, deletes, and inserts in a single
@@ -219,6 +357,221 @@ impl RedbStorage {
         self.ram_overlay.clear();
         self.pending_deletes.clear();
         Ok(())
+    }
+
+    fn portable_layout(&self) -> Result<(PortableHeader, [u64; 2])> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(redb_err("portable read txn"))?;
+        let keypairs = txn
+            .open_table(KEYPAIRS)
+            .map_err(redb_err("portable keypairs"))?;
+        let blocks = txn
+            .open_table(BLOCKS)
+            .map_err(redb_err("portable blocks"))?;
+
+        let mut keypairs_seen = [false; SESSION_COUNT];
+        let mut record_count = 0_u64;
+        let mut record_section_length = 0_u64;
+        for entry in keypairs.iter().map_err(redb_err("portable keypair iter"))? {
+            let (key, value) = entry.map_err(redb_err("portable keypair entry"))?;
+            let key = key.value();
+            if key.len() != 1 || usize::from(key[0]) >= SESSION_COUNT {
+                return Err(SecureStorageError::InvalidPortableArchive);
+            }
+            let slot = usize::from(key[0]);
+            if keypairs_seen[slot] {
+                return Err(SecureStorageError::InvalidPortableArchive);
+            }
+            validate_portable_keypair_value(value.value())?;
+            keypairs_seen[slot] = true;
+            record_count = record_count
+                .checked_add(1)
+                .ok_or(SecureStorageError::Overflow)?;
+            record_section_length = record_section_length
+                .checked_add(26)
+                .and_then(|length| length.checked_add(value.value().len() as u64))
+                .ok_or(SecureStorageError::Overflow)?;
+            if record_section_length
+                > MAX_PORTABLE_ARCHIVE_BYTES - PORTABLE_HEADER_SIZE - PORTABLE_DIGEST_SIZE
+            {
+                return Err(SecureStorageError::PortableArchiveTooLarge);
+            }
+        }
+        if keypairs_seen.iter().any(|seen| !seen) {
+            return Err(SecureStorageError::InvalidPortableArchive);
+        }
+
+        let mut counts = [[0_u64; 2]; SESSION_COUNT];
+        for entry in blocks.iter().map_err(redb_err("portable block iter"))? {
+            let (key, value) = entry.map_err(redb_err("portable block entry"))?;
+            let key = key.value();
+            if key.len() != BLOCK_KEY_LEN || usize::from(key[0]) >= SESSION_COUNT || key[1] > 1 {
+                return Err(SecureStorageError::InvalidPortableArchive);
+            }
+            let slot = usize::from(key[0]);
+            let namespace = usize::from(key[1]);
+            let block_index = u64::from_be_bytes(
+                key[2..10]
+                    .try_into()
+                    .map_err(|_| SecureStorageError::InvalidPortableArchive)?,
+            );
+            if block_index != counts[slot][namespace] {
+                return Err(SecureStorageError::InvalidPortableArchive);
+            }
+            validate_portable_block_value(value.value())?;
+            counts[slot][namespace] = counts[slot][namespace]
+                .checked_add(1)
+                .ok_or(SecureStorageError::Overflow)?;
+            record_count = record_count
+                .checked_add(1)
+                .ok_or(SecureStorageError::Overflow)?;
+            record_section_length = record_section_length
+                .checked_add(26 + BLOCK_SIZE as u64)
+                .ok_or(SecureStorageError::Overflow)?;
+            if record_section_length
+                > MAX_PORTABLE_ARCHIVE_BYTES - PORTABLE_HEADER_SIZE - PORTABLE_DIGEST_SIZE
+            {
+                return Err(SecureStorageError::PortableArchiveTooLarge);
+            }
+        }
+
+        if counts[0][0] == 0
+            || counts[1] != counts[0]
+            || counts[2] != counts[0]
+            || (counts[0][1] > 0 && counts[0][0] == 0)
+        {
+            return Err(SecureStorageError::InvalidPortableArchive);
+        }
+
+        Ok((
+            PortableHeader {
+                record_count,
+                record_section_length,
+            },
+            counts[0],
+        ))
+    }
+
+    /// Flush and stream a strict canonical snapshot of all logical records.
+    pub fn export_portable<W: Write>(&mut self, output: W) -> Result<W> {
+        self.commit()?;
+        let (header, block_counts) = self.portable_layout()?;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(redb_err("portable read txn"))?;
+        let keypairs = txn
+            .open_table(KEYPAIRS)
+            .map_err(redb_err("portable keypairs"))?;
+        let blocks = txn
+            .open_table(BLOCKS)
+            .map_err(redb_err("portable blocks"))?;
+        let mut writer = PortableArchiveWriter::new(output, header)?;
+
+        for slot in 0..SESSION_COUNT as u8 {
+            let key = [slot];
+            let value = keypairs
+                .get(key.as_slice())
+                .map_err(redb_err("portable keypair get"))?
+                .ok_or(SecureStorageError::InvalidPortableArchive)?;
+            writer.write_record(&PortableRecord::keypair(slot, value.value().to_vec()))?;
+        }
+        for (namespace, count) in block_counts.into_iter().enumerate() {
+            for block_index in 0..count {
+                for slot in 0..SESSION_COUNT as u8 {
+                    let key = Self::make_block_key(slot, namespace as u8, block_index);
+                    let value = blocks
+                        .get(key.as_slice())
+                        .map_err(redb_err("portable block get"))?
+                        .ok_or(SecureStorageError::InvalidPortableArchive)?;
+                    writer.write_record(&PortableRecord::block(
+                        slot,
+                        namespace as u8,
+                        block_index,
+                        value.value().to_vec(),
+                    ))?;
+                }
+            }
+        }
+        writer.finish()
+    }
+
+    /// Atomically replace all logical records from a validated canonical stream.
+    ///
+    /// redb keeps the prior installation visible until the complete archive,
+    /// including its digest, has validated and the write transaction commits.
+    pub fn import_portable<R: Read>(&mut self, input: R) -> Result<R> {
+        self.commit()?;
+        let generation_epoch = new_generation_epoch();
+        let committed_generation = committed_generation_value(&generation_epoch);
+        let mut reader = PortableArchiveReader::new(input)?;
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(redb_err("portable write txn"))?;
+        let mut imported_counts = [[0_u64; 2]; SESSION_COUNT];
+        {
+            let mut keypairs = txn
+                .open_table(KEYPAIRS)
+                .map_err(redb_err("portable keypairs"))?;
+            let mut blocks = txn
+                .open_table(BLOCKS)
+                .map_err(redb_err("portable blocks"))?;
+            let mut metadata = txn
+                .open_table(METADATA)
+                .map_err(redb_err("portable metadata"))?;
+            keypairs
+                .retain(|_, _| false)
+                .map_err(redb_err("portable clear keypairs"))?;
+            blocks
+                .retain(|_, _| false)
+                .map_err(redb_err("portable clear blocks"))?;
+            metadata
+                .remove(LEGACY_PORTABLE_IMPORT_INSTALLED_KEY)
+                .map_err(redb_err("legacy portable metadata removal"))?;
+            metadata
+                .insert(
+                    ACCOUNT_GENERATION_STATE_KEY,
+                    committed_generation.as_slice(),
+                )
+                .map_err(redb_err("account generation state marker"))?;
+
+            while let Some(record) = reader.read_record()? {
+                match record.kind {
+                    PortableRecordKind::Keypair => {
+                        let key = [record.slot];
+                        keypairs
+                            .insert(key.as_slice(), record.value.as_slice())
+                            .map_err(redb_err("portable insert keypair"))?;
+                    }
+                    PortableRecordKind::Block => {
+                        let namespace = u8::try_from(record.namespace)
+                            .map_err(|_| SecureStorageError::InvalidPortableArchive)?;
+                        let key = Self::make_block_key(record.slot, namespace, record.block_index);
+                        imported_counts[usize::from(record.slot)][usize::from(namespace)] += 1;
+                        blocks
+                            .insert(key.as_slice(), record.value.as_slice())
+                            .map_err(redb_err("portable insert block"))?;
+                    }
+                }
+            }
+        }
+        let input = reader.finish()?;
+        txn.commit().map_err(redb_err("portable commit"))?;
+        self.block_counts = imported_counts
+            .into_iter()
+            .map(|counts| {
+                counts
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, count)| *count > 0)
+                    .map(|(namespace, count)| (namespace as u8, count))
+                    .collect()
+            })
+            .collect();
+        Ok(input)
     }
 
     /// Drop every staged operation that has not yet been flushed by
@@ -463,6 +816,135 @@ mod tests {
     }
 
     // ── Basics ───────────────────────────────────────────────────────
+
+    #[test]
+    fn account_generation_state_is_versioned_and_fails_closed() {
+        let (mut storage, _dir) = make_storage();
+        assert_eq!(storage.account_generation_state().unwrap(), None);
+        assert_eq!(
+            storage.initialize_empty_account_generation().unwrap(),
+            AccountGenerationState::Empty
+        );
+        assert_eq!(
+            storage.account_generation_state().unwrap(),
+            Some(AccountGenerationState::Empty)
+        );
+        assert_eq!(storage.account_generation_epoch().unwrap(), None);
+
+        let txn = storage.db.begin_write().unwrap();
+        {
+            let mut metadata = txn.open_table(METADATA).unwrap();
+            metadata
+                .insert(ACCOUNT_GENERATION_STATE_KEY, b"future-state".as_slice())
+                .unwrap();
+        }
+        txn.commit().unwrap();
+        assert!(matches!(
+            storage.account_generation_state(),
+            Err(SecureStorageError::UnsupportedAccountGenerationState)
+        ));
+    }
+
+    #[test]
+    fn portable_fixture_import_export_roundtrip() {
+        let (mut storage, _dir) = make_storage();
+        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+
+        storage
+            .import_portable(std::io::Cursor::new(fixture.as_slice()))
+            .unwrap();
+        let exported = storage.export_portable(Vec::new()).unwrap();
+
+        assert_eq!(
+            storage.account_generation_state().unwrap(),
+            Some(AccountGenerationState::Committed)
+        );
+        let epoch = storage.account_generation_epoch().unwrap().unwrap();
+        assert_eq!(epoch.len(), GENERATION_EPOCH_HEX_BYTES);
+        assert!(epoch.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert!(!storage.legacy_portable_import_marker_exists().unwrap());
+        assert_eq!(exported, fixture);
+        assert_eq!(storage.block_counts[0].get(&0), Some(&1));
+        assert_eq!(storage.block_counts[1].get(&0), Some(&1));
+        assert_eq!(storage.block_counts[2].get(&0), Some(&1));
+    }
+
+    #[test]
+    fn failed_portable_import_keeps_previous_installation() {
+        let (mut storage, dir) = make_storage();
+        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+        storage
+            .import_portable(std::io::Cursor::new(fixture.as_slice()))
+            .unwrap();
+        let original_epoch = storage.account_generation_epoch().unwrap();
+
+        let mut corrupted = fixture.to_vec();
+        let wrapped_secret = 40 + 26 + 4 + 65_536 + 16;
+        corrupted[wrapped_secret] ^= 1;
+        assert!(matches!(
+            storage.import_portable(std::io::Cursor::new(corrupted)),
+            Err(SecureStorageError::PortableChecksumMismatch)
+        ));
+        assert_eq!(storage.account_generation_epoch().unwrap(), original_epoch);
+
+        drop(storage);
+        let mut reopened = RedbStorage::open(dir.path()).unwrap();
+        assert_eq!(reopened.export_portable(Vec::new()).unwrap(), fixture);
+    }
+
+    #[test]
+    fn portable_import_replaces_larger_two_namespace_store() {
+        let (mut storage, dir) = make_storage();
+        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+        storage
+            .import_portable(std::io::Cursor::new(fixture.as_slice()))
+            .unwrap();
+
+        for slot in 0..SESSION_COUNT as u8 {
+            let session = SessionIndex::new(slot).unwrap();
+            storage.append_block(session, 0, &make_block(slot)).unwrap();
+            storage.append_block(session, 1, &make_block(slot)).unwrap();
+        }
+        let larger = storage.export_portable(Vec::new()).unwrap();
+        let reader = PortableArchiveReader::new(std::io::Cursor::new(larger.as_slice())).unwrap();
+        assert_eq!(reader.header().record_count, 12);
+
+        storage
+            .import_portable(std::io::Cursor::new(fixture.as_slice()))
+            .unwrap();
+        drop(storage);
+
+        let mut reopened = RedbStorage::open(dir.path()).unwrap();
+        assert_eq!(reopened.export_portable(Vec::new()).unwrap(), fixture);
+        for counts in &reopened.block_counts {
+            assert_eq!(counts.get(&0), Some(&1));
+            assert_eq!(counts.get(&1), None);
+        }
+    }
+
+    #[test]
+    fn portable_export_rejects_unknown_physical_namespace() {
+        let (mut storage, _dir) = make_storage();
+        let fixture = include_bytes!("../../tests/fixtures/portable-v1-minimal.gossipbackup");
+        storage
+            .import_portable(std::io::Cursor::new(fixture.as_slice()))
+            .unwrap();
+
+        let txn = storage.db.begin_write().unwrap();
+        {
+            let mut blocks = txn.open_table(BLOCKS).unwrap();
+            let key = RedbStorage::make_block_key(0, 2, 0);
+            blocks
+                .insert(key.as_slice(), &[0_u8; BLOCK_SIZE][..])
+                .unwrap();
+        }
+        txn.commit().unwrap();
+
+        assert!(matches!(
+            storage.export_portable(Vec::new()),
+            Err(SecureStorageError::InvalidPortableArchive)
+        ));
+    }
 
     #[test]
     fn test_open_creates_db() {

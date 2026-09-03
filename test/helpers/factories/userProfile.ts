@@ -4,7 +4,7 @@
  * Creates test UserProfile instances.
  * This ensures mocks stay in sync with the actual database schema.
  */
-import { UserProfile, AuthMethod, encodeUserId } from '@massalabs/gossip-sdk';
+import { UserProfile, encodeUserId } from '@massalabs/gossip-sdk';
 
 /**
  * Default values for creating test user profiles
@@ -13,7 +13,11 @@ const defaultUserProfile: UserProfile = {
   userId: 'gossip1gcqd2ssurzah4w2uxag2mlhpgpppv8aghl9vsu9x4ru9u5pg7ssq6g7jn2',
   username: 'Test User',
   security: {
-    encKeySalt: new Uint8Array(32).fill(1),
+    formatVersion: 1,
+    passwordKdfVersion: 1,
+    mnemonicEncryptionVersion: 1,
+    identityDerivationVersion: 1,
+    encKeySalt: new Uint8Array(16).fill(1),
     authMethod: 'password',
     mnemonicBackup: {
       encryptedMnemonic: new Uint8Array(64).fill(2),
@@ -46,6 +50,10 @@ class UserProfileBuilder {
     this.profile = {
       ...defaultUserProfile,
       security: {
+        formatVersion: 1,
+        passwordKdfVersion: 1,
+        mnemonicEncryptionVersion: 1,
+        identityDerivationVersion: 1,
         ...defaultUserProfile.security,
         mnemonicBackup: {
           ...defaultUserProfile.security.mnemonicBackup,
@@ -87,7 +95,7 @@ class UserProfileBuilder {
     return this;
   }
 
-  authMethod(value: AuthMethod): this {
+  authMethod(value: UserProfile['security']['authMethod']): this {
     this.profile.security.authMethod = value;
     return this;
   }
@@ -181,9 +189,8 @@ export const testUsers = {
         'gossip1uw8msn2f5v28peqc2zuam90am0xhs7fak2j6whjckfx54ynn36gs8ugayy'
       )
       .username('Bob')
-      .authMethod('webauthn')
-      .webauthn('mock-credential-id')
-      .encKeySalt(new Uint8Array(32).fill(4))
+      .authMethod('password')
+      .encKeySalt(new Uint8Array(16).fill(4))
       .mnemonicBackup({
         encryptedMnemonic: new Uint8Array(64).fill(5),
         createdAt: new Date(Date.now() - 172800000),
@@ -198,9 +205,8 @@ export const testUsers = {
         'gossip1wackhrryxewr3x9246ke0esj29wfu9tdqxkx90rkgq73xuaarcuqczx2y3'
       )
       .username('Charlie')
-      .authMethod('capacitor')
-      .iCloudSync(true)
-      .encKeySalt(new Uint8Array(32).fill(7))
+      .authMethod('password')
+      .encKeySalt(new Uint8Array(16).fill(7))
       .mnemonicBackup({
         encryptedMnemonic: new Uint8Array(64).fill(8),
         createdAt: new Date(Date.now() - 259200000),

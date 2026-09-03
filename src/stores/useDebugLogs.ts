@@ -18,6 +18,21 @@ import {
 const LOG_STORAGE_KEY = 'debug-logs';
 const LOG_STORAGE_VERSION = 1;
 const LOG_STORAGE_KEY_PREFIX = `${LOG_STORAGE_KEY}-v${LOG_STORAGE_VERSION}`;
+const LOG_GENERATION_KEY = 'gossip-debug-log-generation-v1';
+const logOwnerGeneration: Promise<string | null> = Preferences.get({
+  key: LOG_GENERATION_KEY,
+})
+  .then(({ value }) => value ?? '0')
+  .catch(() => null);
+let nativeDebugWriteTail = Promise.resolve();
+
+function enqueueNativeDebugWrite(
+  operation: () => Promise<void>
+): Promise<void> {
+  const result = nativeDebugWriteTail.then(operation);
+  nativeDebugWriteTail = result.catch(() => {});
+  return result;
+}
 const DEFAULT_LOG_STORAGE_LIMIT: LogLimit = 200;
 
 interface DebugStore {
@@ -53,8 +68,44 @@ async function flushPendingLogWrite(): Promise<void> {
   const write = pendingWrite;
   pendingWrite = null;
   if (write) {
-    await Preferences.set({ key: write.name, value: write.value });
+    await persistLogWrite(write.name, write.value);
   }
+}
+
+/**
+ * Write one serialized log payload, but only if this WebView still owns the
+ * current log generation: a stale instance must never clobber newer logs.
+ * Web serializes writers with a shared lock, native with a FIFO queue.
+ */
+async function persistLogWrite(name: string, value: string): Promise<void> {
+  const persistIfCurrent = async () => {
+    const ownerGeneration = await logOwnerGeneration;
+    if (ownerGeneration === null) return;
+    const currentGeneration = await Preferences.get({
+      key: LOG_GENERATION_KEY,
+    });
+    if ((currentGeneration.value ?? '0') !== ownerGeneration) return;
+    const payload = JSON.parse(value) as Record<string, unknown>;
+    payload.outputGeneration = ownerGeneration;
+    await Preferences.set({ key: name, value: JSON.stringify(payload) });
+  };
+  if (
+    !Capacitor.isNativePlatform() &&
+    typeof navigator !== 'undefined' &&
+    navigator.locks
+  ) {
+    await navigator.locks.request(
+      'gossip-debug-log-output-v1',
+      { mode: 'shared' },
+      persistIfCurrent
+    );
+    return;
+  }
+  if (Capacitor.isNativePlatform()) {
+    await enqueueNativeDebugWrite(persistIfCurrent);
+    return;
+  }
+  await persistIfCurrent();
 }
 
 function scheduleLogWrite(name: string, value: string): void {
@@ -287,16 +338,16 @@ export const useDebugLogs = create<DebugStore>()(
             return false;
           }
 
+          let staged = false;
           try {
-            // Write the file to the cache directory
-            // Note: We don't delete the file manually - it's in the Cache directory
-            // so the OS will clean it up automatically when space is needed
+            // Stage only for the lifetime of the native share operation.
             const result = await Filesystem.writeFile({
               path: filename,
               data: text,
               directory: Directory.Cache,
               encoding: Encoding.UTF8,
             });
+            staged = true;
 
             // Share the file using native share sheet
             await Share.share({
@@ -317,6 +368,13 @@ export const useDebugLogs = create<DebugStore>()(
             }
             logger.error('Native share failed:', error);
             return false;
+          } finally {
+            if (staged) {
+              await Filesystem.deleteFile({
+                path: filename,
+                directory: Directory.Cache,
+              }).catch(() => {});
+            }
           }
         };
 
@@ -409,8 +467,38 @@ export const useDebugLogs = create<DebugStore>()(
       name: LOG_STORAGE_KEY_PREFIX,
       storage: createJSONStorage(() => ({
         getItem: async (name: string) => {
-          const { value } = await Preferences.get({ key: name });
-          return value;
+          const readIfCurrent = async () => {
+            const currentGeneration = await Preferences.get({
+              key: LOG_GENERATION_KEY,
+            });
+            const generation = currentGeneration.value ?? '0';
+            const { value } = await Preferences.get({ key: name });
+            if (!value) return value;
+            try {
+              const payload = JSON.parse(value) as {
+                outputGeneration?: unknown;
+              };
+              const payloadGeneration =
+                typeof payload.outputGeneration === 'string'
+                  ? payload.outputGeneration
+                  : '0';
+              return payloadGeneration === generation ? value : null;
+            } catch {
+              return null;
+            }
+          };
+          if (
+            !Capacitor.isNativePlatform() &&
+            typeof navigator !== 'undefined' &&
+            navigator.locks
+          ) {
+            return navigator.locks.request(
+              'gossip-debug-log-output-v1',
+              { mode: 'shared' },
+              readIfCurrent
+            );
+          }
+          return readIfCurrent();
         },
         setItem: (name: string, value: string) => {
           scheduleLogWrite(name, value);
@@ -437,3 +525,80 @@ export const useDebugLogs = create<DebugStore>()(
     }
   )
 );
+
+export async function reconcileDebugLogsGeneration(): Promise<void> {
+  const ownerGeneration = await logOwnerGeneration;
+  const currentGeneration = await Preferences.get({ key: LOG_GENERATION_KEY });
+  if (
+    ownerGeneration === null ||
+    ownerGeneration !== (currentGeneration.value ?? '0')
+  ) {
+    useDebugLogs.setState({ logs: [] });
+  }
+}
+
+export async function clearDebugLogsDurably(): Promise<void> {
+  const clear = async () => {
+    const currentGeneration = await Preferences.get({
+      key: LOG_GENERATION_KEY,
+    });
+    const parsedGeneration = Number.parseInt(
+      currentGeneration.value ?? '0',
+      10
+    );
+    const nextGeneration = String(
+      Number.isFinite(parsedGeneration) ? parsedGeneration + 1 : 1
+    );
+    await Preferences.set({
+      key: LOG_GENERATION_KEY,
+      value: nextGeneration,
+    });
+    const logLimit = useDebugLogs.getState().logLimit;
+    useDebugLogs.setState({ logs: [] });
+    const value = JSON.stringify({
+      state: { logs: [], logLimit },
+      version: 0,
+      outputGeneration: nextGeneration,
+    });
+    await Preferences.set({ key: LOG_STORAGE_KEY_PREFIX, value });
+    if (Capacitor.isNativePlatform()) {
+      const cache = await Filesystem.readdir({
+        path: '',
+        directory: Directory.Cache,
+      });
+      await Promise.all(
+        cache.files
+          .filter(file => /^gossip-debug-logs-.*\.txt$/u.test(file.name))
+          .map(file =>
+            Filesystem.deleteFile({
+              path: file.name,
+              directory: Directory.Cache,
+            })
+          )
+      );
+      const { backgroundRunnerStorageService } =
+        await import('../services/backgroundRunnerStorage');
+      await backgroundRunnerStorageService.setAppStrict(
+        LOG_STORAGE_KEY_PREFIX,
+        value
+      );
+    }
+  };
+  if (Capacitor.isNativePlatform()) {
+    await enqueueNativeDebugWrite(clear);
+    return;
+  }
+  if (
+    !Capacitor.isNativePlatform() &&
+    typeof navigator !== 'undefined' &&
+    navigator.locks
+  ) {
+    await navigator.locks.request(
+      'gossip-debug-log-output-v1',
+      { mode: 'exclusive' },
+      clear
+    );
+    return;
+  }
+  await clear();
+}
