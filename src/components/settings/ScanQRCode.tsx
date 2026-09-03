@@ -7,7 +7,6 @@ import { Capacitor } from '@capacitor/core';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import WebQRScanner from '../qr/WebQRScanner';
 import NativeQRScanner from '../qr/NativeQRScanner';
-import { isQrScanCancelledMessage } from '../../utils/qrScanErrors';
 
 interface ScanQRCodeProps {
   onBack: () => void;
@@ -61,10 +60,8 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
   };
 
   const handleError = (err: string) => {
-    if (!isQrScanCancelledMessage(err)) {
-      logger.warn('[QRScan]', err);
-      toast.error(t('qr_scan_failed'));
-    }
+    logger.warn('[QRScan]', err);
+    toast.error(t('qr_scan_failed'));
     onBack();
   };
 

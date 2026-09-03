@@ -122,6 +122,14 @@ dependencies {
     // plugin — pinning it explicitly can conflict with Capacitor's
     // own Kotlin version.
     implementation 'net.java.dev.jna:jna:5.14.0@aar'
+    // Native QR scanner (QrScanActivity): CameraX for the camera pipeline,
+    // ZXing core for on-device decoding. Neither depends on Google Play
+    // Services, unlike ML Kit which privacy scanners flag as a tracker.
+    implementation 'androidx.camera:camera-core:1.5.1'
+    implementation 'androidx.camera:camera-camera2:1.5.1'
+    implementation 'androidx.camera:camera-lifecycle:1.5.1'
+    implementation 'androidx.camera:camera-view:1.5.1'
+    implementation 'com.google.zxing:core:3.5.3'
 }
 
 apply from: 'capacitor.build.gradle'
