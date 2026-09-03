@@ -2,8 +2,18 @@ Gossip Third-Party Notices
 ==========================
 
 This file lists third-party packages identified from the committed npm
-lockfiles and Cargo metadata. It does not change their licenses. Package
-authors retain their copyrights and other rights.
+lockfiles, Cargo metadata, the Android Gradle build files, and the
+CocoaPods lockfile. It does not change their licenses. Package authors
+retain their copyrights and other rights.
+
+SCOPE LIMITATION (Android): Gradle entries are the coordinates this
+repository and its Capacitor plugins declare directly. Artifacts pulled
+in transitively by those coordinates are not individually enumerated,
+because resolving the full Maven graph requires a network fetch and an
+Android SDK. The most significant transitive closure is the one under
+com.google.mlkit:barcode-scanning, which adds Google Play Services base,
+Firebase components, and the Google datatransport ("Clearcut") logging
+pipeline to the shipped APK.
 
 IMPORTANT: entries marked NOASSERTION or UNRESOLVED require legal review.
 Inclusion of available upstream text is evidence for review, not a conclusion
@@ -11,6 +21,174 @@ that its terms are compatible with AGPL-3.0-or-later.
 
 COMPONENT INVENTORY
 -------------------
+
+Android: androidx.activity:activity@1.11.0
+License: Apache-2.0
+Source: maven:androidx.activity:activity:1.11.0
+Declared in: node_modules/@capacitor/android/capacitor/build.gradle
+License text references: none found
+
+Android: androidx.activity:activity-compose@1.11.0
+License: Apache-2.0
+Source: maven:androidx.activity:activity-compose:1.11.0
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: androidx.activity:activity-ktx@1.11.0
+License: Apache-2.0
+Source: maven:androidx.activity:activity-ktx:1.11.0
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: androidx.appcompat:appcompat@1.7.1
+License: Apache-2.0
+Source: maven:androidx.appcompat:appcompat:1.7.1
+Declared in: android/app/build.gradle
+License text references: none found
+
+Android: androidx.biometric:biometric@1.1.0
+License: Apache-2.0
+Source: maven:androidx.biometric:biometric:1.1.0
+Declared in: node_modules/@aparajita/capacitor-biometric-auth/android/build.gradle
+License text references: none found
+
+Android: androidx.camera:camera-camera2@1.5.1
+License: Apache-2.0
+Source: maven:androidx.camera:camera-camera2:1.5.1
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: androidx.camera:camera-lifecycle@1.5.1
+License: Apache-2.0
+Source: maven:androidx.camera:camera-lifecycle:1.5.1
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: androidx.camera:camera-view@1.5.1
+License: Apache-2.0
+Source: maven:androidx.camera:camera-view:1.5.1
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: androidx.compose.material3:material3@1.4.0
+License: Apache-2.0
+Source: maven:androidx.compose.material3:material3:1.4.0
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: androidx.compose.material3:material3-window-size-class@1.4.0
+License: Apache-2.0
+Source: maven:androidx.compose.material3:material3-window-size-class:1.4.0
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: androidx.coordinatorlayout:coordinatorlayout@1.3.0
+License: Apache-2.0
+Source: maven:androidx.coordinatorlayout:coordinatorlayout:1.3.0
+Declared in: android/app/build.gradle
+License text references: none found
+
+Android: androidx.core:core@1.17.0
+License: Apache-2.0
+Source: maven:androidx.core:core:1.17.0
+Declared in: node_modules/@capacitor/android/capacitor/build.gradle
+License text references: none found
+
+Android: androidx.core:core-ktx@1.17.0
+License: Apache-2.0
+Source: maven:androidx.core:core-ktx:1.17.0
+Declared in: node_modules/@capacitor/background-runner/android/build.gradle
+License text references: none found
+
+Android: androidx.core:core-splashscreen@1.2.0
+License: Apache-2.0
+Source: maven:androidx.core:core-splashscreen:1.2.0
+Declared in: android/app/build.gradle
+License text references: none found
+
+Android: androidx.fragment:fragment@1.8.9
+License: Apache-2.0
+Source: maven:androidx.fragment:fragment:1.8.9
+Declared in: node_modules/@capacitor/android/capacitor/build.gradle
+License text references: none found
+
+Android: androidx.webkit:webkit@1.14.0
+License: Apache-2.0
+Source: maven:androidx.webkit:webkit:1.14.0
+Declared in: node_modules/@capacitor/android/capacitor/build.gradle
+License text references: none found
+
+Android: androidx.work:work-runtime@2.9.1
+License: Apache-2.0
+Source: maven:androidx.work:work-runtime:2.9.1
+Declared in: android/app/build.gradle
+License text references: none found
+
+Android: androidx.work:work-runtime-ktx@2.11.0
+License: Apache-2.0
+Source: maven:androidx.work:work-runtime-ktx:2.11.0
+Declared in: node_modules/@capacitor/background-runner/android/build.gradle
+License text references: none found
+
+Android: com.google.android.material:material@1.13.0
+License: Apache-2.0
+Source: maven:com.google.android.material:material:1.13.0
+Declared in: node_modules/@aparajita/capacitor-biometric-auth/android/build.gradle
+License text references: none found
+
+Android: com.google.mlkit:barcode-scanning@17.3.0
+License: NOASSERTION (Google ML Kit Terms of Service)
+Source: maven:com.google.mlkit:barcode-scanning:17.3.0
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: com.google.zxing:core@3.5.3
+License: Apache-2.0
+Source: maven:com.google.zxing:core:3.5.3
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: io.ionic.libs:ionbarcode-android@2.0.1
+License: Apache-2.0
+Source: maven:io.ionic.libs:ionbarcode-android:2.0.1
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: io.ionic.libs:ionfilesystem-android@1.0.0
+License: Apache-2.0
+Source: maven:io.ionic.libs:ionfilesystem-android:1.0.0
+Declared in: node_modules/@capacitor/filesystem/android/build.gradle
+License text references: none found
+
+Android: net.java.dev.jna:jna@5.14.0
+License: Apache-2.0 OR LGPL-2.1-or-later
+Source: maven:net.java.dev.jna:jna:5.14.0
+Declared in: android/app/build.gradle
+License text references: none found
+
+Android: org.apache.cordova:framework@14.0.1
+License: Apache-2.0
+Source: maven:org.apache.cordova:framework:14.0.1
+Declared in: node_modules/@capacitor/android/capacitor/build.gradle
+License text references: none found
+
+Android: org.jetbrains.kotlinx:kotlinx-coroutines-android@1.10.2
+License: Apache-2.0
+Source: maven:org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
+
+Android: org.jetbrains.kotlinx:kotlinx-coroutines-core@1.10.2
+License: Apache-2.0
+Source: maven:org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2
+Declared in: node_modules/@capacitor/filesystem/android/build.gradle
+License text references: none found
+
+Android: org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm@1.10.2
+License: Apache-2.0
+Source: maven:org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2
+Declared in: node_modules/@capacitor/barcode-scanner/android/build.gradle
+License text references: none found
 
 Cargo: aead@0.5.2
 License: MIT OR Apache-2.0
@@ -1507,6 +1685,24 @@ Cargo: zeroize_derive@1.4.2
 License: Apache-2.0 OR MIT
 Source: registry+https://github.com/rust-lang/crates.io-index
 License text references: cfc7749b96f63bd3, 90a8b6622d5e3faa
+
+CocoaPods: IONFilesystemLib@1.0.1
+License: Apache-2.0
+Source: cocoapods:trunk:IONFilesystemLib
+Integrity: sha1-89258b8e3e85465da93127d25d7ce37f977e8a6f
+License text references: none found
+
+CocoaPods: KeychainSwift@21.0.0
+License: MIT
+Source: cocoapods:trunk:KeychainSwift
+Integrity: sha1-4a71a45c802fd9e73906457c2dcbdbdc06c9419d
+License text references: none found
+
+CocoaPods: OSBarcodeLib@2.0.1
+License: Apache-2.0
+Source: cocoapods:trunk:OSBarcodeLib
+Integrity: sha1-57987d2eb1f916f701f4554e20e349b3cb83f023
+License text references: none found
 
 npm: @aparajita/capacitor-biometric-auth@9.1.2
 License: MIT
