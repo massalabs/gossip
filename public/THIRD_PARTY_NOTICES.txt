@@ -2233,7 +2233,7 @@ License text references: none found
 npm: @tailwindcss/oxide-darwin-arm64@4.1.18
 License: MIT
 Source: node_modules/@tailwindcss/oxide-darwin-arm64
-License text references: 60e0b68c0f35c078
+License text references: none found
 
 npm: @tailwindcss/oxide-darwin-x64@4.1.18
 License: MIT
@@ -2269,13 +2269,13 @@ npm: @tailwindcss/oxide-linux-x64-gnu@4.1.18
 License: MIT
 Source: https://registry.npmjs.org/@tailwindcss/oxide-linux-x64-gnu/-/oxide-linux-x64-gnu-4.1.18.tgz
 Integrity: sha512-v3gyT0ivkfBLoZGF9LyHmts0Isc8jHZyVcbzio6Wpzifg/+5ZJpDiRiUhDLkcr7f/r38SWNe7ucxmGW3j3Kb/g==
-License text references: none found
+License text references: 60e0b68c0f35c078
 
 npm: @tailwindcss/oxide-linux-x64-musl@4.1.18
 License: MIT
 Source: https://registry.npmjs.org/@tailwindcss/oxide-linux-x64-musl/-/oxide-linux-x64-musl-4.1.18.tgz
 Integrity: sha512-bhJ2y2OQNlcRwwgOAGMY0xTFStt4/wyU6pvI6LSuZpRgKQwxTec0/3Scu91O8ir7qCR3AuepQKLU/kX99FouqQ==
-License text references: none found
+License text references: 60e0b68c0f35c078
 
 npm: @tailwindcss/oxide-wasm32-wasi@4.1.18
 License: MIT
@@ -2549,18 +2549,18 @@ License text references: c88d22f013838502
 npm: fsevents@2.3.2
 License: MIT
 Source: node_modules/fsevents
-License text references: 2a8a5d6197bb97a0
+License text references: none found
 
 npm: fsevents@2.3.3
 License: MIT
 Source: https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz
 Integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==
-License text references: 2a8a5d6197bb97a0
+License text references: none found
 
 npm: fsevents@2.3.3
 License: MIT
 Source: node_modules/vite/node_modules/fsevents
-License text references: 2a8a5d6197bb97a0
+License text references: none found
 
 npm: function-bind@1.1.2
 License: MIT
@@ -2710,7 +2710,7 @@ License text references: none found
 npm: lightningcss-darwin-arm64@1.30.2
 License: MPL-2.0
 Source: node_modules/lightningcss-darwin-arm64
-License text references: 5eba353fe5076ac3
+License text references: none found
 
 npm: lightningcss-darwin-x64@1.30.2
 License: MPL-2.0
@@ -2746,13 +2746,13 @@ npm: lightningcss-linux-x64-gnu@1.30.2
 License: MPL-2.0
 Source: https://registry.npmjs.org/lightningcss-linux-x64-gnu/-/lightningcss-linux-x64-gnu-1.30.2.tgz
 Integrity: sha512-Cfd46gdmj1vQ+lR6VRTTadNHu6ALuw2pKR9lYq4FnhvgBc4zWY1EtZcAc6EffShbb1MFrIPfLDXD6Xprbnni4w==
-License text references: none found
+License text references: 5eba353fe5076ac3
 
 npm: lightningcss-linux-x64-musl@1.30.2
 License: MPL-2.0
 Source: https://registry.npmjs.org/lightningcss-linux-x64-musl/-/lightningcss-linux-x64-musl-1.30.2.tgz
 Integrity: sha512-XJaLUUFXb6/QG2lGIW6aIk6jKdtjtcffUT0NKvIqhSBY3hh9Ch+1LCeH80dR9q9LBjG3ewbDjnumefsLsP6aiA==
-License text references: none found
+License text references: 5eba353fe5076ac3
 
 npm: lightningcss-win32-arm64-msvc@1.30.2
 License: MPL-2.0
@@ -5205,36 +5205,6 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
-
-------------------------------------------------------------------------------
-
-Text reference: 2a8a5d6197bb97a0
-SHA-256: 2a8a5d6197bb97a018b8a190dd3ed853d750ca87c8e80c17aad41d6c6ff448e1
-File names: LICENSE
-Used by: npm:fsevents@2.3.2, npm:fsevents@2.3.3
-
-MIT License
------------
-
-Copyright (C) 2010-2020 by Philipp Dunkel, Ben Noordhuis, Elan Shankar, Paul Miller
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 
@@ -10965,7 +10935,7 @@ SOFTWARE.
 Text reference: 5eba353fe5076ac3
 SHA-256: 5eba353fe5076ac3432177f8ab1cf75e3afcd0584251e37c3bfead5f447d040e
 File names: LICENSE
-Used by: npm:lightningcss-darwin-arm64@1.30.2, npm:lightningcss@1.30.2
+Used by: npm:lightningcss-linux-x64-gnu@1.30.2, npm:lightningcss-linux-x64-musl@1.30.2, npm:lightningcss@1.30.2
 
  Mozilla Public License Version 2.0
 ==================================
@@ -11346,7 +11316,7 @@ defined by the Mozilla Public License, v. 2.0.
 Text reference: 60e0b68c0f35c078
 SHA-256: 60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985
 File names: LICENSE
-Used by: npm:@tailwindcss/node@4.1.18, npm:@tailwindcss/oxide-darwin-arm64@4.1.18, npm:@tailwindcss/oxide@4.1.18, npm:@tailwindcss/vite@4.1.18, npm:tailwindcss@4.1.18
+Used by: npm:@tailwindcss/node@4.1.18, npm:@tailwindcss/oxide-linux-x64-gnu@4.1.18, npm:@tailwindcss/oxide-linux-x64-musl@4.1.18, npm:@tailwindcss/oxide@4.1.18, npm:@tailwindcss/vite@4.1.18, npm:tailwindcss@4.1.18
 
 MIT License
 
