@@ -10,9 +10,6 @@ PODS:
     - Capacitor
   - CapacitorBackgroundRunner (3.0.0):
     - Capacitor
-  - CapacitorBarcodeScanner (3.0.0):
-    - Capacitor
-    - OSBarcodeLib (= 2.0.1)
   - CapacitorCommunityPrivacyScreen (6.0.0):
     - Capacitor
   - CapacitorCordova (8.0.0)
@@ -37,7 +34,6 @@ PODS:
     - Capacitor
   - IONFilesystemLib (1.0.1)
   - KeychainSwift (21.0.0)
-  - OSBarcodeLib (2.0.1)
 
 DEPENDENCIES:
   - "AparajitaCapacitorBiometricAuth (from `../../node_modules/@aparajita/capacitor-biometric-auth`)"
@@ -45,7 +41,6 @@ DEPENDENCIES:
   - "Capacitor (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorApp (from `../../node_modules/@capacitor/app`)"
   - "CapacitorBackgroundRunner (from `../../node_modules/@capacitor/background-runner`)"
-  - "CapacitorBarcodeScanner (from `../../node_modules/@capacitor/barcode-scanner`)"
   - "CapacitorCommunityPrivacyScreen (from `../../node_modules/@capacitor-community/privacy-screen`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorDevice (from `../../node_modules/@capacitor/device`)"
@@ -62,7 +57,6 @@ SPEC REPOS:
   trunk:
     - IONFilesystemLib
     - KeychainSwift
-    - OSBarcodeLib
 
 EXTERNAL SOURCES:
   AparajitaCapacitorBiometricAuth:
@@ -75,8 +69,6 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/app"
   CapacitorBackgroundRunner:
     :path: "../../node_modules/@capacitor/background-runner"
-  CapacitorBarcodeScanner:
-    :path: "../../node_modules/@capacitor/barcode-scanner"
   CapacitorCommunityPrivacyScreen:
     :path: "../../node_modules/@capacitor-community/privacy-screen"
   CapacitorCordova:
@@ -106,7 +98,6 @@ SPEC CHECKSUMS:
   Capacitor: 341ff7cf652ec695d1a8ebf604db448ac7b6d635
   CapacitorApp: 3963a84197280757b84f126afd1520a85ae3b092
   CapacitorBackgroundRunner: 42d96bda7db8add43a59330179c2931987ffbfd5
-  CapacitorBarcodeScanner: b56bf5972818c8ef6f7ca27e877dbfd7d1345ef0
   CapacitorCommunityPrivacyScreen: 682470c41cce325d7a85b95907887919d4694066
   CapacitorCordova: 5dc3912d25ef770a3fe0f431bb65c9fbfa2e92f9
   CapacitorDevice: 9a16fb36a19ff391bf75afbe3cf16f883b3b3aa0
@@ -120,8 +111,7 @@ SPEC CHECKSUMS:
   CapacitorStatusBar: 312e2e67928dfe9514c4a8916a1fd610552f5f35
   IONFilesystemLib: 89258b8e3e85465da93127d25d7ce37f977e8a6f
   KeychainSwift: 4a71a45c802fd9e73906457c2dcbdbdc06c9419d
-  OSBarcodeLib: 57987d2eb1f916f701f4554e20e349b3cb83f023
 
-PODFILE CHECKSUM: a0ea80bf4437ba9e5d71f01064d99bf9a7807528
+PODFILE CHECKSUM: ee140bcfa4698a6919fecda7234ded2a51a940ae
 
 COCOAPODS: 1.16.2

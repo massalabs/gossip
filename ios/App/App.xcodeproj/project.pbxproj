@@ -25,6 +25,7 @@
 		FAA8F0912EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */; };
 		FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */; };
 		FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */; };
+		D0A1C0DE2F80000100000001 /* QrScannerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000100000002 /* QrScannerPlugin.swift */; };
 		FAB0FFE22EF01BB300832215 /* GossipShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FAB0FFD82EF01BB300832215 /* GossipShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -76,6 +77,7 @@
 		FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefreshPlugin.swift; sourceTree = "<group>"; };
 		FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyViewController.swift; sourceTree = "<group>"; };
 		FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkObserverPlugin.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F80000100000002 /* QrScannerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QrScannerPlugin.swift; sourceTree = "<group>"; };
 		FAB0FFD82EF01BB300832215 /* GossipShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GossipShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		FAB0FFE82EF01C8600832215 /* Gossip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gossip.entitlements; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-Gossip.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Gossip.debug.xcconfig"; path = "Pods/Target Support Files/Pods-Gossip/Pods-Gossip.debug.xcconfig"; sourceTree = "<group>"; };
@@ -197,6 +199,7 @@
 			children = (
 				D0F41CEB2F73ED03003FC4E1 /* secureStorage */,
 				FAA8F09E2EE6F17300CE65AE /* networkObserver */,
+				D0A1C0DE2F80000100000003 /* qrScanner */,
 				FAA8F08F2EE6E25E00CE65AE /* backgroundRefresh */,
 				FAA8F0872EE6DCFE00CE65AE /* backgroundStorage */,
 			);
@@ -225,6 +228,14 @@
 				FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */,
 			);
 			path = networkObserver;
+			sourceTree = "<group>";
+		};
+		D0A1C0DE2F80000100000003 /* qrScanner */ = {
+			isa = PBXGroup;
+			children = (
+				D0A1C0DE2F80000100000002 /* QrScannerPlugin.swift */,
+			);
+			path = qrScanner;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -403,6 +414,7 @@
 				FAA8F0912EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift in Sources */,
 				D0F41CFE2F73FD8B003FC4E1 /* secureStorage.swift in Sources */,
 				FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */,
+				D0A1C0DE2F80000100000001 /* QrScannerPlugin.swift in Sources */,
 				FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */,
 				FA11BB012F00A00000000001 /* SSLBypassPlugin.swift in Sources */,
 				D0F41CEC2F73ED03003FC4E1 /* SecureStoragePlugin.swift in Sources */,

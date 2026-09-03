@@ -7,7 +7,6 @@ import { Capacitor } from '@capacitor/core';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import WebQRScanner from '../qr/WebQRScanner';
 import NativeQRScanner from '../qr/NativeQRScanner';
-import { isQrScanCancelledMessage } from '../../utils/qrScanErrors';
 
 interface ScanQRCodeProps {
   onBack: () => void;
@@ -55,16 +54,18 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
     } catch (error) {
       logger.error('Failed to parse QR code:', error);
       toast.error(t('qr_parse_failed'));
+      // The native scanner has already closed itself, and the web one has
+      // stopped. Without this the user is left on an empty screen with no
+      // way back.
+      onBack();
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleError = (err: string) => {
-    if (!isQrScanCancelledMessage(err)) {
-      logger.warn('[QRScan]', err);
-      toast.error(t('qr_scan_failed'));
-    }
+    logger.warn('[QRScan]', err);
+    toast.error(t('qr_scan_failed'));
     onBack();
   };
 

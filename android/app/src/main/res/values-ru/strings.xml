@@ -9,4 +9,5 @@
     <string name="portable_backup_notification_title">Защищённая резервная копия Gossip</string>
     <string name="portable_backup_notification_preparing">Подготовка резервной копии</string>
     <string name="portable_backup_notification_writing">Запись резервной копии</string>
+    <string name="qr_scanner_close">Закрыть сканер</string>
 </resources>
