@@ -191,7 +191,9 @@ export default defineConfig({
       },
 
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,txt}'],
+        // wasm is required: the QR decoder, SQLite and secure storage all
+        // load their binary at runtime, so an offline start fails without it.
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,txt,wasm}'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024, // 6MB (crypto polyfills, QR scanner, WASM)
       },
 

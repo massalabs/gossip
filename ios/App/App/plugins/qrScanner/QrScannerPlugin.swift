@@ -29,11 +29,15 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
                 let scanner = QrScanViewController()
                 scanner.modalPresentationStyle = .fullScreen
-                scanner.onResult = { value in
-                    scanner.dismiss(animated: true) {
-                        if let value = value {
-                            call.resolve(["value": value])
-                        } else {
+                // [weak scanner]: the controller owns this closure, so a strong
+                // capture would keep the controller, its session and this call
+                // alive after every scan.
+                scanner.onResult = { [weak scanner] value in
+                    scanner?.dismiss(animated: true) {
+                        switch value {
+                        case .some(let text):
+                            call.resolve(["value": text])
+                        case .none:
                             call.reject("Scan cancelled", "CANCELLED")
                         }
                     }
@@ -158,6 +162,8 @@ final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjec
     private func finish(_ value: String?) {
         guard !finished else { return }
         finished = true
-        onResult?(value)
+        let callback = onResult
+        onResult = nil
+        callback?(value)
     }
 }
