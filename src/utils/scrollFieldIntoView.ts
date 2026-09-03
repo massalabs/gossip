@@ -4,7 +4,9 @@ import type React from 'react';
  * Scroll the field's parent into view within the nearest scroll container.
  * Use as onFocus handler on form inputs to reveal the next field when keyboard opens.
  */
-export function scrollFieldIntoView(e: React.FocusEvent<HTMLInputElement>) {
+export function scrollFieldIntoView(
+  e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>
+) {
   const field = e.target.closest('div > div') ?? e.target.parentElement;
   if (!field) return;
   setTimeout(() => {
