@@ -1623,7 +1623,7 @@ fn commit_pending_backend_writes() -> Result<()> {
 
 /// Open a rusqlite connection using the registered encrypted VFS.
 ///
-/// Page size 4096 aligns well with the bordercrypt block plaintext
+/// Page size 4096 aligns well with the secure-storage block plaintext
 /// capacity (~15 844 bytes ≈ 3.86 pages per block); only ~25 % of
 /// pages straddle a block boundary vs ~50 % at 8192.
 pub fn open_db() -> Result<rusqlite::Connection> {
