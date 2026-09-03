@@ -111,6 +111,41 @@ describe('profile password encryption integration', () => {
     authenticated.encryptionKey.free();
   });
 
+  it('restores the deterministic identity with fresh backed-up security', async () => {
+    const prepared = await preparePasswordAccount(
+      PROFILE_SECURITY_V1_FIXTURE.mnemonic,
+      'fresh-destination-password',
+      true
+    );
+
+    try {
+      expect(prepared.security.mnemonicBackup.backedUp).toBe(true);
+      expect(prepared.security.encKeySalt).not.toEqual(
+        Uint8Array.from(
+          PROFILE_SECURITY_V1_FIXTURE.encryptionKeySaltHex
+            .match(/.{2}/g)!
+            .map(byte => Number.parseInt(byte, 16))
+        )
+      );
+      const authenticated = await auth(
+        buildProfile(prepared.security),
+        'fresh-destination-password'
+      );
+      const derived = await deriveAccountFromMnemonic(authenticated.mnemonic);
+      expect(encodeUserId(derived.userIdBytes)).toBe(
+        PROFILE_SECURITY_V1_FIXTURE.userId
+      );
+      expect(derived.evmAddress).toBe(PROFILE_SECURITY_V1_FIXTURE.evmAddress);
+      expect(derived.massaAddress).toBe(
+        PROFILE_SECURITY_V1_FIXTURE.massaAddress
+      );
+      derived.account.privateKey.toBytes().fill(0);
+      authenticated.encryptionKey.free();
+    } finally {
+      wipePreparedPasswordAccount(prepared);
+    }
+  });
+
   it('rejects unsupported security versions before password derivation', async () => {
     const mnemonic = await generateMnemonic();
     const created = await createPasswordSecurity(mnemonic, 'correct-password');

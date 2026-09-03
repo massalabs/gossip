@@ -8,12 +8,14 @@ interface PasswordConfirmModalProps {
   isOpen: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  confirmLabel?: string;
 }
 
 const PasswordConfirmModal: React.FC<PasswordConfirmModalProps> = ({
   isOpen,
   onConfirm,
   onCancel,
+  confirmLabel,
 }) => {
   const { t } = useTranslation('auth');
 
@@ -41,7 +43,7 @@ const PasswordConfirmModal: React.FC<PasswordConfirmModalProps> = ({
             fullWidth
             className="h-11 rounded-xl text-sm font-medium"
           >
-            {t('create.password_confirm_validate')}
+            {confirmLabel ?? t('create.password_confirm_validate')}
           </Button>
           <Button
             onClick={onCancel}

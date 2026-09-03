@@ -9,6 +9,7 @@ import SecureAccountCreation from '../../../src/components/account/SecureAccount
 const mocks = vi.hoisted(() => ({
   initializeAccount: vi.fn(),
   logout: vi.fn(),
+  validateMnemonic: vi.fn<(mnemonic: string) => boolean>(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -38,8 +39,10 @@ vi.mock('@massalabs/gossip-sdk', async () => {
   const actual = await vi.importActual<typeof import('@massalabs/gossip-sdk')>(
     '@massalabs/gossip-sdk'
   );
+  mocks.validateMnemonic.mockImplementation(actual.validateMnemonic);
   return {
     ...actual,
+    validateMnemonic: mocks.validateMnemonic,
     validatePassword: (password: string) => ({
       valid: password === 'valid-password',
       error: 'invalid password',
@@ -118,6 +121,79 @@ describe('AccountCreationForm mandatory password', () => {
         password: 'valid-password',
       });
     });
+  });
+
+  it('stages a validated mnemonic through the individual account form', async () => {
+    const onSubmit = vi.fn(async () => {});
+    await render(
+      <AccountCreationForm onSubmit={onSubmit} allowMnemonicImport />
+    );
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_tab' })
+    );
+    const mnemonicInput = page.getByLabelText('create.mnemonic_label');
+    await expect
+      .element(mnemonicInput)
+      .toHaveAttribute('aria-invalid', 'false');
+    await expect
+      .element(mnemonicInput)
+      .toHaveAttribute('aria-describedby', 'account-mnemonic-error');
+    await userEvent.fill(mnemonicInput, 'not a valid mnemonic');
+    await expect.element(mnemonicInput).toHaveAttribute('aria-invalid', 'true');
+    await userEvent.fill(
+      mnemonicInput,
+      'ABANDON abandon abandon abandon abandon abandon\nabandon abandon abandon abandon abandon about'
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.enter_username'),
+      'restored'
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.enter_password'),
+      'valid-password'
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.confirm_password'),
+      'valid-password'
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_account' })
+    );
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.password_confirm_import' })
+    );
+
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        username: 'restored',
+        password: 'valid-password',
+        mnemonic:
+          'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      });
+    });
+  });
+
+  it('does not revalidate an unchanged mnemonic on unrelated renders', async () => {
+    await render(
+      <AccountCreationForm onSubmit={vi.fn()} allowMnemonicImport />
+    );
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_tab' })
+    );
+    await userEvent.fill(
+      page.getByLabelText('create.mnemonic_label'),
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+    );
+    mocks.validateMnemonic.mockClear();
+
+    await userEvent.fill(
+      page.getByPlaceholder('create.enter_username'),
+      'restored'
+    );
+
+    expect(mocks.validateMnemonic).not.toHaveBeenCalled();
   });
 
   it('forwards confirmed credentials through classic account creation', async () => {

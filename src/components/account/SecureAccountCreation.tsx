@@ -36,7 +36,9 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
     setError(null);
 
     try {
-      setInitialAccount(stageAccount(result.username, result.password));
+      setInitialAccount(
+        stageAccount(result.username, result.password, result.mnemonic)
+      );
       setStep('setup');
     } catch (err) {
       logger.error('Error staging account:', err);
@@ -73,7 +75,11 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
           <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
         </div>
       )}
-      <AccountCreationForm onSubmit={handleSubmit} standalone={false} />
+      <AccountCreationForm
+        onSubmit={handleSubmit}
+        standalone={false}
+        allowMnemonicImport
+      />
     </PageLayout>
   );
 };

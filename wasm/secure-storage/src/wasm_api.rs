@@ -985,7 +985,7 @@ pub async fn flush_encrypted() -> Result<(), JsValue> {
 
 const DB_NAME: &CStr = c"secure.db";
 const VFS_NAME_C: &CStr = c"secure-storage-enc";
-// Page size 4096 maps better onto the bordercrypt block plaintext capacity
+// Page size 4096 maps better onto the secure-storage block plaintext capacity
 // (PLAINTEXT_SIZE ≈ 15 844 bytes ≈ 3.86 pages per block) than 8192, which
 // straddles a block boundary every other page (15844 < 2 × 8192). With 4096
 // only ~25 % of pages straddle and three pages share one PQ-encrypted block,
