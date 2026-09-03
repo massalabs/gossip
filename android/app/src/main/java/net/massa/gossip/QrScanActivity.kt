@@ -48,6 +48,7 @@ class QrScanActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_RESULT = "net.massa.gossip.qr.RESULT"
+        const val EXTRA_CLOSE_LABEL = "net.massa.gossip.qr.CLOSE_LABEL"
     }
 
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -71,7 +72,10 @@ class QrScanActivity : AppCompatActivity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 28f)
             val pad = (16 * resources.displayMetrics.density).toInt()
             setPadding(pad, pad, pad, pad)
-            contentDescription = "Close"
+            // The app language is chosen in-app, so JS sends the translated
+            // label; the resource only covers a missing extra.
+            contentDescription = intent.getStringExtra(EXTRA_CLOSE_LABEL)
+                ?: getString(R.string.qr_scanner_close)
             setOnClickListener { finish() }
         }
         val root = FrameLayout(this).apply {

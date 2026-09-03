@@ -8,4 +8,5 @@
     <string name="foreground_sync_channel_desc">Keeps message sync active while this mode is on</string>
     <string name="foreground_sync_notification_title">Gossip is syncing</string>
     <string name="foreground_sync_notification_body">Syncing in background to keep your messages up to date</string>
+    <string name="qr_scanner_close">Close scanner</string>
 </resources>

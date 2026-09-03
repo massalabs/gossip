@@ -1,5 +1,6 @@
 import { logger } from '../../utils/logger.ts';
 import React, { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { QrScanner, isQrScanCancelled } from '../../services/qrScanner';
 import { QRScannerProps } from './types';
 
@@ -8,6 +9,7 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
   onError,
   onClose,
 }) => {
+  const { t } = useTranslation('common');
   const scanStartedRef = useRef(false);
 
   useEffect(() => {
@@ -15,7 +17,7 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
     if (scanStartedRef.current) return;
     scanStartedRef.current = true;
 
-    QrScanner.scan()
+    QrScanner.scan({ closeLabel: t('close') })
       .then(({ value }) => onScan(value))
       .catch((err: unknown) => {
         if (isQrScanCancelled(err)) {

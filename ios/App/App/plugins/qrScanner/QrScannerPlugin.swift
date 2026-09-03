@@ -28,6 +28,9 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
                     return
                 }
                 let scanner = QrScanViewController()
+                // The app language is chosen in-app rather than by the OS
+                // locale, so JS sends the already translated label.
+                scanner.closeLabel = call.getString("closeLabel") ?? "Close scanner"
                 scanner.modalPresentationStyle = .fullScreen
                 // [weak scanner]: the controller owns this closure, so a strong
                 // capture would keep the controller, its session and this call
@@ -51,6 +54,9 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
 final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
     /// Called once: decoded text, or nil when cancelled / camera unavailable.
     var onResult: ((String?) -> Void)?
+
+    /// Accessibility label of the close button, translated by the JS side.
+    var closeLabel = "Close scanner"
 
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "net.massa.gossip.qr-session")
@@ -93,7 +99,7 @@ final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjec
         close.setTitle("✕", for: .normal)
         close.titleLabel?.font = .systemFont(ofSize: 28)
         close.tintColor = .white
-        close.accessibilityLabel = "Close"
+        close.accessibilityLabel = closeLabel
         close.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
         close.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(close)

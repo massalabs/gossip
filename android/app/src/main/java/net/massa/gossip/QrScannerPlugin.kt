@@ -45,7 +45,9 @@ class QrScannerPlugin : Plugin() {
     }
 
     private fun openScanner(call: PluginCall) {
-        startActivityForResult(call, Intent(context, QrScanActivity::class.java), "onScanResult")
+        val intent = Intent(context, QrScanActivity::class.java)
+        call.getString("closeLabel")?.let { intent.putExtra(QrScanActivity.EXTRA_CLOSE_LABEL, it) }
+        startActivityForResult(call, intent, "onScanResult")
     }
 
     @ActivityCallback

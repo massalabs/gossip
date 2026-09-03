@@ -54,6 +54,10 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
     } catch (error) {
       logger.error('Failed to parse QR code:', error);
       toast.error(t('qr_parse_failed'));
+      // The native scanner has already closed itself, and the web one has
+      // stopped. Without this the user is left on an empty screen with no
+      // way back.
+      onBack();
     } finally {
       setIsProcessing(false);
     }
