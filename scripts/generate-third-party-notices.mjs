@@ -231,6 +231,219 @@ function cargoPackages() {
     .sort(comparePackages);
 }
 
+/**
+ * Licenses for native dependencies.
+ *
+ * Android artifacts are resolved from remote Maven repositories and iOS pods
+ * from the CocoaPods trunk, so unlike npm and Cargo there is no local checkout
+ * to harvest a LICENSE file from. Recording the license here keeps the
+ * inventory honest, and the assertion below makes the record mandatory: a new
+ * native dependency fails this script until someone looks up its terms.
+ *
+ * Keyed by coordinate without version, because a version bump does not
+ * normally change the license.
+ */
+const nativeLicenses = new Map([
+  // AndroidX: Apache-2.0 across the board.
+  ['androidx.activity:activity', 'Apache-2.0'],
+  ['androidx.activity:activity-compose', 'Apache-2.0'],
+  ['androidx.activity:activity-ktx', 'Apache-2.0'],
+  ['androidx.appcompat:appcompat', 'Apache-2.0'],
+  ['androidx.biometric:biometric', 'Apache-2.0'],
+  ['androidx.camera:camera-camera2', 'Apache-2.0'],
+  ['androidx.camera:camera-lifecycle', 'Apache-2.0'],
+  ['androidx.camera:camera-view', 'Apache-2.0'],
+  ['androidx.compose.material3:material3', 'Apache-2.0'],
+  ['androidx.compose.material3:material3-window-size-class', 'Apache-2.0'],
+  ['androidx.coordinatorlayout:coordinatorlayout', 'Apache-2.0'],
+  ['androidx.core:core', 'Apache-2.0'],
+  ['androidx.core:core-ktx', 'Apache-2.0'],
+  ['androidx.core:core-splashscreen', 'Apache-2.0'],
+  ['androidx.fragment:fragment', 'Apache-2.0'],
+  ['androidx.webkit:webkit', 'Apache-2.0'],
+  ['androidx.work:work-runtime', 'Apache-2.0'],
+  ['androidx.work:work-runtime-ktx', 'Apache-2.0'],
+  // Kotlin and Cordova runtimes.
+  ['org.jetbrains.kotlinx:kotlinx-coroutines-android', 'Apache-2.0'],
+  ['org.jetbrains.kotlinx:kotlinx-coroutines-core', 'Apache-2.0'],
+  ['org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm', 'Apache-2.0'],
+  ['org.apache.cordova:framework', 'Apache-2.0'],
+  // JNA is dual-licensed; Gossip uses it under Apache-2.0 for the UniFFI
+  // Kotlin bindings.
+  ['net.java.dev.jna:jna', 'Apache-2.0 OR LGPL-2.1-or-later'],
+  // Google. ML Kit is NOT open source: it ships under Google's ML Kit Terms
+  // of Service, which permit Google to collect usage and diagnostic data from
+  // the device. It reaches the APK transitively through
+  // @capacitor/barcode-scanner -> io.ionic.libs:ionbarcode-android, and pulls
+  // in Play Services base, Firebase components, and the Google
+  // datatransport/Clearcut logging pipeline with it.
+  [
+    'com.google.mlkit:barcode-scanning',
+    'NOASSERTION (Google ML Kit Terms of Service)',
+  ],
+  ['com.google.zxing:core', 'Apache-2.0'],
+  ['com.google.android.material:material', 'Apache-2.0'],
+  // Ionic / OutSystems support libraries.
+  ['io.ionic.libs:ionbarcode-android', 'Apache-2.0'],
+  ['io.ionic.libs:ionfilesystem-android', 'Apache-2.0'],
+  // iOS pods resolved from the CocoaPods trunk.
+  ['IONFilesystemLib', 'Apache-2.0'],
+  ['KeychainSwift', 'MIT'],
+  ['OSBarcodeLib', 'Apache-2.0'],
+]);
+
+/** Gradle configurations whose dependencies are packaged into the shipped APK. */
+const shippedGradleConfigurations = new Set([
+  'implementation',
+  'api',
+  'compileOnly',
+  'runtimeOnly',
+]);
+
+/**
+ * Maven coordinates that Gradle substitutes with a local project already
+ * inventoried through npm. Capacitor plugins compile against
+ * com.capacitorjs:core, which resolves to the :capacitor-android module inside
+ * node_modules/@capacitor/android rather than to a Maven artifact. Listing it
+ * would double-count the same code under two ecosystems — the same reason the
+ * iOS side skips :path pods.
+ */
+const gradleLocalSubstitutions = new Set(['com.capacitorjs:core']);
+
+/**
+ * Resolve `ext` variables from a Gradle file.
+ *
+ * Capacitor modules declare their own defaults with
+ * `name = project.hasProperty('name') ? rootProject.ext.name : 'default'`, and
+ * the root android/variables.gradle overrides them. Root values therefore win.
+ */
+function gradleVariables(source) {
+  const variables = new Map();
+
+  const withDefault =
+    /(\w+)\s*=\s*project\.hasProperty\([^)]*\)\s*\?[^:]*:\s*'([^']*)'/g;
+  for (const match of source.matchAll(withDefault)) {
+    variables.set(match[1], match[2]);
+  }
+
+  const plain = /^\s*(\w+)\s*=\s*'([^']*)'\s*$/gm;
+  for (const match of source.matchAll(plain)) {
+    variables.set(match[1], match[2]);
+  }
+
+  return variables;
+}
+
+/** Gradle modules that contribute code to the shipped APK. */
+function androidModuleGradleFiles() {
+  const files = [join(root, 'android/app/build.gradle')];
+  const settings = readFileSync(
+    join(root, 'android/capacitor.settings.gradle'),
+    'utf8'
+  );
+
+  for (const match of settings.matchAll(
+    /projectDir\s*=\s*new File\('([^']+)'\)/g
+  )) {
+    files.push(resolve(root, 'android', match[1], 'build.gradle'));
+  }
+
+  return files.filter(file => existsSync(file));
+}
+
+function androidPackages() {
+  const rootVariables = gradleVariables(
+    readFileSync(join(root, 'android/variables.gradle'), 'utf8')
+  );
+  const packages = [];
+
+  // group:name:version, optionally with an @aar/@jar artifact-type suffix.
+  const dependencyPattern =
+    /^\s*(\w+)\s*[( ]\s*["']([^"':]+):([^"':]+):([^"'@]+)(@\w+)?["']/gm;
+
+  for (const file of androidModuleGradleFiles()) {
+    const source = readFileSync(file, 'utf8');
+    const variables = new Map([
+      ...gradleVariables(source),
+      ...rootVariables, // root overrides module defaults
+    ]);
+
+    for (const match of source.matchAll(dependencyPattern)) {
+      const [, configuration, group, name, rawVersion] = match;
+      if (!shippedGradleConfigurations.has(configuration)) continue;
+      if (gradleLocalSubstitutions.has(`${group}:${name}`)) continue;
+
+      // Interpolated versions ("$var" / "${var}") resolve from the ext maps.
+      const version = rawVersion.replace(
+        /\$\{?(\w+)\}?/g,
+        (whole, variable) => variables.get(variable) ?? whole
+      );
+
+      packages.push({
+        ecosystem: 'Android',
+        name: `${group}:${name}`,
+        version,
+        license: nativeLicenses.get(`${group}:${name}`) ?? 'NOASSERTION',
+        source: `maven:${group}:${name}:${version}`,
+        origin: relative(root, file),
+        evidence: [],
+      });
+    }
+  }
+
+  return deduplicatePackages(packages);
+}
+
+function iosPackages() {
+  const lockPath = join(root, 'ios/App/Podfile.lock');
+  if (!existsSync(lockPath)) return [];
+
+  const lock = readFileSync(lockPath, 'utf8');
+
+  // Pods sourced from a spec repo are genuinely third party. Pods listed under
+  // EXTERNAL SOURCES resolve to :path entries inside node_modules and are
+  // already inventoried as npm packages, so listing them again would
+  // double-count the same code.
+  // Capture the indented block under the heading. An `$`-terminated lazy match
+  // would stop at the first line end under the /m flag.
+  const specRepoSection = lock.match(/^SPEC REPOS:\n((?: +.*\n?)*)/m);
+  const externalPods = new Set(
+    [...lock.matchAll(/^ {2}(\S+):\n {4}:path:/gm)].map(match => match[1])
+  );
+
+  const remotePods = specRepoSection
+    ? [...specRepoSection[1].matchAll(/^ {4}- (\S+)$/gm)].map(match => match[1])
+    : [];
+
+  const checksums = new Map(
+    [...lock.matchAll(/^ {2}(\S+): ([0-9a-f]{40})$/gm)].map(match => [
+      match[1],
+      match[2],
+    ])
+  );
+  const versions = new Map(
+    [...lock.matchAll(/^ {2}- (\S+) \(([^)]+)\)/gm)].map(match => [
+      match[1],
+      match[2],
+    ])
+  );
+
+  return remotePods
+    .filter(pod => !externalPods.has(pod))
+    .map(pod => ({
+      ecosystem: 'CocoaPods',
+      name: pod,
+      version: versions.get(pod) ?? 'unknown',
+      license: nativeLicenses.get(pod) ?? 'NOASSERTION',
+      source: `cocoapods:trunk:${pod}`,
+      // CocoaPods records a SHA-1 of the podspec, which pins the resolved
+      // artifact the same way npm's integrity field does.
+      integrity: checksums.has(pod) ? `sha1-${checksums.get(pod)}` : undefined,
+      evidence: [],
+    }))
+    .sort(comparePackages);
+}
+
 function comparePackages(a, b) {
   return (
     a.ecosystem.localeCompare(b.ecosystem) ||
@@ -249,8 +462,8 @@ function deduplicatePackages(packages) {
   return [...unique.values()].sort(comparePackages);
 }
 
-function renderNotice(title, npm, cargo) {
-  const packages = [...npm, ...cargo].sort(comparePackages);
+function renderNotice(title, groups, { includesNative = false } = {}) {
+  const packages = groups.flat().sort(comparePackages);
   const texts = new Map();
 
   for (const pkg of packages) {
@@ -266,13 +479,33 @@ function renderNotice(title, npm, cargo) {
     }
   }
 
+  const scope = includesNative
+    ? [
+        'This file lists third-party packages identified from the committed npm',
+        'lockfiles, Cargo metadata, the Android Gradle build files, and the',
+        'CocoaPods lockfile. It does not change their licenses. Package authors',
+        'retain their copyrights and other rights.',
+        '',
+        'SCOPE LIMITATION (Android): Gradle entries are the coordinates this',
+        'repository and its Capacitor plugins declare directly. Artifacts pulled',
+        'in transitively by those coordinates are not individually enumerated,',
+        'because resolving the full Maven graph requires a network fetch and an',
+        'Android SDK. The most significant transitive closure is the one under',
+        'com.google.mlkit:barcode-scanning, which adds Google Play Services base,',
+        'Firebase components, and the Google datatransport ("Clearcut") logging',
+        'pipeline to the shipped APK.',
+      ]
+    : [
+        'This file lists third-party packages identified from the committed npm',
+        'lockfiles and Cargo metadata. It does not change their licenses. Package',
+        'authors retain their copyrights and other rights.',
+      ];
+
   const lines = [
     title,
     '='.repeat(title.length),
     '',
-    'This file lists third-party packages identified from the committed npm',
-    'lockfiles and Cargo metadata. It does not change their licenses. Package',
-    'authors retain their copyrights and other rights.',
+    ...scope,
     '',
     'IMPORTANT: entries marked NOASSERTION or UNRESOLVED require legal review.',
     'Inclusion of available upstream text is evidence for review, not a conclusion',
@@ -292,6 +525,7 @@ function renderNotice(title, npm, cargo) {
       `License: ${pkg.license}${pkg.unresolved ? ' (UNRESOLVED)' : ''}`
     );
     lines.push(`Source: ${pkg.source}`);
+    if (pkg.origin) lines.push(`Declared in: ${pkg.origin}`);
     if (pkg.integrity) lines.push(`Integrity: ${pkg.integrity}`);
     lines.push(`License text references: ${evidence || 'none found'}`);
     if (pkg.unresolved) lines.push(`Review note: ${pkg.unresolved}`);
@@ -349,13 +583,45 @@ for (const [key] of unresolvedRust) {
 const rootNpm = npmPackages('package-lock.json', new Set(['gossip-sdk']));
 const sdkNpm = npmPackages('gossip-sdk/package-lock.json');
 
+// Native dependencies apply to the application only: gossip-sdk is a
+// JavaScript package with no Gradle or CocoaPods surface of its own.
+const android = androidPackages();
+const ios = iosPackages();
+
+// Force a deliberate decision on every native dependency. Without this, a new
+// Capacitor plugin would quietly land in the APK and be published as
+// NOASSERTION, which is how the ML Kit dependency went undisclosed.
+const unrecordedNative = [...android, ...ios].filter(
+  pkg => !nativeLicenses.has(pkg.name)
+);
+
+if (unrecordedNative.length > 0) {
+  throw new Error(
+    `Native dependencies without a recorded license: ${unrecordedNative
+      .map(pkg => `${pkg.ecosystem}:${pkg.name}@${pkg.version}`)
+      .join(', ')}\n` +
+      'Look up the terms and add them to nativeLicenses in this script.'
+  );
+}
+
+for (const coordinate of nativeLicenses.keys()) {
+  if (![...android, ...ios].some(pkg => pkg.name === coordinate)) {
+    throw new Error(
+      `nativeLicenses records ${coordinate}, but nothing declares it any more. ` +
+        'Remove the entry so the record keeps describing what actually ships.'
+    );
+  }
+}
+
 updateOutput(
   'public/THIRD_PARTY_NOTICES.txt',
-  renderNotice('Gossip Third-Party Notices', rootNpm, cargo)
+  renderNotice('Gossip Third-Party Notices', [rootNpm, cargo, android, ios], {
+    includesNative: true,
+  })
 );
 updateOutput(
   'gossip-sdk/THIRD_PARTY_NOTICES.txt',
-  renderNotice('Gossip SDK Third-Party Notices', sdkNpm, cargo)
+  renderNotice('Gossip SDK Third-Party Notices', [sdkNpm, cargo])
 );
 
 console.log(

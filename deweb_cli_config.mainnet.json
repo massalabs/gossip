@@ -5,6 +5,7 @@
     "TITLE": "Gossip messenger",
     "DESCRIPTION": "Gossip messenger",
     "KEYWORD1": "privacy",
-    "http-header:Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+    "http-header:Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "http-header:Content-Security-Policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; connect-src 'self' https://api.usegossip.com https://mainnet.massa.net https://mainnet.massa.net:33037 https://buildnet.massa.net https://buildnet.massa.net:33037 https://deweb.massa.network; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'"
   }
 }

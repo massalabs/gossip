@@ -23,6 +23,17 @@ jobs:
       - name: Lint
         run: npm run fmt:check
 
+      # Fails if a dependency bump reintroduces a permission the app strips, or
+      # adds any permission outside the audited allowlist. Runs from committed
+      # manifests, so it needs no Android SDK.
+      - name: Audit Android permissions
+        run: npm run audit:android-permissions
+
+      # Fails if the DeWeb deployment configs no longer carry the current
+      # Content-Security-Policy.
+      - name: Verify Content-Security-Policy headers
+        run: npm run csp:check
+
       - name: Get commit hash
         id: vars
         run: echo "commit_hash=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
