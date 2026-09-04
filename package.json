@@ -79,7 +79,6 @@
     "@capacitor/android": "^8.0.0",
     "@capacitor/app": "^8.0.0",
     "@capacitor/background-runner": "^3.0.0",
-    "@capacitor/barcode-scanner": "^3.0.0",
     "@capacitor/core": "^8.0.0",
     "@capacitor/device": "^8.0.0",
     "@capacitor/filesystem": "^8.0.0",
@@ -116,7 +115,8 @@
     "react-router-dom": "^7.9.6",
     "varint": "^6.0.0",
     "virtua": "^0.48.8",
-    "zustand": "^5.0.8"
+    "zustand": "^5.0.8",
+    "zxing-wasm": "2.2.4"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.0.0",

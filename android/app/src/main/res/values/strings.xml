@@ -13,4 +13,5 @@
     <string name="portable_backup_notification_title">Gossip secure backup</string>
     <string name="portable_backup_notification_preparing">Preparing backup</string>
     <string name="portable_backup_notification_writing">Writing backup</string>
+    <string name="qr_scanner_close">Close scanner</string>
 </resources>

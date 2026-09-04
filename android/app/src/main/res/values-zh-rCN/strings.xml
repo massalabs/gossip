@@ -9,4 +9,5 @@
     <string name="portable_backup_notification_title">Gossip 安全备份</string>
     <string name="portable_backup_notification_preparing">正在准备备份</string>
     <string name="portable_backup_notification_writing">正在写入备份</string>
+    <string name="qr_scanner_close">关闭扫描器</string>
 </resources>
