@@ -1,78 +1,73 @@
 import { logger } from '../../utils/logger.ts';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAccountStore } from '../../stores/accountStore';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/Layout/PageLayout';
-import { PrivacyGraphic } from '../graphics';
 import AccountCreationForm, {
   AccountCreationResult,
 } from './AccountCreationForm';
 import SecureAccountSetup from './SecureAccountSetup';
+import { stageAccount, StagedAccount } from './stagedAccount';
+import type { OnboardingStorageModeLease } from '../../services/portableImportAuthorization';
 
-type Step = 'form' | 'creating' | 'setup';
+type Step = 'form' | 'setup';
 
 interface SecureAccountCreationProps {
   onComplete: () => void | Promise<void>;
   onBack: () => void;
+  onCredentialOperationChange?: (active: boolean) => void;
+  creationModeLease?: OnboardingStorageModeLease;
 }
 
 const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
   onComplete,
   onBack,
+  onCredentialOperationChange,
+  creationModeLease,
 }) => {
   const { t } = useTranslation('auth');
-  const { initializeAccount, initializeAccountWithBiometrics } =
-    useAccountStore();
   const [step, setStep] = useState<Step>('form');
   const [error, setError] = useState<string | null>(null);
-  const [mainUsername, setMainUsername] = useState('');
+  const [initialAccount, setInitialAccount] = useState<StagedAccount | null>(
+    null
+  );
 
   const handleSubmit = async (result: AccountCreationResult) => {
     setError(null);
 
     try {
-      if (result.useBiometrics) {
-        // Form stays visible while OS biometric prompt overlays.
-        // AccountCreationForm shows a button spinner via its own isCreating state.
-        await initializeAccountWithBiometrics(
-          result.username,
-          result.iCloudSync
-        );
-      } else {
-        // Password: show full-screen loading immediately
-        setStep('creating');
-        await initializeAccount(result.username, result.password!);
-      }
-      setMainUsername(result.username);
+      setInitialAccount(
+        stageAccount(result.username, result.password, result.mnemonic)
+      );
       setStep('setup');
     } catch (err) {
-      logger.error('Error creating account:', err);
+      logger.error('Error staging account:', err);
       setError(err instanceof Error ? err.message : t('create.failed'));
       setStep('form');
+      // Rethrow so AccountCreationForm's doSubmit takes its error path and
+      // resets its own isCreating/loading state
+      throw err;
     }
   };
 
-  if (step === 'creating') {
+  const handleRestart = (message: string) => {
+    setInitialAccount(null);
+    setError(message);
+    setStep('form');
+  };
+
+  if (step === 'setup' && initialAccount) {
     return (
-      <div className="bg-background flex items-center justify-center h-full">
-        <div className="text-center">
-          <PrivacyGraphic size={120} loading={true} />
-          <p className="text-sm text-muted-foreground mt-4">
-            {t('create.creating')}
-          </p>
-        </div>
-      </div>
+      <SecureAccountSetup
+        initialAccount={initialAccount}
+        onComplete={onComplete}
+        onRestart={handleRestart}
+        onCredentialOperationChange={onCredentialOperationChange}
+        creationModeLease={creationModeLease}
+      />
     );
   }
 
-  if (step === 'setup') {
-    return (
-      <SecureAccountSetup mainUsername={mainUsername} onComplete={onComplete} />
-    );
-  }
-
-  // step === 'form'
   return (
     <PageLayout
       header={<PageHeader title={t('create.title')} onBack={onBack} />}
@@ -84,7 +79,11 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
           <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
         </div>
       )}
-      <AccountCreationForm onSubmit={handleSubmit} standalone={false} />
+      <AccountCreationForm
+        onSubmit={handleSubmit}
+        standalone={false}
+        allowMnemonicImport
+      />
     </PageLayout>
   );
 };

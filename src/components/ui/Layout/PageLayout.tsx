@@ -7,7 +7,6 @@ import React, {
 } from 'react';
 import { useUiStore } from '../../../stores/uiStore';
 import { useHeaderScroll } from '../../../hooks/useHeaderScroll';
-import { useIsPWA } from '../../../hooks/usePlatform';
 import HeaderBar from '../HeaderBar';
 import { ExitAnimationContext } from '../ExitAnimationContext';
 
@@ -69,12 +68,6 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   const setHeaderVisible = useUiStore(s => s.setHeaderVisible);
   const setHeaderIsScrolled = useUiStore(s => s.setHeaderIsScrolled);
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
-  const showBottomNav = useUiStore(s => s.showBottomNav);
-  // In installed PWA mode the phone's system nav bar is fixed and there's no
-  // dynamic browser chrome above the home indicator, so the progressive blur
-  // has nothing meaningful to blur against and just darkens the edge.
-  const isPWA = useIsPWA();
-
   // Reset scroll-aware bg BEFORE first paint on every mount of a non-exiting
   // PageLayout. Prevents stale "scrolled" state from a previous page bleeding
   // into the initial render.
@@ -160,45 +153,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
             style={{ height: 'calc(var(--sab) + 24px)' }}
           />
         </div>
-        {!showBottomNav && !isPWA && <BottomProgressiveBlur />}
       </div>
-    </div>
-  );
-};
-
-/**
- * Progressive blur overlay sitting above the home indicator / native bottom bar.
- * Uses 4 stacked backdrop-filter layers with overlapping gradient masks so blur
- * intensity grows toward the bottom edge. Pure CSS, no JS.
- */
-const BottomProgressiveBlur: React.FC = () => {
-  const layers = [
-    { blur: 2, maskStop: '100%' },
-    { blur: 6, maskStop: '75%' },
-    { blur: 12, maskStop: '50%' },
-    { blur: 24, maskStop: '25%' },
-  ];
-  return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 bottom-0"
-      style={{ height: 'calc(var(--sab) + 32px)' }}
-    >
-      {layers.map(({ blur, maskStop }, i) => {
-        const mask = `linear-gradient(to top, black 0%, transparent ${maskStop})`;
-        return (
-          <div
-            key={i}
-            className="absolute inset-0"
-            style={{
-              backdropFilter: `blur(${blur}px)`,
-              WebkitBackdropFilter: `blur(${blur}px)`,
-              maskImage: mask,
-              WebkitMaskImage: mask,
-            }}
-          />
-        );
-      })}
     </div>
   );
 };

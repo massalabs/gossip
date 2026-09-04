@@ -4,32 +4,23 @@ import CopyClipboard from './CopyClipboard';
 
 interface UserIdDisplayProps {
   userId: string;
-  visible?: boolean; // Kept for backward compatibility, no longer used
-  onChange?: (visible: boolean) => void; // Kept for backward compatibility, no-op
   showCopy?: boolean;
-  showHideToggle?: boolean; // Kept for backward compatibility, no longer used
   prefixChars?: number;
   suffixChars?: number;
   textSize?: 'xs' | 'sm' | 'base';
   textClassName?: string;
   className?: string;
-  onToggleClick?: (e: React.MouseEvent<HTMLButtonElement>) => void; // Kept for backward compatibility, no-op
   copyTitle?: string;
 }
 
 const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
   userId,
-  // Kept for backwards compatibility; no longer control visibility
-  visible: _visible = true,
-  onChange: _onChange,
   showCopy = false,
-  showHideToggle: _showHideToggle = false,
   prefixChars = 4,
   suffixChars = 5,
   textSize = 'xs',
   textClassName = '',
   className = '',
-  onToggleClick: _onToggleClick,
   copyTitle = 'Copy user ID',
 }) => {
   const userIdFormatted = formatUserId(userId, prefixChars, suffixChars);

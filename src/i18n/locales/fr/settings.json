@@ -8,6 +8,7 @@
   "copy_mns_domain": "Copier le domaine MNS",
   "menu": {
     "account_backup": "Sauvegarde du compte",
+    "secure_backup": "Sauvegarde sécurisée",
     "share_contact": "Partager le contact",
     "notifications": "Notifications",
     "appearance": "Apparence",
@@ -21,10 +22,16 @@
     "feedback": "Envoyer des commentaires"
   },
   "delete_account": {
-    "button": "Supprimer le compte",
-    "title": "Supprimer le compte",
-    "confirm": "Es-tu sûr de vouloir supprimer ce compte ?",
-    "warning": "Cette action est irréversible"
+    "button": "Supprimer tous les comptes",
+    "title": "Supprimer tous les comptes",
+    "confirm": "Supprimer définitivement tous les comptes Gossip de cet appareil ?",
+    "warning": "Les messages, les sessions, la connexion biométrique et les données d’importation interrompue seront également supprimés. Les sauvegardes externes ne seront pas modifiées. Cette action est irréversible."
+  },
+  "delete_session": {
+    "title": "Supprimer la session actuelle",
+    "warning": "Attention : la suppression de la session actuelle est une action irréversible",
+    "popover": "Si d'autres sessions existent sur l'appareil, elles ne seront pas supprimées",
+    "confirm": "Supprimer la session"
   },
   "edit_username_modal": {
     "title": "Modifier le nom d'utilisateur",
@@ -43,7 +50,14 @@
     "qr_alt": "Ton QR code de contact"
   },
   "appearance": {
-    "title": "Apparence"
+    "title": "Apparence",
+    "theme": "Thème",
+    "select_theme": "Choisir le thème",
+    "theme_light": "Clair",
+    "theme_dark": "Sombre",
+    "theme_system": "Système",
+    "bottom_nav": "Barre de navigation inférieure",
+    "toggle_bottom_nav": "Activer/désactiver la barre de navigation inférieure"
   },
   "about": {
     "title": "À propos",
@@ -80,6 +94,30 @@
     "password_required": "Le mot de passe est requis",
     "show_failed": "Échec de l'affichage des informations de sauvegarde. Réessaie."
   },
+  "portable_backup": {
+    "title": "Sauvegarde sécurisée",
+    "all_accounts_title": "Sauvegarder tous les comptes",
+    "description": "Créez une sauvegarde portable contenant chaque emplacement de compte chiffré de cet appareil.",
+    "important": "Important : gardez Gossip ouvert jusqu’à la fin de la vérification. Quitter l’application peut interrompre ou corrompre la sauvegarde.",
+    "possession_warning": "Cette sauvegarde n’a pas de mot de passe supplémentaire. Toute personne qui l’obtient peut tenter de deviner vos mots de passe de compte hors ligne. Conservez-la en lieu sûr.",
+    "choose_destination": "Choisir la destination",
+    "change_destination": "Changer de destination",
+    "destination": "Destination",
+    "selected_file": "la sauvegarde Gossip sélectionnée",
+    "export": "Exporter toutes les données des comptes",
+    "notification_title": "Sauvegarde sécurisée Gossip",
+    "preparing": "Préparation de la sauvegarde",
+    "writing": "Écriture de la sauvegarde",
+    "verifying": "Vérification de la sauvegarde",
+    "success_title": "Sauvegarde vérifiée",
+    "success_body": "Votre sauvegarde portable a été écrite et vérifiée avec succès.",
+    "continue_login": "Continuer vers la connexion",
+    "retry": "Réessayer la sauvegarde",
+    "failed": "La sauvegarde n’est pas terminée. Toute sortie non vérifiée créée par cette tentative a été supprimée.",
+    "interrupted": "Une sauvegarde précédente vers {{name}} a été interrompue. Gossip doit supprimer sa sortie incomplète avant de réessayer ou de continuer.",
+    "cleanup_required": "La sauvegarde n’est pas terminée. Gossip n’a pas pu supprimer la sortie non vérifiée. Supprimez manuellement {{name}} avant de continuer.",
+    "unsupported": "La sauvegarde sécurisée en continu n’est pas disponible dans ce navigateur. Utilisez un navigateur de bureau compatible."
+  },
   "debug": {
     "title": "Débogage",
     "show_debug": "Afficher les options de débogage",
@@ -91,6 +129,18 @@
   },
   "security": {
     "title": "Sécurité",
+    "biometric_title": "Connexion avec la biométrie",
+    "biometric_description": "Activez la biométrie pour ce compte. Votre mot de passe reste nécessaire pour l'importation et la récupération.",
+    "biometric_warning": "Un seul compte peut utiliser la connexion biométrique à la fois. La configuration pour ce compte remplace le compte actuellement associé. Pour protéger votre vie privée, Gossip ne peut pas indiquer de quel compte il s'agit.",
+    "biometric_use_for_account": "Utiliser pour ce compte",
+    "biometric_password_title": "Confirmer votre mot de passe",
+    "biometric_password_description": "Saisissez le mot de passe de ce compte avant d'activer la connexion biométrique.",
+    "biometric_password_placeholder": "Saisissez votre mot de passe",
+    "biometric_password_continue": "Continuer",
+    "biometric_password_cancel": "Annuler",
+    "biometric_password_invalid": "Le mot de passe de ce compte est incorrect.",
+    "biometric_success": "La connexion biométrique a été mise à jour.",
+    "biometric_failed": "Échec de la configuration biométrique. Veuillez réessayer.",
     "native_only": "Les paramètres de sécurité sont uniquement disponibles sur les plateformes natives (Android et iOS).",
     "auto_lock_title": "Verrouillage en cas d'inactivité",
     "auto_lock_description": "Verrouiller automatiquement l'application après une période d'inactivité en arrière-plan.",

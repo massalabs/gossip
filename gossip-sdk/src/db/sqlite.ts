@@ -21,14 +21,43 @@ import { drizzle, type SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
 import * as schema from './schema/index.js';
 import { runMigrations } from './migrate.js';
 import { execStatements } from './exec-utils.js';
-import type { SecureStorageWorkerProxy } from './secure-storage-worker.js';
-import type { SecureStorageNativePlugin } from './secure-storage-native.js';
-import { SESSION_COUNT } from './secure-storage-namespaces.js';
+import type {
+  ImportedAccountPreview,
+  SecureStorageWorkerProxy,
+} from './secure-storage-worker-api.js';
+import type {
+  PortableChunkWriter,
+  PortableProgressCallback,
+  SecureStorageNativePlugin,
+} from './secure-storage-native.js';
+import {
+  requiresSecureStorageRecovery,
+  SecureStorageRecoveryRequiredError,
+} from './secure-storage-errors.js';
+import {
+  classifyStatement,
+  TOP_LEVEL_SAVEPOINT_ERROR,
+  type StatementKind,
+} from './sql-statement.js';
+import {
+  SESSION_BLOB_NAMESPACE,
+  SESSION_COUNT,
+  SQL_NAMESPACE,
+} from './secure-storage-namespaces.js';
+export { SecureStorageRecoveryRequiredError } from './secure-storage-errors.js';
+export type {
+  PortableChunkWriter,
+  PortableProgressCallback,
+  PortableTransferProgress,
+} from './secure-storage-native.js';
 export {
   SQL_NAMESPACE,
   SESSION_BLOB_NAMESPACE,
   SESSION_COUNT,
 } from './secure-storage-namespaces.js';
+
+export { classifyStatement } from './sql-statement.js';
+export type { StatementKind } from './sql-statement.js';
 
 export type GossipDatabase = SqliteRemoteDatabase<typeof schema>;
 
@@ -42,12 +71,21 @@ export type GossipSqliteTx = Parameters<
  * and used by the SDK to gate queries / route the consumer to the right UX.
  *
  * - `'empty'`: decoy slots have been provisioned, but no real session exists.
- *   Next step: `secureStorageCreate(slot, password)` (signup flow).
+ *   Signup builds an atomic onboarding candidate before creating sessions.
  * - `'locked'`: a real session exists in storage but the encryption key is
  *   not in memory. Next step: `secureStorageUnlock(password)` (login flow).
  * - `'unlocked'`: session open, `queries`/`profiles` available.
  */
 export type SecureStorageState = 'empty' | 'locked' | 'unlocked';
+export type AccountGenerationState = 'empty' | 'committed';
+
+function unsupportedAccountGenerationState(): Error {
+  const error = new Error(
+    'Unsupported secure-storage account generation state'
+  );
+  error.name = 'UNSUPPORTED_VERSION';
+  return error;
+}
 
 /** Selects the SQLite storage backend. */
 export type StorageConfig =
@@ -94,12 +132,20 @@ interface DbState {
    * `null` when the connection isn't a secure-storage one.
    */
   storageState: SecureStorageState | null;
+  accountGenerationState: AccountGenerationState | null;
+  accountGenerationEpoch: string | null;
   drizzleDb: GossipDatabase | null;
   dbLock: Promise<unknown>;
   txScopeGuard: {
     run<T>(inTransaction: boolean, fn: () => Promise<T>): Promise<T>;
     getStore(): boolean;
   } | null;
+  /**
+   * Number of active public transaction callbacks on this connection. Browser
+   * runtimes lack async-local context, so mutating/lifecycle guards
+   * conservatively apply connection-wide until every callback settles.
+   */
+  transactionCallbackDepth: number;
   /**
    * Open-transaction depth, maintained by inspecting the SQL stream in
    * `execRawDirect`. Both `withTransaction` (issues BEGIN/COMMIT directly)
@@ -111,6 +157,9 @@ interface DbState {
   secureProxy: SecureStorageWorkerProxy | null;
   nativePlugin: SecureStorageNativePlugin | null;
   useNativePlugin: boolean;
+  portableTransferActive: boolean;
+  onboardingCandidateActive: boolean;
+  closeActive: boolean;
 }
 
 interface TransactionContext {
@@ -129,13 +178,19 @@ function createDefaultState(): DbState {
     useWorker: false,
     isSecureStorage: false,
     storageState: null,
+    accountGenerationState: null,
+    accountGenerationEpoch: null,
     drizzleDb: null,
     dbLock: Promise.resolve(),
     txScopeGuard: null,
+    transactionCallbackDepth: 0,
     txDepth: 0,
     secureProxy: null,
     nativePlugin: null,
     useNativePlugin: false,
+    portableTransferActive: false,
+    onboardingCandidateActive: false,
+    closeActive: false,
   };
 }
 
@@ -155,39 +210,6 @@ function assertNoUndefinedBindParams(params: unknown[]): void {
       );
     }
   }
-}
-
-/**
- * Classify a SQL statement for transaction-boundary tracking.
- *
- * Used by both the native and web dispatch paths to maintain `txDepth`
- * and to decide when a flush is required for durability.
- *
- * Mutation matchers cover schema changes (`CREATE`/`DROP`/`ALTER`),
- * data changes via CTE (`WITH ... INSERT`), `REPLACE`, and `VACUUM`.
- * `PRAGMA` is conservatively treated as a mutation since some pragmas
- * change persistent state.
- */
-export type StatementKind =
-  | 'begin'
-  | 'commit'
-  | 'rollback'
-  | 'mutation'
-  | 'other';
-
-export function classifyStatement(sql: string): StatementKind {
-  const trimmed = sql.trimStart();
-  if (/^BEGIN\b/i.test(trimmed)) return 'begin';
-  if (/^COMMIT\b/i.test(trimmed)) return 'commit';
-  if (/^ROLLBACK\b/i.test(trimmed)) return 'rollback';
-  if (
-    /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
-      trimmed
-    )
-  ) {
-    return 'mutation';
-  }
-  return 'other';
 }
 
 async function isNativePlatform(): Promise<boolean> {
@@ -252,6 +274,14 @@ export class DatabaseConnection {
 
   get storageState(): SecureStorageState | null {
     return this.state.storageState;
+  }
+
+  get accountGenerationState(): AccountGenerationState | null {
+    return this.state.accountGenerationState;
+  }
+
+  get accountGenerationEpoch(): string | null {
+    return this.state.accountGenerationEpoch;
   }
 
   // ─── Raw SQL execution ─────────────────────────────────────────
@@ -347,6 +377,13 @@ export class DatabaseConnection {
     // depth but doesn't yet have any data needing durable flush).
     const wasInTxn = this.state.txDepth > 0;
     const kind = classifyStatement(sql);
+    if (kind === 'savepoint' && !wasInTxn) {
+      // An outermost SQLite savepoint is itself a transaction. Until the
+      // bridge reports SQLite's authoritative autocommit state, accepting it
+      // here would allow inner mutations to flush before ROLLBACK TO and let
+      // RELEASE commit without the required durable flush.
+      throw new Error(TOP_LEVEL_SAVEPOINT_ERROR);
+    }
 
     if (this.state.useNativePlugin && this.state.nativePlugin) {
       // No `Array.from` on Uint8Array params: encodeSqlParam in
@@ -556,10 +593,29 @@ export class DatabaseConnection {
             // wiping any previously allocated account. Mirrors the
             // web path's `wasmIdbHasData` gate.
             const { hasData } = await SecureStorageNative.hasData();
+            const { state: accountGenerationState } = hasData
+              ? await SecureStorageNative.accountGenerationState()
+              : await SecureStorageNative.initializeEmptyAccountGeneration();
+            if (accountGenerationState === null) {
+              throw unsupportedAccountGenerationState();
+            }
             if (!hasData) {
               await SecureStorageNative.provisionStorage();
             }
-            this.state.storageState = hasData ? 'locked' : 'empty';
+            const accountGenerationEpoch =
+              accountGenerationState === 'committed'
+                ? (await SecureStorageNative.accountGenerationEpoch()).epoch
+                : null;
+            if (
+              accountGenerationState === 'committed' &&
+              accountGenerationEpoch === null
+            ) {
+              throw unsupportedAccountGenerationState();
+            }
+            this.state.accountGenerationState = accountGenerationState;
+            this.state.accountGenerationEpoch = accountGenerationEpoch;
+            this.state.storageState =
+              accountGenerationState === 'empty' ? 'empty' : 'locked';
           }
         }
 
@@ -579,9 +635,10 @@ export class DatabaseConnection {
               storage.domain,
               storage.secureStorageWasmUrl
             );
-            this.state.storageState = result.hasExistingData
-              ? 'locked'
-              : 'empty';
+            this.state.accountGenerationState = result.accountGenerationState;
+            this.state.accountGenerationEpoch = result.accountGenerationEpoch;
+            this.state.storageState =
+              result.accountGenerationState === 'empty' ? 'empty' : 'locked';
           } catch (err) {
             this.state.secureProxy[Comlink.releaseProxy]();
             this.state.worker.terminate();
@@ -632,6 +689,40 @@ export class DatabaseConnection {
     this.state.drizzleDb = this.createDrizzleInstance();
   }
 
+  private async finalizeUnlockedStorage(
+    recoveryRequiredAfterLock = false
+  ): Promise<void> {
+    try {
+      await this.finalize();
+    } catch (finalizeError) {
+      if (recoveryRequiredAfterLock) {
+        try {
+          await this.secureStorageDestroy([
+            SQL_NAMESPACE,
+            SESSION_BLOB_NAMESPACE,
+          ]);
+        } catch (destroyError) {
+          const combined = new Error(
+            'Failed to finalize and destroy new secure storage'
+          ) as Error & { errors: unknown[] };
+          combined.errors = [finalizeError, destroyError];
+          throw new SecureStorageRecoveryRequiredError(combined);
+        }
+        throw finalizeError;
+      }
+      try {
+        await this.secureStorageLock();
+      } catch (lockError) {
+        const combined = new Error(
+          'Failed to finalize and re-lock secure storage'
+        ) as Error & { errors: unknown[] };
+        combined.errors = [finalizeError, lockError];
+        throw new SecureStorageRecoveryRequiredError(combined);
+      }
+      throw finalizeError;
+    }
+  }
+
   private requireSecureProxy(): SecureStorageWorkerProxy {
     if (!this.state.secureProxy) {
       throw new Error('secure storage not initialized');
@@ -646,7 +737,43 @@ export class DatabaseConnection {
     return this.state.nativePlugin;
   }
 
+  async refreshSecureStorageAccountGeneration(): Promise<AccountGenerationState | null> {
+    if (!this.state.isSecureStorage) return null;
+    let accountGenerationState: AccountGenerationState | null;
+    let accountGenerationEpoch: string | null;
+    if (this.state.useNativePlugin) {
+      accountGenerationState = (
+        await this.requireNativePlugin().accountGenerationState()
+      ).state;
+      accountGenerationEpoch =
+        accountGenerationState === 'committed'
+          ? (await this.requireNativePlugin().accountGenerationEpoch()).epoch
+          : null;
+    } else {
+      const metadata =
+        await this.requireSecureProxy().accountGenerationMetadata();
+      accountGenerationState = metadata.state;
+      accountGenerationEpoch = metadata.epoch;
+    }
+    if (
+      accountGenerationState === null ||
+      (accountGenerationState === 'committed' &&
+        accountGenerationEpoch === null) ||
+      (accountGenerationState === 'empty' && accountGenerationEpoch !== null)
+    ) {
+      throw unsupportedAccountGenerationState();
+    }
+    this.state.accountGenerationState = accountGenerationState;
+    this.state.accountGenerationEpoch = accountGenerationEpoch;
+    if (this.state.storageState !== 'unlocked') {
+      this.state.storageState =
+        accountGenerationState === 'committed' ? 'locked' : 'empty';
+    }
+    return accountGenerationState;
+  }
+
   async secureStorageProvision(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.storageState !== 'empty') {
       return;
     }
@@ -657,7 +784,55 @@ export class DatabaseConnection {
     }
   }
 
+  async secureStorageBeginOnboardingCandidate(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (
+      this.state.storageState !== 'empty' ||
+      this.state.accountGenerationState !== 'empty'
+    ) {
+      throw new Error('Onboarding generation is no longer empty');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().beginOnboardingCandidate();
+    } else {
+      await this.requireSecureProxy().beginOnboardingCandidate();
+    }
+    this.state.onboardingCandidateActive = true;
+  }
+
+  async secureStorageCommitOnboardingCandidate(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (
+      this.state.accountGenerationState !== 'empty' ||
+      !this.state.onboardingCandidateActive
+    ) {
+      throw new Error('Onboarding candidate is not active');
+    }
+    this.state.drizzleDb = null;
+    const generationEpoch = this.state.useNativePlugin
+      ? (await this.requireNativePlugin().commitOnboardingCandidate()).epoch
+      : await this.requireSecureProxy().commitOnboardingCandidate();
+    this.state.accountGenerationState = 'committed';
+    this.state.accountGenerationEpoch = generationEpoch;
+    this.state.onboardingCandidateActive = false;
+    this.state.storageState = 'locked';
+  }
+
+  async secureStorageAbortOnboardingCandidate(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    this.state.drizzleDb = null;
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().abortOnboardingCandidate();
+    } else {
+      await this.requireSecureProxy().abortOnboardingCandidate();
+    }
+    this.state.onboardingCandidateActive = false;
+    this.state.accountGenerationEpoch = null;
+    this.state.storageState = 'empty';
+  }
+
   async secureStorageCreate(slot: number, password: string): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (!Number.isInteger(slot) || slot < 0 || slot >= SESSION_COUNT) {
       throw new Error(
         `secureStorageCreate: slot must be an integer in [0, ${SESSION_COUNT - 1}], got ${slot}`
@@ -665,6 +840,14 @@ export class DatabaseConnection {
     }
     if (password.length === 0) {
       throw new Error('secureStorageCreate: password cannot be empty');
+    }
+    if (
+      this.state.accountGenerationState === 'empty' &&
+      !this.state.onboardingCandidateActive
+    ) {
+      throw new Error(
+        'secureStorageCreate: begin an atomic onboarding candidate first'
+      );
     }
     // State-machine guard: reject create from 'unlocked'. Allowing it
     // would install a new session in the Rust core while the SQLite DB
@@ -694,11 +877,21 @@ export class DatabaseConnection {
       } else {
         // Transfer the buffer so no intermediate copy lingers in the
         // MessagePort queue. After transfer, pwBytes is detached.
-        await this.requireSecureProxy().create(
-          slot,
-          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block, which already handles the detached state.
-          Comlink.transfer(pwBytes, [pwBytes.buffer])
-        );
+        try {
+          await this.requireSecureProxy().create(
+            slot,
+            // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block, which already handles the detached state.
+            Comlink.transfer(pwBytes, [pwBytes.buffer])
+          );
+        } catch (error) {
+          if (requiresSecureStorageRecovery(error)) {
+            // Worker allocation remains unlocked until caller-driven cleanup,
+            // or until the worker can reload the last durable snapshot.
+            this.state.storageState = 'unlocked';
+            throw new SecureStorageRecoveryRequiredError(error);
+          }
+          throw error;
+        }
       }
     } finally {
       // Zero the plaintext password on every exit path, including when
@@ -710,10 +903,11 @@ export class DatabaseConnection {
       }
     }
     this.state.storageState = 'unlocked';
-    await this.finalize();
+    await this.finalizeUnlockedStorage(true);
   }
 
   async secureStorageUnlock(password: string): Promise<boolean> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (password.length === 0) {
       throw new Error('secureStorageUnlock: password cannot be empty');
     }
@@ -756,11 +950,12 @@ export class DatabaseConnection {
     }
     if (!ok) return false;
     this.state.storageState = 'unlocked';
-    await this.finalize();
+    await this.finalizeUnlockedStorage();
     return true;
   }
 
   async secureStorageLock(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     // Flip user-visible state synchronously, before the worker await.
     // A concurrent `queries`/`profiles` access in the same event-loop
     // tick then sees `storageState === 'locked'` and throws the clean
@@ -769,10 +964,17 @@ export class DatabaseConnection {
     // that is mid-lock.
     this.state.drizzleDb = null;
     this.state.storageState = 'locked';
-    if (this.state.useNativePlugin) {
-      await this.requireNativePlugin().lockSession();
-    } else {
-      await this.requireSecureProxy().lock();
+    try {
+      if (this.state.useNativePlugin) {
+        await this.requireNativePlugin().lockSession();
+      } else {
+        await this.requireSecureProxy().lock();
+      }
+    } catch (error) {
+      // Access remains blocked because Drizzle was cleared, but the underlying
+      // session may still hold keys. Preserve a retryable lifecycle state.
+      this.state.storageState = 'unlocked';
+      throw error;
     }
   }
 
@@ -790,12 +992,23 @@ export class DatabaseConnection {
    * in Rust.
    */
   async secureStorageDestroy(namespaces: number[]): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     this.state.drizzleDb = null;
     this.state.storageState = 'locked';
-    if (this.state.useNativePlugin) {
-      await this.requireNativePlugin().destroySession({ namespaces });
-    } else {
-      await this.requireSecureProxy().destroy(Uint8Array.from(namespaces));
+    try {
+      if (this.state.useNativePlugin) {
+        await this.requireNativePlugin().destroySession({ namespaces });
+      } else {
+        await this.requireSecureProxy().destroy(Uint8Array.from(namespaces));
+      }
+    } catch (error) {
+      // Native lifecycle failures leave the original session available for a
+      // retry. The worker path reloads durable state and is already locked.
+      if (this.state.useNativePlugin) this.state.storageState = 'unlocked';
+      if (requiresSecureStorageRecovery(error)) {
+        throw new SecureStorageRecoveryRequiredError(error);
+      }
+      throw error;
     }
   }
 
@@ -809,6 +1022,7 @@ export class DatabaseConnection {
    * manual invocation is only useful for tests.
    */
   async secureStorageCoverTick(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().coverTrafficTick();
     } else {
@@ -817,11 +1031,231 @@ export class DatabaseConnection {
   }
 
   async secureStorageFlush(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().flush();
     } else {
       await this.requireSecureProxy().flush();
     }
+  }
+
+  /** Stream a stable locked snapshot. This operation is terminal for the
+   * current web worker even when the destination later fails or cancels. */
+  async secureStorageExportPortableV1(
+    write: PortableChunkWriter,
+    onProgress?: PortableProgressCallback,
+    signal?: AbortSignal
+  ): Promise<void> {
+    if (this.state.storageState !== 'locked') {
+      throw new Error('Portable export requires locked secure storage');
+    }
+    if (this.state.portableTransferActive) {
+      throw new Error('Portable transfer is already active');
+    }
+    if (this.state.closeActive) {
+      throw new Error('Secure storage is closing');
+    }
+    this.state.portableTransferActive = true;
+    try {
+      if (this.state.useNativePlugin) {
+        await this.requireNativePlugin().exportPortableV1(
+          write,
+          onProgress,
+          signal
+        );
+        return;
+      }
+
+      const proxy = this.requireSecureProxy();
+      let finished = false;
+      let writtenBytes = 0;
+      const abort = () => {
+        void proxy.abortPortableTransfer().catch(() => {});
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      try {
+        if (signal?.aborted) {
+          throw new DOMException('Backup cancelled', 'AbortError');
+        }
+        const { totalBytes } = await proxy.beginPortableExport();
+        if (signal?.aborted) {
+          throw new DOMException('Backup cancelled', 'AbortError');
+        }
+        onProgress?.({ writtenBytes, totalBytes });
+        while (true) {
+          if (signal?.aborted) {
+            throw new DOMException('Backup cancelled', 'AbortError');
+          }
+          const chunk = await proxy.readPortableExportChunk(256 * 1024);
+          if (signal?.aborted) {
+            chunk?.fill(0);
+            throw new DOMException('Backup cancelled', 'AbortError');
+          }
+          if (chunk === null) break;
+          // Ownership passes to the writer. It may retain or transfer the
+          // chunk, so this layer must not mutate it after the await.
+          await write(chunk);
+          writtenBytes += chunk.byteLength;
+          onProgress?.({ writtenBytes, totalBytes });
+        }
+        if (writtenBytes !== totalBytes) {
+          throw new Error('Browser portable export length changed');
+        }
+        await proxy.finishPortableExport();
+        finished = true;
+      } finally {
+        signal?.removeEventListener('abort', abort);
+        if (!finished) await proxy.abortPortableTransfer().catch(() => {});
+      }
+    } finally {
+      this.state.portableTransferActive = false;
+    }
+  }
+
+  async secureStorageBeginPortableImport(): Promise<void> {
+    if (
+      this.state.storageState !== 'empty' &&
+      this.state.storageState !== 'locked'
+    ) {
+      throw new Error('Portable import requires replaceable secure storage');
+    }
+    if (this.state.portableTransferActive) {
+      throw new Error('Portable transfer is already active');
+    }
+    if (this.state.closeActive) throw new Error('Secure storage is closing');
+    this.state.portableTransferActive = true;
+    try {
+      if (this.state.useNativePlugin) {
+        await this.requireNativePlugin().beginPortableImport();
+      } else {
+        await this.requireSecureProxy().beginPortableImport();
+      }
+    } catch (error) {
+      this.state.portableTransferActive = false;
+      throw error;
+    }
+  }
+
+  async secureStoragePushPortableImportChunk(data: Uint8Array): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().pushPortableImportChunk(data);
+    } else {
+      await this.requireSecureProxy().pushPortableImportChunk(data);
+    }
+  }
+
+  async secureStorageValidatePortableImport(): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().validatePortableImport();
+    } else {
+      await this.requireSecureProxy().finishPortableImportValidation();
+    }
+  }
+
+  async secureStorageBeginPortableOuterMigration(): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().beginPortableOuterMigration();
+    } else {
+      await this.requireSecureProxy().beginPortableOuterMigration();
+    }
+  }
+
+  async secureStorageAdmitPortableOuterMigrationPassword(
+    password: Uint8Array
+  ): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().admitPortableOuterMigrationPassword(
+        password
+      );
+    } else {
+      const once = password.slice();
+      try {
+        await this.requireSecureProxy().admitPortableOuterMigrationPassword(
+          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: move a single-use password copy so the coordinator-owned retry buffer remains attached and no serialization copy lingers in the MessagePort queue.
+          Comlink.transfer(once, [once.buffer])
+        );
+      } finally {
+        if (once.byteLength > 0) once.fill(0);
+      }
+    }
+  }
+
+  async secureStorageFinishPortableOuterMigration(): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().finishPortableOuterMigration();
+    } else {
+      await this.requireSecureProxy().finishPortableOuterMigration();
+    }
+  }
+
+  async secureStorageAuthenticatePortableImportCandidate(
+    password: Uint8Array
+  ): Promise<ImportedAccountPreview | null> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    if (this.state.useNativePlugin) {
+      return this.requireNativePlugin().authenticatePortableImportCandidate({
+        password,
+      });
+    }
+    const once = password.slice();
+    try {
+      return await this.requireSecureProxy().authenticatePortableImportCandidate(
+        // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: move a single-use password copy so the coordinator-owned retry buffer remains attached and no serialization copy lingers in the MessagePort queue.
+        Comlink.transfer(once, [once.buffer])
+      );
+    } finally {
+      if (once.byteLength > 0) once.fill(0);
+    }
+  }
+
+  async secureStorageInstallPortableImport(): Promise<void> {
+    if (!this.state.portableTransferActive) {
+      throw new Error('Portable import is not active');
+    }
+    let generationEpoch: string;
+    if (this.state.useNativePlugin) {
+      generationEpoch = (
+        await this.requireNativePlugin().installPortableImport()
+      ).epoch;
+    } else {
+      const proxy = this.requireSecureProxy();
+      generationEpoch = (await proxy.installPortableImport()).generationEpoch;
+      proxy[Comlink.releaseProxy]();
+      this.state.worker?.terminate();
+      this.state.worker = null;
+      this.state.secureProxy = null;
+    }
+    this.state.portableTransferActive = false;
+    this.state.accountGenerationState = 'committed';
+    this.state.accountGenerationEpoch = generationEpoch;
+    this.state.storageState = 'locked';
+  }
+
+  async secureStorageAbortPortableImport(): Promise<void> {
+    if (!this.state.portableTransferActive) return;
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().abortPortableTransfer();
+    } else {
+      await this.requireSecureProxy().abortPortableTransfer();
+    }
+    this.state.portableTransferActive = false;
   }
 
   // ── Generic namespace data API ─────────────────────────────────
@@ -838,6 +1272,7 @@ export class DatabaseConnection {
     offset: number,
     data: Uint8Array
   ): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().writeNamespaceData({
         namespace,
@@ -880,6 +1315,7 @@ export class DatabaseConnection {
 
   /** Truncate a namespace stream to length 0. */
   async secureStorageClearNamespace(namespace: number): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().clearNamespace({ namespace });
       return;
@@ -898,6 +1334,7 @@ export class DatabaseConnection {
     namespace: number,
     data: Uint8Array
   ): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().replaceNamespaceData({
         namespace,
@@ -1004,11 +1441,28 @@ export class DatabaseConnection {
   }
 
   private async runInTxScope<T>(fn: () => Promise<T>): Promise<T> {
-    const guard = this.state.txScopeGuard;
-    if (!guard) {
-      return fn();
+    this.state.transactionCallbackDepth++;
+    try {
+      const guard = this.state.txScopeGuard;
+      if (!guard) {
+        return await fn();
+      }
+      return await guard.run(true, fn);
+    } finally {
+      this.state.transactionCallbackDepth--;
     }
-    return guard.run(true, fn);
+  }
+
+  private assertNoSecureStorageOperationInTransactionCallback(): void {
+    if (this.state.transactionCallbackDepth > 0) {
+      // Autonomous worker cover traffic does not cross this connection API and
+      // remains queued behind transaction ownership. Reject only main-thread
+      // reentry, which would otherwise wait for a COMMIT that cannot run until
+      // the callback returns. The error deliberately exposes no storage state.
+      throw new Error(
+        'Secure storage operations are not allowed inside a transaction callback'
+      );
+    }
   }
 
   private async initTxScopeGuard(): Promise<void> {
@@ -1034,19 +1488,32 @@ export class DatabaseConnection {
   }
 
   async close(): Promise<void> {
-    if (this.state.useNativePlugin && this.state.nativePlugin) {
-      await this.state.nativePlugin.close();
-    } else if (this.state.secureProxy && this.state.worker) {
-      await this.state.secureProxy.close();
-      this.state.secureProxy[Comlink.releaseProxy]();
-      this.state.worker.terminate();
-    } else if (this.state.useWorker && this.state.worker) {
-      await this.postToWorker({ type: 'close' });
-      this.state.worker.terminate();
-    } else if (this.state.dbHandle !== null && this.state.sqlite3) {
-      await this.state.sqlite3.close(this.state.dbHandle);
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (this.state.portableTransferActive) {
+      throw new Error('Cannot close secure storage during portable transfer');
     }
-    this.state = createDefaultState();
+    if (this.state.closeActive) {
+      throw new Error('Secure storage close is already active');
+    }
+    this.state.closeActive = true;
+    try {
+      if (this.state.useNativePlugin && this.state.nativePlugin) {
+        await this.state.nativePlugin.close();
+      } else if (this.state.secureProxy && this.state.worker) {
+        await this.state.secureProxy.close();
+        this.state.secureProxy[Comlink.releaseProxy]();
+        this.state.worker.terminate();
+      } else if (this.state.useWorker && this.state.worker) {
+        await this.postToWorker({ type: 'close' });
+        this.state.worker.terminate();
+      } else if (this.state.dbHandle !== null && this.state.sqlite3) {
+        await this.state.sqlite3.close(this.state.dbHandle);
+      }
+      this.state = createDefaultState();
+    } catch (error) {
+      this.state.closeActive = false;
+      throw error;
+    }
   }
 
   async clearAllTables(): Promise<void> {
@@ -1054,6 +1521,8 @@ export class DatabaseConnection {
       await tx.delete(schema.messages);
       await tx.delete(schema.discussions);
       await tx.delete(schema.contacts);
+      await tx.delete(schema.accountSettings);
+      await tx.delete(schema.privateMigration);
       await tx.delete(schema.userProfile);
       await tx.delete(schema.pendingEncryptedMessages);
       await tx.delete(schema.pendingAnnouncements);
@@ -1075,6 +1544,10 @@ export class DatabaseConnection {
       await tx
         .delete(schema.contacts)
         .where(eq(schema.contacts.ownerUserId, userId));
+      await tx
+        .delete(schema.accountSettings)
+        .where(eq(schema.accountSettings.userId, userId));
+      await tx.delete(schema.privateMigration);
       // Profile table keyed by userId
       await tx
         .delete(schema.userProfile)

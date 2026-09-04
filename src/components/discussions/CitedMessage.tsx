@@ -2,6 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle } from 'react-feather';
 import type { parseLinks } from '../../utils/linkUtils';
+import LinkText from './LinkText';
 
 export interface CitedMessageOriginal {
   originalMessage: { content: string } | null;
@@ -91,33 +92,19 @@ const CitedMessage: React.FC<CitedMessageProps> = React.memo(
         <p
           className={`text-xs truncate ${textColor} ${showNotFound ? 'italic opacity-70' : ''}`}
         >
-          {original.isLoadingOriginal
-            ? t('common:loading')
-            : parsedLinks.length > 0
-              ? parsedLinks.map((segment, index) =>
-                  segment.type === 'link' ? (
-                    <a
-                      key={index}
-                      href={segment.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={onLinkClick}
-                      aria-label={linkAriaLabel(segment.content)}
-                      className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
-                      style={{
-                        textDecorationColor: 'currentColor',
-                        textDecorationThickness: '1px',
-                      }}
-                    >
-                      {segment.content}
-                    </a>
-                  ) : (
-                    <span key={index}>{segment.content}</span>
-                  )
-                )
-              : original.originalMessage?.content ||
-                fallbackContent ||
-                t('message_item.original_message')}
+          {original.isLoadingOriginal ? (
+            t('common:loading')
+          ) : parsedLinks.length > 0 ? (
+            <LinkText
+              segments={parsedLinks}
+              onLinkClick={onLinkClick}
+              linkAriaLabel={linkAriaLabel}
+            />
+          ) : (
+            original.originalMessage?.content ||
+            fallbackContent ||
+            t('message_item.original_message')
+          )}
         </p>
       </div>
     );

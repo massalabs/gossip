@@ -12,6 +12,8 @@ interface PasswordFormProps {
   hasError: boolean;
   clearError?: () => void;
   onFocusChange?: (focused: boolean) => void;
+  /** Ref forwarded to the password input element. */
+  inputRef?: React.Ref<HTMLInputElement>;
 }
 
 export const PasswordForm: React.FC<PasswordFormProps> = ({
@@ -23,6 +25,7 @@ export const PasswordForm: React.FC<PasswordFormProps> = ({
   hasError,
   clearError,
   onFocusChange,
+  inputRef,
 }) => {
   const { t } = useTranslation('auth');
   const isDisabled = isLoading || disabled;
@@ -30,6 +33,7 @@ export const PasswordForm: React.FC<PasswordFormProps> = ({
   return (
     <div className="space-y-2">
       <RoundedInput
+        ref={inputRef}
         type="password"
         value={password}
         onChange={e => {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Check, X } from 'react-feather';
+import { useTranslation } from 'react-i18next';
 import { formatMassaAddress, isValidAddress } from '../../utils/addressUtils';
 
 interface AddressInputProps {
@@ -16,13 +17,16 @@ interface AddressInputProps {
 const AddressInput: React.FC<AddressInputProps> = ({
   value,
   onChange,
-  placeholder = 'Enter address',
-  label = 'Address',
+  placeholder,
+  label,
   showFormattedAddress = true,
   className = '',
   disabled = false,
   onValidationChange,
 }) => {
+  const { t } = useTranslation('wallet');
+  const resolvedPlaceholder = placeholder ?? t('address_input.placeholder');
+  const resolvedLabel = label ?? t('address_input.label');
   const [isValid, setIsValid] = useState<boolean | null>(null);
 
   // Live validation
@@ -56,9 +60,9 @@ const AddressInput: React.FC<AddressInputProps> = ({
 
   return (
     <div>
-      {label && (
+      {resolvedLabel && (
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          {label}
+          {resolvedLabel}
         </label>
       )}
       <div className="relative">
@@ -66,7 +70,7 @@ const AddressInput: React.FC<AddressInputProps> = ({
           type="text"
           value={value}
           onChange={handleChange}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           disabled={disabled}
           className={inputClasses}
         />
@@ -88,10 +92,14 @@ const AddressInput: React.FC<AddressInputProps> = ({
             </div>
           )}
           {isValid === false && (
-            <div className="text-sm text-red-500">Invalid address format</div>
+            <div className="text-sm text-red-500">
+              {t('address_input.invalid')}
+            </div>
           )}
           {isValid === true && (
-            <div className="text-sm text-success">Valid address</div>
+            <div className="text-sm text-success">
+              {t('address_input.valid')}
+            </div>
           )}
         </div>
       )}

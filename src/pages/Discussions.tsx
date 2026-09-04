@@ -81,7 +81,13 @@ const Discussions: React.FC = () => {
       if (contactUserId === SELF_CONTACT_ID) {
         if (pendingForwardMessageId != null) {
           navigate(ROUTES.selfDiscussion(), {
-            state: { forwardFromMessageId: pendingForwardMessageId },
+            // forwardNonce identifies THIS navigation: forwarding the same
+            // message twice must be handled twice, while remounts of the
+            // same history entry must be handled once.
+            state: {
+              forwardFromMessageId: pendingForwardMessageId,
+              forwardNonce: Date.now(),
+            },
             replace: false,
           });
           setPendingSharedContent(null);
@@ -159,7 +165,7 @@ const Discussions: React.FC = () => {
   const menuItems: MenuItem[] = useMemo(
     () => [
       {
-        label: 'Settings',
+        label: t('settings:title'),
         icon: <Settings className="w-5 h-5" />,
         onClick: () => navigate(ROUTES.settings()),
       },
@@ -282,7 +288,7 @@ const Discussions: React.FC = () => {
         onClick={() => navigate(ROUTES.newDiscussion())}
         variant="soft"
         size="custom"
-        className={`absolute right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50 ${
+        className={`absolute right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-[box-shadow,transform] active:scale-90 z-50 ${
           showBottomNav ? 'bottom-3' : 'bottom-[calc(0.75rem+var(--sab))]'
         }`}
         title={t('start_new')}

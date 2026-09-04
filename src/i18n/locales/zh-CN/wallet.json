@@ -48,5 +48,11 @@
     "custom_placeholder": "自定义费用",
     "custom_hint": "以 MAS 为单位输入费用",
     "confirm_fees": "确认费用"
+  },
+  "address_input": {
+    "label": "地址",
+    "placeholder": "输入地址",
+    "invalid": "地址格式无效",
+    "valid": "地址有效"
   }
 }

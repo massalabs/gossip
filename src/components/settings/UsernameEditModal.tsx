@@ -40,6 +40,9 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
   const onCloseRef = useRef(onClose);
   const validateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentInputValueRef = useRef<string>('');
+  // Sequence token so a stale async validation can't apply its result
+  // after the input has changed
+  const validationSeqRef = useRef(0);
   const handleConfirmRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   // Update refs when props change (without causing re-renders)
@@ -64,6 +67,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
 
   const validateUsername = useCallback(
     async (value: string): Promise<boolean> => {
+      const seq = ++validationSeqRef.current;
       const trimmed = value.trim();
       const currentUsername = currentUsernameRef.current;
       const currentUserId = currentUserIdRef.current;
@@ -98,6 +102,9 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
           currentUserId
         );
 
+        // A newer input/validation superseded this one — drop the result
+        if (seq !== validationSeqRef.current) return false;
+
         if (taken) {
           setError(t('edit_username_modal.username_taken'));
           setIsValidating(false);
@@ -108,6 +115,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
         setIsValidating(false);
         return true;
       } catch (err) {
+        if (seq !== validationSeqRef.current) return false;
         logger.error('Username validation failed:', err);
         setError(t('edit_username_modal.username_check_failed'));
         setIsValidating(false);
@@ -122,6 +130,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
       const value = e.target.value;
       setUsername(value);
       currentInputValueRef.current = value; // Track current input value
+      validationSeqRef.current++; // Invalidate any in-flight validation
 
       // Clear existing timeout
       if (validateTimeoutRef.current) {
@@ -181,7 +190,13 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
   }, []);
 
   const handleConfirm = useCallback(async () => {
+    // Guard here too — the global Enter handler bypasses the button/keydown
+    // guards, so re-check before submitting
+    if (isSubmitting || isValidating) return;
+
     const trimmed = username.trim();
+    if (trimmed === '') return;
+
     const currentUsername = currentUsernameRef.current;
 
     if (trimmed === currentUsername) {
@@ -206,7 +221,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
     } finally {
       setIsSubmitting(false);
     }
-  }, [username, validateUsername, t]);
+  }, [username, validateUsername, t, isSubmitting, isValidating]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {

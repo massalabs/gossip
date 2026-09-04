@@ -117,11 +117,8 @@ function isLikeNone(x) {
     return x === undefined || x === null;
 }
 
-function passArray8ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 1, 1) >>> 0;
-    getUint8ArrayMemory0().set(arg, ptr / 1);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
+export function start() {
+    wasm.start();
 }
 
 function takeFromExternrefTable0(idx) {
@@ -129,12 +126,86 @@ function takeFromExternrefTable0(idx) {
     wasm.__externref_table_dealloc(idx);
     return value;
 }
+/**
+ * Generates user keys from a passphrase.
+ *
+ * Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
+ * the passphrase crosses the JS boundary only once.
+ * @param {string} passphrase
+ * @returns {UserKeys}
+ */
+export function generate_user_keys(passphrase) {
+    const ptr0 = passStringToWasm0(passphrase, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.generate_user_keys(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return UserKeys.__wrap(ret[0]);
+}
 
 function _assertClass(instance, klass) {
     if (!(instance instanceof klass)) {
         throw new Error(`expected instance of ${klass.name}`);
     }
 }
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+/**
+ * Encrypts data using AES-256-SIV authenticated encryption.
+ *
+ * # Parameters
+ *
+ * - `key`: The encryption key (64 bytes)
+ * - `nonce`: The nonce (16 bytes, should be unique per encryption)
+ * - `plaintext`: The data to encrypt
+ * - `aad`: Additional authenticated data (not encrypted, but authenticated)
+ *
+ * # Returns
+ *
+ * The ciphertext with authentication tag appended.
+ *
+ * # Security Notes
+ *
+ * - The nonce should be unique for each encryption operation
+ * - AES-SIV is nonce-misuse resistant: reusing nonces only leaks if plaintexts are identical
+ * - AAD is authenticated but not encrypted; it must be transmitted separately
+ * - The same AAD must be provided during decryption
+ *
+ * # Example
+ *
+ * ```javascript
+ * const key = EncryptionKey.generate();
+ * const nonce = Nonce.generate();
+ * const plaintext = new TextEncoder().encode("Secret message");
+ * const aad = new TextEncoder().encode("context info");
+ *
+ * const ciphertext = aead_encrypt(key, nonce, plaintext, aad);
+ * ```
+ * @param {EncryptionKey} key
+ * @param {Nonce} nonce
+ * @param {Uint8Array} plaintext
+ * @param {Uint8Array} aad
+ * @returns {Uint8Array}
+ */
+export function aead_encrypt(key, nonce, plaintext, aad) {
+    _assertClass(key, EncryptionKey);
+    _assertClass(nonce, Nonce);
+    const ptr0 = passArray8ToWasm0(plaintext, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(aad, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.aead_encrypt(key.__wbg_ptr, nonce.__wbg_ptr, ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
 /**
  * Decrypts data using AES-256-SIV authenticated encryption.
  *
@@ -187,78 +258,6 @@ export function aead_decrypt(key, nonce, ciphertext, aad) {
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     }
     return v3;
-}
-
-export function start() {
-    wasm.start();
-}
-
-/**
- * Encrypts data using AES-256-SIV authenticated encryption.
- *
- * # Parameters
- *
- * - `key`: The encryption key (64 bytes)
- * - `nonce`: The nonce (16 bytes, should be unique per encryption)
- * - `plaintext`: The data to encrypt
- * - `aad`: Additional authenticated data (not encrypted, but authenticated)
- *
- * # Returns
- *
- * The ciphertext with authentication tag appended.
- *
- * # Security Notes
- *
- * - The nonce should be unique for each encryption operation
- * - AES-SIV is nonce-misuse resistant: reusing nonces only leaks if plaintexts are identical
- * - AAD is authenticated but not encrypted; it must be transmitted separately
- * - The same AAD must be provided during decryption
- *
- * # Example
- *
- * ```javascript
- * const key = EncryptionKey.generate();
- * const nonce = Nonce.generate();
- * const plaintext = new TextEncoder().encode("Secret message");
- * const aad = new TextEncoder().encode("context info");
- *
- * const ciphertext = aead_encrypt(key, nonce, plaintext, aad);
- * ```
- * @param {EncryptionKey} key
- * @param {Nonce} nonce
- * @param {Uint8Array} plaintext
- * @param {Uint8Array} aad
- * @returns {Uint8Array}
- */
-export function aead_encrypt(key, nonce, plaintext, aad) {
-    _assertClass(key, EncryptionKey);
-    _assertClass(nonce, Nonce);
-    const ptr0 = passArray8ToWasm0(plaintext, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(aad, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.aead_encrypt(key.__wbg_ptr, nonce.__wbg_ptr, ptr0, len0, ptr1, len1);
-    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v3;
-}
-
-/**
- * Generates user keys from a passphrase.
- *
- * Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
- * the passphrase crosses the JS boundary only once.
- * @param {string} passphrase
- * @returns {UserKeys}
- */
-export function generate_user_keys(passphrase) {
-    const ptr0 = passStringToWasm0(passphrase, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.generate_user_keys(ptr0, len0);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return UserKeys.__wrap(ret[0]);
 }
 
 /**

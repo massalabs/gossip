@@ -13,13 +13,14 @@ use std::marker::PhantomData;
 use std::ptr;
 
 use sqlite_wasm_rs::{
-    SQLITE_BLOB, SQLITE_DONE, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_NULL, SQLITE_OK,
-    SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE, SQLITE_ROW, SQLITE_TEXT, SQLITE_TRANSIENT, sqlite3,
-    sqlite3_bind_blob, sqlite3_bind_double, sqlite3_bind_int64, sqlite3_bind_null,
-    sqlite3_bind_text, sqlite3_close, sqlite3_column_blob, sqlite3_column_bytes,
+    SQLITE_BLOB, SQLITE_DBCONFIG_DEFENSIVE, SQLITE_DONE, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_NULL,
+    SQLITE_OK, SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE, SQLITE_ROW, SQLITE_TEXT,
+    SQLITE_TRANSIENT, sqlite3, sqlite3_bind_blob, sqlite3_bind_double, sqlite3_bind_int64,
+    sqlite3_bind_null, sqlite3_bind_text, sqlite3_close, sqlite3_column_blob, sqlite3_column_bytes,
     sqlite3_column_count, sqlite3_column_double, sqlite3_column_int64, sqlite3_column_text,
-    sqlite3_column_type, sqlite3_errmsg, sqlite3_exec, sqlite3_finalize, sqlite3_last_insert_rowid,
-    sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step, sqlite3_stmt,
+    sqlite3_column_type, sqlite3_complete, sqlite3_db_config, sqlite3_errmsg, sqlite3_exec,
+    sqlite3_finalize, sqlite3_last_insert_rowid, sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step,
+    sqlite3_stmt,
 };
 
 // ── Errors ─────────────────────────────────────────────────────────
@@ -83,6 +84,10 @@ pub struct SafeDb {
 impl SafeDb {
     /// Open a database via the named VFS with `READWRITE | CREATE` flags.
     pub fn open(name: &CStr, vfs_name: &CStr) -> SqlResult<Self> {
+        Self::open_with_flags(name, vfs_name, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
+    }
+
+    fn open_with_flags(name: &CStr, vfs_name: &CStr, flags: c_int) -> SqlResult<Self> {
         let mut handle: *mut sqlite3 = ptr::null_mut();
         // SAFETY: sqlite3_open_v2 contract (https://sqlite.org/c3ref/open.html):
         //   - filename (name): "must be encoded in UTF-8" — guaranteed by CStr.
@@ -90,14 +95,7 @@ impl SafeDb {
         //     the VFS" — likewise. SQLite treats both as read-only per spec,
         //     so CStr::as_ptr's immutability requirement is upheld.
         //   - ppDb (&mut handle): writable out pointer for SQLite to populate.
-        let rc = unsafe {
-            sqlite3_open_v2(
-                name.as_ptr(),
-                &mut handle,
-                SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
-                vfs_name.as_ptr(),
-            )
-        };
+        let rc = unsafe { sqlite3_open_v2(name.as_ptr(), &mut handle, flags, vfs_name.as_ptr()) };
         if rc != SQLITE_OK {
             let msg = if handle.is_null() {
                 format!("sqlite3_open_v2 failed with error code: {rc}")
@@ -141,6 +139,35 @@ impl SafeDb {
         Ok(())
     }
 
+    /// Enable SQLite's defensive mode for an untrusted database image.
+    pub fn enable_defensive(&self) -> SqlResult<()> {
+        let mut enabled: c_int = 0;
+        // SAFETY: self.handle is valid. SQLITE_DBCONFIG_DEFENSIVE takes an
+        // integer setting and writable integer result pointer.
+        let rc =
+            unsafe { sqlite3_db_config(self.handle, SQLITE_DBCONFIG_DEFENSIVE, 1, &mut enabled) };
+        if rc != SQLITE_OK || enabled != 1 {
+            return Err(format!(
+                "sqlite3_db_config defensive mode failed: rc={rc}, enabled={enabled}"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Require `PRAGMA quick_check` to return exactly one `ok` row.
+    pub fn validate_integrity(&self) -> SqlResult<()> {
+        let statement = self
+            .prepare("PRAGMA quick_check")?
+            .ok_or_else(|| "quick_check produced no statement".to_string())?;
+        if !matches!(statement.step()?, StepStatus::Row)
+            || !matches!(statement.column(0), SqlValue::Text(value) if value == "ok")
+            || !matches!(statement.step()?, StepStatus::Done)
+        {
+            return Err("candidate SQLite integrity check failed".into());
+        }
+        Ok(())
+    }
+
     /// `sqlite3_last_insert_rowid` on this handle.
     pub fn last_insert_rowid(&self) -> i64 {
         // SAFETY: self.handle is valid (SafeDb invariant).
@@ -151,7 +178,14 @@ impl SafeDb {
 
     /// Prepare a statement. Returns `Ok(None)` if the SQL was empty/whitespace.
     pub fn prepare<'a>(&'a self, sql: &str) -> SqlResult<Option<SafeStmt<'a>>> {
-        let sql_c = CString::new(sql).map_err(|_| "sql contains nul byte".to_string())?;
+        let sql = crate::sql_tail::validate(sql, |candidate| {
+            // SAFETY: candidate is a valid NUL-terminated SQL prefix.
+            // sqlite3_complete performs lexical analysis only and does not
+            // prepare or execute against this live connection.
+            unsafe { sqlite3_complete(candidate.as_ptr()) != 0 }
+        })
+        .map_err(str::to_string)?;
+        let sql_c = CString::new(sql).map_err(|_| crate::sql_tail::NUL_BYTE.to_string())?;
         let mut stmt: *mut sqlite3_stmt = ptr::null_mut();
         // SAFETY: self.handle is valid (SafeDb invariant). sqlite3_prepare_v2
         // contract (https://sqlite.org/c3ref/prepare.html):
@@ -160,7 +194,8 @@ impl SafeDb {
         //   - nByte (sql_len): byte length of the SQL, checked to fit c_int.
         //   - ppStmt (&mut stmt): writable out pointer; SQLite writes a stmt
         //     handle or null if the SQL was empty/whitespace.
-        //   - pzTail is null (we reject multi-statement tails).
+        //   - pzTail is null because side-effect-free lexical validation above
+        //     already established that at most one statement is present.
         let sql_len = len_to_c_int(sql.len(), "sql string")?;
         let rc = unsafe {
             sqlite3_prepare_v2(

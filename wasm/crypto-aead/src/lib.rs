@@ -20,8 +20,8 @@
 //! - **Nonce-misuse resistance**: Unlike AES-GCM or AES-CTR, nonce reuse only reveals
 //!   equality of plaintexts, not the plaintext itself.
 //! - **Authentication**: Built-in authentication ensures ciphertext integrity and authenticity.
-//! - **Padding**: Automatically handles padding, preventing length-related leaks (ciphertext
-//!   is rounded to AES block size).
+//! - **Length disclosure**: AES-SIV does not pad plaintext. Ciphertext is exactly 16 bytes longer,
+//!   so callers that require length confidentiality must apply their own fixed-size framing.
 //! - **Post-quantum**: AES-256 is considered quantum-resistant (Grover's algorithm reduces
 //!   effective key space to 128 bits, which is still secure).
 //!
@@ -167,8 +167,8 @@ impl Key {
 /// Encrypts data using AES-256-SIV.
 ///
 /// SIV mode provides authenticated encryption with associated data (AEAD).
-/// The resulting ciphertext includes an authentication tag and is padded to
-/// the AES block size (16 bytes).
+/// The resulting ciphertext includes a 16-byte authentication tag and does not
+/// pad the plaintext.
 ///
 /// # Arguments
 ///
@@ -205,6 +205,8 @@ impl Key {
 /// - Unique nonces are recommended for maximum security
 /// - AAD is authenticated but NOT encrypted - it's not included in the ciphertext
 /// - The ciphertext is authenticated and tamper-proof
+/// - Ciphertext length reveals plaintext length plus the 16-byte SIV tag; callers
+///   must add fixed-size framing when length confidentiality is required
 pub fn encrypt(key: &Key, nonce: &Nonce, plaintext: &[u8], aad: &[u8]) -> Vec<u8> {
     let cipher = Aes256SivAead::new(key.as_bytes().into());
 

@@ -166,7 +166,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     messagesRef.current = messages;
     virtualItemsRef.current = virtualItems;
 
-    const firstUnreadMessage = findFirstUnreadMessage(messages);
+    const firstUnreadMessage = useMemo(
+      () => findFirstUnreadMessage(messages),
+      [messages]
+    );
 
     const initialTopMostItemIndex = useMemo(() => {
       if (virtualItems.length === 0) return 0;
@@ -186,6 +189,22 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     const knownKeysRef = useRef<Set<string>>(new Set());
     const prevDiscussionIdRef = useRef(discussion?.id);
     const initialScrollDone = useRef(false);
+    const animationTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(
+      new Set()
+    );
+    const initialScrollRafRef = useRef<number | null>(null);
+
+    // Clear pending animation timers / scroll frames on unmount
+    useEffect(() => {
+      const timers = animationTimersRef.current;
+      return () => {
+        timers.forEach(clearTimeout);
+        timers.clear();
+        if (initialScrollRafRef.current !== null) {
+          cancelAnimationFrame(initialScrollRafRef.current);
+        }
+      };
+    }, []);
 
     if (prevDiscussionIdRef.current !== discussion?.id) {
       prevDiscussionIdRef.current = discussion?.id;
@@ -222,13 +241,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           return next;
         });
         // Remove class after animation completes (matches CSS duration)
-        setTimeout(() => {
+        const timer = setTimeout(() => {
+          animationTimersRef.current.delete(timer);
           setAnimatingKeys(prev => {
             const next = new Set(prev);
             newKeys.forEach(k => next.delete(k));
             return next;
           });
         }, 400);
+        animationTimersRef.current.add(timer);
       }
     }, [virtualItems, animationsEnabled]);
 
@@ -244,6 +265,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
 
       // Virtua measures items across frames; on cached remount scrollSize
       // starts at 0 and grows. Retry for ~10 frames so we end at the bottom.
+      // Cancel any loop still running from a previous discussion so two
+      // loops never fight over the same list.
+      if (initialScrollRafRef.current !== null) {
+        cancelAnimationFrame(initialScrollRafRef.current);
+      }
       let frame = 0;
       const tick = () => {
         const ref = vlistRef.current;
@@ -254,9 +280,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             ref.scrollTo(ref.scrollSize);
           }
         }
-        if (frame++ < 10) requestAnimationFrame(tick);
+        initialScrollRafRef.current =
+          frame++ < 10 ? requestAnimationFrame(tick) : null;
       };
-      requestAnimationFrame(tick);
+      initialScrollRafRef.current = requestAnimationFrame(tick);
 
       initialScrollDone.current = true;
       setAnimationsEnabled(true);
@@ -442,6 +469,25 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       ]
     );
 
+    // Lazy row factory for virtua: elements are only created for rows the
+    // list actually renders, instead of building all N elements per render.
+    // The stable per-message key survives the optimistic → persisted swap
+    // (virtua respects the returned element's key).
+    const renderRow = useCallback(
+      (item: VirtualItem, index: number) => {
+        const key = getItemKey(index);
+        return (
+          <div
+            key={key}
+            className={animatingKeys.has(key) ? 'msg-appear' : undefined}
+          >
+            {renderItem(item, index)}
+          </div>
+        );
+      },
+      [getItemKey, animatingKeys, renderItem]
+    );
+
     if (isLoading) {
       return (
         <SignalReadyOnMount signalReady={signalReady}>
@@ -471,18 +517,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             style={{ overflow: 'auto' }}
             onScroll={handleScroll}
             onScrollEnd={handleScrollEnd}
+            data={virtualItems}
           >
-            {virtualItems.map((item, index) => {
-              const key = getItemKey(index);
-              return (
-                <div
-                  key={key}
-                  className={animatingKeys.has(key) ? 'msg-appear' : undefined}
-                >
-                  {renderItem(item, index)}
-                </div>
-              );
-            })}
+            {renderRow}
           </VList>
         )}
 
@@ -499,4 +536,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
 
 MessageList.displayName = 'MessageList';
 
-export default MessageList;
+// Memoized: the heaviest child of the Discussion pages — parent state
+// changes (keyboard, search, selection flags) shouldn't rebuild the whole
+// list when its own props are unchanged.
+export default React.memo(MessageList);

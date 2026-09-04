@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.ts';
 import React, { useState, useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useTranslation } from 'react-i18next';
 import BaseModal from '../components/ui/BaseModal';
 import PageLayout from '../components/ui/Layout/PageLayout';
@@ -26,6 +27,7 @@ import {
   Shield,
   Clock,
   MessageSquare,
+  Download,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -46,21 +48,44 @@ enum SettingsView {
 const REQUIRED_TAPS = 7;
 const TAP_TIMEOUT_MS = 2000; // Reset counter after 2 seconds of inactivity
 
+/** One 52px icon+label row of a settings group. */
+const SettingsRow: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  /** Draw the divider under the row (all rows of a group except the last). */
+  withDivider?: boolean;
+  className?: string;
+  trailing?: React.ReactNode;
+}> = ({ icon, label, onClick, withDivider = false, className, trailing }) => (
+  <Button
+    variant="outline"
+    size="custom"
+    className={`w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 ${
+      withDivider ? 'border-b border-border/60' : ''
+    } ${className ?? ''}`}
+    onClick={onClick}
+  >
+    <span className="mr-5 w-5 h-5 [&>svg]:w-5 [&>svg]:h-5">{icon}</span>
+    <span className="text-[15px] font-medium flex-1 text-left">{label}</span>
+    {trailing}
+  </Button>
+);
+
 const Settings = (): React.ReactElement => {
   const { t } = useTranslation('settings');
   const gossip = useGossipSdk();
-  const {
-    userProfile,
-    getMnemonicBackupInfo,
-    logout,
-    resetAccount,
-    updateUsername,
-  } = useAccountStore();
+  // Field selectors — subscribing to the whole store re-renders this page
+  // on any account-store change.
+  const userProfile = useAccountStore(s => s.userProfile);
+  const getMnemonicBackupInfo = useAccountStore(s => s.getMnemonicBackupInfo);
+  const logout = useAccountStore(s => s.logout);
+  const resetAccount = useAccountStore(s => s.resetAccount);
+  const updateUsername = useAccountStore(s => s.updateUsername);
 
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
-  const [showUserId, setShowUserId] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
   const [activeView, setActiveView] = useState<SettingsView>(SettingsView.MAIN);
@@ -190,12 +215,9 @@ const Settings = (): React.ReactElement => {
                 {(!mnsEnabled || mnsDomains.length === 0) && (
                   <UserIdDisplay
                     userId={userProfile.userId}
-                    visible={showUserId}
-                    onChange={setShowUserId}
                     textSize="xs"
                     textClassName="text-muted-foreground font-mono"
                     showCopy
-                    showHideToggle
                     prefixChars={4}
                     suffixChars={4}
                   />
@@ -210,179 +232,117 @@ const Settings = (): React.ReactElement => {
       <div className="space-y-6">
         {/* Account Backup & Share Contact Group */}
         <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
+          <SettingsRow
+            icon={<User />}
+            label={t('menu.account_backup')}
             onClick={() => setActiveView(SettingsView.ACCOUNT_BACKUP)}
-          >
-            <User className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.account_backup')}
-            </span>
-            {mnemonicBackupInfo?.backedUp && (
-              <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0"
+            withDivider
+            trailing={
+              mnemonicBackupInfo?.backedUp && (
+                <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
+              )
+            }
+          />
+          {['web', 'android', 'ios'].includes(Capacitor.getPlatform()) && (
+            <SettingsRow
+              icon={<Download />}
+              label={t('menu.secure_backup')}
+              onClick={() => navigate(ROUTES.portableBackup())}
+              withDivider
+            />
+          )}
+          <SettingsRow
+            icon={<Share2 />}
+            label={t('menu.share_contact')}
             onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
-          >
-            <Share2 className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.share_contact')}
-            </span>
-          </Button>
+          />
         </div>
 
         {/* Notifications & Appearance Group */}
         <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
+          <SettingsRow
+            icon={<Bell />}
+            label={t('menu.notifications')}
             onClick={() => navigate(ROUTES.settingsNotifications())}
-          >
-            <Bell className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.notifications')}
-            </span>
-          </Button>
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
+            withDivider
+          />
+          <SettingsRow
+            icon={<Moon />}
+            label={t('menu.appearance')}
             onClick={() => navigate(ROUTES.settingsAppearance())}
-          >
-            <Moon className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.appearance')}
-            </span>
-          </Button>
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
+            withDivider
+          />
+          <SettingsRow
+            icon={<Type />}
+            label={t('menu.language')}
             onClick={() => navigate(ROUTES.settingsLanguage())}
-          >
-            <Type className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.language')}
-            </span>
-          </Button>
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
+            withDivider
+          />
+          <SettingsRow
+            icon={<Shield />}
+            label={t('menu.privacy')}
             onClick={() => navigate(ROUTES.settingsPrivacy())}
-          >
-            <Shield className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.privacy')}
-            </span>
-          </Button>
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0"
+            withDivider
+          />
+          <SettingsRow
+            icon={<Clock />}
+            label={t('menu.security')}
             onClick={() => navigate(ROUTES.settingsSecurity())}
-          >
-            <Clock className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.security')}
-            </span>
-          </Button>
+          />
         </div>
 
         {/* Web 3 Group */}
         <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0"
+          <SettingsRow
+            icon={<Globe />}
+            label={t('menu.web3')}
             onClick={() => navigate(ROUTES.settingsWeb3())}
-          >
-            <Globe className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.web3')}
-            </span>
-          </Button>
+          />
         </div>
 
         {/* About & Debug Group */}
         <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
-          <Button
-            variant="outline"
-            size="custom"
-            className={`w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 ${
-              showDebugOption ? 'border-b border-border' : ''
-            }`}
+          <SettingsRow
+            icon={<Info />}
+            label={t('menu.about')}
             onClick={() => navigate(ROUTES.settingsAbout())}
-          >
-            <Info className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.about')}
-            </span>
-          </Button>
-          <Button
-            variant="outline"
-            size="custom"
-            className={`w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border`}
+            withDivider
+          />
+          <SettingsRow
+            icon={<MessageSquare />}
+            label={t('menu.feedback')}
             onClick={() =>
               window.open(
                 'https://cryptpad.fr/form/#/2/form/view/ZzlOcdHn5aACC2omt+QoCLoDohBgdZtWSIXjxmguPDs/embed/',
                 '_blank'
               )
             }
-          >
-            <MessageSquare className="mr-4" />
-
-            <span className="text-base font-semibold flex-1 text-left">
-              {t('menu.feedback')}
-            </span>
-          </Button>
-
+            withDivider={showDebugOption}
+          />
           {showDebugOption && (
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0"
+            <SettingsRow
+              icon={<SettingsIconFeather />}
+              label={t('menu.debug')}
               onClick={() => navigate(ROUTES.settingsDebug())}
-            >
-              <SettingsIconFeather className="mr-5 w-5 h-5" />
-              <span className="text-[15px] font-medium flex-1 text-left">
-                {t('menu.debug')}
-              </span>
-            </Button>
+            />
           )}
         </div>
 
         {/* Account Actions */}
         <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border text-foreground"
+          <SettingsRow
+            icon={<Lock />}
+            label={t('menu.lock_account')}
             onClick={handleLockApp}
-          >
-            <Lock className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('menu.lock_account')}
-            </span>
-          </Button>
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 text-destructive border-destructive hover:bg-destructive/10"
+            withDivider
+            className="text-foreground"
+          />
+          <SettingsRow
+            icon={<Trash2 />}
+            label={t('delete_account.button')}
             onClick={() => setIsResetModalOpen(true)}
-          >
-            <Trash2 className="mr-5 w-5 h-5" />
-            <span className="text-[15px] font-medium flex-1 text-left">
-              {t('delete_account.button')}
-            </span>
-          </Button>
+            className="text-destructive border-destructive hover:bg-destructive/10"
+          />
         </div>
       </div>
       <BaseModal

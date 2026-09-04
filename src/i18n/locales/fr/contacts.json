@@ -57,6 +57,8 @@
   "name_label": "Nom",
   "name_placeholder": "Nom du contact",
   "message_label": "Message de demande de contact (facultatif)",
+  "message_label_main": "Message de demande de contact",
+  "message_label_optional": "(facultatif)",
   "message_placeholder": "Présente-toi ou ajoute du contexte à ta demande de contact...",
   "use_default_message": "Utiliser le message par défaut",
   "user_id_label": "ID utilisateur",
@@ -64,5 +66,20 @@
   "user_id_loading": "Chargement de la clé publique",
   "user_id_helper": "L'ID utilisateur est un identifiant unique de 32 octets",
   "share_invitation": "Partager l'invitation",
-  "file": "Fichier"
+  "file": "Fichier",
+  "share": {
+    "hide_username": "Masquer le nom d'utilisateur dans l'invitation",
+    "include_username": "Inclure le nom d'utilisateur dans l'invitation",
+    "edit_username": "Modifier le nom d'utilisateur",
+    "edit_shared_username": "Modifier le nom d'utilisateur partagé",
+    "link_copied": "Lien copié !",
+    "copy_invite_link": "Copier le lien d'invitation",
+    "qr": "QR",
+    "expiry_hint": "Les invitations expirent après 2 semaines. Les invitations par fichier n'expirent pas.",
+    "expiry_popover": "Les invitations expirent 2 semaines après ta dernière connexion. À chaque ouverture de l'app, la validité est renouvelée si plus de 24 heures se sont écoulées. Les invitations par fichier n'expirent jamais.",
+    "file_modal_title": "Partager l'invitation par fichier",
+    "file_modal_body": "Partage ton profil sous forme de fichier avec les personnes avec qui tu veux discuter. Ton contact peut importer ton fichier depuis la page <newContactLink>Nouveau contact</newContactLink>.",
+    "file_modal_note": "Contrairement aux autres modes de partage de profil, le profil par fichier reste valide même si tu ne te connectes pas à l'app pendant plus de 2 semaines.",
+    "share_file": "Partager le fichier"
+  }
 }

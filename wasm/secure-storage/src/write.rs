@@ -47,7 +47,7 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     block_index: u64,
     plaintext: &[u8; PLAINTEXT_SIZE],
 ) -> Result<()> {
-    if session.session_version != 0 {
+    if !crate::keypair::is_supported_session_version(session.session_version) {
         return Err(SecureStorageError::UnsupportedVersion(
             session.session_version,
         ));
@@ -97,7 +97,12 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
                 encrypt_block(&session.pq_rerand_pk, &aead_sk, &aad_root, plaintext)
             } else {
                 match &p.existing {
-                    Some(cur_ct) => rerandomize_block(&p.pk, cur_ct),
+                    // Noncanonical ciphertext has no recoverable plaintext through
+                    // the current format. Keeping it would break all-slot symmetry;
+                    // aborting would let one session block writes by another. Fresh
+                    // cover preserves privacy and cross-session progress.
+                    Some(cur_ct) => rerandomize_block(&p.pk, cur_ct)
+                        .unwrap_or_else(|_| create_cover_block(&p.pk, &p.aad_root)),
                     None => create_cover_block(&p.pk, &p.aad_root),
                 }
             };
@@ -281,7 +286,7 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     offset: u64,
     data: &[u8],
 ) -> Result<()> {
-    if session.session_version != 0 {
+    if !crate::keypair::is_supported_session_version(session.session_version) {
         return Err(SecureStorageError::UnsupportedVersion(
             session.session_version,
         ));
@@ -388,7 +393,7 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
     ns_state: &mut NamespaceState,
     new_total: u64,
 ) -> Result<()> {
-    if session.session_version != 0 {
+    if !crate::keypair::is_supported_session_version(session.session_version) {
         return Err(SecureStorageError::UnsupportedVersion(
             session.session_version,
         ));
@@ -495,7 +500,12 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
                 create_cover_block(&cur_pk, &cur_aad_root)
             } else {
                 match storage.read_block(cur_session, namespace, b) {
-                    Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
+                    // Noncanonical ciphertext has no recoverable plaintext through
+                    // the current format. Keeping it would make this slot the only
+                    // unchanged one; aborting would let it block another session's
+                    // shrink. Fresh cover preserves symmetry and progress.
+                    Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct)
+                        .unwrap_or_else(|_| create_cover_block(&cur_pk, &cur_aad_root)),
                     Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
                 }
             };
@@ -515,7 +525,7 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
 mod tests {
     use super::*;
     use crate::DEFAULT_NAMESPACE;
-    use crate::keypair::KeypairFile;
+    use crate::keypair::{CURRENT_SESSION_VERSION, KeypairFile};
     use crate::pq::{PqPublicKey, PqSecretKey, pq_keygen};
     use crate::read::read_session_data;
     use crate::run_with_stack;
@@ -538,17 +548,19 @@ mod tests {
             let (pk, sk) = pq_keygen();
             let session = SessionIndex::new(i).unwrap();
 
-            let aad = domain::sk_wrap_aad(DOMAIN, 0, session);
             let wrap_key = crypto_aead::Key::from([0xBB; crypto_aead::KEY_SIZE]);
 
-            let kf = KeypairFile::build_wrapped(
-                0,
+            let kf = KeypairFile::build_current_wrapped(
+                DOMAIN,
+                session,
                 pk.to_bytes(),
                 &wrap_key,
                 &sk.to_bytes(),
-                aad.as_bytes(),
-            );
-            storage.write_keypair(session, &kf.serialize()).unwrap();
+            )
+            .unwrap();
+            storage
+                .write_keypair(session, &kf.serialize().unwrap())
+                .unwrap();
             all_keys.push((pk, sk));
         }
 
@@ -556,7 +568,7 @@ mod tests {
         let (ref pk, ref sk) = all_keys[0];
         let session = UnlockedSession {
             session_index: SessionIndex::new(0).unwrap(),
-            session_version: 0,
+            session_version: CURRENT_SESSION_VERSION,
             pq_rerand_pk: PqPublicKey::from_bytes(&pk.to_bytes()).unwrap(),
             pq_rerand_sk: PqSecretKey::from_bytes(&sk.to_bytes()).unwrap(),
             root_aead_key,

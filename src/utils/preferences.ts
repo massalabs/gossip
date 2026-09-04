@@ -16,6 +16,10 @@ import { ForegroundSync } from '../services/foregroundSync';
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
 const API_BASE_URL_KEY = 'gossip-api-base-url';
 const LAST_SYNC_TIMESTAMP_KEY = 'gossip-last-sync-timestamp';
+const ACCOUNT_CLEANUP_BLOCK_KEY = 'gossip-account-cleanup-blocked-v1';
+const ACCOUNT_OUTPUT_GENERATION_KEY = 'gossip-account-output-generation-v1';
+const SYNC_LOCK_KEY = 'gossip-sync-lock-time';
+const SYNC_LOCK_TIMEOUT_MS = 90_000;
 const BACKGROUND_SYNC_PRESET_PREF_KEY = 'gossip-background-sync-preset';
 
 /** KV key consumed by `public/runners/background-sync.js` — keep in sync. */
@@ -114,18 +118,95 @@ export async function setApiBaseUrlForBackgroundSync(
  *
  * @param seekers - Array of seeker Uint8Arrays to store
  */
+export async function blockAccountLinkedSyncState(
+  outputEpoch: number
+): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  // Block first: no runner may observe a new generation with old seekers.
+  await backgroundRunnerStorageService.setStrict(
+    ACCOUNT_CLEANUP_BLOCK_KEY,
+    `blocked:${outputEpoch}`
+  );
+  const storedGeneration = await backgroundRunnerStorageService.getStrict(
+    ACCOUNT_OUTPUT_GENERATION_KEY
+  );
+  const generation = Number.parseInt(storedGeneration ?? '0', 10);
+  await backgroundRunnerStorageService.setStrict(
+    ACCOUNT_OUTPUT_GENERATION_KEY,
+    String(Number.isFinite(generation) ? generation + 1 : 1)
+  );
+  // Cancel requests accepted just before the tombstone/generation transition.
+  const { notificationService } = await import('../services/notifications');
+  await notificationService.clearAllNotifications();
+  const deadline = Date.now() + SYNC_LOCK_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const rawLock =
+      await backgroundRunnerStorageService.getStrict(SYNC_LOCK_KEY);
+    if (!rawLock) return;
+    const lockTime = Number.parseInt(rawLock, 10);
+    const age = Date.now() - lockTime;
+    if (!Number.isFinite(lockTime) || age < 0 || age >= SYNC_LOCK_TIMEOUT_MS) {
+      await backgroundRunnerStorageService.setStrict(SYNC_LOCK_KEY, null);
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('Background sync did not quiesce');
+}
+
+export async function clearAccountLinkedSyncState(): Promise<void> {
+  const failures: unknown[] = [];
+  try {
+    const blocked = await backgroundRunnerStorageService.getStrict(
+      ACCOUNT_CLEANUP_BLOCK_KEY
+    );
+    if (!blocked) await blockAccountLinkedSyncState(0);
+  } catch (error) {
+    failures.push(error);
+  }
+  const operations: Promise<void>[] = [
+    Preferences.remove({ key: ACTIVE_SEEKERS_KEY }),
+    Preferences.remove({ key: LAST_SYNC_TIMESTAMP_KEY }),
+  ];
+  if (Capacitor.isNativePlatform()) {
+    operations.push(
+      backgroundRunnerStorageService.setStrict(ACTIVE_SEEKERS_KEY, null),
+      backgroundRunnerStorageService.setStrict(LAST_SYNC_TIMESTAMP_KEY, null)
+    );
+  }
+  const results = await Promise.allSettled(operations);
+  failures.push(
+    ...results
+      .filter(result => result.status === 'rejected')
+      .map(result => (result as PromiseRejectedResult).reason)
+  );
+  if (failures.length > 0) {
+    throw new Error('Account-linked sync cleanup is incomplete');
+  }
+}
+
 export async function setActiveSeekersInPreferences(
-  seekers: Uint8Array[]
+  seekers: Uint8Array[],
+  outputEpoch = 0,
+  mayPublish: () => boolean = () => true
 ): Promise<void> {
   const serializedSeekers = seekers.map(seeker => encodeToBase64(seeker));
   const value = JSON.stringify(serializedSeekers);
 
   if (Capacitor.isNativePlatform()) {
     const foreground = await isAppInForeground();
-    if (!foreground) {
+    if (!foreground || !mayPublish()) {
       return;
     }
-    await setBackgroundRunnerStorage(ACTIVE_SEEKERS_KEY, value);
+    await backgroundRunnerStorageService.setStrict(ACTIVE_SEEKERS_KEY, value);
+    if (!mayPublish()) {
+      await backgroundRunnerStorageService.setStrict(ACTIVE_SEEKERS_KEY, null);
+      return;
+    }
+    await backgroundRunnerStorageService.clearIfValue(
+      ACCOUNT_CLEANUP_BLOCK_KEY,
+      `blocked:${outputEpoch}`
+    );
   }
 }
 

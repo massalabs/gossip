@@ -48,7 +48,7 @@ pub fn decrypt_block(
     block_ct: &[u8; BLOCK_SIZE],
 ) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
     let aad = format!("{aad_root}{BLOCK_AEAD_SUFFIX}");
-    let msg = pq_decrypt(pq_sk, block_ct);
+    let msg = pq_decrypt(pq_sk, block_ct)?;
 
     let nonce = crypto_aead::Nonce::from(
         <[u8; crypto_aead::NONCE_SIZE]>::try_from(&msg[..crypto_aead::NONCE_SIZE])
@@ -102,8 +102,7 @@ pub fn create_cover_block(pq_pk: &PqPublicKey, aad_root: &str) -> Vec<u8> {
 /// Re-randomize a ciphertext block using only the public key.
 ///
 /// The decrypted plaintext is unchanged but the ciphertext bytes differ.
-#[must_use]
-pub fn rerandomize_block(pq_pk: &PqPublicKey, block_ct: &[u8; BLOCK_SIZE]) -> Vec<u8> {
+pub fn rerandomize_block(pq_pk: &PqPublicKey, block_ct: &[u8; BLOCK_SIZE]) -> Result<Vec<u8>> {
     pq_rerand(pq_pk, block_ct)
 }
 
@@ -229,7 +228,7 @@ mod tests {
         let (pk, sk) = pq_keygen();
         let ct = create_cover_block(&pk, AAD_ROOT);
         let ct_arr: &[u8; BLOCK_SIZE] = ct.as_slice().try_into().unwrap();
-        let msg = pq_decrypt(&sk, ct_arr);
+        let msg = pq_decrypt(&sk, ct_arr).unwrap();
         // Inner message should be exactly PQ_MSG_SIZE bytes with
         // nonce (16) + AEAD ciphertext (PLAINTEXT_SIZE + AEAD_TAG_SIZE).
         assert_eq!(msg.len(), PQ_MSG_SIZE);
@@ -254,7 +253,7 @@ mod tests {
 
         let ct = encrypt_block(&pk, &key, AAD_ROOT, &pt);
         let ct_arr: &[u8; BLOCK_SIZE] = ct.as_slice().try_into().unwrap();
-        let ct2 = rerandomize_block(&pk, ct_arr);
+        let ct2 = rerandomize_block(&pk, ct_arr).unwrap();
         let ct2_arr: &[u8; BLOCK_SIZE] = ct2.as_slice().try_into().unwrap();
         let decrypted = decrypt_block(&sk, &key, AAD_ROOT, ct2_arr).unwrap();
         assert_eq!(*decrypted, pt);
@@ -268,7 +267,7 @@ mod tests {
 
         let ct = encrypt_block(&pk, &key, AAD_ROOT, &pt);
         let ct_arr: &[u8; BLOCK_SIZE] = ct.as_slice().try_into().unwrap();
-        let ct2 = rerandomize_block(&pk, ct_arr);
+        let ct2 = rerandomize_block(&pk, ct_arr).unwrap();
         assert_ne!(ct, ct2);
     }
 
@@ -282,7 +281,7 @@ mod tests {
         let mut ct = encrypt_block(&pk, &key, AAD_ROOT, &pt);
         for _ in 0..10 {
             let ct_arr: &[u8; BLOCK_SIZE] = ct.as_slice().try_into().unwrap();
-            ct = rerandomize_block(&pk, ct_arr);
+            ct = rerandomize_block(&pk, ct_arr).unwrap();
         }
         let ct_arr: &[u8; BLOCK_SIZE] = ct.as_slice().try_into().unwrap();
         let decrypted = decrypt_block(&sk, &key, AAD_ROOT, ct_arr).unwrap();
@@ -297,7 +296,7 @@ mod tests {
 
         let ct = encrypt_block(&pk, &key, AAD_ROOT, &pt);
         let ct_arr: &[u8; BLOCK_SIZE] = ct.as_slice().try_into().unwrap();
-        let ct2 = rerandomize_block(&pk, ct_arr);
+        let ct2 = rerandomize_block(&pk, ct_arr).unwrap();
         assert_eq!(ct2.len(), BLOCK_SIZE);
     }
 }

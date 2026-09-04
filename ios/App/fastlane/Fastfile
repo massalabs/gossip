@@ -78,7 +78,8 @@ platform :ios do
       export_options: {
         method: "app-store",
         provisioningProfiles: {
-          "net.massa.gossip" => "match AppStore net.massa.gossip"
+          "net.massa.gossip" => "match AppStore net.massa.gossip",
+          "net.massa.gossip.GossipShareExtension" => "match AppStore net.massa.gossip.GossipShareExtension"
         },
         teamID: ENV["APPLE_TEAM_ID"]
       }
@@ -150,4 +151,3 @@ platform :ios do
     UI.error("❌ Error in lane '#{lane}': #{exception.message}")
   end
 end
-

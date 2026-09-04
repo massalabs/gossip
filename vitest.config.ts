@@ -7,6 +7,20 @@ import crossOriginIsolation from 'vite-plugin-cross-origin-isolation';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const secureStorageTestWorker = {
+  name: 'secure-storage-test-worker',
+  enforce: 'pre' as const,
+  transform(code: string, id: string) {
+    if (!id.endsWith('/gossip-sdk/src/db/sqlite.ts')) return null;
+    const productionEntry =
+      "new URL('./secure-storage-worker.ts', import.meta.url)";
+    const testEntry =
+      "new URL('./secure-storage-worker-test.ts', import.meta.url)";
+    if (!code.includes(productionEntry)) return null;
+    return code.replace(productionEntry, testEntry);
+  },
+};
+
 // Dedicated Vitest config file for VSCode plugin compatibility
 // The VSCode Vitest plugin specifically looks for vitest.config.* files
 // This ensures the setup file with SQLite initialization is properly loaded
@@ -31,7 +45,7 @@ export default defineConfig({
         // wasm-bindgen-rayon to transfer the WASM Memory to rayon Web
         // Worker threads). The plugin sets the headers on every response
         // and on the worker scripts spawned by Vite.
-        plugins: [crossOriginIsolation()],
+        plugins: [secureStorageTestWorker, crossOriginIsolation()],
         optimizeDeps: {
           include: [
             'react',
@@ -45,7 +59,11 @@ export default defineConfig({
           name: 'browser',
           browser: {
             enabled: true,
-            provider: playwright(),
+            provider: playwright({
+              ...(process.env.CI
+                ? { launchOptions: { channel: 'chrome' } }
+                : {}),
+            }),
             headless: true,
             instances: [{ browser: 'chromium' }],
           },

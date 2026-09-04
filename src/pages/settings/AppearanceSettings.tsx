@@ -37,12 +37,12 @@ const AppearanceSettings: React.FC = () => {
         <div className="h-[54px] flex items-center px-4 justify-start w-full">
           <Navigation className="w-5 h-5 text-foreground mr-4" />
           <span className="text-base font-medium text-foreground flex-1 text-left">
-            Bottom navigation bar
+            {t('appearance.bottom_nav')}
           </span>
           <Toggle
             checked={showBottomNav}
             onChange={setShowBottomNav}
-            ariaLabel="Toggle bottom navigation bar"
+            ariaLabel={t('appearance.toggle_bottom_nav')}
           />
         </div>
       </div>

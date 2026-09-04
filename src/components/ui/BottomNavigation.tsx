@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useLocation, useNavigate, matchPath } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Settings as SettingsFeather } from 'react-feather';
 import NavButton from './NavButton';
 import GossipIcon from './customIcons/gossip-icon';
@@ -10,6 +11,7 @@ import { useKeyboardStore } from '../../stores/keyboardStore';
 type BottomNavigationTab = 'discussions' | 'settings';
 
 const BottomNavigation: React.FC = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const setBottomNavVisible = useUiStore(s => s.setBottomNavVisible);
@@ -31,13 +33,13 @@ const BottomNavigation: React.FC = () => {
     {
       id: 'discussions' as const,
       path: ROUTES.discussions(),
-      title: 'Discussions',
+      title: t('navigation.discussions'),
       icon: <GossipIcon size={24} />,
     },
     {
       id: 'settings' as const,
       path: ROUTES.settings(),
-      title: 'Settings',
+      title: t('navigation.settings'),
       icon: <SettingsFeather />,
     },
   ];
@@ -48,7 +50,7 @@ const BottomNavigation: React.FC = () => {
   }
 
   return (
-    <nav className="bg-muted pb-safe-b" aria-label="Main navigation">
+    <nav className="bg-muted pb-safe-b" aria-label={t('navigation.label')}>
       <div className="mx-auto app-max-w flex items-center justify-center h-bottom-nav px-nav-padding">
         <div className="flex items-center justify-center gap-8">
           {navItems.map((item, index) => (

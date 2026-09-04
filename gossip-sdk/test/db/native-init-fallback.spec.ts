@@ -48,6 +48,10 @@ describe('DatabaseConnection native secure-storage init', () => {
       SecureStorageNative: {
         initSecureStorage: vi.fn(),
         hasData: vi.fn(async () => ({ hasData: true })),
+        accountGenerationState: vi.fn(async () => ({ state: 'committed' })),
+        accountGenerationEpoch: vi.fn(async () => ({
+          epoch: '00112233445566778899aabbccddeeff',
+        })),
         provisionStorage,
       },
     }));

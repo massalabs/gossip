@@ -9,17 +9,78 @@ import { logger } from '../utils/logger.ts';
 import {
   SdkEventType,
   MessageDirection,
-  type Discussion,
-  type Contact,
   GossipSdk,
   MessageType,
 } from '@massalabs/gossip-sdk';
+import { Capacitor } from '@capacitor/core';
 import { notificationService } from './notifications';
+import { isPortableImportCleanupPending } from './portableImportCleanup';
 import { isAppInForeground } from '../utils/appState';
-import { bridgeSet } from '../sw-bridge';
+import { bridgeGet, bridgeSetMany } from '../sw-bridge';
 import { setActiveSeekersInPreferences } from '../utils/preferences';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
+
+let outputEpoch = 0;
+let activeOutputOwner: { sdk: GossipSdk; epoch: number } | null = null;
+let nativeOutputTail = Promise.resolve();
+
+export async function suspendSdkEventOutputs(): Promise<number> {
+  activeOutputOwner = null;
+  outputEpoch += 1;
+  if (Capacitor.isNativePlatform()) await nativeOutputTail;
+  return outputEpoch;
+}
+
+function canPublishSdkOutput(gossip: GossipSdk, epoch: number): boolean {
+  return (
+    activeOutputOwner?.sdk === gossip &&
+    activeOutputOwner.epoch === epoch &&
+    !isPortableImportCleanupPending()
+  );
+}
+
+async function withSdkOutputFence(
+  gossip: GossipSdk,
+  epoch: number,
+  webOwnerGeneration: Promise<number | null>,
+  publish: () => Promise<void>
+): Promise<void> {
+  if (!canPublishSdkOutput(gossip, epoch)) return;
+  if (!Capacitor.isNativePlatform() && navigator.locks) {
+    await navigator.locks.request(
+      'gossip-account-output-v1',
+      { mode: 'shared' },
+      async () => {
+        const ownerGeneration = await webOwnerGeneration;
+        const currentGeneration =
+          (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
+        if (
+          canPublishSdkOutput(gossip, epoch) &&
+          ownerGeneration === currentGeneration
+        ) {
+          await publish();
+        }
+      }
+    );
+    return;
+  }
+  if (Capacitor.isNativePlatform()) {
+    const predecessor = nativeOutputTail;
+    let release!: () => void;
+    nativeOutputTail = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    await predecessor;
+    try {
+      if (canPublishSdkOutput(gossip, epoch)) await publish();
+    } finally {
+      release();
+    }
+    return;
+  }
+  if (canPublishSdkOutput(gossip, epoch)) await publish();
+}
 
 /**
  * Wire up SDK events to app behaviors like notifications.
@@ -29,32 +90,50 @@ import { useMessageStore } from '../stores/messageStore';
  * like notifications.
  */
 export function setupSdkEventHandlers(gossip: GossipSdk): void {
+  const ownerEpoch = outputEpoch;
+  const webOwnerGeneration = Capacitor.isNativePlatform()
+    ? Promise.resolve(null)
+    : bridgeGet<number>('accountOutputGeneration').then(value => value ?? 0);
+  activeOutputOwner = { sdk: gossip, epoch: ownerEpoch };
   // Propagate seekers to SW bridge (web) and BackgroundRunner (mobile)
   gossip.on(SdkEventType.SEEKERS_UPDATED, (seekers: Uint8Array[]) => {
-    bridgeSet(
-      'activeSeekers',
-      seekers.map(s => Array.from(s))
+    void withSdkOutputFence(
+      gossip,
+      ownerEpoch,
+      webOwnerGeneration,
+      async () => {
+        await bridgeSetMany([
+          ['activeSeekers', seekers.map(s => Array.from(s))],
+          ['accountCleanupBlocked', false],
+        ]);
+        await setActiveSeekersInPreferences(seekers, ownerEpoch, () =>
+          canPublishSdkOutput(gossip, ownerEpoch)
+        );
+      }
     ).catch(() => {});
-    setActiveSeekersInPreferences(seekers).catch(() => {});
   });
 
   // Show notification for new discussion requests when app is in background
-  gossip.on(
-    SdkEventType.SESSION_REQUESTED,
-    async ({ contact }: { discussion: Discussion; contact: Contact }) => {
-      const foreground = await isAppInForeground();
-      if (!foreground) {
-        try {
-          await notificationService.showNewDiscussionNotification();
-          logger.info('[SDK Event] New discussion request notification shown', {
-            contactUserId: contact.userId,
-          });
-        } catch (error) {
-          logger.error('[SDK Event] Failed to show notification:', error);
-        }
+  gossip.on(SdkEventType.SESSION_REQUESTED, async () => {
+    const foreground = await isAppInForeground();
+    if (!foreground) {
+      try {
+        await withSdkOutputFence(
+          gossip,
+          ownerEpoch,
+          webOwnerGeneration,
+          async () => {
+            await notificationService.showNewDiscussionNotification();
+            logger.info(
+              '[SDK Event] New discussion request notification shown'
+            );
+          }
+        );
+      } catch {
+        // Output failures are fail-closed and must not recreate diagnostics.
       }
     }
-  );
+  });
 
   // Show notification for incoming messages when app is in background
   gossip.on(SdkEventType.MESSAGE_RECEIVED, async message => {
@@ -67,21 +146,30 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     const currentContact = useMessageStore.getState().currentContactUserId;
     if (currentContact === message.contactUserId) return;
 
-    const foreground = await isAppInForeground();
-    if (foreground) return;
-
     try {
+      const foreground = await isAppInForeground();
+      if (foreground) return;
+
+      // Mute check: prefer the hydrated store; right after resume the store
+      // can still be empty, so fall back to the SDK (SQLite) — otherwise a
+      // muted contact would notify anyway.
       const { discussions } = useDiscussionStore.getState();
-      const discussion = discussions.find(
+      let discussion = discussions.find(
         d => d.contactUserId === message.contactUserId
       );
+      if (!discussion && discussions.length === 0 && gossip.isSessionOpen) {
+        const dbDiscussions = await gossip.discussions.list();
+        discussion = dbDiscussions.find(
+          d => d.contactUserId === message.contactUserId
+        );
+      }
       if (discussion?.mutedNotifications) return;
 
-      await notificationService.showDiscussionNotification(
-        message.contactUserId
+      await withSdkOutputFence(gossip, ownerEpoch, webOwnerGeneration, () =>
+        notificationService.showDiscussionNotification(message.contactUserId)
       );
-    } catch (error) {
-      logger.error('[SDK Event] Failed to show message notification:', error);
+    } catch {
+      // Output failures are fail-closed and must not recreate diagnostics.
     }
   });
 
@@ -89,7 +177,12 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   gossip.on(
     SdkEventType.ERROR,
     ({ error, context }: { error: Error; context: string }) => {
-      logger.error(`[SDK Error:${context}]`, error);
+      void withSdkOutputFence(
+        gossip,
+        ownerEpoch,
+        webOwnerGeneration,
+        async () => logger.error(`[SDK Error:${context}]`, error)
+      ).catch(() => {});
     }
   );
 }

@@ -1,40 +1,13 @@
 /* tslint:disable */
 /* eslint-disable */
-/**
- * Decrypts data using AES-256-SIV authenticated encryption.
- *
- * # Parameters
- *
- * - `key`: The encryption key (64 bytes, must match encryption key)
- * - `nonce`: The nonce (16 bytes, must match encryption nonce)
- * - `ciphertext`: The encrypted data with authentication tag
- * - `aad`: Additional authenticated data (must match encryption AAD)
- *
- * # Returns
- *
- * The decrypted plaintext, or `null` if authentication fails.
- *
- * # Security Notes
- *
- * - Returns `null` if:
- *   - The ciphertext has been tampered with
- *   - The wrong key or nonce is used
- *   - The AAD doesn't match
- * - Never ignore a decryption failure; it indicates tampering or corruption
- *
- * # Example
- *
- * ```javascript
- * const plaintext = aead_decrypt(key, nonce, ciphertext, aad);
- * if (plaintext) {
- *     console.log("Decrypted:", new TextDecoder().decode(plaintext));
- * } else {
- *     console.error("Decryption failed - data may be corrupted or tampered");
- * }
- * ```
- */
-export function aead_decrypt(key: EncryptionKey, nonce: Nonce, ciphertext: Uint8Array, aad: Uint8Array): Uint8Array | undefined;
 export function start(): void;
+/**
+ * Generates user keys from a passphrase.
+ *
+ * Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
+ * the passphrase crosses the JS boundary only once.
+ */
+export function generate_user_keys(passphrase: string): UserKeys;
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
@@ -69,12 +42,39 @@ export function start(): void;
  */
 export function aead_encrypt(key: EncryptionKey, nonce: Nonce, plaintext: Uint8Array, aad: Uint8Array): Uint8Array;
 /**
- * Generates user keys from a passphrase.
+ * Decrypts data using AES-256-SIV authenticated encryption.
  *
- * Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
- * the passphrase crosses the JS boundary only once.
+ * # Parameters
+ *
+ * - `key`: The encryption key (64 bytes, must match encryption key)
+ * - `nonce`: The nonce (16 bytes, must match encryption nonce)
+ * - `ciphertext`: The encrypted data with authentication tag
+ * - `aad`: Additional authenticated data (must match encryption AAD)
+ *
+ * # Returns
+ *
+ * The decrypted plaintext, or `null` if authentication fails.
+ *
+ * # Security Notes
+ *
+ * - Returns `null` if:
+ *   - The ciphertext has been tampered with
+ *   - The wrong key or nonce is used
+ *   - The AAD doesn't match
+ * - Never ignore a decryption failure; it indicates tampering or corruption
+ *
+ * # Example
+ *
+ * ```javascript
+ * const plaintext = aead_decrypt(key, nonce, ciphertext, aad);
+ * if (plaintext) {
+ *     console.log("Decrypted:", new TextDecoder().decode(plaintext));
+ * } else {
+ *     console.error("Decryption failed - data may be corrupted or tampered");
+ * }
+ * ```
  */
-export function generate_user_keys(passphrase: string): UserKeys;
+export function aead_decrypt(key: EncryptionKey, nonce: Nonce, ciphertext: Uint8Array, aad: Uint8Array): Uint8Array | undefined;
 /**
  * Session status indicating the state of a peer session.
  */

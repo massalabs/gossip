@@ -31,6 +31,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BackgroundRunnerStoragePlugin.class);
         registerPlugin(ForegroundSyncPlugin.class);
         registerPlugin(SecureStoragePlugin.class);
+        registerPlugin(PortableBackupFilePlugin.class);
+        registerPlugin(QrScannerPlugin.class);
         
         super.onCreate(savedInstanceState);
 

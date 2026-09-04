@@ -17,7 +17,8 @@ import i18n from '../../../i18n';
 
 export type HeaderItem = {
   type: 'header';
-  label: string;
+  /** i18n key (discussions namespace) — translated in the renderer. */
+  labelKey: string;
   key: string;
 };
 
@@ -157,7 +158,7 @@ export function useVirtualItems(
       if (filteredDiscussions.length > 0) {
         items.push({
           type: 'header',
-          label: 'Discussions',
+          labelKey: 'list.sections.discussions',
           key: 'header-discussions',
         });
 
@@ -179,7 +180,7 @@ export function useVirtualItems(
       if (filteredContacts.length > 0) {
         items.push({
           type: 'header',
-          label: 'Contacts',
+          labelKey: 'list.sections.contacts',
           key: 'header-contacts',
         });
 
@@ -299,7 +300,7 @@ export function useVirtualItems(
         if (pinnedDiscussions.length > 0) {
           items.push({
             type: 'header',
-            label: 'Pinned',
+            labelKey: 'list.sections.pinned',
             key: 'header-pinned',
           });
 
@@ -321,7 +322,7 @@ export function useVirtualItems(
         if (pendingDiscussions.length > 0) {
           items.push({
             type: 'header',
-            label: 'Pending',
+            labelKey: 'list.sections.pending',
             key: 'header-pending',
           });
 
@@ -343,7 +344,7 @@ export function useVirtualItems(
         if (activeDiscussions.length > 0) {
           items.push({
             type: 'header',
-            label: 'Active',
+            labelKey: 'list.sections.active',
             key: 'header-active',
           });
 

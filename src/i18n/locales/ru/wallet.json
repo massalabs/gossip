@@ -48,5 +48,11 @@
     "custom_placeholder": "Своя комиссия",
     "custom_hint": "Введите комиссию в MAS",
     "confirm_fees": "Подтвердить комиссию"
+  },
+  "address_input": {
+    "label": "Адрес",
+    "placeholder": "Введите адрес",
+    "invalid": "Неверный формат адреса",
+    "valid": "Адрес действителен"
   }
 }

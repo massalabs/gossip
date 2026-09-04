@@ -1,10 +1,13 @@
+import { logger } from '../../utils/logger.ts';
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
+import OptionBottomSheet from '../../components/ui/OptionBottomSheet';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
+import { RETENTION_OPTIONS } from '../../constants/retention';
 
 const PrivacySettings: React.FC = () => {
   const { t } = useTranslation(['settings', 'discussions']);
@@ -16,21 +19,14 @@ const PrivacySettings: React.FC = () => {
 
   const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
 
-  const RETENTION_OPTIONS = useMemo(
-    () => [
-      {
-        labelKey: 'discussions:settings.auto_delete_off',
-        value: null as number | null,
-      },
-      { labelKey: 'discussions:settings.auto_delete_5m', value: 300 },
-      { labelKey: 'discussions:settings.auto_delete_1h', value: 3600 },
-      { labelKey: 'discussions:settings.auto_delete_8h', value: 28800 },
-      { labelKey: 'discussions:settings.auto_delete_1d', value: 86400 },
-      { labelKey: 'discussions:settings.auto_delete_1w', value: 604800 },
-      { labelKey: 'discussions:settings.auto_delete_1mo', value: 2592000 },
-    ],
-    []
-  );
+  const handleRetentionChange = async (duration: number | null) => {
+    try {
+      await setDefaultRetentionDuration(duration);
+      setIsRetentionModalOpen(false);
+    } catch (error) {
+      logger.error('Failed to persist default retention setting:', error);
+    }
+  };
 
   const retentionLabel = useMemo(() => {
     const option = RETENTION_OPTIONS.find(
@@ -39,7 +35,7 @@ const PrivacySettings: React.FC = () => {
     return option
       ? t(option.labelKey)
       : t('discussions:settings.auto_delete_off');
-  }, [defaultRetentionDuration, t, RETENTION_OPTIONS]);
+  }, [defaultRetentionDuration, t]);
 
   return (
     <PageLayout
@@ -72,39 +68,17 @@ const PrivacySettings: React.FC = () => {
         </button>
       </div>
 
-      {isRetentionModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
-          onClick={() => setIsRetentionModalOpen(false)}
-        >
-          <div
-            className="bg-background w-full max-w-md rounded-t-2xl p-6 pb-8"
-            onClick={e => e.stopPropagation()}
-          >
-            <h3 className="text-base font-semibold text-foreground mb-4">
-              {t('privacy.default_retention_title')}
-            </h3>
-            <div className="flex flex-col gap-1">
-              {RETENTION_OPTIONS.map(option => (
-                <button
-                  key={String(option.value)}
-                  onClick={() => {
-                    setDefaultRetentionDuration(option.value);
-                    setIsRetentionModalOpen(false);
-                  }}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
-                    defaultRetentionDuration === option.value
-                      ? 'bg-accent-soft text-accent-soft-foreground font-medium'
-                      : 'hover:bg-muted text-foreground'
-                  }`}
-                >
-                  {t(option.labelKey)}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      <OptionBottomSheet
+        isOpen={isRetentionModalOpen}
+        title={t('privacy.default_retention_title')}
+        options={RETENTION_OPTIONS.map(o => ({
+          label: t(o.labelKey),
+          value: o.value,
+        }))}
+        selectedValue={defaultRetentionDuration}
+        onSelect={value => void handleRetentionChange(value)}
+        onClose={() => setIsRetentionModalOpen(false)}
+      />
     </PageLayout>
   );
 };

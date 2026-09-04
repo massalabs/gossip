@@ -1,7 +1,8 @@
 {
   "name": "gossip",
   "private": true,
-  "version": "0.0.16",
+  "version": "0.0.17",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "workspaces": [
     "gossip-sdk"
@@ -11,7 +12,7 @@
     "dev": "vite",
     "dev:host": "vite --host",
     "build:sdk": "cd gossip-sdk && npm run build",
-    "build": "npm run audit:logging && npm run build:sdk && tsc -b && vite build && npm run strip:logging:sw && npm run audit:logging:dist",
+    "build": "npm run audit:logging && npm run build:sdk && tsc -b && vite build && npm run audit:production-worker:dist && npm run strip:logging:sw && npm run audit:logging:dist",
     "test": "vitest --silent='passed-only'",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
@@ -23,8 +24,11 @@
     "test:unit": "vitest --project=unit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "notices:generate": "node scripts/generate-third-party-notices.mjs",
+    "notices:check": "node scripts/generate-third-party-notices.mjs --check",
     "audit:logging": "node scripts/audit-logging.mjs source",
     "audit:logging:dist": "node scripts/audit-logging.mjs dist",
+    "audit:production-worker:dist": "node gossip-sdk/scripts/audit-production-worker.mjs dist",
     "strip:logging:sw": "node scripts/strip-service-worker-console.mjs",
     "fmt": "prettier --write . && eslint . --fix",
     "fmt:check": "prettier --check . && eslint .",
@@ -42,6 +46,9 @@
     "native:build:android:debug": "bash scripts/build-native-android.sh --debug",
     "build:all": "bash scripts/build-all.sh",
     "wasm:test": "cargo test --workspace --manifest-path wasm/Cargo.toml --all-targets --verbose",
+    "wasm:test:all": "node scripts/run-wasm-tests.mjs",
+    "wasm:test:default": "cargo test --workspace --manifest-path wasm/Cargo.toml --all-targets --verbose",
+    "wasm:test:native": "cargo test --manifest-path wasm/Cargo.toml -p secureStorage --no-default-features --features native",
     "wasm:clean": "rm -rf gossip-sdk/src/assets/generated/wasm gossip-sdk/src/assets/generated/wasm-secureStorage",
     "cap:sync": "cap sync",
     "cap:sync:ios": "cap sync ios",
@@ -72,7 +79,6 @@
     "@capacitor/android": "^8.0.0",
     "@capacitor/app": "^8.0.0",
     "@capacitor/background-runner": "^3.0.0",
-    "@capacitor/barcode-scanner": "^3.0.0",
     "@capacitor/core": "^8.0.0",
     "@capacitor/device": "^8.0.0",
     "@capacitor/filesystem": "^8.0.0",
@@ -109,7 +115,8 @@
     "react-router-dom": "^7.9.6",
     "varint": "^6.0.0",
     "virtua": "^0.48.8",
-    "zustand": "^5.0.8"
+    "zustand": "^5.0.8",
+    "zxing-wasm": "2.2.4"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.0.0",

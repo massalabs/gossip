@@ -4,6 +4,18 @@ import QRCodeStyling from 'qr-code-styling';
  *  and can be pre-warmed from other pages (e.g. Discussions on mount). */
 export const qrCache = new Map<string, string>();
 
+const QR_CACHE_MAX_ENTRIES = 20;
+
+/** Insert into the cache, evicting the oldest entry when the cap is hit
+ *  (Map preserves insertion order) so the cache stays bounded. */
+export const setCachedQr = (deepLinkUrl: string, dataUrl: string): void => {
+  if (!qrCache.has(deepLinkUrl) && qrCache.size >= QR_CACHE_MAX_ENTRIES) {
+    const oldestKey = qrCache.keys().next().value;
+    if (oldestKey !== undefined) qrCache.delete(oldestKey);
+  }
+  qrCache.set(deepLinkUrl, dataUrl);
+};
+
 export const generateQRDataUrl = async (
   deepLinkUrl: string
 ): Promise<string> => {
@@ -43,7 +55,7 @@ export const prewarmShareQR = async (deepLinkUrl: string): Promise<void> => {
   if (qrCache.has(deepLinkUrl)) return;
   try {
     const dataUrl = await generateQRDataUrl(deepLinkUrl);
-    qrCache.set(deepLinkUrl, dataUrl);
+    setCachedQr(deepLinkUrl, dataUrl);
   } catch {
     // Best-effort; on-demand generation will retry when the page opens.
   }

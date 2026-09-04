@@ -5,6 +5,9 @@ const config: CapacitorConfig = {
   appId: 'net.massa.gossip',
   appName: 'Gossip',
   webDir: 'dist',
+  // Capacitor logs complete plugin payloads, including secure-storage
+  // passwords. Keep application logging, but never emit bridge arguments.
+  loggingBehavior: 'none',
   ios: {
     scheme: 'Gossip',
     contentInset: 'automatic',

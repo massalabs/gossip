@@ -8,7 +8,6 @@ import PageLayout from '../ui/Layout/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
-import { Account } from '@massalabs/massa-web3';
 
 interface AccountBackupProps {
   onBack: () => void;
@@ -16,7 +15,7 @@ interface AccountBackupProps {
 
 const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
   const { t } = useTranslation('settings');
-  const { userProfile, showBackup } = useAccountStore();
+  const showBackup = useAccountStore(state => state.showBackup);
   const [method, setMethod] = useState<'mnemonic' | 'privateKey'>('mnemonic');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -24,11 +23,8 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
   const [passwordError, setPasswordError] = useState('');
   const [backupInfo, setBackupInfo] = useState<{
     mnemonic: string;
-    account: Account;
   } | null>(null);
   const [privateKeyString, setPrivateKeyString] = useState<string | null>(null);
-
-  const requiresPassword = userProfile?.security?.authMethod === 'password';
 
   const handleShow = async () => {
     try {
@@ -36,15 +32,13 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
       setError('');
       setPasswordError('');
 
-      if (requiresPassword && !password.trim()) {
+      if (!password.trim()) {
         setPasswordError(t('backup.password_required'));
         return;
       }
-      const backupInfo = await showBackup(
-        requiresPassword ? password : undefined
-      );
-      setBackupInfo(backupInfo);
-      setPrivateKeyString(backupInfo.account.privateKey.toString());
+      const backup = await showBackup(password);
+      setBackupInfo({ mnemonic: backup.mnemonic });
+      setPrivateKeyString(backup.privateKey);
     } catch (e) {
       logger.error('Error showing backup:', e);
       const message = t('backup.show_failed');
@@ -97,51 +91,35 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
       {((method === 'mnemonic' && !backupInfo) ||
         (method === 'privateKey' && !privateKeyString)) && (
         <div className="bg-card rounded-lg p-6 space-y-6 border border-border">
-          {requiresPassword ? (
-            <>
-              <div>
-                <label className="block text-xl font-medium text-foreground mb-3">
-                  {t('backup.enter_password')}
-                </label>
-                <RoundedInput
-                  type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder={t('backup.password_placeholder')}
-                  error={!!passwordError}
-                  disabled={isLoading}
-                />
-                {(error || passwordError) && (
-                  <p className="text-destructive text-xs mt-1">
-                    {error || passwordError}
-                  </p>
-                )}
-              </div>
-              <Button
-                onClick={handleShow}
-                disabled={isLoading || !password.trim()}
-                loading={isLoading}
-                variant="primary"
-                size="custom"
-                fullWidth
-                className="h-11 text-sm font-medium"
-              >
-                {!isLoading && t('backup.show_backup')}
-              </Button>
-            </>
-          ) : (
-            <Button
-              onClick={handleShow}
+          <div>
+            <label className="block text-xl font-medium text-foreground mb-3">
+              {t('backup.enter_password')}
+            </label>
+            <RoundedInput
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder={t('backup.password_placeholder')}
+              error={!!passwordError}
               disabled={isLoading}
-              loading={isLoading}
-              variant="primary"
-              size="custom"
-              fullWidth
-              className="h-11 text-sm font-medium"
-            >
-              {!isLoading && t('backup.show_backup')}
-            </Button>
-          )}
+            />
+            {(error || passwordError) && (
+              <p className="text-destructive text-xs mt-1">
+                {error || passwordError}
+              </p>
+            )}
+          </div>
+          <Button
+            onClick={handleShow}
+            disabled={isLoading || !password.trim()}
+            loading={isLoading}
+            variant="primary"
+            size="custom"
+            fullWidth
+            className="h-11 text-sm font-medium"
+          >
+            {!isLoading && t('backup.show_backup')}
+          </Button>
         </div>
       )}
 

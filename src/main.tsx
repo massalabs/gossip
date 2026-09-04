@@ -7,12 +7,20 @@ import { showInitError } from './utils/initError.ts';
 import { installSafariWorkerDedup } from './utils/safariWorkerDedup';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
+import { useAppStore } from './stores/appStore';
+import { establishFirstInstallCreationGrant } from './hooks/useProfileLoader';
 import { protocolConfig } from './config/protocol';
 import { SECURE_STORAGE_ENABLED } from './config/features';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
 import secureStorageWasmUrl from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
+import UnsupportedStorageReset from './components/UnsupportedStorageReset';
+import {
+  isUnsupportedStorageResetRequested,
+  isUnsupportedStorageVersionError,
+  requestUnsupportedStorageReset,
+} from './services/unsupportedStorageReset';
 
 // Must run before createSdk() so the SDK's SQLite worker is wrapped.
 installSafariWorkerDedup();
@@ -37,18 +45,10 @@ declare global {
 
 window.Buffer = Buffer;
 
-// Prevent pull-to-refresh and accidental page refreshes
-document.addEventListener(
-  'touchstart',
-  e => {
-    // Only prevent pull-to-refresh when touching at the very top of the page
-    // and when the page is already at the top
-    if (e.touches[0].clientY < 20 && window.scrollY === 0) {
-      e.preventDefault();
-    }
-  },
-  { passive: false }
-);
+// Pull-to-refresh is disabled via CSS (`overscroll-behavior: none` on
+// html/body in styles/base.css). No JS touchstart guard: the previous one
+// keyed on `window.scrollY === 0`, which is always true in this
+// inner-scroll layout, making every element in the top 20px tap-dead.
 
 // Prevent refresh on certain key combinations
 document.addEventListener('keydown', e => {
@@ -58,39 +58,6 @@ document.addEventListener('keydown', e => {
     ((e.ctrlKey && e.key === 'r') || e.key === 'F5')
   ) {
     e.preventDefault();
-  }
-});
-
-// Prevent context menu on long press (optional) - disabled to avoid interfering with normal interactions
-// document.addEventListener('contextmenu', (e) => {
-//   e.preventDefault();
-// });
-
-// Handle page refresh gracefully
-window.addEventListener('beforeunload', () => {
-  // Store current state before page unload
-  const currentPath = window.location.pathname;
-  const currentState = {
-    path: currentPath,
-    timestamp: Date.now(),
-  };
-  sessionStorage.setItem('gossip-app-state', JSON.stringify(currentState));
-});
-
-// Restore state on page load
-window.addEventListener('load', () => {
-  const savedState = sessionStorage.getItem('gossip-app-state');
-  if (savedState) {
-    try {
-      const state = JSON.parse(savedState);
-      // If the page was refreshed recently (within 5 seconds), it was likely accidental
-      if (Date.now() - state.timestamp < 5000) {
-        logger.debug('Page refresh detected, restoring state...');
-        // You could add logic here to restore the previous screen
-      }
-    } catch (e) {
-      logger.debug('Could not restore app state:', e);
-    }
   }
 });
 
@@ -119,25 +86,48 @@ async function bootstrap() {
   return sdk;
 }
 
-bootstrap()
-  .then(sdk => {
-    useSdkStore.getState().setSdk(sdk);
+const renderUnsupportedStorageReset = () => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <UnsupportedStorageReset />
+    </StrictMode>
+  );
+};
 
-    createRoot(document.getElementById('root')!).render(
-      <StrictMode>
-        <App />
-      </StrictMode>
-    );
-  })
-  .catch(error => {
-    // PD: do not log the raw error in production. The error message and
-    // stack can carry state-specific text (e.g. "namespace allocation
-    // failed: existing data") that an observer of the browser console
-    // history can use to fingerprint storage state. In DEV we keep the
-    // detail for debugging; the user-facing showInitError() renders one
-    // of two generic strings.
-    if (import.meta.env.DEV) {
-      logger.error('[Gossip] Failed to initialize:', error);
+async function start() {
+  if (isUnsupportedStorageResetRequested()) {
+    renderUnsupportedStorageReset();
+    return;
+  }
+  const sdk = await bootstrap();
+  useSdkStore.getState().setSdk(sdk);
+  try {
+    await establishFirstInstallCreationGrant(sdk);
+  } catch (error) {
+    if (sdk.isSecureStorage && sdk.storageState === 'locked') {
+      const appState = useAppStore.getState();
+      appState.setSecureStartupRouting(appState.isInitialized, true);
+    } else {
+      throw error;
     }
-    showInitError(error);
-  });
+  }
+
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  );
+}
+
+void start().catch(error => {
+  if (isUnsupportedStorageVersionError(error)) {
+    requestUnsupportedStorageReset();
+    return;
+  }
+  // PD: do not log raw production errors: state-specific text can reveal
+  // storage state. Development keeps details for diagnostics.
+  if (import.meta.env.DEV) {
+    logger.error('[Gossip] Failed to initialize:', error);
+  }
+  showInitError(error);
+});

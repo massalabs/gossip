@@ -10,12 +10,26 @@ import { logger } from '../utils/logger.ts';
  */
 
 import { Capacitor } from '@capacitor/core';
+import { bridgeGet } from '../sw-bridge';
 import {
   LocalNotifications,
   type PermissionStatus as LocalNotificationPermissionStatus,
 } from '@capacitor/local-notifications';
 
 const NOTIFICATION_ENABLED_KEY = 'gossip-notifications-enabled';
+const directNotifications = new Set<Notification>();
+const notificationCleanupChannel =
+  typeof window !== 'undefined' && 'BroadcastChannel' in window
+    ? new BroadcastChannel('gossip-notification-cleanup-v1')
+    : null;
+const closeDirectNotifications = () => {
+  for (const notification of directNotifications) notification.close();
+  directNotifications.clear();
+};
+notificationCleanupChannel?.addEventListener(
+  'message',
+  closeDirectNotifications
+);
 
 export interface NotificationPermission {
   granted: boolean;
@@ -69,6 +83,19 @@ export class NotificationService {
    */
   private async initNativePermissionStatus(): Promise<void> {
     if (!this.isNativePlatform() || this.nativePermissionInitialized) {
+      return;
+    }
+
+    await this.refreshNativePermissionStatus();
+  }
+
+  /**
+   * Refresh the native notification permission status from the OS,
+   * bypassing the one-time initialization flag. Best-effort; errors are
+   * logged and the last known state is kept.
+   */
+  private async refreshNativePermissionStatus(): Promise<void> {
+    if (!this.isNativePlatform()) {
       return;
     }
 
@@ -136,9 +163,8 @@ export class NotificationService {
     }
 
     try {
-      // Wait for service worker to be ready
-      await navigator.serviceWorker.ready;
-      return navigator.serviceWorker.controller;
+      const registration = await navigator.serviceWorker.getRegistration();
+      return navigator.serviceWorker.controller ?? registration?.active ?? null;
     } catch {
       return null;
     }
@@ -181,33 +207,35 @@ export class NotificationService {
     const controller = await this.getServiceWorkerController();
 
     if (controller) {
+      const outputGeneration =
+        (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
       // Send notification request to service worker
       // Service worker handles navigation via data.url in notificationclick event
       controller.postMessage({
-        type: 'SEND_NOTIFICATION',
+        type: 'SEND_NOTIFICATION_V2',
         payload: {
           title,
           body,
           tag,
           requireInteraction,
           autoCloseMs,
+          outputGeneration,
           data: {
             ...data,
             url: (data?.url as string) || '/discussions',
           },
         },
       });
-    } else {
-      // Fallback to direct notification if service worker not available
-      await this.showNotificationInternal(
-        title,
-        body,
-        tag,
-        autoCloseMs,
-        onClick,
-        requireInteraction
-      );
+      return;
     }
+    await this.showNotificationInternal(
+      title,
+      body,
+      tag,
+      autoCloseMs,
+      onClick,
+      requireInteraction
+    );
   }
 
   /**
@@ -267,6 +295,14 @@ export class NotificationService {
         ],
       });
     } catch (error) {
+      // The `Notification` constructor doesn't exist in iOS/Android WebViews,
+      // so the browser-based fallback would always throw on native platforms.
+      // Only fall back when not running natively; otherwise just log.
+      if (this.isNativePlatform()) {
+        logger.error('Failed to show native notification:', error);
+        return;
+      }
+
       // If anything goes wrong, log and fall back to browser-based notification
       logger.error(
         'Failed to show native notification, falling back to web notification:',
@@ -310,6 +346,8 @@ export class NotificationService {
       silent: false,
     });
 
+    directNotifications.add(notification);
+
     // Handle notification click
     notification.onclick = () => {
       window.focus();
@@ -317,11 +355,13 @@ export class NotificationService {
         onClick();
       }
       notification.close();
+      directNotifications.delete(notification);
     };
 
     // Auto-close after specified time
     setTimeout(() => {
       notification.close();
+      directNotifications.delete(notification);
     }, autoCloseMs);
   }
 
@@ -461,7 +501,7 @@ export class NotificationService {
   getPermissionStatus(): NotificationPermission {
     if (this.isNativePlatform()) {
       // Kick off async sync with native permission state; return last known state.
-      void this.initNativePermissionStatus();
+      void this.refreshNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }
@@ -475,7 +515,7 @@ export class NotificationService {
   getPreferences(): NotificationPreferences {
     if (this.isNativePlatform()) {
       // Kick off async sync with native permission state; return last known state.
-      void this.initNativePermissionStatus();
+      void this.refreshNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }
@@ -493,8 +533,7 @@ export class NotificationService {
   async fetchPreferences(): Promise<NotificationPreferences> {
     if (this.isNativePlatform()) {
       // Force a fresh read so the returned state reflects the real OS status.
-      this.nativePermissionInitialized = false;
-      await this.initNativePermissionStatus();
+      await this.refreshNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }
@@ -579,16 +618,45 @@ export class NotificationService {
    * Clear all notifications with Gossip tags
    */
   async clearAllNotifications(): Promise<void> {
-    if ('serviceWorker' in navigator) {
+    if (this.isNativePlatform()) {
+      const failures: unknown[] = [];
       try {
-        const registration = await navigator.serviceWorker.ready;
-        const notifications = await registration.getNotifications();
-        notifications.forEach(notification => {
-          notification.close();
-        });
+        const { backgroundRunnerStorageService } =
+          await import('./backgroundRunnerStorage');
+        await backgroundRunnerStorageService.cancelNotifications();
       } catch (error) {
-        logger.error('Failed to clear notifications:', error);
+        failures.push(error);
       }
+      try {
+        const pending = await LocalNotifications.getPending();
+        if (pending.notifications.length > 0) {
+          await LocalNotifications.cancel({
+            notifications: pending.notifications.map(({ id }) => ({ id })),
+          });
+        }
+      } catch (error) {
+        failures.push(error);
+      }
+      try {
+        await LocalNotifications.removeAllDeliveredNotifications();
+      } catch (error) {
+        failures.push(error);
+      }
+      if (failures.length > 0) {
+        throw new Error('Notification cleanup is incomplete');
+      }
+      return;
+    }
+
+    closeDirectNotifications();
+    notificationCleanupChannel?.postMessage('clear');
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (!registration) return;
+      const notifications = await registration.getNotifications();
+      notifications.forEach(notification => {
+        notification.close();
+      });
     }
   }
 }

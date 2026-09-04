@@ -57,6 +57,8 @@
   "name_label": "Name",
   "name_placeholder": "Contact name",
   "message_label": "Contact request message (optional)",
+  "message_label_main": "Contact request message",
+  "message_label_optional": "(optional)",
   "message_placeholder": "Introduce yourself or add context to your contact request...",
   "use_default_message": "Use default message",
   "user_id_label": "User ID",
@@ -64,5 +66,20 @@
   "user_id_loading": "Loading public key",
   "user_id_helper": "User ID is a unique 32-byte identifier",
   "share_invitation": "Share Invitation",
-  "file": "File"
+  "file": "File",
+  "share": {
+    "hide_username": "Hide username from invite",
+    "include_username": "Include username in invite",
+    "edit_username": "Edit username",
+    "edit_shared_username": "Edit shared username",
+    "link_copied": "Link copied!",
+    "copy_invite_link": "Copy invite link",
+    "qr": "QR",
+    "expiry_hint": "Invitations expire after 2 weeks. File invitations don't.",
+    "expiry_popover": "Invitations expire 2 weeks after your last connection. Each time you open the app, validity is renewed if more than 24 hours have passed. File invitations never expire.",
+    "file_modal_title": "Share invitation by file",
+    "file_modal_body": "Share your profile as a file with people you want to talk to. Your contact can import your file from the <newContactLink>New Contact</newContactLink> page.",
+    "file_modal_note": "Compared to other profile sharing mode, the file profile remains valid even if you don't login to the app for more than 2 weeks.",
+    "share_file": "Share file"
+  }
 }

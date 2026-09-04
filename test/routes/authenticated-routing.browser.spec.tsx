@@ -71,6 +71,9 @@ vi.mock('../../src/pages/SelfDiscussion', () => ({
 vi.mock('../../src/pages/InvitePage', () => ({
   InvitePage: stubPage('page-invite'),
 }));
+vi.mock('../../src/pages/PortableBackup', () => ({
+  default: stubPage('page-portable-backup'),
+}));
 
 // Settings sub-pages
 vi.mock('../../src/pages/settings/SecuritySettings', () => ({
@@ -257,6 +260,7 @@ describe('AuthenticatedRoutes', () => {
 
   describe('settings sub-pages', () => {
     const subPages = [
+      { path: '/backup', testId: 'page-portable-backup' },
       { path: '/settings/security', testId: 'page-settings-security' },
       {
         path: '/settings/notifications',
@@ -369,25 +373,25 @@ describe('AuthenticatedRoutes', () => {
 
     it('shows bottom navigation on /discussions', async () => {
       await renderAtRoute('/discussions');
-      const nav = page.getByRole('navigation', { name: 'Main navigation' });
+      const nav = page.getByRole('navigation', { name: 'navigation.label' });
       await expect.element(nav).toBeInTheDocument();
     });
 
     it('shows bottom navigation on /settings', async () => {
       await renderAtRoute('/settings');
-      const nav = page.getByRole('navigation', { name: 'Main navigation' });
+      const nav = page.getByRole('navigation', { name: 'navigation.label' });
       await expect.element(nav).toBeInTheDocument();
     });
 
     it('hides bottom navigation on /discussion/:userId', async () => {
       await renderAtRoute('/discussion/user123');
-      const nav = page.getByRole('navigation', { name: 'Main navigation' });
+      const nav = page.getByRole('navigation', { name: 'navigation.label' });
       await expect.element(nav).not.toBeInTheDocument();
     });
 
     it('hides bottom navigation on settings sub-pages', async () => {
       await renderAtRoute('/settings/security');
-      const nav = page.getByRole('navigation', { name: 'Main navigation' });
+      const nav = page.getByRole('navigation', { name: 'navigation.label' });
       await expect.element(nav).not.toBeInTheDocument();
     });
   });

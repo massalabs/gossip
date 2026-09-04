@@ -22,7 +22,8 @@ import { encodeUserId } from '../../src/utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
 import { ensureWasmInitialized } from '../../src/wasm';
 import { clearAllTables, getTestQueries } from '../testDb';
-import type { Queries } from '../../src/db/queries';
+import { ProfileService } from '../../src/services/profile';
+import { rowToUserProfile, type Queries } from '../../src/db/queries';
 import { makeUserProfileRow } from '../helpers/factories';
 
 function createMockAuthProtocol(
@@ -193,6 +194,15 @@ describe('AuthService', () => {
       );
     });
 
+    it('coalesces concurrent publication attempts for the same user', async () => {
+      await Promise.all([
+        authService.publishPublicKey(testPublicKeys, testUserId, queries),
+        authService.publishPublicKey(testPublicKeys, testUserId, queries),
+      ]);
+
+      expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledOnce();
+    });
+
     it('should update lastPublicKeyPush after publishing', async () => {
       vi.mocked(mockAuthProtocol.postPublicKey).mockResolvedValue('hash123');
 
@@ -200,6 +210,153 @@ describe('AuthService', () => {
 
       const profile = await queries.userProfiles.getById(testUserId);
       expect(profile?.lastPublicKeyPush).toBeTruthy();
+    });
+
+    it('atomically preserves publication during a concurrent stale save', async () => {
+      const publicationTime = new Date('2026-08-24T12:00:00.000Z');
+      const staleTime = new Date(
+        publicationTime.getTime() - 25 * 60 * 60 * 1000
+      );
+      await queries.userProfiles.updateById(testUserId, {
+        lastPublicKeyPush: staleTime,
+      });
+      const staleRow = await queries.userProfiles.getById(testUserId);
+      if (!staleRow) throw new Error('test profile missing');
+      const staleProfile = rowToUserProfile(staleRow);
+      const originalUpsert = queries.userProfiles.upsert.bind(
+        queries.userProfiles
+      );
+      let releaseUpsert!: () => void;
+      const upsertGate = new Promise<void>(resolve => {
+        releaseUpsert = resolve;
+      });
+      const upsert = vi
+        .spyOn(queries.userProfiles, 'upsert')
+        .mockImplementation(async values => {
+          await upsertGate;
+          await originalUpsert(values);
+        });
+      const now = vi
+        .spyOn(Date, 'now')
+        .mockReturnValue(publicationTime.getTime());
+
+      try {
+        const staleSave = new ProfileService(queries).save(staleProfile);
+        await vi.waitFor(() => expect(upsert).toHaveBeenCalledOnce());
+        await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+        releaseUpsert();
+        await staleSave;
+
+        const profile = await queries.userProfiles.getById(testUserId);
+        expect(profile?.lastPublicKeyPush).toEqual(publicationTime);
+      } finally {
+        releaseUpsert();
+        now.mockRestore();
+        upsert.mockRestore();
+      }
+    });
+
+    it('retries timestamp persistence without repeating a successful post', async () => {
+      const publicationTime = new Date('2026-08-24T13:00:00.000Z');
+      const originalUpdate =
+        queries.userProfiles.updateLastPublicKeyPushMax.bind(
+          queries.userProfiles
+        );
+      const update = vi
+        .spyOn(queries.userProfiles, 'updateLastPublicKeyPushMax')
+        .mockRejectedValueOnce(new Error('timestamp persistence failed'))
+        .mockImplementation(originalUpdate);
+      const now = vi
+        .spyOn(Date, 'now')
+        .mockReturnValue(publicationTime.getTime());
+
+      try {
+        await expect(
+          authService.publishPublicKey(testPublicKeys, testUserId, queries)
+        ).rejects.toThrow('timestamp persistence failed');
+        await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+
+        expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledOnce();
+        expect(update).toHaveBeenCalledTimes(2);
+        const profile = await queries.userProfiles.getById(testUserId);
+        expect(profile?.lastPublicKeyPush).toEqual(publicationTime);
+      } finally {
+        now.mockRestore();
+        update.mockRestore();
+      }
+    });
+
+    it('retains a confirmed timestamp until its profile row exists', async () => {
+      const publicationTime = new Date('2026-08-24T14:00:00.000Z');
+      const retryTime = new Date('2026-08-24T14:05:00.000Z');
+      let currentTime = publicationTime.getTime();
+      await queries.userProfiles.delete(testUserId);
+      const update = vi.spyOn(
+        queries.userProfiles,
+        'updateLastPublicKeyPushMax'
+      );
+      const now = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
+
+      try {
+        await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+        expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledOnce();
+        await expect(update.mock.results[0].value).resolves.toBe(false);
+
+        await queries.userProfiles.insert(
+          makeUserProfileRow({ userId: testUserId })
+        );
+        currentTime = retryTime.getTime();
+        await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+
+        expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledOnce();
+        expect(update).toHaveBeenCalledTimes(2);
+        const profile = await queries.userProfiles.getById(testUserId);
+        expect(profile?.lastPublicKeyPush).toEqual(publicationTime);
+      } finally {
+        now.mockRestore();
+        update.mockRestore();
+      }
+    });
+
+    it('does not let older pending persistence move durable time backward', async () => {
+      const olderTime = new Date('2026-08-24T14:00:00.000Z');
+      const newerTime = new Date('2026-08-24T15:00:00.000Z');
+      const update = vi
+        .spyOn(queries.userProfiles, 'updateLastPublicKeyPushMax')
+        .mockRejectedValueOnce(new Error('timestamp persistence failed'));
+      const now = vi.spyOn(Date, 'now').mockReturnValue(olderTime.getTime());
+
+      try {
+        await expect(
+          authService.publishPublicKey(testPublicKeys, testUserId, queries)
+        ).rejects.toThrow('timestamp persistence failed');
+        await queries.userProfiles.updateById(testUserId, {
+          lastPublicKeyPush: newerTime,
+        });
+
+        await expect(
+          authService.persistPendingPublicationTimestamp(testUserId, queries)
+        ).resolves.toBe(true);
+        expect(
+          (await queries.userProfiles.getById(testUserId))?.lastPublicKeyPush
+        ).toEqual(newerTime);
+      } finally {
+        now.mockRestore();
+        update.mockRestore();
+      }
+    });
+
+    it('retries the post when server success was not confirmed', async () => {
+      vi.mocked(mockAuthProtocol.postPublicKey)
+        .mockRejectedValueOnce(new Error('network failed'))
+        .mockResolvedValueOnce('hash123');
+
+      await expect(
+        authService.publishPublicKey(testPublicKeys, testUserId, queries)
+      ).rejects.toThrow('network failed');
+      await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+
+      expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledTimes(2);
     });
 
     it('should skip publishing if published less than 24h ago', async () => {

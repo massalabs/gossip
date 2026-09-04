@@ -1,29 +1,25 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Capacitor } from '@capacitor/core';
-import { Lock, Shield, Zap } from 'react-feather';
-import { validatePassword } from '@massalabs/gossip-sdk';
+import { Key, PlusCircle, Zap } from 'react-feather';
+import { validateMnemonic, validatePassword } from '@massalabs/gossip-sdk';
 import {
   validateUsernameFormat,
   USERNAME_MAX_LENGTH,
 } from '../../utils/validation';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/Layout/PageLayout';
-import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
-import ICloudSyncModal from '../ui/ICloudSyncModal';
 import PasswordConfirmModal from './PasswordConfirmModal';
-import { checkBiometricAvailability } from '../../services/biometricService';
+import PrivacyNotice from './PrivacyNotice';
 import { scrollFieldIntoView } from '../../utils/scrollFieldIntoView';
-import { WEBAUTHN_PRF_UNSUPPORTED_ERROR_CODE } from '../../crypto/webauthn';
+import TabSwitcher from '../ui/TabSwitcher';
 
 export interface AccountCreationResult {
   username: string;
-  useBiometrics: boolean;
-  password?: string;
-  iCloudSync?: boolean;
+  password: string;
+  mnemonic?: string;
 }
 
 interface AccountCreationFormProps {
@@ -31,6 +27,8 @@ interface AccountCreationFormProps {
   onBack?: () => void;
   /** When true, wraps in PageLayout with header. Default: true */
   standalone?: boolean;
+  /** Expose per-account create/import identity tabs. */
+  allowMnemonicImport?: boolean;
 }
 
 type ValidationResult = { valid: boolean; error?: string };
@@ -38,12 +36,15 @@ type ValidationResult = { valid: boolean; error?: string };
 function FieldErrorHint({
   hasError,
   message,
+  id,
 }: {
   hasError: boolean;
   message: string;
+  id?: string;
 }) {
   return (
     <p
+      id={id}
       className={`text-xs text-center mt-1 h-4 ${hasError ? 'text-destructive' : 'invisible'}`}
     >
       {hasError ? message : '\u00A0'}
@@ -56,29 +57,41 @@ function FormFieldRow({
   label,
   children,
   errorHint,
+  inputId,
+  errorHintId,
 }: {
   label: React.ReactNode;
   children: React.ReactNode;
   errorHint: { hasError: boolean; message: string };
+  inputId?: string;
+  errorHintId?: string;
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-foreground mb-1.5">
+      <label
+        htmlFor={inputId}
+        className="block text-sm font-medium text-foreground mb-1.5"
+      >
         {label}
       </label>
       {children}
       <FieldErrorHint
         hasError={errorHint.hasError}
         message={errorHint.message}
+        id={errorHintId}
       />
     </div>
   );
 }
 
+const normalizeMnemonic = (value: string) =>
+  value.trim().toLowerCase().split(/\s+/).join(' ');
+
 const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
   onSubmit,
   onBack,
   standalone = true,
+  allowMnemonicImport = false,
 }) => {
   const { t } = useTranslation('auth');
 
@@ -91,31 +104,23 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [canUseBiometrics, setCanUseBiometrics] = useState(false);
-  const [authMode, setAuthMode] = useState<'password' | 'biometrics'>(
-    'password'
-  );
-  const [showICloudModal, setShowICloudModal] = useState(false);
   const [showPasswordConfirmModal, setShowPasswordConfirmModal] =
     useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
+  const [identityMode, setIdentityMode] = useState<'create' | 'import'>(
+    'create'
+  );
+  const [mnemonic, setMnemonic] = useState('');
+  const [mnemonicError, setMnemonicError] = useState<string | null>(null);
 
-  const isIOS = Capacitor.getPlatform() === 'ios';
-
-  useEffect(() => {
-    checkBiometricAvailability()
-      .then(({ available }) => {
-        setCanUseBiometrics(available);
-        if (available) setAuthMode('biometrics');
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    setError(null);
-    setUsernameError(null);
-    setPasswordError(null);
-  }, [authMode]);
+  // Cache only the non-sensitive result. The normalized mnemonic remains a
+  // submission-local value rather than an additional long-lived React value.
+  const mnemonicIsValid = useMemo(
+    () =>
+      identityMode === 'create' ||
+      validateMnemonic(normalizeMnemonic(mnemonic)),
+    [identityMode, mnemonic]
+  );
 
   const handleValidatedChange = useCallback(
     (
@@ -135,56 +140,56 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
     []
   );
 
-  const handleUsernameChange = handleValidatedChange(
-    validateUsernameFormat,
-    setUsername,
-    setIsUsernameValid,
-    setUsernameError
+  const handleUsernameChange = useMemo(
+    () =>
+      handleValidatedChange(
+        validateUsernameFormat,
+        setUsername,
+        setIsUsernameValid,
+        setUsernameError
+      ),
+    [handleValidatedChange]
   );
 
-  const handlePasswordChange = handleValidatedChange(
-    validatePassword,
-    setPassword,
-    setIsPasswordValid,
-    setPasswordError
+  const handlePasswordChange = useMemo(
+    () =>
+      handleValidatedChange(
+        validatePassword,
+        setPassword,
+        setIsPasswordValid,
+        setPasswordError
+      ),
+    [handleValidatedChange]
   );
 
   const passwordsMatch = password === confirmPassword;
-  const usePassword = authMode === 'password';
-  const canSubmit = usePassword
-    ? isUsernameValid && isPasswordValid && passwordsMatch && !isCreating
-    : isUsernameValid && !isCreating;
+  const canSubmit =
+    isUsernameValid &&
+    isPasswordValid &&
+    passwordsMatch &&
+    mnemonicIsValid &&
+    !isCreating;
 
   const confirmMismatch = confirmPassword.length > 0 && !passwordsMatch;
 
-  const doSubmit = async (iCloudSync = false) => {
+  const doSubmit = async () => {
     setIsCreating(true);
     setError(null);
 
     try {
       await onSubmit({
         username,
-        useBiometrics: !usePassword,
-        password: usePassword ? password : undefined,
-        iCloudSync,
+        password,
+        ...(identityMode === 'import'
+          ? { mnemonic: normalizeMnemonic(mnemonic) }
+          : {}),
       });
       setPassword('');
       setConfirmPassword('');
+      setMnemonic('');
     } catch (err) {
       logger.error('Error creating account:', err);
-      const message = err instanceof Error ? err.message : '';
-      const isPrfProviderError =
-        message.includes(WEBAUTHN_PRF_UNSUPPORTED_ERROR_CODE) ||
-        message.includes(
-          'passkey provider does not support required biometric key derivation'
-        ) ||
-        message.includes('PRF extension not supported by this authenticator');
-
-      setError(
-        isPrfProviderError
-          ? t('create.biometric_prf_unsupported')
-          : t('create.failed')
-      );
+      setError(t('create.failed'));
       setIsCreating(false);
     }
   };
@@ -200,51 +205,89 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
       return;
     }
 
+    if (identityMode === 'import' && !mnemonicIsValid) {
+      setMnemonicError(t('create.mnemonic_invalid'));
+      return;
+    }
     if (!canSubmit) return;
 
-    if (!usePassword && isIOS) {
-      setShowICloudModal(true);
-    } else if (usePassword) {
-      setShowPasswordConfirmModal(true);
-    } else {
-      await doSubmit(false);
-    }
+    setShowPasswordConfirmModal(true);
   };
 
   const handlePasswordConfirm = async () => {
     setShowPasswordConfirmModal(false);
-    await doSubmit(false);
+    await doSubmit();
   };
 
   const formContent = (
     <>
-      {canUseBiometrics && (
+      {allowMnemonicImport && (
         <TabSwitcher
           options={[
             {
-              value: 'biometrics',
-              label: t('create.biometrics'),
-              icon: <Shield className="w-4 h-4" />,
+              value: 'create',
+              label: t('create.new_tab'),
+              icon: <PlusCircle className="w-4 h-4" />,
             },
             {
-              value: 'password',
-              label: t('create.password'),
-              icon: <Lock className="w-4 h-4" />,
+              value: 'import',
+              label: t('create.import_tab'),
+              icon: <Key className="w-4 h-4" />,
             },
           ]}
-          value={authMode}
-          onChange={value => setAuthMode(value as 'password' | 'biometrics')}
+          value={identityMode}
+          onChange={value => {
+            setIdentityMode(value);
+            setMnemonic('');
+            setMnemonicError(null);
+            setError(null);
+          }}
+          className="mb-4"
         />
-      )}
-      {!canUseBiometrics && (
-        <div className="bg-card rounded-lg p-4 mb-4 border border-border">
-          <p className="text-muted-foreground text-sm">
-            {t('create.biometric_not_supported')}
-          </p>
-        </div>
       )}
       <div className="bg-background rounded-lg p-6 ">
         <form onSubmit={handleFormSubmit} className="space-y-1">
+          {identityMode === 'import' && (
+            <FormFieldRow
+              label={t('create.mnemonic_label')}
+              inputId="account-mnemonic"
+              errorHintId="account-mnemonic-error"
+              errorHint={{
+                hasError: !!mnemonicError,
+                message: mnemonicError || '',
+              }}
+            >
+              <textarea
+                id="account-mnemonic"
+                aria-invalid={!!mnemonicError}
+                aria-describedby="account-mnemonic-error"
+                value={mnemonic}
+                onChange={event => {
+                  const value = event.target.value;
+                  setMnemonic(value);
+                  setMnemonicError(
+                    value.length > 0 &&
+                      !validateMnemonic(normalizeMnemonic(value))
+                      ? t('create.mnemonic_invalid')
+                      : null
+                  );
+                  setError(null);
+                }}
+                onFocus={scrollFieldIntoView}
+                placeholder={t('create.mnemonic_placeholder')}
+                disabled={isCreating}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                className={`w-full min-h-28 resize-none rounded-2xl border bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus-visible:ring-2 ${
+                  mnemonicError
+                    ? 'border-destructive/60 focus-visible:ring-destructive/30'
+                    : 'border-border focus-visible:ring-ring/30'
+                }`}
+              />
+            </FormFieldRow>
+          )}
+
           <FormFieldRow
             label={t('create.username')}
             errorHint={{
@@ -263,52 +306,55 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
             />
           </FormFieldRow>
 
-          {usePassword && (
-            <>
-              <FormFieldRow
-                label={t('create.password')}
-                errorHint={{
-                  hasError: !!passwordError,
-                  message: passwordError || '',
-                }}
-              >
-                <RoundedInput
-                  type="password"
-                  value={password}
-                  onChange={handlePasswordChange}
-                  onFocus={scrollFieldIntoView}
-                  placeholder={t('create.enter_password')}
-                  error={!!passwordError}
-                  disabled={isCreating}
-                  showPasswordToggle={true}
-                  showPassword={showPasswords}
-                  onShowPasswordChange={setShowPasswords}
-                />
-              </FormFieldRow>
+          <PrivacyNotice
+            tone="warning"
+            title={t('create.unique_password_title')}
+            content={t('create.unique_password_warning')}
+            className="mb-3"
+          />
 
-              <FormFieldRow
-                label={t('create.confirm_password_label')}
-                errorHint={{
-                  hasError: confirmMismatch,
-                  message: confirmMismatch
-                    ? t('create.passwords_do_not_match')
-                    : '',
-                }}
-              >
-                <RoundedInput
-                  type="password"
-                  value={confirmPassword}
-                  onChange={e => setConfirmPassword(e.target.value)}
-                  onFocus={scrollFieldIntoView}
-                  placeholder={t('create.confirm_password')}
-                  error={confirmMismatch}
-                  disabled={isCreating}
-                  showPasswordToggle={false}
-                  showPassword={showPasswords}
-                />
-              </FormFieldRow>
-            </>
-          )}
+          <FormFieldRow
+            label={t('create.password')}
+            errorHint={{
+              hasError: !!passwordError,
+              message: passwordError || '',
+            }}
+          >
+            <RoundedInput
+              type="password"
+              value={password}
+              onChange={handlePasswordChange}
+              onFocus={scrollFieldIntoView}
+              placeholder={t('create.enter_password')}
+              error={!!passwordError}
+              disabled={isCreating}
+              showPasswordToggle={true}
+              showPassword={showPasswords}
+              onShowPasswordChange={setShowPasswords}
+            />
+          </FormFieldRow>
+
+          <FormFieldRow
+            label={t('create.confirm_password_label')}
+            errorHint={{
+              hasError: confirmMismatch,
+              message: confirmMismatch
+                ? t('create.passwords_do_not_match')
+                : '',
+            }}
+          >
+            <RoundedInput
+              type="password"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              onFocus={scrollFieldIntoView}
+              placeholder={t('create.confirm_password')}
+              error={confirmMismatch}
+              disabled={isCreating}
+              showPasswordToggle={false}
+              showPassword={showPasswords}
+            />
+          </FormFieldRow>
 
           {error && (
             <div className="p-4 bg-destructive/10 border border-destructive/30 rounded-lg">
@@ -328,21 +374,25 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
             {!isCreating && (
               <>
                 <Zap className="w-5 h-5" />
-                <span>{t('create.title')}</span>
+                <span>
+                  {identityMode === 'import'
+                    ? t('create.import_account')
+                    : t('create.title')}
+                </span>
               </>
             )}
           </Button>
         </form>
       </div>
-      <ICloudSyncModal
-        isOpen={showICloudModal}
-        onClose={() => setShowICloudModal(false)}
-        onConfirm={(enableSync: boolean) => doSubmit(enableSync)}
-      />
       <PasswordConfirmModal
         isOpen={showPasswordConfirmModal}
         onConfirm={handlePasswordConfirm}
         onCancel={() => setShowPasswordConfirmModal(false)}
+        confirmLabel={
+          identityMode === 'import'
+            ? t('create.password_confirm_import')
+            : undefined
+        }
       />
     </>
   );

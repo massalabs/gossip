@@ -8,6 +8,7 @@
   "copy_mns_domain": "复制 MNS 域名",
   "menu": {
     "account_backup": "账户备份",
+    "secure_backup": "安全备份",
     "share_contact": "分享联系方式",
     "notifications": "通知",
     "appearance": "外观",
@@ -21,10 +22,16 @@
     "feedback": "发送反馈"
   },
   "delete_account": {
-    "button": "删除账户",
-    "title": "删除账户",
-    "confirm": "确定要删除此账户吗？",
-    "warning": "此操作无法撤销"
+    "button": "删除所有账户",
+    "title": "删除所有账户",
+    "confirm": "永久删除此设备上的所有 Gossip 账户？",
+    "warning": "消息、会话、生物识别登录和中断的导入数据也会被删除。外部备份文件不会改变。此操作无法撤销。"
+  },
+  "delete_session": {
+    "title": "删除当前会话",
+    "warning": "注意：删除当前会话是不可逆的操作",
+    "popover": "如果设备上有其他会话，它们不会被删除",
+    "confirm": "删除会话"
   },
   "edit_username_modal": {
     "title": "修改用户名",
@@ -43,7 +50,14 @@
     "qr_alt": "您的联系方式二维码"
   },
   "appearance": {
-    "title": "外观"
+    "title": "外观",
+    "theme": "主题",
+    "select_theme": "选择主题",
+    "theme_light": "浅色",
+    "theme_dark": "深色",
+    "theme_system": "跟随系统",
+    "bottom_nav": "底部导航栏",
+    "toggle_bottom_nav": "开关底部导航栏"
   },
   "about": {
     "title": "关于",
@@ -80,6 +94,30 @@
     "password_required": "需要输入密码",
     "show_failed": "显示备份信息失败，请重试。"
   },
+  "portable_backup": {
+    "title": "安全备份",
+    "all_accounts_title": "备份所有账户",
+    "description": "创建一个可移植备份，其中包含此设备上的所有加密账户槽位。",
+    "important": "重要：请保持 Gossip 开启，直到备份验证完成。离开应用可能会中断备份或导致备份损坏。",
+    "possession_warning": "此备份没有额外密码。任何获得备份的人都可以离线尝试猜测您的账户密码。请安全保存。",
+    "choose_destination": "选择备份位置",
+    "change_destination": "更改位置",
+    "destination": "保存位置",
+    "selected_file": "所选的 Gossip 备份",
+    "export": "导出所有账户数据",
+    "notification_title": "Gossip 安全备份",
+    "preparing": "正在准备备份",
+    "writing": "正在写入备份",
+    "verifying": "正在验证备份",
+    "success_title": "备份已验证",
+    "success_body": "可移植备份已成功写入并通过验证。",
+    "continue_login": "继续登录",
+    "retry": "重试备份",
+    "failed": "备份未完成。本次操作创建的所有未验证输出均已删除。",
+    "interrupted": "之前写入 {{name}} 的备份已中断。重试或继续之前，Gossip 必须删除未完成的输出。",
+    "cleanup_required": "备份未完成。Gossip 无法删除未验证输出。请先手动删除 {{name}} 再继续。",
+    "unsupported": "此浏览器不支持安全流式备份。请使用受支持的桌面浏览器。"
+  },
   "debug": {
     "title": "调试",
     "show_debug": "显示调试选项",
@@ -91,6 +129,18 @@
   },
   "security": {
     "title": "安全",
+    "biometric_title": "使用生物识别登录",
+    "biometric_description": "为此账户启用生物识别。导入和恢复时仍需使用密码。",
+    "biometric_warning": "同一时间只有一个账户可以使用生物识别登录。为此账户设置后会替换当前关联的账户。为保护隐私，Gossip 无法显示当前关联的是哪个账户。",
+    "biometric_use_for_account": "用于此账户",
+    "biometric_password_title": "确认密码",
+    "biometric_password_description": "启用生物识别登录前，请输入此账户的密码。",
+    "biometric_password_placeholder": "输入密码",
+    "biometric_password_continue": "继续",
+    "biometric_password_cancel": "取消",
+    "biometric_password_invalid": "此账户的密码不正确。",
+    "biometric_success": "生物识别登录已更新。",
+    "biometric_failed": "生物识别设置失败，请重试。",
     "native_only": "安全设置仅在原生平台（Android 和 iOS）上可用。",
     "auto_lock_title": "闲置锁定",
     "auto_lock_description": "应用在后台运行一段时间后自动锁定。",

@@ -4,4 +4,10 @@
     <string name="foreground_sync_channel_desc">Сохраняет синхронизацию сообщений в этом режиме</string>
     <string name="foreground_sync_notification_title">Gossip синхронизируется</string>
     <string name="foreground_sync_notification_body">Синхронизация в фоне для актуальности ваших сообщений</string>
+    <string name="portable_backup_channel_name">Резервные копии Gossip</string>
+    <string name="portable_backup_channel_desc">Ход записи и проверки резервной копии</string>
+    <string name="portable_backup_notification_title">Защищённая резервная копия Gossip</string>
+    <string name="portable_backup_notification_preparing">Подготовка резервной копии</string>
+    <string name="portable_backup_notification_writing">Запись резервной копии</string>
+    <string name="qr_scanner_close">Закрыть сканер</string>
 </resources>

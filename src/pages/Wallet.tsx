@@ -18,7 +18,8 @@ import toast from 'react-hot-toast';
 // no-op
 
 const Wallet: React.FC = () => {
-  const { account, evmAddress } = useAccountStore();
+  const account = useAccountStore.use.account();
+  const evmAddress = useAccountStore.use.evmAddress();
   const tokens = useWalletStore.use.tokens();
   const isLoading = useWalletStore.use.isLoading();
   const refreshBalances = useWalletStore.use.refreshBalances();
@@ -63,7 +64,7 @@ const Wallet: React.FC = () => {
             className="p-2"
           >
             <RefreshCcw
-              className={`w-5 h-5 text-gray-600 dark:text-gray-300 ${isRefreshing ? '-animate-spin' : ''}`}
+              className={`w-5 h-5 text-gray-600 dark:text-gray-300 ${isRefreshing ? 'animate-spin' : ''}`}
             />
           </Button>
         </div>
@@ -162,7 +163,7 @@ const Wallet: React.FC = () => {
         <div className="px-6">
           <div className="space-y-0">
             {tokens.map((token, index) => (
-              <div key={index}>
+              <div key={token.ticker}>
                 <div className="flex items-center py-4">
                   {/* Token Icon */}
                   <div className="mr-4">

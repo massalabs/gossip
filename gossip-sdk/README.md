@@ -121,6 +121,37 @@ await sdk.openSession({
 await sdk.closeSession();
 ```
 
+### Atomic secure-storage onboarding
+
+A fresh secure-storage backend accepts account creation only inside one atomic
+candidate. Begin once, create and durably lock every account, then commit the
+complete generation or abort it:
+
+```typescript
+await sdk.secureStorageBeginOnboardingCandidate();
+try {
+  for (const account of accounts) {
+    await sdk.secureStorageCreate(account.slot, account.password);
+    // Write this account's encrypted profile/session data here.
+    await sdk.secureStorageLock();
+  }
+  await sdk.secureStorageCommitOnboardingCandidate();
+} catch (error) {
+  if (sdk.isSessionOpen) await sdk.closeSession();
+  if (sdk.storageState === 'unlocked') await sdk.secureStorageLock();
+  await sdk.secureStorageAbortOnboardingCandidate().catch(() => {});
+  throw error;
+}
+```
+
+`secureStorageCommitOnboardingCandidate()` and
+`secureStorageAbortOnboardingCandidate()` reject with `SESSION_OPEN` while an
+SDK session is open. Process termination before commit discards the in-memory
+candidate; one successful commit activates all three slots together. Both
+onboarding and portable import expose the same source-neutral
+`accountGenerationEpoch`, which encrypted per-account migrations can use as an
+idempotency key.
+
 ## Service APIs
 
 All services are available after `openSession()` is called.
@@ -437,4 +468,4 @@ gossip-sdk/
 
 ## License
 
-MIT
+MASSA LABS-owned source in this package is licensed under the **GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later`). See [`LICENSE`](./LICENSE) for the full text. Bundled third-party components retain their own licenses; see [`THIRD_PARTY_NOTICES.txt`](./THIRD_PARTY_NOTICES.txt).

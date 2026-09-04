@@ -5,8 +5,57 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1771949224449,
-      "tag": "0000_fixed_hawkeye",
+      "when": 1730000000000,
+      "tag": "0000_nifty_molly_hayes",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1740000000000,
+      "tag": "0001_messages_edit_of",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1741000000000,
+      "tag": "0002_discussions_pinned",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1742000000000,
+      "tag": "0003_messages_reaction_of",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1743000000000,
+      "tag": "0004_discussions_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1744000000000,
+      "tag": "0005_discussions_muted",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787602604377,
+      "tag": "0006_odd_titania",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1787775880997,
+      "tag": "0007_odd_lenny_balinger",
       "breakpoints": true
     }
   ]

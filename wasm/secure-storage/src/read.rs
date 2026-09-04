@@ -11,6 +11,43 @@ use crate::storage::BlockStorage;
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, UnlockedSession};
 
+/// Bound password-preview memory independently of the 64-GiB transfer limit.
+/// Larger valid backups remain preserved and retryable but require a future
+/// demand-paged preview implementation (tracked outside this first release).
+pub const MAX_PREVIEW_DATABASE_BYTES: u64 = 128 * 1024 * 1024;
+
+pub fn preview_block_count(total_length: u64) -> Result<u64> {
+    if total_length > MAX_PREVIEW_DATABASE_BYTES {
+        return Err(SecureStorageError::OutOfBounds);
+    }
+    let first_capacity = (PLAINTEXT_SIZE - LENGTH_HDR_SIZE) as u64;
+    if total_length <= first_capacity {
+        return Ok(1);
+    }
+    let remaining = total_length - first_capacity;
+    let block_size = PLAINTEXT_SIZE as u64;
+    Ok(1 + remaining.div_ceil(block_size))
+}
+
+/// Read the candidate length header before all declared padding blocks are
+/// retained. Unlike normal namespace loading, this deliberately does not
+/// compare the length against the currently admitted block count.
+pub fn preview_total_length_from_block_zero<S: BlockStorage>(
+    storage: &S,
+    domain: &str,
+    namespace: u8,
+    session: &UnlockedSession,
+) -> Result<u64> {
+    let plaintext = decrypt_session_data_block(storage, domain, namespace, session, 0)?;
+    let length = u64::from_be_bytes(
+        plaintext[..LENGTH_HDR_SIZE]
+            .try_into()
+            .map_err(|_| SecureStorageError::CorruptedBlock)?,
+    );
+    preview_block_count(length)?;
+    Ok(length)
+}
+
 /// Internal helper to decrypt a single block given all session parameters.
 fn _decrypt_session_data_block<S: BlockStorage>(
     storage: &S,
@@ -22,7 +59,7 @@ fn _decrypt_session_data_block<S: BlockStorage>(
     root_aead_key: &[u8],
     block_index: u64,
 ) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
-    if session_version != 0 {
+    if !crate::keypair::is_supported_session_version(session_version) {
         return Err(SecureStorageError::UnsupportedVersion(session_version));
     }
     let block_ct = storage.read_block(session_index, namespace, block_index)?;
@@ -199,6 +236,7 @@ mod tests {
     use super::*;
     use crate::DEFAULT_NAMESPACE;
     use crate::block::encrypt_block;
+    use crate::keypair::CURRENT_SESSION_VERSION;
     use crate::pq::pq_keygen;
     use crate::storage::MemoryStorage;
     use crate::types::SessionIndex;
@@ -211,7 +249,7 @@ mod tests {
 
         UnlockedSession {
             session_index: SessionIndex::new(0).unwrap(),
-            session_version: 0,
+            session_version: CURRENT_SESSION_VERSION,
             pq_rerand_pk: pq_pk,
             pq_rerand_sk: pq_sk,
             root_aead_key: Zeroizing::new(root_aead_key),

@@ -62,15 +62,6 @@ pub fn root_kdf_salt(domain: &str) -> String {
     format!("{domain}:secure_storage:kdf:salt")
 }
 
-/// AAD for secret key wrapping: `{session_scope}:pq_sk_wrap`
-#[must_use]
-pub fn sk_wrap_aad(domain: &str, version: u32, index: SessionIndex) -> String {
-    format!(
-        "{domain}:secure_storage:session:v{version}:i{}:pq_sk_wrap",
-        index.as_u8()
-    )
-}
-
 /// Salt for per-block KDF: `{block_scope}:kdf:salt`
 ///
 /// Writes into `buf` (cleared first) to avoid allocations in per-block loops.
@@ -168,8 +159,8 @@ mod tests {
     fn test_block_scope_format() {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
-        block_scope(&mut buf, "app:ns", 0, idx, 0, 42);
-        assert_eq!(buf, "app:ns:secure_storage:session:v0:i0:n0:b42");
+        block_scope(&mut buf, "app:ns", 1, idx, 0, 42);
+        assert_eq!(buf, "app:ns:secure_storage:session:v1:i0:n0:b42");
     }
 
     #[test]
@@ -177,8 +168,8 @@ mod tests {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf0 = String::new();
         let mut buf1 = String::new();
-        block_scope(&mut buf0, "app", 0, idx, 0, 42);
-        block_scope(&mut buf1, "app", 0, idx, 1, 42);
+        block_scope(&mut buf0, "app", 1, idx, 0, 42);
+        block_scope(&mut buf1, "app", 1, idx, 1, 42);
         assert_ne!(buf0, buf1);
     }
 
@@ -196,30 +187,21 @@ mod tests {
     }
 
     #[test]
-    fn test_sk_wrap_aad() {
-        let idx = SessionIndex::new(1).unwrap();
-        assert_eq!(
-            sk_wrap_aad("app:ns", 0, idx),
-            "app:ns:secure_storage:session:v0:i1:pq_sk_wrap"
-        );
-    }
-
-    #[test]
     fn test_block_kdf_salt() {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
-        block_kdf_salt(&mut buf, "app:ns", 0, idx, 0, 5);
-        assert_eq!(buf, "app:ns:secure_storage:session:v0:i0:n0:b5:kdf:salt");
+        block_kdf_salt(&mut buf, "app:ns", 1, idx, 0, 5);
+        assert_eq!(buf, "app:ns:secure_storage:session:v1:i0:n0:b5:kdf:salt");
     }
 
     #[test]
     fn test_block_aead_key_label() {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
-        block_aead_key_label(&mut buf, "app:ns", 0, idx, 0, 5);
+        block_aead_key_label(&mut buf, "app:ns", 1, idx, 0, 5);
         assert_eq!(
             buf,
-            "app:ns:secure_storage:session:v0:i0:n0:b5:kdf:block_aead_key"
+            "app:ns:secure_storage:session:v1:i0:n0:b5:kdf:block_aead_key"
         );
     }
 
@@ -227,8 +209,8 @@ mod tests {
     fn test_block_aead_aad() {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
-        block_aead_aad(&mut buf, "app:ns", 0, idx, 0, 5);
-        assert_eq!(buf, "app:ns:secure_storage:session:v0:i0:n0:b5:block_aead");
+        block_aead_aad(&mut buf, "app:ns", 1, idx, 0, 5);
+        assert_eq!(buf, "app:ns:secure_storage:session:v1:i0:n0:b5:block_aead");
     }
 
     #[test]
@@ -253,17 +235,16 @@ mod tests {
         let domain = "test";
         let mut buf = String::new();
 
-        block_kdf_salt(&mut buf, domain, 0, idx, 0, 0);
+        block_kdf_salt(&mut buf, domain, 1, idx, 0, 0);
         let bks = buf.clone();
-        block_aead_key_label(&mut buf, domain, 0, idx, 0, 0);
+        block_aead_key_label(&mut buf, domain, 1, idx, 0, 0);
         let bakl = buf.clone();
-        block_aead_aad(&mut buf, domain, 0, idx, 0, 0);
+        block_aead_aad(&mut buf, domain, 1, idx, 0, 0);
         let baa = buf.clone();
 
         let labels = vec![
             password_kdf_salt(domain),
             root_kdf_salt(domain),
-            sk_wrap_aad(domain, 0, idx),
             bks,
             bakl,
             baa,

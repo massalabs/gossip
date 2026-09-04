@@ -17,7 +17,6 @@ import {
   removeReactionFromState,
   clearReactionsForDeletedMessage,
   patchReactionCache,
-  recomputeFullCache,
   type SetFn,
 } from './messageStore.helpers';
 
@@ -143,24 +142,47 @@ export function createEventHandlers(
   }: {
     messages: Message[];
   }) => {
-    const map = new Map<string, StoreMessage[]>(get().messagesByContact);
-    let postMsgchanged = false;
     for (const msg of deletedMessages) {
       if (msg.type === MessageType.REACTION) {
         removeReactionFromState(set, msg.contactUserId, r => r.id === msg.id);
-        continue;
+      }
+    }
+
+    // Single functional set(): removes the deleted rows AND the reactions
+    // that referenced them, so nothing is computed from a stale snapshot.
+    set(state => {
+      let msgMap = state.messagesByContact;
+      let rxnUpdate: Pick<
+        MessageStoreState,
+        'reactionsByContact' | 'reactionGroupsCache'
+      > | null = null;
+      let changed = false;
+
+      for (const msg of deletedMessages) {
+        if (msg.type === MessageType.REACTION) continue;
+        const msgs = msgMap.get(msg.contactUserId);
+        if (!msgs) continue;
+        const filtered = msgs.filter(entry => entry.id !== msg.id);
+        if (filtered.length === msgs.length) continue;
+        if (!changed) msgMap = new Map(msgMap);
+        msgMap.set(msg.contactUserId, filtered);
+        changed = true;
+
+        if (msg.messageId) {
+          const scopedState = rxnUpdate ? { ...state, ...rxnUpdate } : state;
+          const update = clearReactionsForDeletedMessage(
+            scopedState,
+            msg.contactUserId,
+            msg.messageId,
+            msgMap
+          );
+          if (update) rxnUpdate = update;
+        }
       }
 
-      const msgs = map.get(msg.contactUserId);
-      if (!msgs) continue;
-      const updated = msgs.filter(entry => entry.id !== msg.id);
-      map.set(msg.contactUserId, updated);
-      postMsgchanged = true;
-    }
-
-    if (postMsgchanged) {
-      set(_ => ({ messagesByContact: map }));
-    }
+      if (!changed) return state;
+      return { messagesByContact: msgMap, ...(rxnUpdate ?? {}) };
+    });
   };
 
   const onUpdated = ({
@@ -224,8 +246,12 @@ export function createEventHandlers(
     const currentContact = get().currentContactUserId;
     if (!currentContact || !sdk.isSessionOpen) return;
     try {
-      const dbMessages = await sdk.messages.getVisibleMessages(currentContact);
-      const dbReactions = await sdk.messages.getReactions(currentContact);
+      const [dbMessages, dbReactions] = await Promise.all([
+        sdk.messages.getVisibleMessages(currentContact),
+        sdk.messages.getReactions(currentContact),
+      ]);
+      // The store may have been cleaned up (logout) while we were fetching.
+      if (!sdk.isSessionOpen) return;
       set(state => {
         const currentMsgs = state.messagesByContact.get(currentContact) || [];
 
@@ -278,7 +304,14 @@ export function createEventHandlers(
         return {
           messagesByContact: msgMap,
           reactionsByContact: rxnMap,
-          reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
+          // Only this contact changed — patch its cache entries instead of
+          // recomputing the cache for every contact.
+          reactionGroupsCache: patchReactionCache(
+            state.reactionGroupsCache,
+            currentContact,
+            msgMap,
+            rxnMap
+          ),
         };
       });
     } catch (error) {

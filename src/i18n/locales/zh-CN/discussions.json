@@ -34,7 +34,10 @@
     "pin_discussion": "置顶",
     "unpin_discussion": "取消置顶",
     "edit_name": "编辑名称",
-    "edit_name_title": "编辑会话名称"
+    "edit_name_title": "编辑会话名称",
+    "name_updated": "名称已更新",
+    "name_update_failed": "更新名称失败",
+    "pin_failed": "置顶会话失败"
   },
   "scroll_to_bottom": "滚动到最新消息",
   "search": {
@@ -83,7 +86,9 @@
     "auto_delete_8h": "8小时",
     "auto_delete_1d": "1天",
     "auto_delete_1w": "1周",
-    "auto_delete_1mo": "1个月"
+    "auto_delete_1mo": "1个月",
+    "retention_update_failed": "更新自动删除设置失败",
+    "mute_update_failed": "更新通知设置失败"
   },
   "new_discussion": {
     "title": "新会话",
@@ -112,7 +117,14 @@
     "refuse": "拒绝",
     "set_contact_name": "设置联系人名称",
     "refuse_title": "拒绝连接？",
-    "refuse_body": "拒绝将关闭此会话请求。"
+    "refuse_body": "拒绝将关闭此会话请求。",
+    "sections": {
+      "discussions": "讨论",
+      "contacts": "联系人",
+      "pinned": "已置顶",
+      "pending": "待处理",
+      "active": "活跃"
+    }
   },
   "empty": {
     "no_discussions": "暂无会话",

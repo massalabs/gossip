@@ -3,6 +3,8 @@ import { Eye, EyeOff } from 'react-feather';
 
 interface RoundedInputProps {
   type?: 'text' | 'password' | 'email';
+  /** Ref forwarded to the underlying input element. */
+  ref?: React.Ref<HTMLInputElement>;
   value: string;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -12,6 +14,11 @@ interface RoundedInputProps {
   error?: boolean;
   disabled?: boolean;
   maxLength?: number;
+  autoComplete?: string;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  autoCorrect?: 'on' | 'off';
+  spellCheck?: boolean;
+  suppressPasswordManager?: boolean;
   className?: string;
   /** Show the eye toggle. Use false for confirm password when paired with first password. */
   showPasswordToggle?: boolean;
@@ -23,6 +30,7 @@ interface RoundedInputProps {
 
 const RoundedInput: React.FC<RoundedInputProps> = ({
   type = 'text',
+  ref,
   value,
   onChange,
   onKeyDown,
@@ -32,6 +40,11 @@ const RoundedInput: React.FC<RoundedInputProps> = ({
   error = false,
   disabled = false,
   maxLength,
+  autoComplete,
+  autoCapitalize,
+  autoCorrect,
+  spellCheck,
+  suppressPasswordManager = false,
   className = '',
   showPasswordToggle,
   showPassword: controlledShowPassword,
@@ -58,6 +71,7 @@ const RoundedInput: React.FC<RoundedInputProps> = ({
   return (
     <div className="relative">
       <input
+        ref={ref}
         type={inputType}
         value={value}
         onChange={onChange}
@@ -66,6 +80,13 @@ const RoundedInput: React.FC<RoundedInputProps> = ({
         onBlur={onBlur}
         placeholder={placeholder}
         maxLength={maxLength}
+        autoComplete={autoComplete}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={autoCorrect}
+        spellCheck={spellCheck}
+        data-1p-ignore={suppressPasswordManager ? '' : undefined}
+        data-lpignore={suppressPasswordManager ? 'true' : undefined}
+        data-form-type={suppressPasswordManager ? 'other' : undefined}
         disabled={disabled}
         className={`w-full h-12 px-4 ${hasToggle ? 'pr-12' : ''} rounded-full border text-sm focus:outline-none focus-visible:ring-2 transition text-foreground dark:text-foreground bg-card dark:bg-input placeholder-muted-foreground dark:placeholder-muted-foreground ${
           error

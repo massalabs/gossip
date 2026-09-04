@@ -29,7 +29,7 @@ const DebugSettings: React.FC = () => {
   const setDisableNativeScreenshot = useAppStore(
     s => s.setDisableNativeScreenshot
   );
-  const { resetAccount } = useAccountStore();
+  const resetAccount = useAccountStore.use.resetAccount();
   const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
   const gossip = useGossipSdk();
 

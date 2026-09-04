@@ -129,8 +129,11 @@ describe('SelfDiscussion forward to self notes', () => {
     settingsButton?.click();
     await act(async () => {});
 
+    // Retention options come from the shared RETENTION_OPTIONS constant,
+    // whose keys are namespace-qualified.
     const oneDayButton = Array.from(document.querySelectorAll('button')).find(
-      button => button.textContent?.trim() === 'settings.auto_delete_1d'
+      button =>
+        button.textContent?.trim() === 'discussions:settings.auto_delete_1d'
     );
     expect(oneDayButton).toBeTruthy();
 

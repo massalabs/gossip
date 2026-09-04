@@ -81,7 +81,7 @@ impl IdbKey {
 ///
 /// **Storage layout**: per `(session, namespace)` pair, a contiguous `Vec` of
 /// `Option<Box<[u8; BLOCK_SIZE]>>`. `None` slots represent gaps from sparse
-/// writes (rare in practice — bordercrypt writes are append-dense). The `Vec`
+/// writes (rare in practice — secure-storage writes are append-dense). The `Vec`
 /// length equals the highest used block index + 1, matching the semantics of
 /// [`Self::block_count`].
 ///
@@ -102,7 +102,7 @@ impl IdbKey {
 ///
 /// **Plausible deniability**: this layer is symmetric across sessions —
 /// it never differentiates "real" vs "decoy" slots. Symmetry of writes
-/// across slots is the responsibility of the upper bordercrypt layer.
+/// across slots is the responsibility of the upper secure-storage layer.
 pub struct IdbStorageState {
     /// `blocks[session][namespace] = Vec<...>`. Lazy populated: only
     /// `(session, namespace)` pairs that have been touched get an entry.

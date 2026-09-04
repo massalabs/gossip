@@ -28,14 +28,20 @@ const EmojiPickerModal: React.FC<EmojiPickerModalProps> = ({
 }) => {
   const { t } = useTranslation('discussions');
   const resolvedTheme = useUiStore(s => s.resolvedTheme);
+  // `render` keeps the picker mounted while the exit transition plays;
+  // `mounted` drives the enter/exit transition classes.
+  const [render, setRender] = useState(isOpen);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
+      setRender(true);
       const id = requestAnimationFrame(() => setMounted(true));
       return () => cancelAnimationFrame(id);
     }
     setMounted(false);
+    const timer = setTimeout(() => setRender(false), 250);
+    return () => clearTimeout(timer);
   }, [isOpen]);
 
   const handleKeyDown = useCallback(
@@ -51,7 +57,7 @@ const EmojiPickerModal: React.FC<EmojiPickerModalProps> = ({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, handleKeyDown]);
 
-  if (!isOpen) return null;
+  if (!render) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-[1100] flex items-end justify-center">

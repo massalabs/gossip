@@ -1,13 +1,7 @@
 import { logger } from '../../utils/logger.ts';
 import React, { useEffect, useRef } from 'react';
-import {
-  CapacitorBarcodeScanner,
-  CapacitorBarcodeScannerTypeHint,
-} from '@capacitor/barcode-scanner';
-import {
-  formatQrScanErrorForLog,
-  normalizeNativeQrError,
-} from '../../utils/qrScanErrors';
+import { useTranslation } from 'react-i18next';
+import { QrScanner, isQrScanCancelled } from '../../services/qrScanner';
 import { QRScannerProps } from './types';
 
 const NativeQRScanner: React.FC<QRScannerProps> = ({
@@ -15,6 +9,7 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
   onError,
   onClose,
 }) => {
+  const { t } = useTranslation('common');
   const scanStartedRef = useRef(false);
 
   useEffect(() => {
@@ -22,32 +17,16 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
     if (scanStartedRef.current) return;
     scanStartedRef.current = true;
 
-    const startNativeScanner = async () => {
-      try {
-        const result = await CapacitorBarcodeScanner.scanBarcode({
-          hint: CapacitorBarcodeScannerTypeHint.QR_CODE,
-          scanInstructions: 'Point your camera at a QR code',
-          scanButton: false,
-        });
-
-        // TODO: Improve Scan Result handling
-        onScan(result.ScanResult);
-      } catch (err: unknown) {
-        const normalized = normalizeNativeQrError(err);
-        const line = formatQrScanErrorForLog(normalized);
-        if (normalized.isCancelled) {
-          // Expected when the user leaves the scanner or the OS ends the session (e.g. custom ROMs).
-          // Use debug level so logcat / dev-console are not noisy; full detail is still in the debug overlay.
-          logger.debug(line, normalized);
+    QrScanner.scan({ closeLabel: t('close') })
+      .then(({ value }) => onScan(value))
+      .catch((err: unknown) => {
+        if (isQrScanCancelled(err)) {
           onClose();
-        } else {
-          logger.warn(line, err);
-          onError(normalized.message);
+          return;
         }
-      }
-    };
-
-    startNativeScanner();
+        logger.warn('[QRScan] native scan failed', err);
+        onError(err instanceof Error ? err.message : String(err));
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 

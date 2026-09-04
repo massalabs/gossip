@@ -44,6 +44,25 @@ export async function bridgeGet<T = unknown>(
   });
 }
 
+export async function bridgeSetMany(
+  entries: ReadonlyArray<readonly [string, unknown]>
+): Promise<void> {
+  const db = await openBridgeDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    for (const [key, value] of entries) store.put(value, key);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+}
+
 export async function bridgeSet(key: string, value: unknown): Promise<void> {
   const db = await openBridgeDb();
   return new Promise((resolve, reject) => {

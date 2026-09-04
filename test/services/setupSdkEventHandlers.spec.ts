@@ -32,8 +32,13 @@ vi.mock('../../src/utils/appState', () => ({
   isAppInForeground: () => mockIsAppInForeground(),
 }));
 
+vi.mock('../../src/services/portableImportCleanup', () => ({
+  isPortableImportCleanupPending: () => false,
+}));
+
 vi.mock('../../src/sw-bridge', () => ({
-  bridgeSet: vi.fn(async () => {}),
+  bridgeGet: vi.fn(async () => 0),
+  bridgeSetMany: vi.fn(async () => {}),
 }));
 
 vi.mock('../../src/utils/preferences', () => ({
