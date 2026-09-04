@@ -1,5 +1,7 @@
+import { logger } from '../utils/logger.ts';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation, Trans } from 'react-i18next';
+import toast from 'react-hot-toast';
 import { Edit2, Plus, Users, User } from 'react-feather';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
@@ -26,7 +28,7 @@ const NewDiscussion: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { userProfile } = useAccountStore();
+  const userProfile = useAccountStore.use.userProfile();
 
   useEffect(() => {
     let isMounted = true;
@@ -65,12 +67,19 @@ const NewDiscussion: React.FC = () => {
 
   const onSelectContact = async (contact: Contact) => {
     if (!userProfile?.userId) return;
-    const discussion = await gossip.discussions.get(contact.userId);
-    if (
-      discussion &&
-      gossip.discussions.getStatus(contact.userId) === SessionStatus.Active
-    ) {
-      navigate(ROUTES.discussion({ userId: contact.userId }));
+    try {
+      const discussion = await gossip.discussions.get(contact.userId);
+      if (
+        discussion &&
+        gossip.discussions.getStatus(contact.userId) === SessionStatus.Active
+      ) {
+        navigate(ROUTES.discussion({ userId: contact.userId }));
+      } else {
+        toast.error(t('contacts:connection_pending'));
+      }
+    } catch (error) {
+      logger.error('Failed to open discussion:', error);
+      toast.error(t('common:error_boundary.fallback'));
     }
   };
 

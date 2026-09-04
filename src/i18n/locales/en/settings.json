@@ -27,6 +27,12 @@
     "confirm": "Permanently delete every Gossip account on this device?",
     "warning": "Messages, sessions, biometric login, and interrupted import data will also be deleted. External backup files are not changed. This cannot be undone."
   },
+  "delete_session": {
+    "title": "Delete current session",
+    "warning": "Attention: Deleting current Session is an irreversible action",
+    "popover": "If other sessions on the device, they will not be deleted",
+    "confirm": "Delete session"
+  },
   "edit_username_modal": {
     "title": "Edit Username",
     "placeholder": "Enter username",
@@ -44,7 +50,14 @@
     "qr_alt": "Your contact QR code"
   },
   "appearance": {
-    "title": "Appearance"
+    "title": "Appearance",
+    "theme": "Theme",
+    "select_theme": "Select Theme",
+    "theme_light": "Light",
+    "theme_dark": "Dark",
+    "theme_system": "System",
+    "bottom_nav": "Bottom navigation bar",
+    "toggle_bottom_nav": "Toggle bottom navigation bar"
   },
   "about": {
     "title": "About",

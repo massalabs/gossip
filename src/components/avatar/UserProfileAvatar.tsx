@@ -1,5 +1,6 @@
 import { logger } from '../../utils/logger.ts';
 import React, { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getProfileHead } from './profileHeads';
 import BaseModal from '../ui/BaseModal';
 import Popover from '../ui/Popover';
@@ -41,6 +42,7 @@ const UserProfileAvatar: React.FC<UserProfileAvatarProps> = ({
   className = '',
   interactive = true,
 }) => {
+  const { t } = useTranslation('settings');
   const sizeClass = SIZE_CLASS_MAP[size] ?? SIZE_CLASS_MAP[10];
   const paddingClass = PADDING_MAP[size] ?? PADDING_MAP[10];
   const headSvg = useMemo(() => getProfileHead(name), [name]);
@@ -90,7 +92,7 @@ const UserProfileAvatar: React.FC<UserProfileAvatarProps> = ({
         <div
           className="w-full h-full [&>svg]:w-full [&>svg]:h-full"
           role="img"
-          aria-label="Profile"
+          aria-label={t('profile')}
           dangerouslySetInnerHTML={{ __html: headSvg }}
         />
       </div>
@@ -99,14 +101,14 @@ const UserProfileAvatar: React.FC<UserProfileAvatarProps> = ({
         <BaseModal
           isOpen={isModalOpen}
           onClose={handleCloseModal}
-          title="Delete current session"
+          title={t('delete_session.title')}
         >
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-semibold text-destructive">
-                Attention: Deleting current Session is an irreversible action
+                {t('delete_session.warning')}
               </p>
-              <Popover message="If other sessions on the device, they will not be deleted" />
+              <Popover message={t('delete_session.popover')} />
             </div>
             <div className="mt-4 flex gap-3">
               <Button
@@ -116,7 +118,7 @@ const UserProfileAvatar: React.FC<UserProfileAvatarProps> = ({
                 onClick={handleCloseModal}
                 disabled={isDeleting}
               >
-                Cancel
+                {t('common:cancel')}
               </Button>
               <Button
                 variant="danger"
@@ -125,7 +127,7 @@ const UserProfileAvatar: React.FC<UserProfileAvatarProps> = ({
                 onClick={handleConfirmDelete}
                 loading={isDeleting}
               >
-                Delete session
+                {t('delete_session.confirm')}
               </Button>
             </div>
           </div>

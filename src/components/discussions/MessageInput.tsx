@@ -48,6 +48,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
 }) => {
   const { t } = useTranslation('discussions');
   const isRefocusingRef = useRef(false);
+  // True while a pointerdown-initiated send is in flight, so the click event
+  // that follows the same pointer interaction doesn't send twice.
+  const sentViaPointerRef = useRef(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
 
   const {
@@ -238,10 +241,22 @@ const MessageInput: React.FC<MessageInputProps> = ({
           />
         </div>
         <button
+          type="button"
           onPointerDown={e => {
             e.preventDefault(); // prevent textarea blur
+            sentViaPointerRef.current = true;
             handleSendMessage(e);
           }}
+          // Keyboard activation dispatches a click with no pointerdown —
+          // without this the send button is unusable from the keyboard.
+          onClick={e => {
+            if (sentViaPointerRef.current) {
+              sentViaPointerRef.current = false;
+              return;
+            }
+            handleSendMessage(e);
+          }}
+          aria-disabled={sendButtonDisabled}
           className={`w-9 h-9 md:w-10 md:h-10 shrink-0
               rounded-full flex items-center justify-center
               shadow-md hover:shadow-lg transition-all duration-200

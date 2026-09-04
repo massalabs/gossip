@@ -34,7 +34,10 @@
     "pin_discussion": "Pin",
     "unpin_discussion": "Unpin",
     "edit_name": "Edit Name",
-    "edit_name_title": "Edit discussion name"
+    "edit_name_title": "Edit discussion name",
+    "name_updated": "Name updated",
+    "name_update_failed": "Failed to update name",
+    "pin_failed": "Failed to pin discussion"
   },
   "scroll_to_bottom": "Scroll to latest messages",
   "search": {
@@ -83,7 +86,9 @@
     "auto_delete_8h": "8 hours",
     "auto_delete_1d": "1 day",
     "auto_delete_1w": "1 week",
-    "auto_delete_1mo": "1 month"
+    "auto_delete_1mo": "1 month",
+    "retention_update_failed": "Failed to update auto-delete setting",
+    "mute_update_failed": "Failed to update notification setting"
   },
   "new_discussion": {
     "title": "New discussion",
@@ -112,7 +117,14 @@
     "refuse": "Refuse",
     "set_contact_name": "Set contact name",
     "refuse_title": "Refuse connection?",
-    "refuse_body": "Refusing will close this discussion request."
+    "refuse_body": "Refusing will close this discussion request.",
+    "sections": {
+      "discussions": "Discussions",
+      "contacts": "Contacts",
+      "pinned": "Pinned",
+      "pending": "Pending",
+      "active": "Active"
+    }
   },
   "empty": {
     "no_discussions": "No discussions yet",

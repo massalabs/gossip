@@ -26,6 +26,10 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
         variant="circular"
         size="custom"
         className="w-12 h-12 bg-primary hover:brightness-110 text-primary-foreground shadow-[0px_0px_11px_1px_rgba(0,0,0,0.1)]"
+        // Keep focus on the message textarea: without this, tapping the
+        // button blurs it and closes the keyboard mid-composition (same
+        // pattern as the send and search buttons).
+        onPointerDown={e => e.preventDefault()}
         onClick={onClick}
         ariaLabel={t('scroll_to_bottom')}
         title={t('scroll_to_bottom')}

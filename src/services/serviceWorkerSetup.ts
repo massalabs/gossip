@@ -21,17 +21,20 @@ import { networkObserverService } from './networkObserver';
  * Also initializes background sync (notifications, periodic sync)
  */
 export async function setupServiceWorker(): Promise<void> {
-  if (!('serviceWorker' in navigator)) {
-    return;
+  // Service worker registration is only possible when the API exists
+  // (e.g. iOS WKWebView does not expose navigator.serviceWorker)
+  if ('serviceWorker' in navigator) {
+    // Setup controller change listener to reload page when new service worker takes control
+    setupControllerChangeListener();
+
+    // Register service worker and setup sync scheduler
+    await registerAndStartSync();
   }
 
-  // Setup controller change listener to reload page when new service worker takes control
-  setupControllerChangeListener();
-
-  // Register service worker and setup sync scheduler
-  await registerAndStartSync();
-
-  // Initialize background sync: request notification permission, register periodic sync
+  // Initialize background sync: notification permission, periodic sync, network observer
+  // Must always run — it does native-critical work (persisting the API base URL for the
+  // BackgroundRunner, syncing the sync preset, starting the network observer) that is
+  // needed even when service workers are unavailable (e.g. iOS WKWebView).
   await initializeBackgroundSync();
 }
 
@@ -40,10 +43,14 @@ export async function setupServiceWorker(): Promise<void> {
  */
 function setupControllerChangeListener(): void {
   let refreshing = false;
+  // With skipWaiting + clientsClaim, controllerchange also fires on the very
+  // first service worker activation. Only reload when a previous controller
+  // existed (i.e. an update took over) to avoid discarding UI state on first visit.
+  const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     // Reload the page when a new service worker takes control
     // This ensures the page uses the new service worker code immediately
-    if (!refreshing) {
+    if (hadController && !refreshing) {
       refreshing = true;
       window.location.reload();
     }
@@ -81,26 +88,8 @@ async function registerServiceWorker(): Promise<void> {
   const swType = import.meta.env.MODE === 'production' ? 'classic' : 'module';
 
   try {
-    // In dev mode, VitePWA serves the service worker dynamically
-    // Skip the HEAD check and register directly - the browser will handle errors
-    // In production, we can optionally verify the file exists first
-    if (import.meta.env.MODE === 'production') {
-      // Optional: verify file exists in production
-      try {
-        const response = await fetch(swUrl, { method: 'HEAD' });
-        if (!response.ok) {
-          logger.warn(
-            `Service worker at ${swUrl} returned status ${response.status}`
-          );
-          return;
-        }
-      } catch (fetchError) {
-        logger.warn(`Could not verify service worker at ${swUrl}:`, fetchError);
-        // Continue anyway - registration will fail if file doesn't exist
-      }
-    }
-
     // Register service worker - it will automatically start sync scheduler on activate event
+    // No pre-flight verification needed: registration itself fails if the file doesn't exist
     await navigator.serviceWorker.register(swUrl, {
       scope: '/',
       type: swType,
@@ -149,8 +138,16 @@ async function initializeBackgroundSync(): Promise<void> {
       baseUrl: protocolConfig.baseUrl,
     });
 
-    // Request notification permission
-    await notificationService.requestPermission();
+    // Sync notification permission state
+    if (Capacitor.isNativePlatform()) {
+      // Native: Capacitor permission flow (no user-gesture requirement)
+      await notificationService.requestPermission();
+    } else {
+      // Web: never prompt without a user gesture (Firefox auto-denies such
+      // requests). Only refresh the current permission state; the actual
+      // request happens from a user interaction in the UI.
+      notificationService.getPermissionStatus();
+    }
 
     // Register periodic background sync (Web API - optional, expected to fail on mobile)
     // This is wrapped in its own try-catch because failures are expected and non-critical
@@ -236,25 +233,29 @@ async function registerPeriodicSync(): Promise<void> {
       }
     ).periodicSync;
 
-    // Check permission status
+    if (periodicSync) {
+      // Check permission status
+      let permissionStatus: PermissionStatus | null = null;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        permissionStatus = await (navigator as any).permissions.query({
+          name: 'periodic-background-sync',
+        });
+      } catch {
+        // Permission query not supported - expected on most browsers
+        return;
+      }
 
-    let permissionStatus: PermissionStatus | null = null;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      permissionStatus = await (navigator as any).permissions.query({
-        name: 'periodic-background-sync',
-      });
-    } catch {
-      // Permission query not supported - expected on most browsers
-      return;
-    }
-
-    if (periodicSync && permissionStatus?.state === 'granted') {
-      await periodicSync.register('gossip-message-sync', {
-        minInterval: PERIODIC_SYNC_MIN_INTERVAL_MS,
-      });
-    } else if (permissionStatus?.state === 'prompt') {
-      // Fallback for browsers that don't support periodicSync but support sync
+      if (permissionStatus?.state === 'granted') {
+        await periodicSync.register('gossip-message-sync', {
+          minInterval: PERIODIC_SYNC_MIN_INTERVAL_MS,
+        });
+      }
+      // If permission is 'prompt' or 'denied', silently skip - registration
+      // would be rejected without an explicit grant
+    } else {
+      // Fallback for browsers that don't support periodicSync but support
+      // one-shot Background Sync
       const syncAPI = (
         registration as ServiceWorkerRegistration & {
           sync?: { register: (tag: string) => Promise<void> };
@@ -269,7 +270,6 @@ async function registerPeriodicSync(): Promise<void> {
         }
       }
     }
-    // If permission is 'denied', silently skip - user doesn't want this
   } catch {
     // Silently handle errors - this API is optional and expected to fail on most mobile devices
     // The native Capacitor BackgroundRunner handles actual background sync

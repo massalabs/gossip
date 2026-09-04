@@ -8,6 +8,7 @@ export interface SendParams {
   amount: bigint;
   asset: Asset;
   final: boolean;
+  fee?: bigint;
 }
 
 export interface UseSendOptions {
@@ -32,13 +33,13 @@ export function useSend(options: UseSendOptions) {
    * @param asset - The asset to send
    * @param amount - The amount to send
    * @param recipient - The recipient address
-   * @returns void
+   * @returns The operation on success, null on failure
    */
   const execute = useCallback(
     async (
       sendFn: () => Promise<Operation>,
       params: SendParams
-    ): Promise<void> => {
+    ): Promise<Operation | null> => {
       const { recipient, amount, asset, final } = params;
       setState(prev => ({ ...prev, isPending: true }));
 
@@ -50,7 +51,7 @@ export function useSend(options: UseSendOptions) {
           isPending: false,
           error: { message: 'Invalid address' },
         }));
-        return;
+        return null;
       }
 
       if (amount > asset.balance) {
@@ -59,7 +60,7 @@ export function useSend(options: UseSendOptions) {
           isPending: false,
           error: { message: 'Insufficient balance' },
         }));
-        return;
+        return null;
       }
 
       try {
@@ -71,10 +72,11 @@ export function useSend(options: UseSendOptions) {
 
         if (error) {
           setState(prev => ({ ...prev, error }));
-          return;
+          return null;
         }
 
         setState(prev => ({ ...prev, error: null }));
+        return op;
       } finally {
         setState(prev => ({ ...prev, isPending: false }));
       }
@@ -87,13 +89,16 @@ export function useSend(options: UseSendOptions) {
    * @param recipient - The recipient address
    * @param amount - The amount to send
    * @param asset - The asset to send
-   * @returns void
+   * @returns The operation on success, null on failure
    */
   const sendMassa = useCallback(
-    async (params: SendParams): Promise<void> => {
+    async (params: SendParams): Promise<Operation | null> => {
       if (!provider) throw new Error('No provider');
-      await execute(
-        () => provider.transfer(params.recipient, params.amount),
+      return execute(
+        () =>
+          provider.transfer(params.recipient, params.amount, {
+            fee: params.fee,
+          }),
         params
       );
     },
@@ -105,15 +110,15 @@ export function useSend(options: UseSendOptions) {
    * @param recipient - The recipient address
    * @param amount - The amount to send
    * @param asset - The token to send
-   * @returns void
+   * @returns The operation on success, null on failure
    */
   const sendToken = useCallback(
-    async (params: SendParams): Promise<void> => {
+    async (params: SendParams): Promise<Operation | null> => {
       if (!provider) throw new Error('No provider');
-      const { recipient, amount, asset } = params;
+      const { recipient, amount, asset, fee } = params;
       if (!asset.address) throw new Error('Token address required');
       const mrc20 = new MRC20(provider, asset.address);
-      await execute(() => mrc20.transfer(recipient, amount), params);
+      return execute(() => mrc20.transfer(recipient, amount, { fee }), params);
     },
     [provider, execute]
   );
@@ -124,10 +129,10 @@ export function useSend(options: UseSendOptions) {
    * @param recipient - The recipient address
    * @param amount - The amount to send
    * @param asset - The asset to send
-   * @returns void
+   * @returns The operation on success, null on failure
    */
   const sendAsset = useCallback(
-    async (params: SendParams): Promise<void> => {
+    async (params: SendParams): Promise<Operation | null> => {
       if (params.asset.isNative) {
         return sendMassa(params);
       }

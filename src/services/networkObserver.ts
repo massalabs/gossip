@@ -71,6 +71,7 @@ const NetworkObserver =
 class NetworkObserverService {
   private isObserving = false;
   private listeners: PluginListenerHandle[] = [];
+  private startPromise: Promise<void> | null = null;
 
   /**
    * Check if running on a native platform
@@ -98,30 +99,67 @@ class NetworkObserverService {
       return;
     }
 
-    // Set up listeners for foreground notifications (optional)
-    const availableListener = await NetworkObserver.addListener(
-      'networkAvailable',
-      data => {
-        logger.info(
-          `[NetworkObserver] Network available (reason: ${data.reason})`
-        );
+    // If a start is already in progress, wait for it instead of starting
+    // a second one (Promise-based lock, same pattern as batteryOptimization)
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+
+    this.startPromise = this.doStartObserving();
+
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
+  }
+
+  /**
+   * Internal method that performs the actual start.
+   * Called by startObserving() which handles the Promise-based locking.
+   */
+  private async doStartObserving(): Promise<void> {
+    // Track listeners added by this attempt so they can be removed on failure
+    const addedListeners: PluginListenerHandle[] = [];
+
+    try {
+      // Set up listeners for foreground notifications (optional)
+      const availableListener = await NetworkObserver.addListener(
+        'networkAvailable',
+        data => {
+          logger.info(
+            `[NetworkObserver] Network available (reason: ${data.reason})`
+          );
+        }
+      );
+      addedListeners.push(availableListener);
+
+      const lostListener = await NetworkObserver.addListener(
+        'networkLost',
+        () => {
+          logger.info('[NetworkObserver] Network lost');
+        }
+      );
+      addedListeners.push(lostListener);
+
+      // Start native observation
+      await NetworkObserver.startObserving();
+
+      this.listeners.push(...addedListeners);
+      this.isObserving = true;
+
+      logger.info('[NetworkObserver] Started observing network changes');
+    } catch (error) {
+      // Remove listeners added by this attempt to avoid leaking them
+      for (const listener of addedListeners) {
+        try {
+          await listener.remove();
+        } catch {
+          // Listener cleanup is best effort
+        }
       }
-    );
-    this.listeners.push(availableListener);
-
-    const lostListener = await NetworkObserver.addListener(
-      'networkLost',
-      () => {
-        logger.info('[NetworkObserver] Network lost');
-      }
-    );
-    this.listeners.push(lostListener);
-
-    // Start native observation
-    await NetworkObserver.startObserving();
-    this.isObserving = true;
-
-    logger.info('[NetworkObserver] Started observing network changes');
+      throw error;
+    }
   }
 
   /**

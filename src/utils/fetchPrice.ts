@@ -41,30 +41,35 @@ abstract class BasePriceProvider implements PriceProvider {
   ): Promise<Record<string, number | null>>;
 }
 
+// Known CoinGecko ids for the symbols the wallet supports. A fixed map
+// avoids downloading the multi-MB /coins/list endpoint on first price fetch
+// and, more importantly, avoids symbol collisions: many CoinGecko coins
+// share a ticker, and picking an arbitrary one returns the wrong price.
+const COINGECKO_IDS: Record<string, string> = {
+  MAS: 'massa',
+  WMAS: 'wrapped-massa',
+  BTC: 'bitcoin',
+  WBTC: 'wrapped-bitcoin',
+  ETH: 'ethereum',
+  WETH: 'weth',
+  WETHBT: 'weth',
+  USDC: 'usd-coin',
+  USDT: 'tether',
+  DAI: 'dai',
+};
+
 class CoinGeckoPriceProvider extends BasePriceProvider {
   private priceUrl = (ids: string[], vs: string) =>
     `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=${vs}`;
-  private coinsListUrl = 'https://api.coingecko.com/api/v3/coins/list';
-  private idCache: Record<string, string | null> = {};
 
   private async getIds(
     symbols: string[]
   ): Promise<Record<string, string | null>> {
-    if (!Object.keys(this.idCache).length) {
-      const coins = await this.fetchJson<{ id: string; symbol: string }[]>(
-        this.coinsListUrl
-      );
-      if (coins) {
-        this.idCache = Object.fromEntries(
-          coins.map(coin => [coin.symbol.toUpperCase(), coin.id])
-        );
-      }
-    }
     return Object.fromEntries(
-      symbols.map(symbol => {
-        const upperSymbol = symbol.toUpperCase();
-        return [symbol, this.idCache[upperSymbol] ?? null];
-      })
+      symbols.map(symbol => [
+        symbol,
+        COINGECKO_IDS[symbol.toUpperCase()] ?? null,
+      ])
     );
   }
 

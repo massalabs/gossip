@@ -27,6 +27,12 @@
     "confirm": "Supprimer définitivement tous les comptes Gossip de cet appareil ?",
     "warning": "Les messages, les sessions, la connexion biométrique et les données d’importation interrompue seront également supprimés. Les sauvegardes externes ne seront pas modifiées. Cette action est irréversible."
   },
+  "delete_session": {
+    "title": "Supprimer la session actuelle",
+    "warning": "Attention : la suppression de la session actuelle est une action irréversible",
+    "popover": "Si d'autres sessions existent sur l'appareil, elles ne seront pas supprimées",
+    "confirm": "Supprimer la session"
+  },
   "edit_username_modal": {
     "title": "Modifier le nom d'utilisateur",
     "placeholder": "Saisir un nom d'utilisateur",
@@ -44,7 +50,14 @@
     "qr_alt": "Ton QR code de contact"
   },
   "appearance": {
-    "title": "Apparence"
+    "title": "Apparence",
+    "theme": "Thème",
+    "select_theme": "Choisir le thème",
+    "theme_light": "Clair",
+    "theme_dark": "Sombre",
+    "theme_system": "Système",
+    "bottom_nav": "Barre de navigation inférieure",
+    "toggle_bottom_nav": "Activer/désactiver la barre de navigation inférieure"
   },
   "about": {
     "title": "À propos",

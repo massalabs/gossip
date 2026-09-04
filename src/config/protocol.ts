@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.ts';
 /**
  * Protocol API Configuration
  *
@@ -14,7 +15,14 @@ export interface ProtocolConfig {
 function buildProtocolApiBaseUrl(): string {
   let apiUrl: string | undefined = import.meta.env.VITE_GOSSIP_API_URL;
 
-  if (!apiUrl) apiUrl = 'http://localhost:3000';
+  if (!apiUrl) {
+    if (import.meta.env.PROD) {
+      logger.error(
+        'VITE_GOSSIP_API_URL is not set in a production build; falling back to http://localhost:3000'
+      );
+    }
+    apiUrl = 'http://localhost:3000';
+  }
 
   // Normalize trailing slashes to avoid `//api`
   const trimmed = apiUrl.replace(/\/+$/, '');

@@ -324,6 +324,8 @@ class GossipSdk {
   private _persistInFlightPromise: Promise<void> | null = null;
   /** Back-off state after a failed persist; reset on every success. */
   private _persistBackoffMs = 0;
+  /** Single-flight latch for `init()` — see `init` for the rationale. */
+  private _initPromise: Promise<GossipSdk> | null = null;
   private _portableExportActive = false;
   private _portableExportTerminal = false;
   private _portableImportActive = false;
@@ -368,6 +370,39 @@ class GossipSdk {
       return this;
     }
 
+    // Single-flight latch. `this.state.status` only flips to INITIALIZED
+    // after the `await DatabaseConnection.create()` in `_doInit`, so two
+    // init() calls racing on the SAME instance would both pass the guard
+    // above and each open the DB — which native secure-storage rejects via
+    // redb's exclusive lock (DatabaseAlreadyOpen). Assigning the promise
+    // synchronously, before any await, closes that window; concurrent
+    // callers await the one init.
+    //
+    // Scope: this only dedupes concurrent inits on one instance. It does
+    // NOT cover a fresh WebView/Activity reusing a still-open
+    // process-global native handle (the notification-relaunch case) — a new
+    // instance has its own latch. That case is handled in the native
+    // layer's idempotent `init_native`.
+    if (this._initPromise) {
+      return this._initPromise;
+    }
+    const initPromise = this._doInit(options);
+    this._initPromise = initPromise;
+    try {
+      return await initPromise;
+    } catch (err) {
+      // A failed init must not poison retries — clear the latch. Guarded
+      // by identity: if a destroy() + fresh init() interleaved between
+      // the rejection and this catch, the latch now belongs to the newer
+      // init and must survive.
+      if (this._initPromise === initPromise) {
+        this._initPromise = null;
+      }
+      throw err;
+    }
+  }
+
+  private async _doInit(options: GossipSdkInitOptions): Promise<GossipSdk> {
     if (import.meta.env?.DEV) {
       logger.info('[GossipSdk] Initializing SDK');
     }
@@ -389,30 +424,52 @@ class GossipSdk {
     }
     this._conn = await DatabaseConnection.create({ storage: options.storage });
 
-    // Defer queries/profile when the database needs an unlock first.
-    if (this._conn.isOpen) {
-      this._queries = new Queries(this._conn);
+    try {
+      // Defer queries/profile when the database needs an unlock first.
+      if (this._conn.isOpen) {
+        this._queries = new Queries(this._conn);
+      }
+
+      if (import.meta.env?.DEV) {
+        logger.info('[GossipSdk] SQLite initialized');
+      }
+      // Create message protocol
+      const messageProtocol = createMessageProtocol();
+
+      // Create services that don't need a session
+      this._auth = new AuthService(createAuthProtocol());
+      this._profile = this._queries
+        ? this.createProfileService(this._queries)
+        : null;
+
+      this.state = {
+        status: SdkStatus.INITIALIZED,
+        messageProtocol,
+        config,
+      };
+
+      return this;
+    } catch (err) {
+      // A failure after the DB opened must release the handle before the
+      // error propagates: `init()` clears its latch on failure, and the
+      // retry's `DatabaseConnection.create()` would otherwise hit the
+      // still-open handle — the same DatabaseAlreadyOpen boot error the
+      // single-flight latch exists to prevent. `_queries` is reset too:
+      // a retry on locked storage (`isOpen === false`) skips reassigning
+      // it and must not keep queries bound to the released connection.
+      const conn = this._conn;
+      this._conn = null;
+      this._queries = null;
+      if (conn) {
+        try {
+          await conn.close();
+        } catch {
+          // Best effort — the original init failure is the actionable
+          // error, not the close's.
+        }
+      }
+      throw err;
     }
-
-    if (import.meta.env?.DEV) {
-      logger.info('[GossipSdk] SQLite initialized');
-    }
-    // Create message protocol
-    const messageProtocol = createMessageProtocol();
-
-    // Create services that don't need a session
-    this._auth = new AuthService(createAuthProtocol());
-    this._profile = this._queries
-      ? this.createProfileService(this._queries)
-      : null;
-
-    this.state = {
-      status: SdkStatus.INITIALIZED,
-      messageProtocol,
-      config,
-    };
-
-    return this;
   }
 
   /**
@@ -893,6 +950,7 @@ class GossipSdk {
     } finally {
       this._lifecycleCloseActive = false;
     }
+    this._initPromise = null;
   }
 
   // ─────────────────────────────────────────────────────────────────

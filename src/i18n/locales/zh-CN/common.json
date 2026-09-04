@@ -20,5 +20,23 @@
   "copied_to_clipboard": "已复制到剪贴板！",
   "contact_name": "联系人名称",
   "enter_name": "输入名称",
-  "introduce_yourself": "介绍一下自己，或为联系人请求添加说明..."
+  "introduce_yourself": "介绍一下自己，或为联系人请求添加说明...",
+  "navigation": {
+    "label": "主导航",
+    "discussions": "讨论",
+    "settings": "设置"
+  },
+  "invite": {
+    "title": "邀请",
+    "opening_title": "正在应用中打开",
+    "invited_title": "您收到了邀请！",
+    "opening_description": "如果应用未打开，您可以改在网页版中继续。",
+    "invited_description": "在 Gossip 应用中打开此邀请，开始与您的联系人聊天。",
+    "open_in_app": "在应用中打开",
+    "opening": "正在打开...",
+    "continue_web": "在网页版中继续",
+    "continue_web_instead": "改在网页版中继续",
+    "open_failed": "无法打开应用，您可以改在网页版中继续。",
+    "learn_more": "进一步了解 Gossip"
+  }
 }

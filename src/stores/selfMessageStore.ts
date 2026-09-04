@@ -9,7 +9,6 @@ import {
 import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
 import { useAccountStore } from './accountStore';
-import { ReactionGroup } from './messageStore';
 import {
   groupReactions,
   addOptimisticReaction,
@@ -24,7 +23,6 @@ interface SelfMessageStore {
   messages: Message[];
   reactions: ReactionsMap;
   isLoading: boolean;
-  isSending: boolean;
   loadMessages: () => Promise<void>;
   loadReactions: () => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
@@ -32,7 +30,6 @@ interface SelfMessageStore {
   deleteMessage: (id: number) => Promise<void>;
   sendReaction: (emoji: string, messageDbId: number) => Promise<void>;
   removeReaction: (reactionId: number) => Promise<void>;
-  getReactionsForMessage: (messageDbId: number) => ReactionGroup[];
   clearMessages: () => void;
 }
 
@@ -40,7 +37,6 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
   messages: [],
   reactions: new Map(),
   isLoading: false,
-  isSending: false,
 
   loadMessages: async () => {
     const sdk = getSdk();
@@ -83,8 +79,6 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     const userProfile = useAccountStore.getState().userProfile;
     if (!userProfile?.userId) return;
 
-    set({ isSending: true });
-
     // Client-generated messageId so the React key (msg-${messageId}) stays
     // stable across the optimistic → persisted patch. The SDK itself doesn't
     // store messageId for self-messages, so we preserve ours after the write.
@@ -100,7 +94,6 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       messageId: localMessageId,
     };
     set(state => ({ messages: [...state.messages, optimistic] }));
-    set({ isSending: false });
 
     try {
       const message = await sdk.selfMessages.send(trimmed);
@@ -245,10 +238,6 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
         ),
       }));
     }
-  },
-
-  getReactionsForMessage: (messageDbId: number): ReactionGroup[] => {
-    return get().reactions.get(messageDbId) ?? [];
   },
 
   clearMessages: () => {

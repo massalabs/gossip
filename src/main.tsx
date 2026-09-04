@@ -45,18 +45,10 @@ declare global {
 
 window.Buffer = Buffer;
 
-// Prevent pull-to-refresh and accidental page refreshes
-document.addEventListener(
-  'touchstart',
-  e => {
-    // Only prevent pull-to-refresh when touching at the very top of the page
-    // and when the page is already at the top
-    if (e.touches[0].clientY < 20 && window.scrollY === 0) {
-      e.preventDefault();
-    }
-  },
-  { passive: false }
-);
+// Pull-to-refresh is disabled via CSS (`overscroll-behavior: none` on
+// html/body in styles/base.css). No JS touchstart guard: the previous one
+// keyed on `window.scrollY === 0`, which is always true in this
+// inner-scroll layout, making every element in the top 20px tap-dead.
 
 // Prevent refresh on certain key combinations
 document.addEventListener('keydown', e => {
@@ -66,39 +58,6 @@ document.addEventListener('keydown', e => {
     ((e.ctrlKey && e.key === 'r') || e.key === 'F5')
   ) {
     e.preventDefault();
-  }
-});
-
-// Prevent context menu on long press (optional) - disabled to avoid interfering with normal interactions
-// document.addEventListener('contextmenu', (e) => {
-//   e.preventDefault();
-// });
-
-// Handle page refresh gracefully
-window.addEventListener('beforeunload', () => {
-  // Store current state before page unload
-  const currentPath = window.location.pathname;
-  const currentState = {
-    path: currentPath,
-    timestamp: Date.now(),
-  };
-  sessionStorage.setItem('gossip-app-state', JSON.stringify(currentState));
-});
-
-// Restore state on page load
-window.addEventListener('load', () => {
-  const savedState = sessionStorage.getItem('gossip-app-state');
-  if (savedState) {
-    try {
-      const state = JSON.parse(savedState);
-      // If the page was refreshed recently (within 5 seconds), it was likely accidental
-      if (Date.now() - state.timestamp < 5000) {
-        logger.debug('Page refresh detected, restoring state...');
-        // You could add logic here to restore the previous screen
-      }
-    } catch (e) {
-      logger.debug('Could not restore app state:', e);
-    }
   }
 });
 

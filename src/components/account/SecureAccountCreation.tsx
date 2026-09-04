@@ -43,6 +43,10 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
     } catch (err) {
       logger.error('Error staging account:', err);
       setError(err instanceof Error ? err.message : t('create.failed'));
+      setStep('form');
+      // Rethrow so AccountCreationForm's doSubmit takes its error path and
+      // resets its own isCreating/loading state
+      throw err;
     }
   };
 

@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useMemo } from 'react';
 
 interface UseLongPressOptions {
   onLongPress: () => void;
@@ -98,12 +98,17 @@ export function useLongPress({
   // Cancel pending timer on unmount
   useEffect(() => () => clear(), [clear]);
 
-  return {
-    onTouchStart,
-    onTouchMove,
-    onTouchEnd,
-    onTouchCancel,
-    onContextMenu,
-    longPressTriggered,
-  };
+  // Stable object so the hook result can be used in dep arrays and passed
+  // to memoized children without invalidating them every render.
+  return useMemo(
+    () => ({
+      onTouchStart,
+      onTouchMove,
+      onTouchEnd,
+      onTouchCancel,
+      onContextMenu,
+      longPressTriggered,
+    }),
+    [onTouchStart, onTouchMove, onTouchEnd, onTouchCancel, onContextMenu]
+  );
 }

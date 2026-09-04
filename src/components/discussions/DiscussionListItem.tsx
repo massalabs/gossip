@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useMinuteTick } from '../../hooks/useMinuteTick';
 import { useTranslation } from 'react-i18next';
 import { Contact, SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
@@ -42,82 +43,41 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   const [isRefuseModalOpen, setIsRefuseModalOpen] = useState(false);
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
   const [isEditNameModalOpen, setIsEditNameModalOpen] = useState(false);
-  // Re-render trigger to update relative time display every minute
-  const [_updateKey, setUpdateKey] = useState(0);
+  // Shared once-a-minute re-render to refresh the relative time display
+  useMinuteTick();
 
-  // Use store to persist modal state across component remounts
+  // Store persists modal open-state across component remounts; a local flag
+  // covers discussions without an id yet.
   const openNameModals = useDiscussionStore(s => s.openNameModals);
   const setModalOpen = useDiscussionStore(s => s.setModalOpen);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const isModalOpenInStore = discussion.id
     ? openNameModals.has(discussion.id)
     : false;
-
-  // Sync local state with store state
-  const [isNameModalOpen, setIsNameModalOpen] = useState(isModalOpenInStore);
-
-  // Update every minute to refresh relative time display
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setUpdateKey(prev => prev + 1);
-    }, 60000); // Update every minute
-
-    return () => clearInterval(interval);
-  }, []);
-
-  // Effect 1: Close the modal if the discussion is no longer pending
-  useEffect(() => {
-    const isPendingIncomingCheck =
-      sessionsStatuses.get(discussion.contactUserId) ===
-      SessionStatus.PeerRequested;
-
-    if (!isPendingIncomingCheck) {
-      // Use functional update to avoid dependency on isNameModalOpen
-      setIsNameModalOpen(prev => {
-        if (prev) {
-          if (discussion.id) {
-            setModalOpen(discussion.id, false);
-          }
-          return false;
-        }
-        return prev;
-      });
-    }
-  }, [discussion.contactUserId, discussion.id, sessionsStatuses, setModalOpen]);
-
-  // Effect 2: Open the modal if the store says it should be open and discussion is pending
-  useEffect(() => {
-    const isPendingIncomingCheck =
-      sessionsStatuses.get(discussion.contactUserId) ===
-      SessionStatus.PeerRequested;
-
-    if (!isPendingIncomingCheck) {
-      return;
-    }
-
-    const shouldBeOpen = discussion.id
-      ? openNameModals.has(discussion.id)
-      : false;
-
-    // Use functional update to avoid dependency on isNameModalOpen
-    setIsNameModalOpen(prev => {
-      if (shouldBeOpen && !prev) {
-        setProposedName(contact.name || '');
-        return true;
-      }
-      return prev;
-    });
-  }, [
-    discussion.contactUserId,
-    discussion.id,
-    openNameModals,
-    contact.name,
-    sessionsStatuses,
-  ]);
+  const [isNameModalOpenLocal, setIsNameModalOpenLocal] =
+    useState(isModalOpenInStore);
 
   const isPendingIncoming =
     sessionsStatuses.get(discussion.contactUserId) ===
     SessionStatus.PeerRequested;
+
+  // Derived: no mirror effects needed — the modal only renders in the
+  // pending-incoming branch, so it closes automatically when the state flips.
+  const isNameModalOpen =
+    isPendingIncoming && (isNameModalOpenLocal || isModalOpenInStore);
+
+  const setIsNameModalOpen = (open: boolean) => {
+    setIsNameModalOpenLocal(open);
+    if (discussion.id) setModalOpen(discussion.id, open);
+  };
+
+  // Store hygiene: drop the persisted open-flag once the discussion is no
+  // longer pending.
+  useEffect(() => {
+    if (!isPendingIncoming && discussion.id && isModalOpenInStore) {
+      setModalOpen(discussion.id, false);
+    }
+  }, [isPendingIncoming, discussion.id, isModalOpenInStore, setModalOpen]);
   const isPendingOutgoing =
     sessionsStatuses.get(discussion.contactUserId) ===
     SessionStatus.SelfRequested;
@@ -135,10 +95,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   };
 
   return (
-    <div
-      key={discussion.contactUserId}
-      className="w-full text-left bg-card rounded-2xl shadow-sm dark:shadow-none dark:border dark:border-border/60 mb-2 hover:bg-muted/60 hover:shadow-md dark:hover:border-border active:scale-[0.99] transition-all"
-    >
+    <div className="w-full text-left bg-card rounded-2xl shadow-sm dark:shadow-none dark:border dark:border-border/60 mb-2 hover:bg-muted/60 hover:shadow-md dark:hover:border-border active:scale-[0.99] transition-all">
       <div
         className={`${
           isPendingIncoming ? 'cursor-not-allowed opacity-95' : 'cursor-pointer'
@@ -215,9 +172,6 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     onClick={() => {
                       setProposedName(contact.name || '');
                       setIsNameModalOpen(true);
-                      if (discussion.id) {
-                        setModalOpen(discussion.id, true);
-                      }
                     }}
                     variant="primary"
                     size="custom"
@@ -236,7 +190,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     {t('list.refuse')}
                   </Button>
                   {discussion.unreadCount > 0 && (
-                    <span className="ml-auto inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full">
+                    <span className="ml-auto inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full animate-badge-pop">
                       {discussion.unreadCount}
                     </span>
                   )}
@@ -244,12 +198,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                 {/* Name prompt modal */}
                 <ContactNameModal
                   isOpen={isNameModalOpen}
-                  onClose={() => {
-                    setIsNameModalOpen(false);
-                    if (discussion.id) {
-                      setModalOpen(discussion.id, false);
-                    }
-                  }}
+                  onClose={() => setIsNameModalOpen(false)}
                   title={t('list.set_contact_name')}
                   initialName={proposedName}
                   confirmLabel={t('common:continue')}
@@ -257,9 +206,6 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                   showSkip
                   onConfirm={name => {
                     setIsNameModalOpen(false);
-                    if (discussion.id) {
-                      setModalOpen(discussion.id, false);
-                    }
                     if (name && name.trim()) {
                       onAccept(discussion, name.trim());
                     } else {
@@ -268,9 +214,6 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                   }}
                   onSkip={() => {
                     setIsNameModalOpen(false);
-                    if (discussion.id) {
-                      setModalOpen(discussion.id, false);
-                    }
                     // Pass the prefilled name (peer's shared username) so the
                     // contact gets a proper display name even when skipping
                     // the rename step.
@@ -320,7 +263,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                   </p>
                 )}
                 {discussion.unreadCount > 0 && (
-                  <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full">
+                  <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full animate-badge-pop">
                     {discussion.unreadCount}
                   </span>
                 )}
@@ -369,4 +312,6 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   );
 };
 
-export default DiscussionListItem;
+// Memoized: one row per discussion — store updates elsewhere in the list
+// shouldn't re-render every row (each carries modals and a context menu).
+export default React.memo(DiscussionListItem);

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import FormInput from '../ui/FormInput';
 import { useAccountStore } from '../../stores/accountStore';
 
@@ -8,14 +9,15 @@ interface MessageFieldProps {
 }
 
 const MessageField: React.FC<MessageFieldProps> = ({ message, onChange }) => {
+  const { t } = useTranslation('contacts');
   const { userProfile } = useAccountStore();
   const myUsername = userProfile?.username;
 
   const getDefaultMessage = (): string => {
     if (myUsername) {
-      return `Hi! I'm ${myUsername} and I'd like to connect with you.`;
+      return t('new_contact.default_message', { username: myUsername });
     }
-    return "Hi! I'd like to connect with you.";
+    return t('new_contact.default_message_anonymous');
   };
 
   const handleFillDefault = (e: React.MouseEvent) => {
@@ -29,14 +31,16 @@ const MessageField: React.FC<MessageFieldProps> = ({ message, onChange }) => {
         htmlFor="contact-message"
         className="block text-sm font-medium text-foreground"
       >
-        Contact request message{' '}
-        <span className="text-muted-foreground font-normal">(optional)</span>
+        {t('message_label_main')}{' '}
+        <span className="text-muted-foreground font-normal">
+          {t('message_label_optional')}
+        </span>
       </label>
       <FormInput
         id="contact-message"
         value={message}
         onChange={onChange}
-        placeholder="Introduce yourself or add context to your contact request..."
+        placeholder={t('message_placeholder')}
         type="textarea"
         textareaRows={3}
         maxLength={500}
@@ -49,7 +53,7 @@ const MessageField: React.FC<MessageFieldProps> = ({ message, onChange }) => {
             onClick={handleFillDefault}
             className="text-muted-foreground hover:text-primary underline underline-offset-2 active:text-primary/80 transition-colors"
           >
-            Use default message
+            {t('use_default_message')}
           </button>
         </div>
       )}

@@ -31,6 +31,7 @@ export const DEV_HARDCODED_PASSWORD = import.meta.env.DEV
  * also bumping the Rust constant produces a runtime "no slot available"
  * error — see `SPEC_DEVIATIONS.md` for the SESSION_COUNT rationale.
  */
-export const MAX_SECURE_ACCOUNTS = Number(
-  import.meta.env.VITE_SECURE_STORAGE_MAX_ACCOUNTS ?? 3
+export const MAX_SECURE_ACCOUNTS = Math.min(
+  3,
+  Number(import.meta.env.VITE_SECURE_STORAGE_MAX_ACCOUNTS ?? 3)
 );

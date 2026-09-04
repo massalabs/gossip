@@ -14,6 +14,8 @@ vi.mock('react-i18next', () => ({
     t: (key: string) => key,
     i18n: { language: 'en' },
   }),
+  // Minimal Trans: render the key like the mocked t() does
+  Trans: ({ i18nKey }: { i18nKey?: string }) => i18nKey ?? null,
   initReactI18next: { type: '3rdParty', init: () => {} },
 }));
 
@@ -141,20 +143,20 @@ describe('ShareContact - QR button in actions grid', () => {
     render(<ShareContact {...defaultProps} />);
 
     await expect
-      .element(page.getByRole('button', { name: /^Share$/ }))
+      .element(page.getByRole('button', { name: /^common:share$/ }))
       .toBeInTheDocument();
     await expect
-      .element(page.getByRole('button', { name: /^QR$/ }))
+      .element(page.getByRole('button', { name: /^share\.qr$/ }))
       .toBeInTheDocument();
     await expect
-      .element(page.getByRole('button', { name: /^File$/ }))
+      .element(page.getByRole('button', { name: /^file$/ }))
       .toBeInTheDocument();
   });
 
   it('QR button is disabled when qrDataUrl is null (before QR generates)', async () => {
     render(<ShareContact {...defaultProps} />);
 
-    const qrButton = page.getByRole('button', { name: /^QR$/ });
+    const qrButton = page.getByRole('button', { name: /^share\.qr$/ });
     await expect.element(qrButton).toBeInTheDocument();
     // QR data URL has not been generated yet, so QR button should be disabled
     expect(qrButton.element().hasAttribute('disabled')).toBe(true);
@@ -169,7 +171,7 @@ describe('ShareContact - QR button in actions grid', () => {
 
     // Wait for re-render -- the button should now be enabled
     await vi.waitFor(() => {
-      const btn = page.getByRole('button', { name: /^QR$/ }).element();
+      const btn = page.getByRole('button', { name: /^share\.qr$/ }).element();
       expect(btn.hasAttribute('disabled')).toBe(false);
     });
   });
@@ -180,7 +182,7 @@ describe('ShareContact - QR button in actions grid', () => {
     // Simulate QR code generation
     capturedOnQRCodeGenerated!('data:image/svg+xml;base64,fakeqrdata');
 
-    const qrButton = page.getByRole('button', { name: /^QR$/ });
+    const qrButton = page.getByRole('button', { name: /^share\.qr$/ });
     await vi.waitFor(() => {
       expect(qrButton.element().hasAttribute('disabled')).toBe(false);
     });
@@ -202,7 +204,7 @@ describe('ShareContact - QR button in actions grid', () => {
     // Simulate QR generation so buttons are enabled
     capturedOnQRCodeGenerated!('data:image/svg+xml;base64,fakeqrdata');
 
-    const shareButton = page.getByRole('button', { name: /^Share$/ });
+    const shareButton = page.getByRole('button', { name: /^common:share$/ });
     await vi.waitFor(() => {
       expect(shareButton.element().hasAttribute('disabled')).toBe(false);
     });
@@ -217,7 +219,7 @@ describe('ShareContact - QR button in actions grid', () => {
 
     render(<ShareContact {...defaultProps} />);
 
-    const shareButton = page.getByRole('button', { name: /^Share$/ });
+    const shareButton = page.getByRole('button', { name: /^common:share$/ });
     await userEvent.click(shareButton.element());
 
     expect(mockShareInvitation).toHaveBeenCalledOnce();
@@ -229,11 +231,11 @@ describe('ShareContact - QR button in actions grid', () => {
   it('File button opens the file share modal', async () => {
     render(<ShareContact {...defaultProps} />);
 
-    const fileButton = page.getByRole('button', { name: /^File$/ });
+    const fileButton = page.getByRole('button', { name: /^file$/ });
     await userEvent.click(fileButton.element());
 
     await expect
-      .element(page.getByText('Share invitation by file'))
+      .element(page.getByText('share.file_modal_title'))
       .toBeInTheDocument();
   });
 });

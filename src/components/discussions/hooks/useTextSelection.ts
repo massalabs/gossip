@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 
 interface UseTextSelectionOptions {
@@ -73,10 +73,15 @@ export function useTextSelection({
     };
   }, [isTextSelectable, clearTextSelection, bubbleRef]);
 
-  return {
-    isTextSelectable,
-    longPressPosRef,
-    enableTextSelection,
-    clearTextSelection,
-  };
+  // Stable object so the hook result can sit in dep arrays without
+  // invalidating them every render.
+  return useMemo(
+    () => ({
+      isTextSelectable,
+      longPressPosRef,
+      enableTextSelection,
+      clearTextSelection,
+    }),
+    [isTextSelectable, enableTextSelection, clearTextSelection]
+  );
 }

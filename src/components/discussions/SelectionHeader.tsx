@@ -23,7 +23,8 @@ const SelectionHeader: React.FC<SelectionHeaderProps> = ({
   const { t } = useTranslation('discussions');
   return (
     <HeaderBar>
-      <div className="flex items-center w-full gap-3">
+      {/* Slide in from under the header, matching the search bar's motion */}
+      <div className="flex items-center w-full gap-3 animate-slide-down-in">
         <Button
           onClick={onClear}
           variant="circular"

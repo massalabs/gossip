@@ -47,9 +47,10 @@ interface HeaderItemProps {
 }
 
 const HeaderItemRenderer: React.FC<HeaderItemProps> = ({ item }) => {
+  const { t } = useTranslation('discussions');
   return (
     <p className="px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-      {item.label}
+      {t(item.labelKey)}
     </p>
   );
 };
@@ -132,18 +133,9 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   const hasNoResults = virtualItems.length === 0;
 
   // Handlers
-  const handleAccept = useCallback(
-    async (discussion: Discussion, newName?: string) => {
-      await handleAcceptDiscussionRequest(discussion, newName);
-    },
-    [handleAcceptDiscussionRequest]
-  );
-
-  const handleRefuse = useCallback(
-    (discussion: Discussion) => {
-      handleRefuseDiscussionRequest(discussion);
-    },
-    [handleRefuseDiscussionRequest]
+  const handleSelect = useCallback(
+    (discussion: Discussion) => onSelect(discussion.contactUserId),
+    [onSelect]
   );
 
   const handleEditName = useCallback(
@@ -157,12 +149,12 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
         // Optimistic store update so the UI reflects the new name without
         // waiting for the SDK's DISCUSSION_UPDATED event / refetch.
         patchDiscussion(discussion.id, { customName: newName || null });
-        toast.success('Name updated');
+        toast.success(t('list_item.name_updated'));
       } else {
-        toast.error(result.message || 'Failed to update name');
+        toast.error(result.message || t('list_item.name_update_failed'));
       }
     },
-    [gossip, patchDiscussion]
+    [gossip, patchDiscussion, t]
   );
 
   const handleTogglePin = useCallback(
@@ -174,10 +166,10 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
         // Optimistic store update so the pin icon toggles immediately.
         patchDiscussion(discussion.id, { pinned: newPinned });
       } else {
-        toast.error(result.message || 'Failed to pin discussion');
+        toast.error(result.message || t('list_item.pin_failed'));
       }
     },
-    [gossip, patchDiscussion]
+    [gossip, patchDiscussion, t]
   );
 
   // Item renderer
@@ -197,9 +189,9 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                 discussion={item.discussion}
                 contact={item.contact}
                 lastMessage={item.lastMessage}
-                onSelect={d => onSelect(d.contactUserId)}
-                onAccept={handleAccept}
-                onRefuse={() => handleRefuse(item.discussion)}
+                onSelect={handleSelect}
+                onAccept={handleAcceptDiscussionRequest}
+                onRefuse={handleRefuseDiscussionRequest}
                 onEditName={handleEditName}
                 onTogglePin={handleTogglePin}
               />
@@ -210,7 +202,14 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
           return null;
       }
     },
-    [onSelect, handleAccept, handleRefuse, handleEditName, handleTogglePin]
+    [
+      onSelect,
+      handleSelect,
+      handleAcceptDiscussionRequest,
+      handleRefuseDiscussionRequest,
+      handleEditName,
+      handleTogglePin,
+    ]
   );
 
   // Empty states

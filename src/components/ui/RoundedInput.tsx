@@ -3,6 +3,8 @@ import { Eye, EyeOff } from 'react-feather';
 
 interface RoundedInputProps {
   type?: 'text' | 'password' | 'email';
+  /** Ref forwarded to the underlying input element. */
+  ref?: React.Ref<HTMLInputElement>;
   value: string;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -28,6 +30,7 @@ interface RoundedInputProps {
 
 const RoundedInput: React.FC<RoundedInputProps> = ({
   type = 'text',
+  ref,
   value,
   onChange,
   onKeyDown,
@@ -68,6 +71,7 @@ const RoundedInput: React.FC<RoundedInputProps> = ({
   return (
     <div className="relative">
       <input
+        ref={ref}
         type={inputType}
         value={value}
         onChange={onChange}

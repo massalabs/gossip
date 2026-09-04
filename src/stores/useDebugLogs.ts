@@ -48,6 +48,84 @@ interface DebugStore {
 
 let idCounter = Date.now();
 
+// ---------------------------------------------------------------------------
+// Debounced persistence
+//
+// The persist middleware re-serializes the WHOLE log array on every log call;
+// a log burst would do quadratic serialization work and hammer Capacitor
+// Preferences. Coalesce writes to at most one per second (trailing) and
+// flush when the page is hidden so nothing is lost on background/close.
+// ---------------------------------------------------------------------------
+const PERSIST_DEBOUNCE_MS = 1000;
+let pendingWrite: { name: string; value: string } | null = null;
+let writeTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function flushPendingLogWrite(): Promise<void> {
+  if (writeTimer !== null) {
+    clearTimeout(writeTimer);
+    writeTimer = null;
+  }
+  const write = pendingWrite;
+  pendingWrite = null;
+  if (write) {
+    await persistLogWrite(write.name, write.value);
+  }
+}
+
+/**
+ * Write one serialized log payload, but only if this WebView still owns the
+ * current log generation: a stale instance must never clobber newer logs.
+ * Web serializes writers with a shared lock, native with a FIFO queue.
+ */
+async function persistLogWrite(name: string, value: string): Promise<void> {
+  const persistIfCurrent = async () => {
+    const ownerGeneration = await logOwnerGeneration;
+    if (ownerGeneration === null) return;
+    const currentGeneration = await Preferences.get({
+      key: LOG_GENERATION_KEY,
+    });
+    if ((currentGeneration.value ?? '0') !== ownerGeneration) return;
+    const payload = JSON.parse(value) as Record<string, unknown>;
+    payload.outputGeneration = ownerGeneration;
+    await Preferences.set({ key: name, value: JSON.stringify(payload) });
+  };
+  if (
+    !Capacitor.isNativePlatform() &&
+    typeof navigator !== 'undefined' &&
+    navigator.locks
+  ) {
+    await navigator.locks.request(
+      'gossip-debug-log-output-v1',
+      { mode: 'shared' },
+      persistIfCurrent
+    );
+    return;
+  }
+  if (Capacitor.isNativePlatform()) {
+    await enqueueNativeDebugWrite(persistIfCurrent);
+    return;
+  }
+  await persistIfCurrent();
+}
+
+function scheduleLogWrite(name: string, value: string): void {
+  pendingWrite = { name, value };
+  if (writeTimer === null) {
+    writeTimer = setTimeout(() => {
+      writeTimer = null;
+      void flushPendingLogWrite();
+    }, PERSIST_DEBOUNCE_MS);
+  }
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      void flushPendingLogWrite();
+    }
+  });
+}
+
 /**
  * Deep equality comparison for LogData.
  */
@@ -422,40 +500,11 @@ export const useDebugLogs = create<DebugStore>()(
           }
           return readIfCurrent();
         },
-        setItem: async (name: string, value: string) => {
-          const persistIfCurrent = async () => {
-            const ownerGeneration = await logOwnerGeneration;
-            if (ownerGeneration === null) return;
-            const currentGeneration = await Preferences.get({
-              key: LOG_GENERATION_KEY,
-            });
-            if ((currentGeneration.value ?? '0') !== ownerGeneration) return;
-            const payload = JSON.parse(value) as Record<string, unknown>;
-            payload.outputGeneration = ownerGeneration;
-            await Preferences.set({
-              key: name,
-              value: JSON.stringify(payload),
-            });
-          };
-          if (
-            !Capacitor.isNativePlatform() &&
-            typeof navigator !== 'undefined' &&
-            navigator.locks
-          ) {
-            await navigator.locks.request(
-              'gossip-debug-log-output-v1',
-              { mode: 'shared' },
-              persistIfCurrent
-            );
-            return;
-          }
-          if (Capacitor.isNativePlatform()) {
-            await enqueueNativeDebugWrite(persistIfCurrent);
-            return;
-          }
-          await persistIfCurrent();
+        setItem: (name: string, value: string) => {
+          scheduleLogWrite(name, value);
         },
         removeItem: async (name: string) => {
+          pendingWrite = null;
           await Preferences.remove({ key: name });
         },
       })),
@@ -463,6 +512,16 @@ export const useDebugLogs = create<DebugStore>()(
         logs: state.logs,
         logLimit: state.logLimit,
       }),
+      // Rehydration is async: logs recorded during startup would otherwise
+      // be silently replaced by the persisted array. Keep both (persisted
+      // first — they're older), trimmed to the limit.
+      merge: (persisted, current) => {
+        const persistedState = (persisted ?? {}) as Partial<DebugStore>;
+        const persistedLogs = persistedState.logs ?? [];
+        const limit = persistedState.logLimit ?? current.logLimit;
+        const logs = [...persistedLogs, ...current.logs].slice(-limit);
+        return { ...current, ...persistedState, logs };
+      },
     }
   )
 );

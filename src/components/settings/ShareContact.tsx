@@ -11,7 +11,7 @@ import {
   Link2,
   Send,
 } from 'react-feather';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import { useLinkShare } from '../../hooks/useLinkShare';
 import { useQRShare } from '../../hooks/useQRShare';
@@ -104,8 +104,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
             className="p-2 rounded-full hover:bg-muted transition-colors"
             aria-label={
               includeUsername
-                ? 'Hide username from invite'
-                : 'Include username in invite'
+                ? t('share.hide_username')
+                : t('share.include_username')
             }
           >
             {includeUsername ? (
@@ -119,7 +119,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
             onClick={() => setIsUsernameModalOpen(true)}
             disabled={!includeUsername}
             className="p-2 rounded-full hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            aria-label="Edit username"
+            aria-label={t('share.edit_username')}
           >
             <Edit2 className="w-4 h-4 text-muted-foreground" />
           </button>
@@ -128,9 +128,9 @@ const ShareContact: React.FC<ShareContactProps> = ({
 
       <ContactNameModal
         isOpen={isUsernameModalOpen}
-        title="Edit shared username"
+        title={t('share.edit_shared_username')}
         initialName={sharedUsername || userName}
-        confirmLabel="Save"
+        confirmLabel={t('common:save')}
         onConfirm={name => {
           if (name) setSharedUsername(name);
           setIsUsernameModalOpen(false);
@@ -154,7 +154,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
           <span
             className={`text-sm font-normal flex-1 text-left ${copiedLink ? 'text-success' : ''}`}
           >
-            {copiedLink ? 'Link copied!' : 'Copy invite link'}
+            {copiedLink ? t('share.link_copied') : t('share.copy_invite_link')}
           </span>
         </Button>
 
@@ -176,7 +176,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
             }
           >
             <Send className="w-4 h-4" />
-            <span className="text-sm font-normal">Share</span>
+            <span className="text-sm font-normal">{t('common:share')}</span>
           </Button>
 
           <Button
@@ -188,7 +188,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
             loading={qrShareSource === 'qr'}
           >
             <Image className="w-4 h-4" />
-            <span className="text-sm font-normal">QR</span>
+            <span className="text-sm font-normal">{t('share.qr')}</span>
           </Button>
 
           <Button
@@ -198,18 +198,18 @@ const ShareContact: React.FC<ShareContactProps> = ({
             onClick={() => setIsFilePanelOpen(true)}
           >
             <FileText className="w-4 h-4" />
-            <span className="text-sm font-normal">File</span>
+            <span className="text-sm font-normal">{t('file')}</span>
           </Button>
         </div>
       </div>
 
       {/* Expiry hint: must be div — Popover contains block nodes */}
       <div className="text-xs text-muted-foreground text-center">
-        Invitations expire after 2 weeks. File invitations don&apos;t.{' '}
+        {t('share.expiry_hint')}{' '}
         <span className="relative inline-flex align-middle ml-0.5">
           <Popover
             position={PopoverPosition.TOP}
-            message="Invitations expire 2 weeks after your last connection. Each time you open the app, validity is renewed if more than 24 hours have passed. File invitations never expire."
+            message={t('share.expiry_popover')}
           />
         </span>
       </div>
@@ -217,24 +217,26 @@ const ShareContact: React.FC<ShareContactProps> = ({
       <BaseModal
         isOpen={isFilePanelOpen}
         onClose={() => setIsFilePanelOpen(false)}
-        title="Share invitation by file"
+        title={t('share.file_modal_title')}
       >
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Share your profile as a file with people you want to talk to. Your
-            contact can import your file from the{' '}
-            <button
-              type="button"
-              onClick={() => navigate(ROUTES.newContact())}
-              className="text-primary underline underline-offset-2"
-            >
-              New Contact
-            </button>{' '}
-            page.
+            <Trans
+              i18nKey="share.file_modal_body"
+              ns="contacts"
+              components={{
+                newContactLink: (
+                  <button
+                    type="button"
+                    onClick={() => navigate(ROUTES.newContact())}
+                    className="text-primary underline underline-offset-2"
+                  />
+                ),
+              }}
+            />
           </p>
           <p className="text-sm font-semibold text-foreground">
-            Compared to other profile sharing mode, the file profile remains
-            valid even if you don&apos;t login to the app for more than 2 weeks.
+            {t('share.file_modal_note')}
           </p>
           <Button
             onClick={handleShareFile}
@@ -245,7 +247,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
             fullWidth
             className="h-11 rounded-xl text-sm font-normal"
           >
-            Share file
+            {t('share.share_file')}
           </Button>
           {fileState.error && (
             <div className="text-sm text-destructive text-center">

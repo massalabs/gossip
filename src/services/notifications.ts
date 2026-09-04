@@ -86,6 +86,19 @@ export class NotificationService {
       return;
     }
 
+    await this.refreshNativePermissionStatus();
+  }
+
+  /**
+   * Refresh the native notification permission status from the OS,
+   * bypassing the one-time initialization flag. Best-effort; errors are
+   * logged and the last known state is kept.
+   */
+  private async refreshNativePermissionStatus(): Promise<void> {
+    if (!this.isNativePlatform()) {
+      return;
+    }
+
     try {
       const status: LocalNotificationPermissionStatus =
         await LocalNotifications.checkPermissions();
@@ -282,6 +295,14 @@ export class NotificationService {
         ],
       });
     } catch (error) {
+      // The `Notification` constructor doesn't exist in iOS/Android WebViews,
+      // so the browser-based fallback would always throw on native platforms.
+      // Only fall back when not running natively; otherwise just log.
+      if (this.isNativePlatform()) {
+        logger.error('Failed to show native notification:', error);
+        return;
+      }
+
       // If anything goes wrong, log and fall back to browser-based notification
       logger.error(
         'Failed to show native notification, falling back to web notification:',
@@ -480,7 +501,7 @@ export class NotificationService {
   getPermissionStatus(): NotificationPermission {
     if (this.isNativePlatform()) {
       // Kick off async sync with native permission state; return last known state.
-      void this.initNativePermissionStatus();
+      void this.refreshNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }
@@ -494,7 +515,7 @@ export class NotificationService {
   getPreferences(): NotificationPreferences {
     if (this.isNativePlatform()) {
       // Kick off async sync with native permission state; return last known state.
-      void this.initNativePermissionStatus();
+      void this.refreshNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }
@@ -512,8 +533,7 @@ export class NotificationService {
   async fetchPreferences(): Promise<NotificationPreferences> {
     if (this.isNativePlatform()) {
       // Force a fresh read so the returned state reflects the real OS status.
-      this.nativePermissionInitialized = false;
-      await this.initNativePermissionStatus();
+      await this.refreshNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }

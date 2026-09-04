@@ -55,7 +55,6 @@ export function useSwipeToReply({
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const isSwiping = useRef(false);
-  const swipeCompleted = useRef(false);
   const touchSlopExceeded = useRef(false);
   const hasTriggeredHaptic = useRef(false);
 
@@ -76,7 +75,6 @@ export function useSwipeToReply({
       touchStartX.current = touch.clientX;
       touchStartY.current = touch.clientY;
       isSwiping.current = false;
-      swipeCompleted.current = false;
       touchSlopExceeded.current = false;
       hasTriggeredHaptic.current = false;
       setIsAnimatingBack(false);
@@ -120,8 +118,10 @@ export function useSwipeToReply({
       }
 
       if (isHorizontalSwipe) {
-        // Prevent iOS from scrolling the parent container during swipe
-        e.preventDefault();
+        // NOTE: no preventDefault() here — React attaches touchmove listeners
+        // as passive, so it would be ignored. Vertical scroll is blocked
+        // during the horizontal pan via `touch-action: pan-y` on the row
+        // (see MessageItem).
         isSwiping.current = true;
         const resistance = isOutgoing
           ? SWIPE_RESISTANCE_OUTGOING
@@ -141,6 +141,11 @@ export function useSwipeToReply({
           : SWIPE_THRESHOLD;
         if (-clampedSwipe >= threshold && !hasTriggeredHaptic.current) {
           hasTriggeredHaptic.current = true;
+          try {
+            navigator.vibrate?.(10);
+          } catch {
+            // Vibration not available
+          }
         }
       } else if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
         setSwipeOffset(0);
@@ -185,7 +190,6 @@ export function useSwipeToReply({
 
       if (isLeftSwipeCompleted && onReplyTo) {
         onReplyTo(message);
-        swipeCompleted.current = true;
       }
 
       // Suppress tap after any swipe gesture

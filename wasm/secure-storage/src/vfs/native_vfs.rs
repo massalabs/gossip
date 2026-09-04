@@ -3613,4 +3613,71 @@ mod tests {
             }
         });
     }
+
+    #[test]
+    fn test_init_native_idempotent_reuses_open_store() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (dir, conn) = setup_native_vfs();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            conn.execute_batch(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);
+                 INSERT INTO t VALUES (1, 'before-reinit');",
+            )
+            .unwrap();
+
+            // Second init for the same (path, domain) while the process-global
+            // handle is still open — the notification-relaunch case (a fresh
+            // WebView re-runs initSecureStorage in a surviving process). Must
+            // reuse the handle, not reopen (redb would fail with
+            // DatabaseAlreadyOpen).
+            init_native(&path, "test").unwrap();
+
+            // The reuse must not disturb live state: the session stays
+            // unlocked (a forced lock here would kill the UI bridge's session
+            // in the two-bridges case) and the open connection keeps working.
+            assert!(is_unlocked().unwrap());
+            let val: String = conn
+                .query_row("SELECT val FROM t WHERE id = 1", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(val, "before-reinit");
+            conn.execute("INSERT INTO t VALUES (2, 'after-reinit')", [])
+                .unwrap();
+
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_init_native_rejects_mismatched_store() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            let dir_a = tempfile::tempdir().unwrap();
+            let dir_b = tempfile::tempdir().unwrap();
+            let path_a = dir_a.path().to_str().unwrap().to_string();
+            let path_b = dir_b.path().to_str().unwrap().to_string();
+
+            init_native(&path_a, "test").unwrap();
+
+            // The single global handle cannot serve two stores: a different
+            // path or domain is misuse and must surface, not silently swap
+            // the open store.
+            let err = init_native(&path_b, "test").expect_err("different path must be rejected");
+            assert!(
+                matches!(&err, SecureStorageError::Storage(msg) if msg.contains("already initialized")),
+                "expected mismatch error, got: {err}"
+            );
+            let err = init_native(&path_a, "other").expect_err("different domain must be rejected");
+            assert!(
+                matches!(&err, SecureStorageError::Storage(msg) if msg.contains("already initialized")),
+                "expected mismatch error, got: {err}"
+            );
+
+            // The failed calls must leave the original store untouched: the
+            // matching re-init still succeeds.
+            init_native(&path_a, "test").unwrap();
+        });
+    }
 }

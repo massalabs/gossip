@@ -140,18 +140,26 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
     []
   );
 
-  const handleUsernameChange = handleValidatedChange(
-    validateUsernameFormat,
-    setUsername,
-    setIsUsernameValid,
-    setUsernameError
+  const handleUsernameChange = useMemo(
+    () =>
+      handleValidatedChange(
+        validateUsernameFormat,
+        setUsername,
+        setIsUsernameValid,
+        setUsernameError
+      ),
+    [handleValidatedChange]
   );
 
-  const handlePasswordChange = handleValidatedChange(
-    validatePassword,
-    setPassword,
-    setIsPasswordValid,
-    setPasswordError
+  const handlePasswordChange = useMemo(
+    () =>
+      handleValidatedChange(
+        validatePassword,
+        setPassword,
+        setIsPasswordValid,
+        setPasswordError
+      ),
+    [handleValidatedChange]
   );
 
   const passwordsMatch = password === confirmPassword;

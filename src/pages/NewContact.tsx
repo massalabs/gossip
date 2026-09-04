@@ -26,7 +26,7 @@ const NewContact: React.FC = () => {
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [showMessage, setShowMessage] = useState(false);
-  const { userProfile } = useAccountStore();
+  const userProfile = useAccountStore.use.userProfile();
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
 
   const {

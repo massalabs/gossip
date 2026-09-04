@@ -43,7 +43,7 @@ const ReactionBar: React.FC<ReactionBarProps> = React.memo(
                   reaction.myReactionMessageId
                 );
               }}
-              className={`flex items-center gap-0.5 text-sm min-w-[2rem] min-h-[1.75rem] px-2 py-1 rounded-full border shadow-sm bg-card/95 backdrop-blur active:scale-95 transition-transform cursor-pointer ${
+              className={`flex items-center gap-0.5 text-sm min-w-[2rem] min-h-[1.75rem] px-2 py-1 rounded-full border shadow-sm bg-card/95 backdrop-blur active:scale-95 transition-transform cursor-pointer animate-reaction-pop ${
                 isMine
                   ? 'border-accent text-foreground'
                   : 'border-border text-foreground'

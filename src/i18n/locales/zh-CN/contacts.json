@@ -57,6 +57,8 @@
   "name_label": "名称",
   "name_placeholder": "联系人名称",
   "message_label": "联系请求消息（可选）",
+  "message_label_main": "联系请求消息",
+  "message_label_optional": "（可选）",
   "message_placeholder": "介绍自己或为联系请求添加说明...",
   "use_default_message": "使用默认消息",
   "user_id_label": "用户 ID",
@@ -64,5 +66,20 @@
   "user_id_loading": "正在加载公钥",
   "user_id_helper": "用户 ID 是一个唯一的 32 字节标识符",
   "share_invitation": "分享邀请",
-  "file": "文件"
+  "file": "文件",
+  "share": {
+    "hide_username": "在邀请中隐藏用户名",
+    "include_username": "在邀请中包含用户名",
+    "edit_username": "编辑用户名",
+    "edit_shared_username": "编辑分享的用户名",
+    "link_copied": "链接已复制！",
+    "copy_invite_link": "复制邀请链接",
+    "qr": "二维码",
+    "expiry_hint": "邀请将在 2 周后过期。文件邀请不会过期。",
+    "expiry_popover": "邀请会在您最后一次连接后 2 周过期。每次打开应用时，如果距上次已超过 24 小时，有效期将会续期。文件邀请永不过期。",
+    "file_modal_title": "通过文件分享邀请",
+    "file_modal_body": "将您的个人资料以文件形式分享给想要交流的人。对方可以在<newContactLink>新联系人</newContactLink>页面导入您的文件。",
+    "file_modal_note": "与其他个人资料分享方式相比，即使您超过 2 周未登录应用，文件形式的个人资料仍然有效。",
+    "share_file": "分享文件"
+  }
 }

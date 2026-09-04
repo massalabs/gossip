@@ -314,6 +314,7 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           disabled={biometricLoading}
           hasError={!!persistentError}
           clearError={() => onErrorChange?.(null)}
+          inputRef={passwordInputRef}
         />
 
         <ErrorDisplay

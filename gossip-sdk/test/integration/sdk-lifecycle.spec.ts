@@ -9,6 +9,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { EncryptionKey } from '../../src/wasm/encryption';
 import { UserPublicKeys, UserSecretKeys } from '../../src/wasm/bindings';
 import { GossipSdk, SdkEventType, SdkStatus } from '../../src/gossip';
+import { DatabaseConnection } from '../../src/db/sqlite';
 import { clearAllTables, getTestStorageConfig } from '../testDb';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { MockMessageProtocol } from '../mocks';
@@ -58,6 +59,7 @@ describe('GossipSdk lifecycle', () => {
     } catch {
       // may not be open
     }
+    vi.restoreAllMocks();
     resetLoggingForTests();
   });
 
@@ -502,6 +504,65 @@ describe('GossipSdk lifecycle', () => {
 
     await sdk.init({ storage: getTestStorageConfig() });
     expect(emittedWarnings.length).toBeGreaterThan(0);
+  });
+
+  it('dedupes concurrent init() calls into a single database open', async () => {
+    const createSpy = vi.spyOn(DatabaseConnection, 'create');
+
+    // Two callers race on the same instance: both must await the one
+    // in-flight init instead of each opening the DB — the native
+    // secure-storage backend rejects a second open (DatabaseAlreadyOpen).
+    const [a, b] = await Promise.all([
+      sdk.init({ storage: getTestStorageConfig() }),
+      sdk.init({ storage: getTestStorageConfig() }),
+    ]);
+
+    expect(a).toBe(sdk);
+    expect(b).toBe(sdk);
+    expect(sdk.isInitialized).toBe(true);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows retrying init() after a failed attempt', async () => {
+    vi.spyOn(DatabaseConnection, 'create').mockRejectedValueOnce(
+      new Error('transient storage failure')
+    );
+
+    await expect(sdk.init({ storage: getTestStorageConfig() })).rejects.toThrow(
+      'transient storage failure'
+    );
+    expect(sdk.isInitialized).toBe(false);
+
+    // The failed attempt must clear the single-flight latch so the retry
+    // runs a fresh init instead of being handed the rejected promise.
+    await sdk.init({ storage: getTestStorageConfig() });
+    expect(sdk.isInitialized).toBe(true);
+  });
+
+  it('releases the connection when init() fails after the database opened', async () => {
+    const close = vi.fn().mockResolvedValue(undefined);
+    // A connection whose first post-open step blows up: `_doInit` reads
+    // `isOpen` right after `create()` resolves.
+    const createSpy = vi
+      .spyOn(DatabaseConnection, 'create')
+      .mockResolvedValueOnce({
+        get isOpen(): boolean {
+          throw new Error('post-open failure');
+        },
+        close,
+      } as unknown as DatabaseConnection);
+
+    await expect(sdk.init({ storage: getTestStorageConfig() })).rejects.toThrow(
+      'post-open failure'
+    );
+
+    // The half-open handle must be released — otherwise the retry's
+    // create() hits DatabaseAlreadyOpen on native secure storage.
+    expect(close).toHaveBeenCalledTimes(1);
+
+    await sdk.init({ storage: getTestStorageConfig() });
+    expect(sdk.isInitialized).toBe(true);
+    expect(createSpy).toHaveBeenCalledTimes(2);
   });
 
   it('invalidates query readiness before a retryable lock failure', async () => {

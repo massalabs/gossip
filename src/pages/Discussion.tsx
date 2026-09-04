@@ -21,7 +21,7 @@ import { Message, SessionStatus } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useDiscussionScrollToMessage } from '../hooks/useDiscussionScrollToMessage';
-import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
+import { useHeaderScrollDetection } from '../hooks/useHeaderScroll';
 import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useForwardPreview } from '../hooks/useForwardPreview';
 import { useDiscussionActions } from '../hooks/useDiscussionActions';
@@ -38,7 +38,7 @@ const TEST_MESSAGE_BATCH_DELAY_MS = 100;
 // messages without reactions instead of a fresh [] on every render.
 const EMPTY_REACTIONS: never[] = [];
 
-const Discussion: React.FC = () => {
+const DiscussionInner: React.FC = () => {
   const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
   const { userId } = useParams();
@@ -126,8 +126,6 @@ const Discussion: React.FC = () => {
   const isLoading = useMessageStore(s => s.isInitializing);
   const sendMessage = useMessageStore(s => s.sendMessage);
 
-  const prevContactUserIdRef = useRef<string | null>(null);
-
   const {
     selectedMessageIds,
     isSelecting,
@@ -171,14 +169,14 @@ const Discussion: React.FC = () => {
   );
 
   const handleToggleSearch = useCallback(() => {
-    setIsSearchOpen(prev => {
-      if (prev) {
-        const textarea = inputAreaRef.current?.querySelector('textarea');
-        textarea?.focus({ preventScroll: true });
-      }
-      return !prev;
-    });
-  }, []);
+    // Side effect kept outside the setState updater (updaters must stay
+    // pure — StrictMode invokes them twice).
+    if (isSearchOpen) {
+      const textarea = inputAreaRef.current?.querySelector('textarea');
+      textarea?.focus({ preventScroll: true });
+    }
+    setIsSearchOpen(!isSearchOpen);
+  }, [isSearchOpen]);
   const handleCloseSearch = useCallback(() => {
     const textarea = inputAreaRef.current?.querySelector('textarea');
     textarea?.focus({ preventScroll: true });
@@ -229,13 +227,40 @@ const Discussion: React.FC = () => {
     }
   }, [finalPrefilledMessage]);
 
+  const contactUserId = contact?.userId ?? null;
+  // Tracked via a ref so the unmount cleanup below sees the LATEST store
+  // value, not the one captured when the effect ran.
+  const storeCurrentContact = useMessageStore(s => s.currentContactUserId);
+  const storeCurrentContactRef = useRef(storeCurrentContact);
+  storeCurrentContactRef.current = storeCurrentContact;
+
   useEffect(() => {
-    const contactUserId = contact?.userId || null;
-    if (prevContactUserIdRef.current !== contactUserId) {
-      prevContactUserIdRef.current = contactUserId;
-      void setCurrentContact(contactUserId);
+    void setCurrentContact(contactUserId);
+    return () => {
+      // Leaving the discussion must stop suppressing notifications for this
+      // contact. Guard against clobbering a newer value: with exit
+      // animations, this cleanup can run after the next page already set
+      // its own contact.
+      if (storeCurrentContactRef.current === contactUserId) {
+        void setCurrentContact(null);
+      }
+    };
+  }, [contactUserId, setCurrentContact]);
+
+  // Location state (forward / scroll-to / prefill) is one-shot: clear it
+  // from the history entry so a reload or back/forward doesn't replay it.
+  // (SelfDiscussion does the same.)
+  useEffect(() => {
+    if (
+      locationState?.forwardFromMessageId != null ||
+      locationState?.scrollToMessageId != null ||
+      locationState?.prefilledMessage
+    ) {
+      navigate(location.pathname, { replace: true, state: {} });
     }
-  }, [contact?.userId, setCurrentContact]);
+    // Run once per mount — everything above captured the values already.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     handleClearSelection();
@@ -256,10 +281,11 @@ const Discussion: React.FC = () => {
       messageRetentionDuration: defaultRetentionDuration,
       retentionPolicySetAt: Date.now(),
     });
-    void gossip.discussions.setRetentionPolicy(
-      userId,
-      defaultRetentionDuration
-    );
+    gossip.discussions
+      .setRetentionPolicy(userId, defaultRetentionDuration)
+      .catch(error => {
+        logger.error('Failed to apply default retention policy:', error);
+      });
   }, [
     userId,
     anyDiscussionId,
@@ -294,6 +320,38 @@ const Discussion: React.FC = () => {
       initialScrollToMessageIdRef.current = null;
     }
   }, [messages.length, isLoading, handleScrollToMessage]);
+
+  // Stable handlers so the memoized MessageList isn't re-rendered by fresh
+  // inline lambdas on every Discussion render.
+  const handleReact = useCallback(
+    (message: Message, emoji: string) => {
+      if (!message.id || !contactUserId) return;
+      reactToMessage(contactUserId, emoji, message.id).catch(err => {
+        logger.error('Failed to send reaction', err);
+      });
+    },
+    [contactUserId, reactToMessage]
+  );
+
+  const handleToggleReaction = useCallback(
+    (
+      message: Message,
+      emoji: string,
+      myReactionId?: number,
+      myReactionMessageId?: Uint8Array
+    ) => {
+      if (myReactionId || myReactionMessageId) {
+        removeReaction(myReactionId, myReactionMessageId).catch(err => {
+          logger.error('Failed to remove reaction', err);
+        });
+      } else if (message.id && contactUserId) {
+        reactToMessage(contactUserId, emoji, message.id).catch(err => {
+          logger.error('Failed to send reaction', err);
+        });
+      }
+    },
+    [contactUserId, reactToMessage, removeReaction]
+  );
 
   const handleSendTestMessages = useCallback(async () => {
     if (!contact?.userId || isSendingTestMessages) return;
@@ -391,29 +449,9 @@ const Discussion: React.FC = () => {
           onForward={handleForwardMessage}
           onDelete={handleDeleteMessage}
           onEdit={onEditMessage}
-          onReact={(message, emoji) => {
-            if (!message.id) return;
-            reactToMessage(contact.userId, emoji, message.id).catch(err => {
-              logger.error('Failed to send reaction', err);
-            });
-          }}
+          onReact={handleReact}
           getReactions={getReactions}
-          onToggleReaction={(
-            message,
-            emoji,
-            myReactionId,
-            myReactionMessageId
-          ) => {
-            if (myReactionId || myReactionMessageId) {
-              removeReaction(myReactionId, myReactionMessageId).catch(err => {
-                logger.error('Failed to remove reaction', err);
-              });
-            } else if (message.id) {
-              reactToMessage(contact.userId, emoji, message.id).catch(err => {
-                logger.error('Failed to send reaction', err);
-              });
-            }
-          }}
+          onToggleReaction={handleToggleReaction}
           onScrollToMessage={handleScrollToMessage}
           onAtBottomChange={handleAtBottomChange}
           onScrollToBottom={scrollToBottom}
@@ -426,6 +464,15 @@ const Discussion: React.FC = () => {
       </div>
     </DiscussionLayout>
   );
+};
+
+// Keyed by contact so navigating from one discussion straight to another
+// (e.g. jump-to-original across discussions) remounts the page: per-contact
+// refs and compose state (prefill, reply, edit, default-retention flag)
+// must not leak from contact A into contact B.
+const Discussion: React.FC = () => {
+  const { userId } = useParams();
+  return <DiscussionInner key={userId ?? 'none'} />;
 };
 
 export default Discussion;

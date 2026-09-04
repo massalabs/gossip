@@ -6,7 +6,6 @@ import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
 import { reconcileDebugLogsGeneration } from './stores/useDebugLogs';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
-// import PWABadge from './PWABadge.tsx';
 import { DebugConsole } from './components/ui/DebugConsole';
 import { Toaster } from 'react-hot-toast';
 
@@ -25,7 +24,7 @@ import { toastOptions, toasterContainerStyle } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
 import { ROUTES } from './constants/routes';
-import { useOnlineStore } from './stores/useOnlineStore.tsx';
+import { useOnlineStore } from './stores/useOnlineStore';
 import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
@@ -37,8 +36,12 @@ import {
 } from './services/portableImportCleanup';
 
 export const AppContent: React.FC = () => {
-  const { isLoading, userProfile } = useAccountStore();
-  const { isInitialized, lockedStartupFallback } = useAppStore();
+  // Field selectors: subscribing to the whole store would re-render the
+  // entire route tree on any account-store change.
+  const isLoading = useAccountStore(s => s.isLoading);
+  const userProfile = useAccountStore(s => s.userProfile);
+  const isInitialized = useAppStore(s => s.isInitialized);
+  const lockedStartupFallback = useAppStore(s => s.lockedStartupFallback);
   const routesInitialized = isInitialized || lockedStartupFallback;
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
@@ -147,9 +150,17 @@ function App() {
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
+    let disposed = false;
 
     const initialize = async () => {
       const cleanupFn = await initTheme();
+      // The effect may already be cleaned up (StrictMode first mount,
+      // unmount during init) — dispose immediately instead of leaking the
+      // theme listener.
+      if (disposed) {
+        cleanupFn?.();
+        return;
+      }
       cleanup = cleanupFn;
       await initOnlineStore();
     };
@@ -157,6 +168,7 @@ function App() {
     void initialize();
 
     return () => {
+      disposed = true;
       cleanup?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -48,5 +48,11 @@
     "custom_placeholder": "Frais personnalisés",
     "custom_hint": "Saisir les frais en MAS",
     "confirm_fees": "Confirmer les frais"
+  },
+  "address_input": {
+    "label": "Adresse",
+    "placeholder": "Saisir l'adresse",
+    "invalid": "Format d'adresse invalide",
+    "valid": "Adresse valide"
   }
 }

@@ -311,7 +311,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
       onTouchEnd={swipe.handleTouchEnd}
       onTouchCancel={swipe.handleTouchCancel}
       onContextMenu={contextMenu.handleContextMenu}
-      style={{ touchAction: 'manipulation' }}
+      // pan-y: the browser keeps vertical scrolling, but hands horizontal
+      // panning to JS — required for swipe-to-reply since React touch
+      // listeners are passive (preventDefault would be ignored).
+      style={{ touchAction: 'pan-y' }}
       role="listitem"
       aria-label={
         isOutgoing
@@ -396,10 +399,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
         isOpen={isEmojiPickerOpen}
         onClose={() => setIsEmojiPickerOpen(false)}
         title={t('message_item.add_reaction')}
-        onSelectEmoji={emoji => onReact?.(message, emoji)}
+        onSelectEmoji={handleSelectEmoji}
       />
     </div>
   );
 };
 
-export default MessageItem;
+// Memoized: rendered per visible row of the virtualized list, so a parent
+// render (selection, highlight, animation tick) shouldn't re-render rows
+// whose props didn't change.
+export default React.memo(MessageItem);

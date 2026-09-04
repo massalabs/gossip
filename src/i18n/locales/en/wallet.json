@@ -48,5 +48,11 @@
     "custom_placeholder": "Custom fees",
     "custom_hint": "Enter fee in MAS",
     "confirm_fees": "Confirm fees"
+  },
+  "address_input": {
+    "label": "Address",
+    "placeholder": "Enter address",
+    "invalid": "Invalid address format",
+    "valid": "Valid address"
   }
 }

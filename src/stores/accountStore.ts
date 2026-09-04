@@ -1,6 +1,8 @@
 import { logger } from '../utils/logger.ts';
 import { create } from 'zustand';
 import {
+  generateMnemonic,
+  EncryptionKey,
   encodeUserId,
   UserProfile,
   SecureStorageRecoveryRequiredError,
@@ -9,20 +11,13 @@ import {
   UnreadableMessagingSessionError,
 } from '@massalabs/gossip-sdk';
 
-import { generateMnemonic, EncryptionKey } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
 import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
 import { finalizeCommittedAccountGenerationAuthority } from '../services/portableImportAuthorization';
 import { resetAllAccountStorage } from '../services/unsupportedStorageReset';
 
-import {
-  Provider,
-  Account,
-  JsonRpcProvider,
-  PublicApiUrl,
-  NetworkName,
-} from '@massalabs/massa-web3';
+import { Provider, Account } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
 
@@ -40,6 +35,7 @@ import {
   fetchMnsDomainsIfEnabled,
   wipeAccountPrivateKey,
 } from './utils/accountHelpers';
+import { registerAccountStoreSubscriptions } from './accountStore.subscriptions';
 
 export type PrivateMigrationPhase = 1 | 2 | 3 | 4 | 5;
 
@@ -175,6 +171,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       evmAddress: null,
       userProfile: null,
       encryptionKey: null,
+      provider: null,
       isLoading: false,
       privateMigrationPhase: null,
     };
@@ -1028,11 +1025,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           },
         };
 
-        await getSdk().profiles.save({
-          ...updatedProfile,
-          updatedAt: new Date(),
-        });
-        set({ userProfile: updatedProfile });
+        const savedProfile = { ...updatedProfile, updatedAt: new Date() };
+        await getSdk().profiles.save(savedProfile);
+        set({ userProfile: savedProfile });
       } catch (error) {
         logger.error('Error marking mnemonic backup as complete:', error);
         throw error;
@@ -1153,42 +1148,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   };
 });
 
-// Subscribe to account changes to initialize provider
-useAccountStoreBase.subscribe(async (state, prevState) => {
-  const currentAddress = state.account?.address?.toString();
-  const prevAddress = prevState.account?.address?.toString();
+export type AccountStoreApi = typeof useAccountStoreBase;
 
-  if (currentAddress === prevAddress) return;
-
-  try {
-    const networkName = useAppStore.getState().networkName;
-    const publicApiUrl =
-      networkName === NetworkName.Buildnet
-        ? PublicApiUrl.Buildnet
-        : PublicApiUrl.Mainnet;
-
-    if (state.account) {
-      const provider = await JsonRpcProvider.fromRPCUrl(
-        publicApiUrl,
-        state.account
-      );
-
-      useAccountStoreBase.setState({ provider });
-    } else {
-      useAccountStoreBase.setState({ provider: null });
-    }
-  } catch (error) {
-    logger.error('Error initializing provider:', error);
-  }
-});
-
-// Subscribe to provider changes to fetch MNS domains when provider becomes available
-useAccountStoreBase.subscribe(async (state, prevState) => {
-  if (state.provider === prevState.provider) return;
-
-  if (state.provider && state.userProfile) {
-    fetchMnsDomainsIfEnabled(state.userProfile, state.provider);
-  }
-});
+registerAccountStoreSubscriptions(useAccountStoreBase);
 
 export const useAccountStore = createSelectors(useAccountStoreBase);
