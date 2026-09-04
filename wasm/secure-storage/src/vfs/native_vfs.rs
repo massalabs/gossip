@@ -3666,12 +3666,12 @@ mod tests {
             // the open store.
             let err = init_native(&path_b, "test").expect_err("different path must be rejected");
             assert!(
-                matches!(&err, SecureStorageError::Storage(msg) if msg.contains("already initialised")),
+                matches!(&err, SecureStorageError::Storage(msg) if msg.contains("already initialized")),
                 "expected mismatch error, got: {err}"
             );
             let err = init_native(&path_a, "other").expect_err("different domain must be rejected");
             assert!(
-                matches!(&err, SecureStorageError::Storage(msg) if msg.contains("already initialised")),
+                matches!(&err, SecureStorageError::Storage(msg) if msg.contains("already initialized")),
                 "expected mismatch error, got: {err}"
             );
 

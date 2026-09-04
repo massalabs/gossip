@@ -6,7 +6,7 @@
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { type EncryptionKey } from '../../src/wasm/encryption';
+import { EncryptionKey } from '../../src/wasm/encryption';
 import { UserPublicKeys, UserSecretKeys } from '../../src/wasm/bindings';
 import { GossipSdk, SdkEventType, SdkStatus } from '../../src/gossip';
 import { DatabaseConnection } from '../../src/db/sqlite';

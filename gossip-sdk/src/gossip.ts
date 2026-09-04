@@ -438,7 +438,9 @@ class GossipSdk {
 
       // Create services that don't need a session
       this._auth = new AuthService(createAuthProtocol());
-      this._profile = this._queries ? new ProfileService(this._queries) : null;
+      this._profile = this._queries
+        ? this.createProfileService(this._queries)
+        : null;
 
       this.state = {
         status: SdkStatus.INITIALIZED,
