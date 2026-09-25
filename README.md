@@ -48,7 +48,7 @@ Required only for native builds:
 git clone <repository-url>
 cd gossip-app
 npm run setup       # installs rust toolchain, cargo subcommands, zig, wasm-bindgen-cli, npm deps
-npm run dev         # web dev server at http://localhost:5173
+npm run dev         # web dev server at https://localhost:5173
 ```
 
 `npm run setup` is idempotent — re-run it after pulling, after installing
@@ -95,6 +95,18 @@ mv .env.example .env
 Set `VITE_GOSSIP_API_URL` to the API base URL used for message transfer.
 The SDK defaults to `https://api.usegossip.com` and the app overrides it at
 runtime via `setProtocolBaseUrl` during startup.
+
+For a local HTTP backend, set e.g. `VITE_GOSSIP_API_URL=http://localhost:40001`
+and run `npm run dev`. Vite keeps the frontend on HTTPS and proxies API requests
+through `/__gossip_api` to avoid mixed-content errors while preserving camera,
+crypto and service worker access. With `npm run dev:host`, the backend URL is
+resolved from the development machine, not the phone or other browser device.
+
+This proxy is only enabled for web development with an explicitly configured
+HTTP API. HTTPS backends (including the official backend), builds, preview and
+Capacitor live-reload scripts (`DEV_SERVER_URL`) retain their existing behavior.
+The connection from Vite to the HTTP backend is still unencrypted; use only a
+trusted development backend/network.
 
 ## Project Structure
 

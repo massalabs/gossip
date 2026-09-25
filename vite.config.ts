@@ -1,6 +1,6 @@
 import path from 'path';
 import { VitePWA } from 'vite-plugin-pwa';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { transformSync } from 'esbuild';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -93,12 +93,12 @@ function stripReleaseConsolePlugin(): Plugin {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig({
+const config = defineConfig({
   plugins: [
     stripReleaseConsolePlugin(),
     react(),
     tailwindcss(),
-    mkcert(), // ← Enables HTTPS locally
+    mkcert(), // Enables HTTPS locally: HTTPS is required for LAN camera, crypto and service worker access.
     crossOriginIsolation(), // ← Sets COOP/COEP for SharedArrayBuffer (rayon WASM)
     nodePolyfills({
       // Whether to polyfill `node:` protocol imports.
@@ -236,4 +236,32 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+});
+
+export default defineConfig(({ command, mode, isPreview }) => {
+  // Native live reload uses DEV_SERVER_URL and retains its existing configuration.
+  if (command !== 'serve' || isPreview || process.env.DEV_SERVER_URL)
+    return config;
+
+  const { VITE_GOSSIP_API_URL: apiUrl } = loadEnv(mode, process.cwd(), 'VITE_');
+  if (!apiUrl?.startsWith('http://')) return config;
+
+  // Keep the browser in a secure context and proxy HTTP APIs only during web dev.
+  const apiProxyPath = '/__gossip_api';
+  return {
+    ...config,
+    define: {
+      'import.meta.env.VITE_GOSSIP_API_URL': JSON.stringify(apiProxyPath),
+    },
+    server: {
+      ...config.server,
+      proxy: {
+        [apiProxyPath + '/']: {
+          target: apiUrl.replace(/\/+$/, ''),
+          changeOrigin: true,
+          rewrite: requestPath => requestPath.slice(apiProxyPath.length),
+        },
+      },
+    },
+  };
 });
