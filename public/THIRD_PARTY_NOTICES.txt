@@ -1995,16 +1995,10 @@ License: MIT
 Source: node_modules/@jridgewell/trace-mapping
 License text references: 769d154fbde32a91
 
-npm: @massalabs/massa-web3@5.3.0
+npm: @massalabs/massa-web3@5.4.0
 License: MIT
-Source: https://registry.npmjs.org/@massalabs/massa-web3/-/massa-web3-5.3.0.tgz
-Integrity: sha512-bct2IwjUXN87KaUL3wBc70s6l4N4gVGweIFnVGnxFpp+uJESfwK1oty89yRbrq5Y0LVL3Y6TYZUH5FxJU5QkvA==
-License text references: none found
-
-npm: @massalabs/massa-web3@5.3.1-dev.20251014074110
-License: MIT
-Source: https://registry.npmjs.org/@massalabs/massa-web3/-/massa-web3-5.3.1-dev.20251014074110.tgz
-Integrity: sha512-nKhHxQcC0fGLrfCaPsurHNgxnxLiAgEtFO9caia/eu4kZvy/TGJ6jGt4tXt+Wv1PBHhYdGfJ06z0BibhstlwKQ==
+Source: https://registry.npmjs.org/@massalabs/massa-web3/-/massa-web3-5.4.0.tgz
+Integrity: sha512-b+/Lwl6snwi6ilImAD+8Cw4UHGZT6QsoReTkxufsfM4yW+JOvsFIPQ1GuQx2A13tzSAb9bGcnIKPl6DCrvVQ9Q==
 License text references: none found
 
 npm: @napi-rs/wasm-runtime@1.1.1
@@ -2942,11 +2936,6 @@ npm: sdp@3.2.1
 License: MIT
 Source: node_modules/sdp
 License text references: 798e82590af6a84b
-
-npm: secure-random@1.1.2
-License: MIT
-Source: node_modules/secure-random
-License text references: none found
 
 npm: set-cookie-parser@2.7.2
 License: MIT

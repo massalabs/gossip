@@ -1508,10 +1508,10 @@ License: Apache-2.0 OR MIT
 Source: registry+https://github.com/rust-lang/crates.io-index
 License text references: cfc7749b96f63bd3, 90a8b6622d5e3faa
 
-npm: @massalabs/massa-web3@5.3.0
+npm: @massalabs/massa-web3@5.4.0
 License: MIT
-Source: https://registry.npmjs.org/@massalabs/massa-web3/-/massa-web3-5.3.0.tgz
-Integrity: sha512-bct2IwjUXN87KaUL3wBc70s6l4N4gVGweIFnVGnxFpp+uJESfwK1oty89yRbrq5Y0LVL3Y6TYZUH5FxJU5QkvA==
+Source: https://registry.npmjs.org/@massalabs/massa-web3/-/massa-web3-5.4.0.tgz
+Integrity: sha512-b+/Lwl6snwi6ilImAD+8Cw4UHGZT6QsoReTkxufsfM4yW+JOvsFIPQ1GuQx2A13tzSAb9bGcnIKPl6DCrvVQ9Q==
 License text references: none found
 
 npm: @noble/ed25519@1.7.5
@@ -1622,11 +1622,11 @@ Source: https://registry.npmjs.org/node-gyp-build/-/node-gyp-build-4.8.4.tgz
 Integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==
 License text references: 7b3638496004b2da
 
-npm: secure-random@1.1.2
-License: MIT
-Source: https://registry.npmjs.org/secure-random/-/secure-random-1.1.2.tgz
-Integrity: sha512-H2bdSKERKdBV1SwoqYm6C0y+9EA94v6SUBOWO8kDndc4NoUih7Dv6Tsgma7zO1lv27wIvjlD0ZpMQk7um5dheQ==
-License text references: none found
+npm: tslib@2.8.1
+License: 0BSD
+Source: https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz
+Integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==
+License text references: 5989359645911c04
 
 npm: utf-8-validate@6.0.6
 License: MIT
@@ -5829,6 +5829,26 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+------------------------------------------------------------------------------
+
+Text reference: 5989359645911c04
+SHA-256: 5989359645911c04a140c49d89496b13feca980bbf36d2250a12d3b9d06250d6
+File names: LICENSE.txt
+Used by: npm:tslib@2.8.1
+
+Copyright (c) Microsoft Corporation.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
 
 ------------------------------------------------------------------------------
 
