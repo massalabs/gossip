@@ -60,7 +60,7 @@ jobs:
 
       - name: Deploy ${{ matrix.branch }} → ${{ matrix.network }}
         id: deploy
-        uses: massalabs/deweb-gh-action@v0.1.0
+        uses: massalabs/deweb-gh-action@v0.1.2
         with:
           config_file: ./${{ matrix.config_file }}
           source_folder: ./dist
