@@ -55,7 +55,7 @@
     "vitest": "^4.0.17"
   },
   "dependencies": {
-    "@massalabs/massa-web3": "^5.3.0",
+    "@massalabs/massa-web3": "^5.4.0",
     "@noble/hashes": "^1.8.0",
     "@scure/base": "^2.0.0",
     "@scure/bip39": "^2.0.1",
