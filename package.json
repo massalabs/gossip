@@ -90,7 +90,7 @@
     "@capacitor/share": "^8.0.0",
     "@capacitor/status-bar": "^8.0.0",
     "@massalabs/gossip-sdk": "workspace:*",
-    "@massalabs/massa-web3": "^5.3.1-dev.20250925215116",
+    "@massalabs/massa-web3": "^5.4.0",
     "@noble/hashes": "^1.8.0",
     "@scure/base": "^2.0.0",
     "@scure/bip32": "^2.0.0",
