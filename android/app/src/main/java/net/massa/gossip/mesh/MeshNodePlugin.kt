@@ -212,6 +212,14 @@ class MeshNodePlugin : Plugin() {
                 .put("bridgeEnabled", status.bridgeEnabled)
                 .put("bulletinCounter", status.bulletinCounter)
                 .put("storedBlobs", status.storedBlobs)
+                .put("linksHandshaking", status.linksHandshaking)
+                .put("meshBlobs", status.meshBlobs)
+                .put("uploadPending", status.uploadPending)
+                .put("wantedEntries", status.wantedEntries)
+                .put("clockOffsetMs", status.clockOffsetMs)
+                .put("peerId", status.peerId)
+                .put("radioLinks", MeshNodeBridge.linkCount())
+                .put("rustCore", MeshCoreFactory.hasRustCore())
         }
     }
 
