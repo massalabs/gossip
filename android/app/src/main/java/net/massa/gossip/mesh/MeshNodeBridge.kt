@@ -31,6 +31,8 @@ object MeshNodeBridge : MeshRadioListener, MeshCoreSink {
     @Volatile private var core: MeshCore? = null
     @Volatile private var radio: MeshRadio? = null
 
+    private val inbound = InboundBudget()
+
     private val arrivalListeners = CopyOnWriteArrayList<ArrivalListener>()
     private val linksListeners = CopyOnWriteArrayList<LinksListener>()
 
@@ -95,7 +97,18 @@ object MeshNodeBridge : MeshRadioListener, MeshCoreSink {
     }
 
     override fun onFrameIn(linkId: Int, frame: ByteArray) {
-        events.execute { core?.frameIn(linkId, frame) }
+        // a link that outpaces the core is closed rather than queued without bound
+        if (!inbound.tryAdd(linkId, frame.size)) {
+            radio?.closeLink(linkId)
+            return
+        }
+        events.execute {
+            try {
+                core?.frameIn(linkId, frame)
+            } finally {
+                inbound.release(linkId, frame.size)
+            }
+        }
     }
 
     // ── MeshCoreSink: core → radio and app ───────────────────────────────

@@ -9,6 +9,7 @@ final class MeshNodeBridge: MeshRadioListener, MeshCoreSink {
     static let shared = MeshNodeBridge()
 
     private let events = DispatchQueue(label: "net.massa.gossip.mesh.events")
+    private let inbound = InboundBudget(maxPendingBytes: MeshConstants.maxPendingInboundBytesPerLink)
     private let calls = DispatchQueue(label: "net.massa.gossip.mesh.calls")
     private let lock = NSLock()
     private var core: MeshCore?
@@ -117,7 +118,15 @@ final class MeshNodeBridge: MeshRadioListener, MeshCoreSink {
     }
 
     func onFrameIn(linkId: Int, frame: Data) {
-        events.async { self.currentCore()?.frameIn(linkId: linkId, frame: frame) }
+        // a link that outpaces the core is closed rather than queued without bound
+        guard inbound.tryAdd(linkId: linkId, bytes: frame.count) else {
+            currentRadio()?.closeLink(linkId: linkId)
+            return
+        }
+        events.async {
+            defer { self.inbound.release(linkId: linkId, bytes: frame.count) }
+            self.currentCore()?.frameIn(linkId: linkId, frame: frame)
+        }
     }
 
     // MARK: - MeshCoreSink: core → radio and app
@@ -137,5 +146,35 @@ final class MeshNodeBridge: MeshRadioListener, MeshCoreSink {
     private func notifyLinks() {
         // Read on the events queue so the count includes the change being reported.
         events.async { self.onLinksChanged?(self.linkCount()) }
+    }
+}
+
+/// Bytes received on each link and not yet taken by the core. Mirrors
+/// `InboundBudget` in InboundLimits.kt.
+final class InboundBudget {
+    private let maxPendingBytes: Int
+    private let lock = NSLock()
+    private var pending: [Int: Int] = [:]
+
+    init(maxPendingBytes: Int) {
+        self.maxPendingBytes = maxPendingBytes
+    }
+
+    /// Counts `bytes` for `linkId`; false, counting nothing, when that would pass the bound.
+    func tryAdd(linkId: Int, bytes: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let next = (pending[linkId] ?? 0) + bytes
+        guard next <= maxPendingBytes else { return false }
+        pending[linkId] = next
+        return true
+    }
+
+    func release(linkId: Int, bytes: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let current = pending[linkId] else { return }
+        let next = current - bytes
+        pending[linkId] = next > 0 ? next : nil
     }
 }

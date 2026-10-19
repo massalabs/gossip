@@ -13,6 +13,12 @@ enum MeshConstants {
     static let attHeaderBytes = 3
     /// Mesh links per phone, both roles together.
     static let maxLinks = 8
+    /// Of `maxLinks`, how many other phones may open: the rest are for the neighbours this phone picks.
+    static let maxInboundLinks = 4
+    /// How long a central whose link closed is ignored if it subscribes again.
+    static let inboundCooldown: TimeInterval = 60
+    /// Received bytes waiting for the core on one link; past it the link is closed.
+    static let maxPendingInboundBytesPerLink = 512 * 1024
     static let maxQueuedChunksPerLink = 256
     static let maxQueuedBytesPerLink = 512 * 1024
     static let centralRestoreIdentifier = "net.massa.gossip.mesh.central"
