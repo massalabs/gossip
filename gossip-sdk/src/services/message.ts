@@ -353,9 +353,25 @@ export class MessageService {
    * node). They are kept until the fetch loop reaches their seeker, so one
    * that arrives before its predecessor is not lost. Returns how many were new.
    */
+  /**
+   * Seekers a pushed message may sit at: the next one of each peer, the ones
+   * after it, and where peers would address a re-announcement to us.
+   */
+  private wantedSeekers(): Uint8Array[] {
+    if (!this.session) return [];
+    return [
+      ...this.session.getMessageBoardReadKeys(),
+      ...this.session.getMessageBoardLookaheadKeys(),
+      ...this.session.getReannouncementMailboxKeys(),
+    ];
+  }
+
   async ingestMessages(messages: EncryptedMessage[]): Promise<number> {
-    const added =
-      await this.queries.pendingEncryptedMessages.insertNew(messages);
+    // anything at another seeker is not for us, or no longer readable
+    const wanted = new Set(this.wantedSeekers().map(s => encodeToBase64(s)));
+    const added = await this.queries.pendingEncryptedMessages.insertNew(
+      messages.filter(m => wanted.has(encodeToBase64(m.seeker)))
+    );
     if (added > 0) await this.fetchMessages();
     return added;
   }
@@ -486,6 +502,11 @@ export class MessageService {
         await this.queries.pendingEncryptedMessages.deleteBySeekers([
           ...waitedSeekers.values(),
         ]);
+        // a lookahead seeker the sender did not use after all (it drew a
+        // fresh one) is no longer wanted: what was pushed there goes too
+        await this.queries.pendingEncryptedMessages.deleteExceptSeekers(
+          this.wantedSeekers()
+        );
         await this.queries.pendingEncryptedMessages.deleteFetchedBefore(
           new Date(Date.now() - PUSHED_MESSAGE_TTL_MS)
         );
