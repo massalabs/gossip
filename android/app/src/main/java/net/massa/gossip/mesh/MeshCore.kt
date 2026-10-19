@@ -85,13 +85,31 @@ class MeshCoreStatus(
     val bridgeEnabled: Boolean,
     val bulletinCounter: String,
     val storedBlobs: Long,
+    // Reported by the Rust node only; the stub leaves the defaults.
+    val linksHandshaking: Int = 0,
+    val meshBlobs: Long = 0,
+    /** Mesh blobs waiting for a bridge to upload them. */
+    val uploadPending: Long = 0,
+    val wantedEntries: Long = 0,
+    val clockOffsetMs: Long = 0,
+    val peerId: String = "",
 )
 
 /**
- * SWAP POINT for the Rust node: return the UniFFI-backed implementation here
- * once `gossip-mobile` ships its Kotlin bindings. Nothing else in the app
- * refers to [StubMeshCore].
+ * The Rust node ([RustMeshCore], in the `meshffi` source set) when the build
+ * included it, else [StubMeshCore]. The build includes it when a gossip-node
+ * checkout with `gossip-mobile` is found (see `buildRustMeshCore`), so a
+ * checkout of this repository alone still builds and runs.
  */
 object MeshCoreFactory {
-    fun create(@Suppress("UNUSED_PARAMETER") context: Context): MeshCore = StubMeshCore()
+    private const val RUST_CORE = "net.massa.gossip.mesh.RustMeshCore"
+
+    fun create(@Suppress("UNUSED_PARAMETER") context: Context): MeshCore = rustCore() ?: StubMeshCore()
+
+    /** Whether this build carries the Rust node rather than the stub. */
+    fun hasRustCore(): Boolean = runCatching { Class.forName(RUST_CORE) }.isSuccess
+
+    private fun rustCore(): MeshCore? = runCatching {
+        Class.forName(RUST_CORE).getDeclaredConstructor().newInstance() as MeshCore
+    }.getOrNull()
 }

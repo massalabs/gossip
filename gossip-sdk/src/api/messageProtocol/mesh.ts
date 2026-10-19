@@ -27,6 +27,12 @@ export interface MeshNodeStatus {
   /** Latest counter of the node's local bulletin. */
   bulletinCounter: string;
   storedBlobs: number;
+  /** Mesh blobs waiting for a bridge to upload them (Rust node only). */
+  uploadPending?: number;
+  /** Seekers on the merged wanted table (Rust node only). */
+  wantedEntries?: number;
+  /** Estimated offset of the local clock from the mesh's (Rust node only). */
+  clockOffsetMs?: number;
 }
 
 /** Blobs the node received for seekers on its wanted list, or announcements. */
@@ -133,6 +139,16 @@ export class MeshNodeProtocol implements IMessageProtocol {
   async getKeys(hash: Uint8Array): Promise<Uint8Array | undefined> {
     const { keys } = await this.plugin.getKeys({ hash: encodeToBase64(hash) });
     return keys === undefined ? undefined : decodeFromBase64(keys);
+  }
+
+  /** Publishes our public key set to the hash pool, under `blake3(keys)`. */
+  async publishKeys(keys: Uint8Array): Promise<void> {
+    await this.plugin.sendBlob({ kind: 'keys', payload: encodeToBase64(keys) });
+  }
+
+  /** The node's last status, refreshed now. */
+  async status(): Promise<MeshNodeStatus> {
+    return this.refreshStatus();
   }
 
   /**

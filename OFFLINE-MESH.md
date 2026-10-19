@@ -14,7 +14,7 @@ Native plugin     MeshNodePlugin (Kotlin / Swift)
                          │
 Bridge            MeshNodeBridge ── radio events → core (one ordered queue)
                          │          plugin calls → core (another queue)
-Core              MeshCore  ← StubMeshCore today, the Rust gossip-mobile node later
+Core              MeshCore  ← RustMeshCore (gossip-mobile) when built in, else StubMeshCore
 Radio             MeshRadio ← BleMeshRadio (Android) / CoreBluetoothMeshRadio (iOS)
 ```
 
@@ -25,12 +25,34 @@ Radio             MeshRadio ← BleMeshRadio (Android) / CoreBluetoothMeshRadio 
   replication, the wanted list, the upstream bridge and storage.
 - The **bridge** joins the two for the whole process.
 
-### Swap point for the Rust node
+### The Rust node and the stub
 
 `MeshCoreFactory.create` (Android `mesh/MeshCore.kt`, iOS `plugins/meshNode/MeshCore.swift`)
-returns `StubMeshCore`. Once `gossip-mobile` ships its UniFFI bindings, return an adapter
-over them there; nothing else refers to the stub. The stub keeps what the app sends in
-memory and answers fetches from it, but does not speak on links.
+returns `RustMeshCore`, an adapter over the `gossip-mobile` UniFFI bindings, when the
+build includes them, and `StubMeshCore` otherwise. The stub keeps what the app sends in
+memory and answers fetches from it, but does not speak on links, so a checkout of this
+repository alone still builds and runs.
+
+`gossip-mobile` lives in the gossip-node repository. The build looks for it at
+`$GOSSIP_NODE_DIR`, else `../gossip-node` next to this repository.
+
+- **Android.** When the crate is found, Gradle adds the `meshffi` source set
+  (`android/app/src/meshffi/java/…/RustMeshCore.kt` and the generated bindings) and runs
+  `buildRustMeshCore` before `preBuild`. That task calls
+  `scripts/build-mesh-android.sh`, which builds `libgossip_mobile.so` into `jniLibs` and
+  the Kotlin bindings (package `net.massa.gossip.mesh.ffi`) into
+  `android/app/src/meshffi/generated`, both gitignored. It uses its own Cargo target
+  directory (`android/app/build/gossip-mobile-target`, or `$GOSSIP_MOBILE_TARGET_DIR`).
+  `GOSSIP_MESH_STUB=1` forces the stub. The factory finds `RustMeshCore` by name, so the
+  main source set never depends on the bindings.
+- **iOS (macOS only).** `scripts/build-mesh-ios.sh` builds a static-library
+  `GossipMobileFFI.xcframework` and the Swift bindings into `ios/App/GossipMobile/generated`
+  (gitignored). Then `pod install`: the Podfile adds the local `GossipMobile` pod only
+  once those files exist. It is a separate Swift module because its types share names
+  with the app's; `RustMeshCore.swift` is compiled only under `canImport(GossipMobile)`.
+
+`wipe` restarts the Rust node empty, upstream and wanted list included; the adapter
+applies them again. The node may call `closeLink` from inside `linkUp` and `frameIn`.
 
 The core must provide, beyond the plugin API (`start`, `stop`, `sendBlob`, `fetch`,
 `fetchBulletin`, `getKeys`, `setWanted`, `setUpstream`, `status`, `wipe`):
