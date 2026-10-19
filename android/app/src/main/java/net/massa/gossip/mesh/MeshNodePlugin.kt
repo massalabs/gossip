@@ -184,7 +184,10 @@ class MeshNodePlugin : Plugin() {
     @PluginMethod
     fun setUpstream(call: PluginCall) {
         reply(call) { core ->
-            core.setUpstream(stringList(call, "urls"), call.getBoolean("bridgeEnabled") ?: false)
+            val urls = stringList(call, "urls")
+            val bridgeEnabled = call.getBoolean("bridgeEnabled") ?: false
+            core.setUpstream(urls, bridgeEnabled)
+            MeshService.rememberUpstream(context, urls, bridgeEnabled)
             JSObject()
         }
     }

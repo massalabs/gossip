@@ -54,6 +54,13 @@ class MeshService : Service() {
         val mode = PowerMode.fromName(prefs.getString(KEY_POWER_MODE, null))
         if (!MeshNodeBridge.isCoreRunning()) {
             MeshNodeBridge.startCore(this, prefs.getString(KEY_CONFIG, null) ?: "{}")
+            // After a reboot the app has not run yet: apply the upstream it last set,
+            // so a bridge keeps bridging. The wanted list comes back with the app.
+            val urls = prefs.getStringSet(KEY_UPSTREAM_URLS, null)
+            if (urls != null) {
+                val bridge = prefs.getBoolean(KEY_BRIDGE, false)
+                MeshNodeBridge.call { it.setUpstream(urls.toList(), bridge) }
+            }
         }
         if (!radioAttached) {
             MeshNodeBridge.attachRadio(BleMeshRadio(applicationContext), mode)
@@ -109,6 +116,9 @@ class MeshService : Service() {
         private const val PREFS_NAME = "GossipMeshPrefs"
         private const val KEY_CONFIG = "config"
         private const val KEY_POWER_MODE = "power_mode"
+        private const val KEY_ENABLED = "enabled"
+        private const val KEY_UPSTREAM_URLS = "upstream_urls"
+        private const val KEY_BRIDGE = "bridge"
 
         // The service is a singleton per process; the flag lives with it.
         private var radioAttached = false
@@ -118,7 +128,27 @@ class MeshService : Service() {
             context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit {
                 putString(KEY_CONFIG, configJson)
                 putString(KEY_POWER_MODE, mode.name)
+                putBoolean(KEY_ENABLED, true)
             }
+            ContextCompat.startForegroundService(context, Intent(context, MeshService::class.java))
+        }
+
+        /** Remembered so the service can apply it on its own after a reboot. */
+        fun rememberUpstream(context: Context, urls: List<String>, bridgeEnabled: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit {
+                putStringSet(KEY_UPSTREAM_URLS, urls.toSet())
+                putBoolean(KEY_BRIDGE, bridgeEnabled)
+            }
+        }
+
+        /** Whether the app last started the mesh rather than stopped it. */
+        @JvmStatic
+        fun isEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_ENABLED, false)
+
+        /** Starts the service again with the remembered configuration (after a reboot). */
+        @JvmStatic
+        fun restart(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, MeshService::class.java))
         }
 
@@ -130,6 +160,7 @@ class MeshService : Service() {
         }
 
         fun stop(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit { putBoolean(KEY_ENABLED, false) }
             context.stopService(Intent(context, MeshService::class.java))
         }
     }

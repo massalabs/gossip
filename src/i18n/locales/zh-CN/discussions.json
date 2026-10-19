@@ -167,7 +167,10 @@
     "delete": "删除",
     "react": "表情回应",
     "add_reaction": "添加表情回应",
-    "more_emojis": "更多表情"
+    "more_emojis": "更多表情",
+    "delayed": "延迟",
+    "delayed_hint": "在发送很久之后才收到",
+    "sent_via_mesh": "已通过离线网络发送，等待桥接"
   },
   "session_issue": {
     "message": "您已发送了许多尚未确认的消息。出于安全考虑，在收到回复之前不会再发送新消息。",
