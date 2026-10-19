@@ -31,7 +31,12 @@ Radio             MeshRadio ← BleMeshRadio (Android) / CoreBluetoothMeshRadio 
 returns `RustMeshCore`, an adapter over the `gossip-mobile` UniFFI bindings, when the
 build includes them, and `StubMeshCore` otherwise. The stub keeps what the app sends in
 memory and answers fetches from it, but does not speak on links, so a checkout of this
-repository alone still builds and runs.
+repository alone still builds and runs. A build with the stub hides the mesh: at launch
+`probeMeshAvailability` asks the plugin's `capabilities()` whether the Rust node is there,
+and without it the settings say the mesh is unavailable and the radio never starts.
+Release builds refuse the stub: Gradle fails a release task without `gossip-mobile`
+unless `GOSSIP_MESH_OPTIONAL=1`, and Swift fails a non-debug build without the
+`GossipMobile` module unless `GOSSIP_MESH_OPTIONAL` is an active compilation condition.
 
 `gossip-mobile` lives in the gossip-node repository. The build looks for it at
 `$GOSSIP_NODE_DIR`, else `../gossip-node` next to this repository.
@@ -55,7 +60,8 @@ repository alone still builds and runs.
 applies them again. The node may call `closeLink` from inside `linkUp` and `frameIn`.
 
 The core must provide, beyond the plugin API (`start`, `stop`, `sendBlob`, `fetch`,
-`fetchBulletin`, `getKeys`, `setWanted`, `setUpstream`, `status`, `wipe`):
+`fetchBulletin`, `getKeys`, `setWanted`, `setUpstream`, `status`, `wipe`, and
+`forgetKeys`, which no core implements yet: see "Open work" below):
 
 - `linkUp`, `linkDown` and `frameIn`, called in order from one thread;
 - a sink it calls back: `sendFrame` (which may refuse when a link's queue is full),
@@ -102,7 +108,13 @@ These are starting values; the node's simulation is where they get tuned.
 - Permissions: `BLUETOOTH_SCAN` (`neverForLocation`), `BLUETOOTH_ADVERTISE` and
   `BLUETOOTH_CONNECT` on Android 12 and later; `ACCESS_FINE_LOCATION` before, where BLE
   scanning required it. `MeshNode.start` asks for them.
-- The node's store (`files/mesh`) is excluded from backups and device transfer.
+- The node's store (`files/mesh`) and the mesh switches (`GossipMeshPrefs.xml`, which
+  also holds a random install id) are excluded from backups and device transfer, so a
+  restored phone does not restart the mesh on its own.
+- Other phones may open at most 4 of the 8 links, and a central whose link closed waits
+  60 s before it may connect again. Long (prepared) writes and writes at an offset are
+  refused. A link with more than 512 KiB received but not yet read by the core is closed.
+- BLE addresses are not logged.
 
 **iOS** (`ios/App/App/plugins/meshNode/`)
 
@@ -114,7 +126,12 @@ These are starting values; the node's simulation is where they get tuned.
   the app open.
 - A peripheral cannot disconnect a central on iOS, so rotation only drops links this
   phone opened as central, and closing a link opened by the other phone only stops using it.
-- The store (`Application Support/mesh`) is excluded from backups.
+  Such a central is then ignored for 60 s if it subscribes again, and other phones may hold
+  at most 4 of the 8 links. Writes at an offset are refused, and a link with more than
+  512 KiB received but not yet read by the core is closed.
+- The store (`Application Support/mesh`) and the install id file (`mesh-install-id`) are
+  excluded from backups. The "mesh on" switch holds the install id it was set on, so a
+  restored phone does not restart the mesh on its own.
 
 ## Turning it on
 
@@ -130,7 +147,11 @@ and it is off until the user turns it on in **Settings → Offline mesh**
   the node at launch, and on Android `BootReceiver` restarts `MeshService` after a reboot
   with the configuration and upstream it last used.
 - **Bridge to the internet** (off by default) lets the node upload other phones' mesh
-  blobs and fetch their wanted seekers when it has internet.
+  blobs and fetch their wanted seekers when it has internet. The consent is saved with the
+  native install id, so a phone restored from a backup is asked again.
+- **Let people nearby add me** (with the mesh on) publishes this account's public keys to
+  the mesh for 10 minutes, then asks the node to forget them. It warns that whoever
+  receives the keys can tie the phone, and where it is, to the user id.
 - **Power mode** sets the radio's duty cycle.
 - **Prepare for a strike** (`MeshPrepareSettings.tsx`) is a checklist: mesh on, sessions
   active with every contact, battery optimisation off (Android) or the app kept open
@@ -150,8 +171,33 @@ Gossip service UUID, and a bridge uploads other people's traffic from its own co
 
 ### Adding someone without internet
 
-The app publishes its own public keys to the mesh's key pool when a session opens with
-the mesh on. Resolving a scanned or typed user id asks the server and, with the mesh on,
+The person to add turns on **Let people nearby add me**: the app never publishes its keys
+on its own. Resolving a scanned or typed user id asks the server and, with the mesh on,
 the mesh at the same time; the first answer wins. The key pool is indexed by
-`blake3(keys)`, which is the user id, and `fetchKeysFromMesh` checks the keys against the
-id again before using them.
+`blake3(keys)`, which is the user id, and both paths check the keys against the id before
+using them (`fetchKeysFromMesh` here, `AuthService.fetchPublicKeyByUserId` in the SDK), so
+neither a phone nearby nor a node can pass off other keys.
+
+When the account changes or the user logs out, the app wipes the node, so it no longer
+serves the previous account's keys or waits on its seekers.
+
+### What stays on the mesh
+
+Lookahead seekers and addressed re-announcements exist for the mesh only. They are put
+on the wanted list, and addressed re-announcements are posted and fetched, only while
+the mesh is on, through `meshOnly` routing, which the REST transport refuses. An
+addressed re-announcement mailbox moves every 6 hours and holds the announcement
+encrypted under a key of the pair, so its bytes differ from the board copy.
+
+## Open work
+
+- **Forgetting published keys.** `forgetKeys` rejects with `UNIMPLEMENTED` until
+  `gossip-mobile` has a call to drop a blob it published (marked `TODO(gossip-mobile)` in
+  `MeshCore.kt` and `MeshCore.swift`). Until then keys shared nearby stay on the node for
+  its retention, and on neighbours that took a copy; an account change still wipes them.
+- **Mesh-only blobs past a bridge.** The SDK never gives a mesh-only entry to the REST
+  node, but the phone's node uploads its own blobs when it reaches the internet, and a
+  bridge fetches every wanted seeker upstream. Keeping mailbox entries and their seekers
+  off the internet entirely needs a "local only" flag on blobs and wanted entries in
+  `gossip-mobile`; the 6-hour rotation and the separate ciphertext limit what leaks
+  meanwhile.
