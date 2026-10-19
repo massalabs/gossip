@@ -1071,10 +1071,11 @@ mod tests {
 
         // looked at twice, then dropped
         for _ in 0..2 {
-            let pending = bob_session
-                .decrypt_incoming_message(&bob_sk, &first.seeker, &first.data)
-                .ok()
-                .expect("decrypts");
+            let Ok(pending) =
+                bob_session.decrypt_incoming_message(&bob_sk, &first.seeker, &first.data)
+            else {
+                panic!("decrypts");
+            };
             assert!(pending.timestamp() > 0);
         }
         assert_eq!(bob_session.next_peer_message_seeker(), seeker);
