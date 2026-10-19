@@ -35,3 +35,10 @@ export {
   type CompositeTransport,
   type TransportKind,
 } from './composite.js';
+export {
+  MeshNodeProtocol,
+  type MeshBlobKind,
+  type MeshNodeArrival,
+  type MeshNodePlugin,
+  type MeshNodeStatus,
+} from './mesh.js';

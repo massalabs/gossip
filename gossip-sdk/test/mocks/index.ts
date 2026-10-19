@@ -7,3 +7,4 @@
  * SessionModule uses real WASM - no mock needed since WASM works in Node.
  */
 export { MockMessageProtocol } from './mockMessageProtocol';
+export { MockMeshNodePlugin } from './mockMeshNodePlugin';
