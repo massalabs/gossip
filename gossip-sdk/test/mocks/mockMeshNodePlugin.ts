@@ -17,6 +17,9 @@ export class MockMeshNodePlugin implements MeshNodePlugin {
   bridgeEnabled = false;
   upstreamUrls: string[] = [];
   wanted: string[] = [];
+  localWanted: string[] = [];
+  /** Keys of the messages sent local-only. */
+  readonly localOnly = new Set<string>();
   readonly messages = new Map<string, string[]>();
   readonly bulletin: { counter: string; data: string }[] = [];
   readonly keys = new Map<string, string>();
@@ -34,8 +37,10 @@ export class MockMeshNodePlugin implements MeshNodePlugin {
     kind: MeshBlobKind;
     key?: string;
     payload: string;
+    localOnly?: boolean;
   }): Promise<{ id: string; counter?: string }> {
     if (options.kind === 'message') {
+      if (options.localOnly) this.localOnly.add(options.key!);
       const copies = this.messages.get(options.key!) ?? [];
       if (!copies.includes(options.payload)) copies.push(options.payload);
       this.messages.set(options.key!, copies);
@@ -71,8 +76,12 @@ export class MockMeshNodePlugin implements MeshNodePlugin {
     return { keys: this.keys.get(options.hash) };
   }
 
-  async setWanted(options: { seekers: string[] }): Promise<void> {
+  async setWanted(options: {
+    seekers: string[];
+    localSeekers?: string[];
+  }): Promise<void> {
     this.wanted = options.seekers;
+    this.localWanted = options.localSeekers ?? [];
   }
 
   async setUpstream(options: {

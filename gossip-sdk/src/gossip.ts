@@ -475,10 +475,12 @@ class GossipSdk {
                   ...session.getReannouncementMailboxKeys(),
                 ]
               : [];
-          const wanted = [...seekers, ...meshExtras];
-          messageProtocol.setWantedSeekers?.(wanted).catch(error => {
-            logger.warn('[GossipSdk] failed to update wanted seekers', error);
-          });
+          // local-only on the mesh, so that no bridge asks the internet
+          messageProtocol
+            .setWantedSeekers?.(seekers, meshExtras)
+            .catch(error => {
+              logger.warn('[GossipSdk] failed to update wanted seekers', error);
+            });
         };
         this.eventEmitter.on(
           SdkEventType.SEEKERS_UPDATED,
