@@ -11,6 +11,7 @@ import {
   type EncryptedMessage,
   type GossipSdk,
   type IMessageProtocol,
+  type MessageRouting,
   type MeshNodePlugin,
   type MeshNodeStatus,
   type TransportConnectivity,
@@ -62,10 +63,10 @@ export interface MeshNodeNativePlugin extends MeshNodePlugin {
    */
   capabilities(): Promise<{ rustCore: boolean; installId?: string }>;
   /**
-   * Makes the node stop serving the key set it published under `hash`.
-   * Rejects with `UNIMPLEMENTED` until the Rust node has the call.
+   * Makes the node stop serving the key set it published under `hash`;
+   * `forgotten` is false when it held none.
    */
-  forgetKeys(options: { hash: string }): Promise<void>;
+  forgetKeys(options: { hash: string }): Promise<{ forgotten?: boolean }>;
   addListener(
     event: 'arrival',
     handler: Parameters<MeshNodePlugin['addListener']>[1]
@@ -161,6 +162,7 @@ export async function isMeshEnabled(): Promise<boolean> {
 class SwitchableMeshProtocol implements IMessageProtocol {
   private active = false;
   private wanted: Uint8Array[] = [];
+  private localWanted: Uint8Array[] = [];
 
   constructor(readonly mesh: MeshNodeProtocol) {}
 
@@ -171,7 +173,9 @@ class SwitchableMeshProtocol implements IMessageProtocol {
   /** Starts serving, and gives the node the seekers the SDK last asked for. */
   async activate(): Promise<void> {
     this.active = true;
-    if (this.wanted.length > 0) await this.mesh.setWantedSeekers(this.wanted);
+    if (this.wanted.length > 0 || this.localWanted.length > 0) {
+      await this.mesh.setWantedSeekers(this.wanted, this.localWanted);
+    }
   }
 
   deactivate(): void {
@@ -187,13 +191,16 @@ class SwitchableMeshProtocol implements IMessageProtocol {
     return this.active;
   }
 
-  // the node is all mesh, so mesh-only routing changes nothing here
+  // the node is all mesh: mesh-only routing only marks what it sends local-only
   async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
     return this.use().fetchMessages(seekers);
   }
 
-  async sendMessage(message: EncryptedMessage): Promise<void> {
-    return this.use().sendMessage(message);
+  async sendMessage(
+    message: EncryptedMessage,
+    routing?: MessageRouting
+  ): Promise<void> {
+    return this.use().sendMessage(message, routing);
   }
 
   async sendAnnouncement(announcement: Uint8Array): Promise<string> {
@@ -215,9 +222,13 @@ class SwitchableMeshProtocol implements IMessageProtocol {
     return this.mesh.changeNode();
   }
 
-  async setWantedSeekers(seekers: Uint8Array[]): Promise<void> {
+  async setWantedSeekers(
+    seekers: Uint8Array[],
+    localSeekers: Uint8Array[] = []
+  ): Promise<void> {
     this.wanted = seekers;
-    if (this.active) await this.mesh.setWantedSeekers(seekers);
+    this.localWanted = localSeekers;
+    if (this.active) await this.mesh.setWantedSeekers(seekers, localSeekers);
   }
 
   getConnectivity(): TransportConnectivity {
@@ -399,11 +410,11 @@ export async function stopSharingKeysNearby(): Promise<void> {
   sharedKeys = null;
   clearTimeout(shared.timer);
   try {
+    // neighbours that took a copy keep it for their retention
     await switchable?.mesh.forgetKeys(decodeUserId(shared.userId));
   } catch (error) {
-    // TODO(gossip-mobile): until the node can forget a published blob, the
-    // keys stay on this phone's node (and on neighbours that took a copy)
-    // for the node's retention; an account change wipes the node.
+    // the node is off (it then serves nothing) or the call failed; an
+    // account change wipes the node either way
     if (import.meta.env.DEV) {
       logger.warn('[MeshNode] could not withdraw our keys', error);
     }

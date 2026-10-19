@@ -150,21 +150,37 @@ describe('CompositeMessageProtocol', () => {
 
   it('reports internet when a transport says so and forwards wanted seekers', async () => {
     const wanted: Uint8Array[][] = [];
+    const local: (Uint8Array[] | undefined)[] = [];
     const meshNode: IMessageProtocol = Object.assign(
       new MockMessageProtocol(),
       {
         getConnectivity: (): TransportConnectivity => 'internet',
-        setWantedSeekers: async (seekers: Uint8Array[]) => {
+        setWantedSeekers: async (
+          seekers: Uint8Array[],
+          localSeekers?: Uint8Array[]
+        ) => {
           wanted.push(seekers);
+          local.push(localSeekers);
         },
       }
     );
-    const internet = new DownProtocol();
+    const internetWanted: (Uint8Array[] | undefined)[] = [];
+    const internet = Object.assign(new DownProtocol(), {
+      setWantedSeekers: async (
+        _seekers: Uint8Array[],
+        localSeekers?: Uint8Array[]
+      ) => {
+        internetWanted.push(localSeekers);
+      },
+    });
     const protocol = composite(internet, meshNode);
     await protocol.fetchMessages([bytes(1)]);
     expect(protocol.getConnectivity()).toBe('internet');
-    await protocol.setWantedSeekers([bytes(1), bytes(2)]);
+    await protocol.setWantedSeekers([bytes(1), bytes(2)], [bytes(3)]);
     expect(wanted).toEqual([[bytes(1), bytes(2)]]);
+    // mesh-only seekers reach the mesh transports alone
+    expect(local).toEqual([[bytes(3)]]);
+    expect(internetWanted).toEqual([undefined]);
   });
   it('keeps mesh-only traffic off the internet transports', async () => {
     const internet = new MockMessageProtocol();

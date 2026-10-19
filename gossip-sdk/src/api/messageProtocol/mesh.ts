@@ -11,6 +11,7 @@ import {
   EncryptedMessage,
   IMessageProtocol,
   MessageProtocolResponse,
+  MessageRouting,
   TransportConnectivity,
 } from './types.js';
 import { decodeFromBase64, encodeToBase64 } from '../../utils/base64.js';
@@ -53,6 +54,11 @@ export interface MeshNodePlugin {
     /** Seeker for a message, absent otherwise. */
     key?: string;
     payload: string;
+    /**
+     * Keep the blob in the mesh: neither this phone nor a bridge that relays
+     * it uploads it to an internet node.
+     */
+    localOnly?: boolean;
   }): Promise<{ id: string; counter?: string }>;
   fetch(options: {
     seekers: string[];
@@ -63,7 +69,14 @@ export interface MeshNodePlugin {
   }): Promise<{ items: { counter: string; data: string }[] }>;
   /** Public key set by `blake3(keys)`, as published to the hash pool. */
   getKeys(options: { hash: string }): Promise<{ keys?: string }>;
-  setWanted(options: { seekers: string[] }): Promise<void>;
+  /**
+   * Replaces the wanted list. `localSeekers` are waited on from the mesh
+   * only: no bridge, nor this phone, fetches them from an internet node.
+   */
+  setWanted(options: {
+    seekers: string[];
+    localSeekers?: string[];
+  }): Promise<void>;
   setUpstream(options: {
     urls: string[];
     bridgeEnabled: boolean;
@@ -71,8 +84,11 @@ export interface MeshNodePlugin {
   status(): Promise<MeshNodeStatus>;
   /** Deletes everything the node stored, its own blobs and relayed ones. */
   wipe(): Promise<void>;
-  /** Stops serving a key set this node published, by `blake3(keys)`. */
-  forgetKeys?(options: { hash: string }): Promise<void>;
+  /**
+   * Stops serving a key set this node published, by `blake3(keys)`;
+   * `forgotten` is false when the node held none.
+   */
+  forgetKeys?(options: { hash: string }): Promise<{ forgotten?: boolean }>;
   addListener(
     event: 'arrival',
     handler: (arrival: MeshNodeArrival) => void
@@ -102,11 +118,20 @@ export class MeshNodeProtocol implements IMessageProtocol {
     }));
   }
 
-  async sendMessage(message: EncryptedMessage): Promise<void> {
+  /**
+   * With `meshOnly` routing (addressed re-announcements) the entry is
+   * local-only on the node: it never reaches an internet node through this
+   * phone or a bridge.
+   */
+  async sendMessage(
+    message: EncryptedMessage,
+    routing?: MessageRouting
+  ): Promise<void> {
     await this.plugin.sendBlob({
       kind: 'message',
       key: encodeToBase64(message.seeker),
       payload: encodeToBase64(message.ciphertext),
+      ...(routing?.meshOnly ? { localOnly: true } : {}),
     });
   }
 
@@ -137,8 +162,14 @@ export class MeshNodeProtocol implements IMessageProtocol {
     return { success: false, error: 'The mesh node has no node to change' };
   }
 
-  async setWantedSeekers(seekers: Uint8Array[]): Promise<void> {
-    await this.plugin.setWanted({ seekers: seekers.map(encodeToBase64) });
+  async setWantedSeekers(
+    seekers: Uint8Array[],
+    localSeekers: Uint8Array[] = []
+  ): Promise<void> {
+    await this.plugin.setWanted({
+      seekers: seekers.map(encodeToBase64),
+      localSeekers: localSeekers.map(encodeToBase64),
+    });
   }
 
   /** Public key set published under `blake3(keys)`, if the node holds it. */

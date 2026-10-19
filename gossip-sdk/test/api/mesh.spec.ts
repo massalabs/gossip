@@ -32,6 +32,9 @@ describe('MeshNodeProtocol', () => {
     const protocol = new MeshNodeProtocol(plugin);
     await protocol.setWantedSeekers([bytes(7)]);
     expect(plugin.wanted).toEqual([encodeToBase64(bytes(7))]);
+    expect(plugin.localWanted).toEqual([]);
+    await protocol.setWantedSeekers([bytes(7)], [bytes(5)]);
+    expect(plugin.localWanted).toEqual([encodeToBase64(bytes(5))]);
 
     const arrivals: { messages: unknown[]; announcements: Uint8Array[] }[] = [];
     const subscription = await protocol.onArrival(a => arrivals.push(a));
@@ -52,6 +55,17 @@ describe('MeshNodeProtocol', () => {
         announcements: [bytes(6)],
       },
     ]);
+  });
+
+  it('sends mesh-only messages local-only', async () => {
+    const plugin = new MockMeshNodePlugin();
+    const protocol = new MeshNodeProtocol(plugin);
+    await protocol.sendMessage({ seeker: bytes(1), ciphertext: bytes(2) });
+    await protocol.sendMessage(
+      { seeker: bytes(3), ciphertext: bytes(4) },
+      { meshOnly: true }
+    );
+    expect([...plugin.localOnly]).toEqual([encodeToBase64(bytes(3))]);
   });
 
   it('derives connectivity from the node status', async () => {
