@@ -9,6 +9,7 @@ export type {
   IMessageProtocol,
   MessageProtocolResponse,
   BulletinItem,
+  TransportConnectivity,
 } from './types.js';
 import type { IMessageProtocol } from './types.js';
 import { protocolConfig } from '../../config/protocol.js';
@@ -29,3 +30,8 @@ export function createMessageProtocol(
 
 export const restMessageProtocol = createMessageProtocol();
 export { RestMessageProtocol } from './rest.js';
+export {
+  CompositeMessageProtocol,
+  type CompositeTransport,
+  type TransportKind,
+} from './composite.js';

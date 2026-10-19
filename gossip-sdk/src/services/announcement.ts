@@ -293,7 +293,10 @@ export class AnnouncementService {
       // fetch from node all announcements since the last retrieved announcement
       const fetched = await this._fetchAnnouncements(cursor);
       announcements = fetched.map(a => a.data);
-      fetchedCounters = fetched.map(a => a.counter);
+      // announcements relayed by another transport carry no counter
+      fetchedCounters = fetched.flatMap(a =>
+        a.counter !== undefined ? [a.counter] : []
+      );
 
       let newAnnouncementsCount = 0;
 
