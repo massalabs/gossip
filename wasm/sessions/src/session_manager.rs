@@ -803,20 +803,11 @@ impl SessionManager {
             return IncomingMessageOutcome::Ignored;
         };
 
-        // Reading a message advances the ratchet before its timestamp is known, so keep
-        // the state from before the read in case the message has to be put back.
-        let Ok(snapshot) =
-            bincode::serde::encode_to_vec(&active_session.session, bincode::config::standard())
-        else {
-            return IncomingMessageOutcome::Ignored;
-        };
-        let snapshot = Zeroizing::new(snapshot);
-
-        let mut msg = match active_session
+        let pending = match active_session
             .session
-            .feed_incoming_message(our_sk, seeker, bytes)
+            .decrypt_incoming_message(our_sk, seeker, bytes)
         {
-            Ok(msg) => msg,
+            Ok(pending) => pending,
             // Whoever learnt the seeker (a relay, a mesh neighbour) can post garbage at
             // it: that must not close the session.
             Err(FeedIncomingMessageError::Unauthenticated) => {
@@ -827,23 +818,14 @@ impl SessionManager {
             }
         };
 
-        // A message dated ahead of our clock by more than the allowed skew is put back:
-        // the ratchet is restored so the same message is read again once our clock has
-        // caught up. Dropping it would break the chain, since the next seeker is inside it.
+        // A message dated ahead of our clock by more than the allowed skew is put back,
+        // left unapplied, so the same message is read again once our clock has caught
+        // up. Dropping it would break the chain, since the next seeker is inside it.
         let cur_timestamp = timestamp_millis();
-        if msg.timestamp > cur_timestamp.saturating_add(max_future) {
-            let restored = bincode::serde::decode_from_slice::<Session, _>(
-                &snapshot,
-                bincode::config::standard(),
-            );
-            return match restored {
-                Ok((session, _)) => {
-                    active_session.session = session;
-                    IncomingMessageOutcome::Held
-                }
-                Err(_) => IncomingMessageOutcome::SessionBroken,
-            };
+        if pending.timestamp() > cur_timestamp.saturating_add(max_future) {
+            return IncomingMessageOutcome::Held;
         }
+        let mut msg = active_session.session.commit_incoming_message(pending);
 
         // The ratchet already guarantees authenticity and order, so an old or
         // out-of-order timestamp only means the message waited in transit, or that the

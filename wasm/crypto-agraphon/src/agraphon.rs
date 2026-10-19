@@ -16,6 +16,26 @@ pub struct FeedIncomingMessageResult {
     pub newly_acknowledged_self_seekers: Vec<Vec<u8>>,
 }
 
+/// An incoming message decrypted against the current state but not applied to it
+/// yet: [`Agraphon::commit_incoming_message`] applies it, dropping it leaves the
+/// state as if the message had never been read.
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct DecryptedIncomingMessage {
+    message_bytes: Vec<u8>,
+    /// The peer state after this message
+    latest_peer_msg: HistoryItemPeer,
+    /// Seeker of our message the peer answered
+    #[zeroize(skip)]
+    peer_msg_seeker: Vec<u8>,
+}
+
+impl DecryptedIncomingMessage {
+    /// The decrypted payload.
+    pub fn message_bytes(&self) -> &[u8] {
+        &self.message_bytes
+    }
+}
+
 /// The main session state machine for secure asynchronous messaging.
 ///
 /// `Agraphon` implements a Double Ratchet-like protocol that provides:
@@ -199,29 +219,76 @@ impl Agraphon {
         self_static_sk: &kem::SecretKey,
         message: &[u8],
     ) -> Option<FeedIncomingMessageResult> {
+        let decrypted = self.try_decrypt_incoming_message(self_static_sk, message)?;
+        Some(self.commit_incoming_message(decrypted))
+    }
+
+    /// Like [`try_feed_incoming_message`](Self::try_feed_incoming_message), without
+    /// changing any state: the caller can look at the payload before deciding to
+    /// apply it with [`commit_incoming_message`](Self::commit_incoming_message).
+    pub fn try_decrypt_incoming_message(
+        &self,
+        self_static_sk: &kem::SecretKey,
+        message: &[u8],
+    ) -> Option<DecryptedIncomingMessage> {
         // Try to decode the incoming message assuming various possible choices of parent on the self side.
-        let scan_ids = self
-            .self_msg_history
+        self.self_msg_history
             .iter()
             .rev() // scan from most recent to oldest (from back to front)
-            .map(|msg| msg.height)
-            .collect::<Vec<u64>>();
-        for p_self_id in scan_ids {
-            if let Some(res) =
-                self.try_incoming_message_with_self_parent(p_self_id, self_static_sk, message)
-            {
-                return Some(res);
+            .find_map(|msg| {
+                self.try_incoming_message_with_self_parent(msg.height, self_static_sk, message)
+            })
+    }
+
+    /// Applies a message decrypted by
+    /// [`try_decrypt_incoming_message`](Self::try_decrypt_incoming_message) on this
+    /// same, unchanged state.
+    ///
+    /// # Panics
+    ///
+    /// When the state moved on since the message was decrypted.
+    pub fn commit_incoming_message(
+        &mut self,
+        mut decrypted: DecryptedIncomingMessage,
+    ) -> FeedIncomingMessageResult {
+        assert_eq!(
+            decrypted.latest_peer_msg.height,
+            self.latest_peer_msg.height + 1,
+            "incoming message committed on a state it was not decrypted on"
+        );
+        let our_parent_height = decrypted.latest_peer_msg.our_parent_height;
+        self.latest_peer_msg = HistoryItemPeer {
+            height: decrypted.latest_peer_msg.height,
+            our_parent_height,
+            pk_next: decrypted.latest_peer_msg.pk_next.clone(),
+            k_next: decrypted.latest_peer_msg.k_next,
+        };
+
+        // prune old messages that cannot be parents anymore
+        let mut newly_acknowledged_seekers = Vec::new();
+        while self
+            .self_msg_history
+            .front()
+            .is_some_and(|msg| msg.height < our_parent_height)
+        {
+            if let Some(popped_msg) = self.self_msg_history.pop_front() {
+                newly_acknowledged_seekers.push(popped_msg.seeker.clone());
             }
         }
-        None
+        newly_acknowledged_seekers.push(std::mem::take(&mut decrypted.peer_msg_seeker));
+
+        FeedIncomingMessageResult {
+            message_bytes: std::mem::take(&mut decrypted.message_bytes),
+            newly_acknowledged_self_seekers: newly_acknowledged_seekers,
+        }
     }
 
     fn try_incoming_message_with_self_parent(
-        &mut self,
+        &self,
         our_parent_height: u64,
         self_static_sk: &kem::SecretKey,
         message: &[u8],
-    ) -> Option<FeedIncomingMessageResult> {
+    ) -> Option<DecryptedIncomingMessage> {
         let self_msg = &self.latest_peer_msg;
         let peer_msg = self.get_self_message_by_height(our_parent_height)?;
         let peer_msg_seeker = peer_msg.seeker.clone();
@@ -277,34 +344,19 @@ impl Agraphon {
         // parse payload
         let payload = content.get(kem::PUBLIC_KEY_SIZE..)?.to_vec();
 
-        // update last history item
-        self.latest_peer_msg = HistoryItemPeer {
-            height: self
-                .latest_peer_msg
-                .height
-                .checked_add(1)
-                .expect("Peer message height overflow"),
-            our_parent_height,
-            pk_next,
-            k_next: msg_root_kdf.k_next,
-        };
-
-        // prune old messages that cannot be parents anymore
-        let mut newly_acknowledged_seekers = Vec::new();
-        while self
-            .self_msg_history
-            .front()
-            .is_some_and(|msg| msg.height < our_parent_height)
-        {
-            if let Some(popped_msg) = self.self_msg_history.pop_front() {
-                newly_acknowledged_seekers.push(popped_msg.seeker.clone());
-            }
-        }
-        newly_acknowledged_seekers.push(peer_msg_seeker);
-
-        Some(FeedIncomingMessageResult {
+        Some(DecryptedIncomingMessage {
             message_bytes: payload,
-            newly_acknowledged_self_seekers: newly_acknowledged_seekers,
+            latest_peer_msg: HistoryItemPeer {
+                height: self
+                    .latest_peer_msg
+                    .height
+                    .checked_add(1)
+                    .expect("Peer message height overflow"),
+                our_parent_height,
+                pk_next,
+                k_next: msg_root_kdf.k_next,
+            },
+            peer_msg_seeker,
         })
     }
 
