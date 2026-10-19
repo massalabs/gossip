@@ -58,7 +58,7 @@ impl SessionConfig {
     /// - Announcement future: 1 hour
     /// - Message age: 2 weeks
     /// - Message future: 1 day
-    /// - Session inactivity: 1 week
+    /// - Session inactivity: 2 weeks
     /// - Keep-alive interval: 1 day
     /// - Max lag: 10000 messages
     /// - Max peer lag before keep-alive: 8 messages
@@ -70,6 +70,9 @@ impl SessionConfig {
     /// flagged stale. Two weeks matches the network's retention, past which a message
     /// cannot be fetched anyway. Announcements keep a tighter future window because a
     /// future-dated announcement blocks the sender's later, correctly dated ones.
+    /// Session inactivity is measured on the peer's message timestamps, so it matches
+    /// the message age window: a message that waited up to two weeks in transit still
+    /// finds its session instead of arriving after it expired.
     pub fn new_default() -> Self {
         Self {
             inner: sessions::SessionManagerConfig {
@@ -77,7 +80,7 @@ impl SessionConfig {
                 max_incoming_announcement_future_millis: 3_600_000, // 1 hour
                 max_incoming_message_age_millis: 1_209_600_000,    // 2 weeks
                 max_incoming_message_future_millis: 86_400_000,    // 1 day
-                max_session_inactivity_millis: 604_800_000,        // 1 week
+                max_session_inactivity_millis: 1_209_600_000,      // 2 weeks
                 keep_alive_interval_millis: 86_400_000,            // 1 day
                 max_session_lag_length: 10000,
                 max_keep_alive_peer_lag_length: 8,
@@ -855,5 +858,17 @@ impl SessionManagerWrapper {
             array.push(&js_peer_id);
         }
         array
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_session_outlives_the_messages_it_accepts() {
+        // a message delayed up to the age window must still find its session
+        let config = SessionConfig::new_default().inner;
+        assert!(config.max_session_inactivity_millis >= config.max_incoming_message_age_millis);
     }
 }
