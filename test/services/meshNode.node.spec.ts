@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     preferences: new Map<string, string>(),
     arrival: null as ArrivalHandler | null,
     keys: undefined as string | undefined,
+    rustCore: true,
   };
   const plugin = {
     start: vi.fn(async () => undefined),
@@ -19,6 +20,10 @@ const mocks = vi.hoisted(() => {
     setWanted: vi.fn(async () => undefined),
     getKeys: vi.fn(async () => ({ keys: state.keys })),
     status: vi.fn(async () => ({ running: true, meshPeers: 2 })),
+    capabilities: vi.fn(async () => ({ rustCore: state.rustCore })),
+    sendBlob: vi.fn(async () => ({ id: 'aWQ=' })),
+    forgetKeys: vi.fn(async () => undefined),
+    wipe: vi.fn(async () => undefined),
     addListener: vi.fn(async (_event: string, handler: ArrivalHandler) => {
       state.arrival = handler;
       return { remove: async () => undefined };
@@ -61,25 +66,74 @@ import {
   fetchKeysFromMesh,
   getMeshSettings,
   isMeshActive,
+  isMeshAvailable,
+  keysSharedNearbyUntil,
+  probeMeshAvailability,
+  shareKeysNearby,
   setMeshBridgeEnabled,
   setMeshEnabled,
   setMeshPowerMode,
+  wipeMeshForAccountChange,
 } from '../../src/services/meshNode';
 
 const seeker = new Uint8Array([1, 2]);
 
 describe('mesh transport', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mocks.state.featureEnabled = true;
+    mocks.state.rustCore = true;
     mocks.state.preferences.clear();
     mocks.state.arrival = null;
     mocks.state.keys = undefined;
     vi.clearAllMocks();
+    await probeMeshAvailability();
   });
 
-  it('gives no transport when the build has no mesh', () => {
+  it('gives no transport when the build has no mesh', async () => {
     mocks.state.featureEnabled = false;
+    await probeMeshAvailability();
     expect(createMeshTransport()).toBeNull();
+  });
+
+  it('hides the mesh when the build has only the stand-in core', async () => {
+    mocks.state.rustCore = false;
+    expect(await probeMeshAvailability()).toBe(false);
+    expect(isMeshAvailable()).toBe(false);
+    expect(createMeshTransport()).toBeNull();
+    expect((await getMeshSettings()).enabled).toBe(false);
+  });
+
+  it('shares our keys only when asked, and withdraws them after a while', async () => {
+    vi.useFakeTimers();
+    try {
+      createMeshTransport();
+      await setMeshEnabled(true);
+      // turning the mesh on publishes nothing
+      expect(mocks.plugin.sendBlob).not.toHaveBeenCalled();
+
+      const sdk = {
+        isSessionOpen: true,
+        userId: encodeUserId(new Uint8Array(32).fill(3)),
+        publicKeys: { to_bytes: () => new Uint8Array([1, 2, 3]) },
+      } as unknown as GossipSdk;
+      const until = await shareKeysNearby(sdk, 60_000);
+      expect(mocks.plugin.sendBlob).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'keys' })
+      );
+      expect(keysSharedNearbyUntil()).toBe(until);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mocks.plugin.forgetKeys).toHaveBeenCalledOnce();
+      expect(keysSharedNearbyUntil()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('wipes the node when the account changes', async () => {
+    createMeshTransport();
+    await wipeMeshForAccountChange();
+    expect(mocks.plugin.wipe).toHaveBeenCalledOnce();
   });
 
   it('composes REST then a mesh member that stays off until turned on', async () => {

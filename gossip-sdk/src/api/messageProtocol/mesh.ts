@@ -71,6 +71,8 @@ export interface MeshNodePlugin {
   status(): Promise<MeshNodeStatus>;
   /** Deletes everything the node stored, its own blobs and relayed ones. */
   wipe(): Promise<void>;
+  /** Stops serving a key set this node published, by `blake3(keys)`. */
+  forgetKeys?(options: { hash: string }): Promise<void>;
   addListener(
     event: 'arrival',
     handler: (arrival: MeshNodeArrival) => void
@@ -148,6 +150,17 @@ export class MeshNodeProtocol implements IMessageProtocol {
   /** Publishes our public key set to the hash pool, under `blake3(keys)`. */
   async publishKeys(keys: Uint8Array): Promise<void> {
     await this.plugin.sendBlob({ kind: 'keys', payload: encodeToBase64(keys) });
+  }
+
+  /**
+   * Stops serving a key set `publishKeys` put on the node. Throws when the
+   * plugin or its node cannot do it.
+   */
+  async forgetKeys(hash: Uint8Array): Promise<void> {
+    if (!this.plugin.forgetKeys) {
+      throw new Error('The mesh node cannot forget published keys');
+    }
+    await this.plugin.forgetKeys({ hash: encodeToBase64(hash) });
   }
 
   /** The node's last status, refreshed now. */

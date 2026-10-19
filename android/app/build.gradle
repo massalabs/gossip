@@ -111,6 +111,15 @@ if (hasMeshCore) {
     android.sourceSets.test.java.srcDirs += ['src/meshffiTest/java']
 } else {
     logger.lifecycle("gossip-mobile not used (none under ${gossipNodeDir}, or GOSSIP_MESH_STUB=1): the mesh runs on the stub core")
+    // The app hides the mesh without the Rust core, but a release must not
+    // ship the stub by accident. GOSSIP_MESH_OPTIONAL=1 allows it, for
+    // builds made without the gossip-node checkout on purpose.
+    gradle.taskGraph.whenReady { graph ->
+        def releasing = graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') }
+        if (releasing && System.getenv('GOSSIP_MESH_OPTIONAL') != '1') {
+            throw new GradleException("Release build without the gossip-mobile mesh core: set GOSSIP_NODE_DIR to a gossip-node checkout, or GOSSIP_MESH_OPTIONAL=1 to build without the mesh")
+        }
+    }
 }
 
 repositories {

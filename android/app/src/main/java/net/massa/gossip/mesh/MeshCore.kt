@@ -47,6 +47,15 @@ interface MeshCore {
 
     /** Deletes everything the node stored, its own blobs and relayed ones. */
     fun wipe()
+
+    /**
+     * Drops the key set this node published under [hash], so the node stops
+     * serving it. TODO(gossip-mobile): wire to the node's forget-own-blob call
+     * once the UniFFI API has one; until then no core supports it and callers
+     * fall back on [wipe] or on the node's retention.
+     */
+    fun forgetKeys(hash: ByteArray): Unit =
+        throw UnsupportedOperationException("This mesh core cannot forget published keys yet")
 }
 
 /** What the core asks of its host. May be called from any core thread. */
