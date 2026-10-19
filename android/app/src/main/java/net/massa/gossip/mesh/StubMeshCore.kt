@@ -44,7 +44,7 @@ class StubMeshCore : MeshCore {
         synchronized(lock) { framesIn++ }
     }
 
-    override fun sendBlob(kind: MeshBlobKind, key: ByteArray?, payload: ByteArray): MeshSendResult {
+    override fun sendBlob(kind: MeshBlobKind, key: ByteArray?, payload: ByteArray, localOnly: Boolean): MeshSendResult {
         val id = sha256(byteArrayOf(kind.ordinal.toByte()) + (key ?: ByteArray(0)) + payload)
         val arrived: MeshKeyValue?
         val counter: String?
@@ -92,8 +92,8 @@ class StubMeshCore : MeshCore {
     // The stub hashes with SHA-256; the node indexes key sets by blake3.
     override fun getKeys(hash: ByteArray): ByteArray? = synchronized(lock) { keys[hex(hash)] }
 
-    override fun setWanted(seekers: List<ByteArray>) {
-        synchronized(lock) { wanted = seekers.map(::hex).toSet() }
+    override fun setWanted(seekers: List<ByteArray>, localSeekers: List<ByteArray>) {
+        synchronized(lock) { wanted = (seekers + localSeekers).map(::hex).toSet() }
     }
 
     override fun setUpstream(urls: List<String>, bridgeEnabled: Boolean) = synchronized(lock) {
@@ -113,10 +113,19 @@ class StubMeshCore : MeshCore {
         )
     }
 
-    override fun wipe() = synchronized(lock) {
+    override fun wipe(newConfigJson: String) = synchronized(lock) {
         messages.clear()
         bulletin.clear()
         keys.clear()
+    }
+
+    // The stub keeps no ids; it forgets by content key alone.
+    override fun forgetOwn(kind: MeshBlobKind, key: ByteArray): Boolean = synchronized(lock) {
+        when (kind) {
+            MeshBlobKind.MESSAGE -> messages.remove(hex(key)) != null
+            MeshBlobKind.KEYS -> keys.remove(hex(key)) != null
+            MeshBlobKind.ANNOUNCEMENT -> false
+        }
     }
 
     private fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)

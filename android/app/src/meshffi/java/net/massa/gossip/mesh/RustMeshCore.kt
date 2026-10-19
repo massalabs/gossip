@@ -25,7 +25,7 @@ class RustMeshCore internal constructor(
     // `wipe` restarts the node empty, upstream and wanted list included:
     // remembered here so they are applied again.
     private var upstream: Pair<List<String>, Boolean>? = null
-    private var wanted: List<ByteArray> = emptyList()
+    private var wanted: Pair<List<ByteArray>, List<ByteArray>> = emptyList<ByteArray>() to emptyList()
 
     override fun start(dataDir: String, configJson: String, sink: MeshCoreSink) {
         node.start(dataDir, configJson, SinkAdapter(sink))
@@ -39,8 +39,8 @@ class RustMeshCore internal constructor(
 
     override fun frameIn(linkId: Int, frame: ByteArray) = node.frameIn(linkId, frame)
 
-    override fun sendBlob(kind: MeshBlobKind, key: ByteArray?, payload: ByteArray): MeshSendResult {
-        val result = node.sendBlob(kind.toFfi(), key, payload)
+    override fun sendBlob(kind: MeshBlobKind, key: ByteArray?, payload: ByteArray, localOnly: Boolean): MeshSendResult {
+        val result = node.sendBlob(kind.toFfi(), key, payload, localOnly)
         return MeshSendResult(result.id, result.counter)
     }
 
@@ -52,9 +52,9 @@ class RustMeshCore internal constructor(
 
     override fun getKeys(hash: ByteArray): ByteArray? = node.getKeys(hash)
 
-    override fun setWanted(seekers: List<ByteArray>) = synchronized(lock) {
-        wanted = seekers
-        node.setWanted(seekers)
+    override fun setWanted(seekers: List<ByteArray>, localSeekers: List<ByteArray>) = synchronized(lock) {
+        wanted = seekers to localSeekers
+        node.setWanted(seekers, localSeekers)
     }
 
     override fun setUpstream(urls: List<String>, bridgeEnabled: Boolean) = synchronized(lock) {
@@ -76,15 +76,17 @@ class RustMeshCore internal constructor(
             uploadPending = status.uploadPending,
             wantedEntries = status.wantedEntries,
             clockOffsetMs = status.clockOffsetMs,
-            peerId = status.peerId,
         )
     }
 
-    override fun wipe() = synchronized(lock) {
-        node.wipe()
+    override fun wipe(newConfigJson: String) = synchronized(lock) {
+        node.wipe(newConfigJson)
         upstream?.let { (urls, bridge) -> node.setUpstream(urls, bridge) }
-        if (wanted.isNotEmpty()) node.setWanted(wanted)
+        val (seekers, localSeekers) = wanted
+        if (seekers.isNotEmpty() || localSeekers.isNotEmpty()) node.setWanted(seekers, localSeekers)
     }
+
+    override fun forgetOwn(kind: MeshBlobKind, key: ByteArray): Boolean = node.forgetOwn(kind.toFfi(), key)
 
     private class SinkAdapter(private val sink: MeshCoreSink) : FfiSink {
         override fun sendFrame(linkId: Int, frame: ByteArray): Boolean = sink.sendFrame(linkId, frame)
