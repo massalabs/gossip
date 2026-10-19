@@ -229,7 +229,11 @@ class MeshNodePlugin : Plugin() {
     /** What this build can do, before the node is started. */
     @PluginMethod
     fun capabilities(call: PluginCall) {
-        call.resolve(JSObject().put("rustCore", MeshCoreFactory.hasRustCore()))
+        call.resolve(
+            JSObject()
+                .put("rustCore", MeshCoreFactory.hasRustCore())
+                .put("installId", MeshService.installId(context))
+        )
     }
 
     @PluginMethod

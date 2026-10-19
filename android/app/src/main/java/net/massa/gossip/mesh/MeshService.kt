@@ -119,6 +119,7 @@ class MeshService : Service() {
         private const val KEY_ENABLED = "enabled"
         private const val KEY_UPSTREAM_URLS = "upstream_urls"
         private const val KEY_BRIDGE = "bridge"
+        private const val KEY_INSTALL_ID = "install_id"
 
         // The service is a singleton per process; the flag lives with it.
         private var radioAttached = false
@@ -139,6 +140,20 @@ class MeshService : Service() {
                 putStringSet(KEY_UPSTREAM_URLS, urls.toSet())
                 putBoolean(KEY_BRIDGE, bridgeEnabled)
             }
+        }
+
+        /**
+         * Random id of this installation, kept out of backups with the rest of
+         * these preferences: the app ties consents (bridging) to it, so a
+         * phone restored from a backup asks again.
+         */
+        @Synchronized
+        fun installId(context: Context): String {
+            val prefs = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            prefs.getString(KEY_INSTALL_ID, null)?.let { return it }
+            val id = java.util.UUID.randomUUID().toString()
+            prefs.edit { putString(KEY_INSTALL_ID, id) }
+            return id
         }
 
         /** Whether the app last started the mesh rather than stopped it. */
