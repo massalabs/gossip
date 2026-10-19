@@ -657,7 +657,7 @@ impl SessionManagerWrapper {
     }
 
     /// Returns the announcement carried by an entry read at a re-announcement
-    /// mailbox seeker, if it is signed by the seeker key; feed it to
+    /// mailbox seeker, if it is signed by the seeker key and decrypts; feed it to
     /// `feed_incoming_announcement`.
     pub fn open_reannouncement_mailbox_read(&self, seeker: &[u8], data: &[u8]) -> Option<Vec<u8>> {
         self.inner.open_reannouncement_mailbox_read(seeker, data)

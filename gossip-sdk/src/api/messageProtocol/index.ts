@@ -10,6 +10,7 @@ export type {
   MessageProtocolResponse,
   BulletinItem,
   TransportConnectivity,
+  MessageRouting,
 } from './types.js';
 import type { IMessageProtocol } from './types.js';
 import { protocolConfig } from '../../config/protocol.js';

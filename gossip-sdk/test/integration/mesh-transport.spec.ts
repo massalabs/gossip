@@ -39,7 +39,17 @@ class ChaosProtocol implements IMessageProtocol {
     if (this.down) throw new Error('partitioned');
   }
 
+  /** Every seeker this path was asked for or given, base64. */
+  seenSeekers = new Set<string>();
+
+  private see(seekers: Uint8Array[]): void {
+    for (const seeker of seekers) {
+      this.seenSeekers.add(Buffer.from(seeker).toString('base64'));
+    }
+  }
+
   async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
+    this.see(seekers);
     await this.step();
     let messages = await this.store.fetchMessages(seekers);
     if (this.duplicate) messages = messages.concat(messages);
@@ -48,6 +58,7 @@ class ChaosProtocol implements IMessageProtocol {
   }
 
   async sendMessage(message: EncryptedMessage): Promise<void> {
+    this.see([message.seeker]);
     await this.step();
     await this.store.sendMessage(message);
   }
@@ -319,8 +330,9 @@ describe('Messaging over internet and mesh transports', () => {
     const [next] = session.getMessageBoardReadKeys();
     const ahead = session.getMessageBoardLookaheadKeys();
     expect(ahead).toHaveLength(3);
+    // the current and the previous window's mailbox of the one contact
     const mailboxes = session.getReannouncementMailboxKeys();
-    expect(mailboxes).toHaveLength(1);
+    expect(mailboxes).toHaveLength(2);
     expect(bob.mesh.wanted).toEqual([next, ...ahead, ...mailboxes]);
 
     await alice.sdk.closeSession();
@@ -338,8 +350,18 @@ describe('Messaging over internet and mesh transports', () => {
     expect(reset.success).toBe(true);
     expect(internetStore.getStoredAnnouncements()).toHaveLength(2);
 
+    const mailboxes = sessionOf(bob.sdk)
+      .getReannouncementMailboxKeys()
+      .map(seeker => Buffer.from(seeker).toString('base64'));
     const fetched = await bob.sdk.announcements.fetch();
     expect(fetched.newAnnouncementsCount).toBe(1);
+
+    // the addressed entry and its seeker never went near the internet node
+    for (const path of [alice.internet, bob.internet]) {
+      for (const mailbox of mailboxes) {
+        expect(path.seenSeekers.has(mailbox)).toBe(false);
+      }
+    }
 
     await sendText(alice.sdk, bob.sdk, 'new session');
     expect(await receive(bob.sdk, alice.sdk, 1)).toEqual(['new session']);

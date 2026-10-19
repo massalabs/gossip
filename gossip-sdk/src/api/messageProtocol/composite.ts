@@ -11,6 +11,7 @@ import {
   EncryptedMessage,
   IMessageProtocol,
   MessageProtocolResponse,
+  MessageRouting,
   TransportConnectivity,
 } from './types.js';
 import { encodeToBase64 } from '../../utils/base64.js';
@@ -104,9 +105,33 @@ export class CompositeMessageProtocol implements IMessageProtocol {
     return 'offline';
   }
 
-  async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
+  private meshTransports(): CompositeTransport[] {
+    return this.transports.filter(
+      t => t.kind === 'mesh' && (t.protocol.isMeshEnabled?.() ?? true)
+    );
+  }
+
+  /** The transports a call with `routing` uses; throws when there are none. */
+  private route(routing?: MessageRouting): CompositeTransport[] {
+    if (!routing?.meshOnly) return this.transports;
+    const mesh = this.meshTransports();
+    if (mesh.length === 0) throw new Error('No mesh transport is on');
+    return mesh;
+  }
+
+  isMeshEnabled(): boolean {
+    return this.meshTransports().length > 0;
+  }
+
+  async fetchMessages(
+    seekers: Uint8Array[],
+    routing?: MessageRouting
+  ): Promise<EncryptedMessage[]> {
+    const transports = this.route(routing);
     const results = await Promise.allSettled(
-      this.transports.map(t => this.track(t, t.protocol.fetchMessages(seekers)))
+      transports.map(t =>
+        this.track(t, t.protocol.fetchMessages(seekers, routing))
+      )
     );
     const fulfilled = results.flatMap(r =>
       r.status === 'fulfilled' ? [r.value] : []
@@ -128,9 +153,15 @@ export class CompositeMessageProtocol implements IMessageProtocol {
     return merged;
   }
 
-  async sendMessage(message: EncryptedMessage): Promise<void> {
+  async sendMessage(
+    message: EncryptedMessage,
+    routing?: MessageRouting
+  ): Promise<void> {
+    const transports = this.route(routing);
     const results = await Promise.allSettled(
-      this.transports.map(t => this.track(t, t.protocol.sendMessage(message)))
+      transports.map(t =>
+        this.track(t, t.protocol.sendMessage(message, routing))
+      )
     );
     if (!results.some(r => r.status === 'fulfilled')) {
       throw (results[0] as PromiseRejectedResult).reason;
@@ -139,7 +170,7 @@ export class CompositeMessageProtocol implements IMessageProtocol {
     this.accepted.delete(key);
     this.accepted.set(
       key,
-      this.transports.flatMap((t, i) =>
+      transports.flatMap((t, i) =>
         results[i].status === 'fulfilled' ? [t.kind] : []
       )
     );
