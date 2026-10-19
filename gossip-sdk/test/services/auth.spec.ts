@@ -8,6 +8,7 @@ import {
   getPublicKeyErrorMessage,
   PUBLIC_KEY_NOT_FOUND_ERROR,
   PUBLIC_KEY_NOT_FOUND_MESSAGE,
+  PUBLIC_KEYS_MISMATCH_ERROR,
   FAILED_TO_FETCH_ERROR,
   FAILED_TO_FETCH_MESSAGE,
   FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
@@ -83,11 +84,12 @@ describe('AuthService', () => {
     await clearAllTables();
     await ensureWasmInitialized();
 
-    testUserIdBytes = new Uint8Array(32).fill(42);
-    testUserId = encodeUserId(testUserIdBytes);
-
     userKeys = generate_user_keys('test-passphrase-' + Date.now());
     testPublicKeys = userKeys.public_keys();
+
+    // the user id the keys hash to, as a node must answer for
+    testUserIdBytes = new Uint8Array(testPublicKeys.derive_id());
+    testUserId = encodeUserId(testUserIdBytes);
 
     mockAuthProtocol = createMockAuthProtocol();
     authService = new AuthService(mockAuthProtocol);
@@ -121,6 +123,18 @@ describe('AuthService', () => {
       expect(mockAuthProtocol.fetchPublicKeyByUserId).toHaveBeenCalledWith(
         testUserIdBytes
       );
+    });
+
+    it('should refuse keys that do not hash to the user id', async () => {
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockResolvedValue(
+        encodeToBase64(testPublicKeys.to_bytes())
+      );
+
+      await expect(
+        authService.fetchPublicKeyByUserId(
+          encodeUserId(new Uint8Array(32).fill(42))
+        )
+      ).rejects.toThrow(PUBLIC_KEYS_MISMATCH_ERROR);
     });
 
     it('should throw when public key is not found', async () => {
