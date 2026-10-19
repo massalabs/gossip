@@ -11,6 +11,7 @@ import { useAppStore } from './stores/appStore';
 import { establishFirstInstallCreationGrant } from './hooks/useProfileLoader';
 import { protocolConfig } from './config/protocol';
 import { SECURE_STORAGE_ENABLED } from './config/features';
+import { attachMeshArrivals, startMeshTransport } from './services/meshNode';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
@@ -68,8 +69,11 @@ configureAppLogging();
 const isNative = Capacitor.isNativePlatform();
 
 async function bootstrap() {
+  // Null unless the mesh is on: the SDK then builds its default REST transport.
+  const meshTransport = await startMeshTransport();
   const sdk = await createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
+    messageProtocol: meshTransport?.messageProtocol,
     config: { polling: { enabled: true } },
     storage: SECURE_STORAGE_ENABLED
       ? {
@@ -81,6 +85,10 @@ async function bootstrap() {
         ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
         : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
   });
+
+  if (meshTransport) {
+    await attachMeshArrivals(sdk, meshTransport.mesh);
+  }
 
   await initSafeArea();
   return sdk;
