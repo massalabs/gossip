@@ -166,4 +166,42 @@ describe('CompositeMessageProtocol', () => {
     await protocol.setWantedSeekers([bytes(1), bytes(2)]);
     expect(wanted).toEqual([[bytes(1), bytes(2)]]);
   });
+  it('keeps mesh-only traffic off the internet transports', async () => {
+    const internet = new MockMessageProtocol();
+    const mesh = new MockMessageProtocol();
+    const protocol = composite(internet, mesh);
+    expect(protocol.isMeshEnabled()).toBe(true);
+
+    await protocol.sendMessage(
+      { seeker: bytes(1), ciphertext: bytes(9) },
+      { meshOnly: true }
+    );
+    expect(internet.getStoredMessages().size).toBe(0);
+    expect(mesh.getStoredMessages().size).toBe(1);
+    expect(protocol.takeAcceptedBy(bytes(1))).toEqual(['mesh']);
+
+    await internet.sendMessage({ seeker: bytes(2), ciphertext: bytes(8) });
+    expect(
+      await protocol.fetchMessages([bytes(1), bytes(2)], { meshOnly: true })
+    ).toEqual([{ seeker: bytes(1), ciphertext: bytes(9) }]);
+  });
+
+  it('refuses mesh-only traffic when no mesh is on', async () => {
+    const mesh = new MockMessageProtocol() as MockMessageProtocol & {
+      isMeshEnabled(): boolean;
+    };
+    mesh.isMeshEnabled = () => false;
+    const protocol = composite(new MockMessageProtocol(), mesh);
+    expect(protocol.isMeshEnabled()).toBe(false);
+    await expect(
+      protocol.sendMessage(
+        { seeker: bytes(1), ciphertext: bytes(9) },
+        { meshOnly: true }
+      )
+    ).rejects.toThrow('No mesh transport');
+    await expect(
+      protocol.fetchMessages([bytes(1)], { meshOnly: true })
+    ).rejects.toThrow('No mesh transport');
+    expect(mesh.getStoredMessages().size).toBe(0);
+  });
 });

@@ -466,11 +466,16 @@ class GossipSdk {
             this.state.status === SdkStatus.SESSION_OPEN
               ? this.state.session
               : undefined;
-          const wanted = [
-            ...seekers,
-            ...(session?.getMessageBoardLookaheadKeys() ?? []),
-            ...(session?.getReannouncementMailboxKeys() ?? []),
-          ];
+          // both only for a mesh: they would let an internet node link
+          // contacts, and polling serves the next seeker alone well enough
+          const meshExtras =
+            session && messageProtocol.isMeshEnabled?.()
+              ? [
+                  ...session.getMessageBoardLookaheadKeys(),
+                  ...session.getReannouncementMailboxKeys(),
+                ]
+              : [];
+          const wanted = [...seekers, ...meshExtras];
           messageProtocol.setWantedSeekers?.(wanted).catch(error => {
             logger.warn('[GossipSdk] failed to update wanted seekers', error);
           });

@@ -327,26 +327,102 @@ impl OutgoingInitiationRequest {
     }
 }
 
-/// Keypair of the board entry where the sender of the announcement with
-/// `sender_seed` posts its next announcement to the peer whose latest announcement
-/// had `receiver_seed`.
-///
-/// Only the two peers know both seeds, so the entry is unlinkable for anyone else,
-/// and both can sign it, as with message seekers. Each new announcement from the
-/// sender moves the entry, so the receiver follows a chain of them.
-pub(crate) fn reannouncement_mailbox_keypair(
+/// Length of the time window a re-announcement mailbox stays at one seeker.
+pub const REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS: u128 = 6 * 60 * 60 * 1000;
+
+/// Window index of `timestamp_millis` (see [`REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS`]).
+pub(crate) fn reannouncement_mailbox_window(timestamp_millis: u128) -> u64 {
+    (timestamp_millis / REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS) as u64
+}
+
+/// Expands the KDF over both announcement seeds and the window for `info`.
+fn reannouncement_mailbox_expand(
     sender_seed: &[u8; 32],
     receiver_seed: &[u8; 32],
-) -> massa_signature::KeyPair {
+    window: u64,
+    info: &[u8],
+    output: &mut [u8],
+) {
     let mut kdf = crypto_kdf::Extract::new(b"session.reannounce.salt---------");
     kdf.input_item(sender_seed.as_slice());
     kdf.input_item(receiver_seed.as_slice());
-    let expander = kdf.finalize();
+    kdf.input_item(window.to_be_bytes().as_slice());
+    kdf.finalize().expand(info, output);
+}
+
+/// Keypair of the board entry where the sender of the announcement with
+/// `sender_seed` posts its next announcement to the peer whose latest announcement
+/// had `receiver_seed`, during time window `window`.
+///
+/// Only the two peers know both seeds, so the entry is unlinkable for anyone else,
+/// and both can sign it, as with message seekers. Each new announcement from the
+/// sender moves the entry, so the receiver follows a chain of them; the window
+/// moves it every few hours too, so a quiet pair does not keep one seeker for weeks.
+pub(crate) fn reannouncement_mailbox_keypair(
+    sender_seed: &[u8; 32],
+    receiver_seed: &[u8; 32],
+    window: u64,
+) -> massa_signature::KeyPair {
     // Massa keypair format: [version_byte, 32_secret_key_bytes]
     let mut key = Zeroizing::new([0u8; 33]);
-    expander.expand(b"session.reannounce.key", &mut key[1..]);
+    reannouncement_mailbox_expand(
+        sender_seed,
+        receiver_seed,
+        window,
+        b"session.reannounce.key",
+        &mut key[1..],
+    );
     massa_signature::KeyPair::from_bytes(key.as_slice())
         .expect("Failed to derive re-announcement keypair")
+}
+
+/// Key the announcement is encrypted under at its mailbox, so the entry does not
+/// repeat the bytes of the board copy: an observer of both cannot tell from them
+/// who the board announcement was for.
+pub(crate) fn reannouncement_mailbox_wrap_key(
+    sender_seed: &[u8; 32],
+    receiver_seed: &[u8; 32],
+    window: u64,
+) -> crypto_aead::Key {
+    let mut key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
+    reannouncement_mailbox_expand(
+        sender_seed,
+        receiver_seed,
+        window,
+        b"session.reannounce.wrap",
+        key.as_mut_slice(),
+    );
+    crypto_aead::Key::from_ref(&key)
+}
+
+/// `nonce ‖ AEAD(announcement)`, bound to the mailbox seeker.
+pub(crate) fn wrap_reannouncement(
+    key: &crypto_aead::Key,
+    seeker: &[u8],
+    announcement: &[u8],
+) -> Vec<u8> {
+    let mut nonce_bytes = [0u8; crypto_aead::NONCE_SIZE];
+    crypto_rng::fill_buffer(&mut nonce_bytes);
+    let nonce = crypto_aead::Nonce::from(nonce_bytes);
+    let mut wrapped = nonce_bytes.to_vec();
+    wrapped.extend(crypto_aead::encrypt(key, &nonce, announcement, seeker));
+    wrapped
+}
+
+/// Inverse of [`wrap_reannouncement`].
+pub(crate) fn unwrap_reannouncement(
+    key: &crypto_aead::Key,
+    seeker: &[u8],
+    wrapped: &[u8],
+) -> Option<Vec<u8>> {
+    let nonce_bytes: [u8; crypto_aead::NONCE_SIZE] =
+        wrapped.get(..crypto_aead::NONCE_SIZE)?.try_into().ok()?;
+    crypto_aead::decrypt(
+        key,
+        &crypto_aead::Nonce::from(nonce_bytes),
+        wrapped.get(crypto_aead::NONCE_SIZE..)?,
+        seeker,
+    )
 }
 
 /// An established session between two peers.

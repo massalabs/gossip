@@ -5,6 +5,7 @@
 import {
   BulletinItem,
   EncryptedMessage,
+  MessageRouting,
   IMessageProtocol,
   MessageProtocolResponse,
 } from './types.js';
@@ -24,12 +25,23 @@ type FetchMessagesResponse = {
   value: string;
 };
 
+/** An internet node must never see traffic meant for the mesh only. */
+function refuseMeshOnly(routing?: MessageRouting): void {
+  if (routing?.meshOnly) {
+    throw new Error('The REST node does not take mesh-only traffic');
+  }
+}
+
 export class RestMessageProtocol
   extends RestClient
   implements IMessageProtocol
 {
   // TODO: Implement a fetch with pagination to avoid fetching all messages at once
-  async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
+  async fetchMessages(
+    seekers: Uint8Array[],
+    routing?: MessageRouting
+  ): Promise<EncryptedMessage[]> {
+    refuseMeshOnly(routing);
     const url = `${this.baseUrl}${MESSAGES_ENDPOINT}/fetch`;
 
     const response = await this.makeRequest<FetchMessagesResponse[]>(url, {
@@ -53,7 +65,11 @@ export class RestMessageProtocol
     });
   }
 
-  async sendMessage(message: EncryptedMessage): Promise<void> {
+  async sendMessage(
+    message: EncryptedMessage,
+    routing?: MessageRouting
+  ): Promise<void> {
+    refuseMeshOnly(routing);
     const url = `${this.baseUrl}${MESSAGES_ENDPOINT}/`;
 
     const response = await this.makeRequest<void>(url, {

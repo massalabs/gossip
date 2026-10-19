@@ -13,4 +13,5 @@ export {
   type IMessageProtocol,
   type BulletinItem,
   type TransportConnectivity,
+  type MessageRouting,
 } from './messageProtocol/index.js';

@@ -160,15 +160,9 @@ export function serializeSendAnnouncement(
   return JSON.stringify({
     announcement_bytes: Array.from(announcement_bytes),
     when_to_send: announcement.when_to_send.toISOString(),
-    // the entry ends with the announcement itself: keep only what precedes it
     ...(mailbox && {
       mailbox_seeker: Array.from(mailbox.seeker),
-      mailbox_prefix: Array.from(
-        mailbox.data.subarray(
-          0,
-          mailbox.data.length - announcement_bytes.length
-        )
-      ),
+      mailbox_data: Array.from(mailbox.data),
     }),
   });
 }
@@ -186,12 +180,13 @@ export function deserializeSendAnnouncement(json: string): ReadyAnnouncement {
       announcement_bytes,
       when_to_send: new Date(parsed.when_to_send),
     };
-    if (parsed.mailbox_seeker && parsed.mailbox_prefix) {
-      const prefix = new Uint8Array(parsed.mailbox_prefix);
-      const data = new Uint8Array(prefix.length + announcement_bytes.length);
-      data.set(prefix);
-      data.set(announcement_bytes, prefix.length);
-      ready.mailbox = { seeker: new Uint8Array(parsed.mailbox_seeker), data };
+    // entries saved before the mailbox was encrypted (mailbox_prefix) are
+    // dropped: the board copy still carries the announcement
+    if (parsed.mailbox_seeker && parsed.mailbox_data) {
+      ready.mailbox = {
+        seeker: new Uint8Array(parsed.mailbox_seeker),
+        data: new Uint8Array(parsed.mailbox_data),
+      };
     }
     return ready;
   } catch (e) {
