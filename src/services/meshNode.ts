@@ -56,6 +56,13 @@ export interface MeshNodeNativePlugin extends MeshNodePlugin {
   status(): Promise<MeshNativeStatus>;
   /** Android: `bluetooth` (12+) and `location` (before 12). iOS: `bluetooth`. */
   checkPermissions(): Promise<Record<string, MeshPermissionState>>;
+  /** What this build can do, before the node is started. */
+  capabilities(): Promise<{ rustCore: boolean }>;
+  /**
+   * Makes the node stop serving the key set it published under `hash`.
+   * Rejects with `UNIMPLEMENTED` until the Rust node has the call.
+   */
+  forgetKeys(options: { hash: string }): Promise<void>;
   addListener(
     event: 'arrival',
     handler: Parameters<MeshNodePlugin['addListener']>[1]
@@ -79,9 +86,37 @@ export interface MeshSettings {
   powerMode: MeshPowerMode;
 }
 
-/** Whether this build and platform can run the mesh at all. */
+/** Whether the native build carries the Rust node; null until probed. */
+let rustCoreAvailable: boolean | null = null;
+
+/**
+ * Asks the native plugin whether this build carries the Rust node. Without
+ * it the mesh is hidden: the stand-in core relays nothing, and a radio that
+ * advertises without relaying only makes the phone visible.
+ */
+export async function probeMeshAvailability(): Promise<boolean> {
+  if (!MESH_FEATURE_ENABLED || !Capacitor.isNativePlatform()) {
+    rustCoreAvailable = false;
+    return false;
+  }
+  try {
+    rustCoreAvailable = (await MeshNode.capabilities()).rustCore;
+  } catch {
+    rustCoreAvailable = false;
+  }
+  return rustCoreAvailable;
+}
+
+/**
+ * Whether this build and platform can run the mesh at all; false until
+ * `probeMeshAvailability` found the Rust node.
+ */
 export function isMeshAvailable(): boolean {
-  return MESH_FEATURE_ENABLED && Capacitor.isNativePlatform();
+  return (
+    MESH_FEATURE_ENABLED &&
+    Capacitor.isNativePlatform() &&
+    rustCoreAvailable === true
+  );
 }
 
 export async function getMeshSettings(): Promise<MeshSettings> {
@@ -221,7 +256,7 @@ export function isMeshActive(): boolean {
  * permissions first) and puts it in the SDK's transports. Throws when it
  * cannot start: permission refused, no Bluetooth.
  */
-export async function startMesh(sdk?: GossipSdk): Promise<void> {
+export async function startMesh(): Promise<void> {
   if (!switchable) throw new Error('The offline mesh is not available');
   const settings = await getMeshSettings();
   await MeshNode.start({ powerMode: settings.powerMode });
@@ -230,10 +265,10 @@ export async function startMesh(sdk?: GossipSdk): Promise<void> {
     bridgeEnabled: settings.bridgeEnabled,
   });
   await switchable.activate();
-  if (sdk) void publishOwnKeysToMesh(sdk);
 }
 
 export async function stopMesh(): Promise<void> {
+  await stopSharingKeysNearby();
   switchable?.deactivate();
   if (isMeshAvailable()) await MeshNode.stop().catch(() => undefined);
 }
@@ -242,12 +277,9 @@ export async function stopMesh(): Promise<void> {
  * Saves the choice and applies it now. Turning it on fails (and stays off)
  * when the node cannot start, so the caller can show why.
  */
-export async function setMeshEnabled(
-  enabled: boolean,
-  sdk?: GossipSdk
-): Promise<void> {
+export async function setMeshEnabled(enabled: boolean): Promise<void> {
   if (enabled) {
-    await startMesh(sdk);
+    await startMesh();
   } else {
     await stopMesh();
   }
@@ -306,16 +338,75 @@ export async function fetchKeysFromMesh(
   return keys;
 }
 
-/** Publishes our public keys to the mesh, so people nearby can add us offline. */
-export async function publishOwnKeysToMesh(sdk: GossipSdk): Promise<void> {
-  if (!switchable?.isActive || !sdk.isSessionOpen) return;
+/** How long "let people nearby add me" keeps our keys on the mesh. */
+export const SHARE_KEYS_NEARBY_MS = 10 * 60 * 1000;
+
+let sharedKeys: {
+  userId: string;
+  until: number;
+  timer: ReturnType<typeof setTimeout>;
+} | null = null;
+
+/** Until when our keys are shared nearby, or null. */
+export function keysSharedNearbyUntil(): number | null {
+  return sharedKeys ? sharedKeys.until : null;
+}
+
+/**
+ * Publishes our public keys to the mesh for a few minutes, so someone nearby
+ * who scanned our QR code can add us without a server. Only on the user's
+ * request: whoever receives the keys can tie this phone, and where it is, to
+ * our user id.
+ */
+export async function shareKeysNearby(
+  sdk: GossipSdk,
+  durationMs: number = SHARE_KEYS_NEARBY_MS
+): Promise<number> {
+  if (!switchable?.isActive || !sdk.isSessionOpen) {
+    throw new Error('The offline mesh is off');
+  }
+  await stopSharingKeysNearby();
+  await switchable.mesh.publishKeys(new Uint8Array(sdk.publicKeys.to_bytes()));
+  const until = Date.now() + durationMs;
+  sharedKeys = {
+    userId: sdk.userId,
+    until,
+    timer: setTimeout(() => void stopSharingKeysNearby(), durationMs),
+  };
+  return until;
+}
+
+/** Stops serving the keys `shareKeysNearby` published, if any. */
+export async function stopSharingKeysNearby(): Promise<void> {
+  const shared = sharedKeys;
+  if (!shared) return;
+  sharedKeys = null;
+  clearTimeout(shared.timer);
   try {
-    await switchable.mesh.publishKeys(
-      new Uint8Array(sdk.publicKeys.to_bytes())
-    );
+    await switchable?.mesh.forgetKeys(decodeUserId(shared.userId));
+  } catch (error) {
+    // TODO(gossip-mobile): until the node can forget a published blob, the
+    // keys stay on this phone's node (and on neighbours that took a copy)
+    // for the node's retention; an account change wipes the node.
+    if (import.meta.env.DEV) {
+      logger.warn('[MeshNode] could not withdraw our keys', error);
+    }
+  }
+}
+
+/**
+ * Clears the node when the account changes or goes away, so it no longer
+ * serves the previous account's keys or waits on its seekers, which would
+ * tie the two accounts together.
+ */
+export async function wipeMeshForAccountChange(): Promise<void> {
+  await stopSharingKeysNearby();
+  if (!isMeshAvailable()) return;
+  try {
+    await MeshNode.wipe();
   } catch (error) {
     if (import.meta.env.DEV) {
-      logger.warn('[MeshNode] failed to publish our keys', error);
+      logger.warn('[MeshNode] failed to wipe the node', error);
     }
   }
 }

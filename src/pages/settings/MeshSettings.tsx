@@ -2,7 +2,13 @@ import { logger } from '../../utils/logger.ts';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Bluetooth, CheckSquare, ChevronRight, Share2 } from 'react-feather';
+import {
+  Bluetooth,
+  CheckSquare,
+  ChevronRight,
+  Share2,
+  UserPlus,
+} from 'react-feather';
 import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import Toggle from '../../components/ui/Toggle';
@@ -16,6 +22,9 @@ import {
   getMeshSettings,
   getMeshStatus,
   isMeshAvailable,
+  keysSharedNearbyUntil,
+  shareKeysNearby,
+  stopSharingKeysNearby,
   setMeshBridgeEnabled,
   setMeshEnabled,
   setMeshPowerMode,
@@ -68,6 +77,10 @@ const MeshSettings: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPowerSheetOpen, setIsPowerSheetOpen] = useState(false);
+  const [sharedUntil, setSharedUntil] = useState<number | null>(() =>
+    keysSharedNearbyUntil()
+  );
+  const [shareError, setShareError] = useState<string | null>(null);
 
   useEffect(() => {
     void getMeshSettings().then(setSettings);
@@ -98,13 +111,41 @@ const MeshSettings: React.FC = () => {
       setBusy(true);
       setError(null);
       try {
-        await setMeshEnabled(next, sdk);
+        await setMeshEnabled(next);
         setSettings(await getMeshSettings());
       } catch (err) {
         logger.error('Failed to switch the offline mesh:', err);
         setError(t('mesh.start_failed'));
       } finally {
         setBusy(false);
+      }
+    },
+    [t]
+  );
+
+  // the share ends on its own: follow it
+  useEffect(() => {
+    if (sharedUntil === null) return;
+    const timer = setTimeout(
+      () => setSharedUntil(keysSharedNearbyUntil()),
+      Math.max(0, sharedUntil - Date.now()) + 500
+    );
+    return () => clearTimeout(timer);
+  }, [sharedUntil]);
+
+  const handleShareToggle = useCallback(
+    async (next: boolean) => {
+      setShareError(null);
+      try {
+        if (next) {
+          setSharedUntil(await shareKeysNearby(sdk));
+        } else {
+          await stopSharingKeysNearby();
+          setSharedUntil(null);
+        }
+      } catch (err) {
+        logger.error('Failed to share keys nearby:', err);
+        setShareError(t('mesh.share_nearby_failed'));
       }
     },
     [sdk, t]
@@ -204,6 +245,36 @@ const MeshSettings: React.FC = () => {
           </span>
         </button>
       </div>
+
+      {enabled && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <ToggleRow
+            icon={<UserPlus />}
+            label={t('mesh.share_nearby')}
+            hint={
+              sharedUntil !== null
+                ? t('mesh.share_nearby_until', {
+                    time: new Date(sharedUntil).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }),
+                  })
+                : t('mesh.share_nearby_hint')
+            }
+            checked={sharedUntil !== null}
+            onChange={value => void handleShareToggle(value)}
+            withDivider
+          />
+          <div className="px-4 py-3">
+            <p className="text-xs text-muted-foreground">
+              {t('mesh.share_nearby_warning')}
+            </p>
+            {shareError && (
+              <p className="text-xs text-destructive mt-2">{shareError}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {enabled && (
         <div className="bg-card border border-border rounded-xl overflow-hidden">

@@ -14,6 +14,7 @@ import { SECURE_STORAGE_ENABLED } from './config/features';
 import {
   attachMeshArrivals,
   createMeshTransport,
+  probeMeshAvailability,
   isMeshEnabled,
   startMesh,
 } from './services/meshNode';
@@ -76,6 +77,7 @@ const isNative = Capacitor.isNativePlatform();
 async function bootstrap() {
   // Null where the mesh is unavailable: the SDK then builds its default REST
   // transport. Elsewhere the mesh member stays off until the user turns it on.
+  await probeMeshAvailability();
   const meshTransport = createMeshTransport();
   const sdk = await createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
@@ -96,7 +98,7 @@ async function bootstrap() {
     await attachMeshArrivals(sdk, meshTransport.mesh);
     if (await isMeshEnabled()) {
       // No permission or no Bluetooth: the app runs on REST alone, as before.
-      await startMesh(sdk).catch(error => {
+      await startMesh().catch(error => {
         if (import.meta.env.DEV) {
           logger.warn('[MeshNode] mesh not started', error);
         }

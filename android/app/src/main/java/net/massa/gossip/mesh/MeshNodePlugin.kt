@@ -226,6 +226,21 @@ class MeshNodePlugin : Plugin() {
         }
     }
 
+    /** What this build can do, before the node is started. */
+    @PluginMethod
+    fun capabilities(call: PluginCall) {
+        call.resolve(JSObject().put("rustCore", MeshCoreFactory.hasRustCore()))
+    }
+
+    @PluginMethod
+    fun forgetKeys(call: PluginCall) {
+        reply(call) { core ->
+            val hash = decode(call.getString("hash") ?: throw IllegalArgumentException("hash is required"))
+            core.forgetKeys(hash)
+            JSObject()
+        }
+    }
+
     @PluginMethod
     fun wipe(call: PluginCall) {
         reply(call) { core ->
@@ -245,7 +260,9 @@ class MeshNodePlugin : Plugin() {
                 call.resolve(MeshNodeBridge.call(block).get())
             } catch (e: ExecutionException) {
                 val cause = e.cause ?: e
-                if (cause is IllegalStateException) {
+                if (cause is UnsupportedOperationException) {
+                    call.reject(cause.message, "UNIMPLEMENTED")
+                } else if (cause is IllegalStateException) {
                     call.reject(cause.message, "NOT_STARTED")
                 } else if (cause is IllegalArgumentException || cause is JSONException) {
                     call.reject(cause.message ?: "Invalid argument", "INVALID_ARGUMENT")
