@@ -50,7 +50,7 @@ import {
   ensureWasmInitialized,
 } from './wasm/loader.js';
 import { generateUserKeys } from './wasm/userKeys.js';
-import { SessionModule } from './wasm/session.js';
+import { SessionModule, type SessionConfigSource } from './wasm/session.js';
 import {
   EncryptionKey,
   generateEncryptionKeyFromSeed,
@@ -85,11 +85,7 @@ import {
   type SecureStorageState,
 } from './db/sqlite.js';
 import { Queries } from './db/queries/index.js';
-import {
-  type UserPublicKeys,
-  type SessionConfig,
-  SessionManagerWrapper,
-} from './wasm/bindings.js';
+import { type UserPublicKeys, SessionManagerWrapper } from './wasm/bindings.js';
 import {
   SdkEventEmitter,
   SdkEventType,
@@ -189,8 +185,11 @@ export interface OpenSessionOptions {
     encryptedBlob: Uint8Array,
     encryptionKey: EncryptionKey
   ) => Promise<void>;
-  /** Custom session configuration (optional, uses defaults if not provided) */
-  sessionConfig?: SessionConfig;
+  /**
+   * Custom session configuration (optional, uses defaults if not provided).
+   * Pass a function to have it applied to restored sessions as well.
+   */
+  sessionConfig?: SessionConfigSource;
   /**
    * Auto-start the polling loop (messages / announcements / session
    * refresh) after the session is open. Defaults to `true` for

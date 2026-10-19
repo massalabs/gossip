@@ -7,6 +7,7 @@
 
 // Export modules
 export { SessionModule, sessionStatusToString } from './session.js';
+export type { SessionConfigSource } from './session.js';
 
 // Export initialization functions
 export {
