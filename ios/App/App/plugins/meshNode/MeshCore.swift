@@ -1,11 +1,11 @@
 import CryptoKit
 import Foundation
 
-/// The mesh node core: pools, link handshakes, BLE chunking, replication, the
-/// wanted list and the internet upstream. It will be the Rust `gossip-mobile`
-/// crate (gossip-node repository) through UniFFI; until then `StubMeshCore`
-/// stands in. Calls may block and are made from the bridge's queues, never
-/// from the main thread. Mirrors `MeshCore.kt`.
+/// The mesh node core: pools, link handshakes, link encryption, BLE chunking,
+/// replication, the wanted list and the internet upstream: the Rust
+/// `gossip-mobile` crate (gossip-node repository) through UniFFI, or
+/// `StubMeshCore` in a build without it. Calls may block and are made from
+/// the bridge's queues, never from the main thread. Mirrors `MeshCore.kt`.
 protocol MeshCore: AnyObject {
     /// Opens the node's storage in `dataDir` and starts it. `configJson` is
     /// the object passed to `MeshNode.start({ config })`, opaque here.
@@ -18,26 +18,25 @@ protocol MeshCore: AnyObject {
     func frameIn(linkId: Int, frame: Data)
 
     // The MeshNode plugin API.
-    func sendBlob(kind: MeshBlobKind, key: Data?, payload: Data) throws -> MeshSendResult
+    /// A `localOnly` blob stays in the mesh: neither this phone nor a bridge
+    /// that relays it uploads it.
+    func sendBlob(kind: MeshBlobKind, key: Data?, payload: Data, localOnly: Bool) throws -> MeshSendResult
     func fetch(seekers: [Data]) throws -> [MeshKeyValue]
     func fetchBulletin(cursor: String?, limit: Int) throws -> [MeshBulletinItem]
     func getKeys(hash: Data) throws -> Data?
-    func setWanted(seekers: [Data]) throws
+    /// `localSeekers` are waited on from the mesh only: no bridge fetches
+    /// them upstream, nor this phone.
+    func setWanted(seekers: [Data], localSeekers: [Data]) throws
     func setUpstream(urls: [String], bridgeEnabled: Bool) throws
     func status() -> MeshCoreStatus
-    /// Deletes everything the node stored, its own blobs and relayed ones.
-    func wipe() throws
-    /// Drops the key set this node published under `hash`.
-    func forgetKeys(hash: Data) throws
-}
-
-extension MeshCore {
-    // TODO(gossip-mobile): wire to the node's forget-own-blob call once the
-    // UniFFI API has one; until then no core supports it and callers fall
-    // back on `wipe` or on the node's retention.
-    func forgetKeys(hash: Data) throws {
-        throw MeshCoreError.unsupported("This mesh core cannot forget published keys yet")
-    }
+    /// Deletes everything the node stored, its own blobs and relayed ones,
+    /// and restarts it empty with `newConfigJson` (a new pool key). Throws
+    /// when the restart fails.
+    func wipe(newConfigJson: String) throws
+    /// Deletes a blob this node published: `key` is the seeker of a message,
+    /// blake3 of the key set (the user id) for keys, or the id `sendBlob`
+    /// returned for an announcement. Returns whether one was deleted.
+    func forgetOwn(kind: MeshBlobKind, key: Data) -> Bool
 }
 
 /// What the core asks of its host; may be called from any of the core's threads.
@@ -85,7 +84,6 @@ struct MeshCoreStatus {
     var uploadPending: Int = 0
     var wantedEntries: Int = 0
     var clockOffsetMs: Int = 0
-    var peerId: String = ""
 }
 
 /// The Rust node (`RustMeshCore`) when the `GossipMobile` pod is installed
@@ -157,7 +155,7 @@ final class StubMeshCore: MeshCore {
 
     func frameIn(linkId: Int, frame: Data) {}
 
-    func sendBlob(kind: MeshBlobKind, key: Data?, payload: Data) throws -> MeshSendResult {
+    func sendBlob(kind: MeshBlobKind, key: Data?, payload: Data, localOnly: Bool) throws -> MeshSendResult {
         let id = Data(SHA256.hash(data: Data(kind.rawValue.utf8) + (key ?? Data()) + payload))
         var arrived: MeshKeyValue?
         let counter: String? = try locked {
@@ -201,7 +199,7 @@ final class StubMeshCore: MeshCore {
     // The stub hashes with SHA-256; the node indexes key sets by blake3.
     func getKeys(hash: Data) throws -> Data? { locked { keys[hash] } }
 
-    func setWanted(seekers: [Data]) throws { locked { wanted = Set(seekers) } }
+    func setWanted(seekers: [Data], localSeekers: [Data]) throws { locked { wanted = Set(seekers + localSeekers) } }
 
     func setUpstream(urls: [String], bridgeEnabled: Bool) throws { locked { self.bridgeEnabled = bridgeEnabled } }
 
@@ -219,11 +217,22 @@ final class StubMeshCore: MeshCore {
         }
     }
 
-    func wipe() throws {
+    func wipe(newConfigJson: String) throws {
         locked {
             messages.removeAll()
             bulletin.removeAll()
             keys.removeAll()
+        }
+    }
+
+    // The stub keeps no ids; it forgets by content key alone.
+    func forgetOwn(kind: MeshBlobKind, key: Data) -> Bool {
+        locked {
+            switch kind {
+            case .message: return messages.removeValue(forKey: key) != nil
+            case .keys: return keys.removeValue(forKey: key) != nil
+            case .announcement: return false
+            }
         }
     }
 }

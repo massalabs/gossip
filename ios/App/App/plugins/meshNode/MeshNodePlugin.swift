@@ -161,7 +161,8 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         reply(call, { core -> [String: Any] in
-            let result = try core.sendBlob(kind: kind, key: key, payload: payload)
+            let localOnly = call.getBool("localOnly") ?? false
+            let result = try core.sendBlob(kind: kind, key: key, payload: payload, localOnly: localOnly)
             var reply: [String: Any] = ["id": result.id.base64EncodedString()]
             if let counter = result.counter { reply["counter"] = counter }
             return reply
@@ -204,12 +205,13 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func setWanted(_ call: CAPPluginCall) {
-        guard let seekers = Self.decodeList(call.getArray("seekers")) else {
+        guard let seekers = Self.decodeList(call.getArray("seekers")),
+              let localSeekers = Self.decodeList(call.getArray("localSeekers")) else {
             call.reject("seekers must be base64 strings", "INVALID_ARGUMENT")
             return
         }
         reply(call, { core -> [String: Any] in
-            try core.setWanted(seekers: seekers)
+            try core.setWanted(seekers: seekers, localSeekers: localSeekers)
             return [:]
         })
     }
@@ -245,7 +247,6 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
                 "uploadPending": status.uploadPending,
                 "wantedEntries": status.wantedEntries,
                 "clockOffsetMs": status.clockOffsetMs,
-                "peerId": status.peerId,
                 "radioLinks": MeshNodeBridge.shared.linkCount(),
                 "rustCore": MeshCoreFactory.hasRustCore,
             ]
@@ -263,16 +264,20 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         reply(call, { core -> [String: Any] in
-            try core.forgetKeys(hash: hash)
-            return [:]
+            ["forgotten": core.forgetOwn(kind: .keys, key: hash)]
         })
     }
 
+    /// Wipes the node, running or not, and replaces its pool key.
     @objc func wipe(_ call: CAPPluginCall) {
-        reply(call, { core -> [String: Any] in
-            try core.wipe()
-            return [:]
-        })
+        bridgeNode.wipe { result in
+            switch result {
+            case .success:
+                call.resolve()
+            case .failure(let error):
+                call.reject(error.localizedDescription, "NODE_ERROR", error)
+            }
+        }
     }
 
     // MARK: - Helpers

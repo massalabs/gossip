@@ -36,14 +36,55 @@ object MeshNodeBridge : MeshRadioListener, MeshCoreSink {
     private val arrivalListeners = CopyOnWriteArrayList<ArrivalListener>()
     private val linksListeners = CopyOnWriteArrayList<LinksListener>()
 
-    /** Starts the core if it is not running; [configJson] only applies to a fresh start. */
+    /** The configuration of the last start, without the pool key. */
+    @Volatile private var baseConfig: String = "{}"
+
+    /**
+     * Starts the core if it is not running; [configJson] only applies to a
+     * fresh start. The pool key comes from [MeshPoolKey], never from the
+     * remembered configuration.
+     */
     fun startCore(context: Context, configJson: String): MeshCore = synchronized(lock) {
         core?.let { return it }
-        val dataDir = File(context.filesDir, "mesh").apply { mkdirs() }
+        val dataDir = dataDir(context).apply { mkdirs() }
+        // pools left under a key the Keystore lost no longer open: start afresh
+        val withKey = MeshPoolKey.withPoolKey(context, configJson) { clearDataDir(context) }
         val created = MeshCoreFactory.create(context.applicationContext)
-        created.start(dataDir.absolutePath, configJson, this)
+        created.start(dataDir.absolutePath, withKey, this)
+        baseConfig = configJson
         core = created
         created
+    }
+
+    /**
+     * Deletes everything the node stored and replaces the pool key, so that
+     * nothing is left wrapped under the old one. A running core restarts empty
+     * (a failed restart leaves it stopped, its directory deleted); a stopped
+     * one has its data directory deleted.
+     */
+    fun wipe(context: Context): Future<Unit> = calls.submit<Unit> {
+        synchronized(lock) {
+            val running = core
+            val fresh = MeshPoolKey.replace(context, baseConfig)
+            if (running == null) {
+                clearDataDir(context)
+                return@synchronized
+            }
+            try {
+                running.wipe(fresh)
+            } catch (e: Exception) {
+                runCatching { running.stop() }
+                core = null
+                clearDataDir(context)
+                throw e
+            }
+        }
+    }
+
+    private fun dataDir(context: Context): File = File(context.filesDir, "mesh")
+
+    private fun clearDataDir(context: Context) {
+        dataDir(context).listFiles()?.forEach { it.deleteRecursively() }
     }
 
     fun stopCore() = synchronized(lock) {

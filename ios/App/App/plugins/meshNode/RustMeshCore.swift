@@ -14,7 +14,7 @@ final class RustMeshCore: MeshCore {
     // `wipe` restarts the node empty, upstream and wanted list included:
     // remembered here so they are applied again.
     private var upstream: (urls: [String], bridge: Bool)?
-    private var wanted: [Data] = []
+    private var wanted: (seekers: [Data], local: [Data]) = ([], [])
 
     init(node: GossipMobile.MeshNodeCoreProtocol = GossipMobile.MeshNodeCore()) {
         self.node = node
@@ -32,8 +32,8 @@ final class RustMeshCore: MeshCore {
 
     func frameIn(linkId: Int, frame: Data) { node.frameIn(linkId: Int32(linkId), frame: frame) }
 
-    func sendBlob(kind: MeshBlobKind, key: Data?, payload: Data) throws -> MeshSendResult {
-        let result = try node.sendBlob(kind: kind.ffi, key: key, payload: payload)
+    func sendBlob(kind: MeshBlobKind, key: Data?, payload: Data, localOnly: Bool) throws -> MeshSendResult {
+        let result = try node.sendBlob(kind: kind.ffi, key: key, payload: payload, localOnly: localOnly)
         return MeshSendResult(id: result.id, counter: result.counter)
     }
 
@@ -48,10 +48,10 @@ final class RustMeshCore: MeshCore {
 
     func getKeys(hash: Data) throws -> Data? { node.getKeys(hash: hash) }
 
-    func setWanted(seekers: [Data]) throws {
+    func setWanted(seekers: [Data], localSeekers: [Data]) throws {
         lock.lock(); defer { lock.unlock() }
-        wanted = seekers
-        node.setWanted(seekers: seekers)
+        wanted = (seekers, localSeekers)
+        node.setWanted(seekers: seekers, localSeekers: localSeekers)
     }
 
     func setUpstream(urls: [String], bridgeEnabled: Bool) throws {
@@ -73,17 +73,20 @@ final class RustMeshCore: MeshCore {
             meshBlobs: Int(status.meshBlobs),
             uploadPending: Int(status.uploadPending),
             wantedEntries: Int(status.wantedEntries),
-            clockOffsetMs: Int(status.clockOffsetMs),
-            peerId: status.peerId
+            clockOffsetMs: Int(status.clockOffsetMs)
         )
     }
 
-    func wipe() throws {
+    func wipe(newConfigJson: String) throws {
         lock.lock(); defer { lock.unlock() }
-        node.wipe()
+        try node.wipe(newConfigJson: newConfigJson)
         if let upstream { node.setUpstream(urls: upstream.urls, bridgeEnabled: upstream.bridge) }
-        if !wanted.isEmpty { node.setWanted(seekers: wanted) }
+        if !wanted.seekers.isEmpty || !wanted.local.isEmpty {
+            node.setWanted(seekers: wanted.seekers, localSeekers: wanted.local)
+        }
     }
+
+    func forgetOwn(kind: MeshBlobKind, key: Data) -> Bool { node.forgetOwn(kind: kind.ffi, key: key) }
 
     private final class SinkAdapter: GossipMobile.MeshCoreSink, @unchecked Sendable {
         private let sink: MeshCoreSink
