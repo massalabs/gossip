@@ -99,6 +99,18 @@ android {
     }
 }
 
+// Offline mesh node (gossip-mobile, in wasm/mesh). Built in by default;
+// GOSSIP_MESH_STUB=1 keeps the in-memory StubMeshCore instead, for a build
+// that skips the Rust cross-compile.
+def gossipWasmDir = file("${rootProject.projectDir.parentFile}/wasm")
+def hasMeshCore = System.getenv('GOSSIP_MESH_STUB') != '1'
+if (hasMeshCore) {
+    android.sourceSets.main.java.srcDirs += ['src/meshffi/java', 'src/meshffi/generated']
+    android.sourceSets.test.java.srcDirs += ['src/meshffiTest/java']
+} else {
+    logger.lifecycle("gossip-mobile not used (GOSSIP_MESH_STUB=1): the mesh runs on the stub core")
+}
+
 repositories {
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
@@ -196,8 +208,38 @@ tasks.register('buildRustSecureStorage', Exec) {
     inputs.property 'rustProfile', rustProfileEnv
 }
 
+// ── gossip-mobile Rust build (offline mesh) ──────────────────────────
+//
+// Same shape as buildRustSecureStorage: .so into jniLibs and Kotlin
+// bindings into src/meshffi/generated, both gitignored. Not registered
+// for a stub build.
+if (hasMeshCore) {
+    tasks.register('buildRustMeshCore', Exec) {
+        group = 'mesh'
+        description = 'Cross-compile gossip-mobile into jniLibs + regenerate its UniFFI Kotlin bindings.'
+        def rootDir = project.rootProject.projectDir.parentFile
+        workingDir rootDir
+        def rustProfileEnv = System.getenv('MESH_RUST_PROFILE') ?: 'release'
+        commandLine 'bash', 'scripts/build-mesh-android.sh', rustProfileEnv == 'debug' ? '--debug' : '--release'
+        outputs.files(
+            fileTree("${project.projectDir}/src/main/jniLibs") { include '*/libgossip_mobile.so' },
+            fileTree("${project.projectDir}/src/meshffi/generated") { include '**/*.kt' }
+        )
+        inputs.dir new File(gossipWasmDir, 'mesh')
+        inputs.file new File(gossipWasmDir, 'Cargo.toml')
+        inputs.file new File(gossipWasmDir, 'Cargo.lock')
+        inputs.file "${rootDir}/scripts/build-mesh-android.sh"
+        inputs.property 'ndkVersion', gossipNdkVersion
+        inputs.property 'abis', gossipAbis.join(',')
+        inputs.property 'rustProfile', rustProfileEnv
+    }
+}
+
 afterEvaluate {
     tasks.named('preBuild').configure { dependsOn 'buildRustSecureStorage' }
+    if (hasMeshCore) {
+        tasks.named('preBuild').configure { dependsOn 'buildRustMeshCore' }
+    }
 }
 
 try {

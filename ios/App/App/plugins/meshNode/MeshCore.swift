@@ -67,13 +67,35 @@ struct MeshCoreStatus {
     let bridgeEnabled: Bool
     let bulletinCounter: String
     let storedBlobs: Int
+    // Reported by the Rust node only; the stub leaves the defaults.
+    var linksHandshaking: Int = 0
+    var meshBlobs: Int = 0
+    /// Mesh blobs waiting for a bridge to upload them.
+    var uploadPending: Int = 0
+    var wantedEntries: Int = 0
+    var clockOffsetMs: Int = 0
+    var peerId: String = ""
 }
 
-/// SWAP POINT for the Rust node: return the UniFFI-backed implementation
-/// here once `gossip-mobile` ships its Swift bindings. Nothing else in the
-/// app refers to `StubMeshCore`.
+/// The Rust node (`RustMeshCore`) when the `GossipMobile` pod is installed
+/// (scripts/build-mesh-ios.sh, then `pod install`), else `StubMeshCore`, so a
+/// checkout of this repository alone still builds.
 enum MeshCoreFactory {
-    static func create() -> MeshCore { StubMeshCore() }
+    static func create() -> MeshCore {
+        #if canImport(GossipMobile)
+        return RustMeshCore()
+        #else
+        return StubMeshCore()
+        #endif
+    }
+
+    static var hasRustCore: Bool {
+        #if canImport(GossipMobile)
+        return true
+        #else
+        return false
+        #endif
+    }
 }
 
 /// Stand-in for the Rust node until its bindings exist: keeps what the app

@@ -214,6 +214,14 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
                 "bridgeEnabled": status.bridgeEnabled,
                 "bulletinCounter": status.bulletinCounter,
                 "storedBlobs": status.storedBlobs,
+                "linksHandshaking": status.linksHandshaking,
+                "meshBlobs": status.meshBlobs,
+                "uploadPending": status.uploadPending,
+                "wantedEntries": status.wantedEntries,
+                "clockOffsetMs": status.clockOffsetMs,
+                "peerId": status.peerId,
+                "radioLinks": MeshNodeBridge.shared.linkCount(),
+                "rustCore": MeshCoreFactory.hasRustCore,
             ]
         })
     }

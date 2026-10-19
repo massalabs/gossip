@@ -29,6 +29,7 @@
 		D0A1C0DE2F80000200000001 /* MeshRadio.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000002 /* MeshRadio.swift */; };
 		D0A1C0DE2F80000200000003 /* CoreBluetoothMeshRadio.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000004 /* CoreBluetoothMeshRadio.swift */; };
 		D0A1C0DE2F80000200000005 /* MeshCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000006 /* MeshCore.swift */; };
+		D0A1C0DE2F800002000000F1 /* RustMeshCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F800002000000F2 /* RustMeshCore.swift */; };
 		D0A1C0DE2F80000200000007 /* MeshNodeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000008 /* MeshNodeBridge.swift */; };
 		D0A1C0DE2F80000200000009 /* MeshNodePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F8000020000000A /* MeshNodePlugin.swift */; };
 		FAB0FFE22EF01BB300832215 /* GossipShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FAB0FFD82EF01BB300832215 /* GossipShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -86,6 +87,7 @@
 		D0A1C0DE2F80000200000002 /* MeshRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshRadio.swift; sourceTree = "<group>"; };
 		D0A1C0DE2F80000200000004 /* CoreBluetoothMeshRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreBluetoothMeshRadio.swift; sourceTree = "<group>"; };
 		D0A1C0DE2F80000200000006 /* MeshCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshCore.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F800002000000F2 /* RustMeshCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustMeshCore.swift; sourceTree = "<group>"; };
 		D0A1C0DE2F80000200000008 /* MeshNodeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshNodeBridge.swift; sourceTree = "<group>"; };
 		D0A1C0DE2F8000020000000A /* MeshNodePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshNodePlugin.swift; sourceTree = "<group>"; };
 		FAB0FFD82EF01BB300832215 /* GossipShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GossipShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -255,6 +257,7 @@
 				D0A1C0DE2F80000200000002 /* MeshRadio.swift */,
 				D0A1C0DE2F80000200000004 /* CoreBluetoothMeshRadio.swift */,
 				D0A1C0DE2F80000200000006 /* MeshCore.swift */,
+				D0A1C0DE2F800002000000F2 /* RustMeshCore.swift */,
 				D0A1C0DE2F80000200000008 /* MeshNodeBridge.swift */,
 				D0A1C0DE2F8000020000000A /* MeshNodePlugin.swift */,
 			);
@@ -441,6 +444,7 @@
 				D0A1C0DE2F80000200000001 /* MeshRadio.swift in Sources */,
 				D0A1C0DE2F80000200000003 /* CoreBluetoothMeshRadio.swift in Sources */,
 				D0A1C0DE2F80000200000005 /* MeshCore.swift in Sources */,
+				D0A1C0DE2F800002000000F1 /* RustMeshCore.swift in Sources */,
 				D0A1C0DE2F80000200000007 /* MeshNodeBridge.swift in Sources */,
 				D0A1C0DE2F80000200000009 /* MeshNodePlugin.swift in Sources */,
 				FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */,
