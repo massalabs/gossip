@@ -1136,7 +1136,7 @@ export class SessionManagerWrapper {
   }
   /**
    * Returns the announcement carried by an entry read at a re-announcement
-   * mailbox seeker, if it is signed by the seeker key; feed it to
+   * mailbox seeker, if it is signed by the seeker key and decrypts; feed it to
    * `feed_incoming_announcement`.
    * @param {Uint8Array} seeker
    * @param {Uint8Array} data

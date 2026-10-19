@@ -101,9 +101,10 @@ export class AnnouncementService {
   }
 
   /**
-   * Posts an announcement to the board and, when one is given, the board
-   * entry addressing it to the peer. Only the board post decides success: a
-   * peer running an older version never looks at the addressed entry.
+   * Posts an announcement to the board and, when one is given and the mesh is
+   * on, the entry addressing it to the peer, on the mesh only: an internet
+   * node never sees it. Only the board post decides success: a peer running
+   * an older version never looks at the addressed entry.
    */
   async sendAnnouncement(
     announcement: Uint8Array,
@@ -115,12 +116,12 @@ export class AnnouncementService {
   }> {
     const log = logger.forMethod('sendAnnouncement');
 
-    if (mailbox) {
+    if (mailbox && this.messageProtocol.isMeshEnabled?.()) {
       try {
-        await this.messageProtocol.sendMessage({
-          seeker: mailbox.seeker,
-          ciphertext: mailbox.data,
-        });
+        await this.messageProtocol.sendMessage(
+          { seeker: mailbox.seeker, ciphertext: mailbox.data },
+          { meshOnly: true }
+        );
       } catch (error) {
         log.warn('addressed copy not sent', error);
       }
@@ -148,12 +149,21 @@ export class AnnouncementService {
     const contactUserId = encodeUserId(contactPublicKeys.derive_id());
 
     // CRITICAL: await to ensure session state is persisted before returning
+    // the addressed entry only exists for the mesh; without one, the board
+    // copy alone travels, as before
     let established: EstablishedAnnouncement;
     try {
-      established = await this.session.establishOutgoingSessionAddressed(
-        contactPublicKeys,
-        payloadBytes
-      );
+      established = this.messageProtocol.isMeshEnabled?.()
+        ? await this.session.establishOutgoingSessionAddressed(
+            contactPublicKeys,
+            payloadBytes
+          )
+        : {
+            announcement: await this.session.establishOutgoingSession(
+              contactPublicKeys,
+              payloadBytes
+            ),
+          };
     } catch (error) {
       log.error('empty announcement returned', { contactUserId, error });
       return {
@@ -487,18 +497,23 @@ export class AnnouncementService {
   /**
    * Reads announcements peers addressed to us at the entries only the two of
    * us can find, following each chain while it moves. Covers re-announcements
-   * a transport cannot bring through the board, such as a mesh.
+   * a transport cannot bring through the board, such as a mesh. Mesh only:
+   * the mailbox seekers are long-lived enough to identify a pair of contacts,
+   * so an internet node is never asked for them.
    */
   private async _fetchAddressedAnnouncements(): Promise<number> {
     const log = logger.forMethod('_fetchAddressedAnnouncements');
     let processed = 0;
+    if (!this.messageProtocol.isMeshEnabled?.()) return processed;
     for (let round = 0; round < MAX_ADDRESSED_ROUNDS; round++) {
       const mailboxes = this.session.getReannouncementMailboxKeys();
       if (mailboxes.length === 0) break;
 
       let entries: EncryptedMessage[] = [];
       try {
-        entries = await this.messageProtocol.fetchMessages(mailboxes);
+        entries = await this.messageProtocol.fetchMessages(mailboxes, {
+          meshOnly: true,
+        });
       } catch (error) {
         log.debug('addressed announcements not fetched', error);
       }

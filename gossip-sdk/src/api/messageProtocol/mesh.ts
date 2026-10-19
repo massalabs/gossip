@@ -86,6 +86,10 @@ export class MeshNodeProtocol implements IMessageProtocol {
 
   constructor(private readonly plugin: MeshNodePlugin) {}
 
+  isMeshEnabled(): boolean {
+    return true;
+  }
+
   async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
     const { messages } = await this.plugin.fetch({
       seekers: seekers.map(encodeToBase64),

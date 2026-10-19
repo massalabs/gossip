@@ -97,7 +97,8 @@ use crate::{
     session::{
         FeedIncomingMessageError, FeedIncomingMessageOutput, IncomingInitiationRequest,
         OutgoingInitiationRequest, SendOutgoingMessageOutput, Session,
-        reannouncement_mailbox_keypair,
+        reannouncement_mailbox_keypair, reannouncement_mailbox_window,
+        reannouncement_mailbox_wrap_key, unwrap_reannouncement, wrap_reannouncement,
     },
     utils::timestamp_millis,
 };
@@ -616,8 +617,10 @@ impl SessionManager {
     /// The entry sits at a seeker only the two of us can compute (see
     /// [`get_reannouncement_mailbox_keys`](Self::get_reannouncement_mailbox_keys)), so a
     /// transport that cannot download the whole announcement board, such as a mesh,
-    /// can still bring a re-announcement to the peer. The announcement must still be
-    /// posted to the board for peers that do not watch these entries.
+    /// can still bring a re-announcement to the peer. It holds the announcement
+    /// encrypted under a key of the pair, so its bytes differ from the board copy.
+    /// The announcement must still be posted to the board for peers that do not
+    /// watch these entries.
     pub fn establish_outgoing_session_addressed(
         &mut self,
         peer_pk: &auth::UserPublicKeys,
@@ -625,55 +628,104 @@ impl SessionManager {
         our_sk: &auth::UserSecretKeys,
         user_data: Vec<u8>,
     ) -> (Vec<u8>, Option<ReannouncementPost>) {
+        self.establish_outgoing_session_addressed_at(
+            peer_pk,
+            our_pk,
+            our_sk,
+            user_data,
+            timestamp_millis(),
+        )
+    }
+
+    fn establish_outgoing_session_addressed_at(
+        &mut self,
+        peer_pk: &auth::UserPublicKeys,
+        our_pk: &auth::UserPublicKeys,
+        our_sk: &auth::UserSecretKeys,
+        user_data: Vec<u8>,
+        now_millis: u128,
+    ) -> (Vec<u8>, Option<ReannouncementPost>) {
+        let window = reannouncement_mailbox_window(now_millis);
         // the entry follows the pair of announcements the peer knows: computed
         // before ours is replaced
-        let mailbox = self.peers.get(&peer_pk.derive_id()).and_then(|peer_info| {
-            Some(reannouncement_mailbox_keypair(
-                &peer_info.latest_outgoing_init_request.as_ref()?.seeker_seed,
-                &peer_info.latest_incoming_init_request.as_ref()?.seeker_seed,
+        let seeds = self.peers.get(&peer_pk.derive_id()).and_then(|peer_info| {
+            Some((
+                peer_info.latest_outgoing_init_request.as_ref()?.seeker_seed,
+                peer_info.latest_incoming_init_request.as_ref()?.seeker_seed,
             ))
         });
         let announcement = self.establish_outgoing_session(peer_pk, our_pk, our_sk, user_data);
-        let post = mailbox.map(|keypair| {
+        let post = seeds.map(|(sender_seed, receiver_seed)| {
+            let keypair = reannouncement_mailbox_keypair(&sender_seed, &receiver_seed, window);
+            let wrap_key = reannouncement_mailbox_wrap_key(&sender_seed, &receiver_seed, window);
             let seeker = Session::compute_seeker(&keypair.get_public_key());
+            let wrapped = wrap_reannouncement(&wrap_key, &seeker, &announcement);
             ReannouncementPost {
-                data: Session::sign_board_entry(&keypair, &seeker, &announcement),
+                data: Session::sign_board_entry(&keypair, &seeker, &wrapped),
                 seeker,
             }
         });
         (announcement, post)
     }
 
+    /// Mailboxes peers would post their next announcement to us at, with what
+    /// opens them: the current window and the previous one, so an entry posted
+    /// just before a window ends is still found.
+    fn reannouncement_mailboxes_at(&self, now_millis: u128) -> Vec<(Vec<u8>, crypto_aead::Key)> {
+        let window = reannouncement_mailbox_window(now_millis);
+        self.peers
+            .values()
+            .filter_map(|peer_info| {
+                Some((
+                    peer_info.latest_incoming_init_request.as_ref()?.seeker_seed,
+                    peer_info.latest_outgoing_init_request.as_ref()?.seeker_seed,
+                ))
+            })
+            .flat_map(|(sender_seed, receiver_seed)| {
+                [window, window.saturating_sub(1)].map(|w| {
+                    let keypair = reannouncement_mailbox_keypair(&sender_seed, &receiver_seed, w);
+                    (
+                        Session::compute_seeker(&keypair.get_public_key()),
+                        reannouncement_mailbox_wrap_key(&sender_seed, &receiver_seed, w),
+                    )
+                })
+            })
+            .collect()
+    }
+
     /// Seekers where peers we exchanged announcements with would post their next
     /// announcement to us. A value found there is opened with
     /// [`open_reannouncement_mailbox_read`](Self::open_reannouncement_mailbox_read)
     /// and fed to [`feed_incoming_announcement`](Self::feed_incoming_announcement),
-    /// which moves the seeker to the next entry of the chain.
+    /// which moves the seeker to the next entry of the chain. They change every
+    /// [`REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS`](crate::session::REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS)
+    /// too, so callers should ask again rather than keep them.
     pub fn get_reannouncement_mailbox_keys(&self) -> Vec<Vec<u8>> {
-        self.peers
-            .values()
-            .filter_map(|peer_info| {
-                let keypair = reannouncement_mailbox_keypair(
-                    &peer_info.latest_incoming_init_request.as_ref()?.seeker_seed,
-                    &peer_info.latest_outgoing_init_request.as_ref()?.seeker_seed,
-                );
-                Some(Session::compute_seeker(&keypair.get_public_key()))
-            })
+        self.reannouncement_mailboxes_at(timestamp_millis())
+            .into_iter()
+            .map(|(seeker, _)| seeker)
             .collect()
     }
 
     /// Returns the announcement carried by an entry read at one of the
     /// [`get_reannouncement_mailbox_keys`](Self::get_reannouncement_mailbox_keys)
-    /// seekers, if it is signed by the seeker key. Changes no state.
+    /// seekers, if it is signed by the seeker key and decrypts. Changes no state.
     pub fn open_reannouncement_mailbox_read(&self, seeker: &[u8], data: &[u8]) -> Option<Vec<u8>> {
-        if !self
-            .get_reannouncement_mailbox_keys()
-            .iter()
-            .any(|mailbox| mailbox.as_slice() == seeker)
-        {
-            return None;
-        }
-        Session::authenticate_incoming_message(seeker, data)
+        self.open_reannouncement_mailbox_read_at(seeker, data, timestamp_millis())
+    }
+
+    fn open_reannouncement_mailbox_read_at(
+        &self,
+        seeker: &[u8],
+        data: &[u8],
+        now_millis: u128,
+    ) -> Option<Vec<u8>> {
+        let (_, wrap_key) = self
+            .reannouncement_mailboxes_at(now_millis)
+            .into_iter()
+            .find(|(mailbox, _)| mailbox.as_slice() == seeker)?;
+        let wrapped = Session::authenticate_incoming_message(seeker, data)?;
+        unwrap_reannouncement(&wrap_key, seeker, &wrapped)
     }
 
     pub fn peer_discard(&mut self, peer_id: &UserId) {
@@ -2491,11 +2543,12 @@ mod tests {
         );
         let (first_post, second_post) = (first_post.unwrap(), second_post.unwrap());
 
-        // Bob follows the chain: only the first entry is where he looks
-        assert_eq!(
-            bob_manager.get_reannouncement_mailbox_keys(),
-            vec![first_post.seeker.clone()]
-        );
+        // Bob follows the chain: only the first entry is where he looks (in the
+        // current window, beside the previous window's seeker)
+        let watched = bob_manager.get_reannouncement_mailbox_keys();
+        assert_eq!(watched.len(), 2);
+        assert!(watched.contains(&first_post.seeker));
+        assert!(!watched.contains(&second_post.seeker));
         assert!(
             bob_manager
                 .open_reannouncement_mailbox_read(&second_post.seeker, &second_post.data)
@@ -2510,9 +2563,10 @@ mod tests {
             .unwrap();
         assert_eq!(result.user_data, b"again");
 
-        assert_eq!(
-            bob_manager.get_reannouncement_mailbox_keys(),
-            vec![second_post.seeker.clone()]
+        assert!(
+            bob_manager
+                .get_reannouncement_mailbox_keys()
+                .contains(&second_post.seeker)
         );
         let opened = bob_manager
             .open_reannouncement_mailbox_read(&second_post.seeker, &second_post.data)
@@ -2560,5 +2614,117 @@ mod tests {
                 .open_reannouncement_mailbox_read(&post.seeker, &post.data)
                 .is_some()
         );
+    }
+    #[test]
+    fn test_reannouncement_mailbox_entry_differs_from_board_copy() {
+        let (mut alice_manager, bob_manager, (alice_pk, alice_sk), (bob_pk, _)) =
+            established_pair();
+        let (announcement, post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            b"hello".to_vec(),
+        );
+        let post = post.unwrap();
+        // no window of the board bytes appears in the entry
+        assert!(
+            !post
+                .data
+                .windows(64)
+                .any(|w| announcement.windows(64).any(|a| a == w))
+        );
+        assert_eq!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&post.seeker, &post.data)
+                .unwrap(),
+            announcement
+        );
+    }
+
+    #[test]
+    fn test_reannouncement_mailbox_moves_with_the_window() {
+        use crate::session::REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS as WINDOW;
+        let (mut alice_manager, bob_manager, (alice_pk, alice_sk), (bob_pk, _)) =
+            established_pair();
+        let now = timestamp_millis();
+        let (announcement, post) = alice_manager.establish_outgoing_session_addressed_at(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            vec![],
+            now,
+        );
+        let post = post.unwrap();
+
+        // the next window still watches it, the one after does not
+        assert!(
+            bob_manager
+                .reannouncement_mailboxes_at(now + WINDOW)
+                .iter()
+                .any(|(seeker, _)| *seeker == post.seeker)
+        );
+        assert_eq!(
+            bob_manager
+                .open_reannouncement_mailbox_read_at(&post.seeker, &post.data, now + WINDOW)
+                .unwrap(),
+            announcement
+        );
+        assert!(
+            bob_manager
+                .reannouncement_mailboxes_at(now + 2 * WINDOW)
+                .iter()
+                .all(|(seeker, _)| *seeker != post.seeker)
+        );
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read_at(&post.seeker, &post.data, now + 2 * WINDOW)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_reannouncement_mailbox_rejects_entry_of_another_mailbox() {
+        use crate::session::REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS as WINDOW;
+        let (mut alice_manager, bob_manager, (alice_pk, alice_sk), (bob_pk, _)) =
+            established_pair();
+        let now = timestamp_millis();
+        let (_, current) = alice_manager.establish_outgoing_session_addressed_at(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            vec![],
+            now,
+        );
+        let current = current.unwrap();
+        // the right seeker cannot open data wrapped and signed for another one
+        let mut mailboxes = bob_manager.reannouncement_mailboxes_at(now + WINDOW);
+        mailboxes.retain(|(seeker, _)| *seeker != current.seeker);
+        let (other_seeker, _) = &mailboxes[0];
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read_at(other_seeker, &current.data, now + WINDOW)
+                .is_none()
+        );
+    }
+    #[test]
+    fn test_reannouncement_mailbox_derivation_is_frozen() {
+        // Both peers, whatever their versions, must find the same mailbox and key.
+        let keypair = reannouncement_mailbox_keypair(&[1u8; 32], &[2u8; 32], 123_456);
+        let wrap_key = reannouncement_mailbox_wrap_key(&[1u8; 32], &[2u8; 32], 123_456);
+        let digest = sha2::Sha256::digest(
+            [
+                keypair.get_public_key().to_bytes().to_vec(),
+                wrap_key.as_bytes().to_vec(),
+            ]
+            .concat(),
+        );
+        assert_eq!(
+            digest
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+            "9a1009d74fabb95dccbeeb172aa74c25302b03ae3f695df438e60337045055f0"
+        );
+        assert_eq!(reannouncement_mailbox_window(6 * 60 * 60 * 1000 * 5 + 1), 5);
     }
 }

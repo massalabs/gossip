@@ -138,6 +138,11 @@ class SwitchableMeshProtocol implements IMessageProtocol {
     return this.mesh;
   }
 
+  isMeshEnabled(): boolean {
+    return this.active;
+  }
+
+  // the node is all mesh, so mesh-only routing changes nothing here
   async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
     return this.use().fetchMessages(seekers);
   }

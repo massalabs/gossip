@@ -1770,9 +1770,9 @@ describe('session break in session manager', () => {
     expect(sendAnnouncementSpy).toHaveBeenCalledTimes(1);
 
     // Verify message send to verify it's called
-    // 3 messages are sent: 1 for the WAITING_SESSION message, 1 for the READY message, 1 for the SENT message;
-    // plus the re-announcement addressed to Bob
-    expect(sendMessageSpy).toHaveBeenCalledTimes(4);
+    // 3 messages are sent: 1 for the WAITING_SESSION message, 1 for the READY message, 1 for the SENT message
+    // (no addressed re-announcement: there is no mesh)
+    expect(sendMessageSpy).toHaveBeenCalledTimes(3);
 
     // Session should still be active after reset
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
