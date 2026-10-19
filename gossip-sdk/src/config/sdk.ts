@@ -52,7 +52,7 @@ export interface MessagesConfig {
    * Shortest gap between two keep-alives to one peer while only a mesh is
    * reachable (default: 3 days). A keep-alive costs a few kilobytes of
    * Bluetooth airtime per hop; this still renews the session well within its
-   * one-week inactivity limit.
+   * two-week inactivity limit.
    */
   meshKeepAliveIntervalMs: number;
 }

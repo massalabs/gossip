@@ -250,7 +250,7 @@ export class SessionConfig {
    * - Announcement future: 1 hour
    * - Message age: 2 weeks
    * - Message future: 1 day
-   * - Session inactivity: 1 week
+   * - Session inactivity: 2 weeks
    * - Keep-alive interval: 1 day
    * - Max lag: 10000 messages
    * - Max peer lag before keep-alive: 8 messages
@@ -262,6 +262,9 @@ export class SessionConfig {
    * flagged stale. Two weeks matches the network's retention, past which a message
    * cannot be fetched anyway. Announcements keep a tighter future window because a
    * future-dated announcement blocks the sender's later, correctly dated ones.
+   * Session inactivity is measured on the peer's message timestamps, so it matches
+   * the message age window: a message that waited up to two weeks in transit still
+   * finds its session instead of arriving after it expired.
    */
   static new_default(): SessionConfig;
   /**
