@@ -169,6 +169,20 @@ pub enum FeedIncomingMessageError {
     Undecryptable,
 }
 
+/// An incoming message decrypted but not applied to the session yet (see
+/// [`Session::decrypt_incoming_message`]).
+pub struct PendingIncomingMessage {
+    decrypted: crypto_agraphon::DecryptedIncomingMessage,
+    message: Message,
+}
+
+impl PendingIncomingMessage {
+    /// Timestamp the sender put in the message (milliseconds since Unix epoch).
+    pub fn timestamp(&self) -> u128 {
+        self.message.timestamp
+    }
+}
+
 /// Incoming session initiation request from a peer.
 ///
 /// Created by parsing announcement bytes received from the peer.
@@ -739,10 +753,59 @@ impl Session {
         seeker: &[u8],
         message: &[u8],
     ) -> Result<FeedIncomingMessageOutput, FeedIncomingMessageError> {
+        let pending = self.decrypt_incoming_message(self_static_sk, seeker, message)?;
+        Ok(self.commit_incoming_message(pending))
+    }
+
+    /// Like [`feed_incoming_message`](Self::feed_incoming_message), without changing
+    /// any state: [`commit_incoming_message`](Self::commit_incoming_message) applies
+    /// the result, dropping it leaves the session as if the message was never read.
+    pub fn decrypt_incoming_message(
+        &self,
+        self_static_sk: &auth::UserSecretKeys,
+        seeker: &[u8],
+        message: &[u8],
+    ) -> Result<PendingIncomingMessage, FeedIncomingMessageError> {
         let message_bytes = Self::authenticate_incoming_message(seeker, message)
             .ok_or(FeedIncomingMessageError::Unauthenticated)?;
-        self.decrypt_incoming_message(self_static_sk, &message_bytes)
-            .ok_or(FeedIncomingMessageError::Undecryptable)
+        let decrypted = self
+            .agraphon_instance
+            .try_decrypt_incoming_message(&self_static_sk.kem_secret_key, &message_bytes)
+            .ok_or(FeedIncomingMessageError::Undecryptable)?;
+        let message: Message = bincode::serde::decode_from_slice(
+            decrypted.message_bytes(),
+            bincode::config::standard(),
+        )
+        .map_err(|_| FeedIncomingMessageError::Undecryptable)?
+        .0;
+        Ok(PendingIncomingMessage { decrypted, message })
+    }
+
+    /// Applies a message read by
+    /// [`decrypt_incoming_message`](Self::decrypt_incoming_message) on this same,
+    /// unchanged session, and advances the ratchet.
+    pub fn commit_incoming_message(
+        &mut self,
+        pending: PendingIncomingMessage,
+    ) -> FeedIncomingMessageOutput {
+        let PendingIncomingMessage { decrypted, message } = pending;
+        let agraphon_result = self.agraphon_instance.commit_incoming_message(decrypted);
+
+        // update peer seeker keypair for next message
+        self.peer_seeker_massa_keypair = message.seeker_massa_keypair_next.clone();
+
+        // get user id of the peer that sent the message
+        let user_id = self.peer_public_keys.derive_id();
+
+        FeedIncomingMessageOutput {
+            timestamp: message.timestamp,
+            message: message.contents.clone(),
+            newly_acknowledged_self_seekers: agraphon_result
+                .newly_acknowledged_self_seekers
+                .clone(),
+            user_id: user_id.as_bytes().to_vec(),
+            stale: false,
+        }
     }
 
     /// Checks the seeker commitment and the seeker signature, without touching any state,
@@ -790,42 +853,6 @@ impl Session {
             return None;
         }
         Some(message_bytes)
-    }
-
-    /// Decrypts an authenticated message and advances the ratchet.
-    fn decrypt_incoming_message(
-        &mut self,
-        self_static_sk: &auth::UserSecretKeys,
-        message_bytes: &[u8],
-    ) -> Option<FeedIncomingMessageOutput> {
-        // try to read message from agraphon
-        let agraphon_result = self
-            .agraphon_instance
-            .try_feed_incoming_message(&self_static_sk.kem_secret_key, message_bytes)?;
-
-        // deserialize the message
-        let message: Message = bincode::serde::decode_from_slice(
-            &agraphon_result.message_bytes,
-            bincode::config::standard(),
-        )
-        .ok()?
-        .0;
-
-        // update peer seeker keypair for next message
-        self.peer_seeker_massa_keypair = message.seeker_massa_keypair_next.clone();
-
-        // get user id of the peer that sent the message
-        let user_id = self.peer_public_keys.derive_id();
-
-        Some(FeedIncomingMessageOutput {
-            timestamp: message.timestamp,
-            message: message.contents.clone(),
-            newly_acknowledged_self_seekers: agraphon_result
-                .newly_acknowledged_self_seekers
-                .clone(),
-            user_id: user_id.as_bytes().to_vec(),
-            stale: false,
-        })
     }
 
     /// Returns the number of unacknowledged self messages sent by this session.
@@ -1017,6 +1044,54 @@ mod tests {
         assert_eq!(receive_output.user_id.len(), 32);
         // Timestamps might differ slightly due to test timing
         assert!((receive_output.timestamp as u128).abs_diff(message.timestamp) < 10);
+    }
+
+    /// Decrypting without committing leaves the session able to read the message again.
+    #[test]
+    fn test_session_decrypt_without_commit_changes_nothing() {
+        let (alice_pk, alice_sk) = generate_test_keypair();
+        let (bob_pk, bob_sk) = generate_test_keypair();
+        let (alice_announcement, alice_outgoing) =
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
+        let (bob_announcement, bob_outgoing) =
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
+        let (bob_incoming_at_alice, _) =
+            IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
+        let (alice_incoming_at_bob, _) =
+            IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
+        let mut alice_session =
+            Session::from_initiation_request_pair(&alice_outgoing, &bob_incoming_at_alice);
+        let mut bob_session =
+            Session::from_initiation_request_pair(&bob_outgoing, &alice_incoming_at_bob);
+
+        let first = alice_session.send_outgoing_message(b"one");
+        let second = alice_session.send_outgoing_message(b"two");
+        let seeker = bob_session.next_peer_message_seeker();
+        assert_eq!(seeker, first.seeker);
+
+        // looked at twice, then dropped
+        for _ in 0..2 {
+            let pending = bob_session
+                .decrypt_incoming_message(&bob_sk, &first.seeker, &first.data)
+                .ok()
+                .expect("decrypts");
+            assert!(pending.timestamp() > 0);
+        }
+        assert_eq!(bob_session.next_peer_message_seeker(), seeker);
+
+        let pending = bob_session
+            .decrypt_incoming_message(&bob_sk, &first.seeker, &first.data)
+            .ok()
+            .unwrap();
+        assert_eq!(bob_session.commit_incoming_message(pending).message, b"one");
+        assert_eq!(bob_session.next_peer_message_seeker(), second.seeker);
+        assert_eq!(
+            bob_session
+                .try_feed_incoming_message(&bob_sk, &second.seeker, &second.data)
+                .unwrap()
+                .message,
+            b"two"
+        );
     }
 
     /// Tests that messages can be sent in both directions and multiple times
