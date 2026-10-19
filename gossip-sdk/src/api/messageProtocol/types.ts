@@ -89,9 +89,15 @@ export interface IMessageProtocol {
   /**
    * Seekers this client currently waits on, for transports that ask other
    * nodes for them instead of being polled (a mesh node puts them on its
-   * wanted list). Called after every message fetch.
+   * wanted list). Called after every message fetch. `localSeekers` are
+   * waited on from the mesh only (lookahead and re-announcement mailbox
+   * seekers): a mesh node floods them flagged local-only, so that no bridge
+   * asks an internet node for them.
    */
-  setWantedSeekers?(seekers: Uint8Array[]): Promise<void>;
+  setWantedSeekers?(
+    seekers: Uint8Array[],
+    localSeekers?: Uint8Array[]
+  ): Promise<void>;
 
   /**
    * Whether a mesh transport is on, so mesh-only traffic (lookahead seekers,

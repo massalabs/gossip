@@ -93,9 +93,14 @@ class ChaosProtocol implements IMessageProtocol {
   }
 
   wanted: Uint8Array[] = [];
+  localWanted: Uint8Array[] = [];
 
-  async setWantedSeekers(seekers: Uint8Array[]): Promise<void> {
+  async setWantedSeekers(
+    seekers: Uint8Array[],
+    localSeekers: Uint8Array[] = []
+  ): Promise<void> {
     this.wanted = seekers;
+    this.localWanted = localSeekers;
   }
 }
 
@@ -333,10 +338,13 @@ describe('Messaging over internet and mesh transports', () => {
     // the current and the previous window's mailbox of the one contact
     const mailboxes = session.getReannouncementMailboxKeys();
     expect(mailboxes).toHaveLength(2);
-    expect(bob.mesh.wanted).toEqual([next, ...ahead, ...mailboxes]);
+    // lookahead and mailbox seekers are local-only: no bridge asks the internet
+    expect(bob.mesh.wanted).toEqual([next]);
+    expect(bob.mesh.localWanted).toEqual([...ahead, ...mailboxes]);
 
     await alice.sdk.closeSession();
     expect(alice.mesh.wanted).toEqual([]);
+    expect(alice.mesh.localWanted).toEqual([]);
   });
 
   it('brings a re-announcement to a contact who cannot reach the board', async () => {

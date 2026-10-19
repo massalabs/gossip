@@ -286,9 +286,17 @@ export class CompositeMessageProtocol implements IMessageProtocol {
     return this.primary.protocol.changeNode(nodeUrl);
   }
 
-  async setWantedSeekers(seekers: Uint8Array[]): Promise<void> {
+  async setWantedSeekers(
+    seekers: Uint8Array[],
+    localSeekers: Uint8Array[] = []
+  ): Promise<void> {
     await Promise.allSettled(
-      this.transports.map(t => t.protocol.setWantedSeekers?.(seekers))
+      this.transports.map(t =>
+        // mesh-only seekers never go to a transport without a mesh
+        t.kind === 'mesh'
+          ? t.protocol.setWantedSeekers?.(seekers, localSeekers)
+          : t.protocol.setWantedSeekers?.(seekers)
+      )
     );
   }
 
