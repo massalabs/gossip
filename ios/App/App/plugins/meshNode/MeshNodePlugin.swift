@@ -28,6 +28,8 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "setUpstream", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "wipe", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "capabilities", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "forgetKeys", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginReturnPromise),
     ]
@@ -226,6 +228,22 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
         })
     }
 
+    /// What this build can do, before the node is started.
+    @objc func capabilities(_ call: CAPPluginCall) {
+        call.resolve(["rustCore": MeshCoreFactory.hasRustCore])
+    }
+
+    @objc func forgetKeys(_ call: CAPPluginCall) {
+        guard let hash = Self.decode(call.getString("hash")) else {
+            call.reject("hash is required", "INVALID_ARGUMENT")
+            return
+        }
+        reply(call, { core -> [String: Any] in
+            try core.forgetKeys(hash: hash)
+            return [:]
+        })
+    }
+
     @objc func wipe(_ call: CAPPluginCall) {
         reply(call, { core -> [String: Any] in
             try core.wipe()
@@ -246,6 +264,8 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
                     call.reject("The mesh node is not started", "NOT_STARTED")
                 case .invalidArgument(let message)?:
                     call.reject(message, "INVALID_ARGUMENT")
+                case .unsupported(let message)?:
+                    call.reject(message, "UNIMPLEMENTED")
                 case nil:
                     call.reject(error.localizedDescription, "NODE_ERROR", error)
                 }

@@ -27,6 +27,17 @@ protocol MeshCore: AnyObject {
     func status() -> MeshCoreStatus
     /// Deletes everything the node stored, its own blobs and relayed ones.
     func wipe() throws
+    /// Drops the key set this node published under `hash`.
+    func forgetKeys(hash: Data) throws
+}
+
+extension MeshCore {
+    // TODO(gossip-mobile): wire to the node's forget-own-blob call once the
+    // UniFFI API has one; until then no core supports it and callers fall
+    // back on `wipe` or on the node's retention.
+    func forgetKeys(hash: Data) throws {
+        throw MeshCoreError.unsupported("This mesh core cannot forget published keys yet")
+    }
 }
 
 /// What the core asks of its host; may be called from any of the core's threads.
@@ -80,6 +91,13 @@ struct MeshCoreStatus {
 /// The Rust node (`RustMeshCore`) when the `GossipMobile` pod is installed
 /// (scripts/build-mesh-ios.sh, then `pod install`), else `StubMeshCore`, so a
 /// checkout of this repository alone still builds.
+// The app hides the mesh without the Rust core, but a release must not ship
+// the stub by accident: add GOSSIP_MESH_OPTIONAL to the active compilation
+// conditions to build without it on purpose.
+#if !DEBUG && !canImport(GossipMobile) && !GOSSIP_MESH_OPTIONAL
+#error("Release build without the gossip-mobile mesh core: run scripts/build-mesh-ios.sh and pod install")
+#endif
+
 enum MeshCoreFactory {
     static func create() -> MeshCore {
         #if canImport(GossipMobile)
@@ -213,11 +231,12 @@ final class StubMeshCore: MeshCore {
 enum MeshCoreError: Error, LocalizedError {
     case notStarted
     case invalidArgument(String)
+    case unsupported(String)
 
     var errorDescription: String? {
         switch self {
         case .notStarted: return "The mesh node is not started"
-        case .invalidArgument(let message): return message
+        case .invalidArgument(let message), .unsupported(let message): return message
         }
     }
 }

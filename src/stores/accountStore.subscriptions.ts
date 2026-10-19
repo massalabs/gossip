@@ -7,7 +7,7 @@ import {
 import { useAppStore } from './appStore';
 import { getSdk } from './sdkStore';
 import { fetchMnsDomainsIfEnabled } from './utils/accountHelpers';
-import { publishOwnKeysToMesh } from '../services/meshNode';
+import { wipeMeshForAccountChange } from '../services/meshNode';
 import type { AccountStoreApi } from './accountStore';
 
 export function registerAccountStoreSubscriptions(store: AccountStoreApi) {
@@ -15,13 +15,17 @@ export function registerAccountStoreSubscriptions(store: AccountStoreApi) {
     const current = state.userProfile;
     const previous = prevState.userProfile;
 
+    // Logged out or switched: the mesh node must not keep serving the
+    // previous account's keys or waiting on its seekers.
+    if (previous && previous.userId !== current?.userId) {
+      void wipeMeshForAccountChange();
+    }
+
     const sdk = getSdk();
     if (!current || !sdk.isSessionOpen) return;
     if (current === previous) return;
     if (previous && current.userId === previous.userId) return;
 
-    // On the mesh too, so people nearby can add us without a server.
-    void publishOwnKeysToMesh(sdk);
     try {
       await sdk.auth.publishPublicKey(sdk.publicKeys, sdk.userId, sdk.queries);
     } catch (error) {
