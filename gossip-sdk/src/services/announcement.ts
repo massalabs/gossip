@@ -201,6 +201,18 @@ export class AnnouncementService {
     }
   }
 
+  /**
+   * Accepts announcements a transport pushed instead of being polled for (a
+   * mesh node). They are queued like pending announcements, carry no bulletin
+   * counter, and are processed before the next fetch from the node.
+   */
+  async ingestAnnouncements(
+    announcements: Uint8Array[]
+  ): Promise<AnnouncementReceptionResult> {
+    await this.queries.pendingAnnouncements.insertNew(announcements);
+    return this.fetchAndProcessAnnouncements();
+  }
+
   async fetchAndProcessAnnouncements(): Promise<AnnouncementReceptionResult> {
     const log = logger.forMethod('fetchAndProcessAnnouncements');
 
