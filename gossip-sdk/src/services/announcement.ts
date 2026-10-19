@@ -391,6 +391,7 @@ export class AnnouncementService {
           lastBulletinCounter: nextCounter,
         });
       }
+      await this._persistTransportCursors();
 
       return {
         success: errors.length === 0 || newAnnouncementsCount > 0,
@@ -456,6 +457,40 @@ export class AnnouncementService {
     return this.skipHistoricalAnnouncements();
   }
 
+  /** Account whose saved secondary cursors the transport holds. */
+  private cursorsRestoredFor?: string;
+  /** Secondary cursors as last saved, JSON. */
+  private savedCursors?: string;
+
+  /** Gives the transport the secondary cursors saved for this account, once. */
+  private async _restoreTransportCursors(): Promise<void> {
+    const protocol = this.messageProtocol;
+    const userId = this.session.userIdEncoded;
+    if (
+      !protocol.importSecondaryCursors ||
+      this.cursorsRestoredFor === userId
+    ) {
+      return;
+    }
+    this.cursorsRestoredFor = userId;
+    const saved = await this.queries.transportCursors.get(userId);
+    if (saved) protocol.importSecondaryCursors(saved);
+    this.savedCursors = JSON.stringify(protocol.exportSecondaryCursors?.());
+  }
+
+  /** Saves the secondary cursors once what they cover has been processed. */
+  private async _persistTransportCursors(): Promise<void> {
+    const cursors = this.messageProtocol.exportSecondaryCursors?.();
+    if (!cursors) return;
+    const json = JSON.stringify(cursors);
+    if (json === this.savedCursors) return;
+    await this.queries.transportCursors.upsert(
+      this.session.userIdEncoded,
+      cursors
+    );
+    this.savedCursors = json;
+  }
+
   private async _fetchAnnouncements(
     cursor?: string,
     limit?: number
@@ -463,6 +498,7 @@ export class AnnouncementService {
     const fetchLimit = limit ?? this.config.announcements.fetchLimit;
     const log = logger.forMethod('_fetchAnnouncements');
 
+    await this._restoreTransportCursors();
     try {
       const items = await this.messageProtocol.fetchAnnouncements(
         fetchLimit,
@@ -562,6 +598,19 @@ export class AnnouncementService {
 
     // if the result is null, it means the announcement is not intended for us. It's not an error
     if (!result) {
+      return { success: true };
+    }
+
+    // a replay of an announcement from a contact the user deleted: forget the
+    // peer again instead of bringing the contact back
+    const announcerId = result.announcer_public_keys.derive_id();
+    const floor = await this.queries.discardedPeers.getFloor(
+      this.session.userIdEncoded,
+      encodeUserId(announcerId)
+    );
+    if (floor !== undefined && result.timestamp <= floor) {
+      await this.session.peerDiscard(announcerId);
+      log.info('ignored a replayed announcement from a deleted contact');
       return { success: true };
     }
 

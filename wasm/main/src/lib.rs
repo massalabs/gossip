@@ -832,6 +832,24 @@ impl SessionManagerWrapper {
     }
 
     /// Discards a peer and all associated session state.
+    /// Timestamp (milliseconds) of the latest announcement accepted from a peer, if
+    /// any: keep it when discarding the peer to refuse replays of older ones.
+    pub fn peer_latest_incoming_announcement_timestamp(
+        &self,
+        peer_id: &[u8],
+    ) -> Result<Option<f64>, JsValue> {
+        if peer_id.len() != 32 {
+            return Err(JsValue::from_str("Peer ID must be 32 bytes"));
+        }
+        let mut peer_id_arr = [0u8; 32];
+        peer_id_arr.copy_from_slice(peer_id);
+        let peer_id = auth::UserId::from_bytes(peer_id_arr);
+        Ok(self
+            .inner
+            .peer_latest_incoming_announcement_timestamp(&peer_id)
+            .map(|timestamp| timestamp as f64))
+    }
+
     pub fn peer_discard(&mut self, peer_id: &[u8]) -> Result<(), JsValue> {
         if peer_id.len() != 32 {
             return Err(JsValue::from_str("Peer ID must be 32 bytes"));

@@ -138,6 +138,11 @@ export const sessionmanagerwrapper_peer_discard: (
   b: number,
   c: number
 ) => [number, number];
+export const sessionmanagerwrapper_peer_latest_incoming_announcement_timestamp: (
+  a: number,
+  b: number,
+  c: number
+) => [number, number, number, number];
 export const sessionmanagerwrapper_peer_list: (a: number) => any;
 export const sessionmanagerwrapper_peer_session_status: (
   a: number,

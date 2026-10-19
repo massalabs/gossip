@@ -47,8 +47,11 @@ async function digest(data: Uint8Array): Promise<string> {
  *   accepts one of them and ignores the rest.
  * - The bulletin cursor the SDK stores belongs to the primary transport.
  *   Announcements from the others carry no counter, so they never move it;
- *   their own cursors are kept here, in memory, and copies of an
- *   announcement already seen are dropped by content digest.
+ *   their own cursors are kept here (the SDK saves them through
+ *   export/importSecondaryCursors), and copies of an announcement already
+ *   seen are dropped by content digest. The digests live in memory only: a
+ *   copy offered again after a restart is refused by the session manager,
+ *   which only accepts an announcement newer than the latest from that peer.
  */
 export class CompositeMessageProtocol implements IMessageProtocol {
   private readonly transports: CompositeTransport[];
@@ -258,6 +261,18 @@ export class CompositeMessageProtocol implements IMessageProtocol {
 
     if (primaryError !== undefined && !secondaryOk) throw primaryError;
     return items;
+  }
+
+  exportSecondaryCursors(): (string | undefined)[] {
+    return [...this.secondaryCursors];
+  }
+
+  /** Restores saved cursors; ignored when the transports changed since. */
+  importSecondaryCursors(cursors: (string | undefined)[]): void {
+    if (cursors.length !== this.secondaryCursors.length) return;
+    cursors.forEach((cursor, index) => {
+      this.secondaryCursors[index] = cursor;
+    });
   }
 
   fetchBulletinCounter(): Promise<string> {
