@@ -5,13 +5,16 @@
  */
 
 import { UserPublicKeys } from '../wasm/bindings.js';
-import { decodeUserId } from '../utils/userId.js';
+import { decodeUserId, encodeUserId } from '../utils/userId.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 import { IAuthProtocol } from '../api/authProtocol.js';
 import type { Queries } from '../db/queries/index.js';
 
 export const PUBLIC_KEY_REPUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS = 60 * 1000;
+
+export const PUBLIC_KEYS_MISMATCH_ERROR =
+  'The public keys received do not match this user id';
 
 export class AuthService {
   private publicationInFlight = new Map<string, Promise<number>>();
@@ -25,15 +28,21 @@ export class AuthService {
    * @param userId - Bech32-encoded userId (e.g., "gossip1...")
    */
   async fetchPublicKeyByUserId(userId: string): Promise<UserPublicKeys> {
+    let publicKeys: UserPublicKeys;
     try {
       const base64PublicKey = await this.authProtocol.fetchPublicKeyByUserId(
         decodeUserId(userId)
       );
-
-      return UserPublicKeys.from_bytes(decodeFromBase64(base64PublicKey));
+      publicKeys = UserPublicKeys.from_bytes(decodeFromBase64(base64PublicKey));
     } catch (err) {
       throw new Error(getPublicKeyErrorMessage(err));
     }
+    // the user id is the hash of the keys: a node cannot pass off other keys
+    if (encodeUserId(publicKeys.derive_id()) !== userId) {
+      publicKeys.free();
+      throw new Error(PUBLIC_KEYS_MISMATCH_ERROR);
+    }
+    return publicKeys;
   }
 
   /**
