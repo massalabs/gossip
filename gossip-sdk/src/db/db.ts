@@ -143,6 +143,11 @@ export enum MessageType {
 export interface ReadyAnnouncement {
   announcement_bytes: Uint8Array;
   when_to_send: Date;
+  /**
+   * Board entry carrying the announcement to a peer we already exchanged
+   * announcements with, posted like a message alongside the board copy.
+   */
+  mailbox?: { seeker: Uint8Array; data: Uint8Array };
 }
 
 export type SendAnnouncement = null | ReadyAnnouncement;
@@ -151,9 +156,20 @@ export type SendAnnouncement = null | ReadyAnnouncement;
 export function serializeSendAnnouncement(
   announcement: ReadyAnnouncement
 ): string {
+  const { announcement_bytes, mailbox } = announcement;
   return JSON.stringify({
-    announcement_bytes: Array.from(announcement.announcement_bytes),
+    announcement_bytes: Array.from(announcement_bytes),
     when_to_send: announcement.when_to_send.toISOString(),
+    // the entry ends with the announcement itself: keep only what precedes it
+    ...(mailbox && {
+      mailbox_seeker: Array.from(mailbox.seeker),
+      mailbox_prefix: Array.from(
+        mailbox.data.subarray(
+          0,
+          mailbox.data.length - announcement_bytes.length
+        )
+      ),
+    }),
   });
 }
 
@@ -165,10 +181,19 @@ export function deserializeSendAnnouncement(json: string): ReadyAnnouncement {
     if (!parsed || !parsed.announcement_bytes || !parsed.when_to_send) {
       throw new Error('missing required fields');
     }
-    return {
-      announcement_bytes: new Uint8Array(parsed.announcement_bytes),
+    const announcement_bytes = new Uint8Array(parsed.announcement_bytes);
+    const ready: ReadyAnnouncement = {
+      announcement_bytes,
       when_to_send: new Date(parsed.when_to_send),
     };
+    if (parsed.mailbox_seeker && parsed.mailbox_prefix) {
+      const prefix = new Uint8Array(parsed.mailbox_prefix);
+      const data = new Uint8Array(prefix.length + announcement_bytes.length);
+      data.set(prefix);
+      data.set(announcement_bytes, prefix.length);
+      ready.mailbox = { seeker: new Uint8Array(parsed.mailbox_seeker), data };
+    }
+    return ready;
   } catch (e) {
     throw new Error(
       `Failed to deserialize SendAnnouncement: ${e instanceof Error ? e.message : e}`

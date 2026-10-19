@@ -2,12 +2,35 @@
 /* eslint-disable */
 export const __wbg_execresult_free: (a: number, b: number) => void;
 export const activateOnboardingGeneration: () => any;
-export const admitOuterMigrationPassword: (a: number, b: number) => [number, number, number];
-export const allocateSession: (a: number, b: number, c: number) => [number, number];
-export const appendCandidatePreviewBlock: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-export const beginCandidatePreview: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
+export const admitOuterMigrationPassword: (
+  a: number,
+  b: number
+) => [number, number, number];
+export const allocateSession: (
+  a: number,
+  b: number,
+  c: number
+) => [number, number];
+export const appendCandidatePreviewBlock: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: number
+) => [number, number];
+export const beginCandidatePreview: (
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  e: any
+) => [number, number, number];
 export const beginOnboardingCandidate: () => [number, number];
-export const beginOuterMigration: (a: number, b: number, c: any) => [number, number];
+export const beginOuterMigration: (
+  a: number,
+  b: number,
+  c: any
+) => [number, number];
 export const clearNamespace: (a: number) => [number, number];
 export const closeDatabase: () => [number, number];
 export const coverTrafficTick: (a: number) => [number, number];
@@ -15,30 +38,58 @@ export const destroySession: (a: number, b: number) => [number, number];
 export const endCandidatePreview: () => any;
 export const endOnboardingCandidate: () => [number, number];
 export const endOuterMigration: () => void;
-export const execSql: (a: number, b: number, c: any) => [number, number, number];
+export const execSql: (
+  a: number,
+  b: number,
+  c: any
+) => [number, number, number];
 export const execresult_lastInsertRowId: (a: number) => number;
 export const execresult_rows: (a: number) => any;
 export const exportOnboardingCandidate: () => [number, number, number, number];
 export const finalizeOuterMigration: () => [number, number, number];
 export const finishCandidatePreview: () => [number, number];
-export const finishOuterMigrationNamespace: (a: number, b: number) => [number, number];
+export const finishOuterMigrationNamespace: (
+  a: number,
+  b: number
+) => [number, number];
 export const flushEncrypted: () => any;
 export const idbHasData: () => any;
-export const initSecureStorage: (a: number, b: number, c: number, d: number) => any;
+export const initSecureStorage: (
+  a: number,
+  b: number,
+  c: number,
+  d: number
+) => any;
 export const lockSession: () => [number, number];
-export const migrateOuterBlockBatch: (a: number, b: number, c: any) => [number, number, number];
+export const migrateOuterBlockBatch: (
+  a: number,
+  b: number,
+  c: any
+) => [number, number, number];
 export const namespaceDataLength: (a: number) => [number, number, number];
 export const openDatabase: () => [number, number];
 export const provisionStorage: () => [number, number];
 export const queryCandidatePreview: () => [number, number, number];
-export const readNamespaceData: (a: number, b: number, c: number) => [number, number, number, number];
+export const readNamespaceData: (
+  a: number,
+  b: number,
+  c: number
+) => [number, number, number, number];
 export const reloadDurableStorage: () => any;
 export const resetSqlDatabaseToDurable: () => any;
 export const unlockSession: (a: number, b: number) => [number, number, number];
 export const validatePortableBlock: (a: number, b: number) => [number, number];
-export const validatePortableKeypair: (a: number, b: number) => [number, number];
+export const validatePortableKeypair: (
+  a: number,
+  b: number
+) => [number, number];
 export const verifyStorageGeneration: () => any;
-export const writeNamespaceData: (a: number, b: number, c: number, d: number) => [number, number];
+export const writeNamespaceData: (
+  a: number,
+  b: number,
+  c: number,
+  d: number
+) => [number, number];
 export const __wbg_wbg_rayon_poolbuilder_free: (a: number, b: number) => void;
 export const initThreadPool: (a: number) => any;
 export const wbg_rayon_poolbuilder_build: (a: number) => void;
@@ -46,7 +97,12 @@ export const wbg_rayon_poolbuilder_numThreads: (a: number) => number;
 export const wbg_rayon_poolbuilder_receiver: (a: number) => number;
 export const wbg_rayon_start_worker: (a: number) => void;
 export const rust_sqlite_wasm_abort: () => void;
-export const rust_sqlite_wasm_assert_fail: (a: number, b: number, c: number, d: number) => void;
+export const rust_sqlite_wasm_assert_fail: (
+  a: number,
+  b: number,
+  c: number,
+  d: number
+) => void;
 export const rust_sqlite_wasm_calloc: (a: number, b: number) => number;
 export const rust_sqlite_wasm_free: (a: number) => void;
 export const rust_sqlite_wasm_getentropy: (a: number, b: number) => number;
@@ -61,13 +117,34 @@ export const __wbindgen_export_2: WebAssembly.Table;
 export const memory: WebAssembly.Memory;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;
-export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_realloc: (
+  a: number,
+  b: number,
+  c: number,
+  d: number
+) => number;
 export const __wbindgen_export_7: WebAssembly.Table;
 export const __externref_table_dealloc: (a: number) => void;
 export const closure127_externref_shim: (a: number, b: number, c: any) => void;
-export const wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (a: number, b: number) => void;
-export const closure83_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+export const wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (
+  a: number,
+  b: number
+) => void;
+export const closure83_externref_shim_multivalue_shim: (
+  a: number,
+  b: number,
+  c: any
+) => [number, number];
 export const closure702_externref_shim: (a: number, b: number, c: any) => void;
-export const closure758_externref_shim: (a: number, b: number, c: any, d: any) => void;
-export const __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
+export const closure758_externref_shim: (
+  a: number,
+  b: number,
+  c: any,
+  d: any
+) => void;
+export const __wbindgen_thread_destroy: (
+  a?: number,
+  b?: number,
+  c?: number
+) => void;
 export const __wbindgen_start: (a: number) => void;

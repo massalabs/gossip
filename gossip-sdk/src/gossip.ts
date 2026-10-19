@@ -460,13 +460,17 @@ class GossipSdk {
       if (messageProtocol.setWantedSeekers) {
         this._wantedSeekersListener = seekers => {
           // also the seekers peers will most likely use next, so a slow
-          // transport can bring several messages in one round trip
+          // transport can bring several messages in one round trip, and
+          // where peers would address a re-announcement to us
           const session =
             this.state.status === SdkStatus.SESSION_OPEN
               ? this.state.session
               : undefined;
-          const ahead = session?.getMessageBoardLookaheadKeys() ?? [];
-          const wanted = [...seekers, ...ahead];
+          const wanted = [
+            ...seekers,
+            ...(session?.getMessageBoardLookaheadKeys() ?? []),
+            ...(session?.getReannouncementMailboxKeys() ?? []),
+          ];
           messageProtocol.setWantedSeekers?.(wanted).catch(error => {
             logger.warn('[GossipSdk] failed to update wanted seekers', error);
           });
