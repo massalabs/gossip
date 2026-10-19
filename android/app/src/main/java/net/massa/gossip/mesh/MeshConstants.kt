@@ -28,6 +28,15 @@ object MeshConstants {
     /** Mesh links per phone, inbound and outbound together. */
     const val MAX_LINKS = 8
 
+    /** Of [MAX_LINKS], how many other phones may open: the rest are for the neighbours this phone picks. */
+    const val MAX_INBOUND_LINKS = 4
+
+    /** How long a central whose inbound link closed must wait before connecting again. */
+    const val INBOUND_COOLDOWN_MS = 60_000L
+
+    /** Received bytes waiting for the core on one link; past it the link is closed. */
+    const val MAX_PENDING_INBOUND_BYTES_PER_LINK = 512 * 1024
+
     /** Chunks queued per link before sends to it fail; the core treats a failed send as a dropped message. */
     const val MAX_QUEUED_CHUNKS_PER_LINK = 256
 
