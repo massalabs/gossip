@@ -174,6 +174,11 @@ export class ReceiveMessageOutput {
    */
   readonly acknowledged_seekers: Array<any>;
   /**
+   * Whether the sender's timestamp is older than the configured maximum age or than
+   * the previous message: authentic and in order, but possibly delayed in transit.
+   */
+  readonly stale: boolean;
+  /**
    * Gets the received message contents.
    */
   readonly message: Uint8Array;
@@ -211,13 +216,21 @@ export class SessionConfig {
   /**
    * Creates a default configuration with sensible defaults:
    * - Announcement age: 1 week
-   * - Announcement future: 1 minute
-   * - Message age: 1 week
-   * - Message future: 1 minute
+   * - Announcement future: 1 hour
+   * - Message age: 2 weeks
+   * - Message future: 1 day
    * - Session inactivity: 1 week
    * - Keep-alive interval: 1 day
    * - Max lag: 10000 messages
    * - Max peer lag before keep-alive: 8 messages
+   *
+   * The clock windows allow for store-and-forward delivery: a phone that relays
+   * over Bluetooth while offline has no time source, and a clock set by hand can be
+   * off by a whole time zone. A message dated beyond the future window is not lost,
+   * only left to be read again later; one older than the age window is delivered and
+   * flagged stale. Two weeks matches the network's retention, past which a message
+   * cannot be fetched anyway. Announcements keep a tighter future window because a
+   * future-dated announcement blocks the sender's later, correctly dated ones.
    */
   static new_default(): SessionConfig;
   /**
@@ -231,6 +244,11 @@ export class SessionConfig {
 export class SessionManagerWrapper {
   free(): void;
   [Symbol.dispose](): void;
+  /**
+   * Replaces the configuration, which a manager restored from a blob otherwise keeps
+   * from when it was created.
+   */
+  set_config(config: SessionConfig): void;
   /**
    * Discards a peer and all associated session state.
    */
@@ -474,6 +492,7 @@ export interface InitOutput {
   readonly nonce_to_bytes: (a: number) => [number, number];
   readonly receivemessageoutput_acknowledged_seekers: (a: number) => any;
   readonly receivemessageoutput_message: (a: number) => [number, number];
+  readonly receivemessageoutput_stale: (a: number) => number;
   readonly receivemessageoutput_timestamp: (a: number) => number;
   readonly receivemessageoutput_user_id: (a: number) => [number, number];
   readonly sendmessageoutput_data: (a: number) => [number, number];
@@ -491,6 +510,7 @@ export interface InitOutput {
   readonly sessionmanagerwrapper_peer_session_status: (a: number, b: number, c: number) => [number, number, number];
   readonly sessionmanagerwrapper_refresh: (a: number) => any;
   readonly sessionmanagerwrapper_send_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly sessionmanagerwrapper_set_config: (a: number, b: number) => void;
   readonly sessionmanagerwrapper_to_encrypted_blob: (a: number, b: number) => [number, number, number, number];
   readonly userkeys_evm_address: (a: number) => [number, number];
   readonly userkeys_massa_address: (a: number) => [number, number];

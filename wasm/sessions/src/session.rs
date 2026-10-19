@@ -145,6 +145,21 @@ pub struct FeedIncomingMessageOutput {
     pub newly_acknowledged_self_seekers: Vec<Vec<u8>>,
     /// User Id of the peer that sent the message
     pub user_id: Vec<u8>,
+    /// Set by the session manager when the sender's timestamp is older than the
+    /// configured maximum age or than the previous message: the message is still
+    /// authentic and in order, but it may have been delayed in transit.
+    pub stale: bool,
+}
+
+/// Why an incoming message was not accepted by [`Session::feed_incoming_message`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedIncomingMessageError {
+    /// Malformed, or not signed by the seeker key: anyone who knows the seeker can
+    /// produce this, so it says nothing about the session. No state was touched.
+    Unauthenticated,
+    /// Signed by the seeker key, which only the peer and we hold, but it does not
+    /// decrypt: the two sides of the session have diverged.
+    Undecryptable,
 }
 
 /// Incoming session initiation request from a peer.
@@ -551,6 +566,27 @@ impl Session {
         seeker: &[u8],
         message: &[u8],
     ) -> Option<FeedIncomingMessageOutput> {
+        self.feed_incoming_message(self_static_sk, seeker, message)
+            .ok()
+    }
+
+    /// Same as [`try_feed_incoming_message`](Self::try_feed_incoming_message), but tells
+    /// an unauthenticated message apart from a session that can no longer decrypt.
+    pub fn feed_incoming_message(
+        &mut self,
+        self_static_sk: &auth::UserSecretKeys,
+        seeker: &[u8],
+        message: &[u8],
+    ) -> Result<FeedIncomingMessageOutput, FeedIncomingMessageError> {
+        let message_bytes = Self::authenticate_incoming_message(seeker, message)
+            .ok_or(FeedIncomingMessageError::Unauthenticated)?;
+        self.decrypt_incoming_message(self_static_sk, &message_bytes)
+            .ok_or(FeedIncomingMessageError::Undecryptable)
+    }
+
+    /// Checks the seeker commitment and the seeker signature, without touching any state,
+    /// and returns the Agraphon message they cover.
+    fn authenticate_incoming_message(seeker: &[u8], message: &[u8]) -> Option<Vec<u8>> {
         // decompose seeker
         let hash_len = *seeker.first()? as usize;
         let hash_bytes = seeker.get(1..1 + hash_len)?;
@@ -592,11 +628,19 @@ impl Session {
         {
             return None;
         }
+        Some(message_bytes)
+    }
 
+    /// Decrypts an authenticated message and advances the ratchet.
+    fn decrypt_incoming_message(
+        &mut self,
+        self_static_sk: &auth::UserSecretKeys,
+        message_bytes: &[u8],
+    ) -> Option<FeedIncomingMessageOutput> {
         // try to read message from agraphon
         let agraphon_result = self
             .agraphon_instance
-            .try_feed_incoming_message(&self_static_sk.kem_secret_key, &message_bytes)?;
+            .try_feed_incoming_message(&self_static_sk.kem_secret_key, message_bytes)?;
 
         // deserialize the message
         let message: Message = bincode::serde::decode_from_slice(
@@ -619,6 +663,7 @@ impl Session {
                 .newly_acknowledged_self_seekers
                 .clone(),
             user_id: user_id.as_bytes().to_vec(),
+            stale: false,
         })
     }
 

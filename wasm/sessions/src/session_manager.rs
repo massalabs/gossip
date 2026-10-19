@@ -95,8 +95,8 @@
 
 use crate::{
     session::{
-        FeedIncomingMessageOutput, IncomingInitiationRequest, OutgoingInitiationRequest,
-        SendOutgoingMessageOutput, Session,
+        FeedIncomingMessageError, FeedIncomingMessageOutput, IncomingInitiationRequest,
+        OutgoingInitiationRequest, SendOutgoingMessageOutput, Session,
     },
     utils::timestamp_millis,
 };
@@ -175,6 +175,16 @@ pub struct SessionManagerConfig {
 
     /// The peer lag threshold above which `refresh` requests a keep-alive immediately
     pub max_keep_alive_peer_lag_length: u64,
+}
+
+enum IncomingMessageOutcome {
+    Accepted(FeedIncomingMessageOutput),
+    /// Not authenticated by the seeker key; nothing changed.
+    Ignored,
+    /// Dated too far in the future; the session was rolled back to read it again later.
+    Held,
+    /// Authenticated but undecryptable: the session can no longer be used.
+    SessionBroken,
 }
 
 #[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -344,6 +354,15 @@ impl SessionManager {
         combined_blob.extend_from_slice(nonce.as_bytes());
         combined_blob.extend_from_slice(&encrypted_blob);
         Some(combined_blob)
+    }
+
+    /// Replaces the configuration.
+    ///
+    /// The configuration is saved in the encrypted blob along with the sessions, so a
+    /// manager restored from an older blob keeps the limits it was created with until
+    /// the application applies its current ones with this method.
+    pub fn set_config(&mut self, config: SessionManagerConfig) {
+        self.config = config;
     }
 
     /// Returns the peer IDs that need a keep-alive message
@@ -626,52 +645,88 @@ impl SessionManager {
         message_board_seekers
     }
 
-    /// returns (message id, message)
+    /// Reads a message found at the next seeker of `peer_id`'s active session.
     fn inner_feed_incoming_msg(
         &mut self,
         peer_id: &UserId,
         seeker: &[u8],
         bytes: &[u8],
         our_sk: &auth::UserSecretKeys,
-    ) -> Option<FeedIncomingMessageOutput> {
-        // try to decode message
-        let mut msg = None;
-        if let Some(peer_info) = self.peers.get_mut(peer_id) {
-            if let Some(active_session) = &mut peer_info.active_session {
-                msg = active_session
-                    .session
-                    .try_feed_incoming_message(our_sk, seeker, bytes);
-            }
-        }
-        let msg = msg?;
+    ) -> IncomingMessageOutcome {
+        let max_age = self.config.max_incoming_message_age_millis;
+        let max_future = self.config.max_incoming_message_future_millis;
+        let Some(active_session) = self
+            .peers
+            .get_mut(peer_id)
+            .and_then(|peer_info| peer_info.active_session.as_mut())
+        else {
+            return IncomingMessageOutcome::Ignored;
+        };
 
-        // check message timestamp (past, future)
+        // Reading a message advances the ratchet before its timestamp is known, so keep
+        // the state from before the read in case the message has to be put back.
+        let Ok(snapshot) =
+            bincode::serde::encode_to_vec(&active_session.session, bincode::config::standard())
+        else {
+            return IncomingMessageOutcome::Ignored;
+        };
+        let snapshot = Zeroizing::new(snapshot);
+
+        let mut msg = match active_session
+            .session
+            .feed_incoming_message(our_sk, seeker, bytes)
+        {
+            Ok(msg) => msg,
+            // Whoever learnt the seeker (a relay, a mesh neighbour) can post garbage at
+            // it: that must not close the session.
+            Err(FeedIncomingMessageError::Unauthenticated) => {
+                return IncomingMessageOutcome::Ignored;
+            }
+            Err(FeedIncomingMessageError::Undecryptable) => {
+                return IncomingMessageOutcome::SessionBroken;
+            }
+        };
+
+        // A message dated ahead of our clock by more than the allowed skew is put back:
+        // the ratchet is restored so the same message is read again once our clock has
+        // caught up. Dropping it would break the chain, since the next seeker is inside it.
         let cur_timestamp = timestamp_millis();
-        if msg.timestamp < cur_timestamp.saturating_sub(self.config.max_incoming_message_age_millis)
-        {
-            return None;
-        }
-        if msg.timestamp
-            > cur_timestamp.saturating_add(self.config.max_incoming_message_future_millis)
-        {
-            return None;
-        }
-
-        // check if the message timestamp is consistent with the latest one,
-        // and update the last incoming message timestamp
-        if let Some(peer_info) = self.peers.get_mut(peer_id) {
-            if let Some(active_session) = &mut peer_info.active_session {
-                if msg.timestamp < active_session.last_incoming_message_timestamp {
-                    return None;
+        if msg.timestamp > cur_timestamp.saturating_add(max_future) {
+            let restored = bincode::serde::decode_from_slice::<Session, _>(
+                &snapshot,
+                bincode::config::standard(),
+            );
+            return match restored {
+                Ok((session, _)) => {
+                    active_session.session = session;
+                    IncomingMessageOutcome::Held
                 }
-                active_session.last_incoming_message_timestamp = msg.timestamp;
-            }
+                Err(_) => IncomingMessageOutcome::SessionBroken,
+            };
         }
 
-        // return the message
-        Some(msg)
+        // The ratchet already guarantees authenticity and order, so an old or
+        // out-of-order timestamp only means the message waited in transit, or that the
+        // sender's clock moved back: deliver it, flagged, rather than break the chain.
+        if msg.timestamp < cur_timestamp.saturating_sub(max_age)
+            || msg.timestamp < active_session.last_incoming_message_timestamp
+        {
+            msg.stale = true;
+        }
+        active_session.last_incoming_message_timestamp = active_session
+            .last_incoming_message_timestamp
+            .max(msg.timestamp);
+
+        IncomingMessageOutcome::Accepted(msg)
     }
 
+    /// Reads a message fetched at one of the seekers returned by
+    /// [`get_message_board_read_keys`](Self::get_message_board_read_keys).
+    ///
+    /// Returns `None` when the seeker is not ours, when the message is not signed by the
+    /// seeker key (the session is left untouched), when it is dated too far in the future
+    /// (it is left to be read again later), or when it does not decrypt, which closes the
+    /// session.
     pub fn feed_incoming_message_board_read(
         &mut self,
         seeker: &[u8],
@@ -690,18 +745,17 @@ impl SessionManager {
         }
         let peer_id = peer_id?;
 
-        // feed the message into the session
-        let msg = self.inner_feed_incoming_msg(&peer_id, seeker, bytes, our_sk);
-
-        // if the message is None here, it means the session has a problem: close it
-        if msg.is_none() {
-            if let Some(peer_info) = self.peers.get_mut(&peer_id) {
-                peer_info.active_session = None;
+        match self.inner_feed_incoming_msg(&peer_id, seeker, bytes, our_sk) {
+            IncomingMessageOutcome::Accepted(msg) => Some(msg),
+            IncomingMessageOutcome::Ignored | IncomingMessageOutcome::Held => None,
+            // the two sides have diverged: close the session so it gets re-established
+            IncomingMessageOutcome::SessionBroken => {
+                if let Some(peer_info) = self.peers.get_mut(&peer_id) {
+                    peer_info.active_session = None;
+                }
+                None
             }
         }
-
-        // return the message
-        msg
     }
 
     /// Sends a message to a peer through their active session.
@@ -2074,5 +2128,175 @@ mod tests {
             .feed_incoming_message_board_read(&output6.seeker, &output6.data, &alice_sk)
             .expect("Alice should receive message on newest session");
         assert_eq!(received6.message.as_slice(), b"Hi Alice from D-C session!");
+    }
+
+    /// Alice and Bob with an active session in both directions.
+    fn established_pair() -> (
+        SessionManager,
+        SessionManager,
+        (auth::UserPublicKeys, auth::UserSecretKeys),
+        (auth::UserPublicKeys, auth::UserSecretKeys),
+    ) {
+        let mut alice_manager = SessionManager::new(create_test_config());
+        let mut bob_manager = SessionManager::new(create_test_config());
+        let (alice_pk, alice_sk) = generate_test_keypair();
+        let (bob_pk, bob_sk) = generate_test_keypair();
+        let alice_announcement =
+            alice_manager.establish_outgoing_session(&bob_pk, &alice_pk, &alice_sk, vec![]);
+        let bob_announcement =
+            bob_manager.establish_outgoing_session(&alice_pk, &bob_pk, &bob_sk, vec![]);
+        bob_manager.feed_incoming_announcement(&alice_announcement, &bob_pk, &bob_sk);
+        alice_manager.feed_incoming_announcement(&bob_announcement, &alice_pk, &alice_sk);
+        (
+            alice_manager,
+            bob_manager,
+            (alice_pk, alice_sk),
+            (bob_pk, bob_sk),
+        )
+    }
+
+    fn with_clock_offset<T>(offset_millis: i128, f: impl FnOnce() -> T) -> T {
+        crate::utils::TEST_CLOCK_OFFSET_MILLIS.with(|offset| offset.set(offset_millis));
+        let result = f();
+        crate::utils::TEST_CLOCK_OFFSET_MILLIS.with(|offset| offset.set(0));
+        result
+    }
+
+    #[test]
+    fn test_unauthenticated_message_at_seeker_keeps_session() {
+        let (mut alice_manager, mut bob_manager, (alice_pk, _), (bob_pk, bob_sk)) =
+            established_pair();
+        let send_output = alice_manager
+            .send_message(&bob_pk.derive_id(), b"Hello Bob!")
+            .unwrap();
+
+        // garbage, then the real message with one covered byte flipped
+        assert!(
+            bob_manager
+                .feed_incoming_message_board_read(&send_output.seeker, b"garbage", &bob_sk)
+                .is_none()
+        );
+        let mut tampered = send_output.data.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        assert!(
+            bob_manager
+                .feed_incoming_message_board_read(&send_output.seeker, &tampered, &bob_sk)
+                .is_none()
+        );
+        assert!(matches!(
+            bob_manager.peer_session_status(&alice_pk.derive_id()),
+            SessionStatus::Active
+        ));
+
+        let received = bob_manager
+            .feed_incoming_message_board_read(&send_output.seeker, &send_output.data, &bob_sk)
+            .expect("the genuine message is still readable");
+        assert_eq!(received.message.as_slice(), b"Hello Bob!");
+        assert!(!received.stale);
+    }
+
+    #[test]
+    fn test_future_dated_message_is_held_until_clock_catches_up() {
+        let (mut alice_manager, mut bob_manager, (alice_pk, _), (bob_pk, bob_sk)) =
+            established_pair();
+        let max_future = create_test_config().max_incoming_message_future_millis as i128;
+        let ahead = max_future + 60_000;
+        let send_output = with_clock_offset(ahead, || {
+            alice_manager
+                .send_message(&bob_pk.derive_id(), b"from the future")
+                .unwrap()
+        });
+
+        assert!(
+            bob_manager
+                .feed_incoming_message_board_read(&send_output.seeker, &send_output.data, &bob_sk)
+                .is_none()
+        );
+        assert!(matches!(
+            bob_manager.peer_session_status(&alice_pk.derive_id()),
+            SessionStatus::Active
+        ));
+        assert!(
+            bob_manager
+                .get_message_board_read_keys()
+                .contains(&send_output.seeker)
+        );
+
+        let received = with_clock_offset(ahead, || {
+            bob_manager.feed_incoming_message_board_read(
+                &send_output.seeker,
+                &send_output.data,
+                &bob_sk,
+            )
+        })
+        .expect("readable once the clocks agree");
+        assert_eq!(received.message.as_slice(), b"from the future");
+
+        // the chain goes on after the held message
+        let next = alice_manager
+            .send_message(&bob_pk.derive_id(), b"next")
+            .unwrap();
+        let received = with_clock_offset(ahead, || {
+            bob_manager.feed_incoming_message_board_read(&next.seeker, &next.data, &bob_sk)
+        })
+        .expect("next message");
+        assert_eq!(received.message.as_slice(), b"next");
+    }
+
+    #[test]
+    fn test_old_and_backdated_messages_are_delivered_stale() {
+        let (mut alice_manager, mut bob_manager, (alice_pk, _), (bob_pk, bob_sk)) =
+            established_pair();
+        let max_age = create_test_config().max_incoming_message_age_millis as i128;
+        let old = with_clock_offset(-(max_age + 60_000), || {
+            alice_manager
+                .send_message(&bob_pk.derive_id(), b"delayed")
+                .unwrap()
+        });
+        let received = bob_manager
+            .feed_incoming_message_board_read(&old.seeker, &old.data, &bob_sk)
+            .expect("an old message is delivered");
+        assert_eq!(received.message.as_slice(), b"delayed");
+        assert!(received.stale);
+
+        // a fresh message, then one dated before it: still delivered, in order
+        let fresh = alice_manager
+            .send_message(&bob_pk.derive_id(), b"fresh")
+            .unwrap();
+        let backdated = with_clock_offset(-30_000, || {
+            alice_manager
+                .send_message(&bob_pk.derive_id(), b"clock moved back")
+                .unwrap()
+        });
+        assert!(
+            !bob_manager
+                .feed_incoming_message_board_read(&fresh.seeker, &fresh.data, &bob_sk)
+                .unwrap()
+                .stale
+        );
+        let received = bob_manager
+            .feed_incoming_message_board_read(&backdated.seeker, &backdated.data, &bob_sk)
+            .expect("a backdated message is delivered");
+        assert!(received.stale);
+        assert!(matches!(
+            bob_manager.peer_session_status(&alice_pk.derive_id()),
+            SessionStatus::Active
+        ));
+    }
+
+    #[test]
+    fn test_set_config_applies_to_restored_manager() {
+        let manager = SessionManager::new(create_test_config());
+        let key = generate_test_key();
+        let blob = manager.to_encrypted_blob(&key).unwrap();
+        let mut restored = SessionManager::from_encrypted_blob(&blob, &key).unwrap();
+        assert_eq!(restored.config.max_incoming_message_future_millis, 5_000);
+        let mut config = create_test_config();
+        config.max_incoming_message_future_millis = 86_400_000;
+        restored.set_config(config);
+        assert_eq!(
+            restored.config.max_incoming_message_future_millis,
+            86_400_000
+        );
     }
 }
