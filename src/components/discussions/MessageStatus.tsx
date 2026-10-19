@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check as CheckIcon, Clock } from 'react-feather';
+import { Bluetooth, Check as CheckIcon, Clock } from 'react-feather';
 import { MessageStatus as MessageStatusEnum } from '@massalabs/gossip-sdk';
 import { formatTime } from '../../utils/timeUtils';
 
@@ -20,6 +20,10 @@ interface MessageStatusProps {
    * store for rationale and lifecycle).
    */
   isOptimisticallySent?: boolean;
+  /** Only the offline mesh took it: it waits for a bridge to reach the internet. */
+  viaMesh?: boolean;
+  /** Read long after its sender dated it (store-and-forward, or we were offline). */
+  isDelayed?: boolean;
 }
 
 const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
@@ -32,10 +36,16 @@ const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
     isSending,
     showTimestamp,
     isOptimisticallySent,
+    viaMesh = false,
+    isDelayed = false,
   }) => {
     const { t } = useTranslation('discussions');
 
-    if (!showTimestamp && !(!isDeleted && (isOutgoing || isEdited)))
+    if (
+      !showTimestamp &&
+      !isDelayed &&
+      !(!isDeleted && (isOutgoing || isEdited))
+    )
       return null;
 
     const isDeliveredOrRead =
@@ -59,10 +69,24 @@ const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
             {t('message_item.edited')}
           </span>
         )}
+        {isDelayed && !isDeleted && (
+          <span
+            className="text-[10px] italic opacity-75"
+            title={t('message_item.delayed_hint')}
+          >
+            {t('message_item.delayed')}
+          </span>
+        )}
         {showTimestamp && (
           <span className="text-[11px] font-medium">
             {formatTime(timestamp)}
           </span>
+        )}
+        {isOutgoing && !isDeleted && showSent && viaMesh && (
+          <Bluetooth
+            className="w-3 h-3"
+            aria-label={t('message_item.sent_via_mesh')}
+          />
         )}
         {isOutgoing && !isDeleted && (
           <span

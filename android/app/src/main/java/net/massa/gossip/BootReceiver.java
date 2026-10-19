@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.UserManager;
 import android.util.Log;
+import net.massa.gossip.mesh.MeshService;
 
 /**
  * Broadcast receiver that triggers when the device boots up.
@@ -82,6 +83,12 @@ public class BootReceiver extends BroadcastReceiver {
             if (GossipForegroundSyncService.isEnabled(context)) {
                 GossipForegroundSyncService.start(context);
                 Log.d(TAG, "High-reliability foreground sync restarted after boot");
+            }
+
+            // The offline mesh relays without the app: bring it back if it was on.
+            if (MeshService.isEnabled(context)) {
+                MeshService.restart(context);
+                Log.d(TAG, "Offline mesh restarted after boot");
             }
         } catch (Exception e) {
             Log.e(TAG, "Failed to schedule background sync after boot", e);
