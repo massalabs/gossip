@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
     arrival: null as ArrivalHandler | null,
     keys: undefined as string | undefined,
     rustCore: true,
+    installId: 'install-1',
   };
   const plugin = {
     start: vi.fn(async () => undefined),
@@ -20,7 +21,10 @@ const mocks = vi.hoisted(() => {
     setWanted: vi.fn(async () => undefined),
     getKeys: vi.fn(async () => ({ keys: state.keys })),
     status: vi.fn(async () => ({ running: true, meshPeers: 2 })),
-    capabilities: vi.fn(async () => ({ rustCore: state.rustCore })),
+    capabilities: vi.fn(async () => ({
+      rustCore: state.rustCore,
+      installId: state.installId,
+    })),
     sendBlob: vi.fn(async () => ({ id: 'aWQ=' })),
     forgetKeys: vi.fn(async () => undefined),
     wipe: vi.fn(async () => undefined),
@@ -82,6 +86,7 @@ describe('mesh transport', () => {
   beforeEach(async () => {
     mocks.state.featureEnabled = true;
     mocks.state.rustCore = true;
+    mocks.state.installId = 'install-1';
     mocks.state.preferences.clear();
     mocks.state.arrival = null;
     mocks.state.keys = undefined;
@@ -128,6 +133,17 @@ describe('mesh transport', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('asks for bridging again on a phone restored from a backup', async () => {
+    createMeshTransport();
+    await setMeshBridgeEnabled(true);
+    expect((await getMeshSettings()).bridgeEnabled).toBe(true);
+
+    // same preferences, new installation
+    mocks.state.installId = 'install-2';
+    await probeMeshAvailability();
+    expect((await getMeshSettings()).bridgeEnabled).toBe(false);
   });
 
   it('wipes the node when the account changes', async () => {

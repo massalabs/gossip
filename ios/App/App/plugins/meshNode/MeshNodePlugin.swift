@@ -53,8 +53,11 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
         bridgeNode.onLinksChanged = { [weak self] count in
             self?.notifyListeners("status", data: ["links": count])
         }
+        // the switch holds the install id it was set on, so a phone restored
+        // from a backup does not start the mesh before being asked again
         let defaults = UserDefaults.standard
-        if defaults.bool(forKey: Self.enabledKey) {
+        let installId = Self.installId()
+        if !installId.isEmpty, defaults.string(forKey: Self.enabledKey) == installId {
             do {
                 try bridgeNode.startCore(configJson: defaults.string(forKey: Self.configKey) ?? "{}")
                 bridgeNode.startRadio(mode: MeshPowerMode(name: defaults.string(forKey: Self.powerModeKey)))
@@ -80,7 +83,7 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         let defaults = UserDefaults.standard
-        defaults.set(true, forKey: Self.enabledKey)
+        defaults.set(Self.installId(), forKey: Self.enabledKey)
         defaults.set(config, forKey: Self.configKey)
         defaults.set(mode.rawValue, forKey: Self.powerModeKey)
         // Creating the managers shows the Bluetooth prompt the first time.
@@ -89,7 +92,7 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func stop(_ call: CAPPluginCall) {
-        UserDefaults.standard.set(false, forKey: Self.enabledKey)
+        UserDefaults.standard.removeObject(forKey: Self.enabledKey)
         bridgeNode.stopRadio()
         bridgeNode.stopCore()
         call.resolve()
@@ -112,6 +115,27 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
     /// this reports the state without prompting.
     @objc override public func requestPermissions(_ call: CAPPluginCall) {
         call.resolve(["bluetooth": Self.permissionState()])
+    }
+
+    /// Random id of this installation, in a file kept out of backups: the app
+    /// ties consents (bridging) to it, so a phone restored from a backup asks again.
+    static func installId() -> String {
+        let fileManager = FileManager.default
+        guard let directory = try? fileManager.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        ) else { return "" }
+        var file = directory.appendingPathComponent("mesh-install-id")
+        if let id = try? String(contentsOf: file, encoding: .utf8), !id.isEmpty { return id }
+        let id = UUID().uuidString
+        do {
+            try id.write(to: file, atomically: true, encoding: .utf8)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try file.setResourceValues(values)
+        } catch {
+            return ""
+        }
+        return id
     }
 
     private static func permissionState() -> String {
@@ -230,7 +254,7 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// What this build can do, before the node is started.
     @objc func capabilities(_ call: CAPPluginCall) {
-        call.resolve(["rustCore": MeshCoreFactory.hasRustCore])
+        call.resolve(["rustCore": MeshCoreFactory.hasRustCore, "installId": Self.installId()])
     }
 
     @objc func forgetKeys(_ call: CAPPluginCall) {
