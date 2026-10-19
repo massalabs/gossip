@@ -14,4 +14,8 @@
     <string name="portable_backup_notification_preparing">Preparing backup</string>
     <string name="portable_backup_notification_writing">Writing backup</string>
     <string name="qr_scanner_close">Close scanner</string>
+    <string name="mesh_channel_name">Gossip mesh</string>
+    <string name="mesh_channel_desc">Keeps the offline Bluetooth mesh running while it is on</string>
+    <string name="mesh_notification_title">Gossip mesh is on</string>
+    <string name="mesh_notification_body">Relaying messages over Bluetooth to nearby phones</string>
 </resources>

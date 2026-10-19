@@ -10,4 +10,8 @@
     <string name="portable_backup_notification_preparing">正在准备备份</string>
     <string name="portable_backup_notification_writing">正在写入备份</string>
     <string name="qr_scanner_close">关闭扫描器</string>
+    <string name="mesh_channel_name">Gossip 网状网络</string>
+    <string name="mesh_channel_desc">开启时保持离线蓝牙网状网络运行</string>
+    <string name="mesh_notification_title">Gossip 网状网络已开启</string>
+    <string name="mesh_notification_body">正在通过蓝牙向附近手机中继消息</string>
 </resources>
