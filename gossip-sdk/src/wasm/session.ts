@@ -240,6 +240,19 @@ export class SessionModule {
   }
 
   /**
+   * Seekers of the messages after the next one from each peer, for transports
+   * that request messages ahead of time (a mesh node's wanted list). Messages
+   * found there are read once getMessageBoardReadKeys() reaches their seeker.
+   */
+  getMessageBoardLookaheadKeys(): Array<Uint8Array> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    return copyOutMany(this.sessionManager.get_message_board_lookahead_keys());
+  }
+
+  /**
    * Process an incoming ciphertext from the message board
    */
   async feedIncomingMessageBoardRead(

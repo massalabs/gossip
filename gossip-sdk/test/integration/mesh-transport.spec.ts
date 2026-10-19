@@ -75,6 +75,12 @@ class ChaosProtocol implements IMessageProtocol {
   changeNode(): Promise<MessageProtocolResponse> {
     return Promise.resolve({ success: true });
   }
+
+  wanted: Uint8Array[] = [];
+
+  async setWantedSeekers(seekers: Uint8Array[]): Promise<void> {
+    this.wanted = seekers;
+  }
 }
 
 interface Peer {
@@ -275,6 +281,18 @@ describe('Messaging over internet and mesh transports', () => {
 
     await sendText(alice.sdk, bob.sdk, 'still here');
     expect(await receive(bob.sdk, alice.sdk, 1)).toEqual(['still here']);
+  });
+
+  it('asks the mesh for the next message and the ones likely to follow', async () => {
+    await bob.sdk.messages.fetch();
+    const session = sessionOf(bob.sdk);
+    const [next] = session.getMessageBoardReadKeys();
+    const ahead = session.getMessageBoardLookaheadKeys();
+    expect(ahead).toHaveLength(3);
+    expect(bob.mesh.wanted).toEqual([next, ...ahead]);
+
+    await alice.sdk.closeSession();
+    expect(alice.mesh.wanted).toEqual([]);
   });
 
   it('accepts announcements pushed by a transport', async () => {

@@ -352,6 +352,12 @@ export class SessionManagerWrapper {
    */
   feed_incoming_message_board_read(seeker: Uint8Array, ciphertext: Uint8Array, our_sk: UserSecretKeys): ReceiveMessageOutput | undefined;
   /**
+   * Gets the seekers of the messages after the next one from each peer, for
+   * transports that request messages ahead of time (JS-owned Uint8Arrays, see
+   * `get_message_board_read_keys`).
+   */
+  get_message_board_lookahead_keys(): Array<any>;
+  /**
    * Creates a new session manager with the given configuration.
    */
   constructor(config: SessionConfig);
@@ -503,6 +509,7 @@ export interface InitOutput {
   readonly sessionmanagerwrapper_feed_incoming_announcement: (a: number, b: number, c: number, d: number, e: number) => number;
   readonly sessionmanagerwrapper_feed_incoming_message_board_read: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
   readonly sessionmanagerwrapper_from_encrypted_blob: (a: number, b: number, c: number) => [number, number, number];
+  readonly sessionmanagerwrapper_get_message_board_lookahead_keys: (a: number) => any;
   readonly sessionmanagerwrapper_get_message_board_read_keys: (a: number) => any;
   readonly sessionmanagerwrapper_new: (a: number) => number;
   readonly sessionmanagerwrapper_peer_discard: (a: number, b: number, c: number) => [number, number];

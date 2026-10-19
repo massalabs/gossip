@@ -654,6 +654,20 @@ impl SessionManagerWrapper {
         array
     }
 
+    /// Gets the seekers of the messages after the next one from each peer, for
+    /// transports that request messages ahead of time (JS-owned Uint8Arrays, see
+    /// `get_message_board_read_keys`).
+    pub fn get_message_board_lookahead_keys(&self) -> js_sys::Array {
+        let seekers = self.inner.get_message_board_lookahead_keys();
+        let array = js_sys::Array::new();
+        for seeker in seekers {
+            let js_seeker = js_sys::Uint8Array::new_with_length(seeker.len() as u32);
+            js_seeker.copy_from(&seeker);
+            array.push(&js_seeker);
+        }
+        array
+    }
+
     /// Sends a message to a peer.
     pub fn send_message(
         &mut self,
