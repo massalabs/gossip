@@ -49,13 +49,13 @@ mkdir -p "$TMP/headers"
 echo "[1/3] cargo build (aarch64-apple-ios + aarch64-apple-ios-sim)..."
 for target in aarch64-apple-ios aarch64-apple-ios-sim; do
     rustup target add "$target" >/dev/null
-    cargo build -p gossip-mobile --target "$target" -j "${JOBS:-3}" ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
+    cargo build --locked -p gossip-mobile --target "$target" -j "${JOBS:-3}" ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
 done
 DEVICE_LIB="$CARGO_TARGET_DIR/aarch64-apple-ios/$TARGET_DIR/libgossip_mobile.a"
 SIM_LIB="$CARGO_TARGET_DIR/aarch64-apple-ios-sim/$TARGET_DIR/libgossip_mobile.a"
 
 echo "[2/3] UniFFI Swift bindings..."
-cargo run -q -p gossip-mobile --features bindgen --bin uniffi-bindgen -j "${JOBS:-3}" -- \
+cargo run --locked -q -p gossip-mobile --features bindgen --bin uniffi-bindgen -j "${JOBS:-3}" -- \
     generate --library "$DEVICE_LIB" --language swift --out-dir "$TMP/swift" --no-format
 cp "$TMP/swift/GossipMobileFFI.h" "$TMP/headers/"
 cp "$TMP/swift/GossipMobileFFI.modulemap" "$TMP/headers/module.modulemap"

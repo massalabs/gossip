@@ -91,7 +91,7 @@ for abi in "${ABI_LIST[@]}"; do
     cc="$TOOLCHAIN/${clang_target}${API}-clang"
     upper="$(echo "$env_target" | tr '[:lower:]' '[:upper:]')"
     export "CC_${env_target}=$cc" "AR_${env_target}=$TOOLCHAIN/llvm-ar" "CARGO_TARGET_${upper}_LINKER=$cc"
-    cargo build -p gossip-mobile --target "$target" -j "${JOBS:-3}" \
+    cargo build --locked -p gossip-mobile --target "$target" -j "${JOBS:-3}" \
         ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
     so="$CARGO_TARGET_DIR/$target/$TARGET_DIR/libgossip_mobile.so"
     if ! file "$so" | grep -q "$expected"; then
@@ -105,7 +105,7 @@ done
 
 echo "[2/2] UniFFI Kotlin bindings..."
 mkdir -p "$TMP_BINDINGS"
-cargo run -q -p gossip-mobile --features bindgen --bin uniffi-bindgen -j "${JOBS:-3}" -- \
+cargo run --locked -q -p gossip-mobile --features bindgen --bin uniffi-bindgen -j "${JOBS:-3}" -- \
     generate --library "$LIB" --language kotlin --out-dir "$TMP_BINDINGS" --no-format
 
 # Install only what changed, so Gradle's fingerprint stays stable.
