@@ -248,6 +248,12 @@ interface Decrypted {
 
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
+/**
+ * How long a pushed message waits for its seeker to come up: the sessions'
+ * maximum message age, past which nobody could still send it.
+ */
+const PUSHED_MESSAGE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
 const logger = new Logger('MessageService');
 export class MessageService {
   private messageProtocol: IMessageProtocol;
@@ -306,6 +312,18 @@ export class MessageService {
     this.queries = queries;
   }
 
+  /**
+   * Accepts messages a transport pushed instead of being polled for (a mesh
+   * node). They are kept until the fetch loop reaches their seeker, so one
+   * that arrives before its predecessor is not lost. Returns how many were new.
+   */
+  async ingestMessages(messages: EncryptedMessage[]): Promise<number> {
+    const added =
+      await this.queries.pendingEncryptedMessages.insertNew(messages);
+    if (added > 0) await this.fetchMessages();
+    return added;
+  }
+
   /** What the transports can reach; transports that cannot tell are taken as online. */
   getConnectivity(): TransportConnectivity {
     return this.messageProtocol.getConnectivity?.() ?? 'internet';
@@ -331,6 +349,8 @@ export class MessageService {
       let iterations = 0;
       let newMessagesCount = 0;
       let seekers: Uint8Array[] = [];
+      // every seeker waited on during this fetch, to drop pushed messages once read
+      const waitedSeekers = new Map<string, Uint8Array>();
 
       while (true) {
         seekers = this.session.getMessageBoardReadKeys();
@@ -353,8 +373,32 @@ export class MessageService {
           break;
         }
 
-        const encryptedMessages =
-          await this.messageProtocol.fetchMessages(seekers);
+        for (const seeker of seekers) {
+          waitedSeekers.set(encodeToBase64(seeker), seeker);
+        }
+
+        // Messages pushed by a transport wait in the inbox until their seeker
+        // comes up; they are read after the fetched ones, so the first copy of a
+        // message the network served is offered first.
+        let encryptedMessages: EncryptedMessage[] = [];
+        let networkError: unknown;
+        try {
+          encryptedMessages = await this.messageProtocol.fetchMessages(seekers);
+        } catch (error) {
+          networkError = error;
+        }
+        const pushed =
+          await this.queries.pendingEncryptedMessages.getBySeekers(seekers);
+        if (networkError !== undefined && pushed.length === 0) {
+          if (iterations === 0) throw networkError;
+          break;
+        }
+        encryptedMessages = encryptedMessages.concat(
+          pushed.map(row => ({
+            seeker: row.seeker,
+            ciphertext: row.ciphertext,
+          }))
+        );
         previousSeekers = currentSeekers;
 
         if (encryptedMessages.length === 0) {
@@ -396,6 +440,21 @@ export class MessageService {
         this.eventEmitter.emit(SdkEventType.SEEKERS_UPDATED, seekers);
       } catch (error) {
         log.error('failed to update active seekers', error);
+      }
+
+      try {
+        // a seeker waited on and then left behind has been read
+        for (const seeker of seekers) {
+          waitedSeekers.delete(encodeToBase64(seeker));
+        }
+        await this.queries.pendingEncryptedMessages.deleteBySeekers([
+          ...waitedSeekers.values(),
+        ]);
+        await this.queries.pendingEncryptedMessages.deleteFetchedBefore(
+          new Date(Date.now() - PUSHED_MESSAGE_TTL_MS)
+        );
+      } catch (error) {
+        log.error('failed to clean pushed messages', error);
       }
 
       if (newMessagesCount > 0) {
@@ -1241,26 +1300,21 @@ export class MessageService {
           // session manager in `wasm/sessions/src/session_manager.rs`
           // and `session.rs`):
           //   - Window where network landed but persist did NOT:
-          //     B has advanced its peer-ratchet to the next expected
-          //     seeker. On A's restart, state is restored to the
-          //     pre-crash counter. A's send loop re-runs the row
-          //     (still WAITING_SESSION) and re-encrypts with the
-          //     OLD counter → produces a seeker B no longer expects
-          //     → B's `feed_incoming_message_board_read` finds no
-          //     matching peer and silently ignores the duplicate.
-          //     **No session kill.** The session-close branch in
-          //     `session_manager.rs:642` only fires after a peer is
-          //     matched AND `try_feed_incoming_message` returns None
-          //     (decrypt failure on a matched session) — neither
-          //     condition is met for a stale-seeker retry.
-          //   - Side-effect: A's row stays WAITING_SESSION and is
-          //     retried on every session refresh. The `acknowledged
-          //     _seekers` field of the next message B sends back
-          //     to A includes the seeker A originally published
-          //     (which B did receive successfully), and A's send
-          //     loop uses that to mark the row SENT and stop
-          //     retrying. So the "stuck retry" is self-healing as
-          //     soon as the conversation has any back-traffic.
+          //     on A's restart, state is restored to the pre-crash
+          //     ratchet and the row (still WAITING_SESSION) is
+          //     re-encrypted. The seeker comes from the restored seeker
+          //     keypair, so it is the SAME seeker with DIFFERENT bytes
+          //     (and a different next seeker inside).
+          //     * If B already read the first copy, B has moved on and
+          //       ignores the second: no session kill. But A's chain now
+          //       continues from the second copy, which B never read, so
+          //       B stops finding A's messages until a re-announcement.
+          //     * If B has not read it yet, which copy B sees depends on
+          //       the store: one value per seeker on a single node, but
+          //       a mesh can carry both. B reads whichever comes first.
+          //     A durable persist before the network write would close
+          //     this window at the cost of latency; READY retries below
+          //     already resend the stored bytes unchanged.
           //
           // Promise.all rejects on either failure:
           //   - Network failed → caught below, row → READY with

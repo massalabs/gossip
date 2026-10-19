@@ -19,6 +19,7 @@ import type {
   IMessageProtocol,
   MessageProtocolResponse,
 } from '../../src/api/messageProtocol/types';
+import type { SessionModule } from '../../src/wasm/session';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
 import { getTestStorageConfig } from '../testDb';
 
@@ -142,6 +143,11 @@ async function receive(
   return texts(owner, contact);
 }
 
+function sessionOf(sdk: GossipSdk): SessionModule {
+  return (sdk as unknown as { state: { session: SessionModule } }).state
+    .session;
+}
+
 describe('Messaging over internet and mesh transports', () => {
   let internetStore: MockMessageProtocol;
   let meshStore: MockMessageProtocol;
@@ -228,5 +234,72 @@ describe('Messaging over internet and mesh transports', () => {
       'over the internet',
       'over the mesh',
     ]);
+  });
+
+  it('reads pushed messages that arrive before their predecessors', async () => {
+    // Alice reaches neither store: capture what she sends instead
+    const captured: EncryptedMessage[] = [];
+    alice.internet.down = true;
+    const sendOnMesh = meshStore.sendMessage.bind(meshStore);
+    meshStore.sendMessage = async message => {
+      captured.push(message);
+    };
+    await sendText(alice.sdk, bob.sdk, 'first');
+    await sendText(alice.sdk, bob.sdk, 'second');
+    await sendText(alice.sdk, bob.sdk, 'third');
+    meshStore.sendMessage = sendOnMesh;
+    expect(captured).toHaveLength(3);
+
+    bob.internet.down = true;
+    bob.mesh.down = true;
+    await bob.sdk.messages.ingestMessages([captured[2]]);
+    await bob.sdk.messages.ingestMessages([captured[1], captured[1]]);
+    expect(await texts(bob.sdk, alice.sdk)).toEqual([]);
+    await bob.sdk.messages.ingestMessages([captured[0]]);
+    expect(await receive(bob.sdk, alice.sdk, 3)).toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
+  });
+
+  it('ignores junk posted at a seeker instead of closing the session', async () => {
+    const [seeker] = sessionOf(bob.sdk).getMessageBoardReadKeys();
+    await bob.sdk.messages.ingestMessages([
+      { seeker, ciphertext: new Uint8Array([1, 2, 3]) },
+    ]);
+    await bob.sdk.messages.fetch();
+    expect(bob.sdk.discussions.getStatus(alice.sdk.userId)).toBe(
+      SessionStatus.Active
+    );
+
+    await sendText(alice.sdk, bob.sdk, 'still here');
+    expect(await receive(bob.sdk, alice.sdk, 1)).toEqual(['still here']);
+  });
+
+  it('accepts announcements pushed by a transport', async () => {
+    const carol = await openPeer(internetStore, meshStore);
+    try {
+      carol.internet.down = true;
+      const captured: Uint8Array[] = [];
+      const announceOnMesh = meshStore.sendAnnouncement.bind(meshStore);
+      meshStore.sendAnnouncement = async announcement => {
+        captured.push(announcement);
+        return '0';
+      };
+      await carol.sdk.contacts.add(bob.sdk.userId, 'Bob', bob.sdk.publicKeys);
+      const contact = await carol.sdk.contacts.get(bob.sdk.userId);
+      const started = await carol.sdk.discussions.start(contact!);
+      expect(started.success).toBe(true);
+      meshStore.sendAnnouncement = announceOnMesh;
+      expect(captured.length).toBeGreaterThan(0);
+
+      bob.internet.down = true;
+      bob.mesh.down = true;
+      await bob.sdk.announcements.ingestAnnouncements(captured);
+      expect(await bob.sdk.discussions.get(carol.sdk.userId)).toBeDefined();
+    } finally {
+      await carol.sdk.destroy();
+    }
   });
 });
