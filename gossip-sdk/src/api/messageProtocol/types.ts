@@ -79,4 +79,10 @@ export interface IMessageProtocol {
 
   /** Current reachability; transports that omit it are assumed online. */
   getConnectivity?(): TransportConnectivity;
+
+  /**
+   * For transports that run several paths: which kinds of path took the last
+   * send at `seeker` ('internet', 'mesh'), read once.
+   */
+  takeAcceptedBy?(seeker: Uint8Array): ('internet' | 'mesh')[] | undefined;
 }
