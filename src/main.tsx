@@ -11,7 +11,12 @@ import { useAppStore } from './stores/appStore';
 import { establishFirstInstallCreationGrant } from './hooks/useProfileLoader';
 import { protocolConfig } from './config/protocol';
 import { SECURE_STORAGE_ENABLED } from './config/features';
-import { attachMeshArrivals, startMeshTransport } from './services/meshNode';
+import {
+  attachMeshArrivals,
+  createMeshTransport,
+  isMeshEnabled,
+  startMesh,
+} from './services/meshNode';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
@@ -69,8 +74,9 @@ configureAppLogging();
 const isNative = Capacitor.isNativePlatform();
 
 async function bootstrap() {
-  // Null unless the mesh is on: the SDK then builds its default REST transport.
-  const meshTransport = await startMeshTransport();
+  // Null where the mesh is unavailable: the SDK then builds its default REST
+  // transport. Elsewhere the mesh member stays off until the user turns it on.
+  const meshTransport = createMeshTransport();
   const sdk = await createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     messageProtocol: meshTransport?.messageProtocol,
@@ -88,6 +94,14 @@ async function bootstrap() {
 
   if (meshTransport) {
     await attachMeshArrivals(sdk, meshTransport.mesh);
+    if (await isMeshEnabled()) {
+      // No permission or no Bluetooth: the app runs on REST alone, as before.
+      await startMesh(sdk).catch(error => {
+        if (import.meta.env.DEV) {
+          logger.warn('[MeshNode] mesh not started', error);
+        }
+      });
+    }
   }
 
   await initSafeArea();

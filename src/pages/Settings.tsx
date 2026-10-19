@@ -28,6 +28,7 @@ import {
   Clock,
   MessageSquare,
   Download,
+  Bluetooth,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -37,6 +38,7 @@ import { useNClicksTrigger } from '../hooks/useNClicksTrigger';
 import AccountBackup from '../components/account/AccountBackup';
 import ShareContact from '../components/settings/ShareContact';
 import UsernameEditModal from '../components/settings/UsernameEditModal';
+import { isMeshAvailable } from '../services/meshNode';
 
 enum SettingsView {
   MAIN = 'MAIN',
@@ -290,6 +292,17 @@ const Settings = (): React.ReactElement => {
             onClick={() => navigate(ROUTES.settingsSecurity())}
           />
         </div>
+
+        {/* Offline mesh (native only) */}
+        {isMeshAvailable() && (
+          <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
+            <SettingsRow
+              icon={<Bluetooth />}
+              label={t('menu.mesh')}
+              onClick={() => navigate(ROUTES.settingsMesh())}
+            />
+          </div>
+        )}
 
         {/* Web 3 Group */}
         <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
