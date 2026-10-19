@@ -227,6 +227,33 @@ export interface SendMessageResult {
  */
 const DELAYED_MESSAGE_MS = 10 * 60 * 1000;
 
+/**
+ * Clock skew tolerated before a sender's date is treated as ahead of ours.
+ * Beyond it, or when the session flags the message stale (dated before the
+ * previous one, or past the age window), the message is placed at the time
+ * we read it: otherwise the sender's clock alone would decide where it lands
+ * in the conversation, anywhere in the past or pinned below later messages.
+ */
+const FUTURE_DATED_MESSAGE_MS = 60 * 1000;
+
+/**
+ * Where an incoming message sits in the conversation, and whether to mark it
+ * delayed. `now` is when we read it.
+ */
+export function placeIncomingMessage(
+  sentAt: Date,
+  stale: boolean,
+  now: number
+): { timestamp: Date; delayed: boolean; untrustedSentAt: boolean } {
+  const untrustedSentAt =
+    stale || sentAt.getTime() > now + FUTURE_DATED_MESSAGE_MS;
+  return {
+    timestamp: untrustedSentAt ? new Date(now) : sentAt,
+    delayed: untrustedSentAt || now - sentAt.getTime() > DELAYED_MESSAGE_MS,
+    untrustedSentAt,
+  };
+}
+
 interface Decrypted {
   content: string;
   sentAt: Date;
@@ -778,6 +805,11 @@ export class MessageService {
           continue;
         }
 
+        const reactionAt = placeIncomingMessage(
+          message.sentAt,
+          !!message.stale,
+          Date.now()
+        ).timestamp;
         const id = await this.queries.messages.insert({
           messageId: message.messageId,
           ownerUserId,
@@ -786,7 +818,7 @@ export class MessageService {
           type: MessageType.REACTION,
           direction: MessageDirection.INCOMING,
           status: MessageStatus.DELIVERED,
-          timestamp: message.sentAt,
+          timestamp: reactionAt,
           metadata: serializeMetadata({}),
           reactionOf: serializeReactionOf(message.reactionOf),
         });
@@ -800,7 +832,7 @@ export class MessageService {
           type: MessageType.REACTION,
           direction: MessageDirection.INCOMING,
           status: MessageStatus.DELIVERED,
-          timestamp: message.sentAt,
+          timestamp: reactionAt,
           reactionOf: message.reactionOf,
         });
 
@@ -849,10 +881,20 @@ export class MessageService {
         }
       }
 
-      const delayed =
-        !!message.stale ||
-        Date.now() - message.sentAt.getTime() > DELAYED_MESSAGE_MS;
-      const incomingMetadata = delayed ? { delayed: true } : {};
+      const placed = placeIncomingMessage(
+        message.sentAt,
+        !!message.stale,
+        Date.now()
+      );
+      // the sender's own date stays available when it was not used
+      const incomingMetadata = placed.delayed
+        ? {
+            delayed: true,
+            ...(placed.untrustedSentAt && {
+              sentAt: message.sentAt.getTime(),
+            }),
+          }
+        : {};
       const incomingMsg: Omit<Message, 'id'> = {
         messageId: message.messageId,
         ownerUserId,
@@ -861,7 +903,7 @@ export class MessageService {
         type: message.type,
         direction: MessageDirection.INCOMING,
         status: MessageStatus.DELIVERED,
-        timestamp: message.sentAt,
+        timestamp: placed.timestamp,
         metadata: incomingMetadata,
         replyTo: message.replyTo,
         forwardOf: message.forwardOf,
@@ -875,7 +917,7 @@ export class MessageService {
         type: message.type,
         direction: MessageDirection.INCOMING,
         status: MessageStatus.DELIVERED,
-        timestamp: message.sentAt,
+        timestamp: placed.timestamp,
         metadata: serializeMetadata(incomingMetadata),
         replyTo: serializeReplyTo(message.replyTo),
         forwardOf: serializeForwardOf(message.forwardOf),
@@ -886,7 +928,7 @@ export class MessageService {
       await this.queries.discussions.updateById(discussion.id, {
         lastMessageId: id,
         lastMessageContent: message.content,
-        lastMessageTimestamp: message.sentAt,
+        lastMessageTimestamp: placed.timestamp,
         updatedAt: now,
         lastSyncTimestamp: now,
       });
