@@ -52,8 +52,12 @@ class ChaosProtocol implements IMessageProtocol {
     await this.store.sendMessage(message);
   }
 
+  /** The announcement board is out of reach, as for a mesh-only node. */
+  noBoard = false;
+
   async sendAnnouncement(announcement: Uint8Array): Promise<string> {
     await this.step();
+    if (this.noBoard) throw new Error('no board');
     return this.store.sendAnnouncement(announcement);
   }
 
@@ -62,6 +66,7 @@ class ChaosProtocol implements IMessageProtocol {
     cursor?: string
   ): Promise<BulletinItem[]> {
     await this.step();
+    if (this.noBoard) throw new Error('no board');
     let items = await this.store.fetchAnnouncements(limit, cursor);
     if (this.duplicate) items = items.concat(items);
     return items;
@@ -283,16 +288,36 @@ describe('Messaging over internet and mesh transports', () => {
     expect(await receive(bob.sdk, alice.sdk, 1)).toEqual(['still here']);
   });
 
-  it('asks the mesh for the next message and the ones likely to follow', async () => {
+  it('asks the mesh for the next messages and for addressed re-announcements', async () => {
     await bob.sdk.messages.fetch();
     const session = sessionOf(bob.sdk);
     const [next] = session.getMessageBoardReadKeys();
     const ahead = session.getMessageBoardLookaheadKeys();
     expect(ahead).toHaveLength(3);
-    expect(bob.mesh.wanted).toEqual([next, ...ahead]);
+    const mailboxes = session.getReannouncementMailboxKeys();
+    expect(mailboxes).toHaveLength(1);
+    expect(bob.mesh.wanted).toEqual([next, ...ahead, ...mailboxes]);
 
     await alice.sdk.closeSession();
     expect(alice.mesh.wanted).toEqual([]);
+  });
+
+  it('brings a re-announcement to a contact who cannot reach the board', async () => {
+    for (const path of [alice.internet, alice.mesh, bob.internet, bob.mesh]) {
+      path.noBoard = true;
+    }
+    const reset = await alice.sdk.discussions.createSessionForContact(
+      bob.sdk.userId,
+      new Uint8Array(0)
+    );
+    expect(reset.success).toBe(true);
+    expect(internetStore.getStoredAnnouncements()).toHaveLength(2);
+
+    const fetched = await bob.sdk.announcements.fetch();
+    expect(fetched.newAnnouncementsCount).toBe(1);
+
+    await sendText(alice.sdk, bob.sdk, 'new session');
+    expect(await receive(bob.sdk, alice.sdk, 1)).toEqual(['new session']);
   });
 
   it('accepts announcements pushed by a transport', async () => {

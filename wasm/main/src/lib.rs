@@ -451,6 +451,35 @@ pub struct ReceiveMessageOutput {
     stale: bool,
 }
 
+/// Announcement for a peer, with the board entry that carries it to a peer we
+/// already exchanged announcements with.
+#[wasm_bindgen]
+pub struct AddressedAnnouncement {
+    announcement: Vec<u8>,
+    mailbox: Option<sessions::ReannouncementPost>,
+}
+
+#[wasm_bindgen]
+impl AddressedAnnouncement {
+    /// The announcement bytes to post to the announcement board.
+    #[wasm_bindgen(getter)]
+    pub fn announcement(&self) -> Vec<u8> {
+        self.announcement.clone()
+    }
+
+    /// Seeker of the board entry carrying the announcement, if any.
+    #[wasm_bindgen(getter)]
+    pub fn mailbox_seeker(&self) -> Option<Vec<u8>> {
+        self.mailbox.as_ref().map(|post| post.seeker.clone())
+    }
+
+    /// Signed entry to post at `mailbox_seeker` like a message, if any.
+    #[wasm_bindgen(getter)]
+    pub fn mailbox_data(&self) -> Option<Vec<u8>> {
+        self.mailbox.as_ref().map(|post| post.data.clone())
+    }
+}
+
 /// Result from feeding an incoming announcement.
 #[wasm_bindgen]
 pub struct AnnouncementResult {
@@ -591,6 +620,47 @@ impl SessionManagerWrapper {
             &our_sk.inner,
             user_data.to_vec(),
         )
+    }
+
+    /// Same as `establish_outgoing_session`, also returning the board entry that
+    /// carries the announcement to a peer we already exchanged announcements with.
+    pub fn establish_outgoing_session_addressed(
+        &mut self,
+        peer_pk: &UserPublicKeys,
+        our_pk: &UserPublicKeys,
+        our_sk: &UserSecretKeys,
+        user_data: &[u8],
+    ) -> AddressedAnnouncement {
+        let (announcement, mailbox) = self.inner.establish_outgoing_session_addressed(
+            &peer_pk.inner,
+            &our_pk.inner,
+            &our_sk.inner,
+            user_data.to_vec(),
+        );
+        AddressedAnnouncement {
+            announcement,
+            mailbox,
+        }
+    }
+
+    /// Gets the seekers where peers would post their next announcement to us
+    /// (JS-owned Uint8Arrays, see `get_message_board_read_keys`).
+    pub fn get_reannouncement_mailbox_keys(&self) -> js_sys::Array {
+        let seekers = self.inner.get_reannouncement_mailbox_keys();
+        let array = js_sys::Array::new();
+        for seeker in seekers {
+            let js_seeker = js_sys::Uint8Array::new_with_length(seeker.len() as u32);
+            js_seeker.copy_from(&seeker);
+            array.push(&js_seeker);
+        }
+        array
+    }
+
+    /// Returns the announcement carried by an entry read at a re-announcement
+    /// mailbox seeker, if it is signed by the seeker key; feed it to
+    /// `feed_incoming_announcement`.
+    pub fn open_reannouncement_mailbox_read(&self, seeker: &[u8], data: &[u8]) -> Option<Vec<u8>> {
+        self.inner.open_reannouncement_mailbox_read(seeker, data)
     }
 
     /// Feeds an incoming announcement from the blockchain.

@@ -14,7 +14,10 @@ import {
 } from '../db/index.js';
 import { toDiscussion } from '../utils/discussions.js';
 import { decodeUserId, encodeUserId } from '../utils/userId.js';
-import { IMessageProtocol } from '../api/messageProtocol/index.js';
+import {
+  IMessageProtocol,
+  type EncryptedMessage,
+} from '../api/messageProtocol/index.js';
 import { UserPublicKeys, SessionStatus } from '../wasm/bindings.js';
 import { SessionModule, sessionStatusToString } from '../wasm/session.js';
 import { Logger } from '../utils/logs.js';
@@ -25,6 +28,14 @@ import { Result } from '../utils/type.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { RefreshService } from './refresh.js';
 import { Queries } from '../db/queries/index.js';
+
+/** How many links of a peer's chain of addressed announcements one fetch follows. */
+const MAX_ADDRESSED_ROUNDS = 5;
+
+/** An announcement ready to post, and the entry addressing it to the peer if any. */
+export type EstablishedAnnouncement = Awaited<
+  ReturnType<SessionModule['establishOutgoingSessionAddressed']>
+>;
 
 const logger = new Logger('AnnouncementService');
 
@@ -89,12 +100,31 @@ export class AnnouncementService {
     this.persistFlusher = flusher;
   }
 
-  async sendAnnouncement(announcement: Uint8Array): Promise<{
+  /**
+   * Posts an announcement to the board and, when one is given, the board
+   * entry addressing it to the peer. Only the board post decides success: a
+   * peer running an older version never looks at the addressed entry.
+   */
+  async sendAnnouncement(
+    announcement: Uint8Array,
+    mailbox?: { seeker: Uint8Array; data: Uint8Array }
+  ): Promise<{
     success: boolean;
     counter?: string;
     error?: string;
   }> {
     const log = logger.forMethod('sendAnnouncement');
+
+    if (mailbox) {
+      try {
+        await this.messageProtocol.sendMessage({
+          seeker: mailbox.seeker,
+          ciphertext: mailbox.data,
+        });
+      } catch (error) {
+        log.warn('addressed copy not sent', error);
+      }
+    }
 
     try {
       const counter = await this.messageProtocol.sendAnnouncement(announcement);
@@ -112,19 +142,20 @@ export class AnnouncementService {
   async establishSession(
     contactPublicKeys: UserPublicKeys,
     payloadBytes?: Uint8Array
-  ): Promise<Result<Uint8Array, Error>> {
+  ): Promise<Result<EstablishedAnnouncement, Error>> {
     const log = logger.forMethod('establishSession');
 
     const contactUserId = encodeUserId(contactPublicKeys.derive_id());
 
     // CRITICAL: await to ensure session state is persisted before returning
-    const announcement = await this.session.establishOutgoingSession(
-      contactPublicKeys,
-      payloadBytes
-    );
-
-    if (announcement.length === 0) {
-      log.error('empty announcement returned', { contactUserId });
+    let established: EstablishedAnnouncement;
+    try {
+      established = await this.session.establishOutgoingSessionAddressed(
+        contactPublicKeys,
+        payloadBytes
+      );
+    } catch (error) {
+      log.error('empty announcement returned', { contactUserId, error });
       return {
         success: false,
         error: new Error(EstablishSessionError),
@@ -133,9 +164,10 @@ export class AnnouncementService {
 
     log.info('announcement prepared for outgoing session', {
       contactUserId,
-      bytes: announcement.length,
+      bytes: established.announcement.length,
+      addressed: established.mailbox !== undefined,
     });
-    return { success: true, data: announcement };
+    return { success: true, data: established };
   }
 
   async processOutgoingAnnouncements(discussions: Discussion[]): Promise<void> {
@@ -172,7 +204,10 @@ export class AnnouncementService {
       }
 
       // Send the announcement and handle updates after transaction
-      const result = await this.sendAnnouncement(announcement_bytes);
+      const result = await this.sendAnnouncement(
+        announcement_bytes,
+        discussion.sendAnnouncement.mailbox
+      );
 
       // update discussion state after sending
       const latest = await this.queries.discussions.getById(discussion.id);
@@ -188,6 +223,7 @@ export class AnnouncementService {
         await this.queries.discussions.updateById(discussion.id, {
           sendAnnouncement: serializeSendAnnouncement({
             announcement_bytes,
+            mailbox: discussion.sendAnnouncement.mailbox,
             when_to_send: new Date(
               Date.now() + this.config.announcements.retryDelayMs
             ),
@@ -227,6 +263,7 @@ export class AnnouncementService {
 
     this.isProcessingAnnouncements = true;
     try {
+      const addressedCount = await this._fetchAddressedAnnouncements();
       const pending = await this.queries.pendingAnnouncements.getAll();
       const successfullyProcessedPendingIds: number[] = [];
 
@@ -292,7 +329,7 @@ export class AnnouncementService {
 
         return {
           success: errors.length === 0 || newAnnouncementsCount > 0,
-          newAnnouncementsCount,
+          newAnnouncementsCount: newAnnouncementsCount + addressedCount,
           error: errors.length > 0 ? errors.join(', ') : undefined,
         };
       }
@@ -347,7 +384,7 @@ export class AnnouncementService {
 
       return {
         success: errors.length === 0 || newAnnouncementsCount > 0,
-        newAnnouncementsCount,
+        newAnnouncementsCount: newAnnouncementsCount + addressedCount,
         error: errors.length > 0 ? errors.join(', ') : undefined,
       };
     } catch (error) {
@@ -445,6 +482,53 @@ export class AnnouncementService {
 
     const next = numbers.length ? Math.max(...numbers) + 1 : 1;
     return `New Request ${next}`;
+  }
+
+  /**
+   * Reads announcements peers addressed to us at the entries only the two of
+   * us can find, following each chain while it moves. Covers re-announcements
+   * a transport cannot bring through the board, such as a mesh.
+   */
+  private async _fetchAddressedAnnouncements(): Promise<number> {
+    const log = logger.forMethod('_fetchAddressedAnnouncements');
+    let processed = 0;
+    for (let round = 0; round < MAX_ADDRESSED_ROUNDS; round++) {
+      const mailboxes = this.session.getReannouncementMailboxKeys();
+      if (mailboxes.length === 0) break;
+
+      let entries: EncryptedMessage[] = [];
+      try {
+        entries = await this.messageProtocol.fetchMessages(mailboxes);
+      } catch (error) {
+        log.debug('addressed announcements not fetched', error);
+      }
+      const pushed =
+        await this.queries.pendingEncryptedMessages.getBySeekers(mailboxes);
+      entries = entries.concat(
+        pushed.map(row => ({ seeker: row.seeker, ciphertext: row.ciphertext }))
+      );
+
+      let advanced = false;
+      for (const entry of entries) {
+        const announcement = this.session.openReannouncementMailboxRead(
+          entry.seeker,
+          entry.ciphertext
+        );
+        if (!announcement) continue;
+        const result = await this._processIncomingAnnouncement(announcement);
+        if (result.success && result.contactUserId) {
+          processed++;
+          advanced = true;
+        }
+      }
+      if (pushed.length > 0) {
+        await this.queries.pendingEncryptedMessages.deleteBySeekers(
+          pushed.map(row => row.seeker)
+        );
+      }
+      if (!advanced) break;
+    }
+    return processed;
   }
 
   private async _processIncomingAnnouncement(

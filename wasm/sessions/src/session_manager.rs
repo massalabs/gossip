@@ -97,6 +97,7 @@ use crate::{
     session::{
         FeedIncomingMessageError, FeedIncomingMessageOutput, IncomingInitiationRequest,
         OutgoingInitiationRequest, SendOutgoingMessageOutput, Session,
+        reannouncement_mailbox_keypair,
     },
     utils::timestamp_millis,
 };
@@ -119,6 +120,13 @@ fn validated_session_ciphertext_len(ciphertext_len: u64) -> Option<usize> {
         return None;
     }
     usize::try_from(ciphertext_len).ok()
+}
+
+/// A board entry carrying an announcement to a peer we already exchanged
+/// announcements with; post `data` at `seeker` like a message.
+pub struct ReannouncementPost {
+    pub seeker: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 /// Result from processing an incoming announcement.
@@ -599,6 +607,73 @@ impl SessionManager {
         let peer_info = self.peers.entry(peer_id.clone()).or_default();
         peer_info.latest_outgoing_init_request = Some(outgoing_initiation_request);
         announcement_bytes
+    }
+
+    /// Like [`establish_outgoing_session`](Self::establish_outgoing_session), and also
+    /// returns a board entry carrying the announcement when we already exchanged
+    /// announcements with this peer.
+    ///
+    /// The entry sits at a seeker only the two of us can compute (see
+    /// [`get_reannouncement_mailbox_keys`](Self::get_reannouncement_mailbox_keys)), so a
+    /// transport that cannot download the whole announcement board, such as a mesh,
+    /// can still bring a re-announcement to the peer. The announcement must still be
+    /// posted to the board for peers that do not watch these entries.
+    pub fn establish_outgoing_session_addressed(
+        &mut self,
+        peer_pk: &auth::UserPublicKeys,
+        our_pk: &auth::UserPublicKeys,
+        our_sk: &auth::UserSecretKeys,
+        user_data: Vec<u8>,
+    ) -> (Vec<u8>, Option<ReannouncementPost>) {
+        // the entry follows the pair of announcements the peer knows: computed
+        // before ours is replaced
+        let mailbox = self.peers.get(&peer_pk.derive_id()).and_then(|peer_info| {
+            Some(reannouncement_mailbox_keypair(
+                &peer_info.latest_outgoing_init_request.as_ref()?.seeker_seed,
+                &peer_info.latest_incoming_init_request.as_ref()?.seeker_seed,
+            ))
+        });
+        let announcement = self.establish_outgoing_session(peer_pk, our_pk, our_sk, user_data);
+        let post = mailbox.map(|keypair| {
+            let seeker = Session::compute_seeker(&keypair.get_public_key());
+            ReannouncementPost {
+                data: Session::sign_board_entry(&keypair, &seeker, &announcement),
+                seeker,
+            }
+        });
+        (announcement, post)
+    }
+
+    /// Seekers where peers we exchanged announcements with would post their next
+    /// announcement to us. A value found there is opened with
+    /// [`open_reannouncement_mailbox_read`](Self::open_reannouncement_mailbox_read)
+    /// and fed to [`feed_incoming_announcement`](Self::feed_incoming_announcement),
+    /// which moves the seeker to the next entry of the chain.
+    pub fn get_reannouncement_mailbox_keys(&self) -> Vec<Vec<u8>> {
+        self.peers
+            .values()
+            .filter_map(|peer_info| {
+                let keypair = reannouncement_mailbox_keypair(
+                    &peer_info.latest_incoming_init_request.as_ref()?.seeker_seed,
+                    &peer_info.latest_outgoing_init_request.as_ref()?.seeker_seed,
+                );
+                Some(Session::compute_seeker(&keypair.get_public_key()))
+            })
+            .collect()
+    }
+
+    /// Returns the announcement carried by an entry read at one of the
+    /// [`get_reannouncement_mailbox_keys`](Self::get_reannouncement_mailbox_keys)
+    /// seekers, if it is signed by the seeker key. Changes no state.
+    pub fn open_reannouncement_mailbox_read(&self, seeker: &[u8], data: &[u8]) -> Option<Vec<u8>> {
+        if !self
+            .get_reannouncement_mailbox_keys()
+            .iter()
+            .any(|mailbox| mailbox.as_slice() == seeker)
+        {
+            return None;
+        }
+        Session::authenticate_incoming_message(seeker, data)
     }
 
     pub fn peer_discard(&mut self, peer_id: &UserId) {
@@ -2375,6 +2450,115 @@ mod tests {
                 .map(|b| format!("{b:02x}"))
                 .collect::<String>(),
             "091ef0d43dae792fd5e5284d1af05ad244c73fc66764e7d0ab60076358405a85"
+        );
+    }
+
+    #[test]
+    fn test_reannouncement_reaches_peer_through_mailbox_chain() {
+        let mut alice_manager = SessionManager::new(create_test_config());
+        let mut bob_manager = SessionManager::new(create_test_config());
+        let (alice_pk, alice_sk) = generate_test_keypair();
+        let (bob_pk, bob_sk) = generate_test_keypair();
+
+        // first contact: nothing to address yet
+        let (alice_announcement, post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            vec![],
+        );
+        assert!(post.is_none());
+        bob_manager.feed_incoming_announcement(&alice_announcement, &bob_pk, &bob_sk);
+        let (bob_announcement, post) =
+            bob_manager.establish_outgoing_session_addressed(&alice_pk, &bob_pk, &bob_sk, vec![]);
+        assert!(post.is_none());
+        alice_manager.feed_incoming_announcement(&bob_announcement, &alice_pk, &alice_sk);
+
+        // Alice re-announces twice; Bob gets neither from the board
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let (first, first_post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            b"again".to_vec(),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let (second, second_post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            b"and again".to_vec(),
+        );
+        let (first_post, second_post) = (first_post.unwrap(), second_post.unwrap());
+
+        // Bob follows the chain: only the first entry is where he looks
+        assert_eq!(
+            bob_manager.get_reannouncement_mailbox_keys(),
+            vec![first_post.seeker.clone()]
+        );
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&second_post.seeker, &second_post.data)
+                .is_none()
+        );
+        let opened = bob_manager
+            .open_reannouncement_mailbox_read(&first_post.seeker, &first_post.data)
+            .unwrap();
+        assert_eq!(opened, first);
+        let result = bob_manager
+            .feed_incoming_announcement(&opened, &bob_pk, &bob_sk)
+            .unwrap();
+        assert_eq!(result.user_data, b"again");
+
+        assert_eq!(
+            bob_manager.get_reannouncement_mailbox_keys(),
+            vec![second_post.seeker.clone()]
+        );
+        let opened = bob_manager
+            .open_reannouncement_mailbox_read(&second_post.seeker, &second_post.data)
+            .unwrap();
+        assert_eq!(opened, second);
+        bob_manager
+            .feed_incoming_announcement(&opened, &bob_pk, &bob_sk)
+            .unwrap();
+
+        // the sessions agree again
+        let output = alice_manager
+            .send_message(&bob_pk.derive_id(), b"back")
+            .unwrap();
+        let received = bob_manager
+            .feed_incoming_message_board_read(&output.seeker, &output.data, &bob_sk)
+            .expect("sessions agree after the re-announcements");
+        assert_eq!(received.message, b"back");
+    }
+
+    #[test]
+    fn test_reannouncement_mailbox_rejects_unsigned_entries() {
+        let (mut alice_manager, bob_manager, (alice_pk, alice_sk), (bob_pk, _)) =
+            established_pair();
+        let (_, post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            vec![],
+        );
+        let post = post.unwrap();
+        let mut tampered = post.data.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&post.seeker, &tampered)
+                .is_none()
+        );
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&post.seeker, b"junk")
+                .is_none()
+        );
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&post.seeker, &post.data)
+                .is_some()
         );
     }
 }

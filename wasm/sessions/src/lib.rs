@@ -224,5 +224,5 @@ mod utils;
 pub use session::{FeedIncomingMessageOutput, SendOutgoingMessageOutput};
 pub use session::{IncomingInitiationRequest, OutgoingInitiationRequest, Session};
 pub use session_manager::{
-    AnnouncementResult, SessionManager, SessionManagerConfig, SessionStatus,
+    AnnouncementResult, ReannouncementPost, SessionManager, SessionManagerConfig, SessionStatus,
 };

@@ -309,10 +309,11 @@ export class DiscussionService {
       await this.queries.discussions.updateById(discussion.id!, {
         weAccepted: true,
         sendAnnouncement: serializeSendAnnouncement({
-          announcement_bytes: sessionResult.data,
+          announcement_bytes: sessionResult.data.announcement,
+          mailbox: sessionResult.data.mailbox,
           when_to_send: now,
         }),
-        initiationAnnouncement: sessionResult.data,
+        initiationAnnouncement: sessionResult.data.announcement,
         updatedAt: now,
       });
 
@@ -342,7 +343,7 @@ export class DiscussionService {
       };
     }
 
-    return { success: true, data: sessionResult.data };
+    return { success: true, data: sessionResult.data.announcement };
   }
 
   // ─────────────────────────────────────────────────────────────────
