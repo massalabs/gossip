@@ -61,6 +61,10 @@ final class CoreBluetoothMeshRadio: NSObject, MeshRadio {
     private var links: [Int: Link] = [:]
     private var centralLinkByPeer: [UUID: Int] = [:]
     private var peripheralLinkByCentral: [UUID: Int] = [:]
+    /// Centrals whose link closed, until when they are ignored. A peripheral
+    /// cannot disconnect a central, so a closed link only stops being used and
+    /// a hostile central could otherwise subscribe again at once.
+    private var inboundCooldownUntil: [UUID: TimeInterval] = [:]
     /// Discovered peripherals must be retained for CoreBluetooth to connect to them.
     private var discovered: [UUID: CBPeripheral] = [:]
     private var connecting: [UUID: (peripheral: CBPeripheral, started: TimeInterval)] = [:]
@@ -178,6 +182,9 @@ final class CoreBluetoothMeshRadio: NSObject, MeshRadio {
         case .peripheral:
             if let central = link.central, peripheralLinkByCentral[central.identifier] == link.id {
                 peripheralLinkByCentral.removeValue(forKey: central.identifier)
+            }
+            if let central = link.central {
+                inboundCooldownUntil[central.identifier] = now() + MeshConstants.inboundCooldown
             }
         }
         link.queue.clear()
@@ -517,8 +524,14 @@ extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
                            didSubscribeTo characteristic: CBCharacteristic) {
         guard running, characteristic.uuid == MeshConstants.chunkCharacteristicUUID,
               peripheralLinkByCentral[central.identifier] == nil else { return }
-        guard allLinks().count + connecting.count < MeshConstants.maxLinks else {
-            // Over the cap: never used, so the central's handshake times out and it moves on.
+        let current = now()
+        inboundCooldownUntil = inboundCooldownUntil.filter { $0.value > current }
+        let inbound = allLinks().filter { $0.role == .peripheral }.count
+        guard allLinks().count + connecting.count < MeshConstants.maxLinks,
+              inbound < MeshConstants.maxInboundLinks,
+              inboundCooldownUntil[central.identifier] == nil else {
+            // Over a cap or cooling down: never used, so the central's handshake
+            // times out and it moves on.
             return
         }
         let id = nextLinkId
@@ -542,7 +555,8 @@ extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         for request in requests where request.characteristic.uuid == MeshConstants.chunkCharacteristicUUID {
-            guard let value = request.value,
+            // a chunk is one plain write: anything at an offset is refused
+            guard request.offset == 0, let value = request.value,
                   let id = peripheralLinkByCentral[request.central.identifier] else { continue }
             listener?.onFrameIn(linkId: id, frame: value)
         }

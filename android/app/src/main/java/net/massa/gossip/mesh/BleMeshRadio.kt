@@ -75,6 +75,7 @@ class BleMeshRadio(
     private val handler = Handler(thread.looper)
     private val bluetoothManager = context.getSystemService(BluetoothManager::class.java)
     private val selector = NeighbourSelector(random = random)
+    private val inboundGate = InboundGate()
     private val nextLinkId = AtomicInteger(1)
 
     // Read from any thread by sendFrame/linkCount, written on the radio thread only.
@@ -294,6 +295,12 @@ class BleMeshRadio(
             offset: Int,
             value: ByteArray?,
         ) {
+            if (preparedWrite || offset != 0) {
+                if (responseNeeded) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, offset, null)
+                }
+                return
+            }
             if (responseNeeded) {
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             }
@@ -312,6 +319,13 @@ class BleMeshRadio(
             offset: Int,
             value: ByteArray?,
         ) {
+            // a chunk is one plain write: long (prepared) writes and offsets are refused
+            if (preparedWrite || offset != 0) {
+                if (responseNeeded) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, offset, null)
+                }
+                return
+            }
             if (responseNeeded) {
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             }
@@ -338,7 +352,10 @@ class BleMeshRadio(
         if (newState == BluetoothProfile.STATE_CONNECTED) {
             // The server callback also reports the connections this phone opened as
             // central; cancelling one of those would drop that link too.
-            if (!isCentralTo(address) && (!running || busyCount() >= MeshConstants.MAX_LINKS)) {
+            if (!isCentralTo(address) &&
+                (!running || busyCount() >= MeshConstants.MAX_LINKS ||
+                    !inboundGate.admit(address, inboundCount(), SystemClock.elapsedRealtime()))
+            ) {
                 gattServer?.cancelConnection(device)
                 return
             }
@@ -453,7 +470,8 @@ class BleMeshRadio(
                     ?: continue
                 pendingCentral[address] = Pending(SystemClock.elapsedRealtime(), gatt)
             } catch (e: IllegalArgumentException) {
-                Log.w(TAG, "Bad address from scan", e)
+                // the exception message holds the address: not logged
+                Log.w(TAG, "Bad address from scan")
             }
         }
     }
@@ -597,6 +615,8 @@ class BleMeshRadio(
 
     private fun busyCount(): Int = links.size + pendingCentral.size + pendingPeripheral.size
 
+    private fun inboundCount(): Int = pendingPeripheral.size + links.values.count { it.role == Role.PERIPHERAL }
+
     private fun linkFor(address: String, role: Role): Link? {
         val link = linkByAddress[address]?.let { links[it] } ?: return null
         return if (link.role == role) link else null
@@ -619,6 +639,7 @@ class BleMeshRadio(
         if (linkByAddress[link.address] == link.id) linkByAddress.remove(link.address)
         link.queue.clear()
         selector.onDisconnected(link.address, SystemClock.elapsedRealtime())
+        if (link.role == Role.PERIPHERAL) inboundGate.onClosed(link.address, SystemClock.elapsedRealtime())
         listener?.onLinkDown(link.id)
         scheduleEvaluate()
     }
@@ -722,7 +743,7 @@ class BleMeshRadio(
                     try {
                         bluetoothManager?.adapter?.getRemoteDevice(address)?.let { gattServer?.cancelConnection(it) }
                     } catch (e: IllegalArgumentException) {
-                        Log.w(TAG, "Bad pending address", e)
+                        Log.w(TAG, "Bad pending address")
                     }
                 }
             }
