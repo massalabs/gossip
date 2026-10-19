@@ -36,11 +36,21 @@ export interface ReceivedMessage {
   user_id: Uint8Array;
   timestamp: number;
   acknowledged_seekers: Uint8Array[];
+  /** Older than the configured age, or than the previous message: delayed in transit. */
+  stale: boolean;
 }
+
+/**
+ * A session configuration, or a function building one. WASM consumes a
+ * SessionConfig when it uses it, so only a function lets the module apply the
+ * same limits again to a manager restored from a blob.
+ */
+export type SessionConfigSource = SessionConfig | (() => SessionConfig);
 
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;
   private onPersist?: () => Promise<void>; // Async callback for persistence
+  private configFactory?: () => SessionConfig;
   public ourPk: UserPublicKeys;
   public ourSk: UserSecretKeys;
   public userId: Uint8Array;
@@ -49,7 +59,7 @@ export class SessionModule {
   constructor(
     userKeys: UserKeys,
     onPersist?: () => Promise<void>,
-    config?: SessionConfig
+    config?: SessionConfigSource
   ) {
     let ourPk: UserPublicKeys | undefined;
     let ourSk: UserSecretKeys | undefined;
@@ -61,8 +71,15 @@ export class SessionModule {
       const userIdEncoded = encodeUserId(userId);
 
       // SessionManagerWrapper consumes the SessionConfig WASM wrapper.
+      // Without a factory, a caller-built config applies only to new managers.
+      this.configFactory =
+        typeof config === 'function'
+          ? config
+          : config
+            ? undefined
+            : () => SessionConfig.new_default();
       sessionManager = new SessionManagerWrapper(
-        config ?? SessionConfig.new_default()
+        typeof config === 'object' ? config : this.configFactory!()
       );
 
       this.ourPk = ourPk;
@@ -118,6 +135,10 @@ export class SessionModule {
         encryptedSession,
         encryptionKey
       );
+      // The blob carries the limits it was created with; apply the current ones.
+      if (this.configFactory) {
+        this.sessionManager.set_config(this.configFactory());
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : JSON.stringify(error);
@@ -247,6 +268,7 @@ export class SessionModule {
       acknowledged_seekers: copyOutMany(
         result.acknowledged_seekers as Uint8Array[]
       ),
+      stale: result.stale,
     };
     result.free();
 

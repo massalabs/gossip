@@ -518,6 +518,15 @@ export class ReceiveMessageOutput {
         return ret;
     }
     /**
+     * Whether the sender's timestamp is older than the configured maximum age or than
+     * the previous message: authentic and in order, but possibly delayed in transit.
+     * @returns {boolean}
+     */
+    get stale() {
+        const ret = wasm.receivemessageoutput_stale(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Gets the received message contents.
      * @returns {Uint8Array}
      */
@@ -628,13 +637,21 @@ export class SessionConfig {
     /**
      * Creates a default configuration with sensible defaults:
      * - Announcement age: 1 week
-     * - Announcement future: 1 minute
-     * - Message age: 1 week
-     * - Message future: 1 minute
+     * - Announcement future: 1 hour
+     * - Message age: 2 weeks
+     * - Message future: 1 day
      * - Session inactivity: 1 week
      * - Keep-alive interval: 1 day
      * - Max lag: 10000 messages
      * - Max peer lag before keep-alive: 8 messages
+     *
+     * The clock windows allow for store-and-forward delivery: a phone that relays
+     * over Bluetooth while offline has no time source, and a clock set by hand can be
+     * off by a whole time zone. A message dated beyond the future window is not lost,
+     * only left to be read again later; one older than the age window is delivered and
+     * flagged stale. Two weeks matches the network's retention, past which a message
+     * cannot be fetched anyway. Announcements keep a tighter future window because a
+     * future-dated announcement blocks the sender's later, correctly dated ones.
      * @returns {SessionConfig}
      */
     static new_default() {
@@ -687,6 +704,16 @@ export class SessionManagerWrapper {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_sessionmanagerwrapper_free(ptr, 0);
+    }
+    /**
+     * Replaces the configuration, which a manager restored from a blob otherwise keeps
+     * from when it was created.
+     * @param {SessionConfig} config
+     */
+    set_config(config) {
+        _assertClass(config, SessionConfig);
+        var ptr0 = config.__destroy_into_raw();
+        wasm.sessionmanagerwrapper_set_config(this.__wbg_ptr, ptr0);
     }
     /**
      * Discards a peer and all associated session state.

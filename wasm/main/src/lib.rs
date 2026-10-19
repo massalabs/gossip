@@ -55,20 +55,28 @@ impl SessionConfig {
 
     /// Creates a default configuration with sensible defaults:
     /// - Announcement age: 1 week
-    /// - Announcement future: 1 minute
-    /// - Message age: 1 week
-    /// - Message future: 1 minute
+    /// - Announcement future: 1 hour
+    /// - Message age: 2 weeks
+    /// - Message future: 1 day
     /// - Session inactivity: 1 week
     /// - Keep-alive interval: 1 day
     /// - Max lag: 10000 messages
     /// - Max peer lag before keep-alive: 8 messages
+    ///
+    /// The clock windows allow for store-and-forward delivery: a phone that relays
+    /// over Bluetooth while offline has no time source, and a clock set by hand can be
+    /// off by a whole time zone. A message dated beyond the future window is not lost,
+    /// only left to be read again later; one older than the age window is delivered and
+    /// flagged stale. Two weeks matches the network's retention, past which a message
+    /// cannot be fetched anyway. Announcements keep a tighter future window because a
+    /// future-dated announcement blocks the sender's later, correctly dated ones.
     pub fn new_default() -> Self {
         Self {
             inner: sessions::SessionManagerConfig {
                 max_incoming_announcement_age_millis: 604_800_000, // 1 week
-                max_incoming_announcement_future_millis: 60_000,   // 1 minute
-                max_incoming_message_age_millis: 604_800_000,      // 1 week
-                max_incoming_message_future_millis: 60_000,        // 1 minute
+                max_incoming_announcement_future_millis: 3_600_000, // 1 hour
+                max_incoming_message_age_millis: 1_209_600_000,    // 2 weeks
+                max_incoming_message_future_millis: 86_400_000,    // 1 day
                 max_session_inactivity_millis: 604_800_000,        // 1 week
                 keep_alive_interval_millis: 86_400_000,            // 1 day
                 max_session_lag_length: 10000,
@@ -440,6 +448,7 @@ pub struct ReceiveMessageOutput {
     timestamp: f64,
     acknowledged_seekers: js_sys::Array,
     user_id: Vec<u8>,
+    stale: bool,
 }
 
 /// Result from feeding an incoming announcement.
@@ -496,6 +505,13 @@ impl ReceiveMessageOutput {
     pub fn user_id(&self) -> Vec<u8> {
         self.user_id.clone()
     }
+
+    /// Whether the sender's timestamp is older than the configured maximum age or than
+    /// the previous message: authentic and in order, but possibly delayed in transit.
+    #[wasm_bindgen(getter)]
+    pub fn stale(&self) -> bool {
+        self.stale
+    }
 }
 
 /// Session manager wrapper for WebAssembly.
@@ -522,6 +538,12 @@ impl SessionManagerWrapper {
         let inner = sessions::SessionManager::from_encrypted_blob(encrypted_blob, &key.inner)
             .ok_or_else(|| JsValue::from_str("Failed to decrypt session manager"))?;
         Ok(Self { inner })
+    }
+
+    /// Replaces the configuration, which a manager restored from a blob otherwise keeps
+    /// from when it was created.
+    pub fn set_config(&mut self, config: SessionConfig) {
+        self.inner.set_config(config.inner);
     }
 
     /// Serializes and encrypts the session manager into a blob.
@@ -681,6 +703,7 @@ impl SessionManagerWrapper {
                     timestamp: output.timestamp as f64,
                     acknowledged_seekers,
                     user_id: output.user_id.clone(),
+                    stale: output.stale,
                 }
             })
     }
