@@ -206,6 +206,78 @@ export class SessionModule {
   }
 
   /**
+   * Like establishOutgoingSession, also returning the board entry that carries
+   * the announcement to a peer we already exchanged announcements with: post
+   * it like a message so a transport that cannot download the whole
+   * announcement board (a mesh) can still deliver it.
+   */
+  async establishOutgoingSessionAddressed(
+    peerPk: UserPublicKeys,
+    userData?: Uint8Array
+  ): Promise<{
+    announcement: Uint8Array;
+    mailbox?: { seeker: Uint8Array; data: Uint8Array };
+  }> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    const result = this.sessionManager.establish_outgoing_session_addressed(
+      peerPk,
+      this.ourPk,
+      this.ourSk,
+      userData ?? new Uint8Array(0)
+    );
+    const announcement = copyOut(result.announcement);
+    const seeker = result.mailbox_seeker;
+    const data = result.mailbox_data;
+    result.free();
+
+    if (announcement.length === 0) {
+      throw new Error(
+        'Failed to establish outgoing session. Session manager returned empty announcement bytes.'
+      );
+    }
+
+    await this.persistIfNeeded();
+    return {
+      announcement,
+      mailbox:
+        seeker && data
+          ? { seeker: copyOut(seeker), data: copyOut(data) }
+          : undefined,
+    };
+  }
+
+  /** Seekers where peers would post their next announcement to us. */
+  getReannouncementMailboxKeys(): Array<Uint8Array> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    return copyOutMany(this.sessionManager.get_reannouncement_mailbox_keys());
+  }
+
+  /**
+   * The announcement carried by an entry read at a re-announcement mailbox,
+   * if it is signed by the mailbox key. Changes no state.
+   */
+  openReannouncementMailboxRead(
+    seeker: Uint8Array,
+    data: Uint8Array
+  ): Uint8Array | undefined {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    const opened = this.sessionManager.open_reannouncement_mailbox_read(
+      seeker,
+      data
+    );
+    return opened ? copyOut(opened) : undefined;
+  }
+
+  /**
    * Feed an incoming announcement into the session manager
    * @returns AnnouncementResult containing the announcer's public keys, timestamp, and user data, or undefined if invalid
    */

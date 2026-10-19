@@ -182,7 +182,7 @@ pub struct IncomingInitiationRequest {
     /// Timestamp when the peer created this announcement (milliseconds since Unix epoch)
     pub(crate) timestamp_millis: u128,
     /// Peer's random seed used to derive their initial seeker keypair via KDF
-    seeker_seed: [u8; 32],
+    pub(crate) seeker_seed: [u8; 32],
 }
 
 impl IncomingInitiationRequest {
@@ -260,7 +260,7 @@ pub struct OutgoingInitiationRequest {
     agraphon_announcement: crypto_agraphon::OutgoingAnnouncement,
     pub(crate) timestamp_millis: u128,
     /// Random seed for deriving initial seeker keypair
-    seeker_seed: [u8; 32],
+    pub(crate) seeker_seed: [u8; 32],
 }
 
 impl OutgoingInitiationRequest {
@@ -325,6 +325,28 @@ impl OutgoingInitiationRequest {
             },
         )
     }
+}
+
+/// Keypair of the board entry where the sender of the announcement with
+/// `sender_seed` posts its next announcement to the peer whose latest announcement
+/// had `receiver_seed`.
+///
+/// Only the two peers know both seeds, so the entry is unlinkable for anyone else,
+/// and both can sign it, as with message seekers. Each new announcement from the
+/// sender moves the entry, so the receiver follows a chain of them.
+pub(crate) fn reannouncement_mailbox_keypair(
+    sender_seed: &[u8; 32],
+    receiver_seed: &[u8; 32],
+) -> massa_signature::KeyPair {
+    let mut kdf = crypto_kdf::Extract::new(b"session.reannounce.salt---------");
+    kdf.input_item(sender_seed.as_slice());
+    kdf.input_item(receiver_seed.as_slice());
+    let expander = kdf.finalize();
+    // Massa keypair format: [version_byte, 32_secret_key_bytes]
+    let mut key = Zeroizing::new([0u8; 33]);
+    expander.expand(b"session.reannounce.key", &mut key[1..]);
+    massa_signature::KeyPair::from_bytes(key.as_slice())
+        .expect("Failed to derive re-announcement keypair")
 }
 
 /// An established session between two peers.
@@ -471,7 +493,7 @@ impl Session {
         Self::derive_following_seeker_keypair(keypair)
     }
 
-    fn compute_seeker(seeker_public_key: &massa_signature::PublicKey) -> Vec<u8> {
+    pub(crate) fn compute_seeker(seeker_public_key: &massa_signature::PublicKey) -> Vec<u8> {
         // Hash the public key bytes to get a fixed-size identifier
         let public_key_bytes = seeker_public_key.to_bytes();
         let hash = massa_hash::Hash::compute_from(&public_key_bytes);
@@ -555,11 +577,25 @@ impl Session {
             &self.peer_public_keys.kem_public_key,
         );
 
+        let data = Self::sign_board_entry(&seeker_keypair, &seeker, &agraphon_message_bytes);
+
+        SendOutgoingMessageOutput {
+            timestamp,
+            seeker: seeker.to_vec(),
+            data,
+        }
+    }
+
+    /// Wraps `payload` as a board entry at `seeker`, signed by the seeker keypair:
+    /// `[pk_len, seeker_pk, sig_len, signature, payload]`. Nodes accept the entry
+    /// only if `seeker` commits to the public key and the signature verifies.
+    pub(crate) fn sign_board_entry(
+        seeker_keypair: &massa_signature::KeyPair,
+        seeker: &[u8],
+        payload: &[u8],
+    ) -> Vec<u8> {
         // assemble the data to sign
-        let data_to_sign = Zeroizing::new(Self::compute_seeker_data_to_sign(
-            &seeker,
-            &agraphon_message_bytes,
-        ));
+        let data_to_sign = Zeroizing::new(Self::compute_seeker_data_to_sign(seeker, payload));
 
         // hash the data to sign
         let hash_to_sign = massa_hash::Hash::compute_from(&data_to_sign);
@@ -571,21 +607,15 @@ impl Session {
         let signature_bytes = signature.to_bytes();
 
         // assemble the data
-        let seeker_public_key_bytes = seeker_public_key.to_bytes();
-        let data = [
+        let seeker_public_key_bytes = seeker_keypair.get_public_key().to_bytes();
+        [
             &[seeker_public_key_bytes.len() as u8],
             seeker_public_key_bytes.as_slice(),
             &[signature_bytes.len() as u8],
             signature_bytes.as_slice(),
-            agraphon_message_bytes.as_slice(),
+            payload,
         ]
-        .concat();
-
-        SendOutgoingMessageOutput {
-            timestamp,
-            seeker: seeker.to_vec(),
-            data,
-        }
+        .concat()
     }
 
     /// Returns the seeker (database key) for the next message from the peer.
@@ -641,7 +671,7 @@ impl Session {
 
     /// Checks the seeker commitment and the seeker signature, without touching any state,
     /// and returns the Agraphon message they cover.
-    fn authenticate_incoming_message(seeker: &[u8], message: &[u8]) -> Option<Vec<u8>> {
+    pub(crate) fn authenticate_incoming_message(seeker: &[u8], message: &[u8]) -> Option<Vec<u8>> {
         // decompose seeker
         let hash_len = *seeker.first()? as usize;
         let hash_bytes = seeker.get(1..1 + hash_len)?;
