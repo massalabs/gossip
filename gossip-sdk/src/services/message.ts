@@ -17,6 +17,7 @@ import { decodeUserId, encodeUserId } from '../utils/userId.js';
 import {
   IMessageProtocol,
   EncryptedMessage,
+  type TransportConnectivity,
 } from '../api/messageProtocol/index.js';
 import { SessionStatus } from '../wasm/bindings.js';
 import { SessionModule } from '../wasm/index.js';
@@ -303,6 +304,11 @@ export class MessageService {
     this.eventEmitter = eventEmitter;
     this.config = config;
     this.queries = queries;
+  }
+
+  /** What the transports can reach; transports that cannot tell are taken as online. */
+  getConnectivity(): TransportConnectivity {
+    return this.messageProtocol.getConnectivity?.() ?? 'internet';
   }
 
   setQueueManager(queueManager: QueueManager): void {

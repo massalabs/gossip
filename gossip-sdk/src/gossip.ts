@@ -169,6 +169,11 @@ export interface GossipSdkInitOptions {
   config?: DeepPartial<SdkConfig>;
   /** SQLite storage backend. Defaults to in-memory. */
   storage?: StorageConfig;
+  /**
+   * Transport for messages and announcements. Defaults to the REST node at
+   * the configured base URL; pass a CompositeMessageProtocol to add others.
+   */
+  messageProtocol?: IMessageProtocol;
 }
 
 export interface OpenSessionOptions {
@@ -259,6 +264,8 @@ class GossipSdk {
   private _discussion: DiscussionService | null = null;
   private _message: MessageService | null = null;
   private _refresh: RefreshService | null = null;
+  private _wantedSeekersListener: ((seekers: Uint8Array[]) => void) | null =
+    null;
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
 
@@ -433,7 +440,8 @@ class GossipSdk {
         logger.info('[GossipSdk] SQLite initialized');
       }
       // Create message protocol
-      const messageProtocol = createMessageProtocol();
+      const messageProtocol =
+        options.messageProtocol ?? createMessageProtocol();
 
       // Create services that don't need a session
       this._auth = new AuthService(createAuthProtocol());
@@ -446,6 +454,20 @@ class GossipSdk {
         messageProtocol,
         config,
       };
+
+      // Transports that ask other nodes for our messages (a mesh node's
+      // wanted list) follow the seekers the message fetch settles on.
+      if (messageProtocol.setWantedSeekers) {
+        this._wantedSeekersListener = seekers => {
+          messageProtocol.setWantedSeekers?.(seekers).catch(error => {
+            logger.warn('[GossipSdk] failed to update wanted seekers', error);
+          });
+        };
+        this.eventEmitter.on(
+          SdkEventType.SEEKERS_UPDATED,
+          this._wantedSeekersListener
+        );
+      }
 
       return this;
     } catch (err) {
@@ -897,6 +919,11 @@ class GossipSdk {
     // Clear message queues
     this.messageQueues.clear();
 
+    // Stop asking other nodes for the closed account's messages
+    this.state.messageProtocol.setWantedSeekers?.([]).catch(error => {
+      logger.warn('[GossipSdk] failed to clear wanted seekers', error);
+    });
+
     // Reset to initialized state
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -940,6 +967,13 @@ class GossipSdk {
     this._lifecycleCloseActive = true;
     try {
       await this.closeSessionInternal();
+      if (this._wantedSeekersListener) {
+        this.eventEmitter.off(
+          SdkEventType.SEEKERS_UPDATED,
+          this._wantedSeekersListener
+        );
+        this._wantedSeekersListener = null;
+      }
       this._queries = null;
       if (this._conn) {
         await this._conn.close();

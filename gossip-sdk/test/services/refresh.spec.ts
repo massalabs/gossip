@@ -50,6 +50,7 @@ function createRefreshMessageService(): MessageService {
     sendMessage: vi.fn().mockResolvedValue({ success: true }),
     getPendingSendCount: vi.fn().mockResolvedValue(0),
     processSendQueueForContact: vi.fn().mockResolvedValue({ success: true }),
+    getConnectivity: vi.fn().mockReturnValue('internet'),
   } as unknown as MessageService;
 }
 
@@ -333,6 +334,57 @@ describe('RefreshService', () => {
           type: MessageType.KEEP_ALIVE,
         })
       );
+    });
+
+    it('should space out keep-alives while only a mesh is reachable', async () => {
+      const mockSession = createRefreshSession(SessionStatus.Active);
+      mockSession.refresh = vi
+        .fn()
+        .mockResolvedValue([decodeUserId(REFRESH_CONTACT_USER_ID)]);
+      const mockMessageService = createRefreshMessageService();
+      mockMessageService.getConnectivity = vi.fn().mockReturnValue('mesh-only');
+
+      const refreshService = new RefreshService(
+        mockMessageService,
+        createRefreshDiscussionService(),
+        createRefreshAnnouncementService(),
+        mockSession,
+        eventEmitter,
+        getTestQueries(),
+        defaultSdkConfig
+      );
+      await getTestQueries().discussions.insert({
+        ownerUserId: REFRESH_OWNER_USER_ID,
+        contactUserId: REFRESH_CONTACT_USER_ID,
+        direction: DiscussionDirection.INITIATED,
+        weAccepted: true,
+        sendAnnouncement: null,
+        unreadCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        await refreshService.stateUpdate();
+        await refreshService.stateUpdate();
+        expect(mockMessageService.sendMessage).toHaveBeenCalledTimes(1);
+
+        vi.setSystemTime(
+          Date.now() + defaultSdkConfig.messages.meshKeepAliveIntervalMs
+        );
+        await refreshService.stateUpdate();
+        expect(mockMessageService.sendMessage).toHaveBeenCalledTimes(2);
+
+        // back online: the session's own schedule applies again
+        mockMessageService.getConnectivity = vi
+          .fn()
+          .mockReturnValue('internet');
+        await refreshService.stateUpdate();
+        expect(mockMessageService.sendMessage).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should not send keep-alive when session is Active but peer does not need it', async () => {

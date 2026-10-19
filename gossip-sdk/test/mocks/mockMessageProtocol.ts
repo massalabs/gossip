@@ -54,7 +54,7 @@ export class MockMessageProtocol implements IMessageProtocol {
     // Filter by cursor (return only announcements after this counter)
     if (cursor) {
       const cursorNum = parseInt(cursor, 10);
-      results = results.filter(a => parseInt(a.counter, 10) > cursorNum);
+      results = results.filter(a => parseInt(a.counter ?? '0', 10) > cursorNum);
     }
 
     // Apply limit

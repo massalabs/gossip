@@ -5,9 +5,20 @@
  */
 
 export type BulletinItem = {
-  counter: string;
+  /**
+   * Position on the bulletin the fetch cursor refers to. Absent for an
+   * announcement that came from another transport (see
+   * CompositeMessageProtocol): it must not move the cursor.
+   */
+  counter?: string;
   data: Uint8Array;
 };
+
+/**
+ * What the transports can reach right now. `mesh-only` means messages still
+ * move, but over a slow store-and-forward mesh where every byte counts.
+ */
+export type TransportConnectivity = 'internet' | 'mesh-only' | 'offline';
 
 export interface EncryptedMessage {
   seeker: Uint8Array;
@@ -58,4 +69,14 @@ export interface IMessageProtocol {
    * @returns MessageProtocolResponse with the new node information
    */
   changeNode(nodeUrl?: string): Promise<MessageProtocolResponse>;
+
+  /**
+   * Seekers this client currently waits on, for transports that ask other
+   * nodes for them instead of being polled (a mesh node puts them on its
+   * wanted list). Called after every message fetch.
+   */
+  setWantedSeekers?(seekers: Uint8Array[]): Promise<void>;
+
+  /** Current reachability; transports that omit it are assumed online. */
+  getConnectivity?(): TransportConnectivity;
 }
