@@ -2,6 +2,8 @@
 <full-backup-content>
     <!-- The native secure-storage redb file must not be copied to Android backup. -->
     <exclude domain="file" path="secure-storage" />
+    <!-- The mesh node's store holds blobs relayed for other people. -->
+    <exclude domain="file" path="mesh" />
     <!-- SAF capabilities are valid only on the device that granted them. -->
     <exclude domain="sharedpref" path="PortableBackupPendingOutputs.xml" />
 </full-backup-content>
