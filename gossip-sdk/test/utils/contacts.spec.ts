@@ -30,6 +30,7 @@ const publicKeys = {
 
 const fakeSession = {
   peerDiscard: vi.fn(),
+  peerLatestIncomingAnnouncementTimestamp: vi.fn(() => 1234),
 } as unknown as SessionModule;
 
 describe('Contacts utilities', () => {
@@ -153,6 +154,13 @@ describe('Contacts utilities', () => {
 
     expect(result.success).toBe(true);
     expect(fakeSession.peerDiscard).toHaveBeenCalled();
+    // replays of announcements up to the latest accepted one stay refused
+    expect(
+      await queries.discardedPeers.getFloor(
+        CONTACTS_OWNER_USER_ID,
+        CONTACTS_CONTACT_USER_ID
+      )
+    ).toBe(1234);
 
     const contacts = await queries.contacts.getByOwner(CONTACTS_OWNER_USER_ID);
     expect(contacts.length).toBe(0);

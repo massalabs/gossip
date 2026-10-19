@@ -292,9 +292,6 @@ export class SessionManagerWrapper {
    * from when it was created.
    */
   set_config(config: SessionConfig): void;
-  /**
-   * Discards a peer and all associated session state.
-   */
   peer_discard(peer_id: Uint8Array): void;
   /**
    * Sends a message to a peer.
@@ -447,6 +444,14 @@ export class SessionManagerWrapper {
    * Creates a new session manager with the given configuration.
    */
   constructor(config: SessionConfig);
+  /**
+   * Discards a peer and all associated session state.
+   * Timestamp (milliseconds) of the latest announcement accepted from a peer, if
+   * any: keep it when discarding the peer to refuse replays of older ones.
+   */
+  peer_latest_incoming_announcement_timestamp(
+    peer_id: Uint8Array
+  ): number | undefined;
   /**
    * Refreshes sessions and returns peer IDs that need keep-alive messages.
    *
@@ -694,6 +699,11 @@ export interface InitOutput {
     b: number,
     c: number
   ) => [number, number];
+  readonly sessionmanagerwrapper_peer_latest_incoming_announcement_timestamp: (
+    a: number,
+    b: number,
+    c: number
+  ) => [number, number, number, number];
   readonly sessionmanagerwrapper_peer_list: (a: number) => any;
   readonly sessionmanagerwrapper_peer_session_status: (
     a: number,

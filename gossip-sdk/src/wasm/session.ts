@@ -406,6 +406,21 @@ export class SessionModule {
   /**
    * Discard a peer and all associated session state
    */
+  /**
+   * Timestamp (ms) of the latest announcement accepted from a peer, if any:
+   * kept when the peer is discarded, to refuse replays of older ones.
+   */
+  peerLatestIncomingAnnouncementTimestamp(
+    peerId: Uint8Array
+  ): number | undefined {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+    return this.sessionManager.peer_latest_incoming_announcement_timestamp(
+      peerId
+    );
+  }
+
   async peerDiscard(peerId: Uint8Array): Promise<void> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');

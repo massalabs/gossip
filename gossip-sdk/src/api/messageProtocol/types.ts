@@ -100,6 +100,14 @@ export interface IMessageProtocol {
    */
   isMeshEnabled?(): boolean;
 
+  /**
+   * Bulletin cursors of the transports behind this one whose announcements
+   * carry no counter the SDK stores (see CompositeMessageProtocol), so they
+   * can be saved and restored across restarts.
+   */
+  exportSecondaryCursors?(): (string | undefined)[];
+  importSecondaryCursors?(cursors: (string | undefined)[]): void;
+
   /** Current reachability; transports that omit it are assumed online. */
   getConnectivity?(): TransportConnectivity;
 

@@ -732,6 +732,19 @@ impl SessionManager {
         self.peers.remove(peer_id);
     }
 
+    /// Timestamp of the latest announcement accepted from `peer_id`. Announcements
+    /// are only accepted with a newer one, so a caller that discards the peer can
+    /// keep this to refuse replays of its earlier announcements.
+    pub fn peer_latest_incoming_announcement_timestamp(&self, peer_id: &UserId) -> Option<u128> {
+        Some(
+            self.peers
+                .get(peer_id)?
+                .latest_incoming_init_request
+                .as_ref()?
+                .timestamp_millis,
+        )
+    }
+
     pub fn peer_session_status(&self, peer_id: &UserId) -> SessionStatus {
         // grab peer
         let Some(peer_info) = self.peers.get(peer_id) else {

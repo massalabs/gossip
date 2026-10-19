@@ -204,4 +204,22 @@ describe('CompositeMessageProtocol', () => {
     ).rejects.toThrow('No mesh transport');
     expect(mesh.getStoredMessages().size).toBe(0);
   });
+  it('exports and restores the cursors of the secondary transports', async () => {
+    const mesh = new MockMessageProtocol();
+    await mesh.sendAnnouncement(bytes(1));
+    await mesh.sendAnnouncement(bytes(2));
+    const first = composite(new DownProtocol(), mesh);
+    expect(await first.fetchAnnouncements()).toHaveLength(2);
+    const saved = first.exportSecondaryCursors();
+    expect(saved[0]).toBeDefined();
+
+    // a new run that restores them does not offer the same entries again
+    const second = composite(new DownProtocol(), mesh);
+    second.importSecondaryCursors(saved);
+    expect(await second.fetchAnnouncements()).toHaveLength(0);
+    // saved for other transports: ignored
+    const third = composite(new DownProtocol(), mesh);
+    third.importSecondaryCursors([...saved, 'x']);
+    expect(await third.fetchAnnouncements()).toHaveLength(2);
+  });
 });
