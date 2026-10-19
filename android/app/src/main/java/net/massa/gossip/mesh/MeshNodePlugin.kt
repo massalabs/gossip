@@ -135,7 +135,8 @@ class MeshNodePlugin : Plugin() {
             if (kind == MeshBlobKind.MESSAGE && key == null) {
                 throw IllegalArgumentException("a message needs its seeker as key")
             }
-            val result = core.sendBlob(kind, key, payload)
+            val localOnly = call.getBoolean("localOnly") ?: false
+            val result = core.sendBlob(kind, key, payload, localOnly)
             JSObject().put("id", encode(result.id)).apply { result.counter?.let { put("counter", it) } }
         }
     }
@@ -176,7 +177,10 @@ class MeshNodePlugin : Plugin() {
     @PluginMethod
     fun setWanted(call: PluginCall) {
         reply(call) { core ->
-            core.setWanted(stringList(call, "seekers").map(::decode))
+            core.setWanted(
+                stringList(call, "seekers").map(::decode),
+                stringList(call, "localSeekers").map(::decode),
+            )
             JSObject()
         }
     }
@@ -220,7 +224,6 @@ class MeshNodePlugin : Plugin() {
                 .put("uploadPending", status.uploadPending)
                 .put("wantedEntries", status.wantedEntries)
                 .put("clockOffsetMs", status.clockOffsetMs)
-                .put("peerId", status.peerId)
                 .put("radioLinks", MeshNodeBridge.linkCount())
                 .put("rustCore", MeshCoreFactory.hasRustCore())
         }
@@ -236,20 +239,26 @@ class MeshNodePlugin : Plugin() {
         )
     }
 
+    /** Withdraws the key set this node published under `hash` (blake3 of the keys, the user id). */
     @PluginMethod
     fun forgetKeys(call: PluginCall) {
         reply(call) { core ->
             val hash = decode(call.getString("hash") ?: throw IllegalArgumentException("hash is required"))
-            core.forgetKeys(hash)
-            JSObject()
+            JSObject().put("forgotten", core.forgetOwn(MeshBlobKind.KEYS, hash))
         }
     }
 
+    /** Wipes the node, running or not, and replaces its pool key. */
     @PluginMethod
     fun wipe(call: PluginCall) {
-        reply(call) { core ->
-            core.wipe()
-            JSObject()
+        replies.execute {
+            try {
+                MeshNodeBridge.wipe(context).get()
+                call.resolve()
+            } catch (e: ExecutionException) {
+                val cause = e.cause ?: e
+                call.reject(cause.message ?: "Mesh wipe failed", "NODE_ERROR", cause as? Exception)
+            }
         }
     }
 

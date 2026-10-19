@@ -3,11 +3,11 @@ package net.massa.gossip.mesh
 import android.content.Context
 
 /**
- * The mesh node core: pools, link handshakes, BLE chunking, replication, the
- * wanted list and the internet upstream. It will be the Rust `gossip-mobile`
- * crate (gossip-node repository) through UniFFI; until then [StubMeshCore]
- * stands in. Calls may block (storage, network) and are made from the
- * bridge's core thread, never from the main thread.
+ * The mesh node core: pools, link handshakes, link encryption, BLE chunking,
+ * replication, the wanted list and the internet upstream: the Rust
+ * `gossip-mobile` crate (gossip-node repository) through UniFFI, or
+ * [StubMeshCore] in a build without it. Calls may block (storage, network)
+ * and are made from the bridge's core thread, never from the main thread.
  *
  * Binary values are raw bytes here; the plugin converts them to base64 for JS.
  */
@@ -31,7 +31,11 @@ interface MeshCore {
 
     // The MeshNode plugin API.
 
-    fun sendBlob(kind: MeshBlobKind, key: ByteArray?, payload: ByteArray): MeshSendResult
+    /**
+     * Stores a blob and offers it to the mesh. A [localOnly] blob stays in the
+     * mesh: neither this phone nor a bridge that relays it uploads it.
+     */
+    fun sendBlob(kind: MeshBlobKind, key: ByteArray?, payload: ByteArray, localOnly: Boolean = false): MeshSendResult
 
     fun fetch(seekers: List<ByteArray>): List<MeshKeyValue>
 
@@ -39,23 +43,30 @@ interface MeshCore {
 
     fun getKeys(hash: ByteArray): ByteArray?
 
-    fun setWanted(seekers: List<ByteArray>)
+    /**
+     * The seekers the app waits for, and [localSeekers] it waits for only from
+     * the mesh: no bridge fetches those upstream, nor this phone.
+     */
+    fun setWanted(seekers: List<ByteArray>, localSeekers: List<ByteArray> = emptyList())
 
     fun setUpstream(urls: List<String>, bridgeEnabled: Boolean)
 
     fun status(): MeshCoreStatus
 
-    /** Deletes everything the node stored, its own blobs and relayed ones. */
-    fun wipe()
+    /**
+     * Deletes everything the node stored, its own blobs and relayed ones, and
+     * restarts it empty with [newConfigJson] (a new pool key). Throws when the
+     * restart fails.
+     */
+    fun wipe(newConfigJson: String)
 
     /**
-     * Drops the key set this node published under [hash], so the node stops
-     * serving it. TODO(gossip-mobile): wire to the node's forget-own-blob call
-     * once the UniFFI API has one; until then no core supports it and callers
-     * fall back on [wipe] or on the node's retention.
+     * Deletes a blob this node published: [key] is the seeker of a MESSAGE,
+     * blake3 of the key set (the user id) for KEYS, or the id [sendBlob]
+     * returned for an ANNOUNCEMENT. Returns whether one was deleted; copies
+     * neighbours took expire with their retention.
      */
-    fun forgetKeys(hash: ByteArray): Unit =
-        throw UnsupportedOperationException("This mesh core cannot forget published keys yet")
+    fun forgetOwn(kind: MeshBlobKind, key: ByteArray): Boolean
 }
 
 /** What the core asks of its host. May be called from any core thread. */
@@ -101,7 +112,6 @@ class MeshCoreStatus(
     val uploadPending: Long = 0,
     val wantedEntries: Long = 0,
     val clockOffsetMs: Long = 0,
-    val peerId: String = "",
 )
 
 /**

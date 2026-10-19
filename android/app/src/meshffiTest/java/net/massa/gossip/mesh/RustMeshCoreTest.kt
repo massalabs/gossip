@@ -19,6 +19,7 @@ class RustMeshCoreTest {
         val calls = mutableListOf<String>()
         var sink: FfiSink? = null
         var kind: FfiBlobKind? = null
+        var localOnly: Boolean? = null
 
         override fun start(dataDir: String, configJson: String, sink: FfiSink) {
             this.sink = sink
@@ -33,19 +34,26 @@ class RustMeshCoreTest {
         override fun frameIn(linkId: Int, frame: ByteArray) {
             sink!!.arrival(listOf(FfiKeyValue(byteArrayOf(1), frame)), listOf(byteArrayOf(9)))
         }
-        override fun sendBlob(kind: FfiBlobKind, key: ByteArray?, payload: ByteArray): FfiSendResult {
+        override fun sendBlob(kind: FfiBlobKind, key: ByteArray?, payload: ByteArray, localOnly: Boolean): FfiSendResult {
             this.kind = kind
+            this.localOnly = localOnly
             return FfiSendResult(byteArrayOf(7), "3")
         }
         override fun fetch(seekers: List<ByteArray>) = seekers.map { FfiKeyValue(it, byteArrayOf(2)) }
         override fun fetchBulletin(cursor: String?, limit: Int) = listOf(FfiBulletinItem("1", byteArrayOf(4)))
         override fun getKeys(hash: ByteArray): ByteArray? = null
-        override fun setWanted(seekers: List<ByteArray>) { calls += "setWanted ${seekers.size}" }
+        override fun setWanted(seekers: List<ByteArray>, localSeekers: List<ByteArray>) {
+            calls += "setWanted ${seekers.size} ${localSeekers.size}"
+        }
         override fun setUpstream(urls: List<String>, bridgeEnabled: Boolean) {
             calls += "setUpstream ${urls.size} $bridgeEnabled"
         }
-        override fun status() = FfiStatus(true, 2, true, true, "5", 10, 1, 4, 3, 6, -20, "P1x")
-        override fun wipe() { calls += "wipe" }
+        override fun status() = FfiStatus(true, 2, true, true, "5", 10, 1, 4, 3, 6, -20, "")
+        override fun wipe(newConfigJson: String?) { calls += "wipe $newConfigJson" }
+        override fun forgetOwn(kind: FfiBlobKind, key: ByteArray): Boolean {
+            calls += "forgetOwn $kind ${key.size}"
+            return true
+        }
     }
 
     private class RecordingSink : MeshCoreSink {
@@ -77,10 +85,13 @@ class RustMeshCoreTest {
         val node = FakeNode()
         val core = RustMeshCore(node)
         core.setUpstream(listOf("https://a"), true)
-        core.setWanted(listOf(byteArrayOf(1), byteArrayOf(2)))
+        core.setWanted(listOf(byteArrayOf(1), byteArrayOf(2)), listOf(byteArrayOf(3)))
         node.calls.clear()
-        core.wipe()
-        assertEquals(listOf("wipe", "setUpstream 1 true", "setWanted 2"), node.calls)
+        core.wipe("{\"pool_key_hex\":\"aa\"}")
+        assertEquals(
+            listOf("wipe {\"pool_key_hex\":\"aa\"}", "setUpstream 1 true", "setWanted 2 1"),
+            node.calls,
+        )
     }
 
     @Test
@@ -89,12 +100,16 @@ class RustMeshCoreTest {
         val core = RustMeshCore(node)
         val result = core.sendBlob(MeshBlobKind.KEYS, null, byteArrayOf(1))
         assertEquals(FfiBlobKind.KEYS, node.kind)
+        assertEquals(false, node.localOnly)
+        core.sendBlob(MeshBlobKind.MESSAGE, byteArrayOf(2), byteArrayOf(1), localOnly = true)
+        assertEquals(true, node.localOnly)
+        assertTrue(core.forgetOwn(MeshBlobKind.KEYS, ByteArray(32)))
+        assertEquals("forgetOwn KEYS 32", node.calls.last())
         assertEquals("3", result.counter)
         assertEquals("1", core.fetchBulletin(null, 10).single().counter)
         val status = core.status()
         assertTrue(status.running)
         assertEquals(3L, status.uploadPending)
         assertEquals(-20L, status.clockOffsetMs)
-        assertEquals("P1x", status.peerId)
     }
 }

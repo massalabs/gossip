@@ -61,7 +61,7 @@ applies them again. The node may call `closeLink` from inside `linkUp` and `fram
 
 The core must provide, beyond the plugin API (`start`, `stop`, `sendBlob`, `fetch`,
 `fetchBulletin`, `getKeys`, `setWanted`, `setUpstream`, `status`, `wipe`, and
-`forgetKeys`, which no core implements yet: see "Open work" below):
+`forgetKeys`, which calls the node's `forgetOwn` for a key set):
 
 - `linkUp`, `linkDown` and `frameIn`, called in order from one thread;
 - a sink it calls back: `sendFrame` (which may refuse when a link's queue is full),
@@ -69,6 +69,32 @@ The core must provide, beyond the plugin API (`start`, `stop`, `sendBlob`, `fetc
   connect to each other), and `arrival` (blobs for wanted seekers and relayed
   announcements, which the app feeds to `ingestMessages` and `ingestAnnouncements`);
 - chunks no larger than `mtu − 3` for each link, with the `mtu` given in `linkUp`.
+
+Links speak `GMSH.2.1`: the Rust core encrypts every link after its first message and
+gives each link a fresh peer id, so the radio moves opaque chunks and never looks inside
+them. `status().peerId` is always empty and the app does not use it.
+
+### Pool key and wipe
+
+The node keeps other people's traffic and refuses to start without a key for its pools
+(`pool_key_hex`, 32 bytes). The native layer draws one per installation and adds it to
+the configuration each time the core starts; the configuration it remembers for restarts
+never holds it.
+
+- **Android** (`MeshPoolKey.kt`): the key is wrapped by a non-exportable AES-GCM key of
+  the Android Keystore and kept in `GossipMeshPrefs`, which backups and device transfer
+  exclude.
+- **iOS** (`MeshPoolKey` in `MeshNodeBridge.swift`): a Keychain item with
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` (readable when CoreBluetooth
+  relaunches the app in the background, never in a backup or a migration), not
+  synchronizable.
+
+If the key is lost (Keystore reset), a new one is drawn and the old pools, which no
+longer open, are deleted. `wipe` replaces the key: the node destroys its key file and
+pools and restarts under the new key (`wipe(newConfigJson)`), so nothing is left wrapped
+under the old one. A node that is not running has its data directory deleted instead, so
+an account change wipes the mesh whether it is on or off. A wipe whose restart fails
+leaves the node stopped and its directory empty.
 
 ## BLE identifiers
 
@@ -181,6 +207,10 @@ neither a phone nearby nor a node can pass off other keys.
 When the account changes or the user logs out, the app wipes the node, so it no longer
 serves the previous account's keys or waits on its seekers.
 
+**Let people nearby add me** withdraws the keys after 10 minutes (or when the mesh is
+turned off) with `forgetKeys`, which deletes the node's own copy (`forgetOwn` on the key
+set's blake3 hash). Neighbours that took a copy keep it for their mesh retention.
+
 ### What stays on the mesh
 
 Lookahead seekers and addressed re-announcements exist for the mesh only. They are put
@@ -189,15 +219,16 @@ the mesh is on, through `meshOnly` routing, which the REST transport refuses. An
 addressed re-announcement mailbox moves every 6 hours and holds the announcement
 encrypted under a key of the pair, so its bytes differ from the board copy.
 
-## Open work
+The node keeps them off the internet too:
 
-- **Forgetting published keys.** `forgetKeys` rejects with `UNIMPLEMENTED` until
-  `gossip-mobile` has a call to drop a blob it published (marked `TODO(gossip-mobile)` in
-  `MeshCore.kt` and `MeshCore.swift`). Until then keys shared nearby stay on the node for
-  its retention, and on neighbours that took a copy; an account change still wipes them.
-- **Mesh-only blobs past a bridge.** The SDK never gives a mesh-only entry to the REST
-  node, but the phone's node uploads its own blobs when it reaches the internet, and a
-  bridge fetches every wanted seeker upstream. Keeping mailbox entries and their seekers
-  off the internet entirely needs a "local only" flag on blobs and wanted entries in
-  `gossip-mobile`; the 6-hour rotation and the separate ciphertext limit what leaks
-  meanwhile.
+- A `meshOnly` send becomes `sendBlob({ …, localOnly: true })`: the blob is local-only,
+  so neither this phone (not even as its own traffic) nor a bridge that relays it uploads
+  it.
+- Lookahead and mailbox seekers go to `setWanted({ seekers, localSeekers })` as
+  `localSeekers` (`setWantedSeekers(seekers, localSeekers)` in the SDK, which gives the
+  second list to mesh transports only): they are flooded flagged local-only, and no bridge,
+  nor this phone, asks an internet node for them.
+
+The flag is honoured by honest phones and bridges; a modified one can ignore it and
+upload what it relays (gossip-node `docs/MESH.md`, "Local-only blobs and seekers"). The
+mailbox rotation and the separate ciphertext still limit what that reveals.

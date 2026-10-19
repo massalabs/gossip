@@ -65,7 +65,7 @@ class StubMeshCoreTest {
         core.sendBlob(MeshBlobKind.ANNOUNCEMENT, null, bytes(2))
         core.sendBlob(MeshBlobKind.KEYS, null, bytes(3))
         assertEquals(3L, core.status().storedBlobs)
-        core.wipe()
+        core.wipe("{}")
         assertEquals(0L, core.status().storedBlobs)
         assertTrue(core.fetch(listOf(bytes(1))).isEmpty())
     }
