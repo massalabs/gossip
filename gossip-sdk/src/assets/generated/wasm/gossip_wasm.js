@@ -914,6 +914,16 @@ export class SessionManagerWrapper {
         return ret === 0 ? undefined : ReceiveMessageOutput.__wrap(ret);
     }
     /**
+     * Gets the seekers of the messages after the next one from each peer, for
+     * transports that request messages ahead of time (JS-owned Uint8Arrays, see
+     * `get_message_board_read_keys`).
+     * @returns {Array<any>}
+     */
+    get_message_board_lookahead_keys() {
+        const ret = wasm.sessionmanagerwrapper_get_message_board_lookahead_keys(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * Creates a new session manager with the given configuration.
      * @param {SessionConfig} config
      */

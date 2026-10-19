@@ -459,7 +459,15 @@ class GossipSdk {
       // wanted list) follow the seekers the message fetch settles on.
       if (messageProtocol.setWantedSeekers) {
         this._wantedSeekersListener = seekers => {
-          messageProtocol.setWantedSeekers?.(seekers).catch(error => {
+          // also the seekers peers will most likely use next, so a slow
+          // transport can bring several messages in one round trip
+          const session =
+            this.state.status === SdkStatus.SESSION_OPEN
+              ? this.state.session
+              : undefined;
+          const ahead = session?.getMessageBoardLookaheadKeys() ?? [];
+          const wanted = [...seekers, ...ahead];
+          messageProtocol.setWantedSeekers?.(wanted).catch(error => {
             logger.warn('[GossipSdk] failed to update wanted seekers', error);
           });
         };

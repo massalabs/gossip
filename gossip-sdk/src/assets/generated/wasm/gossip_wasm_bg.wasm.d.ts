@@ -37,6 +37,7 @@ export const sessionmanagerwrapper_establish_outgoing_session: (a: number, b: nu
 export const sessionmanagerwrapper_feed_incoming_announcement: (a: number, b: number, c: number, d: number, e: number) => number;
 export const sessionmanagerwrapper_feed_incoming_message_board_read: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
 export const sessionmanagerwrapper_from_encrypted_blob: (a: number, b: number, c: number) => [number, number, number];
+export const sessionmanagerwrapper_get_message_board_lookahead_keys: (a: number) => any;
 export const sessionmanagerwrapper_get_message_board_read_keys: (a: number) => any;
 export const sessionmanagerwrapper_new: (a: number) => number;
 export const sessionmanagerwrapper_peer_discard: (a: number, b: number, c: number) => [number, number];

@@ -79,6 +79,13 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 /// where hash_bytes is the massa_hash of the seeker's public key.
 const MESSAGE_SEEKER_DB_KEY: &[u8] = &[1u8];
 
+/// How many seekers past the next one a receiver watches for a peer's messages.
+pub const SEEKER_LOOKAHEAD: usize = 3;
+
+/// A sender draws a fresh seeker keypair for one message in this many (on average)
+/// and derives it from the previous one otherwise. Must divide 256.
+const SEEKER_REFRESH_ONE_IN: u8 = 4;
+
 /// Session initialization payload embedded in announcements.
 ///
 /// This is serialized, encrypted in an auth blob, and included in the announcement.
@@ -424,6 +431,46 @@ impl Session {
         }
     }
 
+    /// Seeker keypair that follows `keypair` when the sender derives it instead of
+    /// drawing a fresh one. Both sides hold every seeker keypair, so the receiver can
+    /// compute the seekers of the next messages before it reads them.
+    fn derive_following_seeker_keypair(
+        keypair: &massa_signature::KeyPair,
+    ) -> massa_signature::KeyPair {
+        let mut kdf = crypto_kdf::Extract::new(b"session.seeker.ahead.salt-------");
+        kdf.input_item(Zeroizing::new(keypair.to_bytes()).as_slice());
+        let expander = kdf.finalize();
+        // Massa keypair format: [version_byte, 32_secret_key_bytes]
+        let mut seeker_key = Zeroizing::new([0u8; 33]);
+        expander.expand(b"session.seeker.ahead.key", &mut seeker_key[1..]);
+        massa_signature::KeyPair::from_bytes(seeker_key.as_slice())
+            .expect("Failed to derive following seeker keypair")
+    }
+
+    /// Seekers the peer's messages after the next one will use, as long as the peer
+    /// keeps deriving its seeker keypairs (see [`send_outgoing_message`](Self::send_outgoing_message)).
+    ///
+    /// They let a store-and-forward transport request several messages in one round
+    /// trip; the messages are still read in order, each at
+    /// [`next_peer_message_seeker`](Self::next_peer_message_seeker). A peer running an
+    /// older version always draws fresh keypairs, so these seekers then stay empty.
+    pub fn peer_message_seekers_ahead(&self) -> Vec<Vec<u8>> {
+        let mut seekers = Vec::with_capacity(SEEKER_LOOKAHEAD);
+        let mut keypair = Self::derive_following_seeker_keypair(&self.peer_seeker_massa_keypair);
+        for _ in 0..SEEKER_LOOKAHEAD {
+            seekers.push(Self::compute_seeker(&keypair.get_public_key()));
+            keypair = Self::derive_following_seeker_keypair(&keypair);
+        }
+        seekers
+    }
+
+    #[cfg(test)]
+    pub(crate) fn derive_following_seeker_keypair_for_test(
+        keypair: &massa_signature::KeyPair,
+    ) -> massa_signature::KeyPair {
+        Self::derive_following_seeker_keypair(keypair)
+    }
+
     fn compute_seeker(seeker_public_key: &massa_signature::PublicKey) -> Vec<u8> {
         // Hash the public key bytes to get a fixed-size identifier
         let public_key_bytes = seeker_public_key.to_bytes();
@@ -466,9 +513,17 @@ impl Session {
         // get timestamp
         let timestamp = crate::utils::timestamp_millis();
 
-        // generate seeker for next message on our side
-        let mut seeker_keypair =
-            massa_signature::KeyPair::generate(0).expect("Failed to generate seeker keypair");
+        // Seeker for the next message on our side. It is usually derived from the
+        // current one, so the peer can watch the next few seekers in advance; one
+        // time in SEEKER_REFRESH_ONE_IN it is drawn fresh, which bounds how many
+        // seekers a leaked seeker key lets anyone predict.
+        let mut refresh_draw = [0u8; 1];
+        crypto_rng::fill_buffer(&mut refresh_draw);
+        let mut seeker_keypair = if refresh_draw[0] % SEEKER_REFRESH_ONE_IN == 0 {
+            massa_signature::KeyPair::generate(0).expect("Failed to generate seeker keypair")
+        } else {
+            Self::derive_following_seeker_keypair(&self.self_seeker_massa_keypair)
+        };
 
         // flip with the current seeker
         std::mem::swap(&mut seeker_keypair, &mut self.self_seeker_massa_keypair);
