@@ -212,6 +212,31 @@ describe('Messaging over internet and mesh transports', () => {
     );
   });
 
+  it('marks messages that reached only the mesh', async () => {
+    alice.internet.down = true;
+    await sendText(alice.sdk, bob.sdk, 'mesh only');
+    alice.internet.down = false;
+    await sendText(alice.sdk, bob.sdk, 'both');
+    expect(await receive(bob.sdk, alice.sdk, 2)).toEqual(['mesh only', 'both']);
+
+    const sent = (await alice.sdk.messages.getMessages(bob.sdk.userId)).filter(
+      m =>
+        m.type === MessageType.TEXT && m.direction === MessageDirection.OUTGOING
+    );
+    expect(sent.map(m => m.metadata?.via)).toEqual(['mesh', undefined]);
+    const received = (
+      await bob.sdk.messages.getMessages(alice.sdk.userId)
+    ).filter(
+      m =>
+        m.type === MessageType.TEXT && m.direction === MessageDirection.INCOMING
+    );
+    // read right away: not delayed
+    expect(received.map(m => m.metadata?.delayed)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('delivers each message once despite delays, duplicates and reordering', async () => {
     for (const path of [alice.internet, alice.mesh, bob.internet, bob.mesh]) {
       path.duplicate = true;

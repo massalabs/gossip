@@ -220,9 +220,18 @@ export interface SendMessageResult {
   error?: string;
 }
 
+/**
+ * An incoming message read this long after its sender dated it is marked
+ * `delayed` in its metadata: it travelled by store-and-forward (a mesh, a
+ * bridge) or sat on a node while we were offline.
+ */
+const DELAYED_MESSAGE_MS = 10 * 60 * 1000;
+
 interface Decrypted {
   content: string;
   sentAt: Date;
+  /** The session read it past its age limit or dated before the previous one. */
+  stale?: boolean;
   senderId: string;
   seeker: Uint8Array;
   messageId: Uint8Array; // 12-byte random ID
@@ -596,6 +605,7 @@ export class MessageService {
           decrypted.push({
             content: deserialized.content,
             sentAt: new Date(Number(out.timestamp)),
+            stale: out.stale,
             senderId: encodeUserId(out.user_id),
             seeker: msg.seeker,
             messageId: deserialized.messageId ?? new Uint8Array(),
@@ -625,6 +635,19 @@ export class MessageService {
     }
 
     return { decrypted, acknowledgedSeekers };
+  }
+
+  /**
+   * Metadata marking `msg` as sent over the mesh only (no internet node took
+   * it), for the UI to show it waits for a bridge; undefined otherwise.
+   */
+  private meshOnlyMetadata(
+    msg: Message,
+    seeker: Uint8Array
+  ): Record<string, unknown> | undefined {
+    const kinds = this.messageProtocol.takeAcceptedBy?.(seeker);
+    if (!kinds || kinds.includes('internet')) return undefined;
+    return { ...(msg.metadata ?? {}), via: 'mesh' };
   }
 
   private async storeDecryptedMessages(
@@ -826,6 +849,10 @@ export class MessageService {
         }
       }
 
+      const delayed =
+        !!message.stale ||
+        Date.now() - message.sentAt.getTime() > DELAYED_MESSAGE_MS;
+      const incomingMetadata = delayed ? { delayed: true } : {};
       const incomingMsg: Omit<Message, 'id'> = {
         messageId: message.messageId,
         ownerUserId,
@@ -835,6 +862,7 @@ export class MessageService {
         direction: MessageDirection.INCOMING,
         status: MessageStatus.DELIVERED,
         timestamp: message.sentAt,
+        metadata: incomingMetadata,
         replyTo: message.replyTo,
         forwardOf: message.forwardOf,
       };
@@ -848,7 +876,7 @@ export class MessageService {
         direction: MessageDirection.INCOMING,
         status: MessageStatus.DELIVERED,
         timestamp: message.sentAt,
-        metadata: serializeMetadata({}),
+        metadata: serializeMetadata(incomingMetadata),
         replyTo: serializeReplyTo(message.replyTo),
         forwardOf: serializeForwardOf(message.forwardOf),
       });
@@ -1404,6 +1432,7 @@ export class MessageService {
           //     mostly in tap-to-sent perception, not raw
           //     throughput on rapid bursts.
           sentCount++;
+          const freshMeshMetadata = this.meshOnlyMetadata(msg, seeker);
           log.debug('message sent (skipped READY)', {
             messageId: msg.id,
             status: MessageStatus.SENT,
@@ -1417,6 +1446,7 @@ export class MessageService {
               this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
                 ...msg,
                 status: MessageStatus.SENT,
+                ...(freshMeshMetadata && { metadata: freshMeshMetadata }),
               });
             } catch (error) {
               log.error('failed to emit message sent event', {
@@ -1438,6 +1468,9 @@ export class MessageService {
               encryptedMessage: null,
               serializedContent: null,
               whenToSend: null,
+              ...(freshMeshMetadata && {
+                metadata: serializeMetadata(freshMeshMetadata),
+              }),
             })
             .catch(error => {
               log.error(
@@ -1496,6 +1529,7 @@ export class MessageService {
             const latestRow = await this.queries.messages.getById(msg.id);
 
             let sent = false;
+            const queuedMeshMetadata = this.meshOnlyMetadata(msg, seeker);
             if (
               latestRow && // ensure the discussion has not been deleted
               latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
@@ -1505,6 +1539,9 @@ export class MessageService {
                 encryptedMessage: null,
                 serializedContent: null,
                 whenToSend: null,
+                ...(queuedMeshMetadata && {
+                  metadata: serializeMetadata(queuedMeshMetadata),
+                }),
               });
               sent = true;
             }
@@ -1527,6 +1564,7 @@ export class MessageService {
                   this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
                     ...msg,
                     status: MessageStatus.SENT,
+                    ...(queuedMeshMetadata && { metadata: queuedMeshMetadata }),
                   });
                 } catch (error) {
                   log.error('failed to emit message sent event', {

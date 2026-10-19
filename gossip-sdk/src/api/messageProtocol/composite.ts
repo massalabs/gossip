@@ -25,6 +25,9 @@ export interface CompositeTransport {
 /** How many announcement digests are remembered to drop copies from other transports. */
 const SEEN_ANNOUNCEMENTS_CAP = 4096;
 
+/** How many recent sends keep the list of transports that took them. */
+const ACCEPTED_BY_CAP = 1024;
+
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
@@ -52,6 +55,8 @@ export class CompositeMessageProtocol implements IMessageProtocol {
   private readonly seenAnnouncements = new Set<string>();
   /** Whether the latest operation on each transport succeeded. */
   private readonly reachable = new Map<IMessageProtocol, boolean>();
+  /** Transports that took each recent send, by seeker, until read. */
+  private readonly accepted = new Map<string, TransportKind[]>();
 
   constructor(
     private readonly primary: CompositeTransport,
@@ -130,6 +135,29 @@ export class CompositeMessageProtocol implements IMessageProtocol {
     if (!results.some(r => r.status === 'fulfilled')) {
       throw (results[0] as PromiseRejectedResult).reason;
     }
+    const key = encodeToBase64(message.seeker);
+    this.accepted.delete(key);
+    this.accepted.set(
+      key,
+      this.transports.flatMap((t, i) =>
+        results[i].status === 'fulfilled' ? [t.kind] : []
+      )
+    );
+    if (this.accepted.size > ACCEPTED_BY_CAP) {
+      const oldest = this.accepted.keys().next().value;
+      if (oldest !== undefined) this.accepted.delete(oldest);
+    }
+  }
+
+  /**
+   * Which transports took the last send at `seeker`, read once: the message
+   * service uses it to mark messages that only reached the mesh.
+   */
+  takeAcceptedBy(seeker: Uint8Array): TransportKind[] | undefined {
+    const key = encodeToBase64(seeker);
+    const kinds = this.accepted.get(key);
+    this.accepted.delete(key);
+    return kinds;
   }
 
   async sendAnnouncement(announcement: Uint8Array): Promise<string> {

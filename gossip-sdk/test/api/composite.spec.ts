@@ -55,6 +55,19 @@ describe('CompositeMessageProtocol', () => {
     ).rejects.toThrow('unreachable');
   });
 
+  it('tells once which transports took a send', async () => {
+    const internet = new DownProtocol();
+    const protocol = composite(internet, new MockMessageProtocol());
+
+    await protocol.sendMessage({ seeker: bytes(1), ciphertext: bytes(9) });
+    expect(protocol.takeAcceptedBy(bytes(1))).toEqual(['mesh']);
+    expect(protocol.takeAcceptedBy(bytes(1))).toBeUndefined();
+
+    internet.down = false;
+    await protocol.sendMessage({ seeker: bytes(2), ciphertext: bytes(9) });
+    expect(protocol.takeAcceptedBy(bytes(2))).toEqual(['internet', 'mesh']);
+  });
+
   it('merges exact copies and keeps distinct values in transport order', async () => {
     const internet = new MockMessageProtocol();
     const mesh = new MockMessageProtocol();
