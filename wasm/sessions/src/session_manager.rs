@@ -645,6 +645,19 @@ impl SessionManager {
         message_board_seekers
     }
 
+    /// Seekers of the messages after the next one from each peer (see
+    /// [`Session::peer_message_seekers_ahead`]), for transports that request messages
+    /// ahead of time. They are not read directly: a message fetched at one of them is
+    /// read once [`get_message_board_read_keys`](Self::get_message_board_read_keys)
+    /// reaches its seeker.
+    pub fn get_message_board_lookahead_keys(&self) -> Vec<Vec<u8>> {
+        self.peers
+            .values()
+            .filter_map(|peer_info| peer_info.active_session.as_ref())
+            .flat_map(|active_session| active_session.session.peer_message_seekers_ahead())
+            .collect()
+    }
+
     /// Reads a message found at the next seeker of `peer_id`'s active session.
     fn inner_feed_incoming_msg(
         &mut self,
@@ -2297,6 +2310,71 @@ mod tests {
         assert_eq!(
             restored.config.max_incoming_message_future_millis,
             86_400_000
+        );
+    }
+
+    #[test]
+    fn test_lookahead_seekers_predict_most_following_messages() {
+        let (mut alice_manager, mut bob_manager, (alice_pk, alice_sk), (bob_pk, bob_sk)) =
+            established_pair();
+        let mut predicted = 0;
+        let total = 100;
+        for i in 0..total {
+            let ahead = bob_manager.get_message_board_lookahead_keys();
+            assert_eq!(ahead.len(), crate::session::SEEKER_LOOKAHEAD);
+            let output = alice_manager
+                .send_message(&bob_pk.derive_id(), format!("m{i}").as_bytes())
+                .unwrap();
+            // the next message goes where Bob already looks
+            assert!(
+                bob_manager
+                    .get_message_board_read_keys()
+                    .contains(&output.seeker)
+            );
+            // the one after that was usually predicted
+            let following = alice_manager
+                .send_message(&bob_pk.derive_id(), b"following")
+                .unwrap();
+            if ahead[0] == following.seeker {
+                predicted += 1;
+            }
+            for out in [&output, &following] {
+                bob_manager
+                    .feed_incoming_message_board_read(&out.seeker, &out.data, &bob_sk)
+                    .expect("in order");
+            }
+            // Bob acknowledges, so Alice's session does not saturate
+            let ack = bob_manager
+                .send_message(&alice_pk.derive_id(), b"ack")
+                .unwrap();
+            alice_manager
+                .feed_incoming_message_board_read(&ack.seeker, &ack.data, &alice_sk)
+                .expect("ack");
+        }
+        // a fresh keypair one time in four: about three predictions in four
+        assert!(predicted > total / 2, "predicted {predicted} of {total}");
+        assert!(predicted < total, "fresh keypairs must still be drawn");
+    }
+
+    #[test]
+    fn test_lookahead_seeker_derivation_is_frozen() {
+        // Sender and receiver must agree on this derivation across versions.
+        let mut key = [0u8; 33];
+        key[1..].copy_from_slice(&[7u8; 32]);
+        let keypair = massa_signature::KeyPair::from_bytes(&key).unwrap();
+        let mut session_like = Vec::new();
+        let mut k = keypair;
+        for _ in 0..2 {
+            k = crate::session::Session::derive_following_seeker_keypair_for_test(&k);
+            session_like.push(k.get_public_key().to_bytes());
+        }
+        let digest = sha2::Sha256::digest(session_like.concat());
+        assert_eq!(
+            digest
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+            "091ef0d43dae792fd5e5284d1af05ad244c73fc66764e7d0ab60076358405a85"
         );
     }
 }
