@@ -874,7 +874,6 @@ export class SessionManagerWrapper {
     wasm.sessionmanagerwrapper_set_config(this.__wbg_ptr, ptr0);
   }
   /**
-   * Discards a peer and all associated session state.
    * @param {Uint8Array} peer_id
    */
   peer_discard(peer_id) {
@@ -1200,6 +1199,27 @@ export class SessionManagerWrapper {
     this.__wbg_ptr = ret >>> 0;
     SessionManagerWrapperFinalization.register(this, this.__wbg_ptr, this);
     return this;
+  }
+  /**
+   * Discards a peer and all associated session state.
+   * Timestamp (milliseconds) of the latest announcement accepted from a peer, if
+   * any: keep it when discarding the peer to refuse replays of older ones.
+   * @param {Uint8Array} peer_id
+   * @returns {number | undefined}
+   */
+  peer_latest_incoming_announcement_timestamp(peer_id) {
+    const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret =
+      wasm.sessionmanagerwrapper_peer_latest_incoming_announcement_timestamp(
+        this.__wbg_ptr,
+        ptr0,
+        len0
+      );
+    if (ret[3]) {
+      throw takeFromExternrefTable0(ret[2]);
+    }
+    return ret[0] === 0 ? undefined : ret[1];
   }
   /**
    * Refreshes sessions and returns peer IDs that need keep-alive messages.

@@ -127,6 +127,15 @@ export async function deleteContact(
       };
     }
 
+    // Remember where the peer's announcements stood: a mesh can bring any of
+    // them back, and the session manager forgets the peer below
+    const floor = session.peerLatestIncomingAnnouncementTimestamp(
+      decodeUserId(contactUserId)
+    );
+    if (floor !== undefined) {
+      await queries.discardedPeers.raise(ownerUserId, contactUserId, floor);
+    }
+
     // Delete contact, discussions, and messages atomically
     await queries.conn.withTransaction(async tx => {
       await queries.contacts.deleteByOwnerAndUser(

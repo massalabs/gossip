@@ -10,6 +10,8 @@ import { PendingEncryptedMessageQueries } from './pendingEncryptedMessages.js';
 import { ActiveSeekerQueries } from './activeSeekers.js';
 import { PrivateMigrationQueries } from './privateMigration.js';
 import { MessagingSessionRecoveryQueries } from './messagingSessionRecovery.js';
+import { DiscardedPeerQueries } from './discardedPeers.js';
+import { TransportCursorQueries } from './transportCursors.js';
 
 export type { AccountSettingsV1 } from './accountSettings.js';
 export type { ContactRow } from './contacts.js';
@@ -39,6 +41,8 @@ export class Queries {
   readonly activeSeekers: ActiveSeekerQueries;
   readonly privateMigration: PrivateMigrationQueries;
   readonly messagingSessionRecovery: MessagingSessionRecoveryQueries;
+  readonly discardedPeers: DiscardedPeerQueries;
+  readonly transportCursors: TransportCursorQueries;
 
   constructor(readonly conn: DatabaseConnection) {
     this.accountSettings = new AccountSettingsQueries(conn);
@@ -52,5 +56,7 @@ export class Queries {
     this.activeSeekers = new ActiveSeekerQueries(conn);
     this.privateMigration = new PrivateMigrationQueries(conn);
     this.messagingSessionRecovery = new MessagingSessionRecoveryQueries(conn);
+    this.discardedPeers = new DiscardedPeerQueries(conn);
+    this.transportCursors = new TransportCursorQueries(conn);
   }
 }

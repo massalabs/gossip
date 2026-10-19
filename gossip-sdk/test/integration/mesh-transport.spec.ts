@@ -392,4 +392,36 @@ describe('Messaging over internet and mesh transports', () => {
       await carol.sdk.destroy();
     }
   });
+  it('does not bring a deleted contact back from a replayed announcement', async () => {
+    const carol = await openPeer(internetStore, meshStore);
+    try {
+      carol.internet.down = true;
+      const captured: Uint8Array[] = [];
+      const announceOnMesh = meshStore.sendAnnouncement.bind(meshStore);
+      meshStore.sendAnnouncement = async announcement => {
+        captured.push(announcement);
+        return '0';
+      };
+      await carol.sdk.contacts.add(bob.sdk.userId, 'Bob', bob.sdk.publicKeys);
+      const contact = await carol.sdk.contacts.get(bob.sdk.userId);
+      expect((await carol.sdk.discussions.start(contact!)).success).toBe(true);
+      meshStore.sendAnnouncement = announceOnMesh;
+
+      bob.internet.down = true;
+      bob.mesh.down = true;
+      await bob.sdk.announcements.ingestAnnouncements(captured);
+      expect(await bob.sdk.contacts.get(carol.sdk.userId)).toBeDefined();
+      expect((await bob.sdk.contacts.delete(carol.sdk.userId)).success).toBe(
+        true
+      );
+
+      // a neighbour offers the same announcement again
+      await bob.sdk.announcements.ingestAnnouncements(captured);
+      await bob.sdk.announcements.fetch();
+      expect(await bob.sdk.contacts.get(carol.sdk.userId)).toBeFalsy();
+      expect(await bob.sdk.discussions.get(carol.sdk.userId)).toBeFalsy();
+    } finally {
+      await carol.sdk.destroy();
+    }
+  });
 });
