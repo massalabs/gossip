@@ -56,8 +56,11 @@ export interface MeshNodeNativePlugin extends MeshNodePlugin {
   status(): Promise<MeshNativeStatus>;
   /** Android: `bluetooth` (12+) and `location` (before 12). iOS: `bluetooth`. */
   checkPermissions(): Promise<Record<string, MeshPermissionState>>;
-  /** What this build can do, before the node is started. */
-  capabilities(): Promise<{ rustCore: boolean }>;
+  /**
+   * What this build can do, before the node is started, and the id of this
+   * installation, which backups do not carry.
+   */
+  capabilities(): Promise<{ rustCore: boolean; installId?: string }>;
   /**
    * Makes the node stop serving the key set it published under `hash`.
    * Rejects with `UNIMPLEMENTED` until the Rust node has the call.
@@ -89,6 +92,9 @@ export interface MeshSettings {
 /** Whether the native build carries the Rust node; null until probed. */
 let rustCoreAvailable: boolean | null = null;
 
+/** This installation's id from the native side, which backups do not carry. */
+let installId: string | null = null;
+
 /**
  * Asks the native plugin whether this build carries the Rust node. Without
  * it the mesh is hidden: the stand-in core relays nothing, and a radio that
@@ -100,7 +106,9 @@ export async function probeMeshAvailability(): Promise<boolean> {
     return false;
   }
   try {
-    rustCoreAvailable = (await MeshNode.capabilities()).rustCore;
+    const capabilities = await MeshNode.capabilities();
+    rustCoreAvailable = capabilities.rustCore;
+    installId = capabilities.installId || null;
   } catch {
     rustCoreAvailable = false;
   }
@@ -130,7 +138,9 @@ export async function getMeshSettings(): Promise<MeshSettings> {
   ]);
   return {
     enabled: enabled.value === 'true',
-    bridgeEnabled: bridge.value === 'true',
+    // the consent names the installation it was given on: a phone restored
+    // from a backup, or a value from before, is asked again
+    bridgeEnabled: installId !== null && bridge.value === installId,
     powerMode: MESH_POWER_MODES.includes(mode.value as MeshPowerMode)
       ? (mode.value as MeshPowerMode)
       : 'balanced',
@@ -287,7 +297,13 @@ export async function setMeshEnabled(enabled: boolean): Promise<void> {
 }
 
 export async function setMeshBridgeEnabled(enabled: boolean): Promise<void> {
-  await Preferences.set({ key: MESH_BRIDGE_KEY, value: String(enabled) });
+  if (enabled && installId === null) {
+    throw new Error('Bridging needs the native mesh node');
+  }
+  await Preferences.set({
+    key: MESH_BRIDGE_KEY,
+    value: enabled ? installId! : 'false',
+  });
   if (isMeshActive()) {
     await MeshNode.setUpstream({
       urls: [protocolConfig.baseUrl],
