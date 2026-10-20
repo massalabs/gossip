@@ -305,8 +305,9 @@ Limits:
 
 - **Timing.** Until the lock, the account is open: someone who takes the phone within the
   timeout, unlocked, gets the open account. The settings tell users to keep auto-lock at
-  5 minutes, to let 5 minutes pass (or lock from the notification) before handing the
-  phone over, and to set biometric login to the decoy's password.
+  5 minutes, and to let 5 minutes pass (or lock from the notification) before handing
+  the phone over. They do not name a decoy account, nor advise which account biometric
+  login should open.
 - **Memory.** A lock drops the wanted list and the shared keys' hashes, the native
   storage keys and the WebView, but freed memory is not zeroed; a memory image of the
   running phone taken soon after may still hold them.
