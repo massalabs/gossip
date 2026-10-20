@@ -27,6 +27,7 @@
 		FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */; };
 		FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */; };
 		D0A1C0DE2F80000100000001 /* QrScannerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000100000002 /* QrScannerPlugin.swift */; };
+		D0A1C0DE2F80000300000001 /* ContactExchangePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000300000002 /* ContactExchangePlugin.swift */; };
 		D0A1C0DE2F80000200000001 /* MeshRadio.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000002 /* MeshRadio.swift */; };
 		D0A1C0DE2F80000200000003 /* CoreBluetoothMeshRadio.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000004 /* CoreBluetoothMeshRadio.swift */; };
 		D0A1C0DE2F80000200000005 /* MeshCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000006 /* MeshCore.swift */; };
@@ -86,6 +87,7 @@
 		FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyViewController.swift; sourceTree = "<group>"; };
 		FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkObserverPlugin.swift; sourceTree = "<group>"; };
 		D0A1C0DE2F80000100000002 /* QrScannerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QrScannerPlugin.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F80000300000002 /* ContactExchangePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactExchangePlugin.swift; sourceTree = "<group>"; };
 		D0A1C0DE2F80000200000002 /* MeshRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshRadio.swift; sourceTree = "<group>"; };
 		D0A1C0DE2F80000200000004 /* CoreBluetoothMeshRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreBluetoothMeshRadio.swift; sourceTree = "<group>"; };
 		D0A1C0DE2F80000200000006 /* MeshCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshCore.swift; sourceTree = "<group>"; };
@@ -215,6 +217,7 @@
 				D0F41CEB2F73ED03003FC4E1 /* secureStorage */,
 				FAA8F09E2EE6F17300CE65AE /* networkObserver */,
 				D0A1C0DE2F80000100000003 /* qrScanner */,
+				D0A1C0DE2F80000300000003 /* contactExchange */,
 				D0A1C0DE2F80000200000F00 /* meshNode */,
 				FAA8F08F2EE6E25E00CE65AE /* backgroundRefresh */,
 				FAA8F0872EE6DCFE00CE65AE /* backgroundStorage */,
@@ -252,6 +255,14 @@
 				D0A1C0DE2F80000100000002 /* QrScannerPlugin.swift */,
 			);
 			path = qrScanner;
+			sourceTree = "<group>";
+		};
+		D0A1C0DE2F80000300000003 /* contactExchange */ = {
+			isa = PBXGroup;
+			children = (
+				D0A1C0DE2F80000300000002 /* ContactExchangePlugin.swift */,
+			);
+			path = contactExchange;
 			sourceTree = "<group>";
 		};
 		D0A1C0DE2F80000200000F00 /* meshNode */ = {
@@ -444,6 +455,7 @@
 				D0F41CFE2F73FD8B003FC4E1 /* secureStorage.swift in Sources */,
 				FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */,
 				D0A1C0DE2F80000100000001 /* QrScannerPlugin.swift in Sources */,
+				D0A1C0DE2F80000300000001 /* ContactExchangePlugin.swift in Sources */,
 				D0A1C0DE2F80000200000001 /* MeshRadio.swift in Sources */,
 				D0A1C0DE2F80000200000003 /* CoreBluetoothMeshRadio.swift in Sources */,
 				D0A1C0DE2F80000200000005 /* MeshCore.swift in Sources */,
