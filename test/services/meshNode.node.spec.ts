@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
     sendBlob: vi.fn(async () => ({ id: 'aWQ=' })),
     forgetKeys: vi.fn(async () => undefined),
     wipe: vi.fn(async () => undefined),
+    lock: vi.fn(async () => undefined),
     addListener: vi.fn(async (_event: string, handler: ArrivalHandler) => {
       state.arrival = handler;
       return { remove: async () => undefined };
@@ -80,7 +81,7 @@ import {
   setMeshBridgeEnabled,
   setMeshEnabled,
   setMeshPowerMode,
-  claimMeshForAccount,
+  lockMesh,
   wipeMesh,
 } from '../../src/services/meshNode';
 
@@ -150,26 +151,24 @@ describe('mesh transport', () => {
     expect((await getMeshSettings()).bridgeEnabled).toBe(false);
   });
 
-  it('keeps the node across a lock and wipes it for another account', async () => {
-    createMeshTransport();
-    await claimMeshForAccount('alice');
-    // the same account after a lock: nothing it received is lost
-    await claimMeshForAccount('alice');
+  it('locks the node without wiping it, and drops what it shared', async () => {
+    const transport = createMeshTransport()!;
+    await setMeshEnabled(true);
+    await transport.messageProtocol.setWantedSeekers?.([new Uint8Array([1])]);
+    await lockMesh();
+    expect(mocks.plugin.lock).toHaveBeenCalledOnce();
     expect(mocks.plugin.wipe).not.toHaveBeenCalled();
-
-    await claimMeshForAccount('bob');
-    expect(mocks.plugin.wipe).toHaveBeenCalledOnce();
-    await claimMeshForAccount('bob');
-    expect(mocks.plugin.wipe).toHaveBeenCalledOnce();
+    // the next account's session starts from an empty wanted list
+    mocks.plugin.setWanted.mockClear();
+    await setMeshEnabled(false);
+    await setMeshEnabled(true);
+    expect(mocks.plugin.setWanted).not.toHaveBeenCalled();
   });
 
-  it('tries the wipe again at the next login when it failed', async () => {
-    createMeshTransport();
-    await claimMeshForAccount('alice');
-    mocks.plugin.wipe.mockRejectedValueOnce(new Error('busy'));
-    await claimMeshForAccount('bob');
-    await claimMeshForAccount('bob');
-    expect(mocks.plugin.wipe).toHaveBeenCalledTimes(2);
+  it('deletes the account a development build recorded in the clear', async () => {
+    mocks.state.preferences.set('gossip-mesh-owner', 'alice');
+    await probeMeshAvailability();
+    expect(mocks.state.preferences.has('gossip-mesh-owner')).toBe(false);
   });
 
   it('sets the upstream again and drops old seekers after a wipe of a running node', async () => {

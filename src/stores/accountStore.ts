@@ -144,11 +144,10 @@ function pickFreeSlot(): number {
 
 const useAccountStoreBase = create<AccountState>((set, get) => {
   // Helper function to cleanup session
-  // keepWantedSeekers: a lock, after which the mesh keeps receiving for us
-  const cleanupSession = async (keepWantedSeekers = false) => {
+  const cleanupSession = async () => {
     const sdk = getSdk();
     if (sdk.isSessionOpen) {
-      await sdk.closeSession({ keepWantedSeekers });
+      await sdk.closeSession();
     }
     // Lock secure-storage too, otherwise storageState stays 'unlocked'
     // and the next login would skip the unlock step and read whichever
@@ -900,7 +899,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
-        await cleanupSession(true);
+        await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();

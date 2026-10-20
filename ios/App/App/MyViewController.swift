@@ -11,6 +11,7 @@ class MyViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(PortableBackupFilePlugin())
         bridge?.registerPluginInstance(QrScannerPlugin())
         bridge?.registerPluginInstance(MeshNodePlugin())
+        bridge?.registerPluginInstance(AppLockPlugin())
 
         #if DEBUG
         bridge?.registerPluginInstance(SSLBypassPlugin())

@@ -7,6 +7,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.ThreadFactory
 import org.json.JSONObject
 import uniffi.secureStorage.nativeCall
@@ -24,9 +25,9 @@ class SecureStoragePlugin : Plugin() {
     // Daemon thread so it doesn't keep the JVM alive on host-activity
     // shutdown. Process death wipes them either way; this is hygiene
     // for hosts that lifecycle Capacitor without process kill.
-    private val executor = Executors.newSingleThreadExecutor(ThreadFactory { r ->
-        Thread(null, r, "secure-storage", 8 * 1024 * 1024).apply { isDaemon = true }
-    })
+    //
+    // Process-wide, so that [lockNow] queues behind the calls in flight.
+    private val executor get() = Companion.executor
 
     /**
      * Single dispatcher. Every call arrives as `{method, args}` where
@@ -80,6 +81,27 @@ class SecureStoragePlugin : Plugin() {
                 call.resolve()
             } catch (e: Exception) {
                 call.reject("secure storage reset failed", "RESET_FAILED", e)
+            }
+        }
+    }
+
+    companion object {
+        private val executor = Executors.newSingleThreadExecutor(ThreadFactory { r ->
+            Thread(null, r, "secure-storage", 8 * 1024 * 1024).apply { isDaemon = true }
+        })
+
+        /**
+         * Locks the unlocked account natively, without the WebView (the
+         * background auto-lock and the notification's Lock action): the
+         * native VFS forgets its keys, as when the app locks. Queued behind
+         * the calls in flight; a locked store stays locked.
+         */
+        fun lockNow(): Future<*> = executor.submit {
+            try {
+                nativeCall("lockSession", "{}")
+            } catch (e: Throwable) {
+                // not unlocked, or a build without the native store
+                Log.w("SecureStorageNative", "native lock failed", e)
             }
         }
     }

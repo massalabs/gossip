@@ -60,8 +60,8 @@ unless `GOSSIP_MESH_OPTIONAL=1`, and Swift fails a non-debug build without the
 applies them again. The node may call `closeLink` from inside `linkUp` and `frameIn`.
 
 The core must provide, beyond the plugin API (`start`, `stop`, `sendBlob`, `fetch`,
-`fetchBulletin`, `getKeys`, `setWanted`, `setUpstream`, `status`, `wipe`, and
-`forgetKeys`, which calls the node's `forgetOwn` for a key set):
+`fetchBulletin`, `getKeys`, `setWanted`, `setUpstream`, `status`, `wipe`, `forgetKeys`
+and `lock`, see [Plausible deniability](#plausible-deniability)):
 
 - `linkUp`, `linkDown` and `frameIn`, called in order from one thread;
 - a sink it calls back: `sendFrame` (which may refuse when a link's queue is full),
@@ -93,8 +93,10 @@ If the key is lost (Keystore reset), a new one is drawn and the old pools, which
 longer open, are deleted. `wipe` replaces the key: the node destroys its key file and
 pools and restarts under the new key (`wipe(newConfigJson)`), so nothing is left wrapped
 under the old one. A node that is not running has its data directory deleted instead, so
-an account change wipes the mesh whether it is on or off. A wipe whose restart fails
-leaves the node stopped and its directory empty.
+deleting every account wipes the mesh whether it is on or off. A wipe whose restart fails
+leaves the node stopped and its directory empty. Only deleting every account wipes the
+node; a lock or another account does not need it (see
+[Plausible deniability](#plausible-deniability)).
 
 ## BLE identifiers
 
@@ -191,7 +193,13 @@ Gossip service UUID, and a bridge uploads other people's traffic from its own co
 - An outgoing message that only the mesh took (no internet node did) is stored with
   `metadata.via = 'mesh'` and shows a Bluetooth mark next to its ✓ until it is delivered.
   The composite tells the message service which transports took each send
-  (`takeAcceptedBy`).
+  (`takeAcceptedBy`). The row keeps its ciphertext, in the account's own storage, and
+  every refresh round posts it to the server once one answers (`repostMeshOnly`, with
+  `internetOnly` routing, which the mesh never sees); then `via` goes and the ciphertext
+  with it. The node no longer uploads the phone's own blobs unless it bridges (it cannot
+  tell them from relayed ones), so this is what gets a message out when the phone, not a
+  bridge, reaches the internet. An announcement only the mesh took stays queued the same
+  way, flagged `internetOnly`, without its addressed copy.
 - An incoming message read more than 10 minutes after its sender dated it, or that the
   session flagged `stale`, is stored with `metadata.delayed = true` and shows "delayed".
 
@@ -204,17 +212,9 @@ the mesh at the same time; the first answer wins. The key pool is indexed by
 using them (`fetchKeysFromMesh` here, `AuthService.fetchPublicKeyByUserId` in the SDK), so
 neither a phone nearby nor a node can pass off other keys.
 
-Locking the app (by hand or by auto-lock) keeps the node as it is: the session closes
-with `keepWantedSeekers`, so the wanted list stays, and what arrives while locked waits in
-the node for the next login. Only the keys shared nearby are withdrawn. The app records
-which account the node serves (`gossip-mesh-owner`); when a different account opens, or
-when every account is deleted, it wipes the node first, so it no longer serves the
-previous account's keys or waits on its seekers. A wipe that fails is tried again at the
-next login.
-
 **Let people nearby add me** withdraws the keys after 10 minutes (or when the mesh is
-turned off) with `forgetKeys`, which deletes the node's own copy (`forgetOwn` on the key
-set's blake3 hash). Neighbours that took a copy keep it for their mesh retention.
+turned off, or the app locks) with `forgetKeys`, which deletes the node's copy of the key
+set (by its blake3 hash). Neighbours that took a copy keep it for their mesh retention.
 
 ### What stays on the mesh
 
@@ -227,8 +227,8 @@ encrypted under a key of the pair, so its bytes differ from the board copy.
 The node keeps them off the internet too:
 
 - A `meshOnly` send becomes `sendBlob({ …, localOnly: true })`: the blob is local-only,
-  so neither this phone (not even as its own traffic) nor a bridge that relays it uploads
-  it.
+  so neither this phone nor a bridge that relays it uploads it, and the SDK never reposts
+  it to a server.
 - Lookahead and mailbox seekers go to `setWanted({ seekers, localSeekers })` as
   `localSeekers` (`setWantedSeekers(seekers, localSeekers)` in the SDK, which gives the
   second list to mesh transports only): they are flooded flagged local-only, and no bridge,
@@ -237,3 +237,84 @@ The node keeps them off the internet too:
 The flag is honoured by honest phones and bridges; a modified one can ignore it and
 upload what it relays (gossip-node `docs/MESH.md`, "Local-only blobs and seekers"). The
 mailbox rotation and the separate ciphertext still limit what that reveals.
+
+## Plausible deniability
+
+The app can hold several accounts, one of them a decoy. The threat: someone arrested is
+made to unlock the phone and to give a Gossip password, and gives the decoy's. Whoever
+holds the phone can then run the app as its owner, use its keystore keys, and copy every
+file it owns. The account storage is already deniable (release builds use
+`VITE_SECURE_STORAGE`). The mesh part must add nothing: once Gossip has been locked, by
+hand, by auto-lock or from the notification, nothing in it may show that another
+account exists; and a decoy opened while the mesh runs must use it as if it were the
+only account, with no wipe, restart or delay.
+
+What the node holds (gossip-node `docs/MESH.md`, "Plausible deniability"):
+
+- **No mark on the phone's own blobs.** `sendBlob` stores a blob exactly as a neighbour's
+  relayed copy would be stored: same scope, same trust bucket, no arrival time, no source.
+  A phone uploads mesh blobs only when it bridges; the SDK posts its own messages to the
+  server itself (see [In the conversation](#in-the-conversation)), from the account's
+  storage, and only while that account is open.
+- **The wanted list in memory only.** Nothing writes it to disk; the file development
+  builds kept is overwritten and deleted at start.
+- **A lock** (`MeshNode.lock`, `lock()` on the node) empties the wanted list and deletes
+  the key sets shared nearby. The rest stays: the phone keeps relaying, what the account
+  sent is still delivered, and what arrives for it waits on this phone and the phones
+  nearby until it opens again and asks.
+
+What the app does:
+
+- Every lock, logout or account change calls `lockMesh` (the SDK's `closeSession` has
+  emptied the wanted list already). Opening any account just uses the running node: the
+  session sets its own wanted list and sends as usual. `wipeMesh` is for deleting every
+  account only. The `gossip-mesh-owner` preference of development builds (a user id in
+  the clear) is deleted at startup.
+- **Auto-lock in the background.** The WebView's JavaScript is paused while the app is in
+  the background or the screen is off, so the JS auto-lock (`useAutoLock`) only acts when
+  someone opens the app. The app tells the native side the timeout while an account is
+  open (`AppLock.configure`); auto-lock is 5 minutes by default (a choice made before
+  stays).
+  - **Android** (`AppLock.kt`): going to the background arms an alarm on the elapsed
+    clock (`setExactAndAllowWhileIdle`, `ELAPSED_REALTIME_WAKEUP`: it counts deep sleep
+    and fires in Doze; without the exact-alarm grant, `setAndAllowWhileIdle`, which Doze
+    may defer); coming back disarms it, or locks before the window shows when the time
+    has passed. The alarm wakes the process whether the mesh is on or off. A lock locks
+    the node (`MeshNodeBridge.lockNode`), locks the account storage natively
+    (`lockSession` on the secure-storage queue), and finishes the app's tasks
+    (`AppTask.finishAndRemoveTask`): the WebView is destroyed with everything decrypted in
+    it, the task leaves Recents, and the next open starts the app afresh on the login
+    screen. The process lives on while the mesh service runs.
+    Destroying the WebView was chosen over an event to the paused page because a paused
+    page may not run it. Screenshots and the Recents thumbnail are already blocked
+    (`FLAG_SECURE`, through the privacy-screen plugin, on unless turned off in the debug
+    settings).
+  - The mesh notification has a **Lock** action that does the same without opening the
+    app.
+  - **iOS** (`AppLockPlugin.swift`): iOS suspends a backgrounded app within seconds, so no
+    timer is sure to fire. The plugin checks the deadline (on `CLOCK_MONOTONIC`, which
+    counts sleep) every 10 s while the app runs (a background task, or the mesh's
+    Bluetooth background modes waking it) and before the app comes back to the
+    foreground; a lock locks the node and the storage natively and reloads the WebView.
+    A suspended app that nothing wakes is locked when it is next opened, before its UI
+    shows, not at the deadline. There is no notification on iOS, so no Lock action.
+
+Limits:
+
+- **Timing.** Until the lock, the account is open: someone who takes the phone within the
+  timeout, unlocked, gets the open account. The settings tell users to keep auto-lock at
+  5 minutes, to let 5 minutes pass (or lock from the notification) before handing the
+  phone over, and to set biometric login to the decoy's password.
+- **Memory.** A lock drops the wanted list and the shared keys' hashes, the native
+  storage keys and the WebView, but freed memory is not zeroed; a memory image of the
+  running phone taken soon after may still hold them.
+- **iOS** locks late when the app stays suspended (above), and the native code there has
+  not been built on this branch (no macOS here).
+- **Messages not yet on the server** wait in the account's storage, encrypted with it,
+  until the account opens with a server in reach. A message a bridge uploaded first is
+  posted again, and the server keeps the copy it has (an identical one, or `409` for
+  another value at the seeker, which also ends the retries).
+- **A phone without a decoy**, or a modified app, is outside this: the property is that
+  locked Gossip shows nothing, not that an open one hides anything.
+- **Neighbours** saw this phone send blobs first and advertise its seekers while the
+  account was open; that is an observation made in radio range, outside the phone.

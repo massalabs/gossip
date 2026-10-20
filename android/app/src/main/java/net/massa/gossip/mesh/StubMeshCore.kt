@@ -119,14 +119,10 @@ class StubMeshCore : MeshCore {
         keys.clear()
     }
 
-    // The stub keeps no ids; it forgets by content key alone.
-    override fun forgetOwn(kind: MeshBlobKind, key: ByteArray): Boolean = synchronized(lock) {
-        when (kind) {
-            MeshBlobKind.MESSAGE -> messages.remove(hex(key)) != null
-            MeshBlobKind.KEYS -> keys.remove(hex(key)) != null
-            MeshBlobKind.ANNOUNCEMENT -> false
-        }
-    }
+    override fun forgetKeys(hash: ByteArray): Boolean = synchronized(lock) { keys.remove(hex(hash)) != null }
+
+    // The stub keeps every key set it was given until forgotten; a lock only empties the wanted list.
+    override fun lock() = synchronized(lock) { wanted = emptySet() }
 
     private fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
 

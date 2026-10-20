@@ -33,10 +33,14 @@ protocol MeshCore: AnyObject {
     /// and restarts it empty with `newConfigJson` (a new pool key). Throws
     /// when the restart fails.
     func wipe(newConfigJson: String) throws
-    /// Deletes a blob this node published: `key` is the seeker of a message,
-    /// blake3 of the key set (the user id) for keys, or the id `sendBlob`
-    /// returned for an announcement. Returns whether one was deleted.
-    func forgetOwn(kind: MeshBlobKind, key: Data) -> Bool
+    /// Deletes the key set stored under `hash` (blake3 of the keys, the user
+    /// id). Returns whether one was deleted.
+    func forgetKeys(hash: Data) -> Bool
+    /// The app locked: the wanted list is emptied and the key sets shared
+    /// since the last lock are deleted. Nothing else the node holds is the
+    /// app's: what it sent is stored like what it relays. (`lock()` in
+    /// `MeshCore.kt`; named apart from the cores' `lock` mutexes here.)
+    func lockNode()
 }
 
 /// What the core asks of its host; may be called from any of the core's threads.
@@ -225,16 +229,10 @@ final class StubMeshCore: MeshCore {
         }
     }
 
-    // The stub keeps no ids; it forgets by content key alone.
-    func forgetOwn(kind: MeshBlobKind, key: Data) -> Bool {
-        locked {
-            switch kind {
-            case .message: return messages.removeValue(forKey: key) != nil
-            case .keys: return keys.removeValue(forKey: key) != nil
-            case .announcement: return false
-            }
-        }
-    }
+    func forgetKeys(hash: Data) -> Bool { locked { keys.removeValue(forKey: hash) != nil } }
+
+    // The stub keeps every key set until forgotten; a lock only empties the wanted list.
+    func lockNode() { locked { wanted.removeAll() } }
 }
 
 enum MeshCoreError: Error, LocalizedError {

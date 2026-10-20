@@ -67,6 +67,13 @@ export interface MeshNodeNativePlugin extends MeshNodePlugin {
    * `forgotten` is false when it held none.
    */
   forgetKeys(options: { hash: string }): Promise<{ forgotten?: boolean }>;
+  /**
+   * The app locked: the node empties its wanted list and deletes the keys
+   * shared nearby, and keeps relaying. Nothing else it holds is ours: what
+   * the app sent is stored like what it relays. The native side also calls
+   * it by itself (background auto-lock, the notification's Lock action).
+   */
+  lock(): Promise<void>;
   addListener(
     event: 'arrival',
     handler: Parameters<MeshNodePlugin['addListener']>[1]
@@ -82,8 +89,11 @@ export const MeshNode = registerPlugin<MeshNodeNativePlugin>('MeshNode');
 const MESH_ENABLED_KEY = 'gossip-mesh-enabled';
 const MESH_BRIDGE_KEY = 'gossip-mesh-bridge';
 const MESH_POWER_MODE_KEY = 'gossip-mesh-power-mode';
-/** The user id of the account whose seekers and keys the node holds. */
-const MESH_OWNER_KEY = 'gossip-mesh-owner';
+/**
+ * Written by development builds: the user id of the account the node served,
+ * in the clear. Deleted at startup: it would name an account.
+ */
+const LEGACY_MESH_OWNER_KEY = 'gossip-mesh-owner';
 
 export interface MeshSettings {
   enabled: boolean;
@@ -104,6 +114,9 @@ let installId: string | null = null;
  * advertises without relaying only makes the phone visible.
  */
 export async function probeMeshAvailability(): Promise<boolean> {
+  await Preferences.remove({ key: LEGACY_MESH_OWNER_KEY }).catch(
+    () => undefined
+  );
   if (!MESH_FEATURE_ENABLED || !Capacitor.isNativePlatform()) {
     rustCoreAvailable = false;
     return false;
@@ -417,8 +430,8 @@ export async function stopSharingKeysNearby(): Promise<void> {
     // neighbours that took a copy keep it for their retention
     await switchable?.mesh.forgetKeys(decodeUserId(shared.userId));
   } catch (error) {
-    // the node is off (it then serves nothing) or the call failed; an
-    // account change wipes the node either way
+    // the node is off (it then serves nothing) or the call failed; the
+    // next lock withdraws them either way
     if (import.meta.env.DEV) {
       logger.warn('[MeshNode] could not withdraw our keys', error);
     }
@@ -426,24 +439,33 @@ export async function stopSharingKeysNearby(): Promise<void> {
 }
 
 /**
- * Called when an account opens. Locking the app keeps the node as it is, so
- * a locked phone goes on receiving and relaying; a different account wipes
- * it first, so it no longer serves the previous account's keys or waits on
- * its seekers, which would tie the two accounts together.
+ * Locks the mesh with the app (lock, auto-lock, logout, another account):
+ * the keys we shared nearby go and the node waits for nothing of ours (the
+ * SDK's closeSession already emptied the wanted list). The node keeps
+ * running and relaying, and what we sent is still delivered: it is stored
+ * like anybody's, so the next account to open, whichever it is, finds a node
+ * that holds nothing of the previous one.
  */
-export async function claimMeshForAccount(userId: string): Promise<void> {
+export async function lockMesh(): Promise<void> {
+  const shared = sharedKeys;
+  sharedKeys = null;
+  if (shared) clearTimeout(shared.timer);
+  switchable?.forgetWanted();
   if (!isMeshAvailable()) return;
-  const { value: owner } = await Preferences.get({ key: MESH_OWNER_KEY });
-  if (owner === userId) return;
-  // a failed wipe leaves the owner as it was, so the next login tries again
-  if (owner !== null && !(await wipeMesh())) return;
-  await Preferences.set({ key: MESH_OWNER_KEY, value: userId });
+  try {
+    await MeshNode.lock();
+  } catch (error) {
+    // a stopped node holds no wanted list and no keys
+    if (import.meta.env.DEV) {
+      logger.warn('[MeshNode] could not lock the node', error);
+    }
+  }
 }
 
 /**
- * Empties the node: on an account change, or when every account is deleted.
- * The restarted node keeps running if it ran, with the upstream set again
- * and only the seekers the new session asks for. False when it failed.
+ * Empties the node, relayed blobs included, when every account is deleted.
+ * The restarted node keeps running if it ran, with the upstream set again.
+ * False when it failed.
  */
 export async function wipeMesh(): Promise<boolean> {
   await stopSharingKeysNearby();
@@ -452,7 +474,6 @@ export async function wipeMesh(): Promise<boolean> {
   switchable?.forgetWanted();
   try {
     await MeshNode.wipe();
-    await Preferences.remove({ key: MESH_OWNER_KEY });
     if (switchable?.isActive) {
       await applyUpstream((await getMeshSettings()).bridgeEnabled);
       await switchable.activate();

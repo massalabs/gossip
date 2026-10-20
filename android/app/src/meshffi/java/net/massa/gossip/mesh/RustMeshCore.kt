@@ -86,7 +86,12 @@ class RustMeshCore internal constructor(
         if (seekers.isNotEmpty() || localSeekers.isNotEmpty()) node.setWanted(seekers, localSeekers)
     }
 
-    override fun forgetOwn(kind: MeshBlobKind, key: ByteArray): Boolean = node.forgetOwn(kind.toFfi(), key)
+    override fun forgetKeys(hash: ByteArray): Boolean = node.forgetKeys(hash)
+
+    override fun lock() = synchronized(lock) {
+        wanted = emptyList<ByteArray>() to emptyList()
+        node.lock()
+    }
 
     private class SinkAdapter(private val sink: MeshCoreSink) : FfiSink {
         override fun sendFrame(linkId: Int, frame: ByteArray): Boolean = sink.sendFrame(linkId, frame)

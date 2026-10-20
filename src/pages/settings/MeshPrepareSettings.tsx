@@ -11,6 +11,7 @@ import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { ROUTES } from '../../constants/routes';
 import { batteryOptimizationService } from '../../services/batteryOptimization';
 import { getMeshSettings } from '../../services/meshNode';
+import { useAppStore } from '../../stores/appStore';
 
 interface Readiness {
   meshEnabled: boolean;
@@ -55,6 +56,8 @@ const MeshPrepareSettings: React.FC = () => {
   const navigate = useNavigate();
   const sdk = useGossipSdk();
   const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const autoLockTimeout = useAppStore(s => s.autoLockTimeout);
+  const autoLockOn = autoLockTimeout !== null && autoLockTimeout <= 300;
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +156,22 @@ const MeshPrepareSettings: React.FC = () => {
               }
             />
           )}
+          <ChecklistItem
+            done={autoLockOn}
+            title={t('mesh.check_lock')}
+            detail={t('mesh.check_lock_detail')}
+            action={
+              !autoLockOn && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(ROUTES.settingsSecurity())}
+                >
+                  {t('mesh.check_lock_action')}
+                </Button>
+              )
+            }
+          />
           <ChecklistItem
             done={null}
             title={t('mesh.check_add_nearby')}

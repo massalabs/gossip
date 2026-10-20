@@ -34,6 +34,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PortableBackupFilePlugin.class);
         registerPlugin(QrScannerPlugin.class);
         registerPlugin(net.massa.gossip.mesh.MeshNodePlugin.class);
+        registerPlugin(AppLockPlugin.class);
         
         super.onCreate(savedInstanceState);
 

@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import net.massa.gossip.AppLock
 import net.massa.gossip.MainActivity
 import net.massa.gossip.R
 
@@ -103,6 +104,8 @@ class MeshService : Service() {
             .setContentText(getString(R.string.mesh_notification_body))
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(contentIntent)
+            // locks the app like the auto-lock, without opening it; the mesh keeps relaying
+            .addAction(R.drawable.ic_notification, getString(R.string.mesh_notification_lock), AppLock.lockIntent(this))
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOnlyAlertOnce(true)

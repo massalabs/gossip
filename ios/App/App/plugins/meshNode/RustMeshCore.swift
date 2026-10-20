@@ -86,7 +86,13 @@ final class RustMeshCore: MeshCore {
         }
     }
 
-    func forgetOwn(kind: MeshBlobKind, key: Data) -> Bool { node.forgetOwn(kind: kind.ffi, key: key) }
+    func forgetKeys(hash: Data) -> Bool { node.forgetKeys(hash: hash) }
+
+    func lockNode() {
+        lock.lock(); defer { lock.unlock() }
+        wanted = ([], [])
+        node.lock()
+    }
 
     private final class SinkAdapter: GossipMobile.MeshCoreSink, @unchecked Sendable {
         private let sink: MeshCoreSink
