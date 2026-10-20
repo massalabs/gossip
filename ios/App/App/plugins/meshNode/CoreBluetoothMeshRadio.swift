@@ -133,6 +133,11 @@ final class CoreBluetoothMeshRadio: NSObject, MeshRadio {
         queue.async {
             guard let link = self.link(linkId) else { return }
             self.closeNow(link)
+            // closed by the core right away: would otherwise be redialled every cooldown
+            let t = self.now()
+            if link.role == .central && t - link.upSince < MeshConstants.quickClose {
+                self.selector.onRefused(link.peerId, now: t)
+            }
         }
     }
 

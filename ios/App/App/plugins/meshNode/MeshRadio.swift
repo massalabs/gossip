@@ -17,6 +17,10 @@ enum MeshConstants {
     static let maxInboundLinks = 4
     /// How long a central whose link closed is ignored if it subscribes again.
     static let inboundCooldown: TimeInterval = 60
+    /// A link the core closes within this time of coming up was refused, not lost.
+    static let quickClose: TimeInterval = 30
+    /// How long a phone that refused our link is left alone (see `NeighbourSelector`).
+    static let refusedCooldown: TimeInterval = 10 * 60
     /// Received bytes waiting for the core on one link; past it the link is closed.
     static let maxPendingInboundBytesPerLink = 512 * 1024
     static let maxQueuedChunksPerLink = 256
@@ -120,7 +124,14 @@ final class NeighbourSelector {
     }
 
     func onDisconnected(_ id: String, now: TimeInterval) {
-        cooldownUntil[id] = now + cooldown
+        cooldownUntil[id] = max(cooldownUntil[id] ?? 0, now + cooldown)
+    }
+
+    /// The core closed our link to `id` right after it came up: most often a second
+    /// link to a phone already linked the other way. Left alone for about the life of
+    /// a random address, after which the same phone shows up under a new id anyway.
+    func onRefused(_ id: String, now: TimeInterval) {
+        cooldownUntil[id] = max(cooldownUntil[id] ?? 0, now + MeshConstants.refusedCooldown)
     }
 
     func forget(_ id: String) {
