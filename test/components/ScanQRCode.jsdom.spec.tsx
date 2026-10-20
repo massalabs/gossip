@@ -152,13 +152,23 @@ describe('ScanQRCode', () => {
     expect(mocks.request).not.toHaveBeenCalled();
   });
 
-  it('starts Bluetooth on the first frame and takes its answer', async () => {
+  it('falls back to Bluetooth when the camera stalls, and takes its answer', async () => {
     let answer: (value: unknown) => void = () => {};
     mocks.fetchContact.mockImplementation(
       () => new Promise(resolve => (answer = resolve))
     );
     const frames = encodeContactFrames({ header, publicKeys: keys.to_bytes() });
-    await scan(frames[5]);
+    vi.useFakeTimers();
+    try {
+      await scan(frames[5]);
+      // the camera may still finish: the radio stays free for the mesh
+      await act(async () => vi.advanceTimersByTimeAsync(3_000));
+      expect(mocks.fetchContact).not.toHaveBeenCalled();
+      // nothing new for 4 s: Bluetooth takes over
+      await act(async () => vi.advanceTimersByTimeAsync(1_500));
+    } finally {
+      vi.useRealTimers();
+    }
     expect(mocks.fetchContact).toHaveBeenCalledTimes(1);
     expect(mocks.fetchContact.mock.calls[0][0].rendezvousId).toEqual(
       header.rendezvousId

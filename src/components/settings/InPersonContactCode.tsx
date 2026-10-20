@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { App } from '@capacitor/app';
 import { Bluetooth, Check } from 'react-feather';
@@ -33,6 +39,9 @@ type BluetoothState =
  * Bluetooth as a faster path once the other phone has read one frame. The
  * ephemeral key and rendezvous id live as long as this code is on screen.
  */
+/** When the presenter starts Bluetooth, after the code appears. */
+const BLUETOOTH_DELAY_MS = 5_000;
+
 const InPersonContactCode: React.FC<InPersonContactCodeProps> = ({
   userId,
   publicKeys,
@@ -76,13 +85,21 @@ const InPersonContactCode: React.FC<InPersonContactCodeProps> = ({
   }, []);
 
   // A new session (fresh ephemeral key and rendezvous id) per code shown.
-  // Bluetooth runs while it is on screen, if it is already allowed; the
-  // ephemeral key is dropped with the code. `generation` restarts it.
+  // Bluetooth runs while it is on screen, if it is already allowed, from a
+  // few seconds in: it is the camera's fallback, and the radio stays free for
+  // the mesh when the camera reads the code first. The ephemeral key is
+  // dropped with the code. `generation` restarts it.
+  const startTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const code = new ContactCodeSession(userId, publicKeys.to_bytes(), name);
     setSession(code);
-    void start(code, false);
+    startTimer.current = setTimeout(() => {
+      startTimer.current = null;
+      void start(code, false);
+    }, BLUETOOTH_DELAY_MS);
     return () => {
+      if (startTimer.current) clearTimeout(startTimer.current);
+      startTimer.current = null;
       void code.stop();
     };
   }, [userId, publicKeys, name, generation, start]);
@@ -107,8 +124,16 @@ const InPersonContactCode: React.FC<InPersonContactCodeProps> = ({
 
   const showSimple = useCallback(() => {
     setSimple(true);
-    // The simple code needs Bluetooth: ask for it now if it is not allowed.
-    if (bluetooth === 'prompt' && session) void start(session, true);
+    if (!session) return;
+    // The simple code needs Bluetooth: start it now, and ask for it if it is
+    // not allowed.
+    if (startTimer.current) {
+      clearTimeout(startTimer.current);
+      startTimer.current = null;
+      void start(session, false);
+    } else if (bluetooth === 'prompt') {
+      void start(session, true);
+    }
   }, [bluetooth, session, start]);
 
   if (!session) return null;

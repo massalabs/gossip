@@ -39,14 +39,22 @@ interface ScanQRCodeProps {
 
 /** Bluetooth attempts per scan before relying on the camera alone. */
 const BLUETOOTH_ATTEMPTS = 2;
+/**
+ * Bluetooth is the fallback of the animated code, keeping the radio for the
+ * mesh: it starts when the camera has gained nothing for this long...
+ */
+const CAMERA_STALL_MS = 4_000;
+/** ...or has not finished this long after its first frame. */
+const CAMERA_GRACE_MS = 12_000;
 
 type BluetoothState = 'idle' | 'checking' | 'running' | 'failed';
 
 /**
  * Scans a plain invite QR code, or an in-person contact code: the frames of
- * the animated code are read until the keys are complete and, as soon as one
- * frame is read, the keys are also asked over Bluetooth. Whichever finishes
- * first wins; keys are checked against the user id before use.
+ * the animated code are read until the keys are complete. When the camera
+ * stalls or is slow, the keys are also asked over Bluetooth (at once for the
+ * simple code, which carries none). Whichever finishes first wins; keys are
+ * checked against the user id before use.
  */
 const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
   const { t } = useTranslation('errors');
@@ -58,6 +66,13 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
   const [progress, setProgress] = useState<number | null>(null);
   const [bluetooth, setBluetooth] = useState<BluetoothState>('idle');
   const [notGossip, setNotGossip] = useState(false);
+  // the animated code's first frame and last progress, for the fallback
+  const cameraRef = useRef<{
+    header: ContactCodeHeader;
+    firstAt: number;
+    lastGainAt: number;
+    progress: number;
+  } | null>(null);
   const [stopped, setStopped] = useState(false);
   // The camera is closed and only Bluetooth is left (simple code).
   const [bluetoothOnly, setBluetoothOnly] = useState(false);
@@ -208,11 +223,43 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
         return;
       }
 
-      if (!result.headerOnly) setProgress(result.progress);
-      void startBluetooth(result.header, result.headerOnly);
+      if (result.headerOnly) {
+        void startBluetooth(result.header, true);
+        return;
+      }
+      setProgress(result.progress);
+      const now = Date.now();
+      const camera = cameraRef.current;
+      if (!camera) {
+        cameraRef.current = {
+          header: result.header,
+          firstAt: now,
+          lastGainAt: now,
+          progress: result.progress,
+        };
+      } else if (result.progress > camera.progress) {
+        camera.progress = result.progress;
+        camera.lastGainAt = now;
+      }
     },
     [succeed, fail, startBluetooth, tc]
   );
+
+  // The camera stalled or is slow: fall back to Bluetooth.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const camera = cameraRef.current;
+      if (!camera || doneRef.current || bluetoothRef.current !== 'idle') return;
+      const now = Date.now();
+      if (
+        now - camera.lastGainAt >= CAMERA_STALL_MS ||
+        now - camera.firstAt >= CAMERA_GRACE_MS
+      ) {
+        void startBluetooth(camera.header, false);
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, [startBluetooth]);
 
   const handleError = (err: string) => {
     logger.warn('[QRScan]', err);
