@@ -865,8 +865,7 @@ class GossipSdk {
    * Call `destroy()` to release the database connection entirely.
    */
   private async closeSessionInternal(
-    forceSecureNamespacePersistence = false,
-    keepWantedSeekers = false
+    forceSecureNamespacePersistence = false
   ): Promise<void> {
     if (this.state.status !== SdkStatus.SESSION_OPEN) {
       return;
@@ -939,13 +938,10 @@ class GossipSdk {
     // Clear message queues
     this.messageQueues.clear();
 
-    // Stop asking other nodes for the closed account's messages, unless the
-    // account is only locked and should keep receiving them
-    if (!keepWantedSeekers) {
-      this.state.messageProtocol.setWantedSeekers?.([]).catch(error => {
-        logger.warn('[GossipSdk] failed to clear wanted seekers', error);
-      });
-    }
+    // Stop asking other nodes for the closed account's messages
+    this.state.messageProtocol.setWantedSeekers?.([]).catch(error => {
+      logger.warn('[GossipSdk] failed to clear wanted seekers', error);
+    });
 
     // Reset to initialized state
     this.state = {
@@ -955,12 +951,7 @@ class GossipSdk {
     };
   }
 
-  /**
-   * @param options.keepWantedSeekers - keep asking other nodes (a mesh node's
-   *   wanted list) for this account's messages, for a session closed only to
-   *   lock the app
-   */
-  async closeSession(options?: { keepWantedSeekers?: boolean }): Promise<void> {
+  async closeSession(): Promise<void> {
     if (this._portableImportActive) {
       throw new Error('Cannot close a session during portable import');
     }
@@ -972,7 +963,7 @@ class GossipSdk {
     }
     this._lifecycleCloseActive = true;
     try {
-      await this.closeSessionInternal(false, options?.keepWantedSeekers);
+      await this.closeSessionInternal();
     } finally {
       this._lifecycleCloseActive = false;
     }

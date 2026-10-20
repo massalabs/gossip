@@ -88,6 +88,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- Auto-lock alarm and the mesh notification's Lock action (AppLock) -->
+        <receiver
+            android:name=".AppLockReceiver"
+            android:exported="false" />
+
         <!-- App Update Receiver: Restart background sync after app update -->
         <receiver
             android:name=".AppUpdateReceiver"

@@ -81,6 +81,16 @@ object MeshNodeBridge : MeshRadioListener, MeshCoreSink {
         }
     }
 
+    /**
+     * The app locked (from the app, the background auto-lock or the
+     * notification): the running core empties its wanted list and deletes
+     * the keys shared nearby, and keeps relaying. A stopped core holds
+     * neither.
+     */
+    fun lockNode(): Future<Unit> = calls.submit<Unit> {
+        core?.lock()
+    }
+
     private fun dataDir(context: Context): File = File(context.filesDir, "mesh")
 
     private fun clearDataDir(context: Context) {

@@ -289,6 +289,9 @@ const MeshSettings: React.FC = () => {
           <p className="text-xs text-muted-foreground">
             {t('mesh.enable_warning')}
           </p>
+          <p className="text-xs text-muted-foreground mt-2">
+            {t('mesh.lock_note')}
+          </p>
           {error && <p className="text-xs text-destructive mt-2">{error}</p>}
         </div>
         <ToggleRow

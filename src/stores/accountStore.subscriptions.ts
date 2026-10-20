@@ -7,10 +7,7 @@ import {
 import { useAppStore } from './appStore';
 import { getSdk } from './sdkStore';
 import { fetchMnsDomainsIfEnabled } from './utils/accountHelpers';
-import {
-  claimMeshForAccount,
-  stopSharingKeysNearby,
-} from '../services/meshNode';
+import { lockMesh } from '../services/meshNode';
 import type { AccountStoreApi } from './accountStore';
 
 export function registerAccountStoreSubscriptions(store: AccountStoreApi) {
@@ -18,13 +15,10 @@ export function registerAccountStoreSubscriptions(store: AccountStoreApi) {
     const current = state.userProfile;
     const previous = prevState.userProfile;
 
-    // Locked: our keys stop being shared, the node keeps receiving for us.
-    // Another account: the node is wiped first (see claimMeshForAccount).
+    // Locked, logged out or switched: the mesh node must not keep serving
+    // the previous account's keys or waiting on its seekers.
     if (previous && previous.userId !== current?.userId) {
-      void stopSharingKeysNearby();
-    }
-    if (current && current.userId !== previous?.userId) {
-      void claimMeshForAccount(current.userId);
+      void lockMesh();
     }
 
     const sdk = getSdk();

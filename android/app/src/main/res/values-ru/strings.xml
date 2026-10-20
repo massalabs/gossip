@@ -14,4 +14,5 @@
     <string name="mesh_channel_desc">Поддерживает офлайн-сеть Bluetooth, пока она включена</string>
     <string name="mesh_notification_title">Mesh-сеть Gossip включена</string>
     <string name="mesh_notification_body">Передача сообщений по Bluetooth на ближайшие телефоны</string>
+    <string name="mesh_notification_lock">Заблокировать</string>
 </resources>

@@ -18,4 +18,5 @@
     <string name="mesh_channel_desc">Keeps the offline Bluetooth mesh running while it is on</string>
     <string name="mesh_notification_title">Gossip mesh is on</string>
     <string name="mesh_notification_body">Relaying messages over Bluetooth to nearby phones</string>
+    <string name="mesh_notification_lock">Lock</string>
 </resources>

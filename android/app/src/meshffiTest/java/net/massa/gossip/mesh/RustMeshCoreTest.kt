@@ -50,10 +50,11 @@ class RustMeshCoreTest {
         }
         override fun status() = FfiStatus(true, 2, true, true, "5", 10, 1, 4, 3, 6, -20, "")
         override fun wipe(newConfigJson: String?) { calls += "wipe $newConfigJson" }
-        override fun forgetOwn(kind: FfiBlobKind, key: ByteArray): Boolean {
-            calls += "forgetOwn $kind ${key.size}"
+        override fun forgetKeys(hash: ByteArray): Boolean {
+            calls += "forgetKeys ${hash.size}"
             return true
         }
+        override fun lock() { calls += "lock" }
     }
 
     private class RecordingSink : MeshCoreSink {
@@ -95,6 +96,18 @@ class RustMeshCoreTest {
     }
 
     @Test
+    fun lockForgetsTheWantedListAWipeWouldReapply() {
+        val node = FakeNode()
+        val core = RustMeshCore(node)
+        core.setUpstream(listOf("https://a"), false)
+        core.setWanted(listOf(byteArrayOf(1)), emptyList())
+        core.lock()
+        node.calls.clear()
+        core.wipe("{}")
+        assertEquals(listOf("wipe {}", "setUpstream 1 false"), node.calls)
+    }
+
+    @Test
     fun mapsKindsResultsAndStatus() {
         val node = FakeNode()
         val core = RustMeshCore(node)
@@ -103,8 +116,8 @@ class RustMeshCoreTest {
         assertEquals(false, node.localOnly)
         core.sendBlob(MeshBlobKind.MESSAGE, byteArrayOf(2), byteArrayOf(1), localOnly = true)
         assertEquals(true, node.localOnly)
-        assertTrue(core.forgetOwn(MeshBlobKind.KEYS, ByteArray(32)))
-        assertEquals("forgetOwn KEYS 32", node.calls.last())
+        assertTrue(core.forgetKeys(ByteArray(32)))
+        assertEquals("forgetKeys 32", node.calls.last())
         assertEquals("3", result.counter)
         assertEquals("1", core.fetchBulletin(null, 10).single().counter)
         val status = core.status()

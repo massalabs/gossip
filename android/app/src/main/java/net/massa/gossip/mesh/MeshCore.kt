@@ -61,12 +61,19 @@ interface MeshCore {
     fun wipe(newConfigJson: String)
 
     /**
-     * Deletes a blob this node published: [key] is the seeker of a MESSAGE,
-     * blake3 of the key set (the user id) for KEYS, or the id [sendBlob]
-     * returned for an ANNOUNCEMENT. Returns whether one was deleted; copies
-     * neighbours took expire with their retention.
+     * Deletes the key set stored under [hash] (blake3 of the keys, the user
+     * id). Returns whether one was deleted; copies neighbours took expire
+     * with their retention.
      */
-    fun forgetOwn(kind: MeshBlobKind, key: ByteArray): Boolean
+    fun forgetKeys(hash: ByteArray): Boolean
+
+    /**
+     * The app locked: the wanted list is emptied and the key sets shared
+     * since the last lock are deleted. Nothing else the node holds is the
+     * app's: what it sent is stored like what it relays, and stays to be
+     * delivered.
+     */
+    fun lock()
 }
 
 /** What the core asks of its host. May be called from any core thread. */

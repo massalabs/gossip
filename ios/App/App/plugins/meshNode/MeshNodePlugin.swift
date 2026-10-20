@@ -30,6 +30,7 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "wipe", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "capabilities", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "forgetKeys", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "lock", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkPermissions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginReturnPromise),
     ]
@@ -264,8 +265,14 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         reply(call, { core -> [String: Any] in
-            ["forgotten": core.forgetOwn(kind: .keys, key: hash)]
+            ["forgotten": core.forgetKeys(hash: hash)]
         })
+    }
+
+    /// The app locked: empties the wanted list and withdraws the keys shared
+    /// nearby. Resolves on a stopped node too.
+    @objc func lock(_ call: CAPPluginCall) {
+        bridgeNode.lockNode { call.resolve() }
     }
 
     /// Wipes the node, running or not, and replaces its pool key.
