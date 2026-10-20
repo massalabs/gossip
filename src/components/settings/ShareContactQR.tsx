@@ -11,6 +11,8 @@ interface ShareContactQRProps {
   userId: string;
   mnsDomains?: string[];
   onQRCodeGenerated?: (qrDataUrl: string) => void;
+  /** Shown instead of the invite QR code (the in-person contact code). */
+  code?: React.ReactNode;
 }
 
 const ShareContactQR: React.FC<ShareContactQRProps> = ({
@@ -18,6 +20,7 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
   userId,
   mnsDomains,
   onQRCodeGenerated,
+  code,
 }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [copiedMnsDomains, setCopiedMnsDomains] = useState<Set<string>>(
@@ -137,7 +140,9 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
     <div className="flex flex-col gap-3">
       {/* QR code — hero element */}
       <div className="flex justify-center">
-        {qrDataUrl ? (
+        {code ? (
+          code
+        ) : qrDataUrl ? (
           <img
             src={qrDataUrl}
             alt="Your contact QR code"

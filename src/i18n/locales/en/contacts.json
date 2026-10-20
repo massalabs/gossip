@@ -81,5 +81,32 @@
     "file_modal_body": "Share your profile as a file with people you want to talk to. Your contact can import your file from the <newContactLink>New Contact</newContactLink> page.",
     "file_modal_note": "Compared to other profile sharing mode, the file profile remains valid even if you don't login to the app for more than 2 weeks.",
     "share_file": "Share file"
+  },
+  "contact_code": {
+    "mode_in_person": "In person",
+    "mode_link": "Invite link",
+    "qr_label": "Your contact code, animated",
+    "hold_phone": "Hold your phone in front of their camera",
+    "bluetooth_on": "Bluetooth is on: their phone can also get your keys that way.",
+    "bluetooth_off_hint": "Works without internet. Bluetooth makes it faster.",
+    "bluetooth_offer": "Use Bluetooth too",
+    "bluetooth_unavailable": "Bluetooth is off or not allowed. The animated code works without it.",
+    "bluetooth_unavailable_simple": "The simple code needs Bluetooth. Turn it on or show the animated code.",
+    "bluetooth_stopped": "Bluetooth stopped.",
+    "restart": "Start again",
+    "shared": "Sent to a phone nearby",
+    "simple_code": "Show a simple code",
+    "animated_code": "Show the animated code",
+    "simple_code_hint": "Their phone reads this code, then gets your keys over Bluetooth.",
+    "point_camera": "Point the camera at their code",
+    "reading": "Reading their code… {{percent}}%",
+    "using_bluetooth": "Using Bluetooth…",
+    "keep_close": "Keep both phones close together.",
+    "bluetooth_failed_keep_camera": "Bluetooth didn't work. Keep the camera on their code.",
+    "bluetooth_failed": "Couldn't get their keys over Bluetooth. Ask them to keep their code on screen and try again.",
+    "bluetooth_needed": "Allow Bluetooth to read a simple code, or ask them to show the animated code.",
+    "not_gossip_code": "This is not a Gossip code",
+    "keys_mismatch": "This code's keys don't match its user ID. The contact was not added.",
+    "web_simple_code": "This code needs Bluetooth: ask them to show the animated code."
   }
 }
