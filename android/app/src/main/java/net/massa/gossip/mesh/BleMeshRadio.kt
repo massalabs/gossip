@@ -677,9 +677,14 @@ class BleMeshRadio(
     private fun pump(linkId: Int) {
         val link = links[linkId] ?: return
         val chunk = link.queue.takeNext(SystemClock.elapsedRealtime()) ?: return
-        val started = when (link.role) {
-            Role.CENTRAL -> writeChunk(link, chunk)
-            Role.PERIPHERAL -> notifyChunk(link, chunk)
+        val started = try {
+            when (link.role) {
+                Role.CENTRAL -> writeChunk(link, chunk)
+                Role.PERIPHERAL -> notifyChunk(link, chunk)
+            }
+        } catch (e: IllegalArgumentException) {
+            // refused by the stack (e.g. longer than an attribute value): close, do not crash
+            false
         }
         if (!started) closeNow(link)
     }
