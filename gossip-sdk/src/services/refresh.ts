@@ -279,7 +279,10 @@ export class RefreshService {
           });
         }
       }
-      // Step 4: hard-delete messages that have exceeded retention duration
+      // Step 4: post to a server what only a mesh took
+      await this.messageService.repostMeshOnly();
+
+      // Step 5: hard-delete messages that have exceeded retention duration
       await this.messageService.deleteExpiredMessages(ownerUserId);
     } catch (error) {
       log.error('error in update_state', { error });

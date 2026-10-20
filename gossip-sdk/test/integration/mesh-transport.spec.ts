@@ -253,6 +253,55 @@ describe('Messaging over internet and mesh transports', () => {
     ]);
   });
 
+  it('posts to the internet node what only the mesh took, once it answers', async () => {
+    alice.internet.down = true;
+    await sendText(alice.sdk, bob.sdk, 'later');
+    const onServer = internetStore.getStoredMessages().size;
+    // no server yet: the ciphertext waits in Alice's storage
+    expect(await alice.sdk.messages.repostMeshOnly()).toBe(0);
+    alice.internet.down = false;
+    expect(await alice.sdk.messages.repostMeshOnly()).toBe(1);
+    expect(internetStore.getStoredMessages().size).toBe(onServer + 1);
+    expect(await alice.sdk.messages.repostMeshOnly()).toBe(0);
+    const [sent] = (
+      await alice.sdk.messages.getMessages(bob.sdk.userId)
+    ).filter(
+      m =>
+        m.type === MessageType.TEXT && m.direction === MessageDirection.OUTGOING
+    );
+    expect(sent.metadata?.via).toBeUndefined();
+    expect(sent.status).toBe(MessageStatus.SENT);
+
+    // Bob, away from the mesh, reads it from the internet node
+    bob.mesh.down = true;
+    expect(await receive(bob.sdk, alice.sdk, 1)).toEqual(['later']);
+  });
+
+  it('posts to the internet node an announcement only the mesh took', async () => {
+    alice.internet.down = true;
+    const boardBefore = internetStore.getStoredAnnouncements().length;
+    const reset = await alice.sdk.discussions.createSessionForContact(
+      bob.sdk.userId,
+      new Uint8Array(0)
+    );
+    expect(reset.success).toBe(true);
+    let discussion = await alice.sdk.discussions.get(bob.sdk.userId);
+    expect(discussion?.sendAnnouncement?.internetOnly).toBe(true);
+    expect(discussion?.sendAnnouncement?.mailbox).toBeUndefined();
+    expect(internetStore.getStoredAnnouncements()).toHaveLength(boardBefore);
+
+    alice.internet.down = false;
+    const messagesBefore = internetStore.getStoredMessages().size;
+    await alice.sdk.announcements.processOutgoingAnnouncements([discussion!]);
+    expect(internetStore.getStoredAnnouncements()).toHaveLength(
+      boardBefore + 1
+    );
+    // the addressed copy never goes to the internet node
+    expect(internetStore.getStoredMessages().size).toBe(messagesBefore);
+    discussion = await alice.sdk.discussions.get(bob.sdk.userId);
+    expect(discussion?.sendAnnouncement).toBeNull();
+  });
+
   it('delivers each message once despite delays, duplicates and reordering', async () => {
     for (const path of [alice.internet, alice.mesh, bob.internet, bob.mesh]) {
       path.duplicate = true;
