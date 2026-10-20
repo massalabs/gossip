@@ -391,11 +391,16 @@ export class FountainDecoder {
     return this.result;
   }
 
-  /** A rough share of the parts needed, below 1 until complete. */
+  /**
+   * The share of the original fragments recovered, below 1 until complete.
+   * (The reference's `processed / (1.75 × count)` assumes mixed parts only;
+   * our code shows the original fragments first, so a clean read finished at
+   * about 57% of it.)
+   */
   estimatedPercentComplete(): number {
     if (this.result) return 1;
     if (!this.expected) return 0;
-    return Math.min(0.99, this.processed / (this.expected.seqLength * 1.75));
+    return Math.min(0.99, this.simple.size / this.expected.seqLength);
   }
 
   receivePart(part: FountainPart): boolean {
