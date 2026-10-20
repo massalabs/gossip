@@ -120,6 +120,22 @@ describe('contact exchange', () => {
       expect(simple?.part).toBeUndefined();
     });
 
+    it('shows progress that climbs to the end of a clean read', () => {
+      const frames = encodeContactFrames(payload);
+      const decoder = new ContactCodeDecoder();
+      let last = 0;
+      for (const frame of frames) {
+        const result = decoder.receive(frame);
+        if (result.kind === 'complete') break;
+        expect(result.kind).toBe('progress');
+        if (result.kind !== 'progress') return;
+        expect(result.progress).toBeGreaterThanOrEqual(last);
+        last = result.progress;
+      }
+      // the last frame before completion is near the end, not halfway
+      expect(last).toBeGreaterThan(0.9);
+    });
+
     it('ignores frames of another code and garbage', () => {
       const decoder = new ContactCodeDecoder();
       const frames = encodeContactFrames(payload);
