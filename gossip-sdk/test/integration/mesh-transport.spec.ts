@@ -342,6 +342,11 @@ describe('Messaging over internet and mesh transports', () => {
     expect(bob.mesh.wanted).toEqual([next]);
     expect(bob.mesh.localWanted).toEqual([...ahead, ...mailboxes]);
 
+    // a lock keeps asking, so the locked phone goes on receiving
+    await bob.sdk.closeSession({ keepWantedSeekers: true });
+    expect(bob.mesh.wanted).toEqual([next]);
+    expect(bob.mesh.localWanted).toEqual([...ahead, ...mailboxes]);
+
     await alice.sdk.closeSession();
     expect(alice.mesh.wanted).toEqual([]);
     expect(alice.mesh.localWanted).toEqual([]);
