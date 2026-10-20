@@ -16,6 +16,7 @@ import { getSdk } from './sdkStore';
 import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
 import { finalizeCommittedAccountGenerationAuthority } from '../services/portableImportAuthorization';
 import { resetAllAccountStorage } from '../services/unsupportedStorageReset';
+import { wipeMesh } from '../services/meshNode';
 
 import { Provider, Account } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
@@ -143,10 +144,11 @@ function pickFreeSlot(): number {
 
 const useAccountStoreBase = create<AccountState>((set, get) => {
   // Helper function to cleanup session
-  const cleanupSession = async () => {
+  // keepWantedSeekers: a lock, after which the mesh keeps receiving for us
+  const cleanupSession = async (keepWantedSeekers = false) => {
     const sdk = getSdk();
     if (sdk.isSessionOpen) {
-      await sdk.closeSession();
+      await sdk.closeSession({ keepWantedSeekers });
     }
     // Lock secure-storage too, otherwise storageState stays 'unlocked'
     // and the next login would skip the unlock step and read whichever
@@ -884,6 +886,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     resetAccount: async () => {
       set({ isLoading: true });
       try {
+        // before the reset, which reloads the app
+        await wipeMesh();
         await resetAllAccountStorage();
       } catch (error) {
         logger.error('Error resetting all accounts:', error);
@@ -896,7 +900,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
-        await cleanupSession();
+        await cleanupSession(true);
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();

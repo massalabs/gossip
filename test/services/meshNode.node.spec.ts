@@ -49,6 +49,9 @@ vi.mock('@capacitor/preferences', () => ({
     set: async ({ key, value }: { key: string; value: string }) => {
       mocks.state.preferences.set(key, value);
     },
+    remove: async ({ key }: { key: string }) => {
+      mocks.state.preferences.delete(key);
+    },
   },
 }));
 
@@ -77,7 +80,8 @@ import {
   setMeshBridgeEnabled,
   setMeshEnabled,
   setMeshPowerMode,
-  wipeMeshForAccountChange,
+  claimMeshForAccount,
+  wipeMesh,
 } from '../../src/services/meshNode';
 
 const seeker = new Uint8Array([1, 2]);
@@ -146,10 +150,38 @@ describe('mesh transport', () => {
     expect((await getMeshSettings()).bridgeEnabled).toBe(false);
   });
 
-  it('wipes the node when the account changes', async () => {
+  it('keeps the node across a lock and wipes it for another account', async () => {
     createMeshTransport();
-    await wipeMeshForAccountChange();
+    await claimMeshForAccount('alice');
+    // the same account after a lock: nothing it received is lost
+    await claimMeshForAccount('alice');
+    expect(mocks.plugin.wipe).not.toHaveBeenCalled();
+
+    await claimMeshForAccount('bob');
     expect(mocks.plugin.wipe).toHaveBeenCalledOnce();
+    await claimMeshForAccount('bob');
+    expect(mocks.plugin.wipe).toHaveBeenCalledOnce();
+  });
+
+  it('tries the wipe again at the next login when it failed', async () => {
+    createMeshTransport();
+    await claimMeshForAccount('alice');
+    mocks.plugin.wipe.mockRejectedValueOnce(new Error('busy'));
+    await claimMeshForAccount('bob');
+    await claimMeshForAccount('bob');
+    expect(mocks.plugin.wipe).toHaveBeenCalledTimes(2);
+  });
+
+  it('sets the upstream again and drops old seekers after a wipe of a running node', async () => {
+    const transport = createMeshTransport()!;
+    await setMeshEnabled(true);
+    await transport.messageProtocol.setWantedSeekers?.([new Uint8Array([1])]);
+    mocks.plugin.setUpstream.mockClear();
+    mocks.plugin.setWanted.mockClear();
+
+    expect(await wipeMesh()).toBe(true);
+    expect(mocks.plugin.setUpstream).toHaveBeenCalledOnce();
+    expect(mocks.plugin.setWanted).not.toHaveBeenCalled();
   });
 
   it('composes REST then a mesh member that stays off until turned on', async () => {

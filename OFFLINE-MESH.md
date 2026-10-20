@@ -204,8 +204,13 @@ the mesh at the same time; the first answer wins. The key pool is indexed by
 using them (`fetchKeysFromMesh` here, `AuthService.fetchPublicKeyByUserId` in the SDK), so
 neither a phone nearby nor a node can pass off other keys.
 
-When the account changes or the user logs out, the app wipes the node, so it no longer
-serves the previous account's keys or waits on its seekers.
+Locking the app (by hand or by auto-lock) keeps the node as it is: the session closes
+with `keepWantedSeekers`, so the wanted list stays, and what arrives while locked waits in
+the node for the next login. Only the keys shared nearby are withdrawn. The app records
+which account the node serves (`gossip-mesh-owner`); when a different account opens, or
+when every account is deleted, it wipes the node first, so it no longer serves the
+previous account's keys or waits on its seekers. A wipe that fails is tried again at the
+next login.
 
 **Let people nearby add me** withdraws the keys after 10 minutes (or when the mesh is
 turned off) with `forgetKeys`, which deletes the node's own copy (`forgetOwn` on the key
