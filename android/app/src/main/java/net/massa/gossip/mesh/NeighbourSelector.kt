@@ -21,6 +21,13 @@ class NeighbourSelector(
     private val candidateTtlMs: Long = 30_000,
     /** A peer just disconnected or rotated out is not picked again for this long. */
     private val cooldownMs: Long = 60_000,
+    /**
+     * A peer whose link the core closed right away (a second link to a phone
+     * already linked the other way, or no slot left) is not picked again for
+     * this long: about the life of an Android random address, after which the
+     * same phone shows up under a new one anyway.
+     */
+    private val refusedCooldownMs: Long = MeshConstants.REFUSED_COOLDOWN_MS,
     private val random: Random = Random.Default,
 ) {
     private class Candidate(var rssi: Int, var lastSeenMs: Long)
@@ -39,7 +46,12 @@ class NeighbourSelector(
     }
 
     fun onDisconnected(address: String, nowMs: Long) {
-        cooldownUntil[address] = nowMs + cooldownMs
+        cooldownUntil[address] = maxOf(cooldownUntil[address] ?: 0L, nowMs + cooldownMs)
+    }
+
+    /** The core closed our link to [address] right after it came up. */
+    fun onRefused(address: String, nowMs: Long) {
+        cooldownUntil[address] = maxOf(cooldownUntil[address] ?: 0L, nowMs + refusedCooldownMs)
     }
 
     /**

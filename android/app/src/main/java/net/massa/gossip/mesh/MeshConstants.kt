@@ -34,6 +34,12 @@ object MeshConstants {
     /** How long a central whose inbound link closed must wait before connecting again. */
     const val INBOUND_COOLDOWN_MS = 60_000L
 
+    /** A link the core closes within this time of coming up was refused, not lost. */
+    const val QUICK_CLOSE_MS = 30_000L
+
+    /** How long a phone that refused our link is left alone (see [NeighbourSelector]). */
+    const val REFUSED_COOLDOWN_MS = 10 * 60_000L
+
     /** Received bytes waiting for the core on one link; past it the link is closed. */
     const val MAX_PENDING_INBOUND_BYTES_PER_LINK = 512 * 1024
 
