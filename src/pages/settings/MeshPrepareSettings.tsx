@@ -177,11 +177,6 @@ const MeshPrepareSettings: React.FC = () => {
             title={t('mesh.check_add_nearby')}
             detail={t('mesh.check_add_nearby_detail')}
           />
-          <ChecklistItem
-            done={null}
-            title={t('mesh.check_keyring')}
-            detail={t('mesh.check_keyring_detail')}
-          />
         </div>
       )}
     </PageLayout>

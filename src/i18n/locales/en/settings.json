@@ -238,7 +238,7 @@
     "bridge_warning": "As a bridge, your phone uploads other people's encrypted mesh messages from your internet connection and fetches replies for them. Your mobile operator and the Gossip node can see that your connection carries this traffic, but not what it says.",
     "battery_exempt_needed": "Android may stop the mesh while the screen is off. Allow Gossip to run in the background so your phone keeps relaying.",
     "battery_exempt_button": "Allow in the background",
-    "battery_saver_on": "Battery saver is on. It slows Bluetooth while the screen is off, so messages take longer to arrive. Turn it off during a strike.",
+    "battery_saver_on": "Battery saver is on. It slows Bluetooth while the screen is off, so messages take longer to arrive. Turn it off during an offline event.",
     "battery_saver_button": "Turn off battery saver",
     "power_mode": "Power mode",
     "power_mode_description": "More scanning finds nearby phones faster and uses more battery.",
@@ -255,7 +255,7 @@
     "status_clock_offset": "Clock offset",
     "status_yes": "Yes",
     "status_no": "No",
-    "prepare": "Prepare for a strike",
+    "prepare": "Prepare for an offline event",
     "prepare_intro": "Do this while you still have internet, so the mesh works on the day.",
     "check_enabled": "Offline mesh on",
     "check_enabled_detail": "The mesh only carries messages for phones where it is on.",
@@ -271,8 +271,6 @@
     "check_lock_detail": "When Gossip is locked, nothing in the mesh shows your accounts, and your phone keeps relaying for others. Messages for you wait nearby and arrive when you unlock. If you must hand over your phone, make sure 5 minutes have passed since you last used Gossip, or lock it from the mesh notification. Set biometric login to your decoy account's password, never the sensitive one.",
     "check_lock_action": "Open security settings",
     "check_add_nearby": "Adding someone without internet",
-    "check_add_nearby_detail": "Meet in person: they open Share contact → In person and hold their phone in front of your camera, then you scan it from New contact → Scan a QR code. The code carries their keys, so no internet is needed.",
-    "check_keyring": "Your group's keyring",
-    "check_keyring_detail": "If your union or group shares a keyring, phones that prove membership get priority on the mesh. Ask your organisers before the strike."
+    "check_add_nearby_detail": "Meet in person: they open Share contact → In person and hold their phone in front of your camera, then you scan it from New contact → Scan a QR code. The code carries their keys, so no internet is needed."
   }
 }
