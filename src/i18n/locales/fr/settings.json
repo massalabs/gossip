@@ -20,7 +20,7 @@
     "privacy": "Confidentialité",
     "security": "Sécurité",
     "feedback": "Envoyer des commentaires",
-    "mesh": "Réseau hors ligne"
+    "mesh": "Réseau Mesh"
   },
   "delete_account": {
     "button": "Supprimer tous les comptes",
@@ -226,20 +226,20 @@
     "reload": "Recharger"
   },
   "mesh": {
-    "title": "Réseau hors ligne",
+    "title": "Réseau Mesh",
     "description": "Sans internet, Gossip peut transmettre vos messages de téléphone en téléphone par Bluetooth jusqu'à vos contacts existants. Les messages restent chiffrés de bout en bout : les téléphones qui les relaient ne peuvent pas les lire.",
-    "not_available": "Le réseau hors ligne nécessite l'application Android ou iOS.",
-    "enable": "Réseau hors ligne",
+    "not_available": "Le Réseau Mesh nécessite l'application Android ou iOS.",
+    "enable": "Réseau Mesh",
     "enable_warning": "Tant qu'il est activé, votre téléphone signale par Bluetooth qu'il utilise Gossip. Toute personne qui scanne à proximité peut le voir, mais pas qui vous êtes ni avec qui vous parlez. Il relaie aussi les messages chiffrés d'autres personnes, ce qui consomme un peu de batterie.",
-    "start_failed": "Le réseau hors ligne n'a pas pu démarrer. Vérifiez que le Bluetooth est activé et que Gossip peut l'utiliser.",
+    "start_failed": "Le Réseau Mesh n'a pas pu démarrer. Vérifiez que le Bluetooth est activé et que Gossip peut l'utiliser.",
     "bridge": "Passerelle vers internet",
-    "bridge_hint": "Quand vous avez internet, faire passer les messages du réseau hors ligne",
+    "bridge_hint": "Quand vous avez internet, faire passer les messages du Réseau Mesh",
     "bridge_warning": "En tant que passerelle, votre téléphone envoie sur internet les messages chiffrés d'autres personnes et récupère leurs réponses. Votre opérateur et le nœud Gossip voient que votre connexion transporte ce trafic, mais pas son contenu.",
     "share_nearby": "Permettre aux personnes proches de m’ajouter",
     "share_nearby_hint": "Pendant 10 minutes, les téléphones proches peuvent obtenir vos clés pour vous ajouter sans internet",
     "share_nearby_warning": "Toute personne proche qui reçoit vos clés peut relier ce téléphone, et l’endroit où il se trouve, à votre identifiant Gossip. Ne l’activez qu’à côté de la personne qui vous ajoute.",
     "share_nearby_until": "Partagé jusqu’à {{time}}",
-    "share_nearby_failed": "Vos clés n’ont pas pu être partagées. Vérifiez que le maillage hors ligne est activé.",
+    "share_nearby_failed": "Vos clés n’ont pas pu être partagées. Vérifiez que le Réseau Mesh est activé.",
     "power_mode": "Mode d'énergie",
     "power_mode_description": "Scanner davantage trouve plus vite les téléphones proches et consomme plus de batterie.",
     "power_performance": "Performance",
@@ -257,7 +257,7 @@
     "status_no": "Non",
     "prepare": "Se préparer à une grève",
     "prepare_intro": "Faites-le tant que vous avez internet, pour que le réseau fonctionne le jour venu.",
-    "check_enabled": "Réseau hors ligne activé",
+    "check_enabled": "Réseau Mesh activé",
     "check_enabled_detail": "Le réseau ne transmet des messages qu'entre téléphones où il est activé.",
     "check_enabled_action": "L'activer",
     "check_sessions": "{{active}} contacts prêts sur {{total}}",
@@ -268,7 +268,7 @@
     "check_ios_background": "Garder Gossip ouvert",
     "check_ios_background_detail": "Les iPhone se trouvent mal par Bluetooth quand Gossip est en arrière-plan. Gardez l'application ouverte le jour venu.",
     "check_add_nearby": "Ajouter quelqu'un sans internet",
-    "check_add_nearby_detail": "Demandez-lui d’activer « Permettre aux personnes proches de m’ajouter » dans ses réglages de maillage, puis scannez son code QR : Gossip obtient ses clés auprès des téléphones proches et les vérifie avec le code.",
+    "check_add_nearby_detail": "Demandez-lui d’activer « Permettre aux personnes proches de m’ajouter » dans ses réglages du Réseau Mesh, puis scannez son code QR : Gossip obtient ses clés auprès des téléphones proches et les vérifie avec le code.",
     "check_keyring": "Le trousseau de votre groupe",
     "check_keyring_detail": "Si votre syndicat ou groupe partage un trousseau de clés, les téléphones qui prouvent leur appartenance sont prioritaires sur le réseau. Demandez à vos organisateurs avant la grève."
   }
