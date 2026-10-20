@@ -140,6 +140,12 @@ class BleMeshRadio(
             val link = links[linkId] ?: return@post
             disconnect(link)
             removeLink(link)
+            // closed by the core right away: most often a second link to a phone we
+            // are already linked with, which would otherwise be redialled every cooldown
+            val now = SystemClock.elapsedRealtime()
+            if (link.role == Role.CENTRAL && now - link.upSinceMs < MeshConstants.QUICK_CLOSE_MS) {
+                selector.onRefused(link.address, now)
+            }
         }
     }
 

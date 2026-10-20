@@ -19,6 +19,30 @@ class NeighbourSelectorTest {
     )
 
     @Test
+    fun leavesAPhoneThatRefusedOurLinkAloneLongerThanALostOne() {
+        val s = NeighbourSelector(
+            maxLinks = 3,
+            minRssi = -90,
+            candidateTtlMs = 1_000_000,
+            cooldownMs = 5_000,
+            refusedCooldownMs = 600_000,
+            random = Random(1),
+        )
+        s.onSeen("lost", -60, 0)
+        s.onSeen("dup", -60, 0)
+        s.onDisconnected("lost", 0)
+        s.onDisconnected("dup", 0)
+        s.onRefused("dup", 0)
+        // a later plain disconnect does not shorten the refusal
+        s.onDisconnected("dup", 1_000)
+        s.onSeen("lost", -60, 10_000)
+        s.onSeen("dup", -60, 10_000)
+        assertEquals(listOf("lost"), s.pickConnections(emptySet(), 10_000))
+        s.onSeen("dup", -60, 600_001)
+        assertTrue("dup" in s.pickConnections(emptySet(), 600_001))
+    }
+
+    @Test
     fun fillsOnlyTheFreeSlots() {
         val s = selector()
         for (i in 0 until 10) s.onSeen("p$i", -60, 0)
