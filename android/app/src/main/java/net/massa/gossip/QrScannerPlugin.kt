@@ -63,7 +63,10 @@ class QrScannerPlugin : Plugin() {
 
     @PluginMethod
     fun setStatus(call: PluginCall) {
-        QrScanActivity.current?.get()?.setStatus(call.getString("text") ?: "")
+        val text = call.getString("text") ?: ""
+        // Kept for a scanner still opening, which shows it once created.
+        QrScanActivity.status = text
+        QrScanActivity.current?.get()?.setStatus(text)
         call.resolve()
     }
 
@@ -76,6 +79,7 @@ class QrScannerPlugin : Plugin() {
     @ActivityCallback
     private fun onScanResult(call: PluginCall?, result: ActivityResult) {
         QrScanActivity.onFrame = null
+        QrScanActivity.status = ""
         if (call == null) return
         val value = result.data?.getStringExtra(QrScanActivity.EXTRA_RESULT)
         if (result.resultCode == Activity.RESULT_OK && value != null) {
