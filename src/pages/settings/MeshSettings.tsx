@@ -133,16 +133,20 @@ const MeshSettings: React.FC = () => {
     void getMeshSettings().then(setSettings);
   }, []);
 
-  // read again on coming back from the system dialog or settings page
+  // polled: the system dialog that grants the exemption does not hide the page
   useEffect(() => {
-    const refresh = () => {
-      if (document.visibilityState === 'visible') {
-        void readBatteryState().then(setBattery);
-      }
+    let cancelled = false;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const next = await readBatteryState();
+      if (!cancelled) setBattery(next);
     };
-    refresh();
-    document.addEventListener('visibilitychange', refresh);
-    return () => document.removeEventListener('visibilitychange', refresh);
+    void refresh();
+    const timer = setInterval(() => void refresh(), STATUS_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, []);
 
   const enabled = settings?.enabled ?? false;
