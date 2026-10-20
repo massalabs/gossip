@@ -180,6 +180,11 @@
   "retention_separator": "Автоудаление включено: {{duration}}",
   "filter_label": "Фильтр чатов",
   "waiting_connection": "Ожидание подключения...",
+  "mesh_connected_one": "Подключено к mesh-сети · {{count}} связь",
+  "mesh_connected_few": "Подключено к mesh-сети · {{count}} связи",
+  "mesh_connected_many": "Подключено к mesh-сети · {{count}} связей",
+  "mesh_connected_other": "Подключено к mesh-сети · {{count}} связи",
+  "mesh_no_links": "Mesh-сеть включена · рядом нет телефонов",
   "announcement": "Объявление",
   "lock_account": "Заблокировать"
 }
