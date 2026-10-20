@@ -51,7 +51,7 @@
 		<true/>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Gossip uses Bluetooth to exchange encrypted messages with nearby phones when there is no internet, if you turn the offline mesh on.</string>
+	<string>Gossip uses Bluetooth to add a contact in person, and to exchange encrypted messages with nearby phones when there is no internet if you turn the offline mesh on.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>This app may use the camera for profile pictures and media sharing.</string>
 	<key>NSFaceIDUsageDescription</key>
