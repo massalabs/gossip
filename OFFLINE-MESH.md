@@ -178,9 +178,9 @@ and it is off until the user turns it on in **Settings → Offline mesh**
   blobs and fetch their wanted seekers when it has internet. The consent is saved with the
   native install id, so a phone restored from a backup is asked again.
 - **Power mode** sets the radio's duty cycle.
-- **Prepare for a strike** (`MeshPrepareSettings.tsx`) is a checklist: mesh on, sessions
-  active with every contact, battery optimisation off (Android) or the app kept open
-  (iOS), how to add someone offline, and the keyring note.
+- **Prepare for an offline event** (`MeshPrepareSettings.tsx`) is a checklist: mesh on,
+  sessions active with every contact, battery optimisation off (Android) or the app kept
+  open (iOS), auto-lock, and how to add someone offline.
 
 Both toggles carry the privacy warnings: a phone with the mesh on advertises a fixed
 Gossip service UUID, and a bridge uploads other people's traffic from its own connection.

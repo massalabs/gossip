@@ -238,7 +238,7 @@
     "bridge_warning": "En tant que passerelle, votre téléphone envoie sur internet les messages chiffrés d'autres personnes et récupère leurs réponses. Votre opérateur et le nœud Gossip voient que votre connexion transporte ce trafic, mais pas son contenu.",
     "battery_exempt_needed": "Android peut arrêter le Réseau Mesh quand l'écran est éteint. Autorisez Gossip à fonctionner en arrière-plan pour que votre téléphone continue de relayer.",
     "battery_exempt_button": "Autoriser en arrière-plan",
-    "battery_saver_on": "L'économiseur de batterie est activé. Il ralentit le Bluetooth quand l'écran est éteint, donc les messages arrivent plus lentement. Désactivez-le pendant une grève.",
+    "battery_saver_on": "L'économiseur de batterie est activé. Il ralentit le Bluetooth quand l'écran est éteint, donc les messages arrivent plus lentement. Désactivez-le pendant un événement hors ligne.",
     "battery_saver_button": "Désactiver l'économiseur de batterie",
     "power_mode": "Mode d'énergie",
     "power_mode_description": "Scanner davantage trouve plus vite les téléphones proches et consomme plus de batterie.",
@@ -255,7 +255,7 @@
     "status_clock_offset": "Décalage d'horloge",
     "status_yes": "Oui",
     "status_no": "Non",
-    "prepare": "Se préparer à une grève",
+    "prepare": "Se préparer à un événement hors ligne",
     "prepare_intro": "Faites-le tant que vous avez internet, pour que le réseau fonctionne le jour venu.",
     "check_enabled": "Réseau Mesh activé",
     "check_enabled_detail": "Le réseau ne transmet des messages qu'entre téléphones où il est activé.",
@@ -271,8 +271,6 @@
     "check_lock_detail": "Quand Gossip est verrouillé, rien dans le Réseau Mesh ne montre vos comptes, et votre téléphone continue de relayer pour les autres. Les messages pour vous attendent à proximité et arrivent quand vous déverrouillez. Si vous devez remettre votre téléphone, assurez-vous que 5 minutes se sont écoulées depuis votre dernière utilisation de Gossip, ou verrouillez-le depuis la notification du Réseau Mesh. Associez la connexion biométrique au mot de passe de votre compte leurre, jamais à celui du compte sensible.",
     "check_lock_action": "Ouvrir les réglages de sécurité",
     "check_add_nearby": "Ajouter quelqu'un sans internet",
-    "check_add_nearby_detail": "Retrouvez-vous en personne : la personne ouvre Partager le contact → En personne et tient son téléphone devant votre caméra, puis vous scannez son code depuis Nouveau contact → Scanner un QR code. Le code contient ses clés, donc pas besoin d'internet.",
-    "check_keyring": "Le trousseau de votre groupe",
-    "check_keyring_detail": "Si votre syndicat ou groupe partage un trousseau de clés, les téléphones qui prouvent leur appartenance sont prioritaires sur le réseau. Demandez à vos organisateurs avant la grève."
+    "check_add_nearby_detail": "Retrouvez-vous en personne : la personne ouvre Partager le contact → En personne et tient son téléphone devant votre caméra, puis vous scannez son code depuis Nouveau contact → Scanner un QR code. Le code contient ses clés, donc pas besoin d'internet."
   }
 }
