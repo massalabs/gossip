@@ -8,14 +8,12 @@ import {
   CheckSquare,
   ChevronRight,
   Share2,
-  UserPlus,
 } from 'react-feather';
 import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import Toggle from '../../components/ui/Toggle';
 import InfoRow from '../../components/ui/InfoRow';
 import OptionBottomSheet from '../../components/ui/OptionBottomSheet';
-import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
 import {
@@ -23,9 +21,6 @@ import {
   getMeshSettings,
   getMeshStatus,
   isMeshAvailable,
-  keysSharedNearbyUntil,
-  shareKeysNearby,
-  stopSharingKeysNearby,
   setMeshBridgeEnabled,
   setMeshEnabled,
   setMeshPowerMode,
@@ -116,17 +111,12 @@ const BatteryWarning: React.FC<{
 const MeshSettings: React.FC = () => {
   const { t } = useTranslation('settings');
   const navigate = useNavigate();
-  const sdk = useGossipSdk();
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const [settings, setSettings] = useState<MeshSettingsValue | null>(null);
   const [status, setStatus] = useState<MeshNativeStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPowerSheetOpen, setIsPowerSheetOpen] = useState(false);
-  const [sharedUntil, setSharedUntil] = useState<number | null>(() =>
-    keysSharedNearbyUntil()
-  );
-  const [shareError, setShareError] = useState<string | null>(null);
   const [battery, setBattery] = useState<BatteryState | null>(null);
 
   useEffect(() => {
@@ -191,34 +181,6 @@ const MeshSettings: React.FC = () => {
       }
     },
     [t]
-  );
-
-  // the share ends on its own: follow it
-  useEffect(() => {
-    if (sharedUntil === null) return;
-    const timer = setTimeout(
-      () => setSharedUntil(keysSharedNearbyUntil()),
-      Math.max(0, sharedUntil - Date.now()) + 500
-    );
-    return () => clearTimeout(timer);
-  }, [sharedUntil]);
-
-  const handleShareToggle = useCallback(
-    async (next: boolean) => {
-      setShareError(null);
-      try {
-        if (next) {
-          setSharedUntil(await shareKeysNearby(sdk));
-        } else {
-          await stopSharingKeysNearby();
-          setSharedUntil(null);
-        }
-      } catch (err) {
-        logger.error('Failed to share keys nearby:', err);
-        setShareError(t('mesh.share_nearby_failed'));
-      }
-    },
-    [sdk, t]
   );
 
   const handleBridgeToggle = useCallback(async (next: boolean) => {
@@ -340,36 +302,6 @@ const MeshSettings: React.FC = () => {
               }
             />
           )}
-        </div>
-      )}
-
-      {enabled && (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <ToggleRow
-            icon={<UserPlus />}
-            label={t('mesh.share_nearby')}
-            hint={
-              sharedUntil !== null
-                ? t('mesh.share_nearby_until', {
-                    time: new Date(sharedUntil).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    }),
-                  })
-                : t('mesh.share_nearby_hint')
-            }
-            checked={sharedUntil !== null}
-            onChange={value => void handleShareToggle(value)}
-            withDivider
-          />
-          <div className="px-4 py-3">
-            <p className="text-xs text-muted-foreground">
-              {t('mesh.share_nearby_warning')}
-            </p>
-            {shareError && (
-              <p className="text-xs text-destructive mt-2">{shareError}</p>
-            )}
-          </div>
         </div>
       )}
 

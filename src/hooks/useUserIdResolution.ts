@@ -5,7 +5,6 @@ import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useGossipSdk } from './useGossipSdk';
 import { mnsService, isMnsDomain } from '../services/mns';
-import { fetchKeysFromMesh, isMeshActive } from '../services/meshNode';
 
 export type FieldState = {
   value: string;
@@ -21,31 +20,6 @@ export type MnsState = {
   /** The original MNS domain that was resolved */
   resolvedDomain: string | null;
 };
-
-/**
- * The server's answer or the mesh's, whichever finds the keys first; the
- * server's error when neither does.
- */
-function firstFound(
-  fromServer: Promise<UserPublicKeys>,
-  fromMesh: Promise<UserPublicKeys | null>
-): Promise<UserPublicKeys> {
-  return new Promise((resolve, reject) => {
-    let pending = 2;
-    let serverError: unknown = new Error('Public keys not found');
-    const settle = () => {
-      if (--pending === 0) reject(serverError);
-    };
-    fromServer.then(resolve, error => {
-      serverError = error;
-      settle();
-    });
-    fromMesh.then(
-      keys => (keys ? resolve(keys) : settle()),
-      () => settle()
-    );
-  });
-}
 
 /**
  * Turns raw user-ID input into a resolved gossip ID plus its public keys:
@@ -88,12 +62,8 @@ export function useUserIdResolution() {
         throw new Error('SDK not initialized');
       }
 
-      // With the mesh on, ask phones nearby at the same time as the server:
-      // whichever answers first, so adding someone works with no internet.
-      const fromServer = gossip.auth.fetchPublicKeyByUserId(uid);
-      const publicKey = isMeshActive()
-        ? await firstFound(fromServer, fetchKeysFromMesh(uid))
-        : await fromServer;
+      // without internet, keys come from the in-person contact code instead
+      const publicKey = await gossip.auth.fetchPublicKeyByUserId(uid);
       publicKeysCache.current.set(uid, publicKey);
       return publicKey;
     },

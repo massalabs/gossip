@@ -236,11 +236,6 @@
     "bridge": "Passerelle vers internet",
     "bridge_hint": "Quand vous avez internet, faire passer les messages du Réseau Mesh",
     "bridge_warning": "En tant que passerelle, votre téléphone envoie sur internet les messages chiffrés d'autres personnes et récupère leurs réponses. Votre opérateur et le nœud Gossip voient que votre connexion transporte ce trafic, mais pas son contenu.",
-    "share_nearby": "Permettre aux personnes proches de m’ajouter",
-    "share_nearby_hint": "Pendant 10 minutes, les téléphones proches peuvent obtenir vos clés pour vous ajouter sans internet",
-    "share_nearby_warning": "Toute personne proche qui reçoit vos clés peut relier ce téléphone, et l’endroit où il se trouve, à votre identifiant Gossip. Ne l’activez qu’à côté de la personne qui vous ajoute.",
-    "share_nearby_until": "Partagé jusqu’à {{time}}",
-    "share_nearby_failed": "Vos clés n’ont pas pu être partagées. Vérifiez que le Réseau Mesh est activé.",
     "battery_exempt_needed": "Android peut arrêter le Réseau Mesh quand l'écran est éteint. Autorisez Gossip à fonctionner en arrière-plan pour que votre téléphone continue de relayer.",
     "battery_exempt_button": "Autoriser en arrière-plan",
     "battery_saver_on": "L'économiseur de batterie est activé. Il ralentit le Bluetooth quand l'écran est éteint, donc les messages arrivent plus lentement. Désactivez-le pendant une grève.",
@@ -276,7 +271,7 @@
     "check_lock_detail": "Quand Gossip est verrouillé, rien dans le Réseau Mesh ne montre vos comptes, et votre téléphone continue de relayer pour les autres. Les messages pour vous attendent à proximité et arrivent quand vous déverrouillez. Si vous devez remettre votre téléphone, assurez-vous que 5 minutes se sont écoulées depuis votre dernière utilisation de Gossip, ou verrouillez-le depuis la notification du Réseau Mesh. Associez la connexion biométrique au mot de passe de votre compte leurre, jamais à celui du compte sensible.",
     "check_lock_action": "Ouvrir les réglages de sécurité",
     "check_add_nearby": "Ajouter quelqu'un sans internet",
-    "check_add_nearby_detail": "Demandez-lui d’activer « Permettre aux personnes proches de m’ajouter » dans ses réglages du Réseau Mesh, puis scannez son code QR : Gossip obtient ses clés auprès des téléphones proches et les vérifie avec le code.",
+    "check_add_nearby_detail": "Retrouvez-vous en personne : la personne ouvre Partager le contact → En personne et tient son téléphone devant votre caméra, puis vous scannez son code depuis Nouveau contact → Scanner un QR code. Le code contient ses clés, donc pas besoin d'internet.",
     "check_keyring": "Le trousseau de votre groupe",
     "check_keyring_detail": "Si votre syndicat ou groupe partage un trousseau de clés, les téléphones qui prouvent leur appartenance sont prioritaires sur le réseau. Demandez à vos organisateurs avant la grève."
   }

@@ -4,9 +4,6 @@ import {
   CompositeMessageProtocol,
   MeshNodeProtocol,
   RestMessageProtocol,
-  UserPublicKeys,
-  decodeUserId,
-  encodeUserId,
   type BulletinItem,
   type EncryptedMessage,
   type GossipSdk,
@@ -63,13 +60,7 @@ export interface MeshNodeNativePlugin extends MeshNodePlugin {
    */
   capabilities(): Promise<{ rustCore: boolean; installId?: string }>;
   /**
-   * Makes the node stop serving the key set it published under `hash`;
-   * `forgotten` is false when it held none.
-   */
-  forgetKeys(options: { hash: string }): Promise<{ forgotten?: boolean }>;
-  /**
-   * The app locked: the node empties its wanted list and deletes the keys
-   * shared nearby, and keeps relaying. Nothing else it holds is ours: what
+   * The app locked: the node empties its wanted list and keeps relaying. Nothing else it holds is ours: what
    * the app sent is stored like what it relays. The native side also calls
    * it by itself (background auto-lock, the notification's Lock action).
    */
@@ -311,7 +302,6 @@ async function applyUpstream(bridgeEnabled: boolean): Promise<void> {
 }
 
 export async function stopMesh(): Promise<void> {
-  await stopSharingKeysNearby();
   switchable?.deactivate();
   if (isMeshAvailable()) await MeshNode.stop().catch(() => undefined);
 }
@@ -358,98 +348,14 @@ export async function getMeshStatus(): Promise<MeshNativeStatus | null> {
 }
 
 /**
- * Public keys of `userId` from the mesh's key pool, without any server: the
- * pool indexes key sets by `blake3(keys)`, which is the user id, and the
- * keys are checked against it again here, so a phone nearby cannot pass off
- * other keys. Null when the mesh is off or nobody nearby published them.
- */
-export async function fetchKeysFromMesh(
-  userId: string
-): Promise<UserPublicKeys | null> {
-  if (!switchable?.isActive) return null;
-  const bytes = await switchable.mesh.getKeys(decodeUserId(userId));
-  if (!bytes) return null;
-  let keys: UserPublicKeys;
-  try {
-    keys = UserPublicKeys.from_bytes(bytes);
-  } catch {
-    return null;
-  }
-  if (encodeUserId(keys.derive_id()) !== userId) {
-    keys.free();
-    return null;
-  }
-  return keys;
-}
-
-/** How long "let people nearby add me" keeps our keys on the mesh. */
-export const SHARE_KEYS_NEARBY_MS = 10 * 60 * 1000;
-
-let sharedKeys: {
-  userId: string;
-  until: number;
-  timer: ReturnType<typeof setTimeout>;
-} | null = null;
-
-/** Until when our keys are shared nearby, or null. */
-export function keysSharedNearbyUntil(): number | null {
-  return sharedKeys ? sharedKeys.until : null;
-}
-
-/**
- * Publishes our public keys to the mesh for a few minutes, so someone nearby
- * who scanned our QR code can add us without a server. Only on the user's
- * request: whoever receives the keys can tie this phone, and where it is, to
- * our user id.
- */
-export async function shareKeysNearby(
-  sdk: GossipSdk,
-  durationMs: number = SHARE_KEYS_NEARBY_MS
-): Promise<number> {
-  if (!switchable?.isActive || !sdk.isSessionOpen) {
-    throw new Error('The offline mesh is off');
-  }
-  await stopSharingKeysNearby();
-  await switchable.mesh.publishKeys(new Uint8Array(sdk.publicKeys.to_bytes()));
-  const until = Date.now() + durationMs;
-  sharedKeys = {
-    userId: sdk.userId,
-    until,
-    timer: setTimeout(() => void stopSharingKeysNearby(), durationMs),
-  };
-  return until;
-}
-
-/** Stops serving the keys `shareKeysNearby` published, if any. */
-export async function stopSharingKeysNearby(): Promise<void> {
-  const shared = sharedKeys;
-  if (!shared) return;
-  sharedKeys = null;
-  clearTimeout(shared.timer);
-  try {
-    // neighbours that took a copy keep it for their retention
-    await switchable?.mesh.forgetKeys(decodeUserId(shared.userId));
-  } catch (error) {
-    // the node is off (it then serves nothing) or the call failed; the
-    // next lock withdraws them either way
-    if (import.meta.env.DEV) {
-      logger.warn('[MeshNode] could not withdraw our keys', error);
-    }
-  }
-}
-
-/**
  * Locks the mesh with the app (lock, auto-lock, logout, another account):
- * the keys we shared nearby go and the node waits for nothing of ours (the
- * SDK's closeSession already emptied the wanted list). The node keeps
+ * the node waits for nothing of ours (the SDK's closeSession already emptied
+ * the wanted list). The node keeps
  * running and relaying, and what we sent is still delivered: it is stored
  * like anybody's, so the next account to open, whichever it is, finds a node
  * that holds nothing of the previous one.
  */
 export async function lockMesh(): Promise<void> {
-  const shared = sharedKeys;
-  sharedKeys = null;
-  if (shared) clearTimeout(shared.timer);
   switchable?.forgetWanted();
   if (!isMeshAvailable()) return;
   try {
@@ -468,7 +374,6 @@ export async function lockMesh(): Promise<void> {
  * False when it failed.
  */
 export async function wipeMesh(): Promise<boolean> {
-  await stopSharingKeysNearby();
   if (!isMeshAvailable()) return true;
   // seekers the previous session left for the next activation
   switchable?.forgetWanted();

@@ -177,9 +177,6 @@ and it is off until the user turns it on in **Settings → Offline mesh**
 - **Bridge to the internet** (off by default) lets the node upload other phones' mesh
   blobs and fetch their wanted seekers when it has internet. The consent is saved with the
   native install id, so a phone restored from a backup is asked again.
-- **Let people nearby add me** (with the mesh on) publishes this account's public keys to
-  the mesh for 10 minutes, then asks the node to forget them. It warns that whoever
-  receives the keys can tie the phone, and where it is, to the user id.
 - **Power mode** sets the radio's duty cycle.
 - **Prepare for a strike** (`MeshPrepareSettings.tsx`) is a checklist: mesh on, sessions
   active with every contact, battery optimisation off (Android) or the app kept open
@@ -208,18 +205,18 @@ Gossip service UUID, and a bridge uploads other people's traffic from its own co
 In person, the contact code of **Share contact → In person** carries the keys
 themselves, over an animated QR code or Bluetooth, so neither phone needs the
 mesh, the internet or published keys ([CONTACT-EXCHANGE.md](CONTACT-EXCHANGE.md)).
-This is the path the app offers; the mesh lookup below is the older one.
+The contact request and its acceptance then travel over the mesh like any
+announcement.
 
-The person to add turns on **Let people nearby add me**: the app never publishes its keys
-on its own. Resolving a scanned or typed user id asks the server and, with the mesh on,
-the mesh at the same time; the first answer wins. The key pool is indexed by
-`blake3(keys)`, which is the user id, and both paths check the keys against the id before
-using them (`fetchKeysFromMesh` here, `AuthService.fetchPublicKeyByUserId` in the SDK), so
-neither a phone nearby nor a node can pass off other keys.
+The app never puts its keys on the mesh. An earlier "Let people nearby add me"
+switch did, for 10 minutes, and was removed: key sets spread to the whole mesh,
+tying the phone to its user id for anyone who received them. A typed or invited
+user id is resolved through the server only.
 
-**Let people nearby add me** withdraws the keys after 10 minutes (or when the mesh is
-turned off, or the app locks) with `forgetKeys`, which deletes the node's copy of the key
-set (by its blake3 hash). Neighbours that took a copy keep it for their mesh retention.
+Without internet, someone outside cannot start a new conversation with someone
+inside: contact requests sit on the server's public board, which bridges do not
+bring into the mesh (they fetch only wanted seekers). Messages between existing
+contacts do cross a bridge both ways.
 
 ### What stays on the mesh
 
