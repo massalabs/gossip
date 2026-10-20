@@ -7,14 +7,23 @@ import UIKit
  * through AVCaptureMetadataOutput, so no third-party library is involved.
  * `scan()` presents a full-screen camera and resolves with the decoded text,
  * or rejects with code CANCELLED when the user closes it.
+ *
+ * `scan({ continuous: true })` keeps the camera open for animated codes: each
+ * new code read is a `frame` event ({ value }), `setStatus` writes a line over
+ * the camera, and `finish()` closes it (the scan then resolves with "").
  */
 @objc(QrScannerPlugin)
 public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "QrScannerPlugin"
     public let jsName = "QrScanner"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "scan", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "scan", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setStatus", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "finish", returnType: CAPPluginReturnPromise),
     ]
+
+    /// The scanner on screen, for setStatus and finish.
+    private weak var current: QrScanViewController?
 
     @objc func scan(_ call: CAPPluginCall) {
         AVCaptureDevice.requestAccess(for: .video) { granted in
@@ -31,6 +40,12 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
                 // The app language is chosen in-app rather than by the OS
                 // locale, so JS sends the already translated label.
                 scanner.closeLabel = call.getString("closeLabel") ?? "Close scanner"
+                scanner.continuous = call.getBool("continuous") ?? false
+                if scanner.continuous {
+                    scanner.onFrame = { [weak self] value in
+                        self?.notifyListeners("frame", data: ["value": value])
+                    }
+                }
                 scanner.modalPresentationStyle = .fullScreen
                 // [weak scanner]: the controller owns this closure, so a strong
                 // capture would keep the controller, its session and this call
@@ -45,15 +60,39 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
                         }
                     }
                 }
+                self.current = scanner
                 host.present(scanner, animated: true)
             }
+        }
+    }
+
+    @objc func setStatus(_ call: CAPPluginCall) {
+        let text = call.getString("text") ?? ""
+        DispatchQueue.main.async {
+            self.current?.setStatus(text)
+            call.resolve()
+        }
+    }
+
+    @objc func finish(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.current?.finishContinuous()
+            call.resolve()
         }
     }
 }
 
 final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
     /// Called once: decoded text, or nil when cancelled / camera unavailable.
+    /// A continuous scan ends with an empty text.
     var onResult: ((String?) -> Void)?
+
+    /// Keep scanning after a code and hand each new one to `onFrame`.
+    var continuous = false
+    var onFrame: ((String) -> Void)?
+    /// The camera reads the same frame several times in a row.
+    private var lastValue: String?
+    private let statusLabel = PaddedLabel()
 
     /// Accessibility label of the close button, translated by the JS side.
     var closeLabel = "Close scanner"
@@ -110,6 +149,26 @@ final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjec
             close.heightAnchor.constraint(equalToConstant: 44),
         ])
 
+        if continuous {
+            statusLabel.textColor = .white
+            statusLabel.font = .systemFont(ofSize: 16)
+            statusLabel.textAlignment = .center
+            statusLabel.numberOfLines = 0
+            statusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.65)
+            statusLabel.layer.cornerRadius = 16
+            statusLabel.layer.masksToBounds = true
+            statusLabel.isHidden = true
+            // Progress changes often: VoiceOver reads it when focused rather than on each change.
+            statusLabel.accessibilityTraits = .updatesFrequently
+            statusLabel.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(statusLabel)
+            NSLayoutConstraint.activate([
+                statusLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+                statusLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+                statusLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32),
+            ])
+        }
+
         // startRunning blocks, keep it off the main thread.
         sessionQueue.async { self.session.startRunning() }
     }
@@ -158,7 +217,24 @@ final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjec
         guard let code = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
               code.type == .qr,
               let value = code.stringValue else { return }
+        if continuous {
+            guard !finished, value != lastValue else { return }
+            lastValue = value
+            onFrame?(value)
+            return
+        }
         finish(value)
+    }
+
+    /// Text over the camera of a continuous scan; empty hides it.
+    func setStatus(_ text: String) {
+        statusLabel.text = text
+        statusLabel.isHidden = text.isEmpty
+    }
+
+    /// Ends a continuous scan: the caller has what it needed.
+    func finishContinuous() {
+        finish("")
     }
 
     @objc private func closeTapped() {
@@ -171,5 +247,26 @@ final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjec
         let callback = onResult
         onResult = nil
         callback?(value)
+    }
+}
+
+/// A label with room around its text, for the status line over the camera.
+final class PaddedLabel: UILabel {
+    private let insets = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: 20)
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: insets))
+    }
+
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        return CGSize(width: size.width + insets.left + insets.right,
+                      height: size.height + insets.top + insets.bottom)
+    }
+
+    override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
+        let inner = super.textRect(forBounds: bounds.inset(by: insets), limitedToNumberOfLines: numberOfLines)
+        return inner.inset(by: UIEdgeInsets(top: -insets.top, left: -insets.left,
+                                            bottom: -insets.bottom, right: -insets.right))
     }
 }
