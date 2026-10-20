@@ -104,11 +104,14 @@ export class AnnouncementService {
    * Posts an announcement to the board and, when one is given and the mesh is
    * on, the entry addressing it to the peer, on the mesh only: an internet
    * node never sees it. Only the board post decides success: a peer running
-   * an older version never looks at the addressed entry.
+   * an older version never looks at the addressed entry. With `internetOnly`
+   * the board copy goes to the servers alone. The counter is '' when only a
+   * mesh took it.
    */
   async sendAnnouncement(
     announcement: Uint8Array,
-    mailbox?: { seeker: Uint8Array; data: Uint8Array }
+    mailbox?: { seeker: Uint8Array; data: Uint8Array },
+    internetOnly = false
   ): Promise<{
     success: boolean;
     counter?: string;
@@ -116,7 +119,7 @@ export class AnnouncementService {
   }> {
     const log = logger.forMethod('sendAnnouncement');
 
-    if (mailbox && this.messageProtocol.isMeshEnabled?.()) {
+    if (mailbox && !internetOnly && this.messageProtocol.isMeshEnabled?.()) {
       try {
         await this.messageProtocol.sendMessage(
           { seeker: mailbox.seeker, ciphertext: mailbox.data },
@@ -128,7 +131,10 @@ export class AnnouncementService {
     }
 
     try {
-      const counter = await this.messageProtocol.sendAnnouncement(announcement);
+      const counter = await this.messageProtocol.sendAnnouncement(
+        announcement,
+        internetOnly ? { internetOnly: true } : undefined
+      );
       log.info('broadcast successful', { counter });
       return { success: true, counter };
     } catch (error) {
@@ -214,9 +220,11 @@ export class AnnouncementService {
       }
 
       // Send the announcement and handle updates after transaction
+      const { mailbox, internetOnly } = discussion.sendAnnouncement;
       const result = await this.sendAnnouncement(
         announcement_bytes,
-        discussion.sendAnnouncement.mailbox
+        mailbox,
+        internetOnly
       );
 
       // update discussion state after sending
@@ -224,16 +232,39 @@ export class AnnouncementService {
       if (!latest || latest.sendAnnouncement === null) {
         continue;
       }
-      if (result.success) {
+      if (result.success && !internetOnly && result.counter === '') {
+        // only a mesh took it, which uploads nothing unless it bridges: it
+        // goes to a server as soon as one answers
+        await this.queries.discussions.updateById(discussion.id, {
+          sendAnnouncement: serializeSendAnnouncement({
+            announcement_bytes,
+            when_to_send: new Date(),
+            internetOnly: true,
+          }),
+          updatedAt: new Date(),
+        });
+      } else if (result.success) {
         await this.queries.discussions.updateById(discussion.id, {
           sendAnnouncement: null,
+          updatedAt: new Date(),
+        });
+      } else if (internetOnly) {
+        // the mesh has it already: only the server copy waits
+        await this.queries.discussions.updateById(discussion.id, {
+          sendAnnouncement: serializeSendAnnouncement({
+            announcement_bytes,
+            when_to_send: new Date(
+              Date.now() + this.config.announcements.retryDelayMs
+            ),
+            internetOnly: true,
+          }),
           updatedAt: new Date(),
         });
       } else {
         await this.queries.discussions.updateById(discussion.id, {
           sendAnnouncement: serializeSendAnnouncement({
             announcement_bytes,
-            mailbox: discussion.sendAnnouncement.mailbox,
+            mailbox,
             when_to_send: new Date(
               Date.now() + this.config.announcements.retryDelayMs
             ),

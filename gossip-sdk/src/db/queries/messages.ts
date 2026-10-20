@@ -1,4 +1,15 @@
-import { eq, and, or, sql, inArray, asc, ne, lt, gte } from 'drizzle-orm';
+import {
+  eq,
+  and,
+  or,
+  sql,
+  inArray,
+  asc,
+  ne,
+  lt,
+  gte,
+  isNotNull,
+} from 'drizzle-orm';
 import type { DiscussionRow } from './discussions.js';
 import * as schema from '../schema/index.js';
 import type { DatabaseConnection, GossipSqliteTx } from '../sqlite.js';
@@ -236,6 +247,27 @@ export class MessageQueries {
           eq(schema.messages.status, MessageStatus.SENT)
         )
       )
+      .all();
+  }
+
+  /**
+   * Sent messages that only a mesh took: they keep their ciphertext until a
+   * server takes it too (see `MessageService.repostMeshOnly`), oldest first.
+   */
+  async getMeshOnlySent(ownerUserId: string): Promise<MessageRow[]> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.direction, MessageDirection.OUTGOING),
+          eq(schema.messages.status, MessageStatus.SENT),
+          isNotNull(schema.messages.encryptedMessage),
+          isNotNull(schema.messages.seeker)
+        )
+      )
+      .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
       .all();
   }
 

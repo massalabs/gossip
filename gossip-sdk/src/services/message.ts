@@ -1528,7 +1528,8 @@ export class MessageService {
             .updateById(msgId!, {
               status: MessageStatus.SENT,
               seeker,
-              encryptedMessage: null,
+              // only a mesh took it: kept for a server (repostMeshOnly)
+              encryptedMessage: freshMeshMetadata ? encryptedMessage : null,
               serializedContent: null,
               whenToSend: null,
               ...(freshMeshMetadata && {
@@ -1599,7 +1600,8 @@ export class MessageService {
             ) {
               await this.queries.messages.updateById(msg.id, {
                 status: MessageStatus.SENT,
-                encryptedMessage: null,
+                // only a mesh took it: kept for a server (repostMeshOnly)
+                encryptedMessage: queuedMeshMetadata ? encryptedMessage : null,
                 serializedContent: null,
                 whenToSend: null,
                 ...(queuedMeshMetadata && {
@@ -1661,6 +1663,61 @@ export class MessageService {
     } finally {
       this.processingContacts.delete(contactUserId);
     }
+  }
+
+  /**
+   * Posts to a server the sent messages that only a mesh took, so that they
+   * reach the peer even when no bridge carries them; a mesh node uploads
+   * nothing unless it bridges. Their ciphertext stays in the account's own
+   * storage until then (and goes once the peer acknowledges them). Stops at
+   * the first failure: no server answers. Returns how many were posted.
+   */
+  async repostMeshOnly(): Promise<number> {
+    const log = logger.forMethod('repostMeshOnly');
+    const ownerUserId = this.session.userIdEncoded;
+    if (!ownerUserId || this.getConnectivity() === 'offline') return 0;
+    const rows = await this.queries.messages.getMeshOnlySent(ownerUserId);
+    let posted = 0;
+    for (const row of rows) {
+      if (!row.seeker || !row.encryptedMessage) continue;
+      // a 4xx but 429 is final: 409 means the server holds the seeker already
+      // (a bridge got there first), anything else that it never takes it
+      let onServer = true;
+      try {
+        await this.messageProtocol.sendMessage(
+          { seeker: row.seeker, ciphertext: row.encryptedMessage },
+          { internetOnly: true }
+        );
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : '';
+        if (!/HTTP 4(?!29)\d\d/.test(reason)) {
+          log.info('no server took a mesh-only message; retried later', {
+            messageId: row.id,
+            error,
+          });
+          break;
+        }
+        onServer = reason.includes('HTTP 409');
+      }
+      const latest = await this.queries.messages.getById(row.id);
+      if (!latest || latest.status !== MessageStatus.SENT) continue;
+      const metadata = deserializeMetadata(latest.metadata) ?? {};
+      if (onServer) delete metadata.via;
+      await this.queries.messages.updateById(row.id, {
+        encryptedMessage: null,
+        metadata: serializeMetadata(
+          Object.keys(metadata).length > 0 ? metadata : undefined
+        ),
+      });
+      if (onServer) posted++;
+      const updated = await this.queries.messages.getById(row.id);
+      if (updated) {
+        this.eventEmitter.emit(SdkEventType.MESSAGE_UPDATED, {
+          messages: [rowToMessage(updated)],
+        });
+      }
+    }
+    return posted;
   }
 
   /**
