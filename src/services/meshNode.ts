@@ -82,6 +82,8 @@ export const MeshNode = registerPlugin<MeshNodeNativePlugin>('MeshNode');
 const MESH_ENABLED_KEY = 'gossip-mesh-enabled';
 const MESH_BRIDGE_KEY = 'gossip-mesh-bridge';
 const MESH_POWER_MODE_KEY = 'gossip-mesh-power-mode';
+/** The user id of the account whose seekers and keys the node holds. */
+const MESH_OWNER_KEY = 'gossip-mesh-owner';
 
 export interface MeshSettings {
   enabled: boolean;
@@ -180,6 +182,12 @@ class SwitchableMeshProtocol implements IMessageProtocol {
 
   deactivate(): void {
     this.active = false;
+  }
+
+  /** Drops the seekers kept for the next `activate`. */
+  forgetWanted(): void {
+    this.wanted = [];
+    this.localWanted = [];
   }
 
   private use(): MeshNodeProtocol {
@@ -281,11 +289,12 @@ export async function startMesh(): Promise<void> {
   if (!switchable) throw new Error('The offline mesh is not available');
   const settings = await getMeshSettings();
   await MeshNode.start({ powerMode: settings.powerMode });
-  await MeshNode.setUpstream({
-    urls: [protocolConfig.baseUrl],
-    bridgeEnabled: settings.bridgeEnabled,
-  });
+  await applyUpstream(settings.bridgeEnabled);
   await switchable.activate();
+}
+
+async function applyUpstream(bridgeEnabled: boolean): Promise<void> {
+  await MeshNode.setUpstream({ urls: [protocolConfig.baseUrl], bridgeEnabled });
 }
 
 export async function stopMesh(): Promise<void> {
@@ -315,12 +324,7 @@ export async function setMeshBridgeEnabled(enabled: boolean): Promise<void> {
     key: MESH_BRIDGE_KEY,
     value: enabled ? installId! : 'false',
   });
-  if (isMeshActive()) {
-    await MeshNode.setUpstream({
-      urls: [protocolConfig.baseUrl],
-      bridgeEnabled: enabled,
-    });
-  }
+  if (isMeshActive()) await applyUpstream(enabled);
 }
 
 export async function setMeshPowerMode(
@@ -422,19 +426,43 @@ export async function stopSharingKeysNearby(): Promise<void> {
 }
 
 /**
- * Clears the node when the account changes or goes away, so it no longer
- * serves the previous account's keys or waits on its seekers, which would
- * tie the two accounts together.
+ * Called when an account opens. Locking the app keeps the node as it is, so
+ * a locked phone goes on receiving and relaying; a different account wipes
+ * it first, so it no longer serves the previous account's keys or waits on
+ * its seekers, which would tie the two accounts together.
  */
-export async function wipeMeshForAccountChange(): Promise<void> {
-  await stopSharingKeysNearby();
+export async function claimMeshForAccount(userId: string): Promise<void> {
   if (!isMeshAvailable()) return;
+  const { value: owner } = await Preferences.get({ key: MESH_OWNER_KEY });
+  if (owner === userId) return;
+  // a failed wipe leaves the owner as it was, so the next login tries again
+  if (owner !== null && !(await wipeMesh())) return;
+  await Preferences.set({ key: MESH_OWNER_KEY, value: userId });
+}
+
+/**
+ * Empties the node: on an account change, or when every account is deleted.
+ * The restarted node keeps running if it ran, with the upstream set again
+ * and only the seekers the new session asks for. False when it failed.
+ */
+export async function wipeMesh(): Promise<boolean> {
+  await stopSharingKeysNearby();
+  if (!isMeshAvailable()) return true;
+  // seekers the previous session left for the next activation
+  switchable?.forgetWanted();
   try {
     await MeshNode.wipe();
+    await Preferences.remove({ key: MESH_OWNER_KEY });
+    if (switchable?.isActive) {
+      await applyUpstream((await getMeshSettings()).bridgeEnabled);
+      await switchable.activate();
+    }
+    return true;
   } catch (error) {
     if (import.meta.env.DEV) {
       logger.warn('[MeshNode] failed to wipe the node', error);
     }
+    return false;
   }
 }
 
