@@ -24,6 +24,8 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// The scanner on screen, for setStatus and finish.
     private weak var current: QrScanViewController?
+    /// Status line of a continuous scan, also for a scanner not presented yet.
+    private var status = ""
 
     @objc func scan(_ call: CAPPluginCall) {
         AVCaptureDevice.requestAccess(for: .video) { granted in
@@ -41,6 +43,7 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
                 // locale, so JS sends the already translated label.
                 scanner.closeLabel = call.getString("closeLabel") ?? "Close scanner"
                 scanner.continuous = call.getBool("continuous") ?? false
+                scanner.initialStatus = self.status
                 if scanner.continuous {
                     scanner.onFrame = { [weak self] value in
                         self?.notifyListeners("frame", data: ["value": value])
@@ -50,7 +53,8 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
                 // [weak scanner]: the controller owns this closure, so a strong
                 // capture would keep the controller, its session and this call
                 // alive after every scan.
-                scanner.onResult = { [weak scanner] value in
+                scanner.onResult = { [weak self, weak scanner] value in
+                    self?.status = ""
                     scanner?.dismiss(animated: true) {
                         switch value {
                         case .some(let text):
@@ -69,6 +73,7 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func setStatus(_ call: CAPPluginCall) {
         let text = call.getString("text") ?? ""
         DispatchQueue.main.async {
+            self.status = text
             self.current?.setStatus(text)
             call.resolve()
         }
@@ -93,6 +98,8 @@ final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjec
     /// The camera reads the same frame several times in a row.
     private var lastValue: String?
     private let statusLabel = PaddedLabel()
+    /// Status set before the view loaded.
+    var initialStatus = ""
 
     /// Accessibility label of the close button, translated by the JS side.
     var closeLabel = "Close scanner"
@@ -167,6 +174,7 @@ final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjec
                 statusLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
                 statusLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32),
             ])
+            setStatus(initialStatus)
         }
 
         // startRunning blocks, keep it off the main thread.

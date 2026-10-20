@@ -59,6 +59,10 @@ class QrScanActivity : AppCompatActivity() {
         @Volatile
         var onFrame: ((String) -> Unit)? = null
 
+        /** Status line of a continuous scan, also for a scanner not created yet. */
+        @Volatile
+        var status: String = ""
+
         /** The scanner on screen, for the plugin's setStatus and finish. */
         @Volatile
         var current: WeakReference<QrScanActivity>? = null
@@ -135,6 +139,7 @@ class QrScanActivity : AppCompatActivity() {
                 insets
             }
             statusView = status
+            setStatus(Companion.status)
         }
         // Keep the close button below the status bar / camera cutout.
         ViewCompat.setOnApplyWindowInsetsListener(closeButton) { v, insets ->
