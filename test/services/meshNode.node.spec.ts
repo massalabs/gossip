@@ -26,7 +26,6 @@ const mocks = vi.hoisted(() => {
       installId: state.installId,
     })),
     sendBlob: vi.fn(async () => ({ id: 'aWQ=' })),
-    forgetKeys: vi.fn(async () => undefined),
     wipe: vi.fn(async () => undefined),
     lock: vi.fn(async () => undefined),
     addListener: vi.fn(async (_event: string, handler: ArrivalHandler) => {
@@ -65,19 +64,15 @@ vi.mock('../../src/config/features', () => ({
 import {
   CompositeMessageProtocol,
   MeshNodeProtocol,
-  encodeUserId,
   type GossipSdk,
 } from '@massalabs/gossip-sdk';
 import {
   attachMeshArrivals,
   createMeshTransport,
-  fetchKeysFromMesh,
   getMeshSettings,
   isMeshActive,
   isMeshAvailable,
-  keysSharedNearbyUntil,
   probeMeshAvailability,
-  shareKeysNearby,
   setMeshBridgeEnabled,
   setMeshEnabled,
   setMeshPowerMode,
@@ -113,31 +108,10 @@ describe('mesh transport', () => {
     expect((await getMeshSettings()).enabled).toBe(false);
   });
 
-  it('shares our keys only when asked, and withdraws them after a while', async () => {
-    vi.useFakeTimers();
-    try {
-      createMeshTransport();
-      await setMeshEnabled(true);
-      // turning the mesh on publishes nothing
-      expect(mocks.plugin.sendBlob).not.toHaveBeenCalled();
-
-      const sdk = {
-        isSessionOpen: true,
-        userId: encodeUserId(new Uint8Array(32).fill(3)),
-        publicKeys: { to_bytes: () => new Uint8Array([1, 2, 3]) },
-      } as unknown as GossipSdk;
-      const until = await shareKeysNearby(sdk, 60_000);
-      expect(mocks.plugin.sendBlob).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: 'keys' })
-      );
-      expect(keysSharedNearbyUntil()).toBe(until);
-
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(mocks.plugin.forgetKeys).toHaveBeenCalledOnce();
-      expect(keysSharedNearbyUntil()).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
+  it('publishes no keys when the mesh turns on', async () => {
+    createMeshTransport();
+    await setMeshEnabled(true);
+    expect(mocks.plugin.sendBlob).not.toHaveBeenCalled();
   });
 
   it('asks for bridging again on a phone restored from a backup', async () => {
@@ -230,19 +204,6 @@ describe('mesh transport', () => {
     await setMeshEnabled(false);
     expect(mocks.plugin.stop).toHaveBeenCalledOnce();
     expect(isMeshActive()).toBe(false);
-  });
-
-  it('finds no keys when the mesh is off, has none, or has unreadable ones', async () => {
-    const userId = encodeUserId(new Uint8Array(32).fill(7));
-    createMeshTransport();
-    expect(await fetchKeysFromMesh(userId)).toBeNull();
-
-    await setMeshEnabled(true);
-    expect(await fetchKeysFromMesh(userId)).toBeNull();
-    expect(mocks.plugin.getKeys).toHaveBeenCalledOnce();
-
-    mocks.state.keys = btoa('not keys');
-    expect(await fetchKeysFromMesh(userId)).toBeNull();
   });
 
   it('feeds arrivals to the SDK only while a session is open', async () => {
