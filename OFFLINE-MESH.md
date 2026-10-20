@@ -205,6 +205,11 @@ Gossip service UUID, and a bridge uploads other people's traffic from its own co
 
 ### Adding someone without internet
 
+In person, the contact code of **Share contact → In person** carries the keys
+themselves, over an animated QR code or Bluetooth, so neither phone needs the
+mesh, the internet or published keys ([CONTACT-EXCHANGE.md](CONTACT-EXCHANGE.md)).
+This is the path the app offers; the mesh lookup below is the older one.
+
 The person to add turns on **Let people nearby add me**: the app never publishes its keys
 on its own. Resolving a scanned or typed user id asks the server and, with the mesh on,
 the mesh at the same time; the first answer wins. The key pool is indexed by
