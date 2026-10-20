@@ -2006,9 +2006,16 @@ License: MIT
 Source: node_modules/@napi-rs/wasm-runtime
 License text references: none found
 
+npm: @noble/ciphers@2.0.1
+License: MIT
+Source: https://registry.npmjs.org/@noble/ciphers/-/ciphers-2.0.1.tgz
+Integrity: sha512-xHK3XHPUW8DTAobU+G0XT+/w+JLM7/8k1UFdB5xg/zTFPnFCobhftzw8wl4Lw2aq/Rvir5pxfZV5fEazmeCJ2g==
+License text references: 24d0608c3320a3e2
+
 npm: @noble/curves@2.0.1
 License: MIT
-Source: node_modules/@noble/curves
+Source: https://registry.npmjs.org/@noble/curves/-/curves-2.0.1.tgz
+Integrity: sha512-vs1Az2OOTBiP4q0pwjW5aF0xp9n4MxVrmkFBxc6EKZc6ddYx5gaZiAsZoq0uRRXWbi3AT/sBqn05eRPtn1JCPw==
 License text references: 3239e134eb6e6d64
 
 npm: @noble/ed25519@1.7.5
@@ -2844,7 +2851,8 @@ License text references: 661f8000efeedf1e
 
 npm: qrcode-generator@1.5.2
 License: MIT
-Source: node_modules/qrcode-generator
+Source: https://registry.npmjs.org/qrcode-generator/-/qrcode-generator-1.5.2.tgz
+Integrity: sha512-pItrW0Z9HnDBnFmgiNrY1uxRdri32Uh9EjNYLPVC2zZ3ZRIIEqBoDgm4DkvDwNNDHTK7FNkmr8zAa77BYc9xNw==
 License text references: none found
 
 npm: react@19.2.3
@@ -5089,6 +5097,36 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+
+Text reference: 24d0608c3320a3e2
+SHA-256: 24d0608c3320a3e27ac35e1b36ee222b096e372ccd981351f4db7ff4c2b0bfd0
+File names: LICENSE
+Used by: npm:@noble/ciphers@2.0.1
+
+The MIT License (MIT)
+
+Copyright (c) 2022 Paul Miller (https://paulmillr.com)
+Copyright (c) 2016 Thomas Pornin <pornin@bolet.org>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the “Software”), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 
