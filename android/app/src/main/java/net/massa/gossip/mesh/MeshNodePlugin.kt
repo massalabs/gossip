@@ -244,7 +244,24 @@ class MeshNodePlugin : Plugin() {
     fun forgetKeys(call: PluginCall) {
         reply(call) { core ->
             val hash = decode(call.getString("hash") ?: throw IllegalArgumentException("hash is required"))
-            JSObject().put("forgotten", core.forgetOwn(MeshBlobKind.KEYS, hash))
+            JSObject().put("forgotten", core.forgetKeys(hash))
+        }
+    }
+
+    /**
+     * The app locked: empties the wanted list and withdraws the keys shared
+     * nearby (see [MeshNodeBridge.lockNode]). Resolves on a stopped node too.
+     */
+    @PluginMethod
+    fun lock(call: PluginCall) {
+        replies.execute {
+            try {
+                MeshNodeBridge.lockNode().get()
+                call.resolve()
+            } catch (e: ExecutionException) {
+                val cause = e.cause ?: e
+                call.reject(cause.message ?: "Mesh lock failed", "NODE_ERROR", cause as? Exception)
+            }
         }
     }
 

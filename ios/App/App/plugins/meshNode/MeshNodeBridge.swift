@@ -119,6 +119,16 @@ final class MeshNodeBridge: MeshRadioListener, MeshCoreSink {
 
     func linkCount() -> Int { currentRadio()?.linkCount() ?? 0 }
 
+    /// The app locked (from the app or the native auto-lock): the running
+    /// core empties its wanted list and deletes the keys shared nearby, and
+    /// keeps relaying. A stopped core holds neither.
+    func lockNode(completion: (() -> Void)? = nil) {
+        calls.async {
+            self.currentCore()?.lockNode()
+            completion?()
+        }
+    }
+
     /// Runs `body` against the core on the calls queue.
     func call<T>(_ body: @escaping (MeshCore) throws -> T, completion: @escaping (Result<T, Error>) -> Void) {
         calls.async {

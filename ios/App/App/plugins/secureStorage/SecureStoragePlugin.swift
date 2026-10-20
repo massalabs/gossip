@@ -58,6 +58,19 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Locks the unlocked account natively, without the WebView (the native
+    /// auto-lock): the VFS forgets its keys, as when the app locks. Queued
+    /// behind the calls in flight; a locked store stays locked.
+    static func lockNow() {
+        worker.enqueue {
+            do {
+                _ = try nativeCall(method: "lockSession", argsJson: "{}")
+            } catch {
+                os_log("native lock failed: %{public}@", log: Self.log, type: .error, error.localizedDescription)
+            }
+        }
+    }
+
     @objc func resetStorage(_ call: CAPPluginCall) {
         Self.worker.enqueue {
             do {
