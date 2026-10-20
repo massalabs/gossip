@@ -116,6 +116,11 @@ export class CompositeMessageProtocol implements IMessageProtocol {
 
   /** The transports a call with `routing` uses; throws when there are none. */
   private route(routing?: MessageRouting): CompositeTransport[] {
+    if (routing?.internetOnly) {
+      const internet = this.transports.filter(t => t.kind === 'internet');
+      if (internet.length === 0) throw new Error('No internet transport');
+      return internet;
+    }
     if (!routing?.meshOnly) return this.transports;
     const mesh = this.meshTransports();
     if (mesh.length === 0) throw new Error('No mesh transport is on');
@@ -194,17 +199,33 @@ export class CompositeMessageProtocol implements IMessageProtocol {
     return kinds;
   }
 
-  async sendAnnouncement(announcement: Uint8Array): Promise<string> {
+  /**
+   * Posts on every transport, or on the internet ones with `internetOnly`.
+   * Returns the primary's counter, or '' when only another transport took it
+   * (a mesh): the caller posts it to a server later.
+   */
+  async sendAnnouncement(
+    announcement: Uint8Array,
+    routing?: MessageRouting
+  ): Promise<string> {
     this.remember(await digest(announcement));
+    const transports = routing?.internetOnly
+      ? this.route(routing)
+      : this.transports;
     const results = await Promise.allSettled(
-      this.transports.map(t =>
+      transports.map(t =>
         this.track(t, t.protocol.sendAnnouncement(announcement))
       )
     );
-    const [primaryResult] = results;
-    if (primaryResult.status === 'fulfilled') return primaryResult.value;
-    if (!results.some(r => r.status === 'fulfilled')) {
-      throw primaryResult.reason;
+    const [first] = results;
+    if (transports[0] === this.primary && first.status === 'fulfilled') {
+      return first.value;
+    }
+    if (
+      first.status === 'rejected' &&
+      !results.some(r => r.status === 'fulfilled')
+    ) {
+      throw first.reason;
     }
     // only another transport took it: there is no primary counter to report
     return '';

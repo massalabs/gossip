@@ -148,6 +148,11 @@ export interface ReadyAnnouncement {
    * announcements with, posted like a message alongside the board copy.
    */
   mailbox?: { seeker: Uint8Array; data: Uint8Array };
+  /**
+   * Only a mesh took it so far: post it to a server, alone (the mailbox entry
+   * never goes to one).
+   */
+  internetOnly?: boolean;
 }
 
 export type SendAnnouncement = null | ReadyAnnouncement;
@@ -156,10 +161,11 @@ export type SendAnnouncement = null | ReadyAnnouncement;
 export function serializeSendAnnouncement(
   announcement: ReadyAnnouncement
 ): string {
-  const { announcement_bytes, mailbox } = announcement;
+  const { announcement_bytes, mailbox, internetOnly } = announcement;
   return JSON.stringify({
     announcement_bytes: Array.from(announcement_bytes),
     when_to_send: announcement.when_to_send.toISOString(),
+    ...(internetOnly && { internet_only: true }),
     ...(mailbox && {
       mailbox_seeker: Array.from(mailbox.seeker),
       mailbox_data: Array.from(mailbox.data),
@@ -180,6 +186,7 @@ export function deserializeSendAnnouncement(json: string): ReadyAnnouncement {
       announcement_bytes,
       when_to_send: new Date(parsed.when_to_send),
     };
+    if (parsed.internet_only === true) ready.internetOnly = true;
     // entries saved before the mailbox was encrypted (mailbox_prefix) are
     // dropped: the board copy still carries the announcement
     if (parsed.mailbox_seeker && parsed.mailbox_data) {

@@ -202,6 +202,30 @@ describe('CompositeMessageProtocol', () => {
     ).toEqual([{ seeker: bytes(1), ciphertext: bytes(9) }]);
   });
 
+  it('keeps internet-only posts off the mesh', async () => {
+    const internet = new DownProtocol();
+    const mesh = new MockMessageProtocol();
+    const protocol = composite(internet, mesh);
+    const message = { seeker: bytes(1), ciphertext: bytes(9) };
+    await expect(
+      protocol.sendMessage(message, { internetOnly: true })
+    ).rejects.toThrow('unreachable');
+    await expect(
+      protocol.sendAnnouncement(bytes(7), { internetOnly: true })
+    ).rejects.toThrow('unreachable');
+    expect(mesh.getStoredMessages().size).toBe(0);
+    expect(mesh.getStoredAnnouncements()).toHaveLength(0);
+
+    internet.down = false;
+    await protocol.sendMessage(message, { internetOnly: true });
+    expect(
+      await protocol.sendAnnouncement(bytes(7), { internetOnly: true })
+    ).not.toBe('');
+    expect(internet.getStoredMessages().size).toBe(1);
+    expect(mesh.getStoredMessages().size).toBe(0);
+    expect(mesh.getStoredAnnouncements()).toHaveLength(0);
+  });
+
   it('refuses mesh-only traffic when no mesh is on', async () => {
     const mesh = new MockMessageProtocol() as MockMessageProtocol & {
       isMeshEnabled(): boolean;

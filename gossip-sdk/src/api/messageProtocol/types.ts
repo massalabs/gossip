@@ -33,6 +33,11 @@ export interface MessageRouting {
    * mesh must refuse the call rather than ignore the option.
    */
   meshOnly?: boolean;
+  /**
+   * Only the internet transports take part: posting to a server what only a
+   * mesh took before (see `MessageService.repostMeshOnly`).
+   */
+  internetOnly?: boolean;
 }
 
 export interface MessageProtocolResponse<T = unknown> {
@@ -63,9 +68,13 @@ export interface IMessageProtocol {
 
   /**
    * Broadcast an outgoing session announcement produced by WASM.
-   * Returns the bulletin counter provided by the API.
+   * Returns the bulletin counter provided by the API. Only `internetOnly`
+   * routing applies to announcements.
    */
-  sendAnnouncement(announcement: Uint8Array): Promise<string>;
+  sendAnnouncement(
+    announcement: Uint8Array,
+    routing?: MessageRouting
+  ): Promise<string>;
   /**
    * Fetch incoming discussion announcements from the bulletin storage.
    * Returns raw announcement bytes as provided by the API.
