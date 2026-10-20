@@ -11,7 +11,7 @@
     <string name="portable_backup_notification_writing">Écriture de la sauvegarde</string>
     <string name="qr_scanner_close">Fermer le scanner</string>
     <string name="mesh_channel_name">Maillage Gossip</string>
-    <string name="mesh_channel_desc">Maintient le maillage Bluetooth hors ligne tant qu’il est activé</string>
-    <string name="mesh_notification_title">Le maillage Gossip est actif</string>
+    <string name="mesh_channel_desc">Maintient le Réseau Mesh Bluetooth tant qu’il est activé</string>
+    <string name="mesh_notification_title">Le Réseau Mesh Gossip est actif</string>
     <string name="mesh_notification_body">Relais des messages par Bluetooth vers les téléphones proches</string>
 </resources>
