@@ -136,7 +136,7 @@ class BlePresenter(
                 done(false)
                 return@post
             }
-            peer.queue.addAll(ExchangeFraming.chunks(response, peer.mtu - ATT_HEADER_BYTES))
+            peer.queue.addAll(ExchangeFraming.chunks(response, minOf(peer.mtu - ATT_HEADER_BYTES, MAX_ATT_VALUE)))
             done(true)
             pump(peer)
         }
@@ -344,6 +344,9 @@ class BlePresenter(
             }
         } catch (e: SecurityException) {
             false
+        } catch (e: IllegalArgumentException) {
+            // a notification the stack refuses (too long) must not take the app down
+            false
         }
         if (!started) {
             peer.queue.clear()
@@ -356,6 +359,8 @@ class BlePresenter(
         const val TAG = "GossipContactExchange"
         const val DEFAULT_ATT_MTU = 23
         const val ATT_HEADER_BYTES = 3
+        /** Longest attribute value Bluetooth allows, whatever the MTU; Android throws past it. */
+        const val MAX_ATT_VALUE = 512
         const val REQUEST_TIMEOUT_MS = 15_000L
         val REQUEST_TOKEN = Any()
         val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")

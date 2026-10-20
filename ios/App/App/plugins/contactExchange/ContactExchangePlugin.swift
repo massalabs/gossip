@@ -338,7 +338,7 @@ final class ContactExchangePresenter: NSObject, CBPeripheralManagerDelegate {
             guard self.running,
                   let peer = self.peers.values.first(where: { $0.requestId == requestId }),
                   peer.subscribed, !peer.sending,
-                  let chunks = ExchangeFraming.chunks(response, maxChunk: peer.central.maximumUpdateValueLength) else {
+                  let chunks = ExchangeFraming.chunks(response, maxChunk: min(peer.central.maximumUpdateValueLength, 512)) else {
                 done(false)
                 return
             }

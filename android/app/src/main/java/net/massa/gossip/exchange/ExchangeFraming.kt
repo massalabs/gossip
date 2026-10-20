@@ -3,7 +3,7 @@ package net.massa.gossip.exchange
 /**
  * Byte framing of the in-person contact exchange (CONTACT-EXCHANGE.md). The
  * request is one ATT write; the response, longer than an ATT packet, goes as
- * notifications of at most `ATT MTU − 3` bytes: a 4-byte big-endian length,
+ * notifications of at most `min(ATT MTU − 3, 512)` bytes: a 4-byte big-endian length,
  * then the bytes. The native side never looks inside: the crypto is in JS.
  */
 object ExchangeFraming {
