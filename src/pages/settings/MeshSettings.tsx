@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
+  AlertTriangle,
   Bluetooth,
   CheckSquare,
   ChevronRight,
@@ -31,8 +32,28 @@ import {
   type MeshNativeStatus,
   type MeshSettings as MeshSettingsValue,
 } from '../../services/meshNode';
+import { batteryOptimizationService } from '../../services/batteryOptimization';
 
 const STATUS_REFRESH_MS = 3000;
+
+/** What Android does to a phone that should keep relaying with the screen off. */
+interface BatteryState {
+  /** Exempt from battery optimisation, so the system does not stop the mesh. */
+  exempt: boolean;
+  /** Battery saver is on, which slows Bluetooth scanning. */
+  saver: boolean;
+}
+
+async function readBatteryState(): Promise<BatteryState | null> {
+  const [status, saver] = await Promise.all([
+    batteryOptimizationService.refreshStatus(),
+    batteryOptimizationService.isPowerSaveMode(),
+  ]);
+  // null off Android, where there is nothing to ask for
+  return status
+    ? { exempt: status.isIgnoringBatteryOptimization, saver }
+    : null;
+}
 
 /** A 54px row with an icon, a label, an optional hint and a toggle. */
 const ToggleRow: React.FC<{
@@ -67,6 +88,31 @@ const ToggleRow: React.FC<{
   </div>
 );
 
+/** A warning with the button that fixes it. */
+const BatteryWarning: React.FC<{
+  text: string;
+  action: string;
+  onAction: () => void;
+  withDivider?: boolean;
+}> = ({ text, action, onAction, withDivider }) => (
+  <div
+    className={`flex items-start gap-4 px-4 py-3 ${
+      withDivider ? 'border-b border-border' : ''
+    }`}
+  >
+    <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+    <div className="flex-1">
+      <p className="text-sm text-foreground">{text}</p>
+      <button
+        onClick={onAction}
+        className="mt-2 text-sm font-medium text-accent-soft-foreground"
+      >
+        {action}
+      </button>
+    </div>
+  </div>
+);
+
 const MeshSettings: React.FC = () => {
   const { t } = useTranslation('settings');
   const navigate = useNavigate();
@@ -81,9 +127,22 @@ const MeshSettings: React.FC = () => {
     keysSharedNearbyUntil()
   );
   const [shareError, setShareError] = useState<string | null>(null);
+  const [battery, setBattery] = useState<BatteryState | null>(null);
 
   useEffect(() => {
     void getMeshSettings().then(setSettings);
+  }, []);
+
+  // read again on coming back from the system dialog or settings page
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') {
+        void readBatteryState().then(setBattery);
+      }
+    };
+    refresh();
+    document.addEventListener('visibilitychange', refresh);
+    return () => document.removeEventListener('visibilitychange', refresh);
   }, []);
 
   const enabled = settings?.enabled ?? false;
@@ -113,6 +172,13 @@ const MeshSettings: React.FC = () => {
       try {
         await setMeshEnabled(next);
         setSettings(await getMeshSettings());
+        // without the exemption Android may stop the mesh with the screen
+        // off: ask now, with the system's own dialog
+        const state = await readBatteryState();
+        setBattery(state);
+        if (next && state && !state.exempt) {
+          await batteryOptimizationService.openBatteryOptimizationSettings();
+        }
       } catch (err) {
         logger.error('Failed to switch the offline mesh:', err);
         setError(t('mesh.start_failed'));
@@ -245,6 +311,30 @@ const MeshSettings: React.FC = () => {
           </span>
         </button>
       </div>
+
+      {enabled && battery && (!battery.exempt || battery.saver) && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          {!battery.exempt && (
+            <BatteryWarning
+              text={t('mesh.battery_exempt_needed')}
+              action={t('mesh.battery_exempt_button')}
+              onAction={() =>
+                void batteryOptimizationService.openBatteryOptimizationSettings()
+              }
+              withDivider={battery.saver}
+            />
+          )}
+          {battery.saver && (
+            <BatteryWarning
+              text={t('mesh.battery_saver_on')}
+              action={t('mesh.battery_saver_button')}
+              onAction={() =>
+                void batteryOptimizationService.openBatterySaverSettings()
+              }
+            />
+          )}
+        </div>
+      )}
 
       {enabled && (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
