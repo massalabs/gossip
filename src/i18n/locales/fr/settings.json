@@ -268,7 +268,7 @@
     "check_ios_background": "Garder Gossip ouvert",
     "check_ios_background_detail": "Les iPhone se trouvent mal par Bluetooth quand Gossip est en arrière-plan. Gardez l'application ouverte le jour venu.",
     "check_lock": "Verrouillage automatique à 5 minutes",
-    "check_lock_detail": "Quand Gossip est verrouillé, rien dans le Réseau Mesh ne montre vos comptes, et votre téléphone continue de relayer pour les autres. Les messages pour vous attendent à proximité et arrivent quand vous déverrouillez. Si vous devez remettre votre téléphone, assurez-vous que 5 minutes se sont écoulées depuis votre dernière utilisation de Gossip, ou verrouillez-le depuis la notification du Réseau Mesh. Associez la connexion biométrique au mot de passe de votre compte leurre, jamais à celui du compte sensible.",
+    "check_lock_detail": "Quand Gossip est verrouillé, rien dans le Réseau Mesh ne montre vos comptes, et votre téléphone continue de relayer pour les autres. Les messages pour vous attendent à proximité et arrivent quand vous déverrouillez. Si vous devez remettre votre téléphone, assurez-vous que 5 minutes se sont écoulées depuis votre dernière utilisation de Gossip, ou verrouillez-le depuis la notification du Réseau Mesh.",
     "check_lock_action": "Ouvrir les réglages de sécurité",
     "check_add_nearby": "Ajouter quelqu'un sans internet",
     "check_add_nearby_detail": "Retrouvez-vous en personne : la personne ouvre Partager le contact → En personne et tient son téléphone devant votre caméra, puis vous scannez son code depuis Nouveau contact → Scanner un QR code. Le code contient ses clés, donc pas besoin d'internet."
