@@ -34,6 +34,7 @@ import androidx.core.content.ContextCompat
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
+import net.massa.gossip.exchange.ContactExchangeGate
 
 /**
  * [MeshRadio] over Android BLE. The phone is a GATT peripheral (it advertises
@@ -362,7 +363,9 @@ class BleMeshRadio(
                 (!running || busyCount() >= MeshConstants.MAX_LINKS ||
                     !inboundGate.admit(address, inboundCount(), SystemClock.elapsedRealtime()))
             ) {
-                gattServer?.cancelConnection(device)
+                // A contact exchange shares the app's connections: cancelling this
+                // one could cut its link, so while one runs it is only left unused.
+                if (!ContactExchangeGate.active) gattServer?.cancelConnection(device)
                 return
             }
             pendingPeripheral[address] = Pending(SystemClock.elapsedRealtime())
@@ -745,7 +748,7 @@ class BleMeshRadio(
             for ((address, pending) in pendingPeripheral.entries.toList()) {
                 if (now - pending.startedMs > CONNECT_TIMEOUT_MS) {
                     pendingPeripheral.remove(address)
-                    if (isCentralTo(address)) continue
+                    if (isCentralTo(address) || ContactExchangeGate.active) continue
                     try {
                         bluetoothManager?.adapter?.getRemoteDevice(address)?.let { gattServer?.cancelConnection(it) }
                     } catch (e: IllegalArgumentException) {
