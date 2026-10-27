@@ -181,6 +181,8 @@
   "filter_label": "Filter discussions",
   "waiting_connection": "Waiting for connection...",
   "mesh_connected_one": "Connected to the mesh · {{count}} link",
+  "mesh_connected_few": "Connected to the mesh · {{count}} links",
+  "mesh_connected_many": "Connected to the mesh · {{count}} links",
   "mesh_connected_other": "Connected to the mesh · {{count}} links",
   "mesh_no_links": "Mesh on · no phone in range",
   "announcement": "Announcement",
