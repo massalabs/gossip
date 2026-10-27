@@ -28,6 +28,11 @@ function getGossipDomain(): string {
   return DEWEB_DEV_INVITE_DOMAIN;
 }
 
+/** The web app's address, for phones that cannot run the native app. */
+export function getWebAppUrl(): string {
+  return getGossipDomain();
+}
+
 /**
  * Generate the single, universal invite link you should share.
  * Example: https://gossip.app/invite/abc123xyz

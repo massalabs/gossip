@@ -177,6 +177,20 @@ const MeshPrepareSettings: React.FC = () => {
             title={t('mesh.check_add_nearby')}
             detail={t('mesh.check_add_nearby_detail')}
           />
+          <ChecklistItem
+            done={null}
+            title={t('mesh.check_share_app')}
+            detail={t('mesh.check_share_app_detail')}
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(ROUTES.settingsMeshShareApp())}
+              >
+                {t('mesh.check_share_app_action')}
+              </Button>
+            }
+          />
         </div>
       )}
     </PageLayout>

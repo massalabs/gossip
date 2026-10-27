@@ -7,6 +7,7 @@ import {
   Bluetooth,
   CheckSquare,
   ChevronRight,
+  Download,
   Share2,
 } from 'react-feather';
 import PageLayout from '../../components/ui/Layout/PageLayout';
@@ -356,6 +357,21 @@ const MeshSettings: React.FC = () => {
           <CheckSquare className="mr-4" />
           <span className="text-base font-medium flex-1 text-left">
             {t('mesh.prepare')}
+          </span>
+          <ChevronRight className="text-muted-foreground" />
+        </button>
+        <button
+          onClick={() => navigate(ROUTES.settingsMeshShareApp())}
+          className="w-full min-h-[54px] flex items-center px-4 py-2 border-t border-border text-foreground hover:bg-muted transition-colors"
+        >
+          <Download className="mr-4 shrink-0" />
+          <span className="flex-1 text-left">
+            <span className="block text-base font-medium">
+              {t('share_app.row')}
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              {t('share_app.row_hint')}
+            </span>
           </span>
           <ChevronRight className="text-muted-foreground" />
         </button>
