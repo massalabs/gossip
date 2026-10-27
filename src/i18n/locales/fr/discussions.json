@@ -181,6 +181,8 @@
   "filter_label": "Filtrer les discussions",
   "waiting_connection": "En attente de connexion...",
   "mesh_connected_one": "Connecté au mesh · {{count}} lien",
+  "mesh_connected_few": "Connecté au mesh · {{count}} liens",
+  "mesh_connected_many": "Connecté au mesh · {{count}} liens",
   "mesh_connected_other": "Connecté au mesh · {{count}} liens",
   "mesh_no_links": "Mesh activé · aucun téléphone à portée",
   "announcement": "Annonce",
