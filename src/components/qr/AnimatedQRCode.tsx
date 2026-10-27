@@ -18,15 +18,17 @@ interface AnimatedQRCodeProps {
   /** CSS pixels. */
   size?: number;
   ariaLabel: string;
+  /** Alphanumeric (the default) packs uppercase texts; Byte takes any text. */
+  mode?: 'Alphanumeric' | 'Byte';
 }
 
 type Matrix = boolean[][];
 
-function toMatrix(text: string): Matrix {
+function toMatrix(text: string, mode: 'Alphanumeric' | 'Byte'): Matrix {
   // Error correction L: a screen is flat and clean, and lower correction
   // keeps the modules large enough for a camera at arm's length.
   const qr = qrcode(0, 'L');
-  qr.addData(text, 'Alphanumeric');
+  qr.addData(text, mode);
   qr.make();
   const count = qr.getModuleCount();
   return Array.from({ length: count }, (_, row) =>
@@ -39,9 +41,13 @@ const AnimatedQRCode: React.FC<AnimatedQRCodeProps> = ({
   frames,
   size = 280,
   ariaLabel,
+  mode = 'Alphanumeric',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const matrices = useMemo(() => frames.map(toMatrix), [frames]);
+  const matrices = useMemo(
+    () => frames.map(frame => toMatrix(frame, mode)),
+    [frames, mode]
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;

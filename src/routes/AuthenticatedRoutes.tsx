@@ -22,6 +22,7 @@ import Web3Settings from '../pages/settings/Web3Settings';
 import PrivacySettings from '../pages/settings/PrivacySettings';
 import MeshSettings from '../pages/settings/MeshSettings';
 import MeshPrepareSettings from '../pages/settings/MeshPrepareSettings';
+import ShareAppSettings from '../pages/settings/ShareAppSettings';
 import PortableBackup from '../pages/PortableBackup';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { usePendingSharedContent } from '../hooks/usePendingSharedContent';
@@ -91,6 +92,10 @@ export const AuthenticatedRoutes: React.FC = () => {
         <Route
           path={ROUTES.settingsMeshPrepare()}
           element={<MeshPrepareSettings />}
+        />
+        <Route
+          path={ROUTES.settingsMeshShareApp()}
+          element={<ShareAppSettings />}
         />
 
         {/* Default redirects */}
