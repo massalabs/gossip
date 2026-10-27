@@ -152,7 +152,17 @@
     <!-- Offline Bluetooth mesh before Android 12, where BLE scanning needed location -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- BLE scanning before Android 12, and the Wi-Fi Direct app-sharing hotspot before Android 13 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="32" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
+    <!-- Sharing the app offline: a Wi-Fi Direct hotspot serving the APK (share/) -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="tiramisu" />
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
 
 </manifest>
