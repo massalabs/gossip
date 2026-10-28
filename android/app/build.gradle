@@ -99,25 +99,18 @@ android {
     }
 }
 
-// Offline mesh node (gossip-mobile, in wasm/mesh). Built in by default;
-// GOSSIP_MESH_STUB=1 keeps the in-memory StubMeshCore instead, for a build
-// that skips the Rust cross-compile.
+// Offline mesh node (gossip-mobile, in wasm/mesh). Built in by default.
+// GOSSIP_MESH=0 (or -Pgossip.mesh=false) skips the Rust cross-compile: the
+// app keeps the in-memory StubMeshCore and hides the mesh.
 def gossipWasmDir = file("${rootProject.projectDir.parentFile}/wasm")
-def hasMeshCore = System.getenv('GOSSIP_MESH_STUB') != '1'
+def hasMeshCore = System.getenv('GOSSIP_MESH') != '0' && project.findProperty('gossip.mesh') != 'false'
 if (hasMeshCore) {
     android.sourceSets.main.java.srcDirs += ['src/meshffi/java', 'src/meshffi/generated']
     android.sourceSets.test.java.srcDirs += ['src/meshffiTest/java']
 } else {
-    logger.lifecycle("gossip-mobile not used (GOSSIP_MESH_STUB=1): the mesh runs on the stub core")
-    // The app hides the mesh without the Rust core, but a release must not
-    // ship the stub by accident. GOSSIP_MESH_OPTIONAL=1 allows it, for
-    // builds made without the mesh on purpose.
-    gradle.taskGraph.whenReady { graph ->
-        def releasing = graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') }
-        if (releasing && System.getenv('GOSSIP_MESH_OPTIONAL') != '1') {
-            throw new GradleException("Release build without the gossip-mobile mesh core: unset GOSSIP_MESH_STUB, or set GOSSIP_MESH_OPTIONAL=1 to build without the mesh")
-        }
-    }
+    logger.lifecycle("Mesh not built in (GOSSIP_MESH=0 or -Pgossip.mesh=false): the mesh runs on the stub core")
+    // a mesh build earlier leaves its library in jniLibs
+    android.packagingOptions.jniLibs.excludes += ['**/libgossip_mobile.so']
 }
 
 repositories {

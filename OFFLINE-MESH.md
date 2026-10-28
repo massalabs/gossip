@@ -34,27 +34,28 @@ memory and answers fetches from it, but does not speak on links, so a checkout o
 repository alone still builds and runs. A build with the stub hides the mesh: at launch
 `probeMeshAvailability` asks the plugin's `capabilities()` whether the Rust node is there,
 and without it the settings say the mesh is unavailable and the radio never starts.
-Release builds refuse the stub: Gradle fails a release task without `gossip-mobile`
-unless `GOSSIP_MESH_OPTIONAL=1`, and Swift fails a non-debug build without the
-`GossipMobile` module unless `GOSSIP_MESH_OPTIONAL` is an active compilation condition.
 
-`gossip-mobile` lives in this repository, under `wasm/mesh`
-([wasm/mesh/README.md](wasm/mesh/README.md)).
+The Rust node is built in by default. `gossip-mobile` lives in this repository, under
+`wasm/mesh` ([wasm/mesh/README.md](wasm/mesh/README.md)). A build can leave it out to
+skip the Rust cross-compile; it then uses the stub.
 
-- **Android.** Unless `GOSSIP_MESH_STUB=1`, Gradle adds the `meshffi` source set
+- **Android.** Unless `GOSSIP_MESH=0` (or `-Pgossip.mesh=false`), Gradle adds the `meshffi` source set
   (`android/app/src/meshffi/java/…/RustMeshCore.kt` and the generated bindings) and runs
   `buildRustMeshCore` before `preBuild`. That task calls
   `scripts/build-mesh-android.sh`, which builds `libgossip_mobile.so` into `jniLibs` and
   the Kotlin bindings (package `net.massa.gossip.mesh.ffi`) into
   `android/app/src/meshffi/generated`, both gitignored. It uses its own Cargo target
   directory (`android/app/build/gossip-mobile-target`, or `$GOSSIP_MOBILE_TARGET_DIR`).
-  `GOSSIP_MESH_STUB=1` forces the stub. The factory finds `RustMeshCore` by name, so the
-  main source set never depends on the bindings.
+  The factory finds `RustMeshCore` by name, so the main source set never depends on the
+  bindings. A stub build leaves a library built earlier out of the package.
 - **iOS (macOS only).** `scripts/build-mesh-ios.sh` builds a static-library
   `GossipMobileFFI.xcframework` and the Swift bindings into `ios/App/GossipMobile/generated`
   (gitignored). Then `pod install`: the Podfile adds the local `GossipMobile` pod only
   once those files exist. It is a separate Swift module because its types share names
   with the app's; `RustMeshCore.swift` is compiled only under `canImport(GossipMobile)`.
+  Without the pod the app uses the stub, and Swift fails a non-debug build unless
+  `GOSSIP_MESH_OPTIONAL` is an active compilation condition, so a release does not ship
+  the stub by accident.
 
 `wipe` restarts the Rust node empty, upstream and wanted list included; the adapter
 applies them again. The node may call `closeLink` from inside `linkUp` and `frameIn`.
