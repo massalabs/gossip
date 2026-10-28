@@ -1,6 +1,9 @@
 /* tslint:disable */
 /* eslint-disable */
-export function initSecureStorage(domain: string, backend: string): Promise<void>;
+export function initSecureStorage(
+  domain: string,
+  backend: string
+): Promise<void>;
 /**
  * Permanently destroy the data of the currently unlocked slot.
  *
@@ -37,8 +40,16 @@ export function execSql(sql: string, params: Array<any>): ExecResult;
  * Strictly validate one version-1 encrypted block record.
  */
 export function validatePortableBlock(value: Uint8Array): void;
-export function writeNamespaceData(namespace: number, offset: number, data: Uint8Array): void;
-export function readNamespaceData(namespace: number, offset: number, len: number): Uint8Array;
+export function writeNamespaceData(
+  namespace: number,
+  offset: number,
+  data: Uint8Array
+): void;
+export function readNamespaceData(
+  namespace: number,
+  offset: number,
+  len: number
+): Uint8Array;
 export function namespaceDataLength(namespace: number): number;
 export function clearNamespace(namespace: number): void;
 /**
@@ -70,8 +81,15 @@ export function finalizeOuterMigration(): Array<any>;
 /**
  * Transform one complete fixed-slot block coordinate.
  */
-export function migrateOuterBlockBatch(namespace: number, block_index: number, values: Array<any>): Array<any>;
-export function finishOuterMigrationNamespace(namespace: number, source_block_count: number): void;
+export function migrateOuterBlockBatch(
+  namespace: number,
+  block_index: number,
+  values: Array<any>
+): Array<any>;
+export function finishOuterMigrationNamespace(
+  namespace: number,
+  source_block_count: number
+): void;
 export function endOuterMigration(): void;
 export function idbHasData(): Promise<boolean>;
 export function provisionStorage(): void;
@@ -84,13 +102,22 @@ export function endOnboardingCandidate(): void;
  * portable candidate and authenticate its keypairs without exposing the
  * matched slot to JavaScript.
  */
-export function beginCandidatePreview(domain: string, password: Uint8Array, keypairs: Array<any>): boolean;
+export function beginCandidatePreview(
+  domain: string,
+  password: Uint8Array,
+  keypairs: Array<any>
+): boolean;
 /**
  * Admit one canonical candidate block. Only namespace 0 blocks belonging to
  * the internally authenticated slot are retained; callers never learn which
  * slot matched.
  */
-export function appendCandidatePreviewBlock(slot: number, namespace: number, block_index: number, data: Uint8Array): void;
+export function appendCandidatePreviewBlock(
+  slot: number,
+  namespace: number,
+  block_index: number,
+  data: Uint8Array
+): void;
 /**
  * Load the candidate namespace length and open SQLite without write authority.
  */
@@ -137,17 +164,45 @@ export class wbg_rayon_PoolBuilder {
   receiver(): number;
 }
 
-export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+export type InitInput =
+  | RequestInfo
+  | URL
+  | Response
+  | BufferSource
+  | WebAssembly.Module;
 
 export interface InitOutput {
   readonly __wbg_execresult_free: (a: number, b: number) => void;
   readonly activateOnboardingGeneration: () => any;
-  readonly admitOuterMigrationPassword: (a: number, b: number) => [number, number, number];
-  readonly allocateSession: (a: number, b: number, c: number) => [number, number];
-  readonly appendCandidatePreviewBlock: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-  readonly beginCandidatePreview: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
+  readonly admitOuterMigrationPassword: (
+    a: number,
+    b: number
+  ) => [number, number, number];
+  readonly allocateSession: (
+    a: number,
+    b: number,
+    c: number
+  ) => [number, number];
+  readonly appendCandidatePreviewBlock: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number
+  ) => [number, number];
+  readonly beginCandidatePreview: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: any
+  ) => [number, number, number];
   readonly beginOnboardingCandidate: () => [number, number];
-  readonly beginOuterMigration: (a: number, b: number, c: any) => [number, number];
+  readonly beginOuterMigration: (
+    a: number,
+    b: number,
+    c: any
+  ) => [number, number];
   readonly clearNamespace: (a: number) => [number, number];
   readonly closeDatabase: () => [number, number];
   readonly coverTrafficTick: (a: number) => [number, number];
@@ -161,24 +216,45 @@ export interface InitOutput {
   readonly exportOnboardingCandidate: () => [number, number, number, number];
   readonly finalizeOuterMigration: () => [number, number, number];
   readonly finishCandidatePreview: () => [number, number];
-  readonly finishOuterMigrationNamespace: (a: number, b: number) => [number, number];
+  readonly finishOuterMigrationNamespace: (
+    a: number,
+    b: number
+  ) => [number, number];
   readonly flushEncrypted: () => any;
   readonly idbHasData: () => any;
-  readonly initSecureStorage: (a: number, b: number, c: number, d: number) => any;
+  readonly initSecureStorage: (
+    a: number,
+    b: number,
+    c: number,
+    d: number
+  ) => any;
   readonly lockSession: () => [number, number];
-  readonly migrateOuterBlockBatch: (a: number, b: number, c: any) => [number, number, number];
+  readonly migrateOuterBlockBatch: (
+    a: number,
+    b: number,
+    c: any
+  ) => [number, number, number];
   readonly namespaceDataLength: (a: number) => [number, number, number];
   readonly openDatabase: () => [number, number];
   readonly provisionStorage: () => [number, number];
   readonly queryCandidatePreview: () => [number, number, number];
-  readonly readNamespaceData: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly readNamespaceData: (
+    a: number,
+    b: number,
+    c: number
+  ) => [number, number, number, number];
   readonly reloadDurableStorage: () => any;
   readonly resetSqlDatabaseToDurable: () => any;
   readonly unlockSession: (a: number, b: number) => [number, number, number];
   readonly validatePortableBlock: (a: number, b: number) => [number, number];
   readonly validatePortableKeypair: (a: number, b: number) => [number, number];
   readonly verifyStorageGeneration: () => any;
-  readonly writeNamespaceData: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly writeNamespaceData: (
+    a: number,
+    b: number,
+    c: number,
+    d: number
+  ) => [number, number];
   readonly __wbg_wbg_rayon_poolbuilder_free: (a: number, b: number) => void;
   readonly initThreadPool: (a: number) => any;
   readonly wbg_rayon_poolbuilder_build: (a: number) => void;
@@ -186,7 +262,12 @@ export interface InitOutput {
   readonly wbg_rayon_poolbuilder_receiver: (a: number) => number;
   readonly wbg_rayon_start_worker: (a: number) => void;
   readonly rust_sqlite_wasm_abort: () => void;
-  readonly rust_sqlite_wasm_assert_fail: (a: number, b: number, c: number, d: number) => void;
+  readonly rust_sqlite_wasm_assert_fail: (
+    a: number,
+    b: number,
+    c: number,
+    d: number
+  ) => void;
   readonly rust_sqlite_wasm_calloc: (a: number, b: number) => number;
   readonly rust_sqlite_wasm_free: (a: number) => void;
   readonly rust_sqlite_wasm_getentropy: (a: number, b: number) => number;
@@ -201,37 +282,77 @@ export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
-  readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+  readonly __wbindgen_realloc: (
+    a: number,
+    b: number,
+    c: number,
+    d: number
+  ) => number;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
   readonly closure127_externref_shim: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (a: number, b: number) => void;
-  readonly closure83_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+  readonly wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (
+    a: number,
+    b: number
+  ) => void;
+  readonly closure83_externref_shim_multivalue_shim: (
+    a: number,
+    b: number,
+    c: any
+  ) => [number, number];
   readonly closure702_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure758_externref_shim: (a: number, b: number, c: any, d: any) => void;
-  readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
+  readonly closure758_externref_shim: (
+    a: number,
+    b: number,
+    c: any,
+    d: any
+  ) => void;
+  readonly __wbindgen_thread_destroy: (
+    a?: number,
+    b?: number,
+    c?: number
+  ) => void;
   readonly __wbindgen_start: (a: number) => void;
 }
 
 export type SyncInitInput = BufferSource | WebAssembly.Module;
 /**
-* Instantiates the given `module`, which can either be bytes or
-* a precompiled `WebAssembly.Module`.
-*
-* @param {{ module: SyncInitInput, memory?: WebAssembly.Memory, thread_stack_size?: number }} module - Passing `SyncInitInput` directly is deprecated.
-* @param {WebAssembly.Memory} memory - Deprecated.
-*
-* @returns {InitOutput}
-*/
-export function initSync(module: { module: SyncInitInput, memory?: WebAssembly.Memory, thread_stack_size?: number } | SyncInitInput, memory?: WebAssembly.Memory): InitOutput;
+ * Instantiates the given `module`, which can either be bytes or
+ * a precompiled `WebAssembly.Module`.
+ *
+ * @param {{ module: SyncInitInput, memory?: WebAssembly.Memory, thread_stack_size?: number }} module - Passing `SyncInitInput` directly is deprecated.
+ * @param {WebAssembly.Memory} memory - Deprecated.
+ *
+ * @returns {InitOutput}
+ */
+export function initSync(
+  module:
+    | {
+        module: SyncInitInput;
+        memory?: WebAssembly.Memory;
+        thread_stack_size?: number;
+      }
+    | SyncInitInput,
+  memory?: WebAssembly.Memory
+): InitOutput;
 
 /**
-* If `module_or_path` is {RequestInfo} or {URL}, makes a request and
-* for everything else, calls `WebAssembly.instantiate` directly.
-*
-* @param {{ module_or_path: InitInput | Promise<InitInput>, memory?: WebAssembly.Memory, thread_stack_size?: number }} module_or_path - Passing `InitInput` directly is deprecated.
-* @param {WebAssembly.Memory} memory - Deprecated.
-*
-* @returns {Promise<InitOutput>}
-*/
-export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput>, memory?: WebAssembly.Memory, thread_stack_size?: number } | InitInput | Promise<InitInput>, memory?: WebAssembly.Memory): Promise<InitOutput>;
+ * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
+ * for everything else, calls `WebAssembly.instantiate` directly.
+ *
+ * @param {{ module_or_path: InitInput | Promise<InitInput>, memory?: WebAssembly.Memory, thread_stack_size?: number }} module_or_path - Passing `InitInput` directly is deprecated.
+ * @param {WebAssembly.Memory} memory - Deprecated.
+ *
+ * @returns {Promise<InitOutput>}
+ */
+export default function __wbg_init(
+  module_or_path?:
+    | {
+        module_or_path: InitInput | Promise<InitInput>;
+        memory?: WebAssembly.Memory;
+        thread_stack_size?: number;
+      }
+    | InitInput
+    | Promise<InitInput>,
+  memory?: WebAssembly.Memory
+): Promise<InitOutput>;

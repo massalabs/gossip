@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.util.Size
 import android.view.View
@@ -36,12 +37,15 @@ import com.google.zxing.DecodeHintType
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
+import java.lang.ref.WeakReference
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Full-screen camera preview that finishes with the first QR code decoded.
+ * In continuous mode it stays open and hands every new code to [onFrame]
+ * (the frames of an animated code) until [finishContinuous].
  * Not exported: only reachable through [QrScannerPlugin].
  */
 class QrScanActivity : AppCompatActivity() {
@@ -49,7 +53,27 @@ class QrScanActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_RESULT = "net.massa.gossip.qr.RESULT"
         const val EXTRA_CLOSE_LABEL = "net.massa.gossip.qr.CLOSE_LABEL"
+        const val EXTRA_CONTINUOUS = "net.massa.gossip.qr.CONTINUOUS"
+
+        /** Receives the codes of a continuous scan, on the analysis thread. */
+        @Volatile
+        var onFrame: ((String) -> Unit)? = null
+
+        /** Status line of a continuous scan, also for a scanner not created yet. */
+        @Volatile
+        var status: String = ""
+
+        /** The scanner on screen, for the plugin's setStatus and finish. */
+        @Volatile
+        var current: WeakReference<QrScanActivity>? = null
     }
+
+    private var continuous = false
+    private var statusView: TextView? = null
+
+    // Last code handed out in continuous mode: the camera reads the same
+    // frame several times in a row.
+    private var lastValue: String? = null
 
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
@@ -64,6 +88,8 @@ class QrScanActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        continuous = intent.getBooleanExtra(EXTRA_CONTINUOUS, false)
+        current = WeakReference(this)
 
         val previewView = PreviewView(this)
         val closeButton = TextView(this).apply {
@@ -83,6 +109,37 @@ class QrScanActivity : AppCompatActivity() {
             addView(previewView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(ViewfinderView(this@QrScanActivity), FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(closeButton, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.START))
+        }
+        if (continuous) {
+            val density = resources.displayMetrics.density
+            val status = TextView(this).apply {
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                gravity = Gravity.CENTER
+                val pad = (12 * density).toInt()
+                setPadding(pad * 2, pad, pad * 2, pad)
+                background = GradientDrawable().apply {
+                    setColor(Color.argb(170, 0, 0, 0))
+                    cornerRadius = 16 * density
+                }
+                visibility = View.GONE
+                // Read out by TalkBack as it changes (progress, Bluetooth).
+                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            }
+            val margin = (24 * density).toInt()
+            root.addView(
+                status,
+                FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM).apply {
+                    setMargins(margin, 0, margin, margin * 2)
+                },
+            )
+            ViewCompat.setOnApplyWindowInsetsListener(status) { v, insets ->
+                val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                (v.layoutParams as FrameLayout.LayoutParams).bottomMargin = margin * 2 + bars.bottom
+                insets
+            }
+            statusView = status
+            setStatus(Companion.status)
         }
         // Keep the close button below the status bar / camera cutout.
         ViewCompat.setOnApplyWindowInsetsListener(closeButton) { v, insets ->
@@ -148,7 +205,15 @@ class QrScanActivity : AppCompatActivity() {
             } finally {
                 reader.reset()
             }
-            if (text != null && done.compareAndSet(false, true)) {
+            if (text == null) return
+            if (continuous) {
+                if (text != lastValue) {
+                    lastValue = text
+                    onFrame?.invoke(text)
+                }
+                return
+            }
+            if (done.compareAndSet(false, true)) {
                 runOnUiThread {
                     setResult(RESULT_OK, Intent().putExtra(EXTRA_RESULT, text))
                     finish()
@@ -157,8 +222,27 @@ class QrScanActivity : AppCompatActivity() {
         }
     }
 
+    /** Writes [text] over the camera of a continuous scan; empty hides it. */
+    fun setStatus(text: String) {
+        runOnUiThread {
+            val view = statusView ?: return@runOnUiThread
+            view.text = text
+            view.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+        }
+    }
+
+    /** Ends a continuous scan: the caller has what it needed. */
+    fun finishContinuous() {
+        if (!done.compareAndSet(false, true)) return
+        runOnUiThread {
+            setResult(RESULT_OK, Intent().putExtra(EXTRA_RESULT, ""))
+            finish()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        if (current?.get() === this) current = null
         analysisExecutor.shutdown()
     }
 }

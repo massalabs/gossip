@@ -104,4 +104,14 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'CREATE TABLE `privateMigration` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`formatVersion` integer DEFAULT 1 NOT NULL,\n\t`installationEpoch` text NOT NULL,\n\t`completedPhase` integer DEFAULT 0 NOT NULL\n);',
     ],
   },
+  {
+    idx: 8,
+    tag: '0008_jittery_warstar',
+    when: 1792426638781,
+    digest: 'cce9a4661bf135b4784f3275f449f68389519c34b25c7384562cd2150e13cdaf',
+    statements: [
+      'CREATE TABLE `discardedPeers` (\n\t`ownerUserId` text NOT NULL,\n\t`userId` text NOT NULL,\n\t`announcementFloorMillis` integer NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `userId`)\n);',
+      'CREATE TABLE `transportCursors` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`cursors` text NOT NULL\n);',
+    ],
+  },
 ];

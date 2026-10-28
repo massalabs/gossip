@@ -167,7 +167,10 @@
     "delete": "Supprimer",
     "react": "Réagir",
     "add_reaction": "Ajouter une réaction",
-    "more_emojis": "Plus d’emojis"
+    "more_emojis": "Plus d’emojis",
+    "delayed": "en retard",
+    "delayed_hint": "Reçu longtemps après son envoi",
+    "sent_via_mesh": "Envoyé par le Réseau Mesh, en attente d'une passerelle"
   },
   "session_issue": {
     "message": "Tu as envoyé de nombreux messages qui n'ont pas encore été confirmés. Par sécurité, aucun autre message ne sera envoyé tant qu'une réponse ne sera pas reçue.",
@@ -177,6 +180,11 @@
   "retention_separator": "Suppression automatique activée : {{duration}}",
   "filter_label": "Filtrer les discussions",
   "waiting_connection": "En attente de connexion...",
+  "mesh_connected_one": "Connecté au mesh · {{count}} lien",
+  "mesh_connected_few": "Connecté au mesh · {{count}} liens",
+  "mesh_connected_many": "Connecté au mesh · {{count}} liens",
+  "mesh_connected_other": "Connecté au mesh · {{count}} liens",
+  "mesh_no_links": "Mesh activé · aucun téléphone à portée",
   "announcement": "Annonce",
   "lock_account": "Verrouiller"
 }

@@ -95,8 +95,10 @@
 
 use crate::{
     session::{
-        FeedIncomingMessageOutput, IncomingInitiationRequest, OutgoingInitiationRequest,
-        SendOutgoingMessageOutput, Session,
+        FeedIncomingMessageError, FeedIncomingMessageOutput, IncomingInitiationRequest,
+        OutgoingInitiationRequest, SendOutgoingMessageOutput, Session,
+        reannouncement_mailbox_keypair, reannouncement_mailbox_window,
+        reannouncement_mailbox_wrap_key, unwrap_reannouncement, wrap_reannouncement,
     },
     utils::timestamp_millis,
 };
@@ -119,6 +121,13 @@ fn validated_session_ciphertext_len(ciphertext_len: u64) -> Option<usize> {
         return None;
     }
     usize::try_from(ciphertext_len).ok()
+}
+
+/// A board entry carrying an announcement to a peer we already exchanged
+/// announcements with; post `data` at `seeker` like a message.
+pub struct ReannouncementPost {
+    pub seeker: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 /// Result from processing an incoming announcement.
@@ -175,6 +184,16 @@ pub struct SessionManagerConfig {
 
     /// The peer lag threshold above which `refresh` requests a keep-alive immediately
     pub max_keep_alive_peer_lag_length: u64,
+}
+
+enum IncomingMessageOutcome {
+    Accepted(FeedIncomingMessageOutput),
+    /// Not authenticated by the seeker key; nothing changed.
+    Ignored,
+    /// Dated too far in the future; the session was rolled back to read it again later.
+    Held,
+    /// Authenticated but undecryptable: the session can no longer be used.
+    SessionBroken,
 }
 
 #[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -344,6 +363,15 @@ impl SessionManager {
         combined_blob.extend_from_slice(nonce.as_bytes());
         combined_blob.extend_from_slice(&encrypted_blob);
         Some(combined_blob)
+    }
+
+    /// Replaces the configuration.
+    ///
+    /// The configuration is saved in the encrypted blob along with the sessions, so a
+    /// manager restored from an older blob keeps the limits it was created with until
+    /// the application applies its current ones with this method.
+    pub fn set_config(&mut self, config: SessionManagerConfig) {
+        self.config = config;
     }
 
     /// Returns the peer IDs that need a keep-alive message
@@ -582,8 +610,139 @@ impl SessionManager {
         announcement_bytes
     }
 
+    /// Like [`establish_outgoing_session`](Self::establish_outgoing_session), and also
+    /// returns a board entry carrying the announcement when we already exchanged
+    /// announcements with this peer.
+    ///
+    /// The entry sits at a seeker only the two of us can compute (see
+    /// [`get_reannouncement_mailbox_keys`](Self::get_reannouncement_mailbox_keys)), so a
+    /// transport that cannot download the whole announcement board, such as a mesh,
+    /// can still bring a re-announcement to the peer. It holds the announcement
+    /// encrypted under a key of the pair, so its bytes differ from the board copy.
+    /// The announcement must still be posted to the board for peers that do not
+    /// watch these entries.
+    pub fn establish_outgoing_session_addressed(
+        &mut self,
+        peer_pk: &auth::UserPublicKeys,
+        our_pk: &auth::UserPublicKeys,
+        our_sk: &auth::UserSecretKeys,
+        user_data: Vec<u8>,
+    ) -> (Vec<u8>, Option<ReannouncementPost>) {
+        self.establish_outgoing_session_addressed_at(
+            peer_pk,
+            our_pk,
+            our_sk,
+            user_data,
+            timestamp_millis(),
+        )
+    }
+
+    fn establish_outgoing_session_addressed_at(
+        &mut self,
+        peer_pk: &auth::UserPublicKeys,
+        our_pk: &auth::UserPublicKeys,
+        our_sk: &auth::UserSecretKeys,
+        user_data: Vec<u8>,
+        now_millis: u128,
+    ) -> (Vec<u8>, Option<ReannouncementPost>) {
+        let window = reannouncement_mailbox_window(now_millis);
+        // the entry follows the pair of announcements the peer knows: computed
+        // before ours is replaced
+        let seeds = self.peers.get(&peer_pk.derive_id()).and_then(|peer_info| {
+            Some((
+                peer_info.latest_outgoing_init_request.as_ref()?.seeker_seed,
+                peer_info.latest_incoming_init_request.as_ref()?.seeker_seed,
+            ))
+        });
+        let announcement = self.establish_outgoing_session(peer_pk, our_pk, our_sk, user_data);
+        let post = seeds.map(|(sender_seed, receiver_seed)| {
+            let keypair = reannouncement_mailbox_keypair(&sender_seed, &receiver_seed, window);
+            let wrap_key = reannouncement_mailbox_wrap_key(&sender_seed, &receiver_seed, window);
+            let seeker = Session::compute_seeker(&keypair.get_public_key());
+            let wrapped = wrap_reannouncement(&wrap_key, &seeker, &announcement);
+            ReannouncementPost {
+                data: Session::sign_board_entry(&keypair, &seeker, &wrapped),
+                seeker,
+            }
+        });
+        (announcement, post)
+    }
+
+    /// Mailboxes peers would post their next announcement to us at, with what
+    /// opens them: the current window and the previous one, so an entry posted
+    /// just before a window ends is still found.
+    fn reannouncement_mailboxes_at(&self, now_millis: u128) -> Vec<(Vec<u8>, crypto_aead::Key)> {
+        let window = reannouncement_mailbox_window(now_millis);
+        self.peers
+            .values()
+            .filter_map(|peer_info| {
+                Some((
+                    peer_info.latest_incoming_init_request.as_ref()?.seeker_seed,
+                    peer_info.latest_outgoing_init_request.as_ref()?.seeker_seed,
+                ))
+            })
+            .flat_map(|(sender_seed, receiver_seed)| {
+                [window, window.saturating_sub(1)].map(|w| {
+                    let keypair = reannouncement_mailbox_keypair(&sender_seed, &receiver_seed, w);
+                    (
+                        Session::compute_seeker(&keypair.get_public_key()),
+                        reannouncement_mailbox_wrap_key(&sender_seed, &receiver_seed, w),
+                    )
+                })
+            })
+            .collect()
+    }
+
+    /// Seekers where peers we exchanged announcements with would post their next
+    /// announcement to us. A value found there is opened with
+    /// [`open_reannouncement_mailbox_read`](Self::open_reannouncement_mailbox_read)
+    /// and fed to [`feed_incoming_announcement`](Self::feed_incoming_announcement),
+    /// which moves the seeker to the next entry of the chain. They change every
+    /// [`REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS`](crate::session::REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS)
+    /// too, so callers should ask again rather than keep them.
+    pub fn get_reannouncement_mailbox_keys(&self) -> Vec<Vec<u8>> {
+        self.reannouncement_mailboxes_at(timestamp_millis())
+            .into_iter()
+            .map(|(seeker, _)| seeker)
+            .collect()
+    }
+
+    /// Returns the announcement carried by an entry read at one of the
+    /// [`get_reannouncement_mailbox_keys`](Self::get_reannouncement_mailbox_keys)
+    /// seekers, if it is signed by the seeker key and decrypts. Changes no state.
+    pub fn open_reannouncement_mailbox_read(&self, seeker: &[u8], data: &[u8]) -> Option<Vec<u8>> {
+        self.open_reannouncement_mailbox_read_at(seeker, data, timestamp_millis())
+    }
+
+    fn open_reannouncement_mailbox_read_at(
+        &self,
+        seeker: &[u8],
+        data: &[u8],
+        now_millis: u128,
+    ) -> Option<Vec<u8>> {
+        let (_, wrap_key) = self
+            .reannouncement_mailboxes_at(now_millis)
+            .into_iter()
+            .find(|(mailbox, _)| mailbox.as_slice() == seeker)?;
+        let wrapped = Session::authenticate_incoming_message(seeker, data)?;
+        unwrap_reannouncement(&wrap_key, seeker, &wrapped)
+    }
+
     pub fn peer_discard(&mut self, peer_id: &UserId) {
         self.peers.remove(peer_id);
+    }
+
+    /// Timestamp of the latest announcement accepted from `peer_id`. Announcements
+    /// are only accepted with a newer one, so a caller that discards the peer can
+    /// keep this to refuse replays of its earlier announcements.
+    pub fn peer_latest_incoming_announcement_timestamp(&self, peer_id: &UserId) -> Option<u128> {
+        Some(
+            self.peers
+                .get(peer_id)?
+                .latest_incoming_init_request
+                .as_ref()?
+                .timestamp_millis,
+        )
     }
 
     pub fn peer_session_status(&self, peer_id: &UserId) -> SessionStatus {
@@ -626,52 +785,83 @@ impl SessionManager {
         message_board_seekers
     }
 
-    /// returns (message id, message)
+    /// Seekers of the messages after the next one from each peer (see
+    /// [`Session::peer_message_seekers_ahead`]), for transports that request messages
+    /// ahead of time. They are not read directly: a message fetched at one of them is
+    /// read once [`get_message_board_read_keys`](Self::get_message_board_read_keys)
+    /// reaches its seeker.
+    pub fn get_message_board_lookahead_keys(&self) -> Vec<Vec<u8>> {
+        self.peers
+            .values()
+            .filter_map(|peer_info| peer_info.active_session.as_ref())
+            .flat_map(|active_session| active_session.session.peer_message_seekers_ahead())
+            .collect()
+    }
+
+    /// Reads a message found at the next seeker of `peer_id`'s active session.
     fn inner_feed_incoming_msg(
         &mut self,
         peer_id: &UserId,
         seeker: &[u8],
         bytes: &[u8],
         our_sk: &auth::UserSecretKeys,
-    ) -> Option<FeedIncomingMessageOutput> {
-        // try to decode message
-        let mut msg = None;
-        if let Some(peer_info) = self.peers.get_mut(peer_id) {
-            if let Some(active_session) = &mut peer_info.active_session {
-                msg = active_session
-                    .session
-                    .try_feed_incoming_message(our_sk, seeker, bytes);
-            }
-        }
-        let msg = msg?;
+    ) -> IncomingMessageOutcome {
+        let max_age = self.config.max_incoming_message_age_millis;
+        let max_future = self.config.max_incoming_message_future_millis;
+        let Some(active_session) = self
+            .peers
+            .get_mut(peer_id)
+            .and_then(|peer_info| peer_info.active_session.as_mut())
+        else {
+            return IncomingMessageOutcome::Ignored;
+        };
 
-        // check message timestamp (past, future)
+        let pending = match active_session
+            .session
+            .decrypt_incoming_message(our_sk, seeker, bytes)
+        {
+            Ok(pending) => pending,
+            // Whoever learnt the seeker (a relay, a mesh neighbour) can post garbage at
+            // it: that must not close the session.
+            Err(FeedIncomingMessageError::Unauthenticated) => {
+                return IncomingMessageOutcome::Ignored;
+            }
+            Err(FeedIncomingMessageError::Undecryptable) => {
+                return IncomingMessageOutcome::SessionBroken;
+            }
+        };
+
+        // A message dated ahead of our clock by more than the allowed skew is put back,
+        // left unapplied, so the same message is read again once our clock has caught
+        // up. Dropping it would break the chain, since the next seeker is inside it.
         let cur_timestamp = timestamp_millis();
-        if msg.timestamp < cur_timestamp.saturating_sub(self.config.max_incoming_message_age_millis)
-        {
-            return None;
+        if pending.timestamp() > cur_timestamp.saturating_add(max_future) {
+            return IncomingMessageOutcome::Held;
         }
-        if msg.timestamp
-            > cur_timestamp.saturating_add(self.config.max_incoming_message_future_millis)
-        {
-            return None;
-        }
+        let mut msg = active_session.session.commit_incoming_message(pending);
 
-        // check if the message timestamp is consistent with the latest one,
-        // and update the last incoming message timestamp
-        if let Some(peer_info) = self.peers.get_mut(peer_id) {
-            if let Some(active_session) = &mut peer_info.active_session {
-                if msg.timestamp < active_session.last_incoming_message_timestamp {
-                    return None;
-                }
-                active_session.last_incoming_message_timestamp = msg.timestamp;
-            }
+        // The ratchet already guarantees authenticity and order, so an old or
+        // out-of-order timestamp only means the message waited in transit, or that the
+        // sender's clock moved back: deliver it, flagged, rather than break the chain.
+        if msg.timestamp < cur_timestamp.saturating_sub(max_age)
+            || msg.timestamp < active_session.last_incoming_message_timestamp
+        {
+            msg.stale = true;
         }
+        active_session.last_incoming_message_timestamp = active_session
+            .last_incoming_message_timestamp
+            .max(msg.timestamp);
 
-        // return the message
-        Some(msg)
+        IncomingMessageOutcome::Accepted(msg)
     }
 
+    /// Reads a message fetched at one of the seekers returned by
+    /// [`get_message_board_read_keys`](Self::get_message_board_read_keys).
+    ///
+    /// Returns `None` when the seeker is not ours, when the message is not signed by the
+    /// seeker key (the session is left untouched), when it is dated too far in the future
+    /// (it is left to be read again later), or when it does not decrypt, which closes the
+    /// session.
     pub fn feed_incoming_message_board_read(
         &mut self,
         seeker: &[u8],
@@ -690,18 +880,17 @@ impl SessionManager {
         }
         let peer_id = peer_id?;
 
-        // feed the message into the session
-        let msg = self.inner_feed_incoming_msg(&peer_id, seeker, bytes, our_sk);
-
-        // if the message is None here, it means the session has a problem: close it
-        if msg.is_none() {
-            if let Some(peer_info) = self.peers.get_mut(&peer_id) {
-                peer_info.active_session = None;
+        match self.inner_feed_incoming_msg(&peer_id, seeker, bytes, our_sk) {
+            IncomingMessageOutcome::Accepted(msg) => Some(msg),
+            IncomingMessageOutcome::Ignored | IncomingMessageOutcome::Held => None,
+            // the two sides have diverged: close the session so it gets re-established
+            IncomingMessageOutcome::SessionBroken => {
+                if let Some(peer_info) = self.peers.get_mut(&peer_id) {
+                    peer_info.active_session = None;
+                }
+                None
             }
         }
-
-        // return the message
-        msg
     }
 
     /// Sends a message to a peer through their active session.
@@ -2074,5 +2263,463 @@ mod tests {
             .feed_incoming_message_board_read(&output6.seeker, &output6.data, &alice_sk)
             .expect("Alice should receive message on newest session");
         assert_eq!(received6.message.as_slice(), b"Hi Alice from D-C session!");
+    }
+
+    /// Alice and Bob with an active session in both directions.
+    fn established_pair() -> (
+        SessionManager,
+        SessionManager,
+        (auth::UserPublicKeys, auth::UserSecretKeys),
+        (auth::UserPublicKeys, auth::UserSecretKeys),
+    ) {
+        let mut alice_manager = SessionManager::new(create_test_config());
+        let mut bob_manager = SessionManager::new(create_test_config());
+        let (alice_pk, alice_sk) = generate_test_keypair();
+        let (bob_pk, bob_sk) = generate_test_keypair();
+        let alice_announcement =
+            alice_manager.establish_outgoing_session(&bob_pk, &alice_pk, &alice_sk, vec![]);
+        let bob_announcement =
+            bob_manager.establish_outgoing_session(&alice_pk, &bob_pk, &bob_sk, vec![]);
+        bob_manager.feed_incoming_announcement(&alice_announcement, &bob_pk, &bob_sk);
+        alice_manager.feed_incoming_announcement(&bob_announcement, &alice_pk, &alice_sk);
+        (
+            alice_manager,
+            bob_manager,
+            (alice_pk, alice_sk),
+            (bob_pk, bob_sk),
+        )
+    }
+
+    fn with_clock_offset<T>(offset_millis: i128, f: impl FnOnce() -> T) -> T {
+        crate::utils::TEST_CLOCK_OFFSET_MILLIS.with(|offset| offset.set(offset_millis));
+        let result = f();
+        crate::utils::TEST_CLOCK_OFFSET_MILLIS.with(|offset| offset.set(0));
+        result
+    }
+
+    #[test]
+    fn test_unauthenticated_message_at_seeker_keeps_session() {
+        let (mut alice_manager, mut bob_manager, (alice_pk, _), (bob_pk, bob_sk)) =
+            established_pair();
+        let send_output = alice_manager
+            .send_message(&bob_pk.derive_id(), b"Hello Bob!")
+            .unwrap();
+
+        // garbage, then the real message with one covered byte flipped
+        assert!(
+            bob_manager
+                .feed_incoming_message_board_read(&send_output.seeker, b"garbage", &bob_sk)
+                .is_none()
+        );
+        let mut tampered = send_output.data.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        assert!(
+            bob_manager
+                .feed_incoming_message_board_read(&send_output.seeker, &tampered, &bob_sk)
+                .is_none()
+        );
+        assert!(matches!(
+            bob_manager.peer_session_status(&alice_pk.derive_id()),
+            SessionStatus::Active
+        ));
+
+        let received = bob_manager
+            .feed_incoming_message_board_read(&send_output.seeker, &send_output.data, &bob_sk)
+            .expect("the genuine message is still readable");
+        assert_eq!(received.message.as_slice(), b"Hello Bob!");
+        assert!(!received.stale);
+    }
+
+    #[test]
+    fn test_future_dated_message_is_held_until_clock_catches_up() {
+        let (mut alice_manager, mut bob_manager, (alice_pk, _), (bob_pk, bob_sk)) =
+            established_pair();
+        let max_future = create_test_config().max_incoming_message_future_millis as i128;
+        let ahead = max_future + 60_000;
+        let send_output = with_clock_offset(ahead, || {
+            alice_manager
+                .send_message(&bob_pk.derive_id(), b"from the future")
+                .unwrap()
+        });
+
+        assert!(
+            bob_manager
+                .feed_incoming_message_board_read(&send_output.seeker, &send_output.data, &bob_sk)
+                .is_none()
+        );
+        assert!(matches!(
+            bob_manager.peer_session_status(&alice_pk.derive_id()),
+            SessionStatus::Active
+        ));
+        assert!(
+            bob_manager
+                .get_message_board_read_keys()
+                .contains(&send_output.seeker)
+        );
+
+        let received = with_clock_offset(ahead, || {
+            bob_manager.feed_incoming_message_board_read(
+                &send_output.seeker,
+                &send_output.data,
+                &bob_sk,
+            )
+        })
+        .expect("readable once the clocks agree");
+        assert_eq!(received.message.as_slice(), b"from the future");
+
+        // the chain goes on after the held message
+        let next = alice_manager
+            .send_message(&bob_pk.derive_id(), b"next")
+            .unwrap();
+        let received = with_clock_offset(ahead, || {
+            bob_manager.feed_incoming_message_board_read(&next.seeker, &next.data, &bob_sk)
+        })
+        .expect("next message");
+        assert_eq!(received.message.as_slice(), b"next");
+    }
+
+    #[test]
+    fn test_old_and_backdated_messages_are_delivered_stale() {
+        let (mut alice_manager, mut bob_manager, (alice_pk, _), (bob_pk, bob_sk)) =
+            established_pair();
+        let max_age = create_test_config().max_incoming_message_age_millis as i128;
+        let old = with_clock_offset(-(max_age + 60_000), || {
+            alice_manager
+                .send_message(&bob_pk.derive_id(), b"delayed")
+                .unwrap()
+        });
+        let received = bob_manager
+            .feed_incoming_message_board_read(&old.seeker, &old.data, &bob_sk)
+            .expect("an old message is delivered");
+        assert_eq!(received.message.as_slice(), b"delayed");
+        assert!(received.stale);
+
+        // a fresh message, then one dated before it: still delivered, in order
+        let fresh = alice_manager
+            .send_message(&bob_pk.derive_id(), b"fresh")
+            .unwrap();
+        let backdated = with_clock_offset(-30_000, || {
+            alice_manager
+                .send_message(&bob_pk.derive_id(), b"clock moved back")
+                .unwrap()
+        });
+        assert!(
+            !bob_manager
+                .feed_incoming_message_board_read(&fresh.seeker, &fresh.data, &bob_sk)
+                .unwrap()
+                .stale
+        );
+        let received = bob_manager
+            .feed_incoming_message_board_read(&backdated.seeker, &backdated.data, &bob_sk)
+            .expect("a backdated message is delivered");
+        assert!(received.stale);
+        assert!(matches!(
+            bob_manager.peer_session_status(&alice_pk.derive_id()),
+            SessionStatus::Active
+        ));
+    }
+
+    #[test]
+    fn test_set_config_applies_to_restored_manager() {
+        let manager = SessionManager::new(create_test_config());
+        let key = generate_test_key();
+        let blob = manager.to_encrypted_blob(&key).unwrap();
+        let mut restored = SessionManager::from_encrypted_blob(&blob, &key).unwrap();
+        assert_eq!(restored.config.max_incoming_message_future_millis, 5_000);
+        let mut config = create_test_config();
+        config.max_incoming_message_future_millis = 86_400_000;
+        restored.set_config(config);
+        assert_eq!(
+            restored.config.max_incoming_message_future_millis,
+            86_400_000
+        );
+    }
+
+    #[test]
+    fn test_lookahead_seekers_predict_most_following_messages() {
+        let (mut alice_manager, mut bob_manager, (alice_pk, alice_sk), (bob_pk, bob_sk)) =
+            established_pair();
+        let mut predicted = 0;
+        let total = 100;
+        for i in 0..total {
+            let ahead = bob_manager.get_message_board_lookahead_keys();
+            assert_eq!(ahead.len(), crate::session::SEEKER_LOOKAHEAD);
+            let output = alice_manager
+                .send_message(&bob_pk.derive_id(), format!("m{i}").as_bytes())
+                .unwrap();
+            // the next message goes where Bob already looks
+            assert!(
+                bob_manager
+                    .get_message_board_read_keys()
+                    .contains(&output.seeker)
+            );
+            // the one after that was usually predicted
+            let following = alice_manager
+                .send_message(&bob_pk.derive_id(), b"following")
+                .unwrap();
+            if ahead[0] == following.seeker {
+                predicted += 1;
+            }
+            for out in [&output, &following] {
+                bob_manager
+                    .feed_incoming_message_board_read(&out.seeker, &out.data, &bob_sk)
+                    .expect("in order");
+            }
+            // Bob acknowledges, so Alice's session does not saturate
+            let ack = bob_manager
+                .send_message(&alice_pk.derive_id(), b"ack")
+                .unwrap();
+            alice_manager
+                .feed_incoming_message_board_read(&ack.seeker, &ack.data, &alice_sk)
+                .expect("ack");
+        }
+        // a fresh keypair one time in four: about three predictions in four
+        assert!(predicted > total / 2, "predicted {predicted} of {total}");
+        assert!(predicted < total, "fresh keypairs must still be drawn");
+    }
+
+    #[test]
+    fn test_lookahead_seeker_derivation_is_frozen() {
+        // Sender and receiver must agree on this derivation across versions.
+        let mut key = [0u8; 33];
+        key[1..].copy_from_slice(&[7u8; 32]);
+        let keypair = massa_signature::KeyPair::from_bytes(&key).unwrap();
+        let mut session_like = Vec::new();
+        let mut k = keypair;
+        for _ in 0..2 {
+            k = crate::session::Session::derive_following_seeker_keypair_for_test(&k);
+            session_like.push(k.get_public_key().to_bytes());
+        }
+        let digest = sha2::Sha256::digest(session_like.concat());
+        assert_eq!(
+            digest
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+            "091ef0d43dae792fd5e5284d1af05ad244c73fc66764e7d0ab60076358405a85"
+        );
+    }
+
+    #[test]
+    fn test_reannouncement_reaches_peer_through_mailbox_chain() {
+        let mut alice_manager = SessionManager::new(create_test_config());
+        let mut bob_manager = SessionManager::new(create_test_config());
+        let (alice_pk, alice_sk) = generate_test_keypair();
+        let (bob_pk, bob_sk) = generate_test_keypair();
+
+        // first contact: nothing to address yet
+        let (alice_announcement, post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            vec![],
+        );
+        assert!(post.is_none());
+        bob_manager.feed_incoming_announcement(&alice_announcement, &bob_pk, &bob_sk);
+        let (bob_announcement, post) =
+            bob_manager.establish_outgoing_session_addressed(&alice_pk, &bob_pk, &bob_sk, vec![]);
+        assert!(post.is_none());
+        alice_manager.feed_incoming_announcement(&bob_announcement, &alice_pk, &alice_sk);
+
+        // Alice re-announces twice; Bob gets neither from the board
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let (first, first_post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            b"again".to_vec(),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let (second, second_post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            b"and again".to_vec(),
+        );
+        let (first_post, second_post) = (first_post.unwrap(), second_post.unwrap());
+
+        // Bob follows the chain: only the first entry is where he looks (in the
+        // current window, beside the previous window's seeker)
+        let watched = bob_manager.get_reannouncement_mailbox_keys();
+        assert_eq!(watched.len(), 2);
+        assert!(watched.contains(&first_post.seeker));
+        assert!(!watched.contains(&second_post.seeker));
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&second_post.seeker, &second_post.data)
+                .is_none()
+        );
+        let opened = bob_manager
+            .open_reannouncement_mailbox_read(&first_post.seeker, &first_post.data)
+            .unwrap();
+        assert_eq!(opened, first);
+        let result = bob_manager
+            .feed_incoming_announcement(&opened, &bob_pk, &bob_sk)
+            .unwrap();
+        assert_eq!(result.user_data, b"again");
+
+        assert!(
+            bob_manager
+                .get_reannouncement_mailbox_keys()
+                .contains(&second_post.seeker)
+        );
+        let opened = bob_manager
+            .open_reannouncement_mailbox_read(&second_post.seeker, &second_post.data)
+            .unwrap();
+        assert_eq!(opened, second);
+        bob_manager
+            .feed_incoming_announcement(&opened, &bob_pk, &bob_sk)
+            .unwrap();
+
+        // the sessions agree again
+        let output = alice_manager
+            .send_message(&bob_pk.derive_id(), b"back")
+            .unwrap();
+        let received = bob_manager
+            .feed_incoming_message_board_read(&output.seeker, &output.data, &bob_sk)
+            .expect("sessions agree after the re-announcements");
+        assert_eq!(received.message, b"back");
+    }
+
+    #[test]
+    fn test_reannouncement_mailbox_rejects_unsigned_entries() {
+        let (mut alice_manager, bob_manager, (alice_pk, alice_sk), (bob_pk, _)) =
+            established_pair();
+        let (_, post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            vec![],
+        );
+        let post = post.unwrap();
+        let mut tampered = post.data.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&post.seeker, &tampered)
+                .is_none()
+        );
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&post.seeker, b"junk")
+                .is_none()
+        );
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&post.seeker, &post.data)
+                .is_some()
+        );
+    }
+    #[test]
+    fn test_reannouncement_mailbox_entry_differs_from_board_copy() {
+        let (mut alice_manager, bob_manager, (alice_pk, alice_sk), (bob_pk, _)) =
+            established_pair();
+        let (announcement, post) = alice_manager.establish_outgoing_session_addressed(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            b"hello".to_vec(),
+        );
+        let post = post.unwrap();
+        // no window of the board bytes appears in the entry
+        assert!(
+            !post
+                .data
+                .windows(64)
+                .any(|w| announcement.windows(64).any(|a| a == w))
+        );
+        assert_eq!(
+            bob_manager
+                .open_reannouncement_mailbox_read(&post.seeker, &post.data)
+                .unwrap(),
+            announcement
+        );
+    }
+
+    #[test]
+    fn test_reannouncement_mailbox_moves_with_the_window() {
+        use crate::session::REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS as WINDOW;
+        let (mut alice_manager, bob_manager, (alice_pk, alice_sk), (bob_pk, _)) =
+            established_pair();
+        let now = timestamp_millis();
+        let (announcement, post) = alice_manager.establish_outgoing_session_addressed_at(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            vec![],
+            now,
+        );
+        let post = post.unwrap();
+
+        // the next window still watches it, the one after does not
+        assert!(
+            bob_manager
+                .reannouncement_mailboxes_at(now + WINDOW)
+                .iter()
+                .any(|(seeker, _)| *seeker == post.seeker)
+        );
+        assert_eq!(
+            bob_manager
+                .open_reannouncement_mailbox_read_at(&post.seeker, &post.data, now + WINDOW)
+                .unwrap(),
+            announcement
+        );
+        assert!(
+            bob_manager
+                .reannouncement_mailboxes_at(now + 2 * WINDOW)
+                .iter()
+                .all(|(seeker, _)| *seeker != post.seeker)
+        );
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read_at(&post.seeker, &post.data, now + 2 * WINDOW)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_reannouncement_mailbox_rejects_entry_of_another_mailbox() {
+        use crate::session::REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS as WINDOW;
+        let (mut alice_manager, bob_manager, (alice_pk, alice_sk), (bob_pk, _)) =
+            established_pair();
+        let now = timestamp_millis();
+        let (_, current) = alice_manager.establish_outgoing_session_addressed_at(
+            &bob_pk,
+            &alice_pk,
+            &alice_sk,
+            vec![],
+            now,
+        );
+        let current = current.unwrap();
+        // the right seeker cannot open data wrapped and signed for another one
+        let mut mailboxes = bob_manager.reannouncement_mailboxes_at(now + WINDOW);
+        mailboxes.retain(|(seeker, _)| *seeker != current.seeker);
+        let (other_seeker, _) = &mailboxes[0];
+        assert!(
+            bob_manager
+                .open_reannouncement_mailbox_read_at(other_seeker, &current.data, now + WINDOW)
+                .is_none()
+        );
+    }
+    #[test]
+    fn test_reannouncement_mailbox_derivation_is_frozen() {
+        // Both peers, whatever their versions, must find the same mailbox and key.
+        let keypair = reannouncement_mailbox_keypair(&[1u8; 32], &[2u8; 32], 123_456);
+        let wrap_key = reannouncement_mailbox_wrap_key(&[1u8; 32], &[2u8; 32], 123_456);
+        let digest = sha2::Sha256::digest(
+            [
+                keypair.get_public_key().to_bytes().to_vec(),
+                wrap_key.as_bytes().to_vec(),
+            ]
+            .concat(),
+        );
+        assert_eq!(
+            digest
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+            "9a1009d74fabb95dccbeeb172aa74c25302b03ae3f695df438e60337045055f0"
+        );
+        assert_eq!(reannouncement_mailbox_window(6 * 60 * 60 * 1000 * 5 + 1), 5);
     }
 }

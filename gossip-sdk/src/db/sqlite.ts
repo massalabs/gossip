@@ -1528,6 +1528,8 @@ export class DatabaseConnection {
       await tx.delete(schema.pendingAnnouncements);
       await tx.delete(schema.activeSeekers);
       await tx.delete(schema.announcementCursors);
+      await tx.delete(schema.discardedPeers);
+      await tx.delete(schema.transportCursors);
     });
   }
 
@@ -1556,6 +1558,12 @@ export class DatabaseConnection {
       await tx
         .delete(schema.announcementCursors)
         .where(eq(schema.announcementCursors.userId, userId));
+      await tx
+        .delete(schema.transportCursors)
+        .where(eq(schema.transportCursors.userId, userId));
+      await tx
+        .delete(schema.discardedPeers)
+        .where(eq(schema.discardedPeers.ownerUserId, userId));
       // Session-specific tables (no user column — safe to clear for current session)
       await tx.delete(schema.pendingEncryptedMessages);
       await tx.delete(schema.pendingAnnouncements);

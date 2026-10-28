@@ -36,11 +36,21 @@ export interface ReceivedMessage {
   user_id: Uint8Array;
   timestamp: number;
   acknowledged_seekers: Uint8Array[];
+  /** Older than the configured age, or than the previous message: delayed in transit. */
+  stale: boolean;
 }
+
+/**
+ * A session configuration, or a function building one. WASM consumes a
+ * SessionConfig when it uses it, so only a function lets the module apply the
+ * same limits again to a manager restored from a blob.
+ */
+export type SessionConfigSource = SessionConfig | (() => SessionConfig);
 
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;
   private onPersist?: () => Promise<void>; // Async callback for persistence
+  private configFactory?: () => SessionConfig;
   public ourPk: UserPublicKeys;
   public ourSk: UserSecretKeys;
   public userId: Uint8Array;
@@ -49,7 +59,7 @@ export class SessionModule {
   constructor(
     userKeys: UserKeys,
     onPersist?: () => Promise<void>,
-    config?: SessionConfig
+    config?: SessionConfigSource
   ) {
     let ourPk: UserPublicKeys | undefined;
     let ourSk: UserSecretKeys | undefined;
@@ -61,8 +71,15 @@ export class SessionModule {
       const userIdEncoded = encodeUserId(userId);
 
       // SessionManagerWrapper consumes the SessionConfig WASM wrapper.
+      // Without a factory, a caller-built config applies only to new managers.
+      this.configFactory =
+        typeof config === 'function'
+          ? config
+          : config
+            ? undefined
+            : () => SessionConfig.new_default();
       sessionManager = new SessionManagerWrapper(
-        config ?? SessionConfig.new_default()
+        typeof config === 'object' ? config : this.configFactory!()
       );
 
       this.ourPk = ourPk;
@@ -118,6 +135,10 @@ export class SessionModule {
         encryptedSession,
         encryptionKey
       );
+      // The blob carries the limits it was created with; apply the current ones.
+      if (this.configFactory) {
+        this.sessionManager.set_config(this.configFactory());
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : JSON.stringify(error);
@@ -185,6 +206,78 @@ export class SessionModule {
   }
 
   /**
+   * Like establishOutgoingSession, also returning the board entry that carries
+   * the announcement to a peer we already exchanged announcements with: post
+   * it like a message so a transport that cannot download the whole
+   * announcement board (a mesh) can still deliver it.
+   */
+  async establishOutgoingSessionAddressed(
+    peerPk: UserPublicKeys,
+    userData?: Uint8Array
+  ): Promise<{
+    announcement: Uint8Array;
+    mailbox?: { seeker: Uint8Array; data: Uint8Array };
+  }> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    const result = this.sessionManager.establish_outgoing_session_addressed(
+      peerPk,
+      this.ourPk,
+      this.ourSk,
+      userData ?? new Uint8Array(0)
+    );
+    const announcement = copyOut(result.announcement);
+    const seeker = result.mailbox_seeker;
+    const data = result.mailbox_data;
+    result.free();
+
+    if (announcement.length === 0) {
+      throw new Error(
+        'Failed to establish outgoing session. Session manager returned empty announcement bytes.'
+      );
+    }
+
+    await this.persistIfNeeded();
+    return {
+      announcement,
+      mailbox:
+        seeker && data
+          ? { seeker: copyOut(seeker), data: copyOut(data) }
+          : undefined,
+    };
+  }
+
+  /** Seekers where peers would post their next announcement to us. */
+  getReannouncementMailboxKeys(): Array<Uint8Array> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    return copyOutMany(this.sessionManager.get_reannouncement_mailbox_keys());
+  }
+
+  /**
+   * The announcement carried by an entry read at a re-announcement mailbox,
+   * if it is signed by the mailbox key. Changes no state.
+   */
+  openReannouncementMailboxRead(
+    seeker: Uint8Array,
+    data: Uint8Array
+  ): Uint8Array | undefined {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    const opened = this.sessionManager.open_reannouncement_mailbox_read(
+      seeker,
+      data
+    );
+    return opened ? copyOut(opened) : undefined;
+  }
+
+  /**
    * Feed an incoming announcement into the session manager
    * @returns AnnouncementResult containing the announcer's public keys, timestamp, and user data, or undefined if invalid
    */
@@ -219,6 +312,19 @@ export class SessionModule {
   }
 
   /**
+   * Seekers of the messages after the next one from each peer, for transports
+   * that request messages ahead of time (a mesh node's wanted list). Messages
+   * found there are read once getMessageBoardReadKeys() reaches their seeker.
+   */
+  getMessageBoardLookaheadKeys(): Array<Uint8Array> {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+
+    return copyOutMany(this.sessionManager.get_message_board_lookahead_keys());
+  }
+
+  /**
    * Process an incoming ciphertext from the message board
    */
   async feedIncomingMessageBoardRead(
@@ -247,6 +353,7 @@ export class SessionModule {
       acknowledged_seekers: copyOutMany(
         result.acknowledged_seekers as Uint8Array[]
       ),
+      stale: result.stale,
     };
     result.free();
 
@@ -299,6 +406,21 @@ export class SessionModule {
   /**
    * Discard a peer and all associated session state
    */
+  /**
+   * Timestamp (ms) of the latest announcement accepted from a peer, if any:
+   * kept when the peer is discarded, to refuse replays of older ones.
+   */
+  peerLatestIncomingAnnouncementTimestamp(
+    peerId: Uint8Array
+  ): number | undefined {
+    if (!this.sessionManager) {
+      throw new Error('Session manager is not initialized');
+    }
+    return this.sessionManager.peer_latest_incoming_announcement_timestamp(
+      peerId
+    );
+  }
+
   async peerDiscard(peerId: Uint8Array): Promise<void> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');

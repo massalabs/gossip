@@ -13,6 +13,7 @@ import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { useSwipeBack } from '../../hooks/useSwipeBack';
+import type { UserPublicKeys } from '@massalabs/gossip-sdk';
 
 const QRCodeSwitcher: React.FC = () => {
   const { t } = useTranslation('settings');
@@ -30,9 +31,16 @@ const QRCodeSwitcher: React.FC = () => {
   }, [navigate]);
 
   const handleScanSuccess = useCallback(
-    (scannedUserId: string, scannedName?: string) => {
+    (
+      scannedUserId: string,
+      scannedName?: string,
+      scannedKeys?: UserPublicKeys
+    ) => {
+      // Keys read in person travel as bytes: history state is cloned.
+      const publicKeys = scannedKeys?.to_bytes();
+      scannedKeys?.free();
       navigate(ROUTES.newContact(), {
-        state: { userId: scannedUserId, name: scannedName },
+        state: { userId: scannedUserId, name: scannedName, publicKeys },
       });
     },
     [navigate]
@@ -82,7 +90,7 @@ const QRCodeSwitcher: React.FC = () => {
           />
         }
         className="app-max-w mx-auto"
-        contentClassName="px-6 py-4 overscroll-none !overflow-y-hidden [@media(max-height:650px)]:!overflow-y-auto"
+        contentClassName="px-6 py-4 overscroll-none !overflow-y-hidden [@media(max-height:760px)]:!overflow-y-auto"
       >
         <ShareContact
           onBack={handleBack}

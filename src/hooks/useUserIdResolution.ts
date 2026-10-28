@@ -62,6 +62,7 @@ export function useUserIdResolution() {
         throw new Error('SDK not initialized');
       }
 
+      // without internet, keys come from the in-person contact code instead
       const publicKey = await gossip.auth.fetchPublicKeyByUserId(uid);
       publicKeysCache.current.set(uid, publicKey);
       return publicKey;

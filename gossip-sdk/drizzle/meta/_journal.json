@@ -57,6 +57,13 @@
       "when": 1787775880997,
       "tag": "0007_odd_lenny_balinger",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792426638781,
+      "tag": "0008_jittery_warstar",
+      "breakpoints": true
     }
   ]
 }

@@ -48,6 +48,13 @@ export interface MessagesConfig {
   deduplicationWindowMs: number;
   /** Delay before retrying a failed message send in ms (default: 5000 = 5 seconds) */
   retryDelayMs: number;
+  /**
+   * Shortest gap between two keep-alives to one peer while only a mesh is
+   * reachable (default: 3 days). A keep-alive costs a few kilobytes of
+   * Bluetooth airtime per hop; this still renews the session well within its
+   * two-week inactivity limit.
+   */
+  meshKeepAliveIntervalMs: number;
 }
 
 /**
@@ -110,6 +117,7 @@ export const defaultSdkConfig: SdkConfig = {
     maxFetchIterations: 30,
     deduplicationWindowMs: 30000, // 30 seconds
     retryDelayMs: 5000, // 5 seconds
+    meshKeepAliveIntervalMs: 3 * 24 * 60 * 60 * 1000, // 3 days
   },
   announcements: {
     fetchLimit: 500,

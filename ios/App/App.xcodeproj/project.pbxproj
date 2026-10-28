@@ -21,11 +21,19 @@
 		D0F41D132F73ED03003FC4E1 /* PortableBackupSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F41D122F73ED03003FC4E1 /* PortableBackupSupport.swift */; };
 		D0F41CFE2F73FD8B003FC4E1 /* secureStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F41CE72F73ED03003FC4E1 /* secureStorage.swift */; };
 		FA11BB012F00A00000000001 /* SSLBypassPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */; };
+		FA11BB012F00A00000000002 /* AppLockPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11BB002F00A00000000002 /* AppLockPlugin.swift */; };
 		FAA8F08A2EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F0892EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift */; };
 		FAA8F0912EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */; };
 		FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */; };
 		FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */; };
 		D0A1C0DE2F80000100000001 /* QrScannerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000100000002 /* QrScannerPlugin.swift */; };
+		D0A1C0DE2F80000300000001 /* ContactExchangePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000300000002 /* ContactExchangePlugin.swift */; };
+		D0A1C0DE2F80000200000001 /* MeshRadio.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000002 /* MeshRadio.swift */; };
+		D0A1C0DE2F80000200000003 /* CoreBluetoothMeshRadio.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000004 /* CoreBluetoothMeshRadio.swift */; };
+		D0A1C0DE2F80000200000005 /* MeshCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000006 /* MeshCore.swift */; };
+		D0A1C0DE2F800002000000F1 /* RustMeshCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F800002000000F2 /* RustMeshCore.swift */; };
+		D0A1C0DE2F80000200000007 /* MeshNodeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F80000200000008 /* MeshNodeBridge.swift */; };
+		D0A1C0DE2F80000200000009 /* MeshNodePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1C0DE2F8000020000000A /* MeshNodePlugin.swift */; };
 		FAB0FFE22EF01BB300832215 /* GossipShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FAB0FFD82EF01BB300832215 /* GossipShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -73,11 +81,19 @@
 		D0F41D102F73ED03003FC4E1 /* PortableBackupFilePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableBackupFilePlugin.swift; sourceTree = "<group>"; };
 		D0F41D122F73ED03003FC4E1 /* PortableBackupSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableBackupSupport.swift; sourceTree = "<group>"; };
 		FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSLBypassPlugin.swift; sourceTree = "<group>"; };
+		FA11BB002F00A00000000002 /* AppLockPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLockPlugin.swift; sourceTree = "<group>"; };
 		FAA8F0892EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRunnerStoragePlugin.swift; sourceTree = "<group>"; };
 		FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefreshPlugin.swift; sourceTree = "<group>"; };
 		FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyViewController.swift; sourceTree = "<group>"; };
 		FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkObserverPlugin.swift; sourceTree = "<group>"; };
 		D0A1C0DE2F80000100000002 /* QrScannerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QrScannerPlugin.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F80000300000002 /* ContactExchangePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactExchangePlugin.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F80000200000002 /* MeshRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshRadio.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F80000200000004 /* CoreBluetoothMeshRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreBluetoothMeshRadio.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F80000200000006 /* MeshCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshCore.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F800002000000F2 /* RustMeshCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RustMeshCore.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F80000200000008 /* MeshNodeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshNodeBridge.swift; sourceTree = "<group>"; };
+		D0A1C0DE2F8000020000000A /* MeshNodePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshNodePlugin.swift; sourceTree = "<group>"; };
 		FAB0FFD82EF01BB300832215 /* GossipShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GossipShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		FAB0FFE82EF01C8600832215 /* Gossip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gossip.entitlements; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-Gossip.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Gossip.debug.xcconfig"; path = "Pods/Target Support Files/Pods-Gossip/Pods-Gossip.debug.xcconfig"; sourceTree = "<group>"; };
@@ -159,6 +175,7 @@
 			children = (
 				FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */,
 				FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */,
+				FA11BB002F00A00000000002 /* AppLockPlugin.swift */,
 				FAA8F0862EE6DCD100CE65AE /* plugins */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -200,6 +217,8 @@
 				D0F41CEB2F73ED03003FC4E1 /* secureStorage */,
 				FAA8F09E2EE6F17300CE65AE /* networkObserver */,
 				D0A1C0DE2F80000100000003 /* qrScanner */,
+				D0A1C0DE2F80000300000003 /* contactExchange */,
+				D0A1C0DE2F80000200000F00 /* meshNode */,
 				FAA8F08F2EE6E25E00CE65AE /* backgroundRefresh */,
 				FAA8F0872EE6DCFE00CE65AE /* backgroundStorage */,
 			);
@@ -236,6 +255,27 @@
 				D0A1C0DE2F80000100000002 /* QrScannerPlugin.swift */,
 			);
 			path = qrScanner;
+			sourceTree = "<group>";
+		};
+		D0A1C0DE2F80000300000003 /* contactExchange */ = {
+			isa = PBXGroup;
+			children = (
+				D0A1C0DE2F80000300000002 /* ContactExchangePlugin.swift */,
+			);
+			path = contactExchange;
+			sourceTree = "<group>";
+		};
+		D0A1C0DE2F80000200000F00 /* meshNode */ = {
+			isa = PBXGroup;
+			children = (
+				D0A1C0DE2F80000200000002 /* MeshRadio.swift */,
+				D0A1C0DE2F80000200000004 /* CoreBluetoothMeshRadio.swift */,
+				D0A1C0DE2F80000200000006 /* MeshCore.swift */,
+				D0A1C0DE2F800002000000F2 /* RustMeshCore.swift */,
+				D0A1C0DE2F80000200000008 /* MeshNodeBridge.swift */,
+				D0A1C0DE2F8000020000000A /* MeshNodePlugin.swift */,
+			);
+			path = meshNode;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -415,8 +455,16 @@
 				D0F41CFE2F73FD8B003FC4E1 /* secureStorage.swift in Sources */,
 				FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */,
 				D0A1C0DE2F80000100000001 /* QrScannerPlugin.swift in Sources */,
+				D0A1C0DE2F80000300000001 /* ContactExchangePlugin.swift in Sources */,
+				D0A1C0DE2F80000200000001 /* MeshRadio.swift in Sources */,
+				D0A1C0DE2F80000200000003 /* CoreBluetoothMeshRadio.swift in Sources */,
+				D0A1C0DE2F80000200000005 /* MeshCore.swift in Sources */,
+				D0A1C0DE2F800002000000F1 /* RustMeshCore.swift in Sources */,
+				D0A1C0DE2F80000200000007 /* MeshNodeBridge.swift in Sources */,
+				D0A1C0DE2F80000200000009 /* MeshNodePlugin.swift in Sources */,
 				FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */,
 				FA11BB012F00A00000000001 /* SSLBypassPlugin.swift in Sources */,
+				FA11BB012F00A00000000002 /* AppLockPlugin.swift in Sources */,
 				D0F41CEC2F73ED03003FC4E1 /* SecureStoragePlugin.swift in Sources */,
 				D0F41D112F73ED03003FC4E1 /* PortableBackupFilePlugin.swift in Sources */,
 				D0F41D132F73ED03003FC4E1 /* PortableBackupSupport.swift in Sources */,

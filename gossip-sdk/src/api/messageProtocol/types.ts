@@ -5,13 +5,39 @@
  */
 
 export type BulletinItem = {
-  counter: string;
+  /**
+   * Position on the bulletin the fetch cursor refers to. Absent for an
+   * announcement that came from another transport (see
+   * CompositeMessageProtocol): it must not move the cursor.
+   */
+  counter?: string;
   data: Uint8Array;
 };
+
+/**
+ * What the transports can reach right now. `mesh-only` means messages still
+ * move, but over a slow store-and-forward mesh where every byte counts.
+ */
+export type TransportConnectivity = 'internet' | 'mesh-only' | 'offline';
 
 export interface EncryptedMessage {
   seeker: Uint8Array;
   ciphertext: Uint8Array;
+}
+
+/** Options of a message fetch or send. */
+export interface MessageRouting {
+  /**
+   * Only the mesh transports take part. For entries that must never reach an
+   * internet node, such as addressed re-announcements; a transport without a
+   * mesh must refuse the call rather than ignore the option.
+   */
+  meshOnly?: boolean;
+  /**
+   * Only the internet transports take part: posting to a server what only a
+   * mesh took before (see `MessageService.repostMeshOnly`).
+   */
+  internetOnly?: boolean;
 }
 
 export interface MessageProtocolResponse<T = unknown> {
@@ -27,18 +53,28 @@ export interface IMessageProtocol {
   /**
    * Fetch encrypted messages for the provided set of seeker read keys
    */
-  fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]>;
+  fetchMessages(
+    seekers: Uint8Array[],
+    routing?: MessageRouting
+  ): Promise<EncryptedMessage[]>;
 
   /**
    * Send an encrypted message to the key-value store
    */
-  sendMessage(message: EncryptedMessage): Promise<void>;
+  sendMessage(
+    message: EncryptedMessage,
+    routing?: MessageRouting
+  ): Promise<void>;
 
   /**
    * Broadcast an outgoing session announcement produced by WASM.
-   * Returns the bulletin counter provided by the API.
+   * Returns the bulletin counter provided by the API. Only `internetOnly`
+   * routing applies to announcements.
    */
-  sendAnnouncement(announcement: Uint8Array): Promise<string>;
+  sendAnnouncement(
+    announcement: Uint8Array,
+    routing?: MessageRouting
+  ): Promise<string>;
   /**
    * Fetch incoming discussion announcements from the bulletin storage.
    * Returns raw announcement bytes as provided by the API.
@@ -58,4 +94,41 @@ export interface IMessageProtocol {
    * @returns MessageProtocolResponse with the new node information
    */
   changeNode(nodeUrl?: string): Promise<MessageProtocolResponse>;
+
+  /**
+   * Seekers this client currently waits on, for transports that ask other
+   * nodes for them instead of being polled (a mesh node puts them on its
+   * wanted list). Called after every message fetch. `localSeekers` are
+   * waited on from the mesh only (lookahead and re-announcement mailbox
+   * seekers): a mesh node floods them flagged local-only, so that no bridge
+   * asks an internet node for them.
+   */
+  setWantedSeekers?(
+    seekers: Uint8Array[],
+    localSeekers?: Uint8Array[]
+  ): Promise<void>;
+
+  /**
+   * Whether a mesh transport is on, so mesh-only traffic (lookahead seekers,
+   * addressed re-announcements, `meshOnly` routing) has somewhere to go.
+   * Transports that omit it have no mesh.
+   */
+  isMeshEnabled?(): boolean;
+
+  /**
+   * Bulletin cursors of the transports behind this one whose announcements
+   * carry no counter the SDK stores (see CompositeMessageProtocol), so they
+   * can be saved and restored across restarts.
+   */
+  exportSecondaryCursors?(): (string | undefined)[];
+  importSecondaryCursors?(cursors: (string | undefined)[]): void;
+
+  /** Current reachability; transports that omit it are assumed online. */
+  getConnectivity?(): TransportConnectivity;
+
+  /**
+   * For transports that run several paths: which kinds of path took the last
+   * send at `seeker` ('internet', 'mesh'), read once.
+   */
+  takeAcceptedBy?(seeker: Uint8Array): ('internet' | 'mesh')[] | undefined;
 }
