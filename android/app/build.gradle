@@ -99,27 +99,22 @@ android {
     }
 }
 
-// Offline mesh node (gossip-mobile, in the gossip-node repository). Built in
-// when a checkout with the crate is found at $GOSSIP_NODE_DIR or
-// ../gossip-node; otherwise the app keeps the in-memory StubMeshCore, so this
-// repository alone still builds. GOSSIP_MESH_STUB=1 forces the stub.
+// Offline mesh node (gossip-mobile, in the gossip-node repository). Off by
+// default: the app keeps the in-memory StubMeshCore and hides the mesh, so
+// this repository alone builds. GOSSIP_MESH=1 (or -Pgossip.mesh=true) builds
+// it in from the checkout at $GOSSIP_NODE_DIR, else ../gossip-node.
 def gossipNodeDir = file(System.getenv('GOSSIP_NODE_DIR') ?: "${rootProject.projectDir.parentFile.parentFile}/gossip-node")
-def hasMeshCore = new File(gossipNodeDir, 'crates/gossip-mobile/Cargo.toml').exists() &&
-        System.getenv('GOSSIP_MESH_STUB') != '1'
+def hasMeshCore = System.getenv('GOSSIP_MESH') == '1' || project.findProperty('gossip.mesh') == 'true'
 if (hasMeshCore) {
+    if (!new File(gossipNodeDir, 'crates/gossip-mobile/Cargo.toml').exists()) {
+        throw new GradleException("Mesh build asked for but no gossip-mobile crate under ${gossipNodeDir}: set GOSSIP_NODE_DIR to a gossip-node checkout")
+    }
     android.sourceSets.main.java.srcDirs += ['src/meshffi/java', 'src/meshffi/generated']
     android.sourceSets.test.java.srcDirs += ['src/meshffiTest/java']
 } else {
-    logger.lifecycle("gossip-mobile not used (none under ${gossipNodeDir}, or GOSSIP_MESH_STUB=1): the mesh runs on the stub core")
-    // The app hides the mesh without the Rust core, but a release must not
-    // ship the stub by accident. GOSSIP_MESH_OPTIONAL=1 allows it, for
-    // builds made without the gossip-node checkout on purpose.
-    gradle.taskGraph.whenReady { graph ->
-        def releasing = graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') }
-        if (releasing && System.getenv('GOSSIP_MESH_OPTIONAL') != '1') {
-            throw new GradleException("Release build without the gossip-mobile mesh core: set GOSSIP_NODE_DIR to a gossip-node checkout, or GOSSIP_MESH_OPTIONAL=1 to build without the mesh")
-        }
-    }
+    logger.lifecycle("Mesh not built in (set GOSSIP_MESH=1 to build it): the mesh runs on the stub core")
+    // a mesh build earlier leaves its library in jniLibs
+    android.packagingOptions.jniLibs.excludes += ['**/libgossip_mobile.so']
 }
 
 repositories {

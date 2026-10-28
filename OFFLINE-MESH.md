@@ -34,21 +34,20 @@ memory and answers fetches from it, but does not speak on links, so a checkout o
 repository alone still builds and runs. A build with the stub hides the mesh: at launch
 `probeMeshAvailability` asks the plugin's `capabilities()` whether the Rust node is there,
 and without it the settings say the mesh is unavailable and the radio never starts.
-Release builds refuse the stub: Gradle fails a release task without `gossip-mobile`
-unless `GOSSIP_MESH_OPTIONAL=1`, and Swift fails a non-debug build without the
-`GossipMobile` module unless `GOSSIP_MESH_OPTIONAL` is an active compilation condition.
 
-`gossip-mobile` lives in the gossip-node repository. The build looks for it at
-`$GOSSIP_NODE_DIR`, else `../gossip-node` next to this repository.
+The Rust node is opt-in: builds use the stub unless asked for the mesh. `gossip-mobile`
+lives in the gossip-node repository; the build looks for it at `$GOSSIP_NODE_DIR`, else
+`../gossip-node` next to this repository.
 
-- **Android.** When the crate is found, Gradle adds the `meshffi` source set
+- **Android.** With `GOSSIP_MESH=1` (or `-Pgossip.mesh=true`), Gradle fails if the crate
+  is missing, else adds the `meshffi` source set
   (`android/app/src/meshffi/java/…/RustMeshCore.kt` and the generated bindings) and runs
   `buildRustMeshCore` before `preBuild`. That task calls
   `scripts/build-mesh-android.sh`, which builds `libgossip_mobile.so` into `jniLibs` and
   the Kotlin bindings (package `net.massa.gossip.mesh.ffi`) into
   `android/app/src/meshffi/generated`, both gitignored. It uses its own Cargo target
   directory (`android/app/build/gossip-mobile-target`, or `$GOSSIP_MOBILE_TARGET_DIR`).
-  `GOSSIP_MESH_STUB=1` forces the stub. The factory finds `RustMeshCore` by name, so the
+  The factory finds `RustMeshCore` by name, so the
   main source set never depends on the bindings.
 - **iOS (macOS only).** `scripts/build-mesh-ios.sh` builds a static-library
   `GossipMobileFFI.xcframework` and the Swift bindings into `ios/App/GossipMobile/generated`

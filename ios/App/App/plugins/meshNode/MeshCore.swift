@@ -92,13 +92,8 @@ struct MeshCoreStatus {
 
 /// The Rust node (`RustMeshCore`) when the `GossipMobile` pod is installed
 /// (scripts/build-mesh-ios.sh, then `pod install`), else `StubMeshCore`, so a
-/// checkout of this repository alone still builds.
-// The app hides the mesh without the Rust core, but a release must not ship
-// the stub by accident: add GOSSIP_MESH_OPTIONAL to the active compilation
-// conditions to build without it on purpose.
-#if !DEBUG && !canImport(GossipMobile) && !GOSSIP_MESH_OPTIONAL
-#error("Release build without the gossip-mobile mesh core: run scripts/build-mesh-ios.sh and pod install")
-#endif
+/// checkout of this repository alone still builds. The app hides the mesh
+/// without the Rust core.
 
 enum MeshCoreFactory {
     static func create() -> MeshCore {
