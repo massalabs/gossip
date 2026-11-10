@@ -369,6 +369,56 @@ export class DatabaseConnection {
     }
   }
 
+  /**
+   * One-round-trip atomic batch, available on the native plugin only: the
+   * whole `BEGIN … COMMIT` is a single bridge call instead of one per
+   * statement. Other backends use the generic per-statement transaction.
+   */
+  private atomicBatchExecutor():
+    | ((statements: { sql: string; params: unknown[] }[]) => Promise<void>)
+    | undefined {
+    if (!this.state.useNativePlugin || !this.state.nativePlugin) {
+      return undefined;
+    }
+    return async statements => {
+      const native = this.requireNativePlugin();
+      for (const statement of statements) {
+        assertNoUndefinedBindParams(statement.params);
+      }
+      const prev = this.state.dbLock;
+      let release!: () => void;
+      this.state.dbLock = new Promise<void>(r => (release = r));
+      await prev;
+      try {
+        if (this.state.txDepth > 0) {
+          throw new Error('Atomic batch cannot run inside a transaction');
+        }
+        try {
+          await native.execSqlBatch({
+            statements: [
+              { sql: 'BEGIN IMMEDIATE', params: [] },
+              ...statements,
+              { sql: 'COMMIT', params: [] },
+            ],
+          });
+        } catch (error) {
+          // The batch stops at the first failing statement, leaving the
+          // transaction open. Roll it back; a ROLLBACK with no open
+          // transaction (BEGIN itself failed) is harmless to ignore.
+          try {
+            await native.execSql({ sql: 'ROLLBACK', params: [] });
+          } catch {
+            // Nothing was left open.
+          }
+          throw error;
+        }
+        await native.flush();
+      } finally {
+        release();
+      }
+    };
+  }
+
   private async execRawDirect(
     sql: string,
     params: unknown[] = []
@@ -661,7 +711,8 @@ export class DatabaseConnection {
       fn => {
         const txExecRaw = this.execRawDirect.bind(this);
         return this.withRawTransaction(() => fn(txExecRaw));
-      }
+      },
+      this.atomicBatchExecutor()
     );
 
     this.state.drizzleDb = this.createDrizzleInstance();
@@ -687,7 +738,8 @@ export class DatabaseConnection {
       fn => {
         const txExecRaw = this.execRawDirect.bind(this);
         return this.withRawTransaction(() => fn(txExecRaw));
-      }
+      },
+      this.atomicBatchExecutor()
     );
     this.state.drizzleDb = this.createDrizzleInstance();
   }
