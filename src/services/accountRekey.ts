@@ -65,8 +65,9 @@ function freeKey(key: EncryptionKey | undefined): void {
 }
 
 /**
- * Re-encrypt the recovery phrase and the messaging session of the account
- * that is currently unlocked in the rekey candidate.
+ * Re-encrypt everything held under the profile key of the account that is
+ * currently unlocked in the rekey candidate: the recovery phrase, the
+ * messaging session and the notes-to-self.
  */
 async function rewriteInnerKeys(
   sdk: GossipSdk,
@@ -116,6 +117,19 @@ async function rewriteInnerKeys(
       // Prove the rewritten blob opens under the new key before it replaces
       // the only copy in this candidate.
       session.load(rewrittenBlob, newKey);
+    }
+
+    // Notes-to-self are encrypted under the profile key itself, so they
+    // must move to the new key together with it.
+    const notes = await sdk.reencryptSelfMessages(
+      profile.userId,
+      oldKey,
+      newKey
+    );
+    if (notes.unreadable > 0) {
+      logger.warn(
+        `${notes.unreadable} note(s) were already unreadable and were left as they are`
+      );
     }
 
     const updated: UserProfile = { ...profile, security };

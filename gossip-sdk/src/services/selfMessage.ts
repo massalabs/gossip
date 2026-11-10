@@ -11,13 +11,77 @@ import {
   MessageStatus,
   MessageType,
 } from '../db/db.js';
-import { discussions } from '../db/schema/index.js';
+import { and, eq } from 'drizzle-orm';
+import { discussions, messages } from '../db/schema/index.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 
 export const SELF_CONTACT_ID = '__self__';
 
 const AAD_EMPTY = new Uint8Array(0);
 const ZERO_NONCE_BYTES = new Uint8Array(16);
+
+/**
+ * Re-encrypt every note-to-self of `ownerUserId` from `oldKey` to `newKey`,
+ * in one transaction.
+ *
+ * Notes are the only message content encrypted under the account's profile
+ * key, so they must follow that key whenever it changes (password change or
+ * key refresh). Without this they stay in the database but can never be
+ * read again.
+ *
+ * A row that does not open under `oldKey` is left exactly as it is: it was
+ * already unreadable, and rewriting it could only destroy what a correct key
+ * might still recover. Returns how many rows were rewritten and how many
+ * were left alone.
+ */
+export async function reencryptSelfMessages(
+  queries: Queries,
+  ownerUserId: string,
+  oldKey: EncryptionKey,
+  newKey: EncryptionKey
+): Promise<{ rewritten: number; unreadable: number }> {
+  const nonce = await nonceFromBytes(ZERO_NONCE_BYTES);
+  return queries.conn.withTransaction(async tx => {
+    const rows = await tx
+      .select({ id: messages.id, content: messages.content })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.ownerUserId, ownerUserId),
+          eq(messages.contactUserId, SELF_CONTACT_ID)
+        )
+      )
+      .all();
+
+    let rewritten = 0;
+    let unreadable = 0;
+    for (const row of rows) {
+      let plaintext: Uint8Array | undefined;
+      try {
+        plaintext = await decryptAead(
+          oldKey,
+          nonce,
+          decodeFromBase64(row.content),
+          AAD_EMPTY
+        );
+      } catch {
+        plaintext = undefined;
+      }
+      if (!plaintext) {
+        unreadable += 1;
+        continue;
+      }
+      const ciphertext = await encryptAead(newKey, nonce, plaintext, AAD_EMPTY);
+      plaintext.fill(0);
+      await tx
+        .update(messages)
+        .set({ content: encodeToBase64(ciphertext) })
+        .where(eq(messages.id, row.id));
+      rewritten += 1;
+    }
+    return { rewritten, unreadable };
+  });
+}
 
 export class SelfMessageService {
   constructor(
