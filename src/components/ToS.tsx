@@ -4,9 +4,11 @@ import tosContent from '../../TERMS_OF_SERVICE.md?raw';
 
 interface ToSProps {
   onHasScrolledBottom?: () => void;
+  /** Hide the heading when the surrounding page already shows one. */
+  hideTitle?: boolean;
 }
 
-const ToS: React.FC<ToSProps> = ({ onHasScrolledBottom }) => {
+const ToS: React.FC<ToSProps> = ({ onHasScrolledBottom, hideTitle }) => {
   const { t } = useTranslation('onboarding');
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
@@ -25,9 +27,11 @@ const ToS: React.FC<ToSProps> = ({ onHasScrolledBottom }) => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <h1 className="text-2xl font-bold text-foreground mb-4 shrink-0">
-        {t('tos.title', 'Terms of Service')}
-      </h1>
+      {!hideTitle && (
+        <h1 className="text-2xl font-bold text-foreground mb-4 shrink-0">
+          {t('tos.title', 'Terms of Service')}
+        </h1>
+      )}
       {/* Scrollable ToS content */}
       <div
         ref={scrollRef}

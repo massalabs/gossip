@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { GossipSdk, generateMnemonic } from '@massalabs/gossip-sdk';
 import { AppContent } from '../../src/App';
 import i18n from '../../src/i18n';
-import SecureAccountSetup from '../../src/components/account/SecureAccountSetup';
+import { commitOnboardingAccount } from '../../src/components/account/commitOnboardingAccount';
 import { stageAccount } from '../../src/components/account/stagedAccount';
 import { useProfileLoader } from '../../src/hooks/useProfileLoader';
 import { useAccountStore } from '../../src/stores/accountStore';
@@ -128,16 +128,14 @@ async function mountProductionAppUntilLogin(): Promise<() => void> {
   try {
     await waitFor(() => {
       const loginLabel = i18n.t('login.login', { ns: 'auth' });
-      const usernamePlaceholder = i18n.t('create.enter_username', {
-        ns: 'auth',
-      });
+      const newAccountLabel = i18n.t('new_account', { ns: 'onboarding' });
       const loginAction = Array.from(mount.querySelectorAll('button')).some(
         button => button.textContent?.trim() === loginLabel
       );
-      const onboardingUsername = Array.from(
-        mount.querySelectorAll('input')
-      ).some(input => input.placeholder === usernamePlaceholder);
-      return loginAction && !onboardingUsername;
+      const onboardingWelcome = Array.from(
+        mount.querySelectorAll('button')
+      ).some(button => button.textContent?.trim() === newAccountLabel);
+      return loginAction && !onboardingWelcome;
     }, 30_000);
     return () => {
       root.unmount();
@@ -252,33 +250,10 @@ export async function runFreshAccountRelaunchScenario(
     'replacement',
     input.replacementPassword
   );
-  const mount = document.createElement('div');
-  document.body.append(mount);
-  const root = createRoot(mount);
-  let completed = false;
-  let restartError: string | null = null;
   const creationModeLease = await claimOnboardingStorageMode('create');
-  root.render(
-    <SecureAccountSetup
-      initialAccount={stagedReplacement}
-      onComplete={() => {
-        completed = true;
-      }}
-      onRestart={message => {
-        restartError = message;
-      }}
-      creationModeLease={creationModeLease}
-    />
-  );
 
   try {
-    await waitFor(() => mount.querySelectorAll('button').length >= 2);
-    const buttons = mount.querySelectorAll('button');
-    buttons[buttons.length - 1].click();
-    await waitFor(() => {
-      if (restartError) throw new Error(restartError);
-      return completed;
-    }, 60_000);
+    await commitOnboardingAccount(stagedReplacement, creationModeLease);
 
     const grantRevoked = !useAppStore.getState().secureAccountCreationAllowed;
     const persistedRevokedAppStore = localStorage.getItem(
@@ -313,8 +288,6 @@ export async function runFreshAccountRelaunchScenario(
       persistedRevokedAppStore,
     };
   } finally {
-    root.unmount();
-    mount.remove();
     await creationModeLease.release();
     if (sdk.isSessionOpen) {
       await useAccountStore.getState().logout({ lockedByUser: false });
