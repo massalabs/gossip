@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, AlertTriangle } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
@@ -8,6 +8,10 @@ import PageLayout from '../ui/Layout/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
+import {
+  authenticateBiometricLogin,
+  checkBiometricAvailability,
+} from '../../services/biometricService';
 
 interface AccountBackupProps {
   onBack: () => void;
@@ -25,6 +29,42 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
     mnemonic: string;
   } | null>(null);
   const [privateKeyString, setPrivateKeyString] = useState<string | null>(null);
+
+  const [biometricMethod, setBiometricMethod] = useState<
+    'capacitor' | 'webauthn' | 'none'
+  >('none');
+
+  useEffect(() => {
+    // Shown whenever the device has biometrics, whether or not this account
+    // is the one linked to them: the screen must not reveal that link.
+    checkBiometricAvailability()
+      .then(({ available, method }) => {
+        if (available) setBiometricMethod(method ?? 'none');
+      })
+      .catch(() => {});
+  }, []);
+
+  // Accounts created with biometrics only have no typed password: recover
+  // the account secret through the biometric prompt instead.
+  const handleShowWithBiometrics = async () => {
+    try {
+      setIsLoading(true);
+      setError('');
+      setPasswordError('');
+      const result = await authenticateBiometricLogin(biometricMethod);
+      if (!result.success || !result.data?.password) {
+        throw new Error(result.error || 'Biometric authentication failed');
+      }
+      const backup = await showBackup(result.data.password);
+      setBackupInfo({ mnemonic: backup.mnemonic });
+      setPrivateKeyString(backup.privateKey);
+    } catch (e) {
+      logger.error('Error showing backup with biometrics:', e);
+      setError(t('backup.show_failed'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleShow = async () => {
     try {
@@ -120,6 +160,18 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
           >
             {!isLoading && t('backup.show_backup')}
           </Button>
+          {biometricMethod !== 'none' && (
+            <Button
+              onClick={handleShowWithBiometrics}
+              disabled={isLoading}
+              variant="outline"
+              size="custom"
+              fullWidth
+              className="h-11 text-sm font-medium"
+            >
+              {t('backup.use_biometrics')}
+            </Button>
+          )}
         </div>
       )}
 

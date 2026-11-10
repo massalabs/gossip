@@ -14,5 +14,10 @@
   "create_account": "Create New Account",
   "back": "Back",
   "get_started_button": "Get Started",
-  "next": "Next"
+  "next": "Next",
+  "new_account": "New account",
+  "restore": "Restore",
+  "terms_notice": "By continuing, you agree to the",
+  "terms_link": "Terms of Service",
+  "multiple_accounts": "Multiple deniable accounts"
 }
