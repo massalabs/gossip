@@ -159,6 +159,8 @@ interface DbState {
   useNativePlugin: boolean;
   portableTransferActive: boolean;
   onboardingCandidateActive: boolean;
+  /** 'admitting' after beginRekey, 'candidate' once the candidate is built. */
+  rekeyPhase: 'idle' | 'admitting' | 'candidate';
   closeActive: boolean;
 }
 
@@ -190,6 +192,7 @@ function createDefaultState(): DbState {
     useNativePlugin: false,
     portableTransferActive: false,
     onboardingCandidateActive: false,
+    rekeyPhase: 'idle',
     closeActive: false,
   };
 }
@@ -829,6 +832,120 @@ export class DatabaseConnection {
     this.state.onboardingCandidateActive = false;
     this.state.accountGenerationEpoch = null;
     this.state.storageState = 'empty';
+  }
+
+  /**
+   * Start an in-place rekey of the committed store. Storage must be locked.
+   * See `GossipSdk.secureStorageBeginRekey` for the full sequence.
+   */
+  async secureStorageBeginRekey(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (
+      this.state.storageState !== 'locked' ||
+      this.state.accountGenerationState !== 'committed' ||
+      this.state.rekeyPhase !== 'idle'
+    ) {
+      throw new Error('Rekey requires locked, committed storage');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().beginRekey();
+    } else {
+      await this.requireSecureProxy().beginRekey();
+    }
+    this.state.rekeyPhase = 'admitting';
+  }
+
+  async secureStorageAdmitRekey(
+    password: string,
+    newPassword?: string
+  ): Promise<boolean> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (this.state.rekeyPhase !== 'admitting') {
+      throw new Error('Rekey is not accepting passwords');
+    }
+    if (password.length === 0 || newPassword?.length === 0) return false;
+    const encoder = new TextEncoder();
+    const pwBytes = encoder.encode(password);
+    const newBytes =
+      newPassword === undefined ? undefined : encoder.encode(newPassword);
+    try {
+      if (this.state.useNativePlugin) {
+        const result = await this.requireNativePlugin().admitRekey({
+          password: pwBytes,
+          newPassword: newBytes,
+        });
+        return result.admitted;
+      }
+      return await this.requireSecureProxy().admitRekey(
+        // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffers; the only post-transfer access is the `byteLength > 0` zeroize guard in the finally block.
+        Comlink.transfer(pwBytes, [pwBytes.buffer]),
+        newBytes === undefined
+          ? undefined
+          : // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: see above.
+            Comlink.transfer(newBytes, [newBytes.buffer])
+      );
+    } finally {
+      if (pwBytes.byteLength > 0) pwBytes.fill(0);
+      if (newBytes && newBytes.byteLength > 0) newBytes.fill(0);
+    }
+  }
+
+  /**
+   * Re-encrypt the store into an in-memory candidate. Afterwards
+   * `secureStorageUnlock` / queries / `secureStorageLock` act on the
+   * candidate, not on the durable store.
+   */
+  async secureStorageBuildRekeyCandidate(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (
+      this.state.rekeyPhase !== 'admitting' ||
+      this.state.storageState !== 'locked'
+    ) {
+      throw new Error('Rekey is not accepting passwords');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().buildRekeyCandidate();
+    } else {
+      await this.requireSecureProxy().buildRekeyCandidate();
+    }
+    this.state.rekeyPhase = 'candidate';
+  }
+
+  /** Atomically replace the committed generation with the candidate. */
+  async secureStorageCommitRekeyCandidate(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (
+      this.state.rekeyPhase !== 'candidate' ||
+      this.state.storageState !== 'locked'
+    ) {
+      throw new Error('Rekey candidate is not ready to commit');
+    }
+    this.state.drizzleDb = null;
+    const generationEpoch = this.state.useNativePlugin
+      ? (await this.requireNativePlugin().commitOnboardingCandidate()).epoch
+      : await this.requireSecureProxy().commitRekeyCandidate();
+    this.state.accountGenerationEpoch = generationEpoch;
+    this.state.rekeyPhase = 'idle';
+  }
+
+  /** Drop admission state and any candidate; the durable store is intact. */
+  async secureStorageAbortRekey(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (this.state.rekeyPhase === 'idle') return;
+    if (this.state.storageState === 'unlocked') {
+      throw new Error('Lock the rekey candidate before aborting');
+    }
+    this.state.drizzleDb = null;
+    if (this.state.useNativePlugin) {
+      const native = this.requireNativePlugin();
+      await native.endRekey();
+      if (this.state.rekeyPhase === 'candidate') {
+        await native.abortOnboardingCandidate();
+      }
+    } else {
+      await this.requireSecureProxy().abortRekey();
+    }
+    this.state.rekeyPhase = 'idle';
   }
 
   async secureStorageCreate(slot: number, password: string): Promise<void> {

@@ -1,6 +1,8 @@
 # Plan: set or change an account password
 
-Status: draft for discussion. Nothing in this document is implemented.
+Status: implemented on web and in the native storage library; see
+"Implementation status" at the end for what differs from the plan below and
+what is still unverified.
 
 ## Goal
 
@@ -425,3 +427,56 @@ exists.
 ## Open decisions
 
 None.
+
+## Implementation status
+
+### What exists
+
+| Layer                    | Where                                                                                                                                                                                              |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Re-encryption core       | `wasm/secure-storage/src/rekey.rs` (`RekeyPlan`: `admit_keep`, `admit_change`, `build`)                                                                                                            |
+| Web bindings             | `beginRekey`, `admitRekeyKeep`, `admitRekeyChange`, `buildRekeyCandidate`, `endRekey` in `wasm_api.rs`                                                                                             |
+| Native bindings          | same command names in `native_api.rs`, implemented in `vfs/native_vfs.rs`                                                                                                                          |
+| SDK                      | `secureStorageBeginRekey` / `AdmitRekey` / `BuildRekeyCandidate` / `CommitRekeyCandidate` / `AbortRekey` on `GossipSdk` and `DatabaseConnection`; worker methods in `secure-storage-worker-api.ts` |
+| App service              | `src/services/accountRekey.ts` (`startRekey`, `rekeyLockedStore`)                                                                                                                                  |
+| Biometric update         | `openBiometricLoginForUpdate` in `src/services/biometricService.ts`                                                                                                                                |
+| UI                       | `src/components/settings/RekeyForm.tsx`, `src/components/RekeyProgressScreen.tsx`, Settings → Security                                                                                             |
+| "No password yet" marker | `security.passwordless` on the profile (`gossip-sdk/src/db/db.ts`)                                                                                                                                 |
+| Export gating            | Settings backup row and the warning on the backup page                                                                                                                                             |
+
+### How it differs from the plan
+
+- **The new generation is built in memory, not staged on disk.** Both
+  platforms already had an in-memory "candidate" store for onboarding, with an
+  atomic commit that replaces the whole durable store. The rekey builds its
+  result into that same candidate, so the candidate can be unlocked and
+  written before the commit (section 4 works as planned, no hand-off record),
+  and a crash before the commit leaves nothing behind at all.
+  Consequences: the whole store must fit in memory, and on web the commit
+  refuses anything over 256 MiB.
+- **The commit reuses onboarding's install path**, which serialises the
+  candidate in the portable archive layout internally
+  (`MemoryStorage::export_portable`, `installOnboardingGenerationWeb`,
+  `RedbStorage::import_portable`). The rekey does not call the import/export
+  feature, but it shares these three functions with onboarding. If
+  import/export is removed, they must stay, as onboarding needs them too.
+- **Inner keys are rewritten by the app service, not the SDK**, because the
+  profile encryption helpers live in the app (`src/stores/utils/auth.ts`).
+- **Authorisation is the open session plus a re-check of the current
+  credential.** There is no separate lease object. Cross-tab safety relies on
+  the existing generation fence: another tab is told to reload after the
+  switch. Writes made by another logged-in tab _during_ the operation are
+  lost.
+
+### Not verified
+
+- **Real phones.** The native path is covered by a Rust test through the
+  command bridge, not by a run on Android or iOS.
+- **Existing conversations.** After the switch, the first login runs the
+  generation journal in `loadAccount`. From reading it, a readable session
+  blob is reopened without a reset, and the rekey re-encrypts that blob. This
+  was not exercised against a backend with a live conversation.
+- **Large stores.** Duration and memory were only measured on near-empty
+  accounts (about 4 seconds in a desktop browser).
+- **Crash injection** between the commit and the old generation's erase was
+  not added; that window is the one onboarding's commit already has.

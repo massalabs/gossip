@@ -380,6 +380,11 @@ const PortableBackup: React.FC = () => {
             <p className="text-muted-foreground">
               {t('portable_backup.possession_warning')}
             </p>
+            {/* Shown to everyone: this page is also reachable before login,
+                where nothing may reveal whether such an account exists. */}
+            <p className="text-muted-foreground">
+              {t('portable_backup.passwordless_warning')}
+            </p>
           </div>
         </div>
 

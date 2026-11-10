@@ -1,3 +1,4 @@
+import toast from 'react-hot-toast';
 import { logger } from '../utils/logger.ts';
 import React, { useState, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
@@ -247,7 +248,16 @@ const Settings = (): React.ReactElement => {
             <SettingsRow
               icon={<Download />}
               label={t('menu.secure_backup')}
-              onClick={() => navigate(ROUTES.portableBackup())}
+              onClick={() => {
+                // The backup is locked by account passwords only. An
+                // account whose password is a device-generated secret could
+                // never be restored from it.
+                if (userProfile?.security.passwordless) {
+                  toast.error(t('portable_backup.set_password_first'));
+                  return;
+                }
+                navigate(ROUTES.portableBackup());
+              }}
               withDivider
             />
           )}

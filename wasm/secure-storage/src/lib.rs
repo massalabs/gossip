@@ -17,6 +17,7 @@ mod outer_migration;
 mod portable;
 mod pq;
 mod read;
+mod rekey;
 mod sql_tail;
 pub mod storage;
 mod types;
@@ -66,6 +67,7 @@ pub use pq::{
     pq_rerand, validate_pq_ciphertext,
 };
 pub use read::{decrypt_session_data_block, read_session_data, read_total_length};
+pub use rekey::RekeyPlan;
 pub use types::SessionIndex;
 pub use unlock::{NamespaceState, UnlockedSession, load_namespace_state, unlock_session};
 pub use write::{

@@ -1169,6 +1169,100 @@ class GossipSdk {
   }
 
   /**
+   * Start an in-place rekey: re-encrypt the whole store into a new
+   * generation, to set or change an account password or simply to refresh
+   * every key. Storage must be locked and no session open.
+   *
+   * Sequence:
+   *  1. `secureStorageBeginRekey()`
+   *  2. `secureStorageAdmitRekey(password, newPassword?)` once per account to
+   *     keep. Accounts that are not admitted are erased by the commit.
+   *  3. `secureStorageBuildRekeyCandidate()`. From here `secureStorageUnlock`,
+   *     `queries`, `profiles`, session-blob calls and `secureStorageLock` act
+   *     on the in-memory candidate, so account contents can be rewritten
+   *     before anything durable changes.
+   *  4. `secureStorageCommitRekeyCandidate()`, or `secureStorageAbortRekey()`
+   *     at any point before it.
+   *
+   * Until the commit resolves, the durable store is only read.
+   */
+  async secureStorageBeginRekey(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot rekey while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageBeginRekey();
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * Admit one account to the active rekey. Resolves `false` when the
+   * passwords are not acceptable; it never says why, and never which account
+   * (if any) a password belongs to.
+   */
+  async secureStorageAdmitRekey(
+    password: string,
+    newPassword?: string
+  ): Promise<boolean> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      return await this.requireConn().secureStorageAdmitRekey(
+        password,
+        newPassword
+      );
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  async secureStorageBuildRekeyCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageBuildRekeyCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Commit the rekey candidate atomically. Lock the candidate first. */
+  async secureStorageCommitRekeyCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot commit a rekey candidate while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageCommitRekeyCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Abandon the rekey. Nothing durable has changed. */
+  async secureStorageAbortRekey(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageAbortRekey();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
    * Open a brand-new encrypted session in the given slot, deriving the key
    * from `password`. Fresh storage requires an active onboarding candidate;
    * finish all account writes and locks before committing that candidate.

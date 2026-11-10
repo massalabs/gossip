@@ -1,3 +1,5 @@
+import { useRekeyStore } from './stores/rekeyStore';
+import RekeyProgressScreen from './components/RekeyProgressScreen';
 import { logger } from './utils/logger.ts';
 import './i18n';
 import React, { useState, useEffect, useRef } from 'react';
@@ -44,6 +46,7 @@ export const AppContent: React.FC = () => {
   const lockedStartupFallback = useAppStore(s => s.lockedStartupFallback);
   const routesInitialized = isInitialized || lockedStartupFallback;
   const [loginError, setLoginError] = useState<string | null>(null);
+  const rekeyStatus = useRekeyStore(state => state.status);
   useProfileLoader();
   useStoreInit(); // Initialize all stores when user profile is available
   const existingAccountInfo = useAccountInfo();
@@ -70,6 +73,11 @@ export const AppContent: React.FC = () => {
       logger.error('Failed to setup service worker:', error);
     });
   }, []); // Only run once on mount
+
+  // Storage is being re-encrypted (or just was): nothing else may open it.
+  if (rekeyStatus !== 'idle') {
+    return <RekeyProgressScreen />;
+  }
 
   // LoadingScreen only during the very first profile-loader pass — not
   // for subsequent actions that toggle isLoading (signup, login, etc.).

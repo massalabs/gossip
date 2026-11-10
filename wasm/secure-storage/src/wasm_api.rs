@@ -60,6 +60,9 @@ thread_local! {
     /// cross into JavaScript; only complete all-slot batches are returned.
     static OUTER_MIGRATION_PLAN: RefCell<Option<crate::OuterMigrationPlan>> = const { RefCell::new(None) };
     static OUTER_MIGRATION: RefCell<Option<crate::OuterMigration>> = const { RefCell::new(None) };
+    /// Password admission for an in-place rekey. Matches and secrets stay in
+    /// WASM; JavaScript only learns whether an admission was accepted.
+    static REKEY_PLAN: RefCell<Option<crate::RekeyPlan>> = const { RefCell::new(None) };
 }
 
 fn map_err(e: SecureStorageError) -> JsValue {
@@ -209,6 +212,103 @@ pub fn end_onboarding_candidate() -> Result<(), JsValue> {
             }
         }
     })
+}
+
+/// Start password admission for an in-place rekey of the durable store.
+/// The store must be locked; its content is only read until the candidate is
+/// committed.
+#[wasm_bindgen(js_name = beginRekey)]
+pub fn begin_rekey() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        if !matches!(state.backend, Backend::Idb(_)) {
+            return Err(JsValue::from_str("rekey requires IndexedDB storage"));
+        }
+        state.session = None;
+        state.namespace_states.clear();
+        let plan = crate::RekeyPlan::new(&state.domain);
+        REKEY_PLAN.with(|cell| *cell.borrow_mut() = Some(plan));
+        Ok(())
+    })
+}
+
+fn admit_rekey(old: &[u8], new: Option<&[u8]>) -> Result<bool, JsValue> {
+    with_app_state(|app| {
+        let state = app.state.borrow();
+        REKEY_PLAN.with(|cell| {
+            let mut plan = cell.borrow_mut();
+            let plan = plan
+                .as_mut()
+                .ok_or_else(|| JsValue::from_str("rekey is not active"))?;
+            let result = match new {
+                Some(new) => plan.admit_change(&state.backend, old, new),
+                None => plan.admit_keep(&state.backend, old),
+            };
+            match result {
+                Ok(()) => Ok(true),
+                // One answer for every secret-dependent rejection.
+                Err(SecureStorageError::InvalidPassword) => Ok(false),
+                Err(error) => Err(map_err(error)),
+            }
+        })
+    })
+}
+
+/// Admit an account that keeps its password.
+#[wasm_bindgen(js_name = admitRekeyKeep)]
+pub fn admit_rekey_keep(password: Vec<u8>) -> Result<bool, JsValue> {
+    let password = Zeroizing::new(password);
+    admit_rekey(&password, None)
+}
+
+/// Admit an account whose password is replaced.
+#[wasm_bindgen(js_name = admitRekeyChange)]
+pub fn admit_rekey_change(password: Vec<u8>, new_password: Vec<u8>) -> Result<bool, JsValue> {
+    let password = Zeroizing::new(password);
+    let new_password = Zeroizing::new(new_password);
+    admit_rekey(&password, Some(&new_password))
+}
+
+/// Re-encrypt the durable store into an in-memory candidate and make that
+/// candidate the active backend, exactly like an onboarding candidate. It is
+/// then committed with `exportOnboardingCandidate` +
+/// `activateOnboardingGeneration`, or discarded with `endOnboardingCandidate`.
+#[wasm_bindgen(js_name = buildRekeyCandidate)]
+pub fn build_rekey_candidate() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
+    let plan = REKEY_PLAN
+        .with(|cell| cell.borrow_mut().take())
+        .ok_or_else(|| JsValue::from_str("rekey is not active"))?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        let previous = std::mem::replace(&mut state.backend, Backend::Memory(MemoryStorage::new()));
+        let durable = match previous {
+            Backend::Idb(durable) => durable,
+            other => {
+                state.backend = other;
+                return Err(JsValue::from_str("rekey requires IndexedDB storage"));
+            }
+        };
+        match plan.build(&durable) {
+            Ok(candidate) => {
+                state.backend = Backend::Onboarding { durable, candidate };
+                state.session = None;
+                state.namespace_states.clear();
+                Ok(())
+            }
+            Err(error) => {
+                state.backend = Backend::Idb(durable);
+                Err(map_err(error))
+            }
+        }
+    })
+}
+
+/// Drop password-admission state without building a candidate.
+#[wasm_bindgen(js_name = endRekey)]
+pub fn end_rekey() {
+    REKEY_PLAN.with(|cell| *cell.borrow_mut() = None);
 }
 
 /// Replace this terminal worker's active backend with an isolated in-memory

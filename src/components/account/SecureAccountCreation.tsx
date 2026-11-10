@@ -154,6 +154,8 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
         generateDefaultUsername(),
         generateAccountSecret()
       );
+      // No password the user knows yet: Settings offers to set one.
+      account.passwordless = true;
       const biometric = await configureBiometricLoginWithRollback(
         readStagedPassword(account),
         false
