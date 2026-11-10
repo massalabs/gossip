@@ -556,6 +556,114 @@ export async function authenticateBiometricLogin(
   }
 }
 
+export interface BiometricUpdateHandle {
+  /** The secret currently stored behind biometrics. */
+  password: string;
+  /**
+   * Store `password` in place of the current secret, in the same location,
+   * without a second biometric prompt.
+   */
+  replace: (password: string) => Promise<void>;
+  /** Release key material. Safe to call more than once. */
+  dispose: () => void;
+}
+
+/**
+ * One biometric prompt that both reveals the stored login secret and
+ * authorises replacing it. Used when account passwords are changed: the
+ * caller reads the secret up front and, once the change is durable, stores
+ * the new password under the same biometric credential.
+ *
+ * Resolves `null` when there is no usable credential or the prompt is
+ * declined. Like biometric login, the result carries no account identifier.
+ */
+export async function openBiometricLoginForUpdate(
+  method: 'capacitor' | 'webauthn' | 'none'
+): Promise<BiometricUpdateHandle | null> {
+  try {
+    if (method === 'capacitor' && isCapacitorAvailable()) {
+      await authenticateNative('Authenticate to update your login');
+      const localPassword = await readNativePassword(false);
+      const cloudPassword =
+        localPassword === null ? await readNativePassword(true) : null;
+      const password = localPassword ?? cloudPassword;
+      if (!password) return null;
+      const syncToICloud = localPassword === null;
+      return {
+        password,
+        replace: async next => {
+          if (!next.trim()) throw new Error('Password is required');
+          await replaceNativePassword(next, syncToICloud);
+        },
+        dispose: () => {},
+      };
+    }
+
+    if (method === 'webauthn' && isWebAuthnSupported()) {
+      const payload = parseWebAuthnPayload(
+        localStorage.getItem(WEBAUTHN_PASSWORD_KEY)
+      );
+      const prfSalt = await getBiometricSalt();
+      const { encryptionKey } = await authenticateWithWebAuthn(
+        payload.credentialId,
+        prfSalt
+      );
+      let disposed = false;
+      const dispose = () => {
+        if (disposed) return;
+        disposed = true;
+        freeEncryptionKey(encryptionKey);
+      };
+      try {
+        const password = decodeWebAuthnPasswordEnvelope(
+          await decrypt(
+            decodeFromBase64(payload.ciphertext),
+            decodeFromBase64(payload.salt),
+            encryptionKey
+          )
+        );
+        return {
+          password,
+          replace: async next => {
+            if (disposed) throw new Error('Biometric update has ended');
+            if (!next.trim()) throw new Error('Password is required');
+            // Same authenticator credential, fresh salt and ciphertext.
+            const salt = (await generateNonce()).to_bytes();
+            try {
+              const { encryptedData } = await encrypt(
+                encodeWebAuthnPasswordEnvelope(next),
+                encryptionKey,
+                salt
+              );
+              const updated: WebAuthnPasswordPayload = {
+                version: WEBAUTHN_PASSWORD_PAYLOAD_VERSION,
+                credentialId: payload.credentialId,
+                salt: encodeToBase64(salt),
+                ciphertext: encodeToBase64(encryptedData),
+              };
+              localStorage.setItem(
+                WEBAUTHN_PASSWORD_KEY,
+                JSON.stringify(updated)
+              );
+            } finally {
+              salt.fill(0);
+            }
+          },
+          dispose,
+        };
+      } catch (error) {
+        dispose();
+        throw error;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    logger.error('Biometric update authentication failed:', error);
+    return null;
+  }
+}
+
 export function getPlatformInfo() {
   return {
     isNative,

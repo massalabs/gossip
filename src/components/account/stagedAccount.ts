@@ -2,6 +2,8 @@ export interface StagedAccount {
   username: string;
   passwordBytes: Uint8Array;
   mnemonicBytes?: Uint8Array;
+  /** The password is a device-generated secret the user never saw. */
+  passwordless?: boolean;
 }
 
 const encoder = new TextEncoder();

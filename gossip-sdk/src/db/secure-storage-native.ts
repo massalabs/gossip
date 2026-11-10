@@ -121,6 +121,14 @@ export interface SecureStorageNativePlugin {
   beginOnboardingCandidate(): Promise<void>;
   commitOnboardingCandidate(): Promise<{ epoch: string }>;
   abortOnboardingCandidate(): Promise<void>;
+  /** In-place rekey; see `SecureStorageWorkerApi.beginRekey`. */
+  beginRekey(): Promise<void>;
+  admitRekey(options: {
+    password: Uint8Array;
+    newPassword?: Uint8Array;
+  }): Promise<{ admitted: boolean }>;
+  buildRekeyCandidate(): Promise<void>;
+  endRekey(): Promise<void>;
   // Binary payloads (passwords, namespace blobs) are typed as Uint8Array
   // end-to-end. Going through `number[]` was an O(n) memcopy in each
   // direction with no benefit: the plugin internally base64-encodes
@@ -268,6 +276,26 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   },
   async abortOnboardingCandidate() {
     await callNative('abortOnboardingCandidate');
+  },
+  async beginRekey() {
+    await callNative('beginRekey');
+  },
+  async admitRekey({ password, newPassword }) {
+    const admitted = newPassword
+      ? await callNative<boolean>('admitRekeyChange', {
+          password: u8ToBase64(password),
+          newPassword: u8ToBase64(newPassword),
+        })
+      : await callNative<boolean>('admitRekeyKeep', {
+          password: u8ToBase64(password),
+        });
+    return { admitted };
+  },
+  async buildRekeyCandidate() {
+    await callNative('buildRekeyCandidate');
+  },
+  async endRekey() {
+    await callNative('endRekey');
   },
   async allocateSession({ slot, password }) {
     await callNative('allocateSession', {
