@@ -90,6 +90,32 @@ export class PrivateMigrationQueries {
     });
   }
 
+  /**
+   * Record the journal as already complete for `installationEpoch`, in one
+   * transaction. Only for an account that was created inside this very
+   * generation: every phase exists to carry data over from an older
+   * generation or format, and such an account has none.
+   */
+  async beginCompleted(
+    installationEpoch: string
+  ): Promise<PrivateMigrationStateV1> {
+    validateEpoch(installationEpoch);
+    return this.conn.withTransaction(async tx => {
+      const values = {
+        formatVersion: PRIVATE_MIGRATION_FORMAT_VERSION,
+        installationEpoch,
+        completedPhase: PRIVATE_MIGRATION_PHASE_COUNT,
+      };
+      const row = await tx
+        .insert(privateMigration)
+        .values({ id: PRIVATE_MIGRATION_SINGLETON_ID, ...values })
+        .onConflictDoUpdate({ target: privateMigration.id, set: values })
+        .returning()
+        .get();
+      return validate(row);
+    });
+  }
+
   async completePhase(
     installationEpoch: string,
     phase: number

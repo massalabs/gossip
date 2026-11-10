@@ -13,7 +13,9 @@ const mocks = vi.hoisted(() => ({
   checkBiometricAvailability: vi.fn(),
   configureBiometricLoginWithRollback: vi.fn(),
   rollbackBiometric: vi.fn(),
-  commitOnboardingAccount: vi.fn(),
+  buildOnboardingAccount: vi.fn(),
+  commitBuild: vi.fn(),
+  abortBuild: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -46,7 +48,7 @@ vi.mock('../../../src/services/biometricService', () => ({
 }));
 
 vi.mock('../../../src/components/account/commitOnboardingAccount', () => ({
-  commitOnboardingAccount: mocks.commitOnboardingAccount,
+  buildOnboardingAccount: mocks.buildOnboardingAccount,
 }));
 
 vi.mock('@massalabs/gossip-sdk', async () => {
@@ -78,12 +80,15 @@ async function enterPassword() {
   );
 }
 
-/** Capture the secret at commit time: the component wipes it afterwards. */
-function recordCommittedPasswords(): string[] {
+const FRESH_LOGIN = { mnemonic: 'the mnemonic', encryptionKey: { id: 'key' } };
+
+/** Capture the secret at build time: the component wipes it afterwards. */
+function recordBuiltPasswords(): string[] {
   const passwords: string[] = [];
-  mocks.commitOnboardingAccount.mockImplementation(
+  mocks.buildOnboardingAccount.mockImplementation(
     async (account: { passwordBytes: Uint8Array }) => {
       passwords.push(decoder.decode(account.passwordBytes));
+      return { commit: mocks.commitBuild, abort: mocks.abortBuild };
     }
   );
   return passwords;
@@ -92,7 +97,12 @@ function recordCommittedPasswords(): string[] {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
-  mocks.commitOnboardingAccount.mockResolvedValue(undefined);
+  mocks.buildOnboardingAccount.mockResolvedValue({
+    commit: mocks.commitBuild,
+    abort: mocks.abortBuild,
+  });
+  mocks.commitBuild.mockResolvedValue(FRESH_LOGIN);
+  mocks.abortBuild.mockResolvedValue(undefined);
   mocks.loadAccount.mockResolvedValue(undefined);
   mocks.rollbackBiometric.mockResolvedValue(undefined);
 });
@@ -278,7 +288,7 @@ describe('SecureAccountCreation', () => {
       success: true,
       rollback: mocks.rollbackBiometric,
     });
-    const committed = recordCommittedPasswords();
+    const committed = recordBuiltPasswords();
     const onComplete = vi.fn();
     const lease = { release: vi.fn() };
 
@@ -300,14 +310,23 @@ describe('SecureAccountCreation', () => {
     // 32 random bytes, base64-encoded.
     expect(secret).toMatch(/^[A-Za-z0-9+/]{43}=$/);
 
-    const [account, usedLease] = mocks.commitOnboardingAccount.mock.calls[0];
+    const [account] = mocks.buildOnboardingAccount.mock.calls[0];
     expect(account.username).toMatch(DEFAULT_USERNAME);
-    expect(usedLease).toBe(lease);
+    expect(account.passwordless).toBe(true);
+    expect(mocks.commitBuild).toHaveBeenCalledWith(lease);
     expect(committed).toEqual([secret]);
+    // The automatic login reuses what creation derived.
     expect(mocks.loadAccount).toHaveBeenCalledWith({
       type: 'password',
       password: secret,
+      fresh: FRESH_LOGIN,
     });
+    // The build starts while the biometric prompt is still open, not after.
+    expect(
+      mocks.buildOnboardingAccount.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.configureBiometricLoginWithRollback.mock.invocationCallOrder[0]
+    );
     // The secret does not outlive creation.
     expect(account.passwordBytes.every((byte: number) => byte === 0)).toBe(
       true
@@ -321,7 +340,7 @@ describe('SecureAccountCreation', () => {
       success: false,
       error: 'cancelled',
     });
-    const committed = recordCommittedPasswords();
+    const committed = recordBuiltPasswords();
     const onComplete = vi.fn();
 
     await render(
@@ -331,7 +350,9 @@ describe('SecureAccountCreation', () => {
     await expect
       .element(page.getByPlaceholder('create.enter_password'))
       .toBeInTheDocument();
-    expect(mocks.commitOnboardingAccount).not.toHaveBeenCalled();
+    // The account built during the prompt is thrown away, never committed.
+    expect(mocks.abortBuild).toHaveBeenCalledOnce();
+    expect(mocks.commitBuild).not.toHaveBeenCalled();
     await expect
       .element(page.getByRole('button', { name: 'create.use_biometrics' }))
       .toBeInTheDocument();
@@ -340,10 +361,12 @@ describe('SecureAccountCreation', () => {
     await userEvent.click(page.getByRole('button', { name: 'create.title' }));
 
     await vi.waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
-    expect(committed).toEqual(['valid-password']);
+    expect(committed.at(-1)).toBe('valid-password');
+    expect(mocks.commitBuild).toHaveBeenCalledOnce();
     expect(mocks.loadAccount).toHaveBeenCalledWith({
       type: 'password',
       password: 'valid-password',
+      fresh: FRESH_LOGIN,
     });
   });
 
@@ -367,7 +390,7 @@ describe('SecureAccountCreation', () => {
       success: true,
       rollback: mocks.rollbackBiometric,
     });
-    mocks.commitOnboardingAccount.mockRejectedValue(new Error('disk full'));
+    mocks.commitBuild.mockRejectedValue(new Error('disk full'));
     const onComplete = vi.fn();
 
     await render(
@@ -417,7 +440,8 @@ describe('SecureAccountCreation', () => {
 
     await vi.waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
     expect(mocks.configureBiometricLoginWithRollback).not.toHaveBeenCalled();
-    const [account] = mocks.commitOnboardingAccount.mock.calls[0];
+    const [account] = mocks.buildOnboardingAccount.mock.calls[0];
     expect(account.mnemonicBytes).toBeDefined();
+    expect(account.passwordless).toBeUndefined();
   });
 });

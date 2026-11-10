@@ -363,7 +363,14 @@ export class AnnouncementService {
    * historical announcements (undecryptable by a new account) are skipped.
    * No-op if a counter already exists.
    */
-  async skipHistoricalAnnouncements(): Promise<void> {
+  /**
+   * @param prefetchedCounter - a `fetchBulletinCounter()` request the
+   *   caller started earlier, so account creation does not wait a full
+   *   network round trip at this point. Same semantics either way.
+   */
+  async skipHistoricalAnnouncements(
+    prefetchedCounter?: Promise<string>
+  ): Promise<void> {
     const log = logger.forMethod('skipHistoricalAnnouncements');
     const existing = await this.queries.announcementCursors.get(
       this.session.userIdEncoded
@@ -371,7 +378,8 @@ export class AnnouncementService {
     if (existing !== undefined) return;
 
     try {
-      const counter = await this.messageProtocol.fetchBulletinCounter();
+      const counter = await (prefetchedCounter ??
+        this.messageProtocol.fetchBulletinCounter());
       await this._upsertLastBulletinCounter(counter);
       log.info('set initial bulletin counter for new account', { counter });
     } catch (err) {
@@ -390,8 +398,8 @@ export class AnnouncementService {
   }
 
   /** Skip historical announcements for a new account (alias) */
-  async skipHistorical(): Promise<void> {
-    return this.skipHistoricalAnnouncements();
+  async skipHistorical(prefetchedCounter?: Promise<string>): Promise<void> {
+    return this.skipHistoricalAnnouncements(prefetchedCounter);
   }
 
   private async _fetchAnnouncements(

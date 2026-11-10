@@ -1169,6 +1169,21 @@ class GossipSdk {
   }
 
   /**
+   * Start fetching the current bulletin counter. Needs no open session, so
+   * account creation can issue the request up front and hand the promise to
+   * `announcements.skipHistorical(...)` once the account exists. The returned
+   * promise never rejects unhandled; a failure surfaces when it is awaited.
+   */
+  prefetchBulletinCounter(): Promise<string> {
+    if (this.state.status === SdkStatus.UNINITIALIZED) {
+      return Promise.reject(new Error('SDK not initialized'));
+    }
+    const request = this.state.messageProtocol.fetchBulletinCounter();
+    request.catch(() => {});
+    return request;
+  }
+
+  /**
    * Start an in-place rekey: re-encrypt the whole store into a new
    * generation, to set or change an account password or simply to refresh
    * every key. Storage must be locked and no session open.

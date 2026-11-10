@@ -38,6 +38,7 @@ const makeSdkMock = () => ({
   polling: { start: vi.fn(), stop: vi.fn(), isRunning: false },
   getEncryptedSession: vi.fn(() => new Uint8Array([6, 6])),
   readSessionBlob: vi.fn(async () => null),
+  prefetchBulletinCounter: vi.fn(() => Promise.resolve('0')),
   persistSessionBlob: vi.fn(async () => {}),
   userId: 'mock-user-id',
   publicKeys: {},

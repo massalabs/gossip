@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import {
   ExecRaw,
+  MIGRATION_LEDGER_EXISTS_QUERY,
   MIGRATION_LEDGER_QUERY,
   runMigrations,
 } from '../../src/db/migrate';
@@ -65,6 +66,7 @@ describe('runMigrations', () => {
     const prefix = MIGRATIONS.slice(0, 2);
     let currentLedgerReads = 0;
     const execRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+      if (sql === MIGRATION_LEDGER_EXISTS_QUERY) return [[1]];
       if (sql === MIGRATION_LEDGER_QUERY) {
         currentLedgerReads += 1;
         if (currentLedgerReads === 1) {
@@ -108,6 +110,7 @@ describe('runMigrations', () => {
 
   it('rejects a mismatched legacy ledger before altering it', async () => {
     const execRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+      if (sql === MIGRATION_LEDGER_EXISTS_QUERY) return [[1]];
       if (sql === MIGRATION_LEDGER_QUERY) {
         throw new Error('no such column: digest');
       }
@@ -161,6 +164,7 @@ describe('runMigrations', () => {
       [...ledgerRows(MIGRATIONS), [999, 'future', 6, '0'.repeat(64), 64]],
     ]) {
       const execRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+        if (sql === MIGRATION_LEDGER_EXISTS_QUERY) return [[1]];
         if (sql === MIGRATION_LEDGER_QUERY) {
           return rows;
         }
@@ -175,9 +179,84 @@ describe('runMigrations', () => {
     }
   });
 
+  it('applies the ledger and every migration of a new database in one transaction', async () => {
+    const execRaw = vi.fn(async (): Promise<unknown[][]> => []);
+    const transactions: string[][] = [];
+    const withTransaction = async <T>(
+      fn: (txExecRaw: ExecRaw) => Promise<T>
+    ): Promise<T> => {
+      const statements: string[] = [];
+      transactions.push(statements);
+      return fn(async (sql: string) => {
+        statements.push(sql);
+        return [];
+      });
+    };
+
+    await runMigrations(execRaw, withTransaction);
+
+    // Nothing is written outside the single transaction.
+    expect(execRaw.mock.calls.map(([sql]) => sql)).toEqual([
+      MIGRATION_LEDGER_EXISTS_QUERY,
+    ]);
+    expect(transactions).toHaveLength(1);
+    const [statements] = transactions;
+    expect(statements[0]).toContain('CREATE TABLE IF NOT EXISTS _migrations');
+    expect(
+      statements.filter(sql => sql.startsWith('INSERT INTO _migrations'))
+    ).toHaveLength(MIGRATIONS.length);
+    expect(statements).toHaveLength(
+      1 +
+        MIGRATIONS.length +
+        MIGRATIONS.reduce((sum, m) => sum + m.statements.length, 0)
+    );
+  });
+
+  it('hands a new database to the atomic batch executor when one exists', async () => {
+    const execRaw = vi.fn(async (): Promise<unknown[][]> => []);
+    const withTransaction = vi.fn();
+    const batches: { sql: string; params: unknown[] }[][] = [];
+
+    await runMigrations(execRaw, withTransaction, async statements => {
+      batches.push(statements);
+    });
+
+    expect(withTransaction).not.toHaveBeenCalled();
+    expect(batches).toHaveLength(1);
+    expect(batches[0][0].sql).toContain(
+      'CREATE TABLE IF NOT EXISTS _migrations'
+    );
+    const ledgerInserts = batches[0].filter(statement =>
+      statement.sql.startsWith('INSERT INTO _migrations')
+    );
+    expect(ledgerInserts.map(statement => statement.params[0])).toEqual(
+      MIGRATIONS.map(migration => migration.idx)
+    );
+  });
+
+  it('never uses the atomic batch on an existing database', async () => {
+    const execRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+      if (sql === MIGRATION_LEDGER_EXISTS_QUERY) return [[1]];
+      if (sql === MIGRATION_LEDGER_QUERY)
+        return ledgerRows(MIGRATIONS.slice(0, 1));
+      return [];
+    });
+    const batch = vi.fn();
+    const withTransaction = vi.fn(
+      async <T>(fn: (txExecRaw: ExecRaw) => Promise<T>): Promise<T> =>
+        fn(async () => [])
+    );
+
+    await runMigrations(execRaw, withTransaction, batch);
+
+    expect(batch).not.toHaveBeenCalled();
+    expect(withTransaction).toHaveBeenCalledTimes(MIGRATIONS.length - 1);
+  });
+
   it('runs each pending migration entirely inside its transaction', async () => {
     const prefix = MIGRATIONS.slice(0, 1);
     const execRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+      if (sql === MIGRATION_LEDGER_EXISTS_QUERY) return [[1]];
       if (sql === MIGRATION_LEDGER_QUERY) {
         return ledgerRows(prefix);
       }
@@ -315,6 +394,7 @@ describe('runMigrations', () => {
 
   it('does no transaction work for the complete known prefix', async () => {
     const execRaw = vi.fn(async (sql: string): Promise<unknown[][]> => {
+      if (sql === MIGRATION_LEDGER_EXISTS_QUERY) return [[1]];
       if (sql === MIGRATION_LEDGER_QUERY) {
         return ledgerRows(MIGRATIONS);
       }

@@ -23,6 +23,15 @@ export interface PreparedPasswordAccount {
   mnemonicBytes: Uint8Array;
   security: UserProfile['security'];
   encryptedSession: Uint8Array;
+  /**
+   * The two profile keys preparation derived: one while encrypting the
+   * recovery phrase, one while proving the password decrypts it again.
+   * Account setup takes the first and the automatic login takes the second,
+   * so neither derives the key a further time. Whoever takes one clears the
+   * field; `wipePreparedPasswordAccount` frees what is left.
+   */
+  encryptionKey?: EncryptionKey;
+  loginKey?: EncryptionKey;
 }
 
 function freeEncryptionKey(key: EncryptionKey): void {
@@ -81,6 +90,10 @@ export function wipePreparedPasswordAccount(
   prepared.encryptedSession.fill(0);
   prepared.security.encKeySalt.fill(0);
   prepared.security.mnemonicBackup.encryptedMnemonic.fill(0);
+  if (prepared.encryptionKey) freeEncryptionKey(prepared.encryptionKey);
+  if (prepared.loginKey) freeEncryptionKey(prepared.loginKey);
+  prepared.encryptionKey = undefined;
+  prepared.loginKey = undefined;
 }
 
 export async function preparePasswordAccount(
@@ -130,7 +143,17 @@ export async function preparePasswordAccount(
     const validationBlob = reopenedSession.toEncryptedBlob(authenticatedKey);
     validationBlob.fill(0);
 
-    return { mnemonicBytes, security, encryptedSession };
+    const result: PreparedPasswordAccount = {
+      mnemonicBytes,
+      security,
+      encryptedSession,
+      encryptionKey,
+      loginKey: authenticatedKey,
+    };
+    // Ownership moved to the result.
+    encryptionKey = undefined;
+    authenticatedKey = undefined;
+    return result;
   } catch (error) {
     mnemonicBytes.fill(0);
     encryptedSession?.fill(0);
