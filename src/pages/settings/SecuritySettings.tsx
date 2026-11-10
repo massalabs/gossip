@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
+import toast from 'react-hot-toast';
 import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
@@ -87,6 +88,13 @@ const SecuritySettings: React.FC = () => {
     await performBiometricSetup(password, false);
   };
 
+  // Setting a password on a biometric-only account and adding hidden
+  // accounts after onboarding both need storage-level support that does
+  // not exist yet. The entry points are here so onboarding can stay minimal.
+  const handleNotImplemented = () => {
+    toast.error(t('security.not_implemented'));
+  };
+
   return (
     <PageLayout
       header={<PageHeader title={t('security.title')} onBack={handleBack} />}
@@ -157,6 +165,54 @@ const SecuritySettings: React.FC = () => {
           <span>{t('security.auto_lock_current')}</span>
           <span className="text-accent-soft-foreground">{timeoutLabel}</span>
         </button>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="px-4 pt-4 pb-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            {t('security.password_title')}
+          </p>
+        </div>
+        <div className="px-4 pb-3">
+          <p className="text-sm text-muted-foreground">
+            {t('security.password_description')}
+          </p>
+        </div>
+        <div className="px-4 py-3 border-t border-border">
+          <Button
+            onClick={handleNotImplemented}
+            variant="outline"
+            size="custom"
+            fullWidth
+            className="h-11 rounded-full text-sm font-medium"
+          >
+            {t('security.password_action')}
+          </Button>
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="px-4 pt-4 pb-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            {t('security.hidden_accounts_title')}
+          </p>
+        </div>
+        <div className="px-4 pb-3">
+          <p className="text-sm text-muted-foreground">
+            {t('security.hidden_accounts_description')}
+          </p>
+        </div>
+        <div className="px-4 py-3 border-t border-border">
+          <Button
+            onClick={handleNotImplemented}
+            variant="outline"
+            size="custom"
+            fullWidth
+            className="h-11 rounded-full text-sm font-medium"
+          >
+            {t('security.hidden_accounts_action')}
+          </Button>
+        </div>
       </div>
 
       <OptionBottomSheet

@@ -119,6 +119,10 @@ vi.mock('../../src/hooks/usePendingSharedContent', () => ({
   usePendingSharedContent: vi.fn(),
 }));
 
+vi.mock('../../src/hooks/useNotificationPermissionPrompt', () => ({
+  useNotificationPermissionPrompt: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Mock infrastructure (Capacitor, stores used by MainLayout/BottomNavigation)
 // ---------------------------------------------------------------------------

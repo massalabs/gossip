@@ -158,7 +158,7 @@ describe.skip('InvitePage - Deep Link Invite Flow', () => {
 
     await render(<App />);
 
-    // OnboardingFlow should be shown instead of InvitePage
+    // The onboarding welcome screen should be shown instead of InvitePage
     const heading = page.getByRole('heading', {
       name: /welcome to gossip!/i,
     });

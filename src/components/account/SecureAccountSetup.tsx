@@ -31,6 +31,7 @@ import Button from '../ui/Button';
 import ICloudSyncModal from '../ui/ICloudSyncModal';
 import { PrivacyGraphic } from '../graphics';
 import SecureAccountForm from './SecureAccountForm';
+import { generateDefaultUsername } from '../../utils/validation';
 import type { AccountCreationResult } from './AccountCreationForm';
 import {
   preparePasswordAccount,
@@ -159,7 +160,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
 
   const handleAddAccount = (result: AccountCreationResult) => {
     const account = stageAccount(
-      result.username,
+      result.username ?? generateDefaultUsername(),
       result.password,
       result.mnemonic
     );

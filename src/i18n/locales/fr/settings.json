@@ -92,7 +92,8 @@
     "never_share": "Ne partage jamais ces informations. Toute personne y ayant accès peut accéder à ton compte.",
     "private_key_warning": "<strong>Attention :</strong> Cette clé privée Massa ne peut pas être utilisée pour restaurer ton compte Gossip. Utilise-la uniquement pour la compatibilité avec des portefeuilles externes. Pour restaurer ton compte Gossip, tu dois utiliser la phrase mnémonique de 24 mots.",
     "password_required": "Le mot de passe est requis",
-    "show_failed": "Échec de l'affichage des informations de sauvegarde. Réessaie."
+    "show_failed": "Échec de l'affichage des informations de sauvegarde. Réessaie.",
+    "use_biometrics": "Utiliser la biométrie"
   },
   "portable_backup": {
     "title": "Sauvegarde sécurisée",
@@ -150,7 +151,14 @@
     "auto_lock_5m": "5 minutes",
     "auto_lock_15m": "15 minutes",
     "auto_lock_30m": "30 minutes",
-    "auto_lock_1h": "1 heure"
+    "auto_lock_1h": "1 heure",
+    "password_title": "Mot de passe",
+    "password_description": "Un compte créé avec la biométrie n'a pas encore de mot de passe. Définis-en un pour déverrouiller ce compte sans biométrie, ou modifie le mot de passe actuel.",
+    "password_action": "Définir ou modifier le mot de passe",
+    "hidden_accounts_title": "Comptes cachés",
+    "hidden_accounts_description": "Cet appareil peut contenir plusieurs comptes totalement isolés, chacun avec son propre mot de passe. Si quelqu'un te force à déverrouiller l'application, tu peux livrer un compte sans révéler les autres.",
+    "hidden_accounts_action": "Ajouter un compte caché",
+    "not_implemented": "Pas encore implémenté."
   },
   "privacy": {
     "title": "Confidentialité",

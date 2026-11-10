@@ -92,7 +92,8 @@
     "never_share": "Never share this information. Anyone with it can access your account.",
     "private_key_warning": "<strong>Warning:</strong> This Massa private key cannot be used to restore your Gossip account. Use this only for external wallet compatibility. To restore your Gossip account, you must use the 24-word mnemonic phrase.",
     "password_required": "Password is required",
-    "show_failed": "Failed to show backup information. Please try again."
+    "show_failed": "Failed to show backup information. Please try again.",
+    "use_biometrics": "Use biometrics"
   },
   "portable_backup": {
     "title": "Secure Backup",
@@ -150,7 +151,14 @@
     "auto_lock_5m": "5 minutes",
     "auto_lock_15m": "15 minutes",
     "auto_lock_30m": "30 minutes",
-    "auto_lock_1h": "1 hour"
+    "auto_lock_1h": "1 hour",
+    "password_title": "Password",
+    "password_description": "An account created with biometrics has no password yet. Set one to unlock this account without biometrics, or change the current one.",
+    "password_action": "Set or change password",
+    "hidden_accounts_title": "Hidden accounts",
+    "hidden_accounts_description": "This device can hold several completely isolated accounts, each with its own password. If someone forces you to unlock the app, you can hand over one account without revealing the others.",
+    "hidden_accounts_action": "Add a hidden account",
+    "not_implemented": "Not yet implemented."
   },
   "privacy": {
     "title": "Privacy",

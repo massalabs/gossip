@@ -92,7 +92,8 @@
     "never_share": "切勿分享此信息。任何拥有此信息的人都可以访问您的账户。",
     "private_key_warning": "<strong>警告：</strong>此 Massa 私钥无法用于恢复您的 Gossip 账户。仅在需要外部钱包兼容时使用。要恢复您的 Gossip 账户，必须使用 24 位助记词。",
     "password_required": "需要输入密码",
-    "show_failed": "显示备份信息失败，请重试。"
+    "show_failed": "显示备份信息失败，请重试。",
+    "use_biometrics": "使用生物识别"
   },
   "portable_backup": {
     "title": "安全备份",
@@ -150,7 +151,14 @@
     "auto_lock_5m": "5 分钟",
     "auto_lock_15m": "15 分钟",
     "auto_lock_30m": "30 分钟",
-    "auto_lock_1h": "1 小时"
+    "auto_lock_1h": "1 小时",
+    "password_title": "密码",
+    "password_description": "使用生物识别创建的账户尚未设置密码。设置密码后无需生物识别即可解锁此账户，也可以修改当前密码。",
+    "password_action": "设置或修改密码",
+    "hidden_accounts_title": "隐藏账户",
+    "hidden_accounts_description": "此设备可以保存多个完全隔离的账户，每个账户都有自己的密码。如果有人强迫你解锁应用，你可以交出一个账户而不暴露其他账户。",
+    "hidden_accounts_action": "添加隐藏账户",
+    "not_implemented": "尚未实现。"
   },
   "privacy": {
     "title": "隐私",

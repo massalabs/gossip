@@ -14,5 +14,10 @@
   "create_account": "Créer un nouveau compte",
   "back": "Retour",
   "get_started_button": "Commencer",
-  "next": "Suivant"
+  "next": "Suivant",
+  "new_account": "Nouveau compte",
+  "restore": "Restaurer",
+  "terms_notice": "En continuant, tu acceptes les",
+  "terms_link": "Conditions d'utilisation",
+  "multiple_accounts": "Plusieurs comptes déniables"
 }

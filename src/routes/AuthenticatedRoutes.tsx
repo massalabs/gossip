@@ -25,6 +25,7 @@ import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { usePendingSharedContent } from '../hooks/usePendingSharedContent';
 import { ROUTES } from '../constants/routes';
 import MainLayout from '../components/ui/Layout/MainLayout';
+import { useNotificationPermissionPrompt } from '../hooks/useNotificationPermissionPrompt';
 import AnimatedRoutes from '../components/ui/AnimatedRoutes';
 
 /**
@@ -39,6 +40,7 @@ import AnimatedRoutes from '../components/ui/AnimatedRoutes';
 export const AuthenticatedRoutes: React.FC = () => {
   usePendingDeepLink();
   usePendingSharedContent();
+  useNotificationPermissionPrompt();
 
   return (
     <MainLayout>

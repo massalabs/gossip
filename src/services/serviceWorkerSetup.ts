@@ -138,16 +138,11 @@ async function initializeBackgroundSync(): Promise<void> {
       baseUrl: protocolConfig.baseUrl,
     });
 
-    // Sync notification permission state
-    if (Capacitor.isNativePlatform()) {
-      // Native: Capacitor permission flow (no user-gesture requirement)
-      await notificationService.requestPermission();
-    } else {
-      // Web: never prompt without a user gesture (Firefox auto-denies such
-      // requests). Only refresh the current permission state; the actual
-      // request happens from a user interaction in the UI.
-      notificationService.getPermissionStatus();
-    }
+    // Sync notification permission state without prompting. The native
+    // permission dialog is raised once the user has a first conversation
+    // (see useNotificationPermissionPrompt) or from Settings; on web the
+    // request needs a user gesture (Firefox auto-denies otherwise).
+    notificationService.getPermissionStatus();
 
     // Register periodic background sync (Web API - optional, expected to fail on mobile)
     // This is wrapped in its own try-catch because failures are expected and non-critical

@@ -44,3 +44,21 @@ export function validateUsernameFormat(value: string): ValidationResult {
 
   return { valid: true };
 }
+
+const DEFAULT_USERNAME_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
+
+/**
+ * Placeholder username for accounts created without asking for one.
+ * Onboarding no longer collects a username; the user renames the account
+ * from Settings. It must stay non-empty because backup previews reject
+ * profiles with an empty username.
+ */
+export function generateDefaultUsername(): string {
+  const random = crypto.getRandomValues(new Uint8Array(4));
+  let suffix = '';
+  for (const byte of random) {
+    suffix +=
+      DEFAULT_USERNAME_ALPHABET[byte % DEFAULT_USERNAME_ALPHABET.length];
+  }
+  return `user-${suffix}`;
+}
