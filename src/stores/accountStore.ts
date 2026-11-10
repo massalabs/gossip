@@ -597,6 +597,15 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     buildOnboardingCandidate: async accounts => {
       const sdk = getSdk();
+      // Building an account briefly publishes its profile, which makes the
+      // discussion and message stores initialise against a session that is
+      // closed again moments later. They only initialise once, so they must
+      // be reset here or the login that follows shows an empty list.
+      const resetTransientAccountStores = (): void => {
+        useDiscussionStore.getState().cleanup();
+        useMessageStore.getState().cleanup();
+        useSelfMessageStore.getState().clearMessages();
+      };
       if (!sdk.isSecureStorage || accounts.length === 0) {
         throw new Error('Atomic onboarding requires secure account data');
       }
@@ -621,6 +630,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         }
         onboardingAllocatedSlots.clear();
+        resetTransientAccountStores();
         useAppStore.getState().resetAccountSettings();
         set({ ...clearAccountState(), isLoading: false });
       };
@@ -665,6 +675,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
             candidateActive = false;
             finalizeCommittedAccountGenerationAuthority();
             onboardingAllocatedSlots.clear();
+            resetTransientAccountStores();
             useAppStore.getState().resetAccountSettings();
             set(clearAccountState());
           } catch (error) {
