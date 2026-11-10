@@ -842,9 +842,19 @@ export async function initializeEmptyAccountGenerationWeb(): Promise<AccountGene
   }
 }
 
+/**
+ * Install a complete in-memory generation and make it the active one in a
+ * single IndexedDB transaction.
+ *
+ * `expectedState` is the account-generation state the store must be in:
+ * `'empty'` for onboarding (first accounts), `'committed'` for an in-place
+ * rekey that replaces the existing generation. Any other state aborts with
+ * nothing written.
+ */
 export async function installOnboardingGenerationWeb(
   archive: Uint8Array,
-  validators: PortableWebValidators
+  validators: PortableWebValidators,
+  expectedState: AccountGenerationState = 'empty'
 ): Promise<string> {
   if (
     archive.byteLength < HEADER_BYTES + DIGEST_BYTES ||
@@ -978,9 +988,13 @@ export async function installOnboardingGenerationWeb(
     const metadata = decodeAccountGenerationMetadata(
       await request(store.get(ACCOUNT_GENERATION_STATE_KEY))
     );
-    if (metadata.state !== 'empty') {
+    if (metadata.state !== expectedState) {
       abortTransaction(tx);
-      throw new Error('Onboarding generation is no longer empty');
+      throw new Error(
+        expectedState === 'empty'
+          ? 'Onboarding generation is no longer empty'
+          : 'Account generation is not committed'
+      );
     }
     const sourceGeneration =
       (await request(store.get(ACTIVE_GENERATION_KEY))) ?? LEGACY_GENERATION;

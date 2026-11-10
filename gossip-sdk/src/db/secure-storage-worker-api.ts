@@ -65,6 +65,11 @@ import init, {
   queryCandidatePreview,
   endCandidatePreview,
   endOuterMigration,
+  beginRekey as beginRekeyWasm,
+  admitRekeyKeep as admitRekeyKeepWasm,
+  admitRekeyChange as admitRekeyChangeWasm,
+  buildRekeyCandidate as buildRekeyCandidateWasm,
+  endRekey as endRekeyWasm,
 } from '../assets/generated/wasm-secureStorage/secureStorage.js';
 
 import {
@@ -173,6 +178,7 @@ export class SecureStorageWorkerApi {
   private portablePreviewRecoveryError: unknown = null;
   private generationStale = false;
   private domain = '';
+  private rekeyCandidateBuilt = false;
 
   private isGenerationMismatch(error: unknown): boolean {
     return String(error).includes('secure-storage generation changed');
@@ -675,6 +681,108 @@ export class SecureStorageWorkerApi {
   async abortOnboardingCandidate(): Promise<void> {
     await this.enqueueLifecycleOperation(async () => {
       endOnboardingCandidate();
+    });
+  }
+
+  /**
+   * Start an in-place rekey (set or change a password, or refresh keys).
+   *
+   * Sequence: `beginRekey` → one `admitRekey*` call per account to keep →
+   * `buildRekeyCandidate` → ordinary `unlock` / `exec` / namespace calls
+   * against the in-memory candidate → `commitRekeyCandidate`, or `abortRekey`
+   * at any point. The durable store is only read until the commit.
+   */
+  async beginRekey(): Promise<void> {
+    await this.enqueueLifecycleOperation(async () => {
+      await this.ensureDurableStorageRecovered();
+      if ((await accountGenerationStateWeb()) !== 'committed') {
+        throw new Error('Account generation is not committed');
+      }
+      // Admission and the final read must see every durable write.
+      await this.flushEncryptedFenced();
+      beginRekeyWasm();
+      this.rekeyCandidateBuilt = false;
+    });
+  }
+
+  /**
+   * Admit one account. Resolves `false` for every secret-dependent
+   * rejection (no match, duplicate, colliding new password) without saying
+   * which. Omit `newPassword` for an account that keeps its password.
+   */
+  async admitRekey(
+    password: Uint8Array,
+    newPassword?: Uint8Array
+  ): Promise<boolean> {
+    const operation = this.enqueueLifecycleOperation(async () => {
+      try {
+        // wasm-bindgen copies `Vec<u8>` arguments; the copies are zeroized
+        // in Rust and the originals below.
+        return newPassword
+          ? admitRekeyChangeWasm(password, newPassword)
+          : admitRekeyKeepWasm(password);
+      } finally {
+        password.fill(0);
+        newPassword?.fill(0);
+      }
+    });
+    try {
+      return await operation;
+    } finally {
+      password.fill(0);
+      newPassword?.fill(0);
+    }
+  }
+
+  async buildRekeyCandidate(): Promise<void> {
+    await this.enqueueLifecycleOperation(async () => {
+      await this.flushEncryptedFenced();
+      buildRekeyCandidateWasm();
+      this.rekeyCandidateBuilt = true;
+    });
+  }
+
+  /** Replace the committed generation with the candidate, atomically. */
+  async commitRekeyCandidate(): Promise<string> {
+    return this.enqueueLifecycleOperation(async () => {
+      if (!this.rekeyCandidateBuilt) {
+        throw new Error('Rekey candidate is not active');
+      }
+      const archive = exportOnboardingCandidate();
+      try {
+        const install = () =>
+          installOnboardingGenerationWeb(
+            archive,
+            {
+              validateKeypair: validatePortableKeypair,
+              validateBlock: validatePortableBlock,
+            },
+            'committed'
+          );
+        const generationEpoch = navigator.locks
+          ? await navigator.locks.request(
+              STORAGE_INSTALLATION_FENCE_LOCK_NAME,
+              { mode: 'exclusive' },
+              install
+            )
+          : await install();
+        await activateOnboardingGeneration();
+        this.rekeyCandidateBuilt = false;
+        return generationEpoch;
+      } finally {
+        archive.fill(0);
+      }
+    });
+  }
+
+  /** Discard admission state and any candidate. The durable store is intact. */
+  async abortRekey(): Promise<void> {
+    await this.enqueueLifecycleOperation(async () => {
+      endRekeyWasm();
+      if (this.rekeyCandidateBuilt) {
+        endOnboardingCandidate();
+        this.rekeyCandidateBuilt = false;
+      }
     });
   }
 

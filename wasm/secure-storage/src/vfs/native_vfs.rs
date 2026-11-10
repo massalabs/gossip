@@ -124,6 +124,9 @@ impl PortableTransfer {
 struct NativeBackend {
     durable: RedbStorage,
     candidate: Option<MemoryStorage>,
+    /// Password admission for an in-place rekey. Present between
+    /// `begin_rekey` and `build_rekey_candidate` (or `end_rekey`).
+    rekey_plan: Option<crate::RekeyPlan>,
 }
 
 impl NativeBackend {
@@ -131,6 +134,7 @@ impl NativeBackend {
         Self {
             durable,
             candidate: None,
+            rekey_plan: None,
         }
     }
 
@@ -185,7 +189,54 @@ impl NativeBackend {
         Ok(())
     }
 
+    /// Start password admission for an in-place rekey of the committed store.
+    fn begin_rekey(&mut self, domain: &str) -> Result<()> {
+        if self.candidate.is_some()
+            || self.account_generation_state()?
+                != Some(super::redb_storage::AccountGenerationState::Committed)
+        {
+            return Err(SecureStorageError::Storage("rekey is not available".into()));
+        }
+        // Admission and the final read must see every durable write.
+        self.durable.commit()?;
+        self.rekey_plan = Some(crate::RekeyPlan::new(domain));
+        Ok(())
+    }
+
+    fn admit_rekey(&mut self, old: &[u8], new: Option<&[u8]>) -> Result<()> {
+        let plan = self
+            .rekey_plan
+            .as_mut()
+            .ok_or_else(|| SecureStorageError::Storage("rekey is not active".into()))?;
+        let durable = &self.durable;
+        with_native_stack("gossip-rekey-admit", move || match new {
+            Some(new) => plan.admit_change(durable, old, new),
+            None => plan.admit_keep(durable, old),
+        })
+    }
+
+    /// Re-encrypt the durable store into an in-memory candidate. From here
+    /// on the candidate is the active backend, exactly like an onboarding
+    /// candidate: it can be unlocked and written, then committed or aborted.
+    fn build_rekey_candidate(&mut self) -> Result<()> {
+        let plan = self
+            .rekey_plan
+            .take()
+            .ok_or_else(|| SecureStorageError::Storage("rekey is not active".into()))?;
+        self.durable.commit()?;
+        let durable = &self.durable;
+        self.candidate = Some(with_native_stack("gossip-rekey-build", move || {
+            plan.build(durable)
+        })?);
+        Ok(())
+    }
+
+    fn end_rekey(&mut self) {
+        self.rekey_plan = None;
+    }
+
     fn abort_onboarding_candidate(&mut self) -> Result<()> {
+        self.rekey_plan = None;
         self.candidate.take().ok_or_else(|| {
             SecureStorageError::Storage("onboarding candidate is not active".into())
         })?;
@@ -613,6 +664,63 @@ pub fn abort_onboarding_candidate() -> Result<()> {
     Ok(())
 }
 
+pub fn begin_rekey() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    if st.session.is_some() {
+        return Err(SecureStorageError::Storage(
+            "rekey requires locked storage".into(),
+        ));
+    }
+    st.backend.begin_rekey(&st.domain)
+}
+
+/// Admit one account to the active rekey. `new` is `None` when the account
+/// keeps its password.
+pub fn admit_rekey(old: &[u8], new: Option<&[u8]>) -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    st.backend.admit_rekey(old, new)
+}
+
+pub fn build_rekey_candidate() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    if st.session.is_some() {
+        return Err(SecureStorageError::Storage(
+            "rekey requires locked storage".into(),
+        ));
+    }
+    st.backend.build_rekey_candidate()?;
+    st.main_file = EncryptedFileCore::new();
+    st.namespace_states.clear();
+    Ok(())
+}
+
+/// Drop password-admission state. A built candidate is discarded with
+/// [`abort_onboarding_candidate`] instead.
+pub fn end_rekey() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.backend.end_rekey();
+    Ok(())
+}
+
 /// Provision all session slots.
 pub fn provision() -> Result<()> {
     let mutex = state_mutex();
@@ -669,6 +777,25 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
         .insert(DEFAULT_NAMESPACE, NamespaceState::empty());
     st.session = Some(session);
     Ok(())
+}
+
+/// Run password and post-quantum work on a thread with a 16 MiB stack.
+/// The caller's thread (a JNI or Swift bridge thread) is far smaller than
+/// what Argon2 and the ML-KEM polynomial code need.
+fn with_native_stack<T, F>(name: &str, work: F) -> Result<T>
+where
+    T: Send,
+    F: FnOnce() -> Result<T> + Send,
+{
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name(name.into())
+            .stack_size(16 * 1024 * 1024)
+            .spawn_scoped(scope, work)
+            .map_err(|error| SecureStorageError::Storage(format!("{name} worker: {error}")))?
+            .join()
+            .map_err(|_| SecureStorageError::Storage(format!("{name} worker failed")))?
+    })
 }
 
 fn unlock_with_native_stack<S>(

@@ -107,6 +107,15 @@ struct UnlockArgs {
     password: String,
 }
 
+#[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
+struct RekeyChangeArgs {
+    /// base64-encoded current password bytes
+    password: String,
+    /// base64-encoded replacement password bytes
+    #[serde(rename = "newPassword")]
+    new_password: String,
+}
+
 #[derive(Deserialize)]
 struct ExecSqlArgs {
     sql: String,
@@ -292,6 +301,41 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
         "abortOnboardingCandidate" => {
             drop_open_database()?;
             native_vfs::abort_onboarding_candidate()?;
+            Ok("null".into())
+        }
+        "beginRekey" => {
+            drop_open_database()?;
+            native_vfs::begin_rekey()?;
+            Ok("null".into())
+        }
+        // Both admission commands answer `true` or `false` only. `false`
+        // covers every secret-dependent rejection; it never says which.
+        "admitRekeyKeep" => {
+            let a: UnlockArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
+            match native_vfs::admit_rekey(&password, None) {
+                Ok(()) => Ok("true".into()),
+                Err(SecureStorageError::InvalidPassword) => Ok("false".into()),
+                Err(error) => Err(error.into()),
+            }
+        }
+        "admitRekeyChange" => {
+            let a: RekeyChangeArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
+            let new_password = Zeroizing::new(B64.decode(a.new_password.as_bytes())?);
+            match native_vfs::admit_rekey(&password, Some(&new_password)) {
+                Ok(()) => Ok("true".into()),
+                Err(SecureStorageError::InvalidPassword) => Ok("false".into()),
+                Err(error) => Err(error.into()),
+            }
+        }
+        "buildRekeyCandidate" => {
+            drop_open_database()?;
+            native_vfs::build_rekey_candidate()?;
+            Ok("null".into())
+        }
+        "endRekey" => {
+            native_vfs::end_rekey()?;
             Ok("null".into())
         }
         "allocateSession" => {
@@ -820,6 +864,137 @@ mod tests {
         dispatch("abortPortableTransfer", "{}").unwrap();
         assert_eq!(dispatch("hasData", "{}").unwrap(), "false");
         native_vfs::reset_state();
+    }
+
+    /// Full in-place rekey through the same command bridge the app uses:
+    /// two accounts, one changes its password, one is kept; then a second
+    /// rekey that omits an account erases it. Covers writing into the
+    /// candidate before commit, abort, and reopening from disk.
+    #[test]
+    fn dispatcher_rekeys_the_committed_store_in_place() {
+        // Debug builds need far more stack than the default test thread has.
+        crate::run_with_stack(rekey_through_the_dispatcher);
+    }
+
+    fn rekey_through_the_dispatcher() {
+        let _guard = native_vfs::test_mutex().lock().unwrap();
+        native_vfs::reset_state();
+        *db_mutex().lock().unwrap() = None;
+        let dir = tempfile::tempdir().unwrap();
+        let init = serde_json::json!({
+            "path": dir.path().to_str().unwrap(),
+            "domain": "test",
+        })
+        .to_string();
+        let pw =
+            |password: &str| serde_json::json!({ "password": B64.encode(password) }).to_string();
+        let change = |old: &str, new: &str| {
+            serde_json::json!({ "password": B64.encode(old), "newPassword": B64.encode(new) })
+                .to_string()
+        };
+        let sql = |statement: &str| {
+            let args = serde_json::json!({ "sql": statement, "params": [] }).to_string();
+            dispatch("execSql", &args).unwrap()
+        };
+        let unlock = |password: &str| dispatch("unlockSession", &pw(password)).unwrap();
+        let note = || {
+            let result: serde_json::Value =
+                serde_json::from_str(&sql("SELECT body FROM note")).unwrap();
+            result["rows"][0][0].as_str().unwrap().to_string()
+        };
+
+        dispatch("initSecureStorage", &init).unwrap();
+        dispatch("initializeEmptyAccountGeneration", "{}").unwrap();
+        dispatch("provisionStorage", "{}").unwrap();
+        // Rekey needs a committed generation.
+        assert!(dispatch("beginRekey", "{}").is_err());
+
+        dispatch("beginOnboardingCandidate", "{}").unwrap();
+        for (slot, password, body) in [(0, "alice-pw", "alice"), (2, "bob-pw", "bob")] {
+            let args =
+                serde_json::json!({ "slot": slot, "password": B64.encode(password) }).to_string();
+            dispatch("allocateSession", &args).unwrap();
+            sql("CREATE TABLE note (body TEXT)");
+            sql(&format!("INSERT INTO note VALUES ('{body}')"));
+            dispatch("lockSession", "{}").unwrap();
+        }
+        let first_epoch = dispatch("commitOnboardingCandidate", "{}").unwrap();
+
+        // Abort during admission and after the candidate exists: no change.
+        dispatch("beginRekey", "{}").unwrap();
+        assert_eq!(
+            dispatch("admitRekeyChange", &change("alice-pw", "new-pw")).unwrap(),
+            "true"
+        );
+        dispatch("endRekey", "{}").unwrap();
+        dispatch("beginRekey", "{}").unwrap();
+        assert_eq!(
+            dispatch("admitRekeyChange", &change("alice-pw", "new-pw")).unwrap(),
+            "true"
+        );
+        dispatch("buildRekeyCandidate", "{}").unwrap();
+        assert_eq!(unlock("new-pw"), "true");
+        sql("UPDATE note SET body = 'never committed'");
+        dispatch("lockSession", "{}").unwrap();
+        dispatch("abortOnboardingCandidate", "{}").unwrap();
+        assert_eq!(
+            dispatch("accountGenerationEpoch", "{}").unwrap(),
+            first_epoch
+        );
+        assert_eq!(unlock("new-pw"), "false");
+        assert_eq!(unlock("alice-pw"), "true");
+        assert_eq!(note(), "alice");
+        dispatch("lockSession", "{}").unwrap();
+
+        // Change Alice, keep Bob. Every rejection is the same `false`.
+        dispatch("beginRekey", "{}").unwrap();
+        assert_eq!(dispatch("admitRekeyKeep", &pw("wrong")).unwrap(), "false");
+        assert_eq!(dispatch("admitRekeyKeep", &pw("bob-pw")).unwrap(), "true");
+        assert_eq!(dispatch("admitRekeyKeep", &pw("bob-pw")).unwrap(), "false");
+        assert_eq!(
+            dispatch("admitRekeyChange", &change("alice-pw", "bob-pw")).unwrap(),
+            "false"
+        );
+        assert_eq!(
+            dispatch("admitRekeyChange", &change("alice-pw", "new-pw")).unwrap(),
+            "true"
+        );
+        dispatch("buildRekeyCandidate", "{}").unwrap();
+        assert_eq!(unlock("new-pw"), "true");
+        sql("UPDATE note SET body = 'alice rewritten'");
+        dispatch("lockSession", "{}").unwrap();
+        let second_epoch = dispatch("commitOnboardingCandidate", "{}").unwrap();
+        assert_ne!(second_epoch, first_epoch);
+
+        // Reopen from disk.
+        dispatch("close", "{}").unwrap();
+        native_vfs::reset_state();
+        *db_mutex().lock().unwrap() = None;
+        dispatch("initSecureStorage", &init).unwrap();
+        assert_eq!(
+            dispatch("accountGenerationEpoch", "{}").unwrap(),
+            second_epoch
+        );
+        assert_eq!(unlock("alice-pw"), "false");
+        assert_eq!(unlock("new-pw"), "true");
+        assert_eq!(note(), "alice rewritten");
+        dispatch("lockSession", "{}").unwrap();
+        assert_eq!(unlock("bob-pw"), "true");
+        assert_eq!(note(), "bob");
+        dispatch("lockSession", "{}").unwrap();
+
+        // A refresh that omits Bob erases him.
+        dispatch("beginRekey", "{}").unwrap();
+        assert_eq!(dispatch("admitRekeyKeep", &pw("new-pw")).unwrap(), "true");
+        dispatch("buildRekeyCandidate", "{}").unwrap();
+        dispatch("commitOnboardingCandidate", "{}").unwrap();
+        assert_eq!(unlock("bob-pw"), "false");
+        assert_eq!(unlock("new-pw"), "true");
+        assert_eq!(note(), "alice rewritten");
+        dispatch("lockSession", "{}").unwrap();
+
+        native_vfs::reset_state();
+        *db_mutex().lock().unwrap() = None;
     }
 
     #[test]

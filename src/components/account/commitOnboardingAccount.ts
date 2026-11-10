@@ -44,6 +44,7 @@ export async function commitOnboardingAccount(
       readStagedPassword(account),
       importedMnemonic !== null
     );
+    if (account.passwordless) prepared.security.passwordless = true;
 
     creationAuthorityOwner =
       consumeOnboardingCreationAuthority(creationModeLease);
