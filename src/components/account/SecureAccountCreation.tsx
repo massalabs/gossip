@@ -12,7 +12,10 @@ import { PrivacyGraphic } from '../graphics';
 import AccountCreationForm, {
   AccountCreationResult,
 } from './AccountCreationForm';
-import { commitOnboardingAccount } from './commitOnboardingAccount';
+import {
+  buildOnboardingAccount,
+  type OnboardingAccountBuild,
+} from './commitOnboardingAccount';
 import {
   readStagedPassword,
   stageAccount,
@@ -28,6 +31,8 @@ import { generateDefaultUsername } from '../../utils/validation';
 import type { OnboardingStorageModeLease } from '../../services/portableImportAuthorization';
 
 type Phase = 'checking' | 'working' | 'form';
+/** What the creating screen says it is doing. */
+type Step = 'building' | 'saving' | 'opening';
 
 interface SecureAccountCreationProps {
   onComplete: () => void | Promise<void>;
@@ -74,6 +79,7 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
   );
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>('building');
   const operationChangeRef = useRef(onCredentialOperationChange);
   operationChangeRef.current = onCredentialOperationChange;
   const onCompleteRef = useRef(onComplete);
@@ -102,18 +108,23 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
   );
 
   /**
-   * Commit the account, then log straight into it with the same secret.
-   * Throws (after undoing the biometric credential) when nothing was
-   * created; resolves once the user is on their way into the app.
+   * Wait for the in-memory build, commit it, then log straight into the
+   * account. Throws (after undoing the biometric credential) when nothing
+   * was created; resolves once the user is on their way into the app.
    */
   const createAndEnter = useCallback(
     async (
       account: StagedAccount,
+      building: Promise<OnboardingAccountBuild>,
       rollbackBiometric?: () => Promise<void>
     ): Promise<void> => {
       try {
+        let login;
         try {
-          await commitOnboardingAccount(account, leaseRef.current);
+          setStep('building');
+          const build = await building;
+          setStep('saving');
+          login = await build.commit(leaseRef.current);
         } catch (commitError) {
           if (rollbackBiometric) {
             try {
@@ -128,10 +139,14 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
           throw commitError;
         }
 
+        setStep('opening');
         try {
+          // `fresh` hands over what creation already derived and proved;
+          // loadAccount owns its key from here, success or failure.
           await useAccountStore.getState().loadAccount({
             type: 'password',
             password: readStagedPassword(account),
+            fresh: login,
           });
         } catch (loginError) {
           // The account is durably created. Falling through sends the user
@@ -156,11 +171,20 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
       );
       // No password the user knows yet: Settings offers to set one.
       account.passwordless = true;
+      // The secret already exists, so the account is built in memory while
+      // the biometric prompt is on screen. Nothing is durable until the
+      // prompt has succeeded and the build is committed.
+      const building = buildOnboardingAccount(account);
+      building.catch(() => {});
       const biometric = await configureBiometricLoginWithRollback(
         readStagedPassword(account),
         false
       );
       if (!biometric.success) {
+        await building.then(
+          build => build.abort(),
+          () => {}
+        );
         wipeStagedAccounts([account]);
         if (biometric.rollback) {
           try {
@@ -183,7 +207,7 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
       }
 
       try {
-        await createAndEnter(account, biometric.rollback);
+        await createAndEnter(account, building, biometric.rollback);
       } catch {
         setError(t('create.failed'));
         setPhase('form');
@@ -238,7 +262,14 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
         result.mnemonic
       );
       // Rethrows on failure so the form resets its own loading state.
-      await createAndEnter(account);
+      setPhase('working');
+      try {
+        await createAndEnter(account, buildOnboardingAccount(account));
+      } catch (creationError) {
+        setError(t('create.failed'));
+        setPhase('form');
+        throw creationError;
+      }
     });
   };
 
@@ -248,7 +279,7 @@ const SecureAccountCreation: React.FC<SecureAccountCreationProps> = ({
         <div className="text-center">
           <PrivacyGraphic size={120} loading={true} />
           <p className="text-sm text-muted-foreground mt-4">
-            {t('create.creating')}
+            {t(`create.progress_${step}`)}
           </p>
         </div>
       </div>
