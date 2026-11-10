@@ -65,7 +65,10 @@ import {
 } from './services/auth.js';
 import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
-import { SelfMessageService } from './services/selfMessage.js';
+import {
+  SelfMessageService,
+  reencryptSelfMessages,
+} from './services/selfMessage.js';
 import {
   validateUserIdFormat,
   type ValidationResult,
@@ -1166,6 +1169,23 @@ class GossipSdk {
     } finally {
       releaseLifecycle();
     }
+  }
+
+  /**
+   * Re-encrypt the notes-to-self of `ownerUserId` from `oldKey` to `newKey`.
+   * Needs unlocked storage but no open session, so it can run inside a rekey
+   * candidate. Whoever replaces an account's profile key must call this, or
+   * the notes become unreadable.
+   */
+  async reencryptSelfMessages(
+    ownerUserId: string,
+    oldKey: EncryptionKey,
+    newKey: EncryptionKey
+  ): Promise<{ rewritten: number; unreadable: number }> {
+    if (!this._queries) {
+      throw new Error('Storage is locked');
+    }
+    return reencryptSelfMessages(this._queries, ownerUserId, oldKey, newKey);
   }
 
   /**

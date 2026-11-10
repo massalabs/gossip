@@ -53,6 +53,10 @@ function fakeSdk() {
       await mocks.refresh();
     },
     readSessionBlob: async () => null,
+    reencryptSelfMessages: async (userId: string) => {
+      note(`notes:${userId}`);
+      return { rewritten: 0, unreadable: 0 };
+    },
     persistSessionBlob: async () => note('persistSession'),
     profiles: {
       getMostRecent: async () => mocks.profile,
@@ -151,8 +155,10 @@ describe('rekeyLockedStore', () => {
       'admit:bob',
       'build',
       'unlock:alice-new',
+      'notes:gossip1test',
       'lock',
       'unlock:bob',
+      'notes:gossip1test',
       'lock',
       'commit',
     ]);

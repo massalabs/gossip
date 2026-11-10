@@ -13,6 +13,8 @@ vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: () => mocks.native },
 }));
 
+vi.mock('@massalabs/gossip-sdk', () => ({ SELF_CONTACT_ID: '__self__' }));
+
 vi.mock('../../src/services/notifications', () => ({
   notificationService: { requestPermission: mocks.requestPermission },
 }));
@@ -49,18 +51,27 @@ describe('useNotificationPermissionPrompt', () => {
     expect(mocks.requestPermission).not.toHaveBeenCalled();
   });
 
+  it('does not count the notes-to-self discussion', () => {
+    mocks.discussions = [{ contactUserId: '__self__' }];
+    mount();
+    expect(mocks.requestPermission).not.toHaveBeenCalled();
+  });
+
   it('prompts once a first conversation appears', () => {
     const rerender = mount();
-    mocks.discussions = [{}];
+    mocks.discussions = [{ contactUserId: 'gossip1bob' }];
     rerender();
-    mocks.discussions = [{}, {}];
+    mocks.discussions = [
+      { contactUserId: 'gossip1bob' },
+      { contactUserId: 'gossip1carol' },
+    ];
     rerender();
     expect(mocks.requestPermission).toHaveBeenCalledOnce();
   });
 
   it('never prompts on web', () => {
     mocks.native = false;
-    mocks.discussions = [{}];
+    mocks.discussions = [{ contactUserId: 'gossip1bob' }];
     mount();
     expect(mocks.requestPermission).not.toHaveBeenCalled();
   });
