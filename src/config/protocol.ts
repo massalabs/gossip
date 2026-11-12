@@ -18,10 +18,10 @@ function buildProtocolApiBaseUrl(): string {
   if (!apiUrl) {
     if (import.meta.env.PROD) {
       logger.error(
-        'VITE_GOSSIP_API_URL is not set in a production build; falling back to http://localhost:3000'
+        'VITE_GOSSIP_API_URL is not set in a production build; falling back to http://localhost:3000/v2'
       );
     }
-    apiUrl = 'http://localhost:3000';
+    apiUrl = 'http://localhost:3000/v2';
   }
 
   // Normalize trailing slashes to avoid `//api`

@@ -35,7 +35,7 @@ const sdk = gossipSdk;
 
 // 1. Initialize (optional config)
 await sdk.init({
-  // protocolBaseUrl: 'https://api.usegossip.com', // optional, otherwise env/default is used
+  // protocolBaseUrl: 'https://api.usegossip.com/v2/api', // optional, otherwise env/default is used
   // storage: { type: 'idb', name: 'gossip-db' }, // optional, defaults to in-memory
 });
 
@@ -73,12 +73,12 @@ await sdk.closeSession();
 Call `init()` once at app startup on your SDK instance (either the `gossipSdk` singleton or an instance of `GossipSdk`). All options inside the `GossipSdkInitOptions` object are optional:
 
 ```typescript
-// Uses VITE_GOSSIP_API_URL / GOSSIP_API_URL env vars, or defaults to https://api.usegossip.com/api
+// Uses VITE_GOSSIP_API_URL / GOSSIP_API_URL env vars, or defaults to https://api.usegossip.com/v2/api
 await sdk.init({});
 
 // Or with explicit config
 await sdk.init({
-  protocolBaseUrl: 'https://api.usegossip.com/api',
+  protocolBaseUrl: 'https://api.usegossip.com/v2/api',
   config: {
     polling: {
       enabled: true,
@@ -337,7 +337,7 @@ Full configuration options with defaults:
 await sdk.init({
   config: {
     protocol: {
-      baseUrl: 'https://api.usegossip.com', // optional; if omitted, env/default is used
+      baseUrl: 'https://api.usegossip.com/v2/api', // optional; if omitted, env/default is used
       timeout: 10000,
       retryAttempts: 3,
     },
