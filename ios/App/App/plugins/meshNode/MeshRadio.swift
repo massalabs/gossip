@@ -2,7 +2,7 @@ import CoreBluetooth
 import Foundation
 
 /// BLE identifiers and link limits of the Gossip mesh, from the node's mesh
-/// specification (gossip-node `docs/MESH.md`, "BLE link"). Android uses the
+/// specification (`wasm/mesh/docs/MESH.md`, "BLE link"). Android uses the
 /// same values in `MeshConstants.kt`.
 enum MeshConstants {
     /// Advertised and scanned for. Fixed: in the background iOS only finds peers by exact UUID.

@@ -35,6 +35,12 @@ Only what the phone build needs is here. Compared with the original crates:
 - the client fixture one `gossip-pools` test reads is copied to
   `gossip-pools/tests/fixtures/`.
 
+`docs/MESH.md` (the mesh protocol, its threat model and defaults) and `docs/MOBILE.md`
+(the node's API and settings) are copied unchanged. Their links to other documents of
+that repository (`API.md`, `WIRE-PROTOCOL.md`, `SIMULATION.md`, `MESH-PLAN.md`) do not
+resolve here. Where they describe the internet node a bridge uploads to, read the Gossip
+API, version 2: it serves the same client contract.
+
 The link protocol is unchanged (`GMSH.2.1`), so a phone built from this copy and one
 built from the original crates talk to each other.
 

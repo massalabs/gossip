@@ -1,4 +1,4 @@
-# The offline mesh node (gossip-mobile, Rust, from the gossip-node repository)
+# The offline mesh node (gossip-mobile, Rust, in wasm/mesh)
 # as its own Swift module, so its UniFFI types do not clash with the app's.
 # generated/ is filled by scripts/build-mesh-ios.sh and gitignored; the
 # Podfile only adds this pod once it exists.

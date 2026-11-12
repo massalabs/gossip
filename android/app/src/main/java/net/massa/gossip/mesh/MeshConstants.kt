@@ -4,7 +4,7 @@ import java.util.UUID
 
 /**
  * BLE identifiers and link limits of the Gossip mesh. The values come from the
- * node's mesh specification (gossip-node `docs/MESH.md`, "BLE link"); iOS uses
+ * node's mesh specification (`wasm/mesh/docs/MESH.md`, "BLE link"); iOS uses
  * the same ones in `MeshConstants.swift`.
  */
 object MeshConstants {
