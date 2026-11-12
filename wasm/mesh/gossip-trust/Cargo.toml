@@ -1,0 +1,21 @@
+[package]
+name = "gossip-trust"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+description = "Gossip P2P backend: trust-proof protocol interface, trust policy, nullifier registry and built-in schemes"
+
+[dependencies]
+gossip-wire = { workspace = true }
+massa_hash = { workspace = true }
+massa_signature = { workspace = true }
+blake3 = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+toml = { workspace = true }

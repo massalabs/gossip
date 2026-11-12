@@ -13,6 +13,12 @@ members = [
     "main",
     "secure-storage",
     "uniffi-bindgen",
+    # Offline Bluetooth mesh node (native only), see mesh/README.md
+    "mesh/gossip-wire",
+    "mesh/gossip-trust",
+    "mesh/gossip-repl",
+    "mesh/gossip-pools",
+    "mesh/gossip-mobile",
 ]
 
 [workspace.package]
@@ -26,3 +32,41 @@ license = "AGPL-3.0-or-later"
 # (`secure-storage`, `uniffi-bindgen`) depend via `uniffi.workspace = true`.
 [workspace.dependencies]
 uniffi = { version = "=0.31.0" }
+
+# ── Offline mesh node (mesh/) ────────────────────────────────────────
+# Used by the mesh crates only. The Massa crates are pinned to the revision this
+# lockfile already resolves for the wasm crates, so key, hash and signature
+# types stay byte-identical between the session layer and the mesh node.
+massa_hash = { git = "https://github.com/massalabs/massa.git", rev = "28887a62a655757751f5de5c79c10ad841a770ae", package = "massa_hash" }
+massa_signature = { git = "https://github.com/massalabs/massa.git", rev = "28887a62a655757751f5de5c79c10ad841a770ae", package = "massa_signature" }
+massa_serialization = { git = "https://github.com/massalabs/massa.git", rev = "28887a62a655757751f5de5c79c10ad841a770ae", package = "massa_serialization" }
+
+gossip-wire = { path = "mesh/gossip-wire" }
+gossip-trust = { path = "mesh/gossip-trust" }
+gossip-repl = { path = "mesh/gossip-repl" }
+gossip-pools = { path = "mesh/gossip-pools" }
+
+nom = "=7.1"
+unsigned-varint = { version = "0.8", features = ["nom"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+base64 = "0.22"
+bs58 = { version = "=0.5", features = ["check"] }
+blake3 = "=1.5"
+rand = "0.8"
+zeroize = { version = "1.8", features = ["derive"] }
+crossbeam = "0.8"
+parking_lot = "0.12"
+schnellru = "0.2"
+rayon = "1.7"
+static_assertions = "1.1"
+redb = "2"
+ip_rfc = "0.1"
+ureq = { version = "3", features = ["json"] }
+thiserror = "1.0"
+displaydoc = "0.2"
+tracing = "0.1"
+tempfile = "3"
+mockall = "0.11"
+proptest = "1.4"
