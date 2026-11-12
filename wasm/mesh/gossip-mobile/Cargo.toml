@@ -1,0 +1,40 @@
+[package]
+name = "gossip-mobile"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+description = "Gossip P2P backend: the node embedded in the phone app (BLE mesh, bridge), with UniFFI bindings"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+name = "gossip_mobile"
+
+[dependencies]
+# no PeerNet (and so no quiche/cmake), no HTTP server, no zkVM prover
+gossip-wire = { workspace = true }
+gossip-repl = { workspace = true }
+gossip-pools = { workspace = true, features = ["blob-store"] }
+gossip-trust = { workspace = true }
+massa_hash = { workspace = true }
+massa_signature = { workspace = true }
+massa_serialization = { workspace = true }
+redb = { workspace = true }
+blake3 = { workspace = true }
+chacha20 = "0.9"
+chacha20poly1305 = "0.10"
+x25519-dalek = { version = "2", features = ["zeroize"] }
+zeroize = { workspace = true }
+rand = { workspace = true }
+parking_lot = { workspace = true }
+crossbeam = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+ureq = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uniffi = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+gossip-wire = { workspace = true }

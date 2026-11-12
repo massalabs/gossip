@@ -1,0 +1,7 @@
+[bindings.kotlin]
+package_name = "net.massa.gossip.mesh.ffi"
+cdylib_name = "gossip_mobile"
+
+[bindings.swift]
+module_name = "GossipMobile"
+ffi_module_name = "GossipMobileFFI"
