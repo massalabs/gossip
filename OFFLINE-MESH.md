@@ -1,9 +1,9 @@
 # Offline mesh: native layer
 
 The offline mesh lets phones exchange Gossip blobs over Bluetooth Low Energy when there
-is no internet. The protocol, the node and its defaults are specified in the
-gossip-node repository (`docs/MESH.md`, `docs/MESH-PLAN.md`). This file describes the
-app side: the native plugin, its layers, and how to turn it on.
+is no internet. The protocol, the node and its defaults are specified in
+[wasm/mesh/docs/MESH.md](wasm/mesh/docs/MESH.md), next to the node's code. This file
+describes the app side: the native plugin, its layers, and how to turn it on.
 
 ## Layers
 
@@ -238,7 +238,7 @@ The node keeps them off the internet too:
   nor this phone, asks an internet node for them.
 
 The flag is honoured by honest phones and bridges; a modified one can ignore it and
-upload what it relays (gossip-node `docs/MESH.md`, "Local-only blobs and seekers"). The
+upload what it relays (`wasm/mesh/docs/MESH.md`, "Local-only blobs and seekers"). The
 mailbox rotation and the separate ciphertext still limit what that reveals.
 
 ## Plausible deniability
@@ -252,7 +252,7 @@ hand, by auto-lock or from the notification, nothing in it may show that another
 account exists; and a decoy opened while the mesh runs must use it as if it were the
 only account, with no wipe, restart or delay.
 
-What the node holds (gossip-node `docs/MESH.md`, "Plausible deniability"):
+What the node holds (`wasm/mesh/docs/MESH.md`, "Plausible deniability"):
 
 - **No mark on the phone's own blobs.** `sendBlob` stores a blob exactly as a neighbour's
   relayed copy would be stored: same scope, same trust bucket, no arrival time, no source.

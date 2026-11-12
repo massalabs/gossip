@@ -5,7 +5,7 @@ import android.content.Context
 /**
  * The mesh node core: pools, link handshakes, link encryption, BLE chunking,
  * replication, the wanted list and the internet upstream: the Rust
- * `gossip-mobile` crate (gossip-node repository) through UniFFI, or
+ * `gossip-mobile` crate (`wasm/mesh`) through UniFFI, or
  * [StubMeshCore] in a build without it. Calls may block (storage, network)
  * and are made from the bridge's core thread, never from the main thread.
  *
@@ -20,7 +20,7 @@ interface MeshCore {
 
     fun stop()
 
-    // Radio events. Chunks follow the chunk format of gossip-node docs/MESH.md:
+    // Radio events. Chunks follow the chunk format of wasm/mesh/docs/MESH.md:
     // the core does the chunking and reassembly, the radio moves the chunks.
 
     fun linkUp(linkId: Int, mtu: Int)
@@ -123,9 +123,8 @@ class MeshCoreStatus(
 
 /**
  * The Rust node ([RustMeshCore], in the `meshffi` source set) when the build
- * included it, else [StubMeshCore]. The build includes it when a gossip-node
- * checkout with `gossip-mobile` is found (see `buildRustMeshCore`), so a
- * checkout of this repository alone still builds and runs.
+ * included it, else [StubMeshCore]. The build includes it unless it was
+ * asked to skip the mesh (see `buildRustMeshCore`).
  */
 object MeshCoreFactory {
     private const val RUST_CORE = "net.massa.gossip.mesh.RustMeshCore"

@@ -6,8 +6,8 @@ package net.massa.gossip.mesh
  *
  * [rotationIntervalMs] is how often one link is replaced by a random new
  * neighbour, so that a crowd does not settle into clusters that never hear
- * from each other. The node's simulation (gossip-node `docs/SIMULATION.md`)
- * is where these values get tuned.
+ * from each other. The node's simulation, in the gossip-node
+ * repository, is where these values get tuned.
  */
 enum class PowerMode(
     val scanOnMs: Long,

@@ -465,6 +465,15 @@ jobs:
           bundler-cache: true
           working-directory: ios/App
 
+      # The Podfile adds the GossipMobile pod (the offline mesh node) only
+      # once its xcframework and Swift bindings exist, so build them before
+      # `pod install`. Without them the app would fall back to the stub
+      # core, which a release build refuses.
+      - name: Build the mesh node (GossipMobile XCFramework + bindings)
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+          bash scripts/build-mesh-ios.sh --release
+
       - name: Install CocoaPods dependencies
         working-directory: ios/App
         run: |

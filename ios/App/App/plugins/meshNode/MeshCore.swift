@@ -3,7 +3,7 @@ import Foundation
 
 /// The mesh node core: pools, link handshakes, link encryption, BLE chunking,
 /// replication, the wanted list and the internet upstream: the Rust
-/// `gossip-mobile` crate (gossip-node repository) through UniFFI, or
+/// `gossip-mobile` crate (`wasm/mesh`) through UniFFI, or
 /// `StubMeshCore` in a build without it. Calls may block and are made from
 /// the bridge's queues, never from the main thread. Mirrors `MeshCore.kt`.
 protocol MeshCore: AnyObject {
@@ -12,7 +12,7 @@ protocol MeshCore: AnyObject {
     func start(dataDir: String, configJson: String, sink: MeshCoreSink) throws
     func stop()
 
-    // Radio events; chunks follow gossip-node docs/MESH.md, the core does the chunking.
+    // Radio events; chunks follow wasm/mesh/docs/MESH.md, the core does the chunking.
     func linkUp(linkId: Int, mtu: Int)
     func linkDown(linkId: Int)
     func frameIn(linkId: Int, frame: Data)
