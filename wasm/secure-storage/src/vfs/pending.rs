@@ -83,10 +83,53 @@ pub(crate) fn flush_writes<S: BlockStorage + KeypairStorage>(
 
     // A file grown past its last write (truncate to a larger size) reads as
     // zeros there. Write them, so the length is persisted with the bytes.
-    if file_size > ns_state.total_data_length {
+    grow_with_zeros(
+        backend,
+        domain,
+        namespace,
+        session,
+        ns_state,
+        file_size,
+        ZERO_FILL_CHUNK,
+    )
+}
+
+/// Largest run of zeros written at once when a file is grown.
+const ZERO_FILL_CHUNK: usize = 64 * crate::constants::PLAINTEXT_SIZE;
+
+/// Grow the stream to `file_size` by writing zeros, at most `chunk` bytes per
+/// write. Does nothing when the stream is already that long.
+///
+/// The zeros are written in chunks so that neither the buffer nor a length
+/// has to hold the whole growth: `file_size` is a `u64` and may exceed what a
+/// `usize` holds on a 32-bit target. Each chunk is a complete write, with its
+/// length persisted, so a failure leaves a shorter but consistent stream.
+fn grow_with_zeros<S: BlockStorage + KeypairStorage>(
+    backend: &mut S,
+    domain: &str,
+    namespace: u8,
+    session: &UnlockedSession,
+    ns_state: &mut NamespaceState,
+    file_size: u64,
+    chunk: usize,
+) -> Result<()> {
+    if file_size <= ns_state.total_data_length {
+        return Ok(());
+    }
+    let zeros = vec![0u8; chunk];
+    while ns_state.total_data_length < file_size {
         let from = ns_state.total_data_length;
-        let zeros = vec![0u8; (file_size - from) as usize];
-        crate::write_session_data(backend, domain, namespace, session, ns_state, from, &zeros)?;
+        // bounded by `chunk`, so the conversion cannot truncate
+        let len = usize::try_from(file_size - from).map_or(chunk, |left| left.min(chunk));
+        crate::write_session_data(
+            backend,
+            domain,
+            namespace,
+            session,
+            ns_state,
+            from,
+            &zeros[..len],
+        )?;
     }
     Ok(())
 }
@@ -547,6 +590,74 @@ mod tests {
             .unwrap();
 
             assert_eq!(persisted_length(&storage, &session), 100);
+        });
+    }
+
+    #[test]
+    fn grow_writes_zeros_in_several_chunks() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            crate::write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                b"data",
+            )
+            .unwrap();
+
+            // a chunk that is not a whole number of blocks, and a size that
+            // is not a whole number of chunks
+            let chunk = PLAINTEXT_SIZE + 7;
+            let file_size = 4 + 2 * chunk as u64 + 100;
+            grow_with_zeros(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                file_size,
+                chunk,
+            )
+            .unwrap();
+
+            assert_eq!(ns_state.total_data_length, file_size);
+            assert_eq!(persisted_length(&storage, &session), file_size);
+            let read = read_session_data(
+                &storage,
+                DOMAIN,
+                NS,
+                &session,
+                &ns_state,
+                0,
+                file_size as usize,
+            )
+            .unwrap();
+            assert_eq!(&read[..4], b"data");
+            assert!(read[4..].iter().all(|&b| b == 0));
+        });
+    }
+
+    #[test]
+    fn grow_does_nothing_when_the_stream_is_long_enough() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            crate::write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                b"data",
+            )
+            .unwrap();
+
+            grow_with_zeros(&mut storage, DOMAIN, NS, &session, &mut ns_state, 3, 16).unwrap();
+            assert_eq!(ns_state.total_data_length, 4);
+            assert_eq!(persisted_length(&storage, &session), 4);
         });
     }
 }
