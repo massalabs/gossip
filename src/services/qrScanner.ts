@@ -24,7 +24,12 @@ interface QrScannerPlugin {
   }): Promise<{ value: string }>;
   /** Text shown over the camera of a continuous scan (progress, hints). */
   setStatus(options: { text: string }): Promise<void>;
-  /** Closes a continuous scan. */
+  /**
+   * Closes a continuous scan. Called while a scan is still opening (waiting
+   * for the camera permission, or for its screen), it is remembered and that
+   * scan is closed as soon as it appears; `scan()` then resolves with an
+   * empty value.
+   */
   finish(): Promise<void>;
   addListener(
     event: 'frame',

@@ -66,6 +66,9 @@ class QrScanActivity : AppCompatActivity() {
         /** The scanner on screen, for the plugin's setStatus and finish. */
         @Volatile
         var current: WeakReference<QrScanActivity>? = null
+
+        /** A close asked for while the scanner was still opening. */
+        val opening = ScanOpening()
     }
 
     private var continuous = false
@@ -90,6 +93,11 @@ class QrScanActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         continuous = intent.getBooleanExtra(EXTRA_CONTINUOUS, false)
         current = WeakReference(this)
+        // asked to close before it was on screen: the page that wanted it left
+        if (opening.opened()) {
+            finishContinuous()
+            return
+        }
 
         val previewView = PreviewView(this)
         val closeButton = TextView(this).apply {

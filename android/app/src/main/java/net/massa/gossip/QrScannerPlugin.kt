@@ -32,6 +32,7 @@ class QrScannerPlugin : Plugin() {
 
     @PluginMethod
     fun scan(call: PluginCall) {
+        QrScanActivity.opening.begin()
         if (getPermissionState("camera") == PermissionState.GRANTED) {
             openScanner(call)
         } else {
@@ -44,11 +45,18 @@ class QrScannerPlugin : Plugin() {
         if (getPermissionState("camera") == PermissionState.GRANTED) {
             openScanner(call)
         } else {
+            QrScanActivity.opening.end()
             call.reject("Camera permission denied", "PERMISSION_DENIED")
         }
     }
 
     private fun openScanner(call: PluginCall) {
+        // closed while the permission was asked: as if finish() had closed it
+        if (QrScanActivity.opening.closeRequested()) {
+            QrScanActivity.opening.end()
+            call.resolve(JSObject().put("value", ""))
+            return
+        }
         val intent = Intent(context, QrScanActivity::class.java)
         call.getString("closeLabel")?.let { intent.putExtra(QrScanActivity.EXTRA_CLOSE_LABEL, it) }
         val continuous = call.getBoolean("continuous") ?: false
@@ -72,12 +80,19 @@ class QrScannerPlugin : Plugin() {
 
     @PluginMethod
     fun finish(call: PluginCall) {
-        QrScanActivity.current?.get()?.finishContinuous()
+        val scanner = QrScanActivity.current?.get()
+        if (scanner != null) {
+            scanner.finishContinuous()
+        } else {
+            // not on screen yet: closed when it appears
+            QrScanActivity.opening.requestClose()
+        }
         call.resolve()
     }
 
     @ActivityCallback
     private fun onScanResult(call: PluginCall?, result: ActivityResult) {
+        QrScanActivity.opening.end()
         QrScanActivity.onFrame = null
         QrScanActivity.status = ""
         if (call == null) return
