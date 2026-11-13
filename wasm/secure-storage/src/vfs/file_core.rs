@@ -116,7 +116,9 @@ impl EncryptedFileCore {
         session: &UnlockedSession,
         ns_state: &mut NamespaceState,
     ) -> Result<()> {
-        if self.pending.is_empty() {
+        // A truncate to a larger size leaves no pending write, only a size
+        // to persist.
+        if self.pending.is_empty() && self.pending_size <= ns_state.total_data_length {
             return Ok(());
         }
         flush_writes(
@@ -330,6 +332,38 @@ mod tests {
             assert!(file.pending.is_empty());
             assert_eq!(file.pending_size, 0);
             assert_eq!(ns_state.total_data_length, 4);
+        });
+    }
+
+    #[test]
+    fn sync_persists_a_truncate_that_grows_with_no_write() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            let mut file = EncryptedFileCore::new();
+
+            file.write(0, b"data");
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
+
+            file.truncate(&mut storage, DOMAIN, &session, &mut ns_state, 100)
+                .unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
+
+            // what the next unlock reads back
+            let reopened =
+                crate::unlock::load_namespace_state(&storage, DOMAIN, &session, DEFAULT_NAMESPACE)
+                    .unwrap();
+            assert_eq!(reopened.total_data_length, 100);
+
+            let file = EncryptedFileCore::new();
+            let mut buf = vec![0xFFu8; 100];
+            let ok = file
+                .read(&storage, DOMAIN, &session, &reopened, 0, &mut buf)
+                .unwrap();
+            assert!(ok);
+            assert_eq!(&buf[..4], b"data");
+            assert!(buf[4..].iter().all(|&b| b == 0));
         });
     }
 

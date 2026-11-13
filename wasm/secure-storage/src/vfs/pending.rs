@@ -38,7 +38,17 @@ pub(crate) fn flush_writes<S: BlockStorage + KeypairStorage>(
     file_size: u64,
 ) -> Result<()> {
     if writes.is_empty() {
-        return Ok(());
+        // No bytes to write, but the file may have been grown (a truncate to
+        // a larger size with no write after it).
+        return grow_with_zeros(
+            backend,
+            domain,
+            namespace,
+            session,
+            ns_state,
+            file_size,
+            ZERO_FILL_CHUNK,
+        );
     }
 
     if writes.len() == 1 {
@@ -589,6 +599,28 @@ mod tests {
             )
             .unwrap();
 
+            assert_eq!(persisted_length(&storage, &session), 100);
+        });
+    }
+
+    #[test]
+    fn flush_persists_a_file_size_with_no_write() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            flush_writes(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                &[pw(0, b"data")],
+                4,
+            )
+            .unwrap();
+
+            flush_writes(&mut storage, DOMAIN, NS, &session, &mut ns_state, &[], 100).unwrap();
+
+            assert_eq!(ns_state.total_data_length, 100);
             assert_eq!(persisted_length(&storage, &session), 100);
         });
     }
