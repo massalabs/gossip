@@ -258,14 +258,24 @@ fn rerandomize_block_across_all_slots<S: BlockStorage + KeypairStorage>(
         let new_ct = if force_cover {
             create_cover_block(&cur_pk, &cur_aad_root)
         } else {
-            match storage.read_block(cur_session, namespace, block_index) {
+            match crate::write::read_block_of_other_slot(
+                storage,
+                cur_session,
+                namespace,
+                block_index,
+            )
+            .into_block()
+            {
                 // Noncanonical ciphertext has no recoverable plaintext through
                 // the current format. Keeping it would leave one slot unchanged;
                 // aborting would let that slot block cover/destroy work for every
                 // session. Fresh cover preserves all-slot symmetry and progress.
-                Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct)
+                Some(cur_ct) => rerandomize_block(&cur_pk, &cur_ct)
                     .unwrap_or_else(|_| create_cover_block(&cur_pk, &cur_aad_root)),
-                Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
+                // No block there yet, or one that could not be read (reported
+                // by `read_block_of_other_slot`): fresh cover, for the same
+                // reason.
+                None => create_cover_block(&cur_pk, &cur_aad_root),
             }
         };
         let ct_arr: &[u8; BLOCK_SIZE] = new_ct

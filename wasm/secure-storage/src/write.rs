@@ -74,7 +74,7 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
             let existing = if idx == session.session_index {
                 None
             } else {
-                storage.read_block(idx, namespace, block_index).ok()
+                read_block_of_other_slot(storage, idx, namespace, block_index).into_block()
             };
             Ok(BlockPrep {
                 index: idx,
@@ -124,6 +124,73 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     }
 
     Ok(())
+}
+
+/// What a slot holds at a block index, as seen by an operation that rewrites
+/// that index in every slot without being able to decrypt the block.
+pub(crate) enum OtherSlotBlock {
+    /// The block, to be re-randomized.
+    Present(Box<[u8; BLOCK_SIZE]>),
+    /// The slot has no block at that index yet.
+    Missing,
+    /// The slot has a block at that index and it could not be read.
+    Unreadable,
+}
+
+impl OtherSlotBlock {
+    /// The block to re-randomize, or `None` when the slot gets a fresh cover
+    /// block instead.
+    pub(crate) fn into_block(self) -> Option<Box<[u8; BLOCK_SIZE]>> {
+        match self {
+            Self::Present(block) => Some(block),
+            Self::Missing | Self::Unreadable => None,
+        }
+    }
+}
+
+/// Read the block of a slot other than the caller's, for an operation that
+/// rewrites `block_index` in every slot.
+///
+/// Rewriting the same index in every slot, on each write and on each cover
+/// traffic tick, is what hides which slot is in use, and it has priority
+/// over the content of one block: it must not be stopped by the state of one
+/// slot. A block that cannot be read is therefore not an error here. The slot
+/// gets a fresh cover block, which also removes the cause, so the same read
+/// cannot fail again.
+///
+/// If that slot holds an account, the content of that block is lost. That
+/// case is reported on stderr, so that a damaged store does not go
+/// unnoticed. The report does not name the slot: on a write, the unreadable
+/// block is by construction not the active slot's, and a slot number would
+/// say which slots are not in use.
+///
+/// This is not how a caller treats its **own** block: see
+/// `read_block_for_rewrite`.
+pub(crate) fn read_block_of_other_slot<S: BlockStorage>(
+    storage: &S,
+    slot: SessionIndex,
+    namespace: u8,
+    block_index: u64,
+) -> OtherSlotBlock {
+    match storage.read_block(slot, namespace, block_index) {
+        Ok(block) => OtherSlotBlock::Present(block),
+        Err(_) => {
+            // The backends report a missing block with different errors, so
+            // the block count says whether there was one to read. A count
+            // that cannot be read either is treated as a block that exists.
+            let exists = storage
+                .block_count(slot, namespace)
+                .map_or(true, |count| block_index < count);
+            if !exists {
+                return OtherSlotBlock::Missing;
+            }
+            eprintln!(
+                "secureStorage: a block that could not be read is replaced with a cover block \
+                 (namespace {namespace}, block {block_index})"
+            );
+            OtherSlotBlock::Unreadable
+        }
+    }
 }
 
 /// Returns the global block count (maximum across all sessions) for `namespace`.
@@ -650,6 +717,8 @@ mod tests {
         failing_block: std::cell::Cell<Option<u64>>,
         /// Writes of this block of session 0 fail.
         failing_write: Option<u64>,
+        /// The session whose reads of `failing_block` fail. Session 0 unless set.
+        failing_session: u8,
     }
 
     impl FlakyStorage {
@@ -658,6 +727,7 @@ mod tests {
                 inner: MemoryStorage::new(),
                 failing_block: std::cell::Cell::new(None),
                 failing_write: None,
+                failing_session: 0,
             }
         }
     }
@@ -669,7 +739,7 @@ mod tests {
             namespace: u8,
             block: u64,
         ) -> Result<Box<[u8; BLOCK_SIZE]>> {
-            if session.as_u8() == 0 && self.failing_block.get() == Some(block) {
+            if session.as_u8() == self.failing_session && self.failing_block.get() == Some(block) {
                 return Err(SecureStorageError::Storage("read failed".into()));
             }
             self.inner.read_block(session, namespace, block)
@@ -849,6 +919,85 @@ mod tests {
             )
             .unwrap();
             assert_eq!(&read[..], &data[..]);
+        });
+    }
+
+    /// Rewriting an index in every slot is not stopped by a block of another
+    /// slot that cannot be read: the write succeeds and that slot gets a
+    /// fresh cover block. The caller's own data is written as asked.
+    #[test]
+    fn write_replaces_an_unreadable_block_of_another_slot() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+            let other = SessionIndex::new(1).unwrap();
+
+            let first = vec![0x11u8; 100];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+            let before = storage.inner.read_block(other, NS, 0).unwrap();
+
+            storage.failing_session = 1;
+            storage.failing_block.set(Some(0));
+            assert!(matches!(
+                read_block_of_other_slot(&storage, other, NS, 0),
+                OtherSlotBlock::Unreadable
+            ));
+            // an append from a later block rewrites the header in block 0
+            let offset = 2 * PLAINTEXT_SIZE as u64;
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &[0x22u8; 10],
+            )
+            .unwrap();
+
+            storage.failing_block.set(None);
+            // the other slot has a block again, and it is a new one
+            let after = storage.inner.read_block(other, NS, 0).unwrap();
+            assert_ne!(&before[..], &after[..]);
+            assert!(matches!(
+                read_block_of_other_slot(&storage, other, NS, 0),
+                OtherSlotBlock::Present(_)
+            ));
+            // the caller's own data is intact
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, first.len())
+                .unwrap();
+            assert_eq!(&read[..], &first[..]);
+            assert_eq!(persisted_length(&storage, &session), offset + 10);
+        });
+    }
+
+    /// A slot that has no block at an index yet is not an unreadable block.
+    #[test]
+    fn a_block_that_does_not_exist_yet_is_missing_not_unreadable() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage);
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                &[1u8; 10],
+            )
+            .unwrap();
+            let other = SessionIndex::new(1).unwrap();
+
+            assert!(matches!(
+                read_block_of_other_slot(&storage, other, NS, 0),
+                OtherSlotBlock::Present(_)
+            ));
+            assert!(matches!(
+                read_block_of_other_slot(&storage, other, NS, 7),
+                OtherSlotBlock::Missing
+            ));
         });
     }
 
