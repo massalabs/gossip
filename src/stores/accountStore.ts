@@ -885,7 +885,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     resetAccount: async () => {
       set({ isLoading: true });
       try {
-        // before the reset, which reloads the app
+        // before the reset, which reloads the app; throws, and stops the
+        // reset, when the mesh node could not be emptied
         await wipeMesh();
         await resetAllAccountStorage();
       } catch (error) {

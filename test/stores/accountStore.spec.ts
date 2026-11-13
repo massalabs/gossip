@@ -18,6 +18,7 @@ const appState = vi.hoisted(() => ({ secureAccountCreationAllowed: true }));
 const derivedAccountKeys = vi.hoisted(() => [] as Uint8Array[]);
 const encodeUserIdSpy = vi.hoisted(() => vi.fn(() => 'mock-user-id'));
 const resetAllAccountsSpy = vi.hoisted(() => vi.fn(async () => {}));
+const wipeMeshSpy = vi.hoisted(() => vi.fn(async () => {}));
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
@@ -141,6 +142,11 @@ function mockProfile(session = new Uint8Array([9, 9])) {
 // Mock getSdk to avoid real SDK initialization
 vi.mock('../../src/services/unsupportedStorageReset', () => ({
   resetAllAccountStorage: resetAllAccountsSpy,
+}));
+
+vi.mock('../../src/services/meshNode', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/services/meshNode')>()),
+  wipeMesh: wipeMeshSpy,
 }));
 
 vi.mock('../../src/stores/sdkStore', () => ({
@@ -873,7 +879,20 @@ describe('AccountStore session cleanup', () => {
   it('delegates resetAccount to the complete all-account wipe', async () => {
     await useAccountStore.getState().resetAccount();
 
+    expect(wipeMeshSpy).toHaveBeenCalledOnce();
     expect(resetAllAccountsSpy).toHaveBeenCalledOnce();
+  });
+
+  it('deletes no account when the mesh node could not be wiped', async () => {
+    resetAllAccountsSpy.mockClear();
+    wipeMeshSpy.mockRejectedValueOnce(new Error('could not be wiped'));
+
+    await expect(useAccountStore.getState().resetAccount()).rejects.toThrow(
+      'could not be wiped'
+    );
+
+    expect(resetAllAccountsSpy).not.toHaveBeenCalled();
+    expect(useAccountStore.getState().isLoading).toBe(false);
   });
 });
 
