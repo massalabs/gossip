@@ -357,15 +357,13 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
         // Full overwrite optimization: skip decrypt for non-block-0 fully overwritten blocks
         let full_overwrite = w_start == block_start_pos && w_end == block_end_pos && b != 0;
 
-        let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
-        if full_overwrite {
+        let mut pt = if full_overwrite {
+            let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
             rand::rngs::OsRng.fill_bytes(&mut pt[..]);
+            pt
         } else {
-            match decrypt_session_data_block(storage, domain, namespace, session, b) {
-                Ok(existing) => pt.copy_from_slice(existing.as_ref()),
-                Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
-            }
-        }
+            read_block_for_rewrite(storage, domain, namespace, session, b)?
+        };
 
         // Copy data into the plaintext
         let src_off = (w_start - start_pos) as usize;
@@ -733,6 +731,105 @@ mod tests {
                 &block_0[LENGTH_HDR_SIZE..LENGTH_HDR_SIZE + first.len()],
                 &first[..]
             );
+        });
+    }
+
+    /// A write that changes part of a block keeps the rest of it. If the
+    /// block cannot be read, the write must fail and leave the block as it
+    /// was, not replace the rest with random bytes.
+    #[test]
+    fn partial_overwrite_keeps_a_block_that_cannot_be_read() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+
+            let first = vec![0x11u8; 3 * PLAINTEXT_SIZE];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+
+            // ten bytes in the middle of block 1
+            let offset = PLAINTEXT_SIZE as u64 + 100;
+            storage.failing_block.set(Some(1));
+            let result = write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &[0x22u8; 10],
+            );
+            assert!(matches!(result, Err(SecureStorageError::Storage(_))));
+
+            storage.failing_block.set(None);
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, first.len())
+                .unwrap();
+            assert_eq!(&read[..], &first[..]);
+        });
+    }
+
+    /// A block this session cannot decrypt holds none of its data: a write
+    /// into it starts from random bytes and succeeds.
+    #[test]
+    fn partial_overwrite_replaces_a_cover_block() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, mut ns_state, all_keys) = provision_all_sessions(&mut storage);
+
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                &vec![0x11u8; 3 * PLAINTEXT_SIZE],
+            )
+            .unwrap();
+
+            // block 1 of this session becomes a cover block
+            let mut aad_root = String::new();
+            domain::block_scope(
+                &mut aad_root,
+                DOMAIN,
+                session.session_version,
+                session.session_index,
+                NS,
+                1,
+            );
+            let cover = create_cover_block(&all_keys[0].0, &aad_root);
+            let cover: &[u8; BLOCK_SIZE] = cover.as_slice().try_into().unwrap();
+            storage
+                .write_block(session.session_index, NS, 1, cover)
+                .unwrap();
+            assert!(matches!(
+                decrypt_session_data_block(&storage, DOMAIN, NS, &session, 1),
+                Err(SecureStorageError::CorruptedBlock)
+            ));
+
+            let offset = PLAINTEXT_SIZE as u64 + 100;
+            let data = [0x22u8; 10];
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &data,
+            )
+            .unwrap();
+            let read = read_session_data(
+                &storage,
+                DOMAIN,
+                NS,
+                &session,
+                &ns_state,
+                offset,
+                data.len(),
+            )
+            .unwrap();
+            assert_eq!(&read[..], &data[..]);
         });
     }
 
