@@ -369,26 +369,76 @@ export async function lockMesh(): Promise<void> {
 }
 
 /**
- * Empties the node, relayed blobs included, when every account is deleted.
- * The restarted node keeps running if it ran, with the upstream set again.
- * False when it failed.
+ * Waits before a wipe that failed for an unknown reason is tried again: the
+ * first retry 0.5 s after the failure, the second 5 s after the first.
  */
-export async function wipeMesh(): Promise<boolean> {
-  if (!isMeshAvailable()) return true;
+const WIPE_RETRY_DELAYS_MS = [500, 5000];
+const WIPE_MAX_RETRIES = 2;
+
+/**
+ * Empties the node, relayed blobs included, when every account is deleted.
+ * Throws when the node could not be emptied, so that the caller does not go
+ * on as if it had been.
+ *
+ * The restarted node keeps running if it ran, with the upstream set again. A
+ * node that is emptied but does not restart is not a failure of the wipe:
+ * nothing is left in it.
+ */
+export async function wipeMesh(): Promise<void> {
+  if (!isMeshAvailable()) return;
   // seekers the previous session left for the next activation
   switchable?.forgetWanted();
+  await wipeNodeStore();
+  if (!switchable?.isActive) return;
   try {
-    await MeshNode.wipe();
-    if (switchable?.isActive) {
-      await applyUpstream((await getMeshSettings()).bridgeEnabled);
-      await switchable.activate();
-    }
-    return true;
+    await applyUpstream((await getMeshSettings()).bridgeEnabled);
+    await switchable.activate();
   } catch (error) {
-    if (import.meta.env.DEV) {
-      logger.warn('[MeshNode] failed to wipe the node', error);
+    logger.warn('[MeshNode] the wiped node did not restart', error);
+  }
+}
+
+/** Whether the native node runs, or undefined when it does not say. */
+async function isNodeRunning(): Promise<boolean | undefined> {
+  try {
+    return (await MeshNode.status()).running;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Wipes the native node, trying again up to `WIPE_MAX_RETRIES` times.
+ *
+ * A running node that refuses the wipe is stopped by the native side, which
+ * deletes its directory before it reports the error (`MeshNodeBridge.wipe`
+ * on Android and iOS). The next attempt then only replaces the key and
+ * deletes the directory of a stopped node, so it is made at once. Any other
+ * failure is retried after a wait.
+ */
+async function wipeNodeStore(): Promise<void> {
+  let waits = 0;
+  for (let retries = 0; ; retries++) {
+    const ranBefore = await isNodeRunning();
+    try {
+      await MeshNode.wipe();
+      return;
+    } catch (error) {
+      if (retries >= WIPE_MAX_RETRIES) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`The offline mesh could not be wiped: ${reason}`);
+      }
+      logger.warn('[MeshNode] failed to wipe the node, trying again', error);
+      // TODO: have the native side report its own error code when it stopped
+      // the node and deleted its directory (every wipe failure is NODE_ERROR
+      // today), and decide from the error instead of asking for the status.
+      const stoppedByTheWipe =
+        ranBefore === true && (await isNodeRunning()) === false;
+      if (!stoppedByTheWipe) {
+        const wait = WIPE_RETRY_DELAYS_MS[waits++];
+        await new Promise(resolve => setTimeout(resolve, wait));
+      }
     }
-    return false;
   }
 }
 

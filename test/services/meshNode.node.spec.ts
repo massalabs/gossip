@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   type ArrivalHandler = (arrival: {
@@ -152,9 +152,110 @@ describe('mesh transport', () => {
     mocks.plugin.setUpstream.mockClear();
     mocks.plugin.setWanted.mockClear();
 
-    expect(await wipeMesh()).toBe(true);
+    await wipeMesh();
     expect(mocks.plugin.setUpstream).toHaveBeenCalledOnce();
     expect(mocks.plugin.setWanted).not.toHaveBeenCalled();
+  });
+
+  describe('a wipe that fails', () => {
+    const refused = new Error('the node refused');
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      createMeshTransport();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      mocks.plugin.wipe.mockReset().mockResolvedValue(undefined);
+      mocks.plugin.status
+        .mockReset()
+        .mockResolvedValue({ running: true, meshPeers: 2 });
+    });
+
+    /** Settled or not, without waiting for it. */
+    function track(promise: Promise<void>) {
+      const state = { done: false, error: undefined as unknown };
+      promise.then(
+        () => (state.done = true),
+        error => {
+          state.done = true;
+          state.error = error;
+        }
+      );
+      return state;
+    }
+
+    it('tries again at once when the failed wipe stopped the node', async () => {
+      mocks.plugin.wipe.mockRejectedValueOnce(refused);
+      mocks.plugin.status
+        .mockResolvedValueOnce({ running: true, meshPeers: 2 })
+        .mockResolvedValueOnce({ running: false, meshPeers: 0 });
+
+      const wipe = track(wipeMesh());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(wipe.done).toBe(true);
+      expect(wipe.error).toBeUndefined();
+      expect(mocks.plugin.wipe).toHaveBeenCalledTimes(2);
+    });
+
+    it('waits half a second before retrying an unknown failure', async () => {
+      mocks.plugin.wipe.mockRejectedValueOnce(refused);
+
+      const wipe = track(wipeMesh());
+      await vi.advanceTimersByTimeAsync(499);
+      expect(mocks.plugin.wipe).toHaveBeenCalledTimes(1);
+      expect(wipe.done).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mocks.plugin.wipe).toHaveBeenCalledTimes(2);
+      expect(wipe.done).toBe(true);
+      expect(wipe.error).toBeUndefined();
+    });
+
+    it('waits five more seconds before the second retry', async () => {
+      mocks.plugin.wipe
+        .mockRejectedValueOnce(refused)
+        .mockRejectedValueOnce(refused);
+
+      const wipe = track(wipeMesh());
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mocks.plugin.wipe).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(mocks.plugin.wipe).toHaveBeenCalledTimes(2);
+      expect(wipe.done).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mocks.plugin.wipe).toHaveBeenCalledTimes(3);
+      expect(wipe.done).toBe(true);
+      expect(wipe.error).toBeUndefined();
+    });
+
+    it('throws after the second retry failed', async () => {
+      mocks.plugin.wipe.mockRejectedValue(refused);
+
+      const wipe = track(wipeMesh());
+      await vi.advanceTimersByTimeAsync(5500);
+
+      expect(mocks.plugin.wipe).toHaveBeenCalledTimes(3);
+      expect(wipe.done).toBe(true);
+      expect(wipe.error).toBeInstanceOf(Error);
+      expect((wipe.error as Error).message).toContain('the node refused');
+    });
+
+    it('does not fail when the wiped node does not restart', async () => {
+      await setMeshEnabled(true);
+      mocks.plugin.setUpstream.mockRejectedValueOnce(new Error('not started'));
+
+      const wipe = track(wipeMesh());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mocks.plugin.wipe).toHaveBeenCalledOnce();
+      expect(wipe.done).toBe(true);
+      expect(wipe.error).toBeUndefined();
+    });
   });
 
   it('composes REST then a mesh member that stays off until turned on', async () => {
