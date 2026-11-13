@@ -33,7 +33,11 @@ Only what the phone build needs is here. Compared with the original crates:
 - the crates are members of the `wasm/` workspace: they take their shared dependencies
   and their lockfile from it, and declare edition 2021 themselves;
 - the client fixture one `gossip-pools` test reads is copied to
-  `gossip-pools/tests/fixtures/`.
+  `gossip-pools/tests/fixtures/`;
+- the `gossip-pools` sweeper gives up sending the removed ids when it is asked to stop
+  (`notify_removed` in `gossip-pools/src/sweeper.rs`). The original blocks there for as
+  long as the channel is full, and stopping the sweeper then never returns. This is a
+  fix to bring back to the original, not a trim.
 
 `docs/MESH.md` (the mesh protocol, its threat model and defaults) and `docs/MOBILE.md`
 (the node's API and settings) are copied unchanged. Their links to other documents of

@@ -73,11 +73,61 @@ fn run(
                 if !removed.is_empty() {
                     tracing::debug!(count = removed.len(), "pools sweep removed blobs");
                     if let Some(tx) = &on_removed {
-                        let _ = tx.send(removed);
+                        if !notify_removed(tx, removed, &stop) {
+                            return;
+                        }
                     }
                 }
             }
             Err(e) => tracing::warn!(error = %e, "pools sweep failed"),
         }
+    }
+}
+
+/// Sends the removed ids, or gives up when the thread is asked to stop.
+///
+/// A plain `send` on a bounded channel that is full blocks until its receiver
+/// makes room. A receiver that is alive but not reading would keep the thread
+/// there for good, and [`SweeperHandle::stop`] joins the thread. Returns false
+/// when the stop signal came first.
+fn notify_removed(tx: &Sender<Vec<BlobId>>, removed: Vec<BlobId>, stop: &Receiver<()>) -> bool {
+    channel::select! {
+        // a receiver that is gone is not an error: nobody listens any more
+        send(tx, removed) -> _ => true,
+        recv(stop) -> _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn notify_removed_sends_when_there_is_room() {
+        let (tx, rx) = channel::bounded(1);
+        let (_stop_tx, stop_rx) = channel::bounded::<()>(0);
+        assert!(notify_removed(&tx, Vec::new(), &stop_rx));
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn notify_removed_gives_up_on_stop_when_nobody_reads() {
+        // full, and its receiver alive but not reading
+        let (tx, _rx) = channel::bounded(1);
+        tx.send(Vec::new()).unwrap();
+        let (stop_tx, stop_rx) = channel::bounded::<()>(0);
+
+        let (done_tx, done_rx) = channel::bounded(1);
+        let thread = std::thread::spawn(move || {
+            let _ = done_tx.send(notify_removed(&tx, Vec::new(), &stop_rx));
+        });
+        // still waiting for room
+        assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+        drop(stop_tx);
+        assert_eq!(done_rx.recv_timeout(Duration::from_secs(5)), Ok(false));
+        thread.join().unwrap();
     }
 }
