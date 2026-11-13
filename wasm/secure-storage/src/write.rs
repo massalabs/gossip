@@ -283,9 +283,18 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
 /// The length of the namespace is persisted in the first [`LENGTH_HDR_SIZE`]
 /// bytes of block 0 and nowhere else: `ns_state.total_data_length` is a copy
 /// that [`crate::unlock::load_namespace_state`] reads back from there at the
-/// next unlock. On return the two are equal, whichever blocks the write
-/// touched. A caller must not raise `ns_state.total_data_length` by itself:
-/// the bytes past the persisted length would be cut off at the next unlock.
+/// next unlock. After a successful write the two are equal, whichever blocks
+/// the write touched. A caller must not raise `ns_state.total_data_length` by
+/// itself: the bytes past the persisted length would be cut off at the next
+/// unlock.
+///
+/// # Errors
+///
+/// A write that fails leaves `ns_state.total_data_length` as it was, and may
+/// have written some of its blocks. Writing the same data again completes it:
+/// the length is compared with the unchanged copy, so the header is written
+/// by the retry. Until then block 0 may already hold the new length (a write
+/// that starts in block 0 stores it first) while later blocks are missing.
 pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
@@ -311,7 +320,6 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             .checked_add(data_len)
             .ok_or(SecureStorageError::Overflow)?,
     );
-    ns_state.total_data_length = new_total;
 
     // Ensure enough blocks exist
     let ps = PLAINTEXT_SIZE as u64;
@@ -390,6 +398,11 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     if new_total != old_total && first_block != 0 {
         write_length_header(storage, domain, namespace, session, new_total)?;
     }
+
+    // Only now that the blocks and the header are written. Raised earlier, a
+    // write that failed would leave this copy ahead of the header, and its
+    // retry would find the length unchanged and skip the header.
+    ns_state.total_data_length = new_total;
 
     Ok(())
 }
@@ -635,6 +648,8 @@ mod tests {
     struct FlakyStorage {
         inner: MemoryStorage,
         failing_block: std::cell::Cell<Option<u64>>,
+        /// Writes of this block of session 0 fail.
+        failing_write: Option<u64>,
     }
 
     impl FlakyStorage {
@@ -642,6 +657,7 @@ mod tests {
             Self {
                 inner: MemoryStorage::new(),
                 failing_block: std::cell::Cell::new(None),
+                failing_write: None,
             }
         }
     }
@@ -665,6 +681,9 @@ mod tests {
             block: u64,
             data: &[u8; BLOCK_SIZE],
         ) -> Result<()> {
+            if session.as_u8() == 0 && self.failing_write == Some(block) {
+                return Err(SecureStorageError::Storage("write failed".into()));
+            }
             self.inner.write_block(session, namespace, block, data)
         }
         fn append_block(
@@ -829,6 +848,107 @@ mod tests {
                 data.len(),
             )
             .unwrap();
+            assert_eq!(&read[..], &data[..]);
+        });
+    }
+
+    /// The length a later unlock would read back from block 0.
+    fn persisted_length(storage: &FlakyStorage, session: &UnlockedSession) -> u64 {
+        crate::read::read_total_length(
+            storage,
+            DOMAIN,
+            session.session_version,
+            session.session_index,
+            NS,
+            &session.pq_rerand_sk,
+            session.root_aead_key.as_ref(),
+        )
+        .unwrap()
+    }
+
+    /// A write that grows the stream from a later block and fails on the
+    /// header: the data blocks are written, the length is not. The length in
+    /// memory must stay the old one, so that the retry writes the header.
+    #[test]
+    fn retry_writes_the_header_after_a_failed_header_rewrite() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+
+            let first = vec![0x11u8; 100];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+
+            let offset = 2 * PLAINTEXT_SIZE as u64;
+            let data = [0x22u8; 10];
+            storage.failing_write = Some(0);
+            let result = write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &data,
+            );
+            assert!(matches!(result, Err(SecureStorageError::Storage(_))));
+            assert_eq!(ns_state.total_data_length, 100);
+            assert_eq!(persisted_length(&storage, &session), 100);
+
+            storage.failing_write = None;
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &data,
+            )
+            .unwrap();
+            assert_eq!(ns_state.total_data_length, offset + 10);
+            assert_eq!(persisted_length(&storage, &session), offset + 10);
+            let read = read_session_data(
+                &storage,
+                DOMAIN,
+                NS,
+                &session,
+                &ns_state,
+                offset,
+                data.len(),
+            )
+            .unwrap();
+            assert_eq!(&read[..], &data[..]);
+        });
+    }
+
+    /// A write that starts in block 0 stores the new length first. If it
+    /// fails on a later block, the length in memory stays the old one and
+    /// the retry completes the write.
+    #[test]
+    fn retry_completes_a_write_that_failed_after_block_0() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+
+            let first = vec![0x11u8; 100];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+
+            let data = vec![0x22u8; 2 * PLAINTEXT_SIZE + 500];
+            storage.failing_write = Some(1);
+            let result =
+                write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &data);
+            assert!(matches!(result, Err(SecureStorageError::Storage(_))));
+            assert_eq!(ns_state.total_data_length, 100);
+
+            storage.failing_write = None;
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &data)
+                .unwrap();
+            assert_eq!(ns_state.total_data_length, data.len() as u64);
+            assert_eq!(persisted_length(&storage, &session), data.len() as u64);
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, data.len())
+                .unwrap();
             assert_eq!(&read[..], &data[..]);
         });
     }
