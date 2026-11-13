@@ -20,8 +20,47 @@ impl Drop for PendingWrite {
 
 /// Coalesce pending writes by block group and encrypt only the affected blocks.
 ///
-/// Updates `ns_state.total_data_length` if `file_size` exceeds it.
+/// Grows the stream to `file_size` if it is shorter after the writes, by
+/// writing the missing zeros: the length is persisted by `write_session_data`
+/// only (see its "Length header" section), never by setting it in `ns_state`.
 /// Does not commit the backend; the caller is responsible for that.
+///
+/// # A flush that fails is not rolled back
+///
+/// This function writes block after block into the backend, where the
+/// blocks are staged until the backend is committed. When a write fails
+/// midway it returns the error, and the blocks written so far stay staged:
+/// nothing takes them back. `EncryptedFileCore::sync` keeps its pending
+/// writes in that case, so the next flush writes all of them again and
+/// completes the change.
+///
+/// Until that next flush the staged blocks hold a half-applied change. The
+/// simplest form: a flush that only rewrites bytes inside the file (same
+/// length before and after) has updated some of its blocks and not the
+/// others. The length is right, the content is a mix of old and new pages.
+///
+/// The backend has one set of staged blocks and one commit for everything.
+/// A commit made for another reason therefore persists the half-applied
+/// change with it:
+///
+/// * in the browser, `IdbBlockStorage::persist_dirty`, which the worker
+///   runs after a cover traffic tick and after a write to another namespace
+///   (`flushEncrypted` in `secure-storage-worker-api.ts`);
+/// * on iOS and Android, `RedbStorage::commit`, which
+///   `run_cover_scheduler_tick` and `write_namespace_data` call in
+///   `native_vfs.rs`.
+///
+/// If the process stops after such a commit and before the next successful
+/// flush, the half-applied change is what the next unlock finds. SQLite
+/// cannot repair it: its rollback journal is kept in memory
+/// (`journal_mode = MEMORY`) and is gone with the process.
+///
+/// This needs a flush to fail first. Both backends stage block writes in
+/// memory, so in practice that is a block of this session that cannot be
+/// read back or does not decrypt. Closing the gap would take a way to
+/// discard the blocks one flush staged without touching the others; neither
+/// backend offers one today (`RedbStorage::discard_pending` drops
+/// everything staged, cover blocks included).
 ///
 /// Each call to `write_session_data` drains its own rerand pool entries
 /// before returning, so this function does not need an additional flush
@@ -36,7 +75,17 @@ pub(crate) fn flush_writes<S: BlockStorage + KeypairStorage>(
     file_size: u64,
 ) -> Result<()> {
     if writes.is_empty() {
-        return Ok(());
+        // No bytes to write, but the file may have been grown (a truncate to
+        // a larger size with no write after it).
+        return grow_with_zeros(
+            backend,
+            domain,
+            namespace,
+            session,
+            ns_state,
+            file_size,
+            ZERO_FILL_CHUNK,
+        );
     }
 
     if writes.len() == 1 {
@@ -51,8 +100,11 @@ pub(crate) fn flush_writes<S: BlockStorage + KeypairStorage>(
         )?;
     } else {
         let groups = group_by_contiguous_blocks(writes);
+        // Groups are rounded up to whole blocks; the file ends where its
+        // content does, not at the end of the last block.
+        let content_end = file_size.max(ns_state.total_data_length);
         for &(group_off, group_end) in &groups {
-            let span = (group_end - group_off) as usize;
+            let span = (group_end.min(content_end) - group_off) as usize;
             let mut buf = vec![0u8; span];
 
             // Seed buf with persisted bytes that fall inside this group; the
@@ -76,8 +128,55 @@ pub(crate) fn flush_writes<S: BlockStorage + KeypairStorage>(
         }
     }
 
-    if file_size > ns_state.total_data_length {
-        ns_state.total_data_length = file_size;
+    // A file grown past its last write (truncate to a larger size) reads as
+    // zeros there. Write them, so the length is persisted with the bytes.
+    grow_with_zeros(
+        backend,
+        domain,
+        namespace,
+        session,
+        ns_state,
+        file_size,
+        ZERO_FILL_CHUNK,
+    )
+}
+
+/// Largest run of zeros written at once when a file is grown.
+const ZERO_FILL_CHUNK: usize = 64 * crate::constants::PLAINTEXT_SIZE;
+
+/// Grow the stream to `file_size` by writing zeros, at most `chunk` bytes per
+/// write. Does nothing when the stream is already that long.
+///
+/// The zeros are written in chunks so that neither the buffer nor a length
+/// has to hold the whole growth: `file_size` is a `u64` and may exceed what a
+/// `usize` holds on a 32-bit target. Each chunk is a complete write, with its
+/// length persisted, so a failure leaves a shorter but consistent stream.
+fn grow_with_zeros<S: BlockStorage + KeypairStorage>(
+    backend: &mut S,
+    domain: &str,
+    namespace: u8,
+    session: &UnlockedSession,
+    ns_state: &mut NamespaceState,
+    file_size: u64,
+    chunk: usize,
+) -> Result<()> {
+    if file_size <= ns_state.total_data_length {
+        return Ok(());
+    }
+    let zeros = vec![0u8; chunk];
+    while ns_state.total_data_length < file_size {
+        let from = ns_state.total_data_length;
+        // bounded by `chunk`, so the conversion cannot truncate
+        let len = usize::try_from(file_size - from).map_or(chunk, |left| left.min(chunk));
+        crate::write_session_data(
+            backend,
+            domain,
+            namespace,
+            session,
+            ns_state,
+            from,
+            &zeros[..len],
+        )?;
     }
     Ok(())
 }
@@ -460,6 +559,174 @@ mod tests {
             )
             .unwrap();
             assert_eq!(ns_state.total_data_length, 100);
+        });
+    }
+
+    // ── the length header in block 0 must follow every flush ──
+
+    fn persisted_length(storage: &MemoryStorage, session: &UnlockedSession) -> u64 {
+        load_namespace_state(storage, DOMAIN, session, NS)
+            .unwrap()
+            .total_data_length
+    }
+
+    #[test]
+    fn flush_single_write_past_block_zero_persists_the_length() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            let bs = PLAINTEXT_SIZE as u64;
+            let first = vec![pw(0, b"start")];
+            flush_writes(&mut storage, DOMAIN, NS, &session, &mut ns_state, &first, 5).unwrap();
+
+            // grows the stream without touching block 0
+            let far = vec![pw(3 * bs, b"end")];
+            flush_writes(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                &far,
+                3 * bs + 3,
+            )
+            .unwrap();
+
+            assert_eq!(ns_state.total_data_length, 3 * bs + 3);
+            assert_eq!(persisted_length(&storage, &session), 3 * bs + 3);
+        });
+    }
+
+    #[test]
+    fn flush_far_groups_persist_the_length() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            let bs = PLAINTEXT_SIZE as u64;
+            // block 0 is written first, the group that grows the stream after it
+            let writes = vec![pw(0, b"start"), pw(10 * bs, b"end")];
+            flush_writes(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                &writes,
+                10 * bs + 3,
+            )
+            .unwrap();
+
+            assert_eq!(persisted_length(&storage, &session), 10 * bs + 3);
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 5).unwrap();
+            assert_eq!(&*read, b"start");
+        });
+    }
+
+    #[test]
+    fn flush_persists_a_file_size_past_the_last_write() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            let writes = vec![pw(0, b"data")];
+            flush_writes(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                &writes,
+                100,
+            )
+            .unwrap();
+
+            assert_eq!(persisted_length(&storage, &session), 100);
+        });
+    }
+
+    #[test]
+    fn flush_persists_a_file_size_with_no_write() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            flush_writes(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                &[pw(0, b"data")],
+                4,
+            )
+            .unwrap();
+
+            flush_writes(&mut storage, DOMAIN, NS, &session, &mut ns_state, &[], 100).unwrap();
+
+            assert_eq!(ns_state.total_data_length, 100);
+            assert_eq!(persisted_length(&storage, &session), 100);
+        });
+    }
+
+    #[test]
+    fn grow_writes_zeros_in_several_chunks() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            crate::write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                b"data",
+            )
+            .unwrap();
+
+            // a chunk that is not a whole number of blocks, and a size that
+            // is not a whole number of chunks
+            let chunk = PLAINTEXT_SIZE + 7;
+            let file_size = 4 + 2 * chunk as u64 + 100;
+            grow_with_zeros(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                file_size,
+                chunk,
+            )
+            .unwrap();
+
+            assert_eq!(ns_state.total_data_length, file_size);
+            assert_eq!(persisted_length(&storage, &session), file_size);
+            let read = read_session_data(
+                &storage,
+                DOMAIN,
+                NS,
+                &session,
+                &ns_state,
+                0,
+                file_size as usize,
+            )
+            .unwrap();
+            assert_eq!(&read[..4], b"data");
+            assert!(read[4..].iter().all(|&b| b == 0));
+        });
+    }
+
+    #[test]
+    fn grow_does_nothing_when_the_stream_is_long_enough() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            crate::write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                b"data",
+            )
+            .unwrap();
+
+            grow_with_zeros(&mut storage, DOMAIN, NS, &session, &mut ns_state, 3, 16).unwrap();
+            assert_eq!(ns_state.total_data_length, 4);
+            assert_eq!(persisted_length(&storage, &session), 4);
         });
     }
 }

@@ -74,7 +74,7 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
             let existing = if idx == session.session_index {
                 None
             } else {
-                storage.read_block(idx, namespace, block_index).ok()
+                read_block_of_other_slot(storage, idx, namespace, block_index).into_block()
             };
             Ok(BlockPrep {
                 index: idx,
@@ -124,6 +124,73 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     }
 
     Ok(())
+}
+
+/// What a slot holds at a block index, as seen by an operation that rewrites
+/// that index in every slot without being able to decrypt the block.
+pub(crate) enum OtherSlotBlock {
+    /// The block, to be re-randomized.
+    Present(Box<[u8; BLOCK_SIZE]>),
+    /// The slot has no block at that index yet.
+    Missing,
+    /// The slot has a block at that index and it could not be read.
+    Unreadable,
+}
+
+impl OtherSlotBlock {
+    /// The block to re-randomize, or `None` when the slot gets a fresh cover
+    /// block instead.
+    pub(crate) fn into_block(self) -> Option<Box<[u8; BLOCK_SIZE]>> {
+        match self {
+            Self::Present(block) => Some(block),
+            Self::Missing | Self::Unreadable => None,
+        }
+    }
+}
+
+/// Read the block of a slot other than the caller's, for an operation that
+/// rewrites `block_index` in every slot.
+///
+/// Rewriting the same index in every slot, on each write and on each cover
+/// traffic tick, is what hides which slot is in use, and it has priority
+/// over the content of one block: it must not be stopped by the state of one
+/// slot. A block that cannot be read is therefore not an error here. The slot
+/// gets a fresh cover block, which also removes the cause, so the same read
+/// cannot fail again.
+///
+/// If that slot holds an account, the content of that block is lost. That
+/// case is reported on stderr, so that a damaged store does not go
+/// unnoticed. The report does not name the slot: on a write, the unreadable
+/// block is by construction not the active slot's, and a slot number would
+/// say which slots are not in use.
+///
+/// This is not how a caller treats its **own** block: see
+/// `read_block_for_rewrite`.
+pub(crate) fn read_block_of_other_slot<S: BlockStorage>(
+    storage: &S,
+    slot: SessionIndex,
+    namespace: u8,
+    block_index: u64,
+) -> OtherSlotBlock {
+    match storage.read_block(slot, namespace, block_index) {
+        Ok(block) => OtherSlotBlock::Present(block),
+        Err(_) => {
+            // The backends report a missing block with different errors, so
+            // the block count says whether there was one to read. A count
+            // that cannot be read either is treated as a block that exists.
+            let exists = storage
+                .block_count(slot, namespace)
+                .map_or(true, |count| block_index < count);
+            if !exists {
+                return OtherSlotBlock::Missing;
+            }
+            eprintln!(
+                "secureStorage: a block that could not be read is replaced with a cover block \
+                 (namespace {namespace}, block {block_index})"
+            );
+            OtherSlotBlock::Unreadable
+        }
+    }
 }
 
 /// Returns the global block count (maximum across all sessions) for `namespace`.
@@ -277,6 +344,24 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
 /// Handles multi-block writes, partial overwrites, full overwrite optimization,
 /// and length header updates in block 0. Updates `ns_state.total_data_length`
 /// in place if the write extends past the previous end of the namespace.
+///
+/// # Length header
+///
+/// The length of the namespace is persisted in the first [`LENGTH_HDR_SIZE`]
+/// bytes of block 0 and nowhere else: `ns_state.total_data_length` is a copy
+/// that [`crate::unlock::load_namespace_state`] reads back from there at the
+/// next unlock. After a successful write the two are equal, whichever blocks
+/// the write touched. A caller must not raise `ns_state.total_data_length` by
+/// itself: the bytes past the persisted length would be cut off at the next
+/// unlock.
+///
+/// # Errors
+///
+/// A write that fails leaves `ns_state.total_data_length` as it was, and may
+/// have written some of its blocks. Writing the same data again completes it:
+/// the length is compared with the unchanged copy, so the header is written
+/// by the retry. Until then block 0 may already hold the new length (a write
+/// that starts in block 0 stores it first) while later blocks are missing.
 pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
@@ -302,7 +387,6 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             .checked_add(data_len)
             .ok_or(SecureStorageError::Overflow)?,
     );
-    ns_state.total_data_length = new_total;
 
     // Ensure enough blocks exist
     let ps = PLAINTEXT_SIZE as u64;
@@ -348,15 +432,13 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
         // Full overwrite optimization: skip decrypt for non-block-0 fully overwritten blocks
         let full_overwrite = w_start == block_start_pos && w_end == block_end_pos && b != 0;
 
-        let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
-        if full_overwrite {
+        let mut pt = if full_overwrite {
+            let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
             rand::rngs::OsRng.fill_bytes(&mut pt[..]);
+            pt
         } else {
-            match decrypt_session_data_block(storage, domain, namespace, session, b) {
-                Ok(existing) => pt.copy_from_slice(existing.as_ref()),
-                Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
-            }
-        }
+            read_block_for_rewrite(storage, domain, namespace, session, b)?
+        };
 
         // Copy data into the plaintext
         let src_off = (w_start - start_pos) as usize;
@@ -376,7 +458,59 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
         encrypt_session_data_block(storage, domain, namespace, session, b, pt_arr)?;
     }
 
+    // The loop refreshes the length header only when it rewrites block 0. A
+    // write that grows the stream from a later block must refresh it too:
+    // otherwise the next unlock reads the old length and the bytes written
+    // past it are lost.
+    if new_total != old_total && first_block != 0 {
+        write_length_header(storage, domain, namespace, session, new_total)?;
+    }
+
+    // Only now that the blocks and the header are written. Raised earlier, a
+    // write that failed would leave this copy ahead of the header, and its
+    // retry would find the length unchanged and skip the header.
+    ns_state.total_data_length = new_total;
+
     Ok(())
+}
+
+/// Rewrite the length header of block 0, keeping the rest of the block.
+fn write_length_header<S: BlockStorage + KeypairStorage>(
+    storage: &mut S,
+    domain: &str,
+    namespace: u8,
+    session: &UnlockedSession,
+    total: u64,
+) -> Result<()> {
+    let mut pt = read_block_for_rewrite(storage, domain, namespace, session, 0)?;
+    pt[..LENGTH_HDR_SIZE].copy_from_slice(&total.to_be_bytes());
+    let pt_arr: &[u8; PLAINTEXT_SIZE] = pt
+        .as_slice()
+        .try_into()
+        .expect(&format!("{} != PLAINTEXT_SIZE", pt.len()));
+    encrypt_session_data_block(storage, domain, namespace, session, 0, pt_arr)
+}
+
+/// The plaintext of a block that is about to be partly rewritten.
+///
+/// A block this session cannot decrypt is a cover block: it holds none of
+/// the session's data, and the rewrite starts from random bytes. Any other
+/// error (the backend failed to read) is returned, so that a block holding
+/// data is never replaced because it could not be read.
+fn read_block_for_rewrite<S: BlockStorage>(
+    storage: &S,
+    domain: &str,
+    namespace: u8,
+    session: &UnlockedSession,
+    block_index: u64,
+) -> Result<Zeroizing<Vec<u8>>> {
+    let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+    match decrypt_session_data_block(storage, domain, namespace, session, block_index) {
+        Ok(existing) => pt.copy_from_slice(existing.as_ref()),
+        Err(SecureStorageError::CorruptedBlock) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
+        Err(e) => return Err(e),
+    }
+    Ok(pt)
 }
 
 /// Shrink namespace data to `new_total` bytes, converting freed blocks to cover.
@@ -575,6 +709,397 @@ mod tests {
         };
 
         (session, NamespaceState::empty(), all_keys)
+    }
+
+    /// A [`MemoryStorage`] whose reads of one block of session 0 can be made to fail.
+    struct FlakyStorage {
+        inner: MemoryStorage,
+        failing_block: std::cell::Cell<Option<u64>>,
+        /// Writes of this block of session 0 fail.
+        failing_write: Option<u64>,
+        /// The session whose reads of `failing_block` fail. Session 0 unless set.
+        failing_session: u8,
+    }
+
+    impl FlakyStorage {
+        fn new() -> Self {
+            Self {
+                inner: MemoryStorage::new(),
+                failing_block: std::cell::Cell::new(None),
+                failing_write: None,
+                failing_session: 0,
+            }
+        }
+    }
+
+    impl BlockStorage for FlakyStorage {
+        fn read_block(
+            &self,
+            session: SessionIndex,
+            namespace: u8,
+            block: u64,
+        ) -> Result<Box<[u8; BLOCK_SIZE]>> {
+            if session.as_u8() == self.failing_session && self.failing_block.get() == Some(block) {
+                return Err(SecureStorageError::Storage("read failed".into()));
+            }
+            self.inner.read_block(session, namespace, block)
+        }
+        fn write_block(
+            &mut self,
+            session: SessionIndex,
+            namespace: u8,
+            block: u64,
+            data: &[u8; BLOCK_SIZE],
+        ) -> Result<()> {
+            if session.as_u8() == 0 && self.failing_write == Some(block) {
+                return Err(SecureStorageError::Storage("write failed".into()));
+            }
+            self.inner.write_block(session, namespace, block, data)
+        }
+        fn append_block(
+            &mut self,
+            session: SessionIndex,
+            namespace: u8,
+            data: &[u8; BLOCK_SIZE],
+        ) -> Result<()> {
+            self.inner.append_block(session, namespace, data)
+        }
+        fn block_count(&self, session: SessionIndex, namespace: u8) -> Result<u64> {
+            self.inner.block_count(session, namespace)
+        }
+        fn fsync(&self, session: SessionIndex, namespace: u8) -> Result<()> {
+            self.inner.fsync(session, namespace)
+        }
+        fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
+            self.inner.reset_blockstream(session, namespace)
+        }
+        fn namespaces_with_data(&self, session: SessionIndex) -> Result<Vec<u8>> {
+            self.inner.namespaces_with_data(session)
+        }
+    }
+
+    impl KeypairStorage for FlakyStorage {
+        fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
+            self.inner.read_keypair(session)
+        }
+        fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
+            self.inner.write_keypair(session, data)
+        }
+    }
+
+    /// A write that grows the stream from a later block rewrites the length
+    /// header of block 0. If block 0 cannot be read, the write must fail and
+    /// leave block 0 as it was, not replace it.
+    #[test]
+    fn append_keeps_block_0_when_it_cannot_be_read() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+
+            let first = vec![0x11u8; 100];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+
+            storage.failing_block.set(Some(0));
+            let offset = 2 * PLAINTEXT_SIZE as u64;
+            let result = write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &[0x22u8; 10],
+            );
+            assert!(matches!(result, Err(SecureStorageError::Storage(_))));
+
+            storage.failing_block.set(None);
+            let block_0 =
+                crate::read::decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0).unwrap();
+            assert_eq!(
+                &block_0[LENGTH_HDR_SIZE..LENGTH_HDR_SIZE + first.len()],
+                &first[..]
+            );
+        });
+    }
+
+    /// A write that changes part of a block keeps the rest of it. If the
+    /// block cannot be read, the write must fail and leave the block as it
+    /// was, not replace the rest with random bytes.
+    #[test]
+    fn partial_overwrite_keeps_a_block_that_cannot_be_read() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+
+            let first = vec![0x11u8; 3 * PLAINTEXT_SIZE];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+
+            // ten bytes in the middle of block 1
+            let offset = PLAINTEXT_SIZE as u64 + 100;
+            storage.failing_block.set(Some(1));
+            let result = write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &[0x22u8; 10],
+            );
+            assert!(matches!(result, Err(SecureStorageError::Storage(_))));
+
+            storage.failing_block.set(None);
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, first.len())
+                .unwrap();
+            assert_eq!(&read[..], &first[..]);
+        });
+    }
+
+    /// A block this session cannot decrypt holds none of its data: a write
+    /// into it starts from random bytes and succeeds.
+    #[test]
+    fn partial_overwrite_replaces_a_cover_block() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, mut ns_state, all_keys) = provision_all_sessions(&mut storage);
+
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                &vec![0x11u8; 3 * PLAINTEXT_SIZE],
+            )
+            .unwrap();
+
+            // block 1 of this session becomes a cover block
+            let mut aad_root = String::new();
+            domain::block_scope(
+                &mut aad_root,
+                DOMAIN,
+                session.session_version,
+                session.session_index,
+                NS,
+                1,
+            );
+            let cover = create_cover_block(&all_keys[0].0, &aad_root);
+            let cover: &[u8; BLOCK_SIZE] = cover.as_slice().try_into().unwrap();
+            storage
+                .write_block(session.session_index, NS, 1, cover)
+                .unwrap();
+            assert!(matches!(
+                decrypt_session_data_block(&storage, DOMAIN, NS, &session, 1),
+                Err(SecureStorageError::CorruptedBlock)
+            ));
+
+            let offset = PLAINTEXT_SIZE as u64 + 100;
+            let data = [0x22u8; 10];
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &data,
+            )
+            .unwrap();
+            let read = read_session_data(
+                &storage,
+                DOMAIN,
+                NS,
+                &session,
+                &ns_state,
+                offset,
+                data.len(),
+            )
+            .unwrap();
+            assert_eq!(&read[..], &data[..]);
+        });
+    }
+
+    /// Rewriting an index in every slot is not stopped by a block of another
+    /// slot that cannot be read: the write succeeds and that slot gets a
+    /// fresh cover block. The caller's own data is written as asked.
+    #[test]
+    fn write_replaces_an_unreadable_block_of_another_slot() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+            let other = SessionIndex::new(1).unwrap();
+
+            let first = vec![0x11u8; 100];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+            let before = storage.inner.read_block(other, NS, 0).unwrap();
+
+            storage.failing_session = 1;
+            storage.failing_block.set(Some(0));
+            assert!(matches!(
+                read_block_of_other_slot(&storage, other, NS, 0),
+                OtherSlotBlock::Unreadable
+            ));
+            // an append from a later block rewrites the header in block 0
+            let offset = 2 * PLAINTEXT_SIZE as u64;
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &[0x22u8; 10],
+            )
+            .unwrap();
+
+            storage.failing_block.set(None);
+            // the other slot has a block again, and it is a new one
+            let after = storage.inner.read_block(other, NS, 0).unwrap();
+            assert_ne!(&before[..], &after[..]);
+            assert!(matches!(
+                read_block_of_other_slot(&storage, other, NS, 0),
+                OtherSlotBlock::Present(_)
+            ));
+            // the caller's own data is intact
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, first.len())
+                .unwrap();
+            assert_eq!(&read[..], &first[..]);
+            assert_eq!(persisted_length(&storage, &session), offset + 10);
+        });
+    }
+
+    /// A slot that has no block at an index yet is not an unreadable block.
+    #[test]
+    fn a_block_that_does_not_exist_yet_is_missing_not_unreadable() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage);
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                &[1u8; 10],
+            )
+            .unwrap();
+            let other = SessionIndex::new(1).unwrap();
+
+            assert!(matches!(
+                read_block_of_other_slot(&storage, other, NS, 0),
+                OtherSlotBlock::Present(_)
+            ));
+            assert!(matches!(
+                read_block_of_other_slot(&storage, other, NS, 7),
+                OtherSlotBlock::Missing
+            ));
+        });
+    }
+
+    /// The length a later unlock would read back from block 0.
+    fn persisted_length(storage: &FlakyStorage, session: &UnlockedSession) -> u64 {
+        crate::read::read_total_length(
+            storage,
+            DOMAIN,
+            session.session_version,
+            session.session_index,
+            NS,
+            &session.pq_rerand_sk,
+            session.root_aead_key.as_ref(),
+        )
+        .unwrap()
+    }
+
+    /// A write that grows the stream from a later block and fails on the
+    /// header: the data blocks are written, the length is not. The length in
+    /// memory must stay the old one, so that the retry writes the header.
+    #[test]
+    fn retry_writes_the_header_after_a_failed_header_rewrite() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+
+            let first = vec![0x11u8; 100];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+
+            let offset = 2 * PLAINTEXT_SIZE as u64;
+            let data = [0x22u8; 10];
+            storage.failing_write = Some(0);
+            let result = write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &data,
+            );
+            assert!(matches!(result, Err(SecureStorageError::Storage(_))));
+            assert_eq!(ns_state.total_data_length, 100);
+            assert_eq!(persisted_length(&storage, &session), 100);
+
+            storage.failing_write = None;
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &data,
+            )
+            .unwrap();
+            assert_eq!(ns_state.total_data_length, offset + 10);
+            assert_eq!(persisted_length(&storage, &session), offset + 10);
+            let read = read_session_data(
+                &storage,
+                DOMAIN,
+                NS,
+                &session,
+                &ns_state,
+                offset,
+                data.len(),
+            )
+            .unwrap();
+            assert_eq!(&read[..], &data[..]);
+        });
+    }
+
+    /// A write that starts in block 0 stores the new length first. If it
+    /// fails on a later block, the length in memory stays the old one and
+    /// the retry completes the write.
+    #[test]
+    fn retry_completes_a_write_that_failed_after_block_0() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+
+            let first = vec![0x11u8; 100];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+
+            let data = vec![0x22u8; 2 * PLAINTEXT_SIZE + 500];
+            storage.failing_write = Some(1);
+            let result =
+                write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &data);
+            assert!(matches!(result, Err(SecureStorageError::Storage(_))));
+            assert_eq!(ns_state.total_data_length, 100);
+
+            storage.failing_write = None;
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &data)
+                .unwrap();
+            assert_eq!(ns_state.total_data_length, data.len() as u64);
+            assert_eq!(persisted_length(&storage, &session), data.len() as u64);
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, data.len())
+                .unwrap();
+            assert_eq!(&read[..], &data[..]);
+        });
     }
 
     // --- commit 12: encrypt_session_data_block ---
