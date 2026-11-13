@@ -8,7 +8,7 @@ import { logger } from '../utils/logger.ts';
 
 import { MNS } from '@massalabs/massa-web3';
 import { useAccountStore } from '../stores/accountStore';
-import { isValidUserId } from '@massalabs/gossip-sdk';
+import { isValidUserId, canonicalUserId } from '@massalabs/gossip-sdk';
 
 const MNS_SUFFIX = '.massa';
 
@@ -105,7 +105,8 @@ class MnsService {
       if (isValidUserId(target)) {
         return {
           success: true,
-          gossipId: target,
+          // the record may hold the id in uppercase: the app keeps one spelling
+          gossipId: canonicalUserId(target),
         };
       }
 

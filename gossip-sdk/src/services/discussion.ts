@@ -34,7 +34,7 @@ import type { AuthService } from './auth.js';
 import { Result } from '../utils/type.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import { Queries } from '../db/queries/index.js';
-import { decodeUserId } from '../utils/userId.js';
+import { canonicalUserId, decodeUserId } from '../utils/userId.js';
 import { addContact } from '../utils/contacts.js';
 
 const logger = new Logger('DiscussionService');
@@ -271,6 +271,7 @@ export class DiscussionService {
   ): Promise<Result<Uint8Array, Error>> {
     const log = logger.forMethod('createSessionForContact');
     const ownerUserId = this.session.userIdEncoded;
+    contactUserId = canonicalUserId(contactUserId);
 
     const discussion = await this.queries.discussions.getByOwnerAndContact(
       ownerUserId,
@@ -382,6 +383,7 @@ export class DiscussionService {
     if (!this.authService) {
       return { success: false, error: new Error('AuthService not set') };
     }
+    contactUserId = canonicalUserId(contactUserId);
 
     const pubKeys =
       await this.authService.fetchPublicKeyByUserId(contactUserId);
@@ -438,7 +440,7 @@ export class DiscussionService {
   async get(contactUserId: string): Promise<Discussion | undefined> {
     const row = await this.queries.discussions.getByOwnerAndContact(
       this.session.userIdEncoded,
-      contactUserId
+      canonicalUserId(contactUserId)
     );
     return row ? toDiscussion(row) : undefined;
   }
