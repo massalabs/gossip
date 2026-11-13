@@ -23,7 +23,7 @@ jobs:
   app-tests:
     runs-on: ubuntu-latest
     env:
-      VITE_GOSSIP_API_URL: ${{ vars.GOSSIP_API_URL }}
+      VITE_GOSSIP_API_URL: ${{ vars.GOSSIP_API_URL }}/v2
       VITE_INVITE_DOMAIN: ${{ vars.INVITE_DOMAIN_DEV }}
     steps:
       - uses: actions/checkout@v4

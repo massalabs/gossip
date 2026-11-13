@@ -1,0 +1,30 @@
+[package]
+name = "gossip-pools"
+version.workspace = true
+edition = "2021"
+rust-version = "1.98"
+license.workspace = true
+description = "Gossip P2P backend: the three replicated message pools (counter, key-value, hash) on redb"
+
+[dependencies]
+gossip-wire = { workspace = true }
+gossip-repl = { workspace = true, optional = true }
+massa_hash = { workspace = true }
+massa_signature = { workspace = true }
+massa_serialization = { workspace = true }
+redb = { workspace = true }
+crossbeam = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[features]
+# `impl gossip_repl::BlobStore for PoolsStore`
+blob-store = ["dep:gossip-repl"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+serde_json = { workspace = true }
+redb = { workspace = true }
+proptest = { workspace = true }

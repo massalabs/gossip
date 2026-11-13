@@ -33,3 +33,8 @@ pnpm-lock.yaml
 # OS files
 .DS_Store
 Thumbs.db
+
+# Fixtures and specification of the vendored mesh node, kept byte-identical to
+# their source
+wasm/mesh/**/fixtures/
+wasm/mesh/docs/

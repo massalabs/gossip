@@ -26,6 +26,6 @@ describe('protocol config', () => {
   it('resets to default after override', () => {
     setProtocolBaseUrl('https://custom.example.com/api');
     resetProtocolBaseUrl();
-    expect(protocolConfig.baseUrl).toBe('https://api.usegossip.com/api');
+    expect(protocolConfig.baseUrl).toBe('https://api.usegossip.com/v2/api');
   });
 });

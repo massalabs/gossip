@@ -25,6 +25,11 @@ import { generateDeepLinkUrl } from '../../utils/invite';
 import ShareContactQR from './ShareContactQR';
 import Popover from '../ui/Popover';
 import { PopoverPosition } from '../utils';
+import TabSwitcher from '../ui/TabSwitcher';
+import InPersonContactCode from './InPersonContactCode';
+import { isBluetoothExchangeSupported } from '../../services/contactExchange';
+
+type ShareMode = 'in_person' | 'link';
 
 interface ShareContactProps {
   onBack: () => void;
@@ -56,6 +61,14 @@ const ShareContact: React.FC<ShareContactProps> = ({
   const [sharedUsername, setSharedUsername] = useState(userName);
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
   const { shareFileContact, fileState } = useFileShareContact();
+  // In person, the code carries the keys (no internet needed); the invite
+  // link is for sharing at a distance and is all the web offers.
+  const canShareInPerson =
+    isOwnContact && isBluetoothExchangeSupported() && !!publicKey;
+  const [shareMode, setShareMode] = useState<ShareMode>(
+    canShareInPerson ? 'in_person' : 'link'
+  );
+  const sharedName = includeUsername ? sharedUsername || userName : undefined;
   const navigate = useNavigate();
   const deepLinkUrl = useMemo(
     () =>
@@ -78,12 +91,32 @@ const ShareContact: React.FC<ShareContactProps> = ({
 
   const content = (
     <div className="flex flex-col gap-4">
+      {canShareInPerson && (
+        <TabSwitcher<ShareMode>
+          options={[
+            { value: 'in_person', label: t('contact_code.mode_in_person') },
+            { value: 'link', label: t('contact_code.mode_link') },
+          ]}
+          value={shareMode}
+          onChange={setShareMode}
+        />
+      )}
+
       {/* Hero: QR code */}
       <ShareContactQR
         deepLinkUrl={deepLinkUrl}
         userId={userId}
         mnsDomains={mnsDomains}
         onQRCodeGenerated={setQrDataUrl}
+        code={
+          canShareInPerson && shareMode === 'in_person' ? (
+            <InPersonContactCode
+              userId={userId}
+              publicKeys={publicKey}
+              name={sharedName}
+            />
+          ) : undefined
+        }
       />
 
       {/* Username row: Eye toggles inclusion, pencil edits the name */}

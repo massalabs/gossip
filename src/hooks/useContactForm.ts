@@ -147,6 +147,19 @@ export function useContactForm() {
     ]
   );
 
+  /**
+   * A contact read in person (contact code): its keys were already checked
+   * against the user id, so no server lookup is needed.
+   */
+  const handleVerifiedContact = useCallback(
+    (contactUserId: string, keys: UserPublicKeys, contactName?: string) => {
+      cachePublicKey(contactUserId, keys);
+      void handleUserIdChange(contactUserId);
+      if (contactName) handleNameChange(contactName);
+    },
+    [cachePublicKey, handleUserIdChange, handleNameChange]
+  );
+
   const handleSubmit = useCallback(async () => {
     const trimmedName = name.value.trim();
     const trimmedUserId = userId.value.trim();
@@ -323,6 +336,7 @@ export function useContactForm() {
     handleShareUsernameChange,
     handleCustomUsernameChange,
     handleFileImport,
+    handleVerifiedContact,
     handleSubmit,
   };
 }

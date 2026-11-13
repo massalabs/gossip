@@ -10,4 +10,9 @@
     <string name="portable_backup_notification_preparing">Подготовка резервной копии</string>
     <string name="portable_backup_notification_writing">Запись резервной копии</string>
     <string name="qr_scanner_close">Закрыть сканер</string>
+    <string name="mesh_channel_name">Mesh-сеть Gossip</string>
+    <string name="mesh_channel_desc">Поддерживает офлайн-сеть Bluetooth, пока она включена</string>
+    <string name="mesh_notification_title">Mesh-сеть Gossip включена</string>
+    <string name="mesh_notification_body">Передача сообщений по Bluetooth на ближайшие телефоны</string>
+    <string name="mesh_notification_lock">Заблокировать</string>
 </resources>

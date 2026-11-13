@@ -88,6 +88,27 @@ export enum SessionStatus {
   Saturated = 6,
 }
 /**
+ * Announcement for a peer, with the board entry that carries it to a peer we
+ * already exchanged announcements with.
+ */
+export class AddressedAnnouncement {
+  private constructor();
+  free(): void;
+  [Symbol.dispose](): void;
+  /**
+   * The announcement bytes to post to the announcement board.
+   */
+  readonly announcement: Uint8Array;
+  /**
+   * Signed entry to post at `mailbox_seeker` like a message, if any.
+   */
+  readonly mailbox_data: Uint8Array | undefined;
+  /**
+   * Seeker of the board entry carrying the announcement, if any.
+   */
+  readonly mailbox_seeker: Uint8Array | undefined;
+}
+/**
  * Result from feeding an incoming announcement.
  */
 export class AnnouncementResult {
@@ -174,6 +195,11 @@ export class ReceiveMessageOutput {
    */
   readonly acknowledged_seekers: Array<any>;
   /**
+   * Whether the sender's timestamp is older than the configured maximum age or than
+   * the previous message: authentic and in order, but possibly delayed in transit.
+   */
+  readonly stale: boolean;
+  /**
    * Gets the received message contents.
    */
   readonly message: Uint8Array;
@@ -211,13 +237,24 @@ export class SessionConfig {
   /**
    * Creates a default configuration with sensible defaults:
    * - Announcement age: 1 week
-   * - Announcement future: 1 minute
-   * - Message age: 1 week
-   * - Message future: 1 minute
-   * - Session inactivity: 1 week
+   * - Announcement future: 1 hour
+   * - Message age: 2 weeks
+   * - Message future: 1 day
+   * - Session inactivity: 2 weeks
    * - Keep-alive interval: 1 day
    * - Max lag: 10000 messages
    * - Max peer lag before keep-alive: 8 messages
+   *
+   * The clock windows allow for store-and-forward delivery: a phone that relays
+   * over Bluetooth while offline has no time source, and a clock set by hand can be
+   * off by a whole time zone. A message dated beyond the future window is not lost,
+   * only left to be read again later; one older than the age window is delivered and
+   * flagged stale. Two weeks matches the network's retention, past which a message
+   * cannot be fetched anyway. Announcements keep a tighter future window because a
+   * future-dated announcement blocks the sender's later, correctly dated ones.
+   * Session inactivity is measured on the peer's message timestamps, so it matches
+   * the message age window: a message that waited up to two weeks in transit still
+   * finds its session instead of arriving after it expired.
    */
   static new_default(): SessionConfig;
   /**
@@ -232,8 +269,10 @@ export class SessionManagerWrapper {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * Discards a peer and all associated session state.
+   * Replaces the configuration, which a manager restored from a blob otherwise keeps
+   * from when it was created.
    */
+  set_config(config: SessionConfig): void;
   peer_discard(peer_id: Uint8Array): void;
   /**
    * Sends a message to a peer.
@@ -325,6 +364,11 @@ export class SessionManagerWrapper {
    */
   get_message_board_read_keys(): Array<any>;
   /**
+   * Gets the seekers where peers would post their next announcement to us
+   * (JS-owned Uint8Arrays, see `get_message_board_read_keys`).
+   */
+  get_reannouncement_mailbox_keys(): Array<any>;
+  /**
    * Processes an incoming message from the message board.
    *
    * Each acknowledged seeker is materialised as a JS-owned Uint8Array
@@ -334,9 +378,32 @@ export class SessionManagerWrapper {
    */
   feed_incoming_message_board_read(seeker: Uint8Array, ciphertext: Uint8Array, our_sk: UserSecretKeys): ReceiveMessageOutput | undefined;
   /**
+   * Gets the seekers of the messages after the next one from each peer, for
+   * transports that request messages ahead of time (JS-owned Uint8Arrays, see
+   * `get_message_board_read_keys`).
+   */
+  get_message_board_lookahead_keys(): Array<any>;
+  /**
+   * Returns the announcement carried by an entry read at a re-announcement
+   * mailbox seeker, if it is signed by the seeker key and decrypts; feed it to
+   * `feed_incoming_announcement`.
+   */
+  open_reannouncement_mailbox_read(seeker: Uint8Array, data: Uint8Array): Uint8Array | undefined;
+  /**
+   * Same as `establish_outgoing_session`, also returning the board entry that
+   * carries the announcement to a peer we already exchanged announcements with.
+   */
+  establish_outgoing_session_addressed(peer_pk: UserPublicKeys, our_pk: UserPublicKeys, our_sk: UserSecretKeys, user_data: Uint8Array): AddressedAnnouncement;
+  /**
    * Creates a new session manager with the given configuration.
    */
   constructor(config: SessionConfig);
+  /**
+   * Discards a peer and all associated session state.
+   * Timestamp (milliseconds) of the latest announcement accepted from a peer, if
+   * any: keep it when discarding the peer to refuse replays of older ones.
+   */
+  peer_latest_incoming_announcement_timestamp(peer_id: Uint8Array): number | undefined;
   /**
    * Refreshes sessions and returns peer IDs that need keep-alive messages.
    *
@@ -449,6 +516,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
+  readonly __wbg_addressedannouncement_free: (a: number, b: number) => void;
   readonly __wbg_announcementresult_free: (a: number, b: number) => void;
   readonly __wbg_encryptionkey_free: (a: number, b: number) => void;
   readonly __wbg_nonce_free: (a: number, b: number) => void;
@@ -459,6 +527,9 @@ export interface InitOutput {
   readonly __wbg_userkeys_free: (a: number, b: number) => void;
   readonly __wbg_userpublickeys_free: (a: number, b: number) => void;
   readonly __wbg_usersecretkeys_free: (a: number, b: number) => void;
+  readonly addressedannouncement_announcement: (a: number) => [number, number];
+  readonly addressedannouncement_mailbox_data: (a: number) => [number, number];
+  readonly addressedannouncement_mailbox_seeker: (a: number) => [number, number];
   readonly aead_decrypt: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
   readonly aead_encrypt: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
   readonly announcementresult_announcer_public_keys: (a: number) => number;
@@ -474,6 +545,7 @@ export interface InitOutput {
   readonly nonce_to_bytes: (a: number) => [number, number];
   readonly receivemessageoutput_acknowledged_seekers: (a: number) => any;
   readonly receivemessageoutput_message: (a: number) => [number, number];
+  readonly receivemessageoutput_stale: (a: number) => number;
   readonly receivemessageoutput_timestamp: (a: number) => number;
   readonly receivemessageoutput_user_id: (a: number) => [number, number];
   readonly sendmessageoutput_data: (a: number) => [number, number];
@@ -481,16 +553,22 @@ export interface InitOutput {
   readonly sessionconfig_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: bigint, h: bigint) => number;
   readonly sessionconfig_new_default: () => number;
   readonly sessionmanagerwrapper_establish_outgoing_session: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly sessionmanagerwrapper_establish_outgoing_session_addressed: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
   readonly sessionmanagerwrapper_feed_incoming_announcement: (a: number, b: number, c: number, d: number, e: number) => number;
   readonly sessionmanagerwrapper_feed_incoming_message_board_read: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
   readonly sessionmanagerwrapper_from_encrypted_blob: (a: number, b: number, c: number) => [number, number, number];
+  readonly sessionmanagerwrapper_get_message_board_lookahead_keys: (a: number) => any;
   readonly sessionmanagerwrapper_get_message_board_read_keys: (a: number) => any;
+  readonly sessionmanagerwrapper_get_reannouncement_mailbox_keys: (a: number) => any;
   readonly sessionmanagerwrapper_new: (a: number) => number;
+  readonly sessionmanagerwrapper_open_reannouncement_mailbox_read: (a: number, b: number, c: number, d: number, e: number) => [number, number];
   readonly sessionmanagerwrapper_peer_discard: (a: number, b: number, c: number) => [number, number];
+  readonly sessionmanagerwrapper_peer_latest_incoming_announcement_timestamp: (a: number, b: number, c: number) => [number, number, number, number];
   readonly sessionmanagerwrapper_peer_list: (a: number) => any;
   readonly sessionmanagerwrapper_peer_session_status: (a: number, b: number, c: number) => [number, number, number];
   readonly sessionmanagerwrapper_refresh: (a: number) => any;
   readonly sessionmanagerwrapper_send_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly sessionmanagerwrapper_set_config: (a: number, b: number) => void;
   readonly sessionmanagerwrapper_to_encrypted_blob: (a: number, b: number) => [number, number, number, number];
   readonly userkeys_evm_address: (a: number) => [number, number];
   readonly userkeys_massa_address: (a: number) => [number, number];

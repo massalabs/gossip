@@ -88,6 +88,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- Auto-lock alarm and the mesh notification's Lock action (AppLock) -->
+        <receiver
+            android:name=".AppLockReceiver"
+            android:exported="false" />
+
         <!-- App Update Receiver: Restart background sync after app update -->
         <receiver
             android:name=".AppUpdateReceiver"
@@ -102,6 +107,12 @@
             android:name=".GossipForegroundSyncService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Offline mesh: keeps the BLE radio relaying while the app is in the background -->
+        <service
+            android:name=".mesh.MeshService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <service
             android:name=".PortableBackupForegroundService"
@@ -129,5 +140,29 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- Offline Bluetooth mesh (Android 12+). Scans never derive a location. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Offline Bluetooth mesh before Android 12, where BLE scanning needed location -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <!-- BLE scanning before Android 12, and the Wi-Fi Direct app-sharing hotspot before Android 13 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="32" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
+    <!-- Sharing the app offline: a Wi-Fi Direct hotspot serving the APK (share/) -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="tiramisu" />
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
 
 </manifest>

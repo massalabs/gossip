@@ -1,5 +1,5 @@
 import { AppRoute } from '../constants/routes';
-import { validateUserIdFormat } from '@massalabs/gossip-sdk';
+import { canonicalUserId, validateUserIdFormat } from '@massalabs/gossip-sdk';
 
 // Matches a clean invite path like "/invite/<userId>" (no query/fragment)
 const INVITE_REGEX = new RegExp(`^/${AppRoute.invite}/([^/#?\\s]+)$`, 'i');
@@ -32,7 +32,8 @@ export function parseInvite(input: string): ParsedInvite {
   const name = rawName ? rawName.slice(0, 100) : null;
 
   return {
-    userId,
+    // a link may carry the id in uppercase: the app keeps one spelling
+    userId: canonicalUserId(userId),
     ...(name && { name }),
   };
 }

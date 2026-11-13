@@ -26,6 +26,7 @@ import { useDiscussionStore } from '../stores/discussionStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import { useOnlineStore } from '../stores/useOnlineStore';
+import { useOfflineLabel } from '../hooks/useMeshLinks';
 import { useSwipeFilter } from '../hooks/useSwipeFilter';
 import { useUiStore } from '../stores/uiStore';
 import { prewarmShareQR } from '../components/settings/shareContactQrCache';
@@ -58,6 +59,7 @@ const Discussions: React.FC = () => {
   const setFilter = useDiscussionStore(s => s.setFilter);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const isOnline = useOnlineStore(s => s.isOnline);
+  const offline = useOfflineLabel();
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
   const showBottomNav = useUiStore(s => s.showBottomNav);
   const swipeHandlers = useSwipeFilter(filter, setFilter);
@@ -203,8 +205,12 @@ const Discussions: React.FC = () => {
         {isOnline ? (
           <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
         ) : (
-          <h1 className="text-2xl font-bold text-accent-soft-foreground">
-            {t('waiting_connection')}
+          <h1
+            className={`font-bold text-accent-soft-foreground ${
+              offline.mesh ? 'text-lg' : 'text-2xl'
+            }`}
+          >
+            {offline.label}
           </h1>
         )}
       </div>

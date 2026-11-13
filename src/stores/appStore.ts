@@ -223,8 +223,8 @@ const useAppStoreBase = create<AppStoreState>()(
           mnsDomains: [],
         }));
       },
-      // Auto-lock timeout (disabled by default)
-      autoLockTimeout: null,
+      // Auto-lock timeout: 5 minutes by default (a choice saved before stays)
+      autoLockTimeout: 300,
       setAutoLockTimeout: (timeout: number | null) => {
         set({ autoLockTimeout: timeout });
       },

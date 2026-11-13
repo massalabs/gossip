@@ -55,21 +55,32 @@ impl SessionConfig {
 
     /// Creates a default configuration with sensible defaults:
     /// - Announcement age: 1 week
-    /// - Announcement future: 1 minute
-    /// - Message age: 1 week
-    /// - Message future: 1 minute
-    /// - Session inactivity: 1 week
+    /// - Announcement future: 1 hour
+    /// - Message age: 2 weeks
+    /// - Message future: 1 day
+    /// - Session inactivity: 2 weeks
     /// - Keep-alive interval: 1 day
     /// - Max lag: 10000 messages
     /// - Max peer lag before keep-alive: 8 messages
+    ///
+    /// The clock windows allow for store-and-forward delivery: a phone that relays
+    /// over Bluetooth while offline has no time source, and a clock set by hand can be
+    /// off by a whole time zone. A message dated beyond the future window is not lost,
+    /// only left to be read again later; one older than the age window is delivered and
+    /// flagged stale. Two weeks matches the network's retention, past which a message
+    /// cannot be fetched anyway. Announcements keep a tighter future window because a
+    /// future-dated announcement blocks the sender's later, correctly dated ones.
+    /// Session inactivity is measured on the peer's message timestamps, so it matches
+    /// the message age window: a message that waited up to two weeks in transit still
+    /// finds its session instead of arriving after it expired.
     pub fn new_default() -> Self {
         Self {
             inner: sessions::SessionManagerConfig {
                 max_incoming_announcement_age_millis: 604_800_000, // 1 week
-                max_incoming_announcement_future_millis: 60_000,   // 1 minute
-                max_incoming_message_age_millis: 604_800_000,      // 1 week
-                max_incoming_message_future_millis: 60_000,        // 1 minute
-                max_session_inactivity_millis: 604_800_000,        // 1 week
+                max_incoming_announcement_future_millis: 3_600_000, // 1 hour
+                max_incoming_message_age_millis: 1_209_600_000,    // 2 weeks
+                max_incoming_message_future_millis: 86_400_000,    // 1 day
+                max_session_inactivity_millis: 1_209_600_000,      // 2 weeks
                 keep_alive_interval_millis: 86_400_000,            // 1 day
                 max_session_lag_length: 10000,
                 max_keep_alive_peer_lag_length: 8,
@@ -440,6 +451,36 @@ pub struct ReceiveMessageOutput {
     timestamp: f64,
     acknowledged_seekers: js_sys::Array,
     user_id: Vec<u8>,
+    stale: bool,
+}
+
+/// Announcement for a peer, with the board entry that carries it to a peer we
+/// already exchanged announcements with.
+#[wasm_bindgen]
+pub struct AddressedAnnouncement {
+    announcement: Vec<u8>,
+    mailbox: Option<sessions::ReannouncementPost>,
+}
+
+#[wasm_bindgen]
+impl AddressedAnnouncement {
+    /// The announcement bytes to post to the announcement board.
+    #[wasm_bindgen(getter)]
+    pub fn announcement(&self) -> Vec<u8> {
+        self.announcement.clone()
+    }
+
+    /// Seeker of the board entry carrying the announcement, if any.
+    #[wasm_bindgen(getter)]
+    pub fn mailbox_seeker(&self) -> Option<Vec<u8>> {
+        self.mailbox.as_ref().map(|post| post.seeker.clone())
+    }
+
+    /// Signed entry to post at `mailbox_seeker` like a message, if any.
+    #[wasm_bindgen(getter)]
+    pub fn mailbox_data(&self) -> Option<Vec<u8>> {
+        self.mailbox.as_ref().map(|post| post.data.clone())
+    }
 }
 
 /// Result from feeding an incoming announcement.
@@ -496,6 +537,13 @@ impl ReceiveMessageOutput {
     pub fn user_id(&self) -> Vec<u8> {
         self.user_id.clone()
     }
+
+    /// Whether the sender's timestamp is older than the configured maximum age or than
+    /// the previous message: authentic and in order, but possibly delayed in transit.
+    #[wasm_bindgen(getter)]
+    pub fn stale(&self) -> bool {
+        self.stale
+    }
 }
 
 /// Session manager wrapper for WebAssembly.
@@ -522,6 +570,12 @@ impl SessionManagerWrapper {
         let inner = sessions::SessionManager::from_encrypted_blob(encrypted_blob, &key.inner)
             .ok_or_else(|| JsValue::from_str("Failed to decrypt session manager"))?;
         Ok(Self { inner })
+    }
+
+    /// Replaces the configuration, which a manager restored from a blob otherwise keeps
+    /// from when it was created.
+    pub fn set_config(&mut self, config: SessionConfig) {
+        self.inner.set_config(config.inner);
     }
 
     /// Serializes and encrypts the session manager into a blob.
@@ -569,6 +623,47 @@ impl SessionManagerWrapper {
             &our_sk.inner,
             user_data.to_vec(),
         )
+    }
+
+    /// Same as `establish_outgoing_session`, also returning the board entry that
+    /// carries the announcement to a peer we already exchanged announcements with.
+    pub fn establish_outgoing_session_addressed(
+        &mut self,
+        peer_pk: &UserPublicKeys,
+        our_pk: &UserPublicKeys,
+        our_sk: &UserSecretKeys,
+        user_data: &[u8],
+    ) -> AddressedAnnouncement {
+        let (announcement, mailbox) = self.inner.establish_outgoing_session_addressed(
+            &peer_pk.inner,
+            &our_pk.inner,
+            &our_sk.inner,
+            user_data.to_vec(),
+        );
+        AddressedAnnouncement {
+            announcement,
+            mailbox,
+        }
+    }
+
+    /// Gets the seekers where peers would post their next announcement to us
+    /// (JS-owned Uint8Arrays, see `get_message_board_read_keys`).
+    pub fn get_reannouncement_mailbox_keys(&self) -> js_sys::Array {
+        let seekers = self.inner.get_reannouncement_mailbox_keys();
+        let array = js_sys::Array::new();
+        for seeker in seekers {
+            let js_seeker = js_sys::Uint8Array::new_with_length(seeker.len() as u32);
+            js_seeker.copy_from(&seeker);
+            array.push(&js_seeker);
+        }
+        array
+    }
+
+    /// Returns the announcement carried by an entry read at a re-announcement
+    /// mailbox seeker, if it is signed by the seeker key and decrypts; feed it to
+    /// `feed_incoming_announcement`.
+    pub fn open_reannouncement_mailbox_read(&self, seeker: &[u8], data: &[u8]) -> Option<Vec<u8>> {
+        self.inner.open_reannouncement_mailbox_read(seeker, data)
     }
 
     /// Feeds an incoming announcement from the blockchain.
@@ -632,6 +727,20 @@ impl SessionManagerWrapper {
         array
     }
 
+    /// Gets the seekers of the messages after the next one from each peer, for
+    /// transports that request messages ahead of time (JS-owned Uint8Arrays, see
+    /// `get_message_board_read_keys`).
+    pub fn get_message_board_lookahead_keys(&self) -> js_sys::Array {
+        let seekers = self.inner.get_message_board_lookahead_keys();
+        let array = js_sys::Array::new();
+        for seeker in seekers {
+            let js_seeker = js_sys::Uint8Array::new_with_length(seeker.len() as u32);
+            js_seeker.copy_from(&seeker);
+            array.push(&js_seeker);
+        }
+        array
+    }
+
     /// Sends a message to a peer.
     pub fn send_message(
         &mut self,
@@ -681,6 +790,7 @@ impl SessionManagerWrapper {
                     timestamp: output.timestamp as f64,
                     acknowledged_seekers,
                     user_id: output.user_id.clone(),
+                    stale: output.stale,
                 }
             })
     }
@@ -722,6 +832,24 @@ impl SessionManagerWrapper {
     }
 
     /// Discards a peer and all associated session state.
+    /// Timestamp (milliseconds) of the latest announcement accepted from a peer, if
+    /// any: keep it when discarding the peer to refuse replays of older ones.
+    pub fn peer_latest_incoming_announcement_timestamp(
+        &self,
+        peer_id: &[u8],
+    ) -> Result<Option<f64>, JsValue> {
+        if peer_id.len() != 32 {
+            return Err(JsValue::from_str("Peer ID must be 32 bytes"));
+        }
+        let mut peer_id_arr = [0u8; 32];
+        peer_id_arr.copy_from_slice(peer_id);
+        let peer_id = auth::UserId::from_bytes(peer_id_arr);
+        Ok(self
+            .inner
+            .peer_latest_incoming_announcement_timestamp(&peer_id)
+            .map(|timestamp| timestamp as f64))
+    }
+
     pub fn peer_discard(&mut self, peer_id: &[u8]) -> Result<(), JsValue> {
         if peer_id.len() != 32 {
             return Err(JsValue::from_str("Peer ID must be 32 bytes"));
@@ -748,5 +876,17 @@ impl SessionManagerWrapper {
             array.push(&js_peer_id);
         }
         array
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_session_outlives_the_messages_it_accepts() {
+        // a message delayed up to the age window must still find its session
+        let config = SessionConfig::new_default().inner;
+        assert!(config.max_session_inactivity_millis >= config.max_incoming_message_age_millis);
     }
 }

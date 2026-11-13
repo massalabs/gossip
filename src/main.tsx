@@ -11,6 +11,13 @@ import { useAppStore } from './stores/appStore';
 import { establishFirstInstallCreationGrant } from './hooks/useProfileLoader';
 import { protocolConfig } from './config/protocol';
 import { SECURE_STORAGE_ENABLED } from './config/features';
+import {
+  attachMeshArrivals,
+  createMeshTransport,
+  probeMeshAvailability,
+  isMeshEnabled,
+  startMesh,
+} from './services/meshNode';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
@@ -68,8 +75,13 @@ configureAppLogging();
 const isNative = Capacitor.isNativePlatform();
 
 async function bootstrap() {
+  // Null where the mesh is unavailable: the SDK then builds its default REST
+  // transport. Elsewhere the mesh member stays off until the user turns it on.
+  await probeMeshAvailability();
+  const meshTransport = createMeshTransport();
   const sdk = await createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
+    messageProtocol: meshTransport?.messageProtocol,
     config: { polling: { enabled: true } },
     storage: SECURE_STORAGE_ENABLED
       ? {
@@ -81,6 +93,18 @@ async function bootstrap() {
         ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
         : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
   });
+
+  if (meshTransport) {
+    await attachMeshArrivals(sdk, meshTransport.mesh);
+    if (await isMeshEnabled()) {
+      // No permission or no Bluetooth: the app runs on REST alone, as before.
+      await startMesh().catch(error => {
+        if (import.meta.env.DEV) {
+          logger.warn('[MeshNode] mesh not started', error);
+        }
+      });
+    }
+  }
 
   await initSafeArea();
   return sdk;

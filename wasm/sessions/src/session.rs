@@ -79,6 +79,13 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 /// where hash_bytes is the massa_hash of the seeker's public key.
 const MESSAGE_SEEKER_DB_KEY: &[u8] = &[1u8];
 
+/// How many seekers past the next one a receiver watches for a peer's messages.
+pub const SEEKER_LOOKAHEAD: usize = 3;
+
+/// A sender draws a fresh seeker keypair for one message in this many (on average)
+/// and derives it from the previous one otherwise. Must divide 256.
+const SEEKER_REFRESH_ONE_IN: u8 = 4;
+
 /// Session initialization payload embedded in announcements.
 ///
 /// This is serialized, encrypted in an auth blob, and included in the announcement.
@@ -145,6 +152,35 @@ pub struct FeedIncomingMessageOutput {
     pub newly_acknowledged_self_seekers: Vec<Vec<u8>>,
     /// User Id of the peer that sent the message
     pub user_id: Vec<u8>,
+    /// Set by the session manager when the sender's timestamp is older than the
+    /// configured maximum age or than the previous message: the message is still
+    /// authentic and in order, but it may have been delayed in transit.
+    pub stale: bool,
+}
+
+/// Why an incoming message was not accepted by [`Session::feed_incoming_message`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedIncomingMessageError {
+    /// Malformed, or not signed by the seeker key: anyone who knows the seeker can
+    /// produce this, so it says nothing about the session. No state was touched.
+    Unauthenticated,
+    /// Signed by the seeker key, which only the peer and we hold, but it does not
+    /// decrypt: the two sides of the session have diverged.
+    Undecryptable,
+}
+
+/// An incoming message decrypted but not applied to the session yet (see
+/// [`Session::decrypt_incoming_message`]).
+pub struct PendingIncomingMessage {
+    decrypted: crypto_agraphon::DecryptedIncomingMessage,
+    message: Message,
+}
+
+impl PendingIncomingMessage {
+    /// Timestamp the sender put in the message (milliseconds since Unix epoch).
+    pub fn timestamp(&self) -> u128 {
+        self.message.timestamp
+    }
 }
 
 /// Incoming session initiation request from a peer.
@@ -160,7 +196,7 @@ pub struct IncomingInitiationRequest {
     /// Timestamp when the peer created this announcement (milliseconds since Unix epoch)
     pub(crate) timestamp_millis: u128,
     /// Peer's random seed used to derive their initial seeker keypair via KDF
-    seeker_seed: [u8; 32],
+    pub(crate) seeker_seed: [u8; 32],
 }
 
 impl IncomingInitiationRequest {
@@ -238,7 +274,7 @@ pub struct OutgoingInitiationRequest {
     agraphon_announcement: crypto_agraphon::OutgoingAnnouncement,
     pub(crate) timestamp_millis: u128,
     /// Random seed for deriving initial seeker keypair
-    seeker_seed: [u8; 32],
+    pub(crate) seeker_seed: [u8; 32],
 }
 
 impl OutgoingInitiationRequest {
@@ -303,6 +339,104 @@ impl OutgoingInitiationRequest {
             },
         )
     }
+}
+
+/// Length of the time window a re-announcement mailbox stays at one seeker.
+pub const REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS: u128 = 6 * 60 * 60 * 1000;
+
+/// Window index of `timestamp_millis` (see [`REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS`]).
+pub(crate) fn reannouncement_mailbox_window(timestamp_millis: u128) -> u64 {
+    (timestamp_millis / REANNOUNCEMENT_MAILBOX_WINDOW_MILLIS) as u64
+}
+
+/// Expands the KDF over both announcement seeds and the window for `info`.
+fn reannouncement_mailbox_expand(
+    sender_seed: &[u8; 32],
+    receiver_seed: &[u8; 32],
+    window: u64,
+    info: &[u8],
+    output: &mut [u8],
+) {
+    let mut kdf = crypto_kdf::Extract::new(b"session.reannounce.salt---------");
+    kdf.input_item(sender_seed.as_slice());
+    kdf.input_item(receiver_seed.as_slice());
+    kdf.input_item(window.to_be_bytes().as_slice());
+    kdf.finalize().expand(info, output);
+}
+
+/// Keypair of the board entry where the sender of the announcement with
+/// `sender_seed` posts its next announcement to the peer whose latest announcement
+/// had `receiver_seed`, during time window `window`.
+///
+/// Only the two peers know both seeds, so the entry is unlinkable for anyone else,
+/// and both can sign it, as with message seekers. Each new announcement from the
+/// sender moves the entry, so the receiver follows a chain of them; the window
+/// moves it every few hours too, so a quiet pair does not keep one seeker for weeks.
+pub(crate) fn reannouncement_mailbox_keypair(
+    sender_seed: &[u8; 32],
+    receiver_seed: &[u8; 32],
+    window: u64,
+) -> massa_signature::KeyPair {
+    // Massa keypair format: [version_byte, 32_secret_key_bytes]
+    let mut key = Zeroizing::new([0u8; 33]);
+    reannouncement_mailbox_expand(
+        sender_seed,
+        receiver_seed,
+        window,
+        b"session.reannounce.key",
+        &mut key[1..],
+    );
+    massa_signature::KeyPair::from_bytes(key.as_slice())
+        .expect("Failed to derive re-announcement keypair")
+}
+
+/// Key the announcement is encrypted under at its mailbox, so the entry does not
+/// repeat the bytes of the board copy: an observer of both cannot tell from them
+/// who the board announcement was for.
+pub(crate) fn reannouncement_mailbox_wrap_key(
+    sender_seed: &[u8; 32],
+    receiver_seed: &[u8; 32],
+    window: u64,
+) -> crypto_aead::Key {
+    let mut key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
+    reannouncement_mailbox_expand(
+        sender_seed,
+        receiver_seed,
+        window,
+        b"session.reannounce.wrap",
+        key.as_mut_slice(),
+    );
+    crypto_aead::Key::from_ref(&key)
+}
+
+/// `nonce ‖ AEAD(announcement)`, bound to the mailbox seeker.
+pub(crate) fn wrap_reannouncement(
+    key: &crypto_aead::Key,
+    seeker: &[u8],
+    announcement: &[u8],
+) -> Vec<u8> {
+    let mut nonce_bytes = [0u8; crypto_aead::NONCE_SIZE];
+    crypto_rng::fill_buffer(&mut nonce_bytes);
+    let nonce = crypto_aead::Nonce::from(nonce_bytes);
+    let mut wrapped = nonce_bytes.to_vec();
+    wrapped.extend(crypto_aead::encrypt(key, &nonce, announcement, seeker));
+    wrapped
+}
+
+/// Inverse of [`wrap_reannouncement`].
+pub(crate) fn unwrap_reannouncement(
+    key: &crypto_aead::Key,
+    seeker: &[u8],
+    wrapped: &[u8],
+) -> Option<Vec<u8>> {
+    let nonce_bytes: [u8; crypto_aead::NONCE_SIZE] =
+        wrapped.get(..crypto_aead::NONCE_SIZE)?.try_into().ok()?;
+    crypto_aead::decrypt(
+        key,
+        &crypto_aead::Nonce::from(nonce_bytes),
+        wrapped.get(crypto_aead::NONCE_SIZE..)?,
+        seeker,
+    )
 }
 
 /// An established session between two peers.
@@ -409,7 +543,47 @@ impl Session {
         }
     }
 
-    fn compute_seeker(seeker_public_key: &massa_signature::PublicKey) -> Vec<u8> {
+    /// Seeker keypair that follows `keypair` when the sender derives it instead of
+    /// drawing a fresh one. Both sides hold every seeker keypair, so the receiver can
+    /// compute the seekers of the next messages before it reads them.
+    fn derive_following_seeker_keypair(
+        keypair: &massa_signature::KeyPair,
+    ) -> massa_signature::KeyPair {
+        let mut kdf = crypto_kdf::Extract::new(b"session.seeker.ahead.salt-------");
+        kdf.input_item(Zeroizing::new(keypair.to_bytes()).as_slice());
+        let expander = kdf.finalize();
+        // Massa keypair format: [version_byte, 32_secret_key_bytes]
+        let mut seeker_key = Zeroizing::new([0u8; 33]);
+        expander.expand(b"session.seeker.ahead.key", &mut seeker_key[1..]);
+        massa_signature::KeyPair::from_bytes(seeker_key.as_slice())
+            .expect("Failed to derive following seeker keypair")
+    }
+
+    /// Seekers the peer's messages after the next one will use, as long as the peer
+    /// keeps deriving its seeker keypairs (see [`send_outgoing_message`](Self::send_outgoing_message)).
+    ///
+    /// They let a store-and-forward transport request several messages in one round
+    /// trip; the messages are still read in order, each at
+    /// [`next_peer_message_seeker`](Self::next_peer_message_seeker). A peer running an
+    /// older version always draws fresh keypairs, so these seekers then stay empty.
+    pub fn peer_message_seekers_ahead(&self) -> Vec<Vec<u8>> {
+        let mut seekers = Vec::with_capacity(SEEKER_LOOKAHEAD);
+        let mut keypair = Self::derive_following_seeker_keypair(&self.peer_seeker_massa_keypair);
+        for _ in 0..SEEKER_LOOKAHEAD {
+            seekers.push(Self::compute_seeker(&keypair.get_public_key()));
+            keypair = Self::derive_following_seeker_keypair(&keypair);
+        }
+        seekers
+    }
+
+    #[cfg(test)]
+    pub(crate) fn derive_following_seeker_keypair_for_test(
+        keypair: &massa_signature::KeyPair,
+    ) -> massa_signature::KeyPair {
+        Self::derive_following_seeker_keypair(keypair)
+    }
+
+    pub(crate) fn compute_seeker(seeker_public_key: &massa_signature::PublicKey) -> Vec<u8> {
         // Hash the public key bytes to get a fixed-size identifier
         let public_key_bytes = seeker_public_key.to_bytes();
         let hash = massa_hash::Hash::compute_from(&public_key_bytes);
@@ -451,9 +625,17 @@ impl Session {
         // get timestamp
         let timestamp = crate::utils::timestamp_millis();
 
-        // generate seeker for next message on our side
-        let mut seeker_keypair =
-            massa_signature::KeyPair::generate(0).expect("Failed to generate seeker keypair");
+        // Seeker for the next message on our side. It is usually derived from the
+        // current one, so the peer can watch the next few seekers in advance; one
+        // time in SEEKER_REFRESH_ONE_IN it is drawn fresh, which bounds how many
+        // seekers a leaked seeker key lets anyone predict.
+        let mut refresh_draw = [0u8; 1];
+        crypto_rng::fill_buffer(&mut refresh_draw);
+        let mut seeker_keypair = if refresh_draw[0] % SEEKER_REFRESH_ONE_IN == 0 {
+            massa_signature::KeyPair::generate(0).expect("Failed to generate seeker keypair")
+        } else {
+            Self::derive_following_seeker_keypair(&self.self_seeker_massa_keypair)
+        };
 
         // flip with the current seeker
         std::mem::swap(&mut seeker_keypair, &mut self.self_seeker_massa_keypair);
@@ -485,11 +667,25 @@ impl Session {
             &self.peer_public_keys.kem_public_key,
         );
 
+        let data = Self::sign_board_entry(&seeker_keypair, &seeker, &agraphon_message_bytes);
+
+        SendOutgoingMessageOutput {
+            timestamp,
+            seeker: seeker.to_vec(),
+            data,
+        }
+    }
+
+    /// Wraps `payload` as a board entry at `seeker`, signed by the seeker keypair:
+    /// `[pk_len, seeker_pk, sig_len, signature, payload]`. Nodes accept the entry
+    /// only if `seeker` commits to the public key and the signature verifies.
+    pub(crate) fn sign_board_entry(
+        seeker_keypair: &massa_signature::KeyPair,
+        seeker: &[u8],
+        payload: &[u8],
+    ) -> Vec<u8> {
         // assemble the data to sign
-        let data_to_sign = Zeroizing::new(Self::compute_seeker_data_to_sign(
-            &seeker,
-            &agraphon_message_bytes,
-        ));
+        let data_to_sign = Zeroizing::new(Self::compute_seeker_data_to_sign(seeker, payload));
 
         // hash the data to sign
         let hash_to_sign = massa_hash::Hash::compute_from(&data_to_sign);
@@ -501,21 +697,15 @@ impl Session {
         let signature_bytes = signature.to_bytes();
 
         // assemble the data
-        let seeker_public_key_bytes = seeker_public_key.to_bytes();
-        let data = [
+        let seeker_public_key_bytes = seeker_keypair.get_public_key().to_bytes();
+        [
             &[seeker_public_key_bytes.len() as u8],
             seeker_public_key_bytes.as_slice(),
             &[signature_bytes.len() as u8],
             signature_bytes.as_slice(),
-            agraphon_message_bytes.as_slice(),
+            payload,
         ]
-        .concat();
-
-        SendOutgoingMessageOutput {
-            timestamp,
-            seeker: seeker.to_vec(),
-            data,
-        }
+        .concat()
     }
 
     /// Returns the seeker (database key) for the next message from the peer.
@@ -551,6 +741,76 @@ impl Session {
         seeker: &[u8],
         message: &[u8],
     ) -> Option<FeedIncomingMessageOutput> {
+        self.feed_incoming_message(self_static_sk, seeker, message)
+            .ok()
+    }
+
+    /// Same as [`try_feed_incoming_message`](Self::try_feed_incoming_message), but tells
+    /// an unauthenticated message apart from a session that can no longer decrypt.
+    pub fn feed_incoming_message(
+        &mut self,
+        self_static_sk: &auth::UserSecretKeys,
+        seeker: &[u8],
+        message: &[u8],
+    ) -> Result<FeedIncomingMessageOutput, FeedIncomingMessageError> {
+        let pending = self.decrypt_incoming_message(self_static_sk, seeker, message)?;
+        Ok(self.commit_incoming_message(pending))
+    }
+
+    /// Like [`feed_incoming_message`](Self::feed_incoming_message), without changing
+    /// any state: [`commit_incoming_message`](Self::commit_incoming_message) applies
+    /// the result, dropping it leaves the session as if the message was never read.
+    pub fn decrypt_incoming_message(
+        &self,
+        self_static_sk: &auth::UserSecretKeys,
+        seeker: &[u8],
+        message: &[u8],
+    ) -> Result<PendingIncomingMessage, FeedIncomingMessageError> {
+        let message_bytes = Self::authenticate_incoming_message(seeker, message)
+            .ok_or(FeedIncomingMessageError::Unauthenticated)?;
+        let decrypted = self
+            .agraphon_instance
+            .try_decrypt_incoming_message(&self_static_sk.kem_secret_key, &message_bytes)
+            .ok_or(FeedIncomingMessageError::Undecryptable)?;
+        let message: Message = bincode::serde::decode_from_slice(
+            decrypted.message_bytes(),
+            bincode::config::standard(),
+        )
+        .map_err(|_| FeedIncomingMessageError::Undecryptable)?
+        .0;
+        Ok(PendingIncomingMessage { decrypted, message })
+    }
+
+    /// Applies a message read by
+    /// [`decrypt_incoming_message`](Self::decrypt_incoming_message) on this same,
+    /// unchanged session, and advances the ratchet.
+    pub fn commit_incoming_message(
+        &mut self,
+        pending: PendingIncomingMessage,
+    ) -> FeedIncomingMessageOutput {
+        let PendingIncomingMessage { decrypted, message } = pending;
+        let agraphon_result = self.agraphon_instance.commit_incoming_message(decrypted);
+
+        // update peer seeker keypair for next message
+        self.peer_seeker_massa_keypair = message.seeker_massa_keypair_next.clone();
+
+        // get user id of the peer that sent the message
+        let user_id = self.peer_public_keys.derive_id();
+
+        FeedIncomingMessageOutput {
+            timestamp: message.timestamp,
+            message: message.contents.clone(),
+            newly_acknowledged_self_seekers: agraphon_result
+                .newly_acknowledged_self_seekers
+                .clone(),
+            user_id: user_id.as_bytes().to_vec(),
+            stale: false,
+        }
+    }
+
+    /// Checks the seeker commitment and the seeker signature, without touching any state,
+    /// and returns the Agraphon message they cover.
+    pub(crate) fn authenticate_incoming_message(seeker: &[u8], message: &[u8]) -> Option<Vec<u8>> {
         // decompose seeker
         let hash_len = *seeker.first()? as usize;
         let hash_bytes = seeker.get(1..1 + hash_len)?;
@@ -592,34 +852,7 @@ impl Session {
         {
             return None;
         }
-
-        // try to read message from agraphon
-        let agraphon_result = self
-            .agraphon_instance
-            .try_feed_incoming_message(&self_static_sk.kem_secret_key, &message_bytes)?;
-
-        // deserialize the message
-        let message: Message = bincode::serde::decode_from_slice(
-            &agraphon_result.message_bytes,
-            bincode::config::standard(),
-        )
-        .ok()?
-        .0;
-
-        // update peer seeker keypair for next message
-        self.peer_seeker_massa_keypair = message.seeker_massa_keypair_next.clone();
-
-        // get user id of the peer that sent the message
-        let user_id = self.peer_public_keys.derive_id();
-
-        Some(FeedIncomingMessageOutput {
-            timestamp: message.timestamp,
-            message: message.contents.clone(),
-            newly_acknowledged_self_seekers: agraphon_result
-                .newly_acknowledged_self_seekers
-                .clone(),
-            user_id: user_id.as_bytes().to_vec(),
-        })
+        Some(message_bytes)
     }
 
     /// Returns the number of unacknowledged self messages sent by this session.
@@ -811,6 +1044,55 @@ mod tests {
         assert_eq!(receive_output.user_id.len(), 32);
         // Timestamps might differ slightly due to test timing
         assert!((receive_output.timestamp as u128).abs_diff(message.timestamp) < 10);
+    }
+
+    /// Decrypting without committing leaves the session able to read the message again.
+    #[test]
+    fn test_session_decrypt_without_commit_changes_nothing() {
+        let (alice_pk, alice_sk) = generate_test_keypair();
+        let (bob_pk, bob_sk) = generate_test_keypair();
+        let (alice_announcement, alice_outgoing) =
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
+        let (bob_announcement, bob_outgoing) =
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
+        let (bob_incoming_at_alice, _) =
+            IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
+        let (alice_incoming_at_bob, _) =
+            IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
+        let mut alice_session =
+            Session::from_initiation_request_pair(&alice_outgoing, &bob_incoming_at_alice);
+        let mut bob_session =
+            Session::from_initiation_request_pair(&bob_outgoing, &alice_incoming_at_bob);
+
+        let first = alice_session.send_outgoing_message(b"one");
+        let second = alice_session.send_outgoing_message(b"two");
+        let seeker = bob_session.next_peer_message_seeker();
+        assert_eq!(seeker, first.seeker);
+
+        // looked at twice, then dropped
+        for _ in 0..2 {
+            let Ok(pending) =
+                bob_session.decrypt_incoming_message(&bob_sk, &first.seeker, &first.data)
+            else {
+                panic!("decrypts");
+            };
+            assert!(pending.timestamp() > 0);
+        }
+        assert_eq!(bob_session.next_peer_message_seeker(), seeker);
+
+        let pending = bob_session
+            .decrypt_incoming_message(&bob_sk, &first.seeker, &first.data)
+            .ok()
+            .unwrap();
+        assert_eq!(bob_session.commit_incoming_message(pending).message, b"one");
+        assert_eq!(bob_session.next_peer_message_seeker(), second.seeker);
+        assert_eq!(
+            bob_session
+                .try_feed_incoming_message(&bob_sk, &second.seeker, &second.data)
+                .unwrap()
+                .message,
+            b"two"
+        );
     }
 
     /// Tests that messages can be sent in both directions and multiple times

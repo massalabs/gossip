@@ -167,7 +167,10 @@
     "delete": "Delete",
     "react": "React",
     "add_reaction": "Add reaction",
-    "more_emojis": "More emojis"
+    "more_emojis": "More emojis",
+    "delayed": "delayed",
+    "delayed_hint": "Received long after it was sent",
+    "sent_via_mesh": "Sent over the offline mesh, waiting for a bridge"
   },
   "session_issue": {
     "message": "You have sent many messages that have not been acknowledged yet. For security, no more messages will be sent until a reply is received.",
@@ -177,6 +180,11 @@
   "retention_separator": "Auto-delete enabled: {{duration}}",
   "filter_label": "Filter discussions",
   "waiting_connection": "Waiting for connection...",
+  "mesh_connected_one": "Connected to the mesh · {{count}} link",
+  "mesh_connected_few": "Connected to the mesh · {{count}} links",
+  "mesh_connected_many": "Connected to the mesh · {{count}} links",
+  "mesh_connected_other": "Connected to the mesh · {{count}} links",
+  "mesh_no_links": "Mesh on · no phone in range",
   "announcement": "Announcement",
   "lock_account": "Lock"
 }

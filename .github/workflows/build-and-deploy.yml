@@ -41,7 +41,7 @@ jobs:
   build-web:
     runs-on: ubuntu-latest
     env:
-      VITE_GOSSIP_API_URL: ${{ vars.GOSSIP_API_URL }}
+      VITE_GOSSIP_API_URL: ${{ vars.GOSSIP_API_URL }}/v2
       VITE_INVITE_DOMAIN: ${{ (github.ref_name == 'main' || github.ref_type == 'tag') && vars.INVITE_DOMAIN_MAIN || vars.INVITE_DOMAIN_DEV }}
       VITE_SECURE_STORAGE: 'true'
     steps:
@@ -464,6 +464,15 @@ jobs:
           ruby-version: '3.3.10'
           bundler-cache: true
           working-directory: ios/App
+
+      # The Podfile adds the GossipMobile pod (the offline mesh node) only
+      # once its xcframework and Swift bindings exist, so build them before
+      # `pod install`. Without them the app would fall back to the stub
+      # core, which a release build refuses.
+      - name: Build the mesh node (GossipMobile XCFramework + bindings)
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+          bash scripts/build-mesh-ios.sh --release
 
       - name: Install CocoaPods dependencies
         working-directory: ios/App

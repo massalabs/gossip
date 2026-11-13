@@ -62,6 +62,33 @@ export function decodeUserId(encoded: string): Uint8Array {
  * @param encoded - Bech32-encoded string to validate
  * @returns true if valid, false otherwise
  */
+/**
+ * The one spelling of a user ID: lowercase.
+ *
+ * Bech32 text is valid in all lowercase or in all uppercase and both denote
+ * the same ID. IDs are stored and compared as text, so they are brought to
+ * this spelling wherever one comes in from outside (typed, scanned, resolved
+ * from a name) and before one is stored or looked up.
+ *
+ * @throws Error if the ID is not valid
+ */
+export function normalizeUserId(encoded: string): string {
+  return encodeUserId(decodeUserId(encoded));
+}
+
+/**
+ * Like {@link normalizeUserId}, for places that must not start failing on a
+ * text that is not a user ID: such a text is returned unchanged, and is then
+ * simply not found.
+ */
+export function canonicalUserId(encoded: string): string {
+  try {
+    return normalizeUserId(encoded);
+  } catch {
+    return encoded;
+  }
+}
+
 export function isValidUserId(encoded: string): boolean {
   try {
     decodeUserId(encoded);

@@ -7,6 +7,8 @@ import {
   encodeUserId,
   decodeUserId,
   isValidUserId,
+  normalizeUserId,
+  canonicalUserId,
   formatUserId,
   generate as generateUserId,
 } from '../../src/utils/userId';
@@ -35,6 +37,32 @@ describe('userId utils', () => {
       const bytes = new Uint8Array(32).fill(8);
       const invalid = bech32.encode('wrong', bech32.toWords(bytes));
       expect(() => decodeUserId(invalid)).toThrow('Invalid prefix');
+    });
+  });
+
+  describe('normalizeUserId / canonicalUserId', () => {
+    const id = encodeUserId(new Uint8Array(32).fill(7));
+
+    it('brings an uppercase id to lowercase', () => {
+      expect(id.toUpperCase()).not.toBe(id);
+      expect(normalizeUserId(id.toUpperCase())).toBe(id);
+      expect(canonicalUserId(id.toUpperCase())).toBe(id);
+    });
+
+    it('leaves a lowercase id as it is', () => {
+      expect(normalizeUserId(id)).toBe(id);
+      expect(canonicalUserId(id)).toBe(id);
+    });
+
+    it('refuses a mix of cases, which is not a valid id', () => {
+      const mixed = id.slice(0, 20) + id.slice(20).toUpperCase();
+      expect(() => normalizeUserId(mixed)).toThrow();
+      expect(canonicalUserId(mixed)).toBe(mixed);
+    });
+
+    it('throws or returns the text unchanged when it is not an id', () => {
+      expect(() => normalizeUserId('not an id')).toThrow();
+      expect(canonicalUserId('not an id')).toBe('not an id');
     });
   });
 

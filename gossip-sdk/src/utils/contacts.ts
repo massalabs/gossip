@@ -5,7 +5,7 @@ import { logger } from './logs.js';
  * Functions for managing contacts including updating names and deleting contacts.
  */
 
-import { decodeUserId } from './userId.js';
+import { canonicalUserId, decodeUserId } from './userId.js';
 import type { SessionModule } from '../wasm/session.js';
 import type { UserPublicKeys } from '../wasm/bindings.js';
 import type { Contact } from '../db/index.js';
@@ -127,6 +127,15 @@ export async function deleteContact(
       };
     }
 
+    // Remember where the peer's announcements stood: a mesh can bring any of
+    // them back, and the session manager forgets the peer below
+    const floor = session.peerLatestIncomingAnnouncementTimestamp(
+      decodeUserId(contactUserId)
+    );
+    if (floor !== undefined) {
+      await queries.discardedPeers.raise(ownerUserId, contactUserId, floor);
+    }
+
     // Delete contact, discussions, and messages atomically
     await queries.conn.withTransaction(async tx => {
       await queries.contacts.deleteByOwnerAndUser(
@@ -171,6 +180,8 @@ export async function addContact(
   queries: Queries
 ): Promise<AddContactResult> {
   try {
+    // one spelling in the database, whatever the caller was given
+    userId = canonicalUserId(userId);
     const existing = await queries.contacts.getByOwnerAndUser(
       ownerUserId,
       userId

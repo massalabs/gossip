@@ -1,22 +1,81 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { parseInvite } from '../../utils/invite';
+import type { UserPublicKeys } from '@massalabs/gossip-sdk';
+import { tryParseInvite } from '../../utils/invite';
 import toast from 'react-hot-toast';
 import { Capacitor } from '@capacitor/core';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
+import { Bluetooth } from 'react-feather';
 import WebQRScanner from '../qr/WebQRScanner';
 import NativeQRScanner from '../qr/NativeQRScanner';
+import Button from '../ui/Button';
+import {
+  ContactCodeDecoder,
+  type ContactCodeHeader,
+  type VerifiedContact,
+  verifyContactPayload,
+} from '../../utils/contactExchange';
+import {
+  cancelBluetoothExchange,
+  checkBluetoothPermission,
+  fetchContactOverBluetooth,
+  isBluetoothExchangeSupported,
+  requestBluetoothPermission,
+} from '../../services/contactExchange';
 
 interface ScanQRCodeProps {
   onBack: () => void;
-  onScanSuccess: (userId: string, name?: string) => void;
+  /**
+   * `publicKeys` is set when the code carried them (in-person contact code),
+   * already checked against `userId`: no server lookup is needed.
+   */
+  onScanSuccess: (
+    userId: string,
+    name?: string,
+    publicKeys?: UserPublicKeys
+  ) => void;
 }
 
+/** Bluetooth attempts per scan before relying on the camera alone. */
+const BLUETOOTH_ATTEMPTS = 2;
+/**
+ * Bluetooth is the fallback of the animated code, keeping the radio for the
+ * mesh: it starts when the camera has gained nothing for this long...
+ */
+const CAMERA_STALL_MS = 4_000;
+/** ...or has not finished this long after its first frame. */
+const CAMERA_GRACE_MS = 12_000;
+
+type BluetoothState = 'idle' | 'checking' | 'running' | 'failed';
+
+/**
+ * Scans a plain invite QR code, or an in-person contact code: the frames of
+ * the animated code are read until the keys are complete. When the camera
+ * stalls or is slow, the keys are also asked over Bluetooth (at once for the
+ * simple code, which carries none). Whichever finishes first wins; keys are
+ * checked against the user id before use.
+ */
 const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
   const { t } = useTranslation('errors');
-  const [isProcessing, setIsProcessing] = useState(false);
+  const { t: tc } = useTranslation('contacts');
   const isNative = Capacitor.isNativePlatform();
+  const decoderRef = useRef(new ContactCodeDecoder());
+  const doneRef = useRef(false);
+  const bluetoothRef = useRef<BluetoothState>('idle');
+  const [progress, setProgress] = useState<number | null>(null);
+  const [bluetooth, setBluetooth] = useState<BluetoothState>('idle');
+  const [notGossip, setNotGossip] = useState(false);
+  // the animated code's first frame and last progress, for the fallback
+  const cameraRef = useRef<{
+    header: ContactCodeHeader;
+    firstAt: number;
+    lastGainAt: number;
+    progress: number;
+  } | null>(null);
+  const [stopped, setStopped] = useState(false);
+  // The camera is closed and only Bluetooth is left (simple code).
+  const [bluetoothOnly, setBluetoothOnly] = useState(false);
 
   // Disable privacy screen when scanner is opened, re-enable when closed
   useEffect(() => {
@@ -44,24 +103,163 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
     };
   }, [isNative]);
 
-  const handleScanSuccess = async (qrText: string) => {
-    if (isProcessing) return;
-    setIsProcessing(true);
+  // Leaving the scanner stops a Bluetooth attempt still running.
+  useEffect(
+    () => () => {
+      doneRef.current = true;
+      if (bluetoothRef.current === 'running') void cancelBluetoothExchange();
+    },
+    []
+  );
 
-    try {
-      const { userId, name } = parseInvite(qrText);
-      onScanSuccess(userId, name);
-    } catch (error) {
-      logger.error('Failed to parse QR code:', error);
-      toast.error(t('qr_parse_failed'));
-      // The native scanner has already closed itself, and the web one has
-      // stopped. Without this the user is left on an empty screen with no
-      // way back.
+  const setBluetoothState = useCallback((state: BluetoothState) => {
+    bluetoothRef.current = state;
+    setBluetooth(state);
+  }, []);
+
+  const succeed = useCallback(
+    (userId: string, name?: string, publicKeys?: UserPublicKeys) => {
+      if (doneRef.current) {
+        publicKeys?.free();
+        return;
+      }
+      doneRef.current = true;
+      setStopped(true);
+      if (bluetoothRef.current === 'running') void cancelBluetoothExchange();
+      onScanSuccess(userId, name, publicKeys);
+    },
+    [onScanSuccess]
+  );
+
+  const fail = useCallback(
+    (message: string) => {
+      if (doneRef.current) return;
+      doneRef.current = true;
+      setStopped(true);
+      if (bluetoothRef.current === 'running') void cancelBluetoothExchange();
+      toast.error(message);
       onBack();
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+    },
+    [onBack]
+  );
+
+  const runBluetooth = useCallback(
+    async (header: ContactCodeHeader, cameraOpen: boolean) => {
+      setBluetoothState('running');
+      for (let i = 0; i < BLUETOOTH_ATTEMPTS && !doneRef.current; i++) {
+        const contact: VerifiedContact | null =
+          await fetchContactOverBluetooth(header);
+        if (contact) {
+          succeed(contact.userId, contact.name, contact.publicKeys);
+          return;
+        }
+      }
+      if (doneRef.current) return;
+      setBluetoothState('failed');
+      if (!cameraOpen) fail(tc('contact_code.bluetooth_failed'));
+    },
+    [setBluetoothState, succeed, fail, tc]
+  );
+
+  /** One frame was read: try Bluetooth too, if it can run. */
+  const startBluetooth = useCallback(
+    async (header: ContactCodeHeader, headerOnly: boolean) => {
+      if (bluetoothRef.current !== 'idle') return;
+      // The web has no Bluetooth: only the animated code works there.
+      if (!isBluetoothExchangeSupported()) return;
+      setBluetoothState('checking');
+      const permission = await checkBluetoothPermission();
+      if (doneRef.current) return;
+      if (permission === 'granted') {
+        void runBluetooth(header, true);
+        return;
+      }
+      if (!headerOnly) {
+        // The animated code needs no Bluetooth: do not interrupt the camera.
+        setBluetoothState('idle');
+        return;
+      }
+      // The simple code needs Bluetooth. Close the camera first: the
+      // permission prompt cannot show over it on Android.
+      setStopped(true);
+      setBluetoothOnly(true);
+      const requested = await requestBluetoothPermission();
+      if (doneRef.current) return;
+      if (requested !== 'granted') {
+        fail(tc('contact_code.bluetooth_needed'));
+        return;
+      }
+      void runBluetooth(header, false);
+    },
+    [setBluetoothState, runBluetooth, fail, tc]
+  );
+
+  const handleScan = useCallback(
+    (qrText: string) => {
+      if (doneRef.current) return;
+      const decoder = decoderRef.current;
+      const result = decoder.receive(qrText);
+
+      if (result.kind === 'ignored') {
+        if (decoder.lockedHeader) return;
+        const invite = tryParseInvite(qrText);
+        if (invite) {
+          succeed(invite.userId, invite.name);
+          return;
+        }
+        setNotGossip(true);
+        return;
+      }
+
+      setNotGossip(false);
+      if (result.kind === 'complete') {
+        const contact = verifyContactPayload(result.payload);
+        if (!contact) {
+          logger.warn('[QRScan] contact code keys do not match its user id');
+          fail(tc('contact_code.keys_mismatch'));
+          return;
+        }
+        succeed(contact.userId, contact.name, contact.publicKeys);
+        return;
+      }
+
+      if (result.headerOnly) {
+        void startBluetooth(result.header, true);
+        return;
+      }
+      setProgress(result.progress);
+      const now = Date.now();
+      const camera = cameraRef.current;
+      if (!camera) {
+        cameraRef.current = {
+          header: result.header,
+          firstAt: now,
+          lastGainAt: now,
+          progress: result.progress,
+        };
+      } else if (result.progress > camera.progress) {
+        camera.progress = result.progress;
+        camera.lastGainAt = now;
+      }
+    },
+    [succeed, fail, startBluetooth, tc]
+  );
+
+  // The camera stalled or is slow: fall back to Bluetooth.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const camera = cameraRef.current;
+      if (!camera || doneRef.current || bluetoothRef.current !== 'idle') return;
+      const now = Date.now();
+      if (
+        now - camera.lastGainAt >= CAMERA_STALL_MS ||
+        now - camera.firstAt >= CAMERA_GRACE_MS
+      ) {
+        void startBluetooth(camera.header, false);
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, [startBluetooth]);
 
   const handleError = (err: string) => {
     logger.warn('[QRScan]', err);
@@ -69,21 +267,75 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
     onBack();
   };
 
+  const handleCancel = useCallback(() => {
+    doneRef.current = true;
+    if (bluetoothRef.current === 'running') void cancelBluetoothExchange();
+    onBack();
+  }, [onBack]);
+
+  const statusLines: string[] = [];
+  if (notGossip) statusLines.push(tc('contact_code.not_gossip_code'));
+  else if (progress !== null)
+    statusLines.push(
+      tc('contact_code.reading', { percent: Math.round(progress * 100) })
+    );
+  else if (!decoderRef.current.lockedHeader)
+    statusLines.push(tc('contact_code.point_camera'));
+  if (bluetooth === 'running')
+    statusLines.push(tc('contact_code.using_bluetooth'));
+  if (bluetooth === 'failed')
+    statusLines.push(tc('contact_code.bluetooth_failed_keep_camera'));
+  if (
+    !isNative &&
+    decoderRef.current.lockedHeader &&
+    progress === null &&
+    !notGossip
+  )
+    statusLines.push(tc('contact_code.web_simple_code'));
+  const status = statusLines.join('\n');
+
+  if (bluetoothOnly) {
+    return (
+      <div
+        className="app-max-w mx-auto h-full flex flex-col items-center justify-center gap-6 px-6 text-center"
+        role="status"
+        aria-live="polite"
+      >
+        <Bluetooth className="w-10 h-10 text-accent animate-pulse" />
+        <p className="text-base text-foreground">
+          {tc('contact_code.using_bluetooth')}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {tc('contact_code.keep_close')}
+        </p>
+        <Button variant="outline" onClick={handleCancel}>
+          {tc('common:cancel')}
+        </Button>
+      </div>
+    );
+  }
+
   if (isNative) {
     return (
       <NativeQRScanner
-        onScan={handleScanSuccess}
+        onScan={handleScan}
         onError={handleError}
-        onClose={onBack}
+        onClose={handleCancel}
+        continuous
+        status={status}
+        stopped={stopped}
       />
     );
   }
 
   return (
     <WebQRScanner
-      onScan={handleScanSuccess}
+      onScan={handleScan}
       onError={handleError}
-      onClose={onBack}
+      onClose={handleCancel}
+      continuous
+      status={status}
+      stopped={stopped}
     />
   );
 };
