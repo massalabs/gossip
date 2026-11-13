@@ -125,6 +125,21 @@ describe('AuthService', () => {
       );
     });
 
+    it('should accept the user id written in uppercase', async () => {
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockResolvedValue(
+        encodeToBase64(testPublicKeys.to_bytes())
+      );
+
+      const result = await authService.fetchPublicKeyByUserId(
+        testUserId.toUpperCase()
+      );
+
+      expect(result).toBeInstanceOf(UserPublicKeys);
+      expect(mockAuthProtocol.fetchPublicKeyByUserId).toHaveBeenCalledWith(
+        testUserIdBytes
+      );
+    });
+
     it('should refuse keys that do not hash to the user id', async () => {
       vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockResolvedValue(
         encodeToBase64(testPublicKeys.to_bytes())

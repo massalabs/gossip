@@ -5,7 +5,7 @@
  */
 
 import { UserPublicKeys } from '../wasm/bindings.js';
-import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import { decodeUserId } from '../utils/userId.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 import { IAuthProtocol } from '../api/authProtocol.js';
 import type { Queries } from '../db/queries/index.js';
@@ -29,16 +29,19 @@ export class AuthService {
    */
   async fetchPublicKeyByUserId(userId: string): Promise<UserPublicKeys> {
     let publicKeys: UserPublicKeys;
+    let requestedId: Uint8Array;
     try {
-      const base64PublicKey = await this.authProtocol.fetchPublicKeyByUserId(
-        decodeUserId(userId)
-      );
+      requestedId = decodeUserId(userId);
+      const base64PublicKey =
+        await this.authProtocol.fetchPublicKeyByUserId(requestedId);
       publicKeys = UserPublicKeys.from_bytes(decodeFromBase64(base64PublicKey));
     } catch (err) {
       throw new Error(getPublicKeyErrorMessage(err));
     }
-    // the user id is the hash of the keys: a node cannot pass off other keys
-    if (encodeUserId(publicKeys.derive_id()) !== userId) {
+    // The user id is the hash of the keys: a node cannot pass off other keys.
+    // The ids are compared, not their text: the same id can be written in
+    // lowercase or in uppercase.
+    if (!sameBytes(publicKeys.derive_id(), requestedId)) {
       publicKeys.free();
       throw new Error(PUBLIC_KEYS_MISMATCH_ERROR);
     }
@@ -183,4 +186,8 @@ export function getPublicKeyErrorMessage(error: unknown): string {
   }
 
   return `${FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR}. ${errorMessage}`;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
