@@ -56,6 +56,30 @@ describe('Contacts utilities', () => {
     expect(contact?.name).toBe('Alice');
   });
 
+  it('stores a contact added with an uppercase id in lowercase', async () => {
+    const queries = getTestQueries();
+    const result = await addContact(
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID.toUpperCase(),
+      'Alice',
+      publicKeys,
+      queries
+    );
+    expect(result.success).toBe(true);
+    expect(result.contact?.userId).toBe(CONTACTS_CONTACT_USER_ID);
+
+    // the same person in the other spelling is the same contact
+    const again = await addContact(
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
+      'Alice 2',
+      publicKeys,
+      queries
+    );
+    expect(again.success).toBe(false);
+    expect(again.error).toContain('exists');
+  });
+
   it('returns error when contact already exists', async () => {
     const queries = getTestQueries();
     await addContact(

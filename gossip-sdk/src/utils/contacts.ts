@@ -5,7 +5,7 @@ import { logger } from './logs.js';
  * Functions for managing contacts including updating names and deleting contacts.
  */
 
-import { decodeUserId } from './userId.js';
+import { canonicalUserId, decodeUserId } from './userId.js';
 import type { SessionModule } from '../wasm/session.js';
 import type { UserPublicKeys } from '../wasm/bindings.js';
 import type { Contact } from '../db/index.js';
@@ -180,6 +180,8 @@ export async function addContact(
   queries: Queries
 ): Promise<AddContactResult> {
   try {
+    // one spelling in the database, whatever the caller was given
+    userId = canonicalUserId(userId);
     const existing = await queries.contacts.getByOwnerAndUser(
       ownerUserId,
       userId
