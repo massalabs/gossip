@@ -124,6 +124,7 @@ vi.mock('../../src/hooks/usePendingSharedContent', () => ({
 // ---------------------------------------------------------------------------
 
 vi.mock('@capacitor/core', () => ({
+  registerPlugin: () => ({}),
   Capacitor: {
     getPlatform: vi.fn(() => 'web'),
     isNativePlatform: vi.fn(() => false),
