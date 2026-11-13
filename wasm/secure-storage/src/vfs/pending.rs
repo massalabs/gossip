@@ -25,6 +25,43 @@ impl Drop for PendingWrite {
 /// only (see its "Length header" section), never by setting it in `ns_state`.
 /// Does not commit the backend; the caller is responsible for that.
 ///
+/// # A flush that fails is not rolled back
+///
+/// This function writes block after block into the backend, where the
+/// blocks are staged until the backend is committed. When a write fails
+/// midway it returns the error, and the blocks written so far stay staged:
+/// nothing takes them back. `EncryptedFileCore::sync` keeps its pending
+/// writes in that case, so the next flush writes all of them again and
+/// completes the change.
+///
+/// Until that next flush the staged blocks hold a half-applied change. The
+/// simplest form: a flush that only rewrites bytes inside the file (same
+/// length before and after) has updated some of its blocks and not the
+/// others. The length is right, the content is a mix of old and new pages.
+///
+/// The backend has one set of staged blocks and one commit for everything.
+/// A commit made for another reason therefore persists the half-applied
+/// change with it:
+///
+/// * in the browser, `IdbBlockStorage::persist_dirty`, which the worker
+///   runs after a cover traffic tick and after a write to another namespace
+///   (`flushEncrypted` in `secure-storage-worker-api.ts`);
+/// * on iOS and Android, `RedbStorage::commit`, which
+///   `run_cover_scheduler_tick` and `write_namespace_data` call in
+///   `native_vfs.rs`.
+///
+/// If the process stops after such a commit and before the next successful
+/// flush, the half-applied change is what the next unlock finds. SQLite
+/// cannot repair it: its rollback journal is kept in memory
+/// (`journal_mode = MEMORY`) and is gone with the process.
+///
+/// This needs a flush to fail first. Both backends stage block writes in
+/// memory, so in practice that is a block of this session that cannot be
+/// read back or does not decrypt. Closing the gap would take a way to
+/// discard the blocks one flush staged without touching the others; neither
+/// backend offers one today (`RedbStorage::discard_pending` drops
+/// everything staged, cover blocks included).
+///
 /// Each call to `write_session_data` drains its own rerand pool entries
 /// before returning, so this function does not need an additional flush
 /// — the pool is empty for `namespace` by the time we exit.
