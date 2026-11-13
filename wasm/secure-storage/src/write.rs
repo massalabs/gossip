@@ -404,17 +404,35 @@ fn write_length_header<S: BlockStorage + KeypairStorage>(
     session: &UnlockedSession,
     total: u64,
 ) -> Result<()> {
-    let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
-    match decrypt_session_data_block(storage, domain, namespace, session, 0) {
-        Ok(existing) => pt.copy_from_slice(existing.as_ref()),
-        Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
-    }
+    let mut pt = read_block_for_rewrite(storage, domain, namespace, session, 0)?;
     pt[..LENGTH_HDR_SIZE].copy_from_slice(&total.to_be_bytes());
     let pt_arr: &[u8; PLAINTEXT_SIZE] = pt
         .as_slice()
         .try_into()
         .expect(&format!("{} != PLAINTEXT_SIZE", pt.len()));
     encrypt_session_data_block(storage, domain, namespace, session, 0, pt_arr)
+}
+
+/// The plaintext of a block that is about to be partly rewritten.
+///
+/// A block this session cannot decrypt is a cover block: it holds none of
+/// the session's data, and the rewrite starts from random bytes. Any other
+/// error (the backend failed to read) is returned, so that a block holding
+/// data is never replaced because it could not be read.
+fn read_block_for_rewrite<S: BlockStorage>(
+    storage: &S,
+    domain: &str,
+    namespace: u8,
+    session: &UnlockedSession,
+    block_index: u64,
+) -> Result<Zeroizing<Vec<u8>>> {
+    let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+    match decrypt_session_data_block(storage, domain, namespace, session, block_index) {
+        Ok(existing) => pt.copy_from_slice(existing.as_ref()),
+        Err(SecureStorageError::CorruptedBlock) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
+        Err(e) => return Err(e),
+    }
+    Ok(pt)
 }
 
 /// Shrink namespace data to `new_total` bytes, converting freed blocks to cover.
@@ -613,6 +631,109 @@ mod tests {
         };
 
         (session, NamespaceState::empty(), all_keys)
+    }
+
+    /// A [`MemoryStorage`] whose reads of one block of session 0 can be made to fail.
+    struct FlakyStorage {
+        inner: MemoryStorage,
+        failing_block: std::cell::Cell<Option<u64>>,
+    }
+
+    impl FlakyStorage {
+        fn new() -> Self {
+            Self {
+                inner: MemoryStorage::new(),
+                failing_block: std::cell::Cell::new(None),
+            }
+        }
+    }
+
+    impl BlockStorage for FlakyStorage {
+        fn read_block(
+            &self,
+            session: SessionIndex,
+            namespace: u8,
+            block: u64,
+        ) -> Result<Box<[u8; BLOCK_SIZE]>> {
+            if session.as_u8() == 0 && self.failing_block.get() == Some(block) {
+                return Err(SecureStorageError::Storage("read failed".into()));
+            }
+            self.inner.read_block(session, namespace, block)
+        }
+        fn write_block(
+            &mut self,
+            session: SessionIndex,
+            namespace: u8,
+            block: u64,
+            data: &[u8; BLOCK_SIZE],
+        ) -> Result<()> {
+            self.inner.write_block(session, namespace, block, data)
+        }
+        fn append_block(
+            &mut self,
+            session: SessionIndex,
+            namespace: u8,
+            data: &[u8; BLOCK_SIZE],
+        ) -> Result<()> {
+            self.inner.append_block(session, namespace, data)
+        }
+        fn block_count(&self, session: SessionIndex, namespace: u8) -> Result<u64> {
+            self.inner.block_count(session, namespace)
+        }
+        fn fsync(&self, session: SessionIndex, namespace: u8) -> Result<()> {
+            self.inner.fsync(session, namespace)
+        }
+        fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
+            self.inner.reset_blockstream(session, namespace)
+        }
+        fn namespaces_with_data(&self, session: SessionIndex) -> Result<Vec<u8>> {
+            self.inner.namespaces_with_data(session)
+        }
+    }
+
+    impl KeypairStorage for FlakyStorage {
+        fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
+            self.inner.read_keypair(session)
+        }
+        fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
+            self.inner.write_keypair(session, data)
+        }
+    }
+
+    /// A write that grows the stream from a later block rewrites the length
+    /// header of block 0. If block 0 cannot be read, the write must fail and
+    /// leave block 0 as it was, not replace it.
+    #[test]
+    fn append_keeps_block_0_when_it_cannot_be_read() {
+        run_with_stack(|| {
+            let mut storage = FlakyStorage::new();
+            let (session, mut ns_state, _) = provision_all_sessions(&mut storage.inner);
+
+            let first = vec![0x11u8; 100];
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &first)
+                .unwrap();
+
+            storage.failing_block.set(Some(0));
+            let offset = 2 * PLAINTEXT_SIZE as u64;
+            let result = write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                offset,
+                &[0x22u8; 10],
+            );
+            assert!(matches!(result, Err(SecureStorageError::Storage(_))));
+
+            storage.failing_block.set(None);
+            let block_0 =
+                crate::read::decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0).unwrap();
+            assert_eq!(
+                &block_0[LENGTH_HDR_SIZE..LENGTH_HDR_SIZE + first.len()],
+                &first[..]
+            );
+        });
     }
 
     // --- commit 12: encrypt_session_data_block ---
