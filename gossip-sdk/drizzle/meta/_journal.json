@@ -64,6 +64,13 @@
       "when": 1792426638781,
       "tag": "0008_jittery_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794590816699,
+      "tag": "0009_lowercase_user_ids",
+      "breakpoints": true
     }
   ]
 }
