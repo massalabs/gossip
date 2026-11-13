@@ -341,27 +341,49 @@ describe('Messaging over internet and mesh transports', () => {
     // Alice reaches neither store: capture what she sends instead
     const captured: EncryptedMessage[] = [];
     alice.internet.down = true;
-    const sendOnMesh = meshStore.sendMessage.bind(meshStore);
     meshStore.sendMessage = async message => {
       captured.push(message);
     };
-    await sendText(alice.sdk, bob.sdk, 'first');
-    await sendText(alice.sdk, bob.sdk, 'second');
-    await sendText(alice.sdk, bob.sdk, 'third');
-    meshStore.sendMessage = sendOnMesh;
-    expect(captured).toHaveLength(3);
-
     bob.internet.down = true;
     bob.mesh.down = true;
-    await bob.sdk.messages.ingestMessages([captured[2]]);
-    await bob.sdk.messages.ingestMessages([captured[1], captured[1]]);
-    expect(await texts(bob.sdk, alice.sdk)).toEqual([]);
-    await bob.sdk.messages.ingestMessages([captured[0]]);
-    expect(await receive(bob.sdk, alice.sdk, 3)).toEqual([
-      'first',
-      'second',
-      'third',
-    ]);
+    const sameSeeker = (a: Uint8Array, b: Uint8Array) =>
+      Buffer.from(a).equals(Buffer.from(b));
+
+    // A sender draws a fresh seeker for one message in four, and a message
+    // at a seeker Bob could not predict is only readable in order. Send
+    // rounds of three until Bob predicted a whole round (each round has a
+    // little more than one chance in two).
+    const expected: string[] = [];
+    let readOutOfOrder = false;
+    for (let round = 0; round < 16 && !readOutOfOrder; round++) {
+      captured.length = 0;
+      const sent = ['first', 'second', 'third'].map(text => `${text} ${round}`);
+      for (const text of sent) await sendText(alice.sdk, bob.sdk, text);
+      expect(captured).toHaveLength(3);
+      const [first, second, third] = captured;
+      const ahead = sessionOf(bob.sdk).getMessageBoardLookaheadKeys();
+
+      if (
+        sameSeeker(second.seeker, ahead[0]) &&
+        sameSeeker(third.seeker, ahead[1])
+      ) {
+        await bob.sdk.messages.ingestMessages([third]);
+        await bob.sdk.messages.ingestMessages([second, second]);
+        expect(await texts(bob.sdk, alice.sdk)).toEqual(expected);
+        await bob.sdk.messages.ingestMessages([first]);
+        readOutOfOrder = true;
+      } else {
+        // as a mesh node does: each one once Bob asks for its seeker
+        for (const message of captured) {
+          await bob.sdk.messages.ingestMessages([message]);
+        }
+      }
+      expected.push(...sent);
+      expect(await receive(bob.sdk, alice.sdk, expected.length)).toEqual(
+        expected
+      );
+    }
+    expect(readOutOfOrder).toBe(true);
   });
 
   it('ignores junk posted at a seeker instead of closing the session', async () => {
