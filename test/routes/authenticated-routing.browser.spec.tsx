@@ -106,6 +106,15 @@ vi.mock('../../src/pages/settings/Web3Settings', () => ({
 vi.mock('../../src/pages/settings/PrivacySettings', () => ({
   default: stubPage('page-settings-privacy'),
 }));
+vi.mock('../../src/pages/settings/MeshSettings', () => ({
+  default: stubPage('page-settings-mesh'),
+}));
+vi.mock('../../src/pages/settings/MeshPrepareSettings', () => ({
+  default: stubPage('page-settings-mesh-prepare'),
+}));
+vi.mock('../../src/pages/settings/ShareAppSettings', () => ({
+  default: stubPage('page-settings-mesh-share-app'),
+}));
 
 // ---------------------------------------------------------------------------
 // Mock hooks used by AuthenticatedRoutes
