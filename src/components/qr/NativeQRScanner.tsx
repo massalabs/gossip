@@ -19,6 +19,18 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
   const handlersRef = useRef({ onScan, onError, onClose });
   handlersRef.current = { onScan, onError, onClose };
 
+  // Whether the page is still there. Starting the scanner takes time (the
+  // listener, then the camera permission), and the page can go away
+  // meanwhile. StrictMode's unmount is followed by a mount at once, which
+  // sets it back before anything below reads it.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     // Guard against StrictMode double-mount opening the scanner twice
     if (scanStartedRef.current) return;
@@ -26,18 +38,33 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
 
     void (async () => {
       const listener = continuous
-        ? await QrScanner.addListener('frame', ({ value }) =>
-            handlersRef.current.onScan(value)
-          )
+        ? await QrScanner.addListener('frame', ({ value }) => {
+            if (!mountedRef.current) {
+              // a scanner that opened after the page left: close it
+              QrScanner.finish().catch(() => undefined);
+              return;
+            }
+            handlersRef.current.onScan(value);
+          })
         : null;
+      // The page left while the listener was being registered: the cleanup
+      // below found no scanner to close, so do not open one now.
+      if (!mountedRef.current) {
+        await listener?.remove();
+        return;
+      }
       try {
         const { value } = await QrScanner.scan({
           closeLabel: t('close'),
           continuous,
         });
         // A continuous scan resolves once finish() closed it: nothing to read.
-        if (!continuous) handlersRef.current.onScan(value);
+        if (!continuous && mountedRef.current) {
+          handlersRef.current.onScan(value);
+        }
       } catch (err) {
+        // nobody is left to tell
+        if (!mountedRef.current) return;
         if (isQrScanCancelled(err)) {
           handlersRef.current.onClose();
           return;
