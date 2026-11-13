@@ -89,7 +89,9 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
     if (continuous && stopped) QrScanner.finish().catch(() => undefined);
   }, [continuous, stopped]);
 
-  // Leaving the page closes a scanner still open.
+  // Leaving the page closes a scanner still open, and one that is still
+  // opening (waiting for the camera permission): the plugin remembers the
+  // request and closes that scanner when it appears.
   useEffect(
     () => () => {
       if (continuous) QrScanner.finish().catch(() => undefined);

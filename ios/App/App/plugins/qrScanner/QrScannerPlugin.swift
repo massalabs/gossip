@@ -26,16 +26,34 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
     private weak var current: QrScanViewController?
     /// Status line of a continuous scan, also for a scanner not presented yet.
     private var status = ""
+    /// A scan was asked for and its scanner is not presented yet (the camera
+    /// permission is being asked). Main queue only, like `closeRequested`.
+    private var opening = false
+    /// `finish` was called while the scanner was still opening: there was
+    /// nothing to close yet, so the scanner is not presented at all.
+    private var closeRequested = false
 
     @objc func scan(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.opening = true
+            self.closeRequested = false
+        }
         AVCaptureDevice.requestAccess(for: .video) { granted in
             DispatchQueue.main.async {
+                let closeRequested = self.closeRequested
+                self.opening = false
+                self.closeRequested = false
                 guard granted else {
                     call.reject("Camera permission denied", "PERMISSION_DENIED")
                     return
                 }
                 guard let host = self.bridge?.viewController else {
                     call.reject("No view controller", "UNAVAILABLE")
+                    return
+                }
+                // closed while the permission was asked: as if finish() had closed it
+                if closeRequested {
+                    call.resolve(["value": ""])
                     return
                 }
                 let scanner = QrScanViewController()
@@ -81,7 +99,12 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func finish(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
-            self.current?.finishContinuous()
+            if let scanner = self.current {
+                scanner.finishContinuous()
+            } else if self.opening {
+                // not presented yet: remembered until the permission answers
+                self.closeRequested = true
+            }
             call.resolve()
         }
     }
