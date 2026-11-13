@@ -2,6 +2,7 @@
 name = "gossip-trust"
 version.workspace = true
 edition = "2021"
+rust-version = "1.98"
 license.workspace = true
 description = "Gossip P2P backend: trust-proof protocol interface, trust policy, nullifier registry and built-in schemes"
 

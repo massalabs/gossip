@@ -44,6 +44,14 @@ API, version 2: it serves the same client contract.
 The link protocol is unchanged (`GMSH.2.1`), so a phone built from this copy and one
 built from the original crates talk to each other.
 
+## Rust version
+
+The crates need Rust 1.98 or newer and say so in their manifests (`rust-version`), so an
+older compiler refuses to build them. This is not a formality: the node locks its storage
+file with `File::try_lock`, which the standard library only implements for Android from
+1.98. Built with an older compiler, the library loads but the node never starts on a
+phone, and reports "the pools file is in use".
+
 ## Building and testing
 
 The app build compiles the node for Android and iOS (see OFFLINE-MESH.md). To work on
