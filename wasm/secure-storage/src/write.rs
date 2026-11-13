@@ -277,6 +277,15 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
 /// Handles multi-block writes, partial overwrites, full overwrite optimization,
 /// and length header updates in block 0. Updates `ns_state.total_data_length`
 /// in place if the write extends past the previous end of the namespace.
+///
+/// # Length header
+///
+/// The length of the namespace is persisted in the first [`LENGTH_HDR_SIZE`]
+/// bytes of block 0 and nowhere else: `ns_state.total_data_length` is a copy
+/// that [`crate::unlock::load_namespace_state`] reads back from there at the
+/// next unlock. On return the two are equal, whichever blocks the write
+/// touched. A caller must not raise `ns_state.total_data_length` by itself:
+/// the bytes past the persisted length would be cut off at the next unlock.
 pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
@@ -376,7 +385,36 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
         encrypt_session_data_block(storage, domain, namespace, session, b, pt_arr)?;
     }
 
+    // The loop refreshes the length header only when it rewrites block 0. A
+    // write that grows the stream from a later block must refresh it too:
+    // otherwise the next unlock reads the old length and the bytes written
+    // past it are lost.
+    if new_total != old_total && first_block != 0 {
+        write_length_header(storage, domain, namespace, session, new_total)?;
+    }
+
     Ok(())
+}
+
+/// Rewrite the length header of block 0, keeping the rest of the block.
+fn write_length_header<S: BlockStorage + KeypairStorage>(
+    storage: &mut S,
+    domain: &str,
+    namespace: u8,
+    session: &UnlockedSession,
+    total: u64,
+) -> Result<()> {
+    let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+    match decrypt_session_data_block(storage, domain, namespace, session, 0) {
+        Ok(existing) => pt.copy_from_slice(existing.as_ref()),
+        Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
+    }
+    pt[..LENGTH_HDR_SIZE].copy_from_slice(&total.to_be_bytes());
+    let pt_arr: &[u8; PLAINTEXT_SIZE] = pt
+        .as_slice()
+        .try_into()
+        .expect(&format!("{} != PLAINTEXT_SIZE", pt.len()));
+    encrypt_session_data_block(storage, domain, namespace, session, 0, pt_arr)
 }
 
 /// Shrink namespace data to `new_total` bytes, converting freed blocks to cover.
