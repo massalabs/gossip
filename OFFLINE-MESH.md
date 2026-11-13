@@ -36,8 +36,8 @@ repository alone still builds and runs. A build with the stub hides the mesh: at
 and without it the settings say the mesh is unavailable and the radio never starts.
 
 The Rust node is built in by default. `gossip-mobile` lives in this repository, under
-`wasm/mesh` ([wasm/mesh/README.md](wasm/mesh/README.md)). A build can leave it out to
-skip the Rust cross-compile; it then uses the stub.
+`wasm/mesh` ([wasm/mesh/README.md](wasm/mesh/README.md)), and needs Rust 1.98 or newer.
+A build can leave it out to skip the Rust cross-compile; it then uses the stub.
 
 - **Android.** Unless `GOSSIP_MESH=0` (or `-Pgossip.mesh=false`), Gradle adds the `meshffi` source set
   (`android/app/src/meshffi/java/…/RustMeshCore.kt` and the generated bindings) and runs
