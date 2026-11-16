@@ -38,6 +38,17 @@ const RekeyProgressScreen: React.FC = () => {
             </p>
           </>
         )}
+        {status === 'elsewhere' && (
+          <>
+            <PrivacyGraphic size={120} loading={true} />
+            <h1 className="text-xl font-semibold text-foreground">
+              {t('security.rekey_elsewhere_title')}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {t('security.rekey_elsewhere_body')}
+            </p>
+          </>
+        )}
         {status === 'success' && (
           <>
             <CheckCircle className="w-12 h-12 text-success mx-auto" />

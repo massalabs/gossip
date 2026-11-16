@@ -7,14 +7,22 @@ const mocks = vi.hoisted(() => ({
   commit: vi.fn<() => Promise<void>>(),
   refresh: vi.fn<() => Promise<void>>(),
   epoch: 'epoch-1',
+  epochAfterCommit: 'epoch-2',
+  padding: { admit: 0, unlock: 0 },
   storageState: 'locked',
   profile: null as Record<string, unknown> | null,
   saved: [] as Array<Record<string, unknown>>,
   auth: vi.fn(),
   createPasswordSecurity: vi.fn(),
   logout: vi.fn(async () => {}),
+  windows: [] as string[],
+  otherWindowsLetGo: true,
   userProfile: null as Record<string, unknown> | null,
 }));
+
+// Padding rounds use random 64-hex passwords that open nothing. They are
+// kept out of `calls` and counted separately.
+const isPadding = (password: string) => /^[0-9a-f]{64}$/u.test(password);
 
 function fakeSdk() {
   const note = (name: string) => mocks.calls.push(name);
@@ -30,11 +38,19 @@ function fakeSdk() {
     },
     secureStorageBeginRekey: async () => note('begin'),
     secureStorageAdmitRekey: async (password: string, next?: string) => {
+      if (isPadding(password)) {
+        mocks.padding.admit += 1;
+        return false;
+      }
       note(`admit:${password}${next ? `->${next}` : ''}`);
       return mocks.admit(password, next);
     },
     secureStorageBuildRekeyCandidate: async () => note('build'),
     secureStorageUnlock: async (password: string) => {
+      if (isPadding(password)) {
+        mocks.padding.unlock += 1;
+        return false;
+      }
       note(`unlock:${password}`);
       const ok = await mocks.unlock(password);
       if (ok) mocks.storageState = 'unlocked';
@@ -47,6 +63,7 @@ function fakeSdk() {
     secureStorageCommitRekeyCandidate: async () => {
       note('commit');
       await mocks.commit();
+      mocks.epoch = mocks.epochAfterCommit;
     },
     secureStorageAbortRekey: async () => note('abort'),
     refreshAccountGenerationState: async () => {
@@ -58,6 +75,14 @@ function fakeSdk() {
       return { rewritten: 0, unreadable: 0 };
     },
     persistSessionBlob: async () => note('persistSession'),
+    queries: {
+      privateMigration: {
+        carryOver: async (from: string, to: string) => {
+          note(`journal:${from}->${to}`);
+          return true;
+        },
+      },
+    },
     profiles: {
       getMostRecent: async () => mocks.profile,
       save: async (profile: Record<string, unknown>) => {
@@ -79,6 +104,17 @@ vi.mock('../../src/stores/accountStore', () => ({
 vi.mock('../../src/stores/utils/auth', () => ({
   auth: mocks.auth,
   createPasswordSecurity: mocks.createPasswordSecurity,
+}));
+vi.mock('../../src/services/rekeyTabs', () => ({
+  claimRekey: async () => {
+    mocks.windows.push('claim');
+    return () => mocks.windows.push('release-claim');
+  },
+  waitForOtherWindows: async () => {
+    if (!mocks.otherWindowsLetGo) throw new Error('timed out');
+    mocks.windows.push('others-out');
+    return () => mocks.windows.push('release-others');
+  },
 }));
 vi.mock('@massalabs/gossip-sdk', () => ({
   generateUserKeys: vi.fn(),
@@ -109,7 +145,6 @@ const profile = (extra: Record<string, unknown> = {}) => ({
 const account = (oldPassword: string, finalPassword = oldPassword) => ({
   oldPassword,
   finalPassword,
-  clearsPasswordless: false,
 });
 
 beforeEach(() => {
@@ -117,6 +152,10 @@ beforeEach(() => {
   mocks.calls.length = 0;
   mocks.saved.length = 0;
   mocks.epoch = 'epoch-1';
+  mocks.epochAfterCommit = 'epoch-2';
+  mocks.padding = { admit: 0, unlock: 0 };
+  mocks.windows.length = 0;
+  mocks.otherWindowsLetGo = true;
   mocks.storageState = 'locked';
   mocks.profile = profile();
   mocks.userProfile = profile();
@@ -161,6 +200,13 @@ describe('rekeyLockedStore', () => {
       'notes:gossip1test',
       'lock',
       'commit',
+      // Each kept account is told its login journal is still complete.
+      'unlock:alice-new',
+      'journal:epoch-1->epoch-2',
+      'lock',
+      'unlock:bob',
+      'journal:epoch-1->epoch-2',
+      'lock',
     ]);
     expect(result.reloadRequired).toBe(false);
     // Both accounts got a fresh inner salt and re-encrypted recovery phrase,
@@ -176,6 +222,38 @@ describe('rekeyLockedStore', () => {
       expect(security.mnemonicBackup.backedUp).toBe(true);
       expect(security.mnemonicBackup.createdAt).toEqual(new Date(0));
     }
+  });
+
+  it('does the key work of three accounts however many are entered', async () => {
+    const counts = async (passwords: string[]) => {
+      mocks.padding = { admit: 0, unlock: 0 };
+      mocks.calls.length = 0;
+      mocks.createPasswordSecurity.mockClear();
+      mocks.auth.mockClear();
+      mocks.epoch = 'epoch-1';
+      await rekeyLockedStore(
+        sdk as never,
+        passwords.map(password => account(password))
+      );
+      const real = (prefix: string) =>
+        mocks.calls.filter(call => call.startsWith(prefix)).length;
+      return {
+        admissions: real('admit:') + mocks.padding.admit,
+        unlocks: real('unlock:') + mocks.padding.unlock,
+        freshKeys: mocks.createPasswordSecurity.mock.calls.length,
+        authentications: mocks.auth.mock.calls.length,
+      };
+    };
+
+    const one = await counts(['alice']);
+    expect(one).toEqual({
+      admissions: 3,
+      unlocks: 6,
+      freshKeys: 3,
+      authentications: 6,
+    });
+    expect(await counts(['alice', 'bob'])).toEqual(one);
+    expect(await counts(['alice', 'bob', 'carol'])).toEqual(one);
   });
 
   it('still admits the remaining accounts after a rejection, then changes nothing', async () => {
@@ -201,14 +279,13 @@ describe('rekeyLockedStore', () => {
   it('ignores a biometric secret that opens no account', async () => {
     mocks.admit.mockImplementation(async password => password !== 'stale');
 
-    const result = await rekeyLockedStore(
-      sdk as never,
-      [account('alice')],
-      ['stale']
-    );
+    const result = await rekeyLockedStore(sdk as never, [
+      account('alice'),
+      { ...account('stale'), bestEffort: true },
+    ]);
 
     expect(result.kept.map(kept => kept.oldPassword)).toEqual(['alice']);
-    expect(mocks.calls.at(-1)).toBe('commit');
+    expect(mocks.calls).toContain('commit');
   });
 
   it('locks and aborts when rewriting an account fails', async () => {
@@ -231,13 +308,7 @@ describe('rekeyLockedStore', () => {
 
   it('removes the passwordless marker only when a typed password replaces the secret', async () => {
     mocks.profile = profile({ passwordless: true });
-    await rekeyLockedStore(sdk as never, [
-      {
-        oldPassword: 'secret',
-        finalPassword: 'typed',
-        clearsPasswordless: true,
-      },
-    ]);
+    await rekeyLockedStore(sdk as never, [account('secret', 'typed')]);
     expect(
       (mocks.saved[0].security as Record<string, unknown>).passwordless
     ).toBeUndefined();
@@ -276,16 +347,14 @@ describe('startRekey', () => {
     dispose: vi.fn(),
   });
 
-  it('refuses a wrong current password before logging out', async () => {
-    mocks.auth.mockRejectedValueOnce(new Error('Authentication failed'));
+  it('refuses to start when the open account is not among the entries', async () => {
+    mocks.auth.mockRejectedValue(new Error('Authentication failed'));
     await expect(
       startRekey({
-        currentPassword: 'nope',
-        newPassword: 'next',
-        otherPasswords: [],
+        accounts: [{ credential: 'nope', newPassword: 'next' }],
         biometric: null,
       })
-    ).rejects.toThrow('Authentication failed');
+    ).rejects.toThrow('The open account was not entered');
     expect(mocks.logout).not.toHaveBeenCalled();
     expect(useRekeyStore.getState().status).toBe('idle');
   });
@@ -293,13 +362,21 @@ describe('startRekey', () => {
   it('logs out, rekeys, and stores the new password behind biometrics', async () => {
     const handle = biometric('current');
     await startRekey({
-      currentPassword: 'current',
-      newPassword: 'next',
-      otherPasswords: ['other', ''],
+      accounts: [
+        { credential: 'current', newPassword: 'next' },
+        { credential: 'other' },
+        { credential: '' },
+      ],
       biometric: handle,
     });
 
     expect(mocks.logout).toHaveBeenCalledOnce();
+    expect(mocks.windows).toEqual([
+      'claim',
+      'others-out',
+      'release-others',
+      'release-claim',
+    ]);
     expect(mocks.calls.slice(0, 4)).toEqual([
       'begin',
       'admit:current->next',
@@ -311,12 +388,49 @@ describe('startRekey', () => {
     expect(useRekeyStore.getState().status).toBe('success');
   });
 
+  it('changes several passwords in one operation, the open account kept', async () => {
+    // Only 'current' opens the profile of the account that is logged in.
+    mocks.auth.mockImplementation(async (candidate, password) => {
+      if (candidate === mocks.userProfile && password !== 'current') {
+        throw new Error('Authentication failed');
+      }
+      return { mnemonic: 'the mnemonic', encryptionKey: key() };
+    });
+    await startRekey({
+      accounts: [
+        { credential: 'hidden', newPassword: 'next-hidden' },
+        { credential: 'current' },
+      ],
+      biometric: null,
+    });
+
+    expect(mocks.calls.slice(0, 4)).toEqual([
+      'begin',
+      'admit:hidden->next-hidden',
+      'admit:current',
+      'build',
+    ]);
+    expect(mocks.calls).toContain('commit');
+  });
+
+  it('touches nothing when another window does not log out', async () => {
+    mocks.otherWindowsLetGo = false;
+    const handle = biometric('current');
+    await startRekey({
+      accounts: [{ credential: 'current', newPassword: 'next' }],
+      biometric: handle,
+    });
+
+    expect(mocks.calls).toEqual([]);
+    expect(mocks.windows).toEqual(['claim', 'release-claim']);
+    expect(handle.replace).not.toHaveBeenCalled();
+    expect(useRekeyStore.getState().status).toBe('error');
+  });
+
   it('keeps the biometric account and rewrites its unchanged secret', async () => {
     const handle = biometric('biometric-secret');
     await startRekey({
-      currentPassword: 'current',
-      newPassword: 'next',
-      otherPasswords: [],
+      accounts: [{ credential: 'current', newPassword: 'next' }],
       biometric: handle,
     });
 
@@ -324,12 +438,25 @@ describe('startRekey', () => {
     expect(handle.replace).toHaveBeenCalledWith('biometric-secret');
   });
 
+  it('sets a password on another biometric account and stores it', async () => {
+    const handle = biometric('biometric-secret');
+    await startRekey({
+      accounts: [
+        { credential: 'current' },
+        { credential: 'biometric-secret', newPassword: 'typed' },
+      ],
+      biometric: handle,
+    });
+
+    expect(mocks.calls).toContain('admit:biometric-secret->typed');
+    expect(handle.replace).toHaveBeenCalledWith('typed');
+  });
+
   it('leaves the biometric entry alone when its secret opens no kept account', async () => {
     mocks.admit.mockImplementation(async password => password !== 'stale');
     const handle = biometric('stale');
     await startRekey({
-      currentPassword: 'current',
-      otherPasswords: [],
+      accounts: [{ credential: 'current' }, { credential: 'stale' }],
       biometric: handle,
     });
 
@@ -341,9 +468,10 @@ describe('startRekey', () => {
     mocks.admit.mockImplementation(async password => password !== 'bad');
     const handle = biometric('current');
     await startRekey({
-      currentPassword: 'current',
-      newPassword: 'next',
-      otherPasswords: ['bad'],
+      accounts: [
+        { credential: 'current', newPassword: 'next' },
+        { credential: 'bad' },
+      ],
       biometric: handle,
     });
 

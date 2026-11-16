@@ -14,8 +14,9 @@ Let a logged-in user:
 3. **Refresh the encryption keys** without changing any password. Required
    for deniability (see "Snapshot analysis", rule R3).
 
-All three are the same operation: re-encrypt the store, with the initiating
-account's password replaced or kept.
+All three are the same operation: re-encrypt the store, with each entered
+account's password replaced or kept. Several accounts can change password in
+one operation.
 
 ## Design decision
 
@@ -82,14 +83,23 @@ types, written for this purpose rather than adapted from the migration code:
   source with `old`; derive the destination wrap key and root key from `new`.
 - Every admission does equal work on all slots and fails with one generic
   error, whether the password matched nothing, matched twice, or `new`
-  collides with another admitted password or opens any source slot.
-- `finalize()`: fresh keypair for all three slots. Admitted slots have their
-  new secret key wrapped under the destination key (fresh nonce);
-  non-admitted slots become dummies.
+  collides with the final password of another admitted account. A `new` that
+  happens to open a slot that was not admitted is accepted on purpose: that
+  slot is erased anyway, and rejecting it would confirm that the password
+  exists.
+- `build()`: fresh keypair for all three slots. For an admitted slot, the new
+  secret key is encrypted under the key derived from its final password, with
+  a fresh nonce. Any other slot gets the same envelope under a random
+  throwaway key that no password opens.
 - `rekey_block_batch(namespace, index, [3 blocks])`: for admitted slots,
   decrypt with the source keys, encrypt with the destination root key under
-  the new public key, then rerandomise; cover blocks elsewhere. Block nonces
+  the new public key, then rerandomise. A slot that was not admitted gets
+  fresh cover blocks under its new public key, also rerandomised. Block nonces
   are random per encryption already (`encrypt_block`).
+- There is no per-slot password nonce in this store: the password derivation
+  salt comes from the domain only. The public material of a slot is its public
+  key, the nonce of its wrapped secret key, and its blocks; all of it is
+  fresh for all three slots.
 - Exposed through `wasm_api.rs`, `native_api.rs` and the UniFFI bindings under
   its own names.
 
@@ -185,8 +195,11 @@ restore.
 
 Flow:
 
-1. One screen collects everything first: the current credential, the new
-   password (twice), and the passwords of the other accounts to keep.
+1. One screen collects everything first, as two lists: "Change these
+   passwords" (current credential, new password twice) and "Keep these
+   passwords" (current credential only). An entry can be moved between the
+   lists, added or removed. The account that is logged in must be one of the
+   entries, in either list.
 2. All of them are admitted to the migration plan. Any wrong password, any
    duplicate, or a new password that collides with another account stops the
    operation here, with nothing written.
@@ -199,8 +212,12 @@ Rules for that screen:
   failed or whether it matched a slot.
 - It states plainly that accounts whose password is not entered will be
   erased, and asks for an explicit confirmation before starting.
-- Up to two additional password fields, always offered, since the device holds
-  at most three accounts.
+- At most three entries in total, since the device holds at most three
+  accounts. "Set or change password" needs at least one entry in the change
+  list; "Refresh keys" shows the keep list only. Every button is always
+  visible and is disabled when it would break a limit.
+- The screen advises changing every password in the same operation when one
+  may be known to someone else (see rule R3).
 - **Keeping a biometric-only account.** Its password is a random secret that
   cannot be typed, so it is entered by fingerprint: when the device has
   biometrics, the screen always shows a "keep the account unlocked by
@@ -327,9 +344,17 @@ exists.
   started the operation** (section 6): rewritten whenever its secret matches
   any admitted account, untouched otherwise.
 - **R3. The operation must be available without changing any password**
-  ("Refresh encryption keys"), from any account, as an ordinary action. This
-  gives the innocent explanation for "everything changed but my password did
-  not". Without it, R1 alone is not enough.
+  ("Refresh encryption keys"), from any account, as an ordinary, visible
+  action with a stated reason to use it. This gives the innocent explanation
+  for "everything changed but my password did not". Without it, R1 alone is
+  not enough.
+  This cover is limited: refreshing has little benefit a user could point to,
+  so it explains one occurrence better than many. An adversary needs three or
+  more copies to count occurrences. The stronger cover is to change the decoy
+  password in the same operation as a hidden one, which is why several
+  passwords can be changed at once and the screen recommends it. Both are
+  kept: the combined change when the user follows the advice, the refresh as
+  the fallback when they do not.
 - **R4. No durable marker written by this feature names an account, a slot or
   a count**: lease, authorisation, staged-generation and cleanup-pending
   markers carry only random identifiers.
@@ -463,20 +488,85 @@ None.
 - **Inner keys are rewritten by the app service, not the SDK**, because the
   profile encryption helpers live in the app (`src/stores/utils/auth.ts`).
 - **Authorisation is the open session plus a re-check of the current
-  credential.** There is no separate lease object. Cross-tab safety relies on
-  the existing generation fence: another tab is told to reload after the
-  switch. Writes made by another logged-in tab _during_ the operation are
-  lost.
+  credential.** Other windows are kept out with Web Locks
+  (`src/services/rekeyTabs.ts`): the rekeying window takes an exclusive rekey
+  lock and announces it; every other window logs out (flushing what it
+  wrote), shows a blocking screen and reloads when the lock is released. The
+  rekey starts only once no other window has an account open, and gives up
+  after 15 seconds with nothing changed. A window opened during the rekey
+  finds the lock held and blocks too. On web the rekey then reloads the
+  store from IndexedDB, since other windows' writes are only there.
+
+### Verified on a phone (Galaxy S20 FE, Android, debug build), 16 November 2026
+
+Two accounts with passwords, the decoy in a live conversation with an
+account on another device and holding a note:
+
+- Both passwords changed in one operation: 8.8 s. The old password opens
+  nothing; both new ones open their account; the note and the conversation
+  history are intact; messages go through in both directions afterwards.
+- Refresh keeping both accounts: 8.7 s. Refresh keeping only the decoy:
+  8.4 s, and the other account is gone.
 
 ### Not verified
 
-- **Real phones.** The native path is covered by a Rust test through the
-  command bridge, not by a run on Android or iOS.
-- **Existing conversations.** After the switch, the first login runs the
-  generation journal in `loadAccount`. From reading it, a readable session
-  blob is reopened without a reset, and the rekey re-encrypts that blob. This
-  was not exercised against a backend with a live conversation.
+- **Fingerprint on the device.** Keeping or setting a password on an account
+  that opens by fingerprint needs a person at the phone; covered only in a
+  desktop browser with a simulated authenticator.
+- **iOS.**
 - **Large stores.** Duration and memory were only measured on near-empty
-  accounts (about 4 seconds in a desktop browser).
+  accounts.
 - **Crash injection** between the commit and the old generation's erase was
   not added; that window is the one onboarding's commit already has.
+
+### Review, 16 November 2026
+
+Outcome of the first review pass.
+
+Done:
+
+- Several passwords can be changed in one operation; the form has a change
+  list and a keep list (`RekeyForm.tsx`, `RekeyRequest.accounts`).
+- The open account must be among the entries, otherwise the operation is
+  refused before anything starts.
+- The "no password yet" marker is cleared for any account that gets a typed
+  password, not only the one that is logged in.
+- "Refresh keys" stays a separate entry in Settings, with a reason in its
+  description.
+- **Login journal.** After the switch, each kept account's finished journal
+  is carried over to the new generation (`privateMigration.carryOver`), so
+  the first login no longer walks the five phases written for restored
+  backups. It is not atomic with the switch: an account that misses it walks
+  the journal at its next login, as before. Only a journal finished in the
+  previous generation is carried over.
+- **Other windows** are locked out for the duration (see "How it differs
+  from the plan"). Checked in a browser with two tabs: a note written in the
+  other tab just before the rekey survives it.
+- **Tests asked for by the review:** the storage core rekeys all 26
+  combinations of changed, kept and skipped accounts on a full device, one of
+  them with a 32-byte binary secret like a biometric-only account, and checks
+  that every slot's public key and wrapped-key nonce change. The app service
+  test checks that one, two and three accounts do the same key work.
+- **Duration padding.** Admissions, inner-key rewrites and journal
+  carry-overs are made up to three rounds with passwords that open nothing.
+  In a desktop browser a refresh took 6.2 to 6.4 s with one account and with
+  two. Work that depends on how much an account holds (notes, messaging
+  session, store size) is not padded.
+
+Open:
+
+- **Per-account data outside the encrypted store** (audited, not changed;
+  these predate this feature):
+  - the polling keys of the last open account stay in plain form after
+    lock and background sync keeps polling with them (web: `activeSeekers`
+    in the service-worker bridge; Android: `gossip-active-seekers` in the
+    background runner, which is also included in Android backups);
+  - delivered notifications stay in the tray after lock, tagged with the
+    contact's id;
+  - the last background sync time is kept in plain form.
+    Each can show someone holding the decoy password that another account
+    exists. Clearing them on lock would stop background notifications while
+    the app is locked.
+- A fingerprint entry is only rewritten when the fingerprint is used on the
+  form. An account whose password is typed and changed needs biometric login
+  re-enabled afterwards.

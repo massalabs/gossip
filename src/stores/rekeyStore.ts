@@ -1,6 +1,15 @@
 import { create } from 'zustand';
 
-export type RekeyStatus = 'idle' | 'running' | 'success' | 'error';
+/**
+ * `elsewhere`: another window is rekeying; this one is logged out and
+ * reloads when it is done.
+ */
+export type RekeyStatus =
+  | 'idle'
+  | 'running'
+  | 'success'
+  | 'error'
+  | 'elsewhere';
 
 interface RekeyState {
   status: RekeyStatus;

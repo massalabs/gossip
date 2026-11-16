@@ -698,8 +698,11 @@ export class SecureStorageWorkerApi {
       if ((await accountGenerationStateWeb()) !== 'committed') {
         throw new Error('Account generation is not committed');
       }
-      // Admission and the final read must see every durable write.
+      // Admission and the final read must see every durable write: this
+      // worker's own, flushed here, and those other windows flushed before
+      // they let go of storage, which only the durable image holds.
       await this.flushEncryptedFenced();
+      await this.verifyGenerationFenced(() => reloadDurableStorage());
       beginRekeyWasm();
       this.rekeyCandidateBuilt = false;
     });
