@@ -24,12 +24,34 @@ import { useMessageStore } from '../stores/messageStore';
 let outputEpoch = 0;
 let activeOutputOwner: { sdk: GossipSdk; epoch: number } | null = null;
 let nativeOutputTail = Promise.resolve();
+// Web only: the service-worker bridge generation this owner may write to.
+let webOwnerGeneration: Promise<number | null> = Promise.resolve(null);
 
+function readWebOwnerGeneration(): Promise<number | null> {
+  return Capacitor.isNativePlatform()
+    ? Promise.resolve(null)
+    : bridgeGet<number>('accountOutputGeneration').then(value => value ?? 0);
+}
+
+/**
+ * Stop SDK events from reaching anything outside the encrypted store
+ * (background-sync seekers, notifications, logs). Outputs already accepted
+ * are drained on native. Returns the new epoch.
+ */
 export async function suspendSdkEventOutputs(): Promise<number> {
   activeOutputOwner = null;
   outputEpoch += 1;
   if (Capacitor.isNativePlatform()) await nativeOutputTail;
   return outputEpoch;
+}
+
+/**
+ * Let SDK events reach outside outputs again, for the account that was just
+ * opened. Events raised before the last suspension stay dropped.
+ */
+export function resumeSdkEventOutputs(gossip: GossipSdk): void {
+  webOwnerGeneration = readWebOwnerGeneration();
+  activeOutputOwner = { sdk: gossip, epoch: outputEpoch };
 }
 
 function canPublishSdkOutput(gossip: GossipSdk, epoch: number): boolean {
@@ -43,7 +65,7 @@ function canPublishSdkOutput(gossip: GossipSdk, epoch: number): boolean {
 async function withSdkOutputFence(
   gossip: GossipSdk,
   epoch: number,
-  webOwnerGeneration: Promise<number | null>,
+  ownerGenerationAtEvent: Promise<number | null>,
   publish: () => Promise<void>
 ): Promise<void> {
   if (!canPublishSdkOutput(gossip, epoch)) return;
@@ -52,7 +74,7 @@ async function withSdkOutputFence(
       'gossip-account-output-v1',
       { mode: 'shared' },
       async () => {
-        const ownerGeneration = await webOwnerGeneration;
+        const ownerGeneration = await ownerGenerationAtEvent;
         const currentGeneration =
           (await bridgeGet<number>('accountOutputGeneration')) ?? 0;
         if (
@@ -90,45 +112,37 @@ async function withSdkOutputFence(
  * like notifications.
  */
 export function setupSdkEventHandlers(gossip: GossipSdk): void {
-  const ownerEpoch = outputEpoch;
-  const webOwnerGeneration = Capacitor.isNativePlatform()
-    ? Promise.resolve(null)
-    : bridgeGet<number>('accountOutputGeneration').then(value => value ?? 0);
-  activeOutputOwner = { sdk: gossip, epoch: ownerEpoch };
+  resumeSdkEventOutputs(gossip);
+  // Each event is bound to the owner current when it was raised, so an event
+  // raised before a lock can never publish after it.
+  const owner = () => ({
+    epoch: outputEpoch,
+    generation: webOwnerGeneration,
+  });
   // Propagate seekers to SW bridge (web) and BackgroundRunner (mobile)
   gossip.on(SdkEventType.SEEKERS_UPDATED, (seekers: Uint8Array[]) => {
-    void withSdkOutputFence(
-      gossip,
-      ownerEpoch,
-      webOwnerGeneration,
-      async () => {
-        await bridgeSetMany([
-          ['activeSeekers', seekers.map(s => Array.from(s))],
-          ['accountCleanupBlocked', false],
-        ]);
-        await setActiveSeekersInPreferences(seekers, ownerEpoch, () =>
-          canPublishSdkOutput(gossip, ownerEpoch)
-        );
-      }
-    ).catch(() => {});
+    const { epoch: ownerEpoch, generation } = owner();
+    void withSdkOutputFence(gossip, ownerEpoch, generation, async () => {
+      await bridgeSetMany([
+        ['activeSeekers', seekers.map(s => Array.from(s))],
+        ['accountCleanupBlocked', false],
+      ]);
+      await setActiveSeekersInPreferences(seekers, ownerEpoch, () =>
+        canPublishSdkOutput(gossip, ownerEpoch)
+      );
+    }).catch(() => {});
   });
 
   // Show notification for new discussion requests when app is in background
   gossip.on(SdkEventType.SESSION_REQUESTED, async () => {
+    const { epoch: ownerEpoch, generation } = owner();
     const foreground = await isAppInForeground();
     if (!foreground) {
       try {
-        await withSdkOutputFence(
-          gossip,
-          ownerEpoch,
-          webOwnerGeneration,
-          async () => {
-            await notificationService.showNewDiscussionNotification();
-            logger.info(
-              '[SDK Event] New discussion request notification shown'
-            );
-          }
-        );
+        await withSdkOutputFence(gossip, ownerEpoch, generation, async () => {
+          await notificationService.showNewDiscussionNotification();
+          logger.info('[SDK Event] New discussion request notification shown');
+        });
       } catch {
         // Output failures are fail-closed and must not recreate diagnostics.
       }
@@ -137,6 +151,7 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
 
   // Show notification for incoming messages when app is in background
   gossip.on(SdkEventType.MESSAGE_RECEIVED, async message => {
+    const { epoch: ownerEpoch, generation } = owner();
     // Only notify for incoming messages
     if (message.direction !== MessageDirection.INCOMING) return;
 
@@ -165,7 +180,7 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
       }
       if (discussion?.mutedNotifications) return;
 
-      await withSdkOutputFence(gossip, ownerEpoch, webOwnerGeneration, () =>
+      await withSdkOutputFence(gossip, ownerEpoch, generation, () =>
         notificationService.showDiscussionNotification(message.contactUserId)
       );
     } catch {
@@ -177,11 +192,9 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   gossip.on(
     SdkEventType.ERROR,
     ({ error, context }: { error: Error; context: string }) => {
-      void withSdkOutputFence(
-        gossip,
-        ownerEpoch,
-        webOwnerGeneration,
-        async () => logger.error(`[SDK Error:${context}]`, error)
+      const { epoch: ownerEpoch, generation } = owner();
+      void withSdkOutputFence(gossip, ownerEpoch, generation, async () =>
+        logger.error(`[SDK Error:${context}]`, error)
       ).catch(() => {});
     }
   );

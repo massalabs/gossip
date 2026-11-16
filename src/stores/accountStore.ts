@@ -17,6 +17,11 @@ import { configureBiometricLogin as storeBiometricPassword } from '../services/b
 import { finalizeCommittedAccountGenerationAuthority } from '../services/portableImportAuthorization';
 import { resetAllAccountStorage } from '../services/unsupportedStorageReset';
 import { wipeMesh } from '../services/meshNode';
+import {
+  admitAccountOutputs,
+  clearAccountTraces,
+} from '../services/accountTraces';
+import { SECURE_STORAGE_ENABLED } from '../config/features';
 
 import { Provider, Account } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
@@ -879,6 +884,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
               : undefined;
         }
 
+        // Background sync and notifications for this account, only once the
+        // traces of the last lock are gone.
+        await admitAccountOutputs(sdk);
         const persistOpenedSession = createOnPersist(profile.userId);
         let sessionPersistenceEnabled = !method.resetMessagingSessions;
         try {
@@ -1040,6 +1048,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({ isLoading: true });
 
         await cleanupSession();
+        // Locked means nothing of the account is left outside the encrypted
+        // store. Not awaited: on native it may wait for a background sync to
+        // finish; the next login waits for it instead.
+        if (SECURE_STORAGE_ENABLED) void clearAccountTraces();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
