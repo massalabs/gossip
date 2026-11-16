@@ -30,6 +30,7 @@ import { useOnlineStore } from './stores/useOnlineStore';
 import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
+import { useRekeyCoordination } from './hooks/useRekeyCoordination';
 import PageLayout from './components/ui/Layout/PageLayout.tsx';
 import PortableBackupStartupGate from './components/PortableBackupStartupGate.tsx';
 import {
@@ -48,6 +49,7 @@ export const AppContent: React.FC = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const rekeyStatus = useRekeyStore(state => state.status);
   useProfileLoader();
+  useRekeyCoordination();
   useStoreInit(); // Initialize all stores when user profile is available
   const existingAccountInfo = useAccountInfo();
 

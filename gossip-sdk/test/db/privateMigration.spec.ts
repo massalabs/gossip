@@ -21,6 +21,28 @@ describe('PrivateMigrationQueries', () => {
     });
   });
 
+  it('carries only a finished journal over to a re-encrypted generation', async () => {
+    const queries = getTestQueries().privateMigration;
+    // No journal, and an unfinished one, are left for the next login to walk.
+    await expect(queries.carryOver(EPOCH_A, EPOCH_B)).resolves.toBe(false);
+    await queries.begin(EPOCH_A);
+    await queries.completePhase(EPOCH_A, 1);
+    await expect(queries.carryOver(EPOCH_A, EPOCH_B)).resolves.toBe(false);
+    await expect(queries.get()).resolves.toMatchObject({
+      installationEpoch: EPOCH_A,
+      completedPhase: 1,
+    });
+
+    await queries.beginCompleted(EPOCH_A);
+    // A journal finished in some other generation is not carried over.
+    await expect(queries.carryOver(EPOCH_B, EPOCH_A)).resolves.toBe(false);
+    await expect(queries.carryOver(EPOCH_A, EPOCH_B)).resolves.toBe(true);
+    await expect(queries.begin(EPOCH_B)).resolves.toMatchObject({
+      installationEpoch: EPOCH_B,
+      completedPhase: 5,
+    });
+  });
+
   it('does not let a delayed begin reset concurrently completed progress', async () => {
     const queries = getTestQueries().privateMigration;
     const connection = getTestConnection();

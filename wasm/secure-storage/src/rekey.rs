@@ -404,6 +404,15 @@ mod tests {
         for (old, new) in public_keys(before).iter().zip(public_keys(after)) {
             assert_ne!(old, &new);
         }
+        // The other public value of each slot: the nonce of its wrapped secret
+        // key. It changes for every slot, admitted or not.
+        for slot in 0..SESSION_COUNT as u8 {
+            let slot = SessionIndex::new(slot).unwrap();
+            assert_ne!(
+                read_session_keypair(before, slot).unwrap().sk_nonce,
+                read_session_keypair(after, slot).unwrap().sk_nonce
+            );
+        }
     }
 
     #[test]
@@ -519,6 +528,94 @@ mod tests {
             let after = plan.build(&before).unwrap();
             assert_eq!(read_all(&after, NEW, 0, ALICE_SQL.len()), ALICE_SQL);
             assert_eq!(read_all(&after, BOB, 0, BOB_SQL.len()), BOB_SQL);
+        });
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Fate {
+        Change,
+        Keep,
+        Skip,
+    }
+
+    /// Every combination of changed, kept and skipped accounts on a full
+    /// device. The third account's password is 32 random-looking bytes, like
+    /// the secret of an account created with biometrics only.
+    #[test]
+    fn every_combination_of_changed_kept_and_skipped_accounts() {
+        run_with_stack(|| {
+            const BIOMETRIC: &[u8] = &[
+                0x00, 0xff, 0x13, 0x37, 0x80, 0x7f, 0xc3, 0x28, 0x9a, 0x01, 0xfe, 0x55, 0xaa, 0x10,
+                0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x88, 0x99, 0xab, 0xcd, 0xef, 0x02, 0x04, 0x08,
+                0x0f, 0xf0, 0x66, 0x77,
+            ];
+            let accounts: [(&[u8], &[u8], &[u8], u8); 3] = [
+                (ALICE, b"alice-next", ALICE_SQL, 0),
+                (BOB, b"bob-next", BOB_SQL, 2),
+                (BIOMETRIC, b"typed-at-last", b"biometric account bytes", 1),
+            ];
+            let mut before = MemoryStorage::new();
+            crate::lifecycle::provision_storage_for_domain(&mut before, DOMAIN).unwrap();
+            for (password, _, data, slot) in accounts {
+                let session = crate::allocate_session(
+                    &mut before,
+                    DOMAIN,
+                    SessionIndex::new(slot).unwrap(),
+                    password,
+                )
+                .unwrap();
+                let mut state = NamespaceState::empty();
+                write_session_data(&mut before, DOMAIN, 0, &session, &mut state, 0, data).unwrap();
+            }
+
+            let fates = [Fate::Change, Fate::Keep, Fate::Skip];
+            let mut combinations = 0;
+            for a in fates {
+                for b in fates {
+                    for c in fates {
+                        let plan_fates = [a, b, c];
+                        if plan_fates.iter().all(|fate| matches!(fate, Fate::Skip)) {
+                            continue;
+                        }
+                        combinations += 1;
+                        let mut plan = RekeyPlan::new(DOMAIN);
+                        for ((old, new, _, _), fate) in accounts.iter().zip(plan_fates) {
+                            match fate {
+                                Fate::Change => plan.admit_change(&before, old, new).unwrap(),
+                                Fate::Keep => plan.admit_keep(&before, old).unwrap(),
+                                Fate::Skip => {}
+                            }
+                        }
+                        let after = plan.build(&before).unwrap();
+                        assert_layout_copied_and_all_blocks_differ(&before, &after);
+
+                        for ((old, new, data, slot), fate) in accounts.iter().zip(plan_fates) {
+                            let context = format!("{plan_fates:?}, slot {slot}");
+                            let opens = |password: &[u8]| {
+                                unlock_session(&after, DOMAIN, password)
+                                    .ok()
+                                    .map(|session| session.session_index.as_u8())
+                            };
+                            match fate {
+                                Fate::Change => {
+                                    assert_eq!(opens(old), None, "{context}");
+                                    assert_eq!(opens(new), Some(*slot), "{context}");
+                                    assert_eq!(read_all(&after, new, 0, data.len()), *data);
+                                }
+                                Fate::Keep => {
+                                    assert_eq!(opens(old), Some(*slot), "{context}");
+                                    assert_eq!(read_all(&after, old, 0, data.len()), *data);
+                                }
+                                Fate::Skip => {
+                                    assert_eq!(opens(old), None, "{context}");
+                                    assert_eq!(opens(new), None, "{context}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            assert_eq!(combinations, 26);
         });
     }
 
