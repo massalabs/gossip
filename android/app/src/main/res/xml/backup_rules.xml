@@ -7,5 +7,9 @@
     <!-- Mesh switches and the install id: a restored phone must be asked again. -->
     <exclude domain="sharedpref" path="GossipMeshPrefs.xml" />
     <!-- SAF capabilities are valid only on the device that granted them. -->
+    <!-- Background-sync seekers and sync time, and app preferences (which hold
+         debug logs when enabled): account traces must not leave the device. -->
+    <exclude domain="sharedpref" path="net.massa.gossip.background.sync.xml" />
+    <exclude domain="sharedpref" path="CapacitorStorage.xml" />
     <exclude domain="sharedpref" path="PortableBackupPendingOutputs.xml" />
 </full-backup-content>

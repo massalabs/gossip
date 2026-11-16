@@ -555,18 +555,17 @@ Done:
 
 Open:
 
-- **Per-account data outside the encrypted store** (audited, not changed;
-  these predate this feature):
-  - the polling keys of the last open account stay in plain form after
-    lock and background sync keeps polling with them (web: `activeSeekers`
-    in the service-worker bridge; Android: `gossip-active-seekers` in the
-    background runner, which is also included in Android backups);
-  - delivered notifications stay in the tray after lock, tagged with the
-    contact's id;
-  - the last background sync time is kept in plain form.
-    Each can show someone holding the decoy password that another account
-    exists. Clearing them on lock would stop background notifications while
-    the app is locked.
+- **Per-account data outside the encrypted store.** Fixed: every lock, and
+  every start of the app, clears the background-sync seekers and last sync
+  time, delivered notifications and debug logs
+  (`src/services/accountTraces.ts`), and they are excluded from Android
+  backups. The next login waits for that to finish, then publishes again.
+  Consequence: no background polling or notifications while locked.
+  Checked on the phone. Still outside the store: the single biometric
+  credential (no account id, by design). On the `mesh/app` branch, the
+  native auto-lock (`AppLock.lock`) bypasses the JS logout; the start-up
+  clearance covers it when the app reopens, but `AppLock.lock` should also
+  clear the runner's seekers and the notifications natively.
 - A fingerprint entry is only rewritten when the fingerprint is used on the
   form. An account whose password is typed and changed needs biometric login
   re-enabled afterwards.

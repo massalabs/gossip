@@ -31,6 +31,8 @@ import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
 import { useRekeyCoordination } from './hooks/useRekeyCoordination';
+import { clearAccountTraces } from './services/accountTraces';
+import { SECURE_STORAGE_ENABLED } from './config/features';
 import PageLayout from './components/ui/Layout/PageLayout.tsx';
 import PortableBackupStartupGate from './components/PortableBackupStartupGate.tsx';
 import {
@@ -68,6 +70,12 @@ export const AppContent: React.FC = () => {
       initialLoadDone.current = true;
     }
   }, [isLoading]);
+
+  // The app may have been killed, or locked natively, with an account open:
+  // nothing of it may stay outside the encrypted store while locked.
+  useEffect(() => {
+    if (SECURE_STORAGE_ENABLED) void clearAccountTraces();
+  }, []);
 
   // Setup service worker: register, listen for messages, start sync scheduler, and initialize background sync
   useEffect(() => {
