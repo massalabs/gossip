@@ -28,9 +28,14 @@ let nativeOutputTail = Promise.resolve();
 let webOwnerGeneration: Promise<number | null> = Promise.resolve(null);
 
 function readWebOwnerGeneration(): Promise<number | null> {
-  return Capacitor.isNativePlatform()
-    ? Promise.resolve(null)
-    : bridgeGet<number>('accountOutputGeneration').then(value => value ?? 0);
+  if (Capacitor.isNativePlatform()) return Promise.resolve(null);
+  // Not awaited until an output is published. An unreadable bridge yields
+  // `null`, which never matches the current generation: publishing stays
+  // blocked (fail closed) instead of raising an unhandled rejection.
+  return bridgeGet<number>('accountOutputGeneration').then(
+    value => value ?? 0,
+    () => null
+  );
 }
 
 /**
