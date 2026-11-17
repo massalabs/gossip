@@ -329,6 +329,15 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
                 Err(error) => Err(error.into()),
             }
         }
+        "admitRekeyNew" => {
+            let a: UnlockArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password.as_bytes())?);
+            match native_vfs::admit_rekey_new(&password) {
+                Ok(()) => Ok("true".into()),
+                Err(SecureStorageError::InvalidPassword) => Ok("false".into()),
+                Err(error) => Err(error.into()),
+            }
+        }
         "buildRekeyCandidate" => {
             drop_open_database()?;
             native_vfs::build_rekey_candidate()?;
@@ -989,6 +998,26 @@ mod tests {
         dispatch("buildRekeyCandidate", "{}").unwrap();
         dispatch("commitOnboardingCandidate", "{}").unwrap();
         assert_eq!(unlock("bob-pw"), "false");
+        assert_eq!(unlock("new-pw"), "true");
+        assert_eq!(note(), "alice rewritten");
+        dispatch("lockSession", "{}").unwrap();
+
+        // Adding an account: a rekey that also creates one, written to
+        // before the commit like an onboarding account.
+        dispatch("beginRekey", "{}").unwrap();
+        assert_eq!(dispatch("admitRekeyKeep", &pw("new-pw")).unwrap(), "true");
+        // A password that already opens an account is refused, generically.
+        assert_eq!(dispatch("admitRekeyNew", &pw("new-pw")).unwrap(), "false");
+        assert_eq!(dispatch("admitRekeyNew", &pw("carol-pw")).unwrap(), "true");
+        dispatch("buildRekeyCandidate", "{}").unwrap();
+        assert_eq!(unlock("carol-pw"), "true");
+        sql("CREATE TABLE note (body TEXT)");
+        sql("INSERT INTO note VALUES ('carol')");
+        dispatch("lockSession", "{}").unwrap();
+        dispatch("commitOnboardingCandidate", "{}").unwrap();
+        assert_eq!(unlock("carol-pw"), "true");
+        assert_eq!(note(), "carol");
+        dispatch("lockSession", "{}").unwrap();
         assert_eq!(unlock("new-pw"), "true");
         assert_eq!(note(), "alice rewritten");
         dispatch("lockSession", "{}").unwrap();

@@ -127,6 +127,9 @@ export interface SecureStorageNativePlugin {
     password: Uint8Array;
     newPassword?: Uint8Array;
   }): Promise<{ admitted: boolean }>;
+  admitRekeyNew(options: {
+    password: Uint8Array;
+  }): Promise<{ admitted: boolean }>;
   buildRekeyCandidate(): Promise<void>;
   endRekey(): Promise<void>;
   // Binary payloads (passwords, namespace blobs) are typed as Uint8Array
@@ -289,6 +292,12 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
       : await callNative<boolean>('admitRekeyKeep', {
           password: u8ToBase64(password),
         });
+    return { admitted };
+  },
+  async admitRekeyNew({ password }) {
+    const admitted = await callNative<boolean>('admitRekeyNew', {
+      password: u8ToBase64(password),
+    });
     return { admitted };
   },
   async buildRekeyCandidate() {

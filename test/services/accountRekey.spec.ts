@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   createPasswordSecurity: vi.fn(),
   logout: vi.fn(async () => {}),
+  admitNew: vi.fn<(password: string) => Promise<boolean>>(),
+  createAccount: vi.fn(async (username: string, password: string) => {
+    mocks.calls.push(`create:${username}:${password}`);
+  }),
   windows: [] as string[],
   otherWindowsLetGo: true,
   userProfile: null as Record<string, unknown> | null,
@@ -44,6 +48,10 @@ function fakeSdk() {
       }
       note(`admit:${password}${next ? `->${next}` : ''}`);
       return mocks.admit(password, next);
+    },
+    secureStorageAdmitRekeyNew: async (password: string) => {
+      note(`admitNew:${password}`);
+      return mocks.admitNew(password);
     },
     secureStorageBuildRekeyCandidate: async () => note('build'),
     secureStorageUnlock: async (password: string) => {
@@ -81,6 +89,9 @@ function fakeSdk() {
           note(`journal:${from}->${to}`);
           return true;
         },
+        beginCompleted: async (epoch: string) => {
+          note(`journalNew:${epoch}`);
+        },
       },
     },
     profiles: {
@@ -98,7 +109,11 @@ const sdk = fakeSdk();
 vi.mock('../../src/stores/sdkStore', () => ({ getSdk: () => sdk }));
 vi.mock('../../src/stores/accountStore', () => ({
   useAccountStore: {
-    getState: () => ({ userProfile: mocks.userProfile, logout: mocks.logout }),
+    getState: () => ({
+      userProfile: mocks.userProfile,
+      logout: mocks.logout,
+      createAccountInRekeyCandidate: mocks.createAccount,
+    }),
   },
 }));
 vi.mock('../../src/stores/utils/auth', () => ({
@@ -160,6 +175,7 @@ beforeEach(() => {
   mocks.profile = profile();
   mocks.userProfile = profile();
   mocks.admit.mockResolvedValue(true);
+  mocks.admitNew.mockResolvedValue(true);
   mocks.unlock.mockResolvedValue(true);
   mocks.commit.mockResolvedValue(undefined);
   mocks.refresh.mockResolvedValue(undefined);
@@ -254,6 +270,71 @@ describe('rekeyLockedStore', () => {
     });
     expect(await counts(['alice', 'bob'])).toEqual(one);
     expect(await counts(['alice', 'bob', 'carol'])).toEqual(one);
+  });
+
+  it('creates the new account in the candidate and completes its journal', async () => {
+    await rekeyLockedStore(sdk as never, [account('alice')], {
+      password: 'carol',
+      username: 'carol-name',
+    });
+    expect(mocks.calls).toEqual([
+      'begin',
+      'admit:alice',
+      'admitNew:carol',
+      'build',
+      'unlock:alice',
+      'notes:gossip1test',
+      'lock',
+      'create:carol-name:carol',
+      'commit',
+      'unlock:alice',
+      'journal:epoch-1->epoch-2',
+      'lock',
+      'unlock:carol',
+      'journalNew:epoch-2',
+      'lock',
+    ]);
+  });
+
+  it('pads an add exactly like a refresh with the same number of accounts', async () => {
+    const work = async (
+      passwords: string[],
+      newAccount?: { password: string; username: string }
+    ) => {
+      mocks.padding = { admit: 0, unlock: 0 };
+      mocks.calls.length = 0;
+      mocks.epoch = 'epoch-1';
+      await rekeyLockedStore(
+        sdk as never,
+        passwords.map(password => account(password)),
+        newAccount
+      );
+      const count = (prefix: string) =>
+        mocks.calls.filter(call => call.startsWith(prefix)).length;
+      return {
+        admissions: count('admit:') + count('admitNew:') + mocks.padding.admit,
+        // Creating an account stands for one per-account round.
+        rounds: count('notes:') + count('create:'),
+        journalUnlocks: mocks.padding.unlock + count('journal'),
+      };
+    };
+    const refresh = await work(['alice', 'bob']);
+    const add = await work(['alice'], { password: 'carol', username: 'c' });
+    expect(add).toEqual(refresh);
+    expect(refresh.admissions).toBe(3);
+  });
+
+  it('changes nothing when the new password is refused', async () => {
+    mocks.admitNew.mockResolvedValue(false);
+    await expect(
+      rekeyLockedStore(sdk as never, [account('alice')], {
+        password: 'alice',
+        username: 'x',
+      })
+    ).rejects.toBeInstanceOf(RekeyRejectedError);
+    expect(mocks.calls).not.toContain('build');
+    expect(mocks.calls.at(-1)).toBe('abort');
+    expect(mocks.createAccount).not.toHaveBeenCalled();
   });
 
   it('still admits the remaining accounts after a rejection, then changes nothing', async () => {

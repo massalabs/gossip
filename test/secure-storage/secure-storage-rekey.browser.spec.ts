@@ -154,6 +154,41 @@ describe('in-place rekey', () => {
     await reopened.close();
   }, 240_000);
 
+  it('creates a new account in the free slot and survives a restart', async () => {
+    const domain = 'vitest-rekey-add';
+    await createTwoAccounts(domain);
+
+    const conn = await DatabaseConnection.create(config(domain));
+    await conn.secureStorageBeginRekey();
+    expect(await conn.secureStorageAdmitRekey(ALICE)).toBe(true);
+    expect(await conn.secureStorageAdmitRekey(BOB)).toBe(true);
+    // A password that already opens an account is refused.
+    expect(await conn.secureStorageAdmitRekeyNew(BOB)).toBe(false);
+    expect(await conn.secureStorageAdmitRekeyNew(NEW)).toBe(true);
+    await conn.secureStorageBuildRekeyCandidate();
+
+    // The new account is empty and is filled before the commit.
+    expect(await conn.secureStorageUnlock(NEW)).toBe(true);
+    expect(await usernames(conn)).toEqual([]);
+    await insertProfile(conn, 'carol');
+    await conn.secureStorageFlush();
+    await conn.secureStorageLock();
+    await conn.secureStorageCommitRekeyCandidate();
+    await conn.close();
+
+    const reopened = await DatabaseConnection.create(config(domain));
+    for (const [password, name] of [
+      [ALICE, 'alice'],
+      [BOB, 'bob'],
+      [NEW, 'carol'],
+    ]) {
+      expect(await reopened.secureStorageUnlock(password)).toBe(true);
+      expect(await usernames(reopened)).toEqual([name]);
+      await reopened.secureStorageLock();
+    }
+    await reopened.close();
+  }, 240_000);
+
   it('leaves the store untouched when aborted, before or after the candidate', async () => {
     const domain = 'vitest-rekey-abort';
     await createTwoAccounts(domain);

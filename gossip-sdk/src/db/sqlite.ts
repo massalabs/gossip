@@ -943,6 +943,33 @@ export class DatabaseConnection {
   }
 
   /**
+   * Admit a new, empty account to the active rekey. It is created in the
+   * candidate at build time; unlock it with `password` to fill it.
+   */
+  async secureStorageAdmitRekeyNew(password: string): Promise<boolean> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (this.state.rekeyPhase !== 'admitting') {
+      throw new Error('Rekey is not accepting passwords');
+    }
+    if (password.length === 0) return false;
+    const pwBytes = new TextEncoder().encode(password);
+    try {
+      if (this.state.useNativePlugin) {
+        const result = await this.requireNativePlugin().admitRekeyNew({
+          password: pwBytes,
+        });
+        return result.admitted;
+      }
+      return await this.requireSecureProxy().admitRekeyNew(
+        // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; the only post-transfer access is the `byteLength > 0` zeroize guard in the finally block.
+        Comlink.transfer(pwBytes, [pwBytes.buffer])
+      );
+    } finally {
+      if (pwBytes.byteLength > 0) pwBytes.fill(0);
+    }
+  }
+
+  /**
    * Re-encrypt the store into an in-memory candidate. Afterwards
    * `secureStorageUnlock` / queries / `secureStorageLock` act on the
    * candidate, not on the durable store.

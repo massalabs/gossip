@@ -190,28 +190,6 @@ state => {
 }
 );
 
-function makeClosure(arg0, arg1, dtor, f) {
-    const state = { a: arg0, b: arg1, cnt: 1, dtor };
-    const real = (...args) => {
-
-        // First up with a closure we increment the internal reference
-        // count. This ensures that the Rust closure environment won't
-        // be deallocated while we're invoking it.
-        state.cnt++;
-        try {
-            return f(state.a, state.b, ...args);
-        } finally {
-            if (--state.cnt === 0) {
-                wasm.__wbindgen_export_7.get(state.dtor)(state.a, state.b); state.a = 0;
-                CLOSURE_DTORS.unregister(state);
-            }
-        }
-    };
-    real.original = state;
-    CLOSURE_DTORS.register(real, state, state);
-    return real;
-}
-
 function makeMutClosure(arg0, arg1, dtor, f) {
     const state = { a: arg0, b: arg1, cnt: 1, dtor };
     const real = (...args) => {
@@ -237,6 +215,28 @@ function makeMutClosure(arg0, arg1, dtor, f) {
     CLOSURE_DTORS.register(real, state, state);
     return real;
 }
+
+function makeClosure(arg0, arg1, dtor, f) {
+    const state = { a: arg0, b: arg1, cnt: 1, dtor };
+    const real = (...args) => {
+
+        // First up with a closure we increment the internal reference
+        // count. This ensures that the Rust closure environment won't
+        // be deallocated while we're invoking it.
+        state.cnt++;
+        try {
+            return f(state.a, state.b, ...args);
+        } finally {
+            if (--state.cnt === 0) {
+                wasm.__wbindgen_export_7.get(state.dtor)(state.a, state.b); state.a = 0;
+                CLOSURE_DTORS.unregister(state);
+            }
+        }
+    };
+    real.original = state;
+    CLOSURE_DTORS.register(real, state, state);
+    return real;
+}
 /**
  * @param {string} domain
  * @param {string} backend
@@ -249,6 +249,10 @@ export function initSecureStorage(domain, backend) {
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.initSecureStorage(ptr0, len0, ptr1, len1);
     return ret;
+}
+
+export function endOuterMigration() {
+    wasm.endOuterMigration();
 }
 
 /**
@@ -272,23 +276,16 @@ export function provisionStorage() {
     }
 }
 
-function passArray8ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 1, 1) >>> 0;
-    getUint8ArrayMemory0().set(arg, ptr / 1);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
 /**
- * @param {number} slot
- * @param {Uint8Array} password
+ * @param {number} namespace
+ * @returns {number}
  */
-export function allocateSession(slot, password) {
-    const ptr0 = passArray8ToWasm0(password, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.allocateSession(slot, ptr0, len0);
-    if (ret[1]) {
-        throw takeFromExternrefTable0(ret[0]);
+export function namespaceDataLength(namespace) {
+    const ret = wasm.namespaceDataLength(namespace);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
     }
+    return ret[0];
 }
 
 /**
@@ -355,24 +352,23 @@ export function closeDatabase() {
     }
 }
 
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
 /**
- * Run a SQL statement with bound parameters.
- *
- * `params` is a JS array of values; supported types are number, string,
- * Uint8Array, null, and bigint. Returns rows as a JS array of arrays
- * (positional column values), matching the Drizzle sqlite-proxy contract.
- * @param {string} sql
- * @param {Array<any>} params
- * @returns {ExecResult}
+ * @param {number} slot
+ * @param {Uint8Array} password
  */
-export function execSql(sql, params) {
-    const ptr0 = passStringToWasm0(sql, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+export function allocateSession(slot, password) {
+    const ptr0 = passArray8ToWasm0(password, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.execSql(ptr0, len0, params);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
+    const ret = wasm.allocateSession(slot, ptr0, len0);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
     }
-    return ExecResult.__wrap(ret[0]);
 }
 
 /**
@@ -489,15 +485,23 @@ export function readNamespaceData(namespace, offset, len) {
 }
 
 /**
- * @param {number} namespace
- * @returns {number}
+ * Run a SQL statement with bound parameters.
+ *
+ * `params` is a JS array of values; supported types are number, string,
+ * Uint8Array, null, and bigint. Returns rows as a JS array of arrays
+ * (positional column values), matching the Drizzle sqlite-proxy contract.
+ * @param {string} sql
+ * @param {Array<any>} params
+ * @returns {ExecResult}
  */
-export function namespaceDataLength(namespace) {
-    const ret = wasm.namespaceDataLength(namespace);
+export function execSql(sql, params) {
+    const ptr0 = passStringToWasm0(sql, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.execSql(ptr0, len0, params);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
-    return ret[0];
+    return ExecResult.__wrap(ret[0]);
 }
 
 export function beginOnboardingCandidate() {
@@ -526,6 +530,24 @@ export function exportOnboardingCandidate() {
 export function activateOnboardingGeneration() {
     const ret = wasm.activateOnboardingGeneration();
     return ret;
+}
+
+/**
+ * Admit one canonical candidate block. Only namespace 0 blocks belonging to
+ * the internally authenticated slot are retained; callers never learn which
+ * slot matched.
+ * @param {number} slot
+ * @param {number} namespace
+ * @param {number} block_index
+ * @param {Uint8Array} data
+ */
+export function appendCandidatePreviewBlock(slot, namespace, block_index, data) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.appendCandidatePreviewBlock(slot, namespace, block_index, ptr0, len0);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
 }
 
 /**
@@ -629,10 +651,6 @@ export function finishOuterMigrationNamespace(namespace, source_block_count) {
     }
 }
 
-export function endOuterMigration() {
-    wasm.endOuterMigration();
-}
-
 export function endOnboardingCandidate() {
     const ret = wasm.endOnboardingCandidate();
     if (ret[1]) {
@@ -686,6 +704,23 @@ export function admitRekeyChange(password, new_password) {
 }
 
 /**
+ * Create a new, empty account with this password in the rekey candidate.
+ * Resolves `false` for every secret-dependent rejection, like the other
+ * admissions; the slot it gets is never reported.
+ * @param {Uint8Array} password
+ * @returns {boolean}
+ */
+export function admitRekeyNew(password) {
+    const ptr0 = passArray8ToWasm0(password, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.admitRekeyNew(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
+}
+
+/**
  * Re-encrypt the durable store into an in-memory candidate and make that
  * candidate the active backend, exactly like an onboarding candidate. It is
  * then committed with `exportOnboardingCandidate` +
@@ -727,24 +762,6 @@ export function beginCandidatePreview(domain, password, keypairs) {
 }
 
 /**
- * Admit one canonical candidate block. Only namespace 0 blocks belonging to
- * the internally authenticated slot are retained; callers never learn which
- * slot matched.
- * @param {number} slot
- * @param {number} namespace
- * @param {number} block_index
- * @param {Uint8Array} data
- */
-export function appendCandidatePreviewBlock(slot, namespace, block_index, data) {
-    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.appendCandidatePreviewBlock(slot, namespace, block_index, ptr0, len0);
-    if (ret[1]) {
-        throw takeFromExternrefTable0(ret[0]);
-    }
-}
-
-/**
  * @param {number} num_threads
  * @returns {Promise<any>}
  */
@@ -760,27 +777,27 @@ export function wbg_rayon_start_worker(receiver) {
     wasm.wbg_rayon_start_worker(receiver);
 }
 
-function __wbg_adapter_8(arg0, arg1, arg2) {
-    wasm.closure121_externref_shim(arg0, arg1, arg2);
-}
-
-function __wbg_adapter_11(arg0, arg1, arg2) {
-    wasm.closure697_externref_shim(arg0, arg1, arg2);
-}
-
-function __wbg_adapter_14(arg0, arg1, arg2) {
-    const ret = wasm.closure113_externref_shim_multivalue_shim(arg0, arg1, arg2);
+function __wbg_adapter_6(arg0, arg1, arg2) {
+    const ret = wasm.closure46_externref_shim_multivalue_shim(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
 }
 
-function __wbg_adapter_25(arg0, arg1) {
+function __wbg_adapter_9(arg0, arg1, arg2) {
+    wasm.closure124_externref_shim(arg0, arg1, arg2);
+}
+
+function __wbg_adapter_12(arg0, arg1) {
     wasm.wasm_bindgen_68d4d73dda818e04___convert__closures_____invoke______(arg0, arg1);
 }
 
-function __wbg_adapter_221(arg0, arg1, arg2, arg3) {
-    wasm.closure754_externref_shim(arg0, arg1, arg2, arg3);
+function __wbg_adapter_19(arg0, arg1, arg2) {
+    wasm.closure700_externref_shim(arg0, arg1, arg2);
+}
+
+function __wbg_adapter_222(arg0, arg1, arg2, arg3) {
+    wasm.closure757_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const __wbindgen_enum_IdbRequestReadyState = ["pending", "done"];
@@ -1118,7 +1135,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wbg_adapter_221(a, state0.b, arg0, arg1);
+                    return __wbg_adapter_222(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -1420,29 +1437,14 @@ function __wbg_get_imports() {
     imports.wbg.__wbg_wbindgenthrow_451ec1a8469d7eb6 = function(arg0, arg1) {
         throw new Error(getStringFromWasm0(arg0, arg1));
     };
-    imports.wbg.__wbindgen_cast_09892270585d49aa = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 696, function: Function { arguments: [NamedExternref("Event")], shim_idx: 697, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
-        const ret = makeClosure(arg0, arg1, 696, __wbg_adapter_11);
-        return ret;
-    };
-    imports.wbg.__wbindgen_cast_0adc93f55113ddaa = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 112, function: Function { arguments: [NamedExternref("IDBVersionChangeEvent")], shim_idx: 113, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, 112, __wbg_adapter_14);
-        return ret;
-    };
     imports.wbg.__wbindgen_cast_2241b6af4c4b2941 = function(arg0, arg1) {
         // Cast intrinsic for `Ref(String) -> Externref`.
         const ret = getStringFromWasm0(arg0, arg1);
         return ret;
     };
-    imports.wbg.__wbindgen_cast_303eb6bd6b658b8e = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 696, function: Function { arguments: [], shim_idx: 699, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
-        const ret = makeClosure(arg0, arg1, 696, __wbg_adapter_25);
-        return ret;
-    };
-    imports.wbg.__wbindgen_cast_75edd3f875320618 = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 120, function: Function { arguments: [Externref], shim_idx: 121, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, 120, __wbg_adapter_8);
+    imports.wbg.__wbindgen_cast_582acc9824fa5232 = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 123, function: Function { arguments: [Externref], shim_idx: 124, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, 123, __wbg_adapter_9);
         return ret;
     };
     imports.wbg.__wbindgen_cast_9ae0607507abb057 = function(arg0) {
@@ -1450,14 +1452,29 @@ function __wbg_get_imports() {
         const ret = arg0;
         return ret;
     };
+    imports.wbg.__wbindgen_cast_a520d67488dc5e93 = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 123, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 124, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, 123, __wbg_adapter_9);
+        return ret;
+    };
+    imports.wbg.__wbindgen_cast_a949beea0c59bb27 = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 699, function: Function { arguments: [], shim_idx: 702, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
+        const ret = makeClosure(arg0, arg1, 699, __wbg_adapter_12);
+        return ret;
+    };
+    imports.wbg.__wbindgen_cast_b67aea33611966ef = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 699, function: Function { arguments: [NamedExternref("Event")], shim_idx: 700, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
+        const ret = makeClosure(arg0, arg1, 699, __wbg_adapter_19);
+        return ret;
+    };
     imports.wbg.__wbindgen_cast_cb9088102bce6b30 = function(arg0, arg1) {
         // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
         const ret = getArrayU8FromWasm0(arg0, arg1);
         return ret;
     };
-    imports.wbg.__wbindgen_cast_d0e6a81566bb11aa = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 120, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 121, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, 120, __wbg_adapter_8);
+    imports.wbg.__wbindgen_cast_d1f4f4a07fddbb9b = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 45, function: Function { arguments: [NamedExternref("IDBVersionChangeEvent")], shim_idx: 46, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, 45, __wbg_adapter_6);
         return ret;
     };
     imports.wbg.__wbindgen_cast_d6cd19b81560fd6e = function(arg0) {

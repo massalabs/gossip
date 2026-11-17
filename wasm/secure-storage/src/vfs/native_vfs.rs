@@ -215,6 +215,17 @@ impl NativeBackend {
         })
     }
 
+    fn admit_rekey_new(&mut self, password: &[u8]) -> Result<()> {
+        let plan = self
+            .rekey_plan
+            .as_mut()
+            .ok_or_else(|| SecureStorageError::Storage("rekey is not active".into()))?;
+        let durable = &self.durable;
+        with_native_stack("gossip-rekey-admit", move || {
+            plan.admit_new(durable, password)
+        })
+    }
+
     /// Re-encrypt the durable store into an in-memory candidate. From here
     /// on the candidate is the active backend, exactly like an onboarding
     /// candidate: it can be unlocked and written, then committed or aborted.
@@ -689,6 +700,17 @@ pub fn admit_rekey(old: &[u8], new: Option<&[u8]>) -> Result<()> {
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
     st.require_transfer_idle()?;
     st.backend.admit_rekey(old, new)
+}
+
+/// Admit a new, empty account to the active rekey.
+pub fn admit_rekey_new(password: &[u8]) -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.require_transfer_idle()?;
+    st.backend.admit_rekey_new(password)
 }
 
 pub fn build_rekey_candidate() -> Result<()> {

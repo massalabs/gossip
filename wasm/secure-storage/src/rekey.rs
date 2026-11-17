@@ -16,6 +16,9 @@
 //!   Any account it held is gone: a slot cannot be given a new keypair without
 //!   its password.
 //! * Block counts are copied exactly. Nothing grows and nothing is compacted.
+//! * At most one new account can be created in the same operation
+//!   ([`RekeyPlan::admit_new`]). It goes to a slot chosen at random among the
+//!   slots that were not admitted, which only this module ever knows.
 //! * Match state stays inside this module. No call reports which slot a
 //!   password opened, and every admission failure is the same error.
 //!
@@ -24,6 +27,7 @@
 //! storage primitives.
 
 use rand::RngCore;
+use rand::seq::SliceRandom;
 use zeroize::Zeroizing;
 
 use crate::block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
@@ -45,10 +49,16 @@ struct AdmittedSlot {
     destination_root_key: Zeroizing<[u8; crypto_aead::KEY_SIZE]>,
 }
 
+struct NewAccount {
+    password: Zeroizing<Vec<u8>>,
+    destination_wrap_key: Zeroizing<[u8; crypto_aead::KEY_SIZE]>,
+}
+
 /// Password admission for one rekey operation.
 pub struct RekeyPlan {
     domain: String,
     admitted: [Option<AdmittedSlot>; SESSION_COUNT],
+    new_account: Option<NewAccount>,
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
@@ -68,6 +78,7 @@ impl RekeyPlan {
         Self {
             domain: domain.to_owned(),
             admitted: std::array::from_fn(|_| None),
+            new_account: None,
         }
     }
 
@@ -109,12 +120,7 @@ impl RekeyPlan {
         let slot = usize::from(session.session_index.as_u8());
 
         let mut rejected = self.admitted[slot].is_some();
-        for other in self.admitted.iter().flatten() {
-            rejected |= constant_time_eq(
-                other.destination_wrap_key.as_ref(),
-                destination.sk_wrap_key.as_ref(),
-            );
-        }
+        rejected |= self.claims_destination(destination.sk_wrap_key.as_ref());
         if rejected {
             return Err(SecureStorageError::InvalidPassword);
         }
@@ -127,12 +133,60 @@ impl RekeyPlan {
         Ok(())
     }
 
+    /// Whether an admitted account, or the new account, already ends up with
+    /// the password behind `wrap_key`. Compares against every candidate.
+    fn claims_destination(&self, wrap_key: &[u8]) -> bool {
+        let mut claimed = false;
+        for other in self.admitted.iter().flatten() {
+            claimed |= constant_time_eq(other.destination_wrap_key.as_ref(), wrap_key);
+        }
+        if let Some(new_account) = self.new_account.as_ref() {
+            claimed |= constant_time_eq(new_account.destination_wrap_key.as_ref(), wrap_key);
+        }
+        claimed
+    }
+
+    /// Create a new, empty account with `password` in the replacement store.
+    ///
+    /// Same generic error as the other admissions, and the same all-slot
+    /// unlock work, when the password opens any source slot, is already the
+    /// final password of an admitted account, or a new account was already
+    /// admitted. No slot is chosen until [`Self::build`].
+    pub fn admit_new<S: BlockStorage + KeypairStorage>(
+        &mut self,
+        source: &S,
+        password: &[u8],
+    ) -> Result<()> {
+        if password.is_empty() {
+            return Err(SecureStorageError::InvalidPassword);
+        }
+        let opens_a_slot = unlock_session_unique(source, &self.domain, password).is_ok();
+        let destination = derive_session_keys(&self.domain, password);
+        let rejected = opens_a_slot
+            | self.new_account.is_some()
+            | self.claims_destination(destination.sk_wrap_key.as_ref());
+        if rejected {
+            return Err(SecureStorageError::InvalidPassword);
+        }
+        self.new_account = Some(NewAccount {
+            password: Zeroizing::new(password.to_vec()),
+            destination_wrap_key: destination.sk_wrap_key.clone(),
+        });
+        Ok(())
+    }
+
     /// Build the complete replacement store from `source`.
     ///
     /// `source` is only read. The returned store shares no key material with
     /// it except what the admitted passwords derive.
-    pub fn build<S: BlockStorage + KeypairStorage>(self, source: &S) -> Result<MemoryStorage> {
+    pub fn build<S: BlockStorage + KeypairStorage>(mut self, source: &S) -> Result<MemoryStorage> {
         if self.admitted.iter().all(Option::is_none) {
+            return Err(SecureStorageError::InvalidPassword);
+        }
+        let new_account = self.new_account.take();
+        let admitted_slots: [bool; SESSION_COUNT] =
+            std::array::from_fn(|slot| self.admitted[slot].is_some());
+        if new_account.is_some() && admitted_slots.iter().all(|admitted| *admitted) {
             return Err(SecureStorageError::InvalidPassword);
         }
 
@@ -291,6 +345,21 @@ impl RekeyPlan {
                     return Err(SecureStorageError::CorruptedBlock);
                 }
             }
+        }
+
+        if let Some(new_account) = new_account {
+            let free: Vec<u8> = (0..SESSION_COUNT as u8)
+                .filter(|slot| !admitted_slots[usize::from(*slot)])
+                .collect();
+            let slot = *free
+                .choose(&mut rand::rngs::OsRng)
+                .ok_or(SecureStorageError::InvalidPassword)?;
+            crate::allocate_session(
+                &mut destination,
+                &self.domain,
+                SessionIndex::new(slot)?,
+                &new_account.password,
+            )?;
         }
 
         Ok(destination)
@@ -616,6 +685,113 @@ mod tests {
                 }
             }
             assert_eq!(combinations, 26);
+        });
+    }
+
+    /// The new account opens with its password, holds nothing yet, and can
+    /// be written to. Returns its slot.
+    fn assert_new_account_is_empty_and_writable(after: &mut MemoryStorage, password: &[u8]) -> u8 {
+        let session = unlock_session(after, DOMAIN, password).unwrap();
+        let slot = session.session_index.as_u8();
+        let mut state = load_namespace_state(after, DOMAIN, &session, 0).unwrap();
+        assert_eq!(state.total_data_length, 0);
+        write_session_data(after, DOMAIN, 0, &session, &mut state, 0, b"first words").unwrap();
+        assert_eq!(read_all(after, password, 0, 11), b"first words");
+        slot
+    }
+
+    #[test]
+    fn adds_an_account_next_to_the_kept_ones() {
+        run_with_stack(|| {
+            let before = source();
+            let mut plan = RekeyPlan::new(DOMAIN);
+            plan.admit_keep(&before, ALICE).unwrap();
+            plan.admit_new(&before, NEW).unwrap();
+            plan.admit_keep(&before, BOB).unwrap();
+            let mut after = plan.build(&before).unwrap();
+
+            assert_layout_copied_and_all_blocks_differ(&before, &after);
+            assert_eq!(read_all(&after, ALICE, 0, ALICE_SQL.len()), ALICE_SQL);
+            assert_eq!(
+                read_all(&after, ALICE, 1, ALICE_SESSION.len()),
+                ALICE_SESSION
+            );
+            assert_eq!(read_all(&after, BOB, 0, BOB_SQL.len()), BOB_SQL);
+            // Slots 0 and 2 are taken: the only free one is 1.
+            assert_eq!(assert_new_account_is_empty_and_writable(&mut after, NEW), 1);
+            assert_eq!(read_all(&after, BOB, 0, BOB_SQL.len()), BOB_SQL);
+        });
+    }
+
+    #[test]
+    fn the_new_account_takes_a_random_free_slot_and_omitted_accounts_are_erased() {
+        run_with_stack(|| {
+            let before = source();
+            let mut seen = [false; SESSION_COUNT];
+            for _ in 0..24 {
+                let mut plan = RekeyPlan::new(DOMAIN);
+                plan.admit_keep(&before, ALICE).unwrap();
+                plan.admit_new(&before, NEW).unwrap();
+                let mut after = plan.build(&before).unwrap();
+                // Bob was not entered: gone, whichever slot the new account took.
+                assert!(unlock_session(&after, DOMAIN, BOB).is_err());
+                assert_eq!(read_all(&after, ALICE, 0, ALICE_SQL.len()), ALICE_SQL);
+                let slot = assert_new_account_is_empty_and_writable(&mut after, NEW);
+                assert_ne!(slot, 0, "Alice keeps her slot");
+                seen[usize::from(slot)] = true;
+            }
+            // Slots 1 and 2 are both free; 24 draws miss one with probability 2^-23.
+            assert!(seen[1] && seen[2]);
+        });
+    }
+
+    #[test]
+    fn a_new_account_is_refused_like_any_other_admission() {
+        run_with_stack(|| {
+            let before = source();
+            let invalid = |result: Result<()>| {
+                assert!(matches!(result, Err(SecureStorageError::InvalidPassword)));
+            };
+
+            let mut plan = RekeyPlan::new(DOMAIN);
+            invalid(plan.admit_new(&before, b""));
+            // Opens an existing account, entered or not.
+            invalid(plan.admit_new(&before, BOB));
+            plan.admit_change(&before, ALICE, NEW).unwrap();
+            // Already the final password of an admitted account.
+            invalid(plan.admit_new(&before, NEW));
+            plan.admit_new(&before, b"fresh-password").unwrap();
+            // Only one new account per operation.
+            invalid(plan.admit_new(&before, b"another-password"));
+            // An admitted account may not take the new account's password.
+            invalid(plan.admit_change(&before, BOB, b"fresh-password"));
+            plan.admit_keep(&before, BOB).unwrap();
+
+            let mut after = plan.build(&before).unwrap();
+            assert_eq!(read_all(&after, NEW, 0, ALICE_SQL.len()), ALICE_SQL);
+            assert_eq!(read_all(&after, BOB, 0, BOB_SQL.len()), BOB_SQL);
+            assert_eq!(
+                assert_new_account_is_empty_and_writable(&mut after, b"fresh-password"),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn a_new_account_needs_a_free_slot() {
+        run_with_stack(|| {
+            let mut before = source();
+            crate::allocate_session(&mut before, DOMAIN, SessionIndex::new(1).unwrap(), b"carol")
+                .unwrap();
+            let mut plan = RekeyPlan::new(DOMAIN);
+            for password in [ALICE, BOB, b"carol".as_slice()] {
+                plan.admit_keep(&before, password).unwrap();
+            }
+            plan.admit_new(&before, NEW).unwrap();
+            assert!(matches!(
+                plan.build(&before),
+                Err(SecureStorageError::InvalidPassword)
+            ));
         });
     }
 

@@ -3,7 +3,6 @@ import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import toast from 'react-hot-toast';
 import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
@@ -34,9 +33,9 @@ const SecuritySettings: React.FC = () => {
     state => state.configureBiometricLogin
   );
 
-  const [rekeyMode, setRekeyMode] = useState<'password' | 'refresh' | null>(
-    null
-  );
+  const [rekeyMode, setRekeyMode] = useState<
+    'password' | 'refresh' | 'add' | null
+  >(null);
   const [isTimeoutModalOpen, setIsTimeoutModalOpen] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isICloudModalOpen, setIsICloudModalOpen] = useState(false);
@@ -91,13 +90,6 @@ const SecuritySettings: React.FC = () => {
       return;
     }
     await performBiometricSetup(password, false);
-  };
-
-  // Adding hidden accounts after onboarding needs storage-level support
-  // that does not exist yet. The entry point is here so onboarding can stay
-  // minimal.
-  const handleNotImplemented = () => {
-    toast.error(t('security.not_implemented'));
   };
 
   if (rekeyMode) {
@@ -228,29 +220,31 @@ const SecuritySettings: React.FC = () => {
         </>
       )}
 
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="px-4 pt-4 pb-2">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            {t('security.hidden_accounts_title')}
-          </p>
+      {SECURE_STORAGE_ENABLED && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="px-4 pt-4 pb-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              {t('security.hidden_accounts_title')}
+            </p>
+          </div>
+          <div className="px-4 pb-3">
+            <p className="text-sm text-muted-foreground">
+              {t('security.hidden_accounts_description')}
+            </p>
+          </div>
+          <div className="px-4 py-3 border-t border-border">
+            <Button
+              onClick={() => setRekeyMode('add')}
+              variant="outline"
+              size="custom"
+              fullWidth
+              className="h-11 rounded-full text-sm font-medium"
+            >
+              {t('security.hidden_accounts_action')}
+            </Button>
+          </div>
         </div>
-        <div className="px-4 pb-3">
-          <p className="text-sm text-muted-foreground">
-            {t('security.hidden_accounts_description')}
-          </p>
-        </div>
-        <div className="px-4 py-3 border-t border-border">
-          <Button
-            onClick={handleNotImplemented}
-            variant="outline"
-            size="custom"
-            fullWidth
-            className="h-11 rounded-full text-sm font-medium"
-          >
-            {t('security.hidden_accounts_action')}
-          </Button>
-        </div>
-      </div>
+      )}
 
       <OptionBottomSheet
         isOpen={isTimeoutModalOpen}
