@@ -68,6 +68,7 @@ import init, {
   beginRekey as beginRekeyWasm,
   admitRekeyKeep as admitRekeyKeepWasm,
   admitRekeyChange as admitRekeyChangeWasm,
+  admitRekeyNew as admitRekeyNewWasm,
   buildRekeyCandidate as buildRekeyCandidateWasm,
   endRekey as endRekeyWasm,
 } from '../assets/generated/wasm-secureStorage/secureStorage.js';
@@ -734,6 +735,26 @@ export class SecureStorageWorkerApi {
     } finally {
       password.fill(0);
       newPassword?.fill(0);
+    }
+  }
+
+  /**
+   * Admit a new, empty account to be created in the candidate, in a slot
+   * that is never reported. Resolves `false` for every secret-dependent
+   * rejection, like `admitRekey`.
+   */
+  async admitRekeyNew(password: Uint8Array): Promise<boolean> {
+    const operation = this.enqueueLifecycleOperation(async () => {
+      try {
+        return admitRekeyNewWasm(password);
+      } finally {
+        password.fill(0);
+      }
+    });
+    try {
+      return await operation;
+    } finally {
+      password.fill(0);
     }
   }
 

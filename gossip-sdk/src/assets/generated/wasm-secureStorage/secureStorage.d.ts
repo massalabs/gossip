@@ -1,9 +1,10 @@
 /* tslint:disable */
 /* eslint-disable */
 export function initSecureStorage(domain: string, backend: string): Promise<void>;
+export function endOuterMigration(): void;
 export function idbHasData(): Promise<boolean>;
 export function provisionStorage(): void;
-export function allocateSession(slot: number, password: Uint8Array): void;
+export function namespaceDataLength(namespace: number): number;
 export function clearNamespace(namespace: number): void;
 /**
  * Verify that this worker still owns the active IndexedDB generation.
@@ -25,14 +26,7 @@ export function resetSqlDatabaseToDurable(): Promise<void>;
 export function flushEncrypted(): Promise<void>;
 export function openDatabase(): void;
 export function closeDatabase(): void;
-/**
- * Run a SQL statement with bound parameters.
- *
- * `params` is a JS array of values; supported types are number, string,
- * Uint8Array, null, and bigint. Returns rows as a JS array of arrays
- * (positional column values), matching the Drizzle sqlite-proxy contract.
- */
-export function execSql(sql: string, params: Array<any>): ExecResult;
+export function allocateSession(slot: number, password: Uint8Array): void;
 export function unlockSession(password: Uint8Array): boolean;
 export function lockSession(): void;
 /**
@@ -63,10 +57,23 @@ export function validatePortableKeypair(value: Uint8Array): void;
 export function validatePortableBlock(value: Uint8Array): void;
 export function writeNamespaceData(namespace: number, offset: number, data: Uint8Array): void;
 export function readNamespaceData(namespace: number, offset: number, len: number): Uint8Array;
-export function namespaceDataLength(namespace: number): number;
+/**
+ * Run a SQL statement with bound parameters.
+ *
+ * `params` is a JS array of values; supported types are number, string,
+ * Uint8Array, null, and bigint. Returns rows as a JS array of arrays
+ * (positional column values), matching the Drizzle sqlite-proxy contract.
+ */
+export function execSql(sql: string, params: Array<any>): ExecResult;
 export function beginOnboardingCandidate(): void;
 export function exportOnboardingCandidate(): Uint8Array;
 export function activateOnboardingGeneration(): Promise<void>;
+/**
+ * Admit one canonical candidate block. Only namespace 0 blocks belonging to
+ * the internally authenticated slot are retained; callers never learn which
+ * slot matched.
+ */
+export function appendCandidatePreviewBlock(slot: number, namespace: number, block_index: number, data: Uint8Array): void;
 /**
  * Load the candidate namespace length and open SQLite without write authority.
  */
@@ -97,7 +104,6 @@ export function finalizeOuterMigration(): Array<any>;
  */
 export function migrateOuterBlockBatch(namespace: number, block_index: number, values: Array<any>): Array<any>;
 export function finishOuterMigrationNamespace(namespace: number, source_block_count: number): void;
-export function endOuterMigration(): void;
 export function endOnboardingCandidate(): void;
 /**
  * Start password admission for an in-place rekey of the durable store.
@@ -113,6 +119,12 @@ export function admitRekeyKeep(password: Uint8Array): boolean;
  * Admit an account whose password is replaced.
  */
 export function admitRekeyChange(password: Uint8Array, new_password: Uint8Array): boolean;
+/**
+ * Create a new, empty account with this password in the rekey candidate.
+ * Resolves `false` for every secret-dependent rejection, like the other
+ * admissions; the slot it gets is never reported.
+ */
+export function admitRekeyNew(password: Uint8Array): boolean;
 /**
  * Re-encrypt the durable store into an in-memory candidate and make that
  * candidate the active backend, exactly like an onboarding candidate. It is
@@ -130,12 +142,6 @@ export function endRekey(): void;
  * matched slot to JavaScript.
  */
 export function beginCandidatePreview(domain: string, password: Uint8Array, keypairs: Array<any>): boolean;
-/**
- * Admit one canonical candidate block. Only namespace 0 blocks belonging to
- * the internally authenticated slot are retained; callers never learn which
- * slot matched.
- */
-export function appendCandidatePreviewBlock(slot: number, namespace: number, block_index: number, data: Uint8Array): void;
 export function initThreadPool(num_threads: number): Promise<any>;
 export function wbg_rayon_start_worker(receiver: number): void;
 /**
@@ -170,6 +176,7 @@ export interface InitOutput {
   readonly admitOuterMigrationPassword: (a: number, b: number) => [number, number, number];
   readonly admitRekeyChange: (a: number, b: number, c: number, d: number) => [number, number, number];
   readonly admitRekeyKeep: (a: number, b: number) => [number, number, number];
+  readonly admitRekeyNew: (a: number, b: number) => [number, number, number];
   readonly allocateSession: (a: number, b: number, c: number) => [number, number];
   readonly appendCandidatePreviewBlock: (a: number, b: number, c: number, d: number, e: number) => [number, number];
   readonly beginCandidatePreview: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
@@ -234,11 +241,11 @@ export interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure121_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure697_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure113_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+  readonly closure46_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+  readonly closure124_externref_shim: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen_68d4d73dda818e04___convert__closures_____invoke______: (a: number, b: number) => void;
-  readonly closure754_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure700_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure757_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

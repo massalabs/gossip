@@ -53,6 +53,16 @@ export interface RekeyRequest {
    * afterwards.
    */
   biometric: BiometricUpdateHandle | null;
+  /**
+   * Create one new account in the same operation, in a free slot that is
+   * never reported. Accounts not listed in `accounts` are still erased.
+   */
+  newAccount?: NewAccountRequest;
+}
+
+export interface NewAccountRequest {
+  password: string;
+  username: string;
 }
 
 /** A supplied password was not accepted. Nothing was changed. */
@@ -216,10 +226,11 @@ async function paddingRewrite(sdk: GossipSdk): Promise<void> {
 
 /**
  * After the switch: tell each kept account that its login journal, finished
- * in the previous generation, is finished in this one too. The journal
- * exists to carry data over from a restored backup; a re-encrypted account
- * has nothing to carry over. Done the same way for every kept account, and
- * padded like the rest.
+ * in the previous generation, is finished in this one too, and record the
+ * new account's journal as complete (it was created in this generation).
+ * The journal exists to carry data over from a restored backup; these
+ * accounts have nothing to carry over. One unlock and one journal write per
+ * account, padded like the rest.
  *
  * This is not atomic with the switch. An account that misses it walks the
  * journal at its next login, which is what happened before this existed.
@@ -227,20 +238,32 @@ async function paddingRewrite(sdk: GossipSdk): Promise<void> {
 async function carryJournalsOver(
   sdk: GossipSdk,
   kept: AdmittedAccount[],
+  newAccount: NewAccountRequest | undefined,
   epochBefore: string | null
 ): Promise<void> {
   const epochAfter = sdk.accountGenerationEpoch;
   if (!epochBefore || !epochAfter || epochAfter === epochBefore) return;
-  for (let round = 0; round < Math.max(ROUNDS, kept.length); round++) {
-    const account = kept[round];
+  const rounds: Array<{ password: string; created: boolean }> = [
+    ...kept.map(account => ({
+      password: account.finalPassword,
+      created: false,
+    })),
+    ...(newAccount ? [{ password: newAccount.password, created: true }] : []),
+  ];
+  for (let round = 0; round < Math.max(ROUNDS, rounds.length); round++) {
+    const account = rounds[round];
     try {
       if (!account) {
         await sdk.secureStorageUnlock(paddingPassword());
         continue;
       }
-      if (!(await sdk.secureStorageUnlock(account.finalPassword))) continue;
+      if (!(await sdk.secureStorageUnlock(account.password))) continue;
       try {
-        await sdk.queries.privateMigration.carryOver(epochBefore, epochAfter);
+        if (account.created) {
+          await sdk.queries.privateMigration.beginCompleted(epochAfter);
+        } else {
+          await sdk.queries.privateMigration.carryOver(epochBefore, epochAfter);
+        }
       } finally {
         await sdk.secureStorageLock();
       }
@@ -259,7 +282,8 @@ async function carryJournalsOver(
  */
 export async function rekeyLockedStore(
   sdk: GossipSdk,
-  accounts: AdmittedAccount[]
+  accounts: AdmittedAccount[],
+  newAccount?: NewAccountRequest
 ): Promise<{ reloadRequired: boolean; kept: AdmittedAccount[] }> {
   const epochBefore = sdk.accountGenerationEpoch;
   await sdk.secureStorageBeginRekey();
@@ -279,8 +303,14 @@ export async function rekeyLockedStore(
       if (ok) admitted.push(account);
       else if (!account.bestEffort) rejected = true;
     }
+    if (newAccount) {
+      if (!(await sdk.secureStorageAdmitRekeyNew(newAccount.password))) {
+        rejected = true;
+      }
+    }
     // Always the work of three admissions.
-    for (let round = accounts.length; round < ROUNDS; round++) {
+    const entries = accounts.length + (newAccount ? 1 : 0);
+    for (let round = entries; round < ROUNDS; round++) {
       await sdk.secureStorageAdmitRekey(paddingPassword());
     }
     if (rejected || admitted.length === 0) throw new RekeyRejectedError();
@@ -298,7 +328,16 @@ export async function rekeyLockedStore(
         await sdk.secureStorageLock();
       }
     }
-    for (let round = admitted.length; round < ROUNDS; round++) {
+    if (newAccount) {
+      await useAccountStore
+        .getState()
+        .createAccountInRekeyCandidate(
+          newAccount.username,
+          newAccount.password
+        );
+    }
+    const filled = admitted.length + (newAccount ? 1 : 0);
+    for (let round = filled; round < ROUNDS; round++) {
       await paddingRewrite(sdk);
     }
   } catch (error) {
@@ -315,7 +354,7 @@ export async function rekeyLockedStore(
 
   try {
     await sdk.secureStorageCommitRekeyCandidate();
-    await carryJournalsOver(sdk, admitted, epochBefore);
+    await carryJournalsOver(sdk, admitted, newAccount, epochBefore);
     return { reloadRequired: false, kept: admitted };
   } catch (commitError) {
     // The commit is atomic but its answer can be lost. Ask storage which
@@ -409,7 +448,11 @@ export async function startRekey(request: RekeyRequest): Promise<void> {
     releaseRekey = await claimRekey();
     await useAccountStore.getState().logout({ lockedByUser: false });
     releaseOtherWindows = await waitForOtherWindows();
-    const { reloadRequired, kept } = await rekeyLockedStore(sdk, accounts);
+    const { reloadRequired, kept } = await rekeyLockedStore(
+      sdk,
+      accounts,
+      request.newAccount
+    );
 
     // Same rule whoever started the operation: if the stored biometric
     // secret belongs to an account that was kept, store that account's

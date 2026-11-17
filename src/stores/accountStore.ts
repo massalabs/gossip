@@ -116,6 +116,16 @@ interface AccountState {
   initializePreparedAccountsAtomically: (
     accounts: readonly PreparedOnboardingAccount[]
   ) => Promise<void>;
+  /**
+   * Fill the empty account that an active rekey candidate created for
+   * `password`, exactly as onboarding fills a new account, then lock it and
+   * leave no account state in memory. Nothing is durable until the rekey
+   * commits.
+   */
+  createAccountInRekeyCandidate: (
+    username: string,
+    password: string
+  ) => Promise<void>;
   loadAccount: (method: LoginMethod) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
   finalizeOnboarding: () => Promise<void>;
@@ -247,6 +257,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       | (() => Promise<PreparedPasswordAccount>);
     publishPublicKey?: boolean;
     deferExternalSideEffects?: boolean;
+    /**
+     * Secure storage only: the slot already exists, empty, under `password`
+     * (created by a rekey candidate). Unlock it instead of picking and
+     * creating a slot. The caller owns cleanup on failure.
+     */
+    slotAlreadyCreated?: boolean;
   }
 
   const setupAccount = async ({
@@ -257,6 +273,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     prepared,
     publishPublicKey = true,
     deferExternalSideEffects = false,
+    slotAlreadyCreated = false,
   }: SetupAccountParams): Promise<void> => {
     await cleanupSession();
 
@@ -364,9 +381,18 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     let allocatedSlot: number | null = null;
 
+    if (slotAlreadyCreated) {
+      if (!sdk.isSecureStorage) {
+        throw new Error('An existing slot needs secure storage');
+      }
+      if (!(await sdk.secureStorageUnlock(password))) {
+        throw new Error('The new account does not open with its password');
+      }
+    }
+
     // Secure-storage mode: create the slot with the user's password before
     // any DB access. Queries created by openSession need the backend unlocked.
-    if (sdk.isSecureStorage) {
+    if (sdk.isSecureStorage && !slotAlreadyCreated) {
       if (
         sdk.storageState !== 'empty' &&
         !useAppStore.getState().secureAccountCreationAllowed
@@ -699,6 +725,30 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     initializePreparedAccountsAtomically: async accounts => {
       const candidate = await get().buildOnboardingCandidate(accounts);
       await candidate.commit();
+    },
+
+    createAccountInRekeyCandidate: async (username, password) => {
+      try {
+        await setupAccount({
+          username,
+          mnemonic: generateMnemonic(256),
+          password,
+          skipHistorical: true,
+          // Published at the account's first login, as for accounts created
+          // by the multi-account onboarding.
+          publishPublicKey: false,
+          deferExternalSideEffects: true,
+          slotAlreadyCreated: true,
+        });
+      } finally {
+        await cleanupSession();
+        // Filling the account briefly published its profile to the stores.
+        useDiscussionStore.getState().cleanup();
+        useMessageStore.getState().cleanup();
+        useSelfMessageStore.getState().clearMessages();
+        useAppStore.getState().resetAccountSettings();
+        set({ ...clearAccountState(), isLoading: false });
+      }
     },
 
     loadAccount: async (method: LoginMethod) => {

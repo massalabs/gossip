@@ -270,6 +270,28 @@ pub fn admit_rekey_change(password: Vec<u8>, new_password: Vec<u8>) -> Result<bo
     admit_rekey(&password, Some(&new_password))
 }
 
+/// Create a new, empty account with this password in the rekey candidate.
+/// Resolves `false` for every secret-dependent rejection, like the other
+/// admissions; the slot it gets is never reported.
+#[wasm_bindgen(js_name = admitRekeyNew)]
+pub fn admit_rekey_new(password: Vec<u8>) -> Result<bool, JsValue> {
+    let password = Zeroizing::new(password);
+    with_app_state(|app| {
+        let state = app.state.borrow();
+        REKEY_PLAN.with(|cell| {
+            let mut plan = cell.borrow_mut();
+            let plan = plan
+                .as_mut()
+                .ok_or_else(|| JsValue::from_str("rekey is not active"))?;
+            match plan.admit_new(&state.backend, &password) {
+                Ok(()) => Ok(true),
+                Err(SecureStorageError::InvalidPassword) => Ok(false),
+                Err(error) => Err(map_err(error)),
+            }
+        })
+    })
+}
+
 /// Re-encrypt the durable store into an in-memory candidate and make that
 /// candidate the active backend, exactly like an onboarding candidate. It is
 /// then committed with `exportOnboardingCandidate` +

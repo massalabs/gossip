@@ -15,10 +15,15 @@ import {
 } from '../../services/biometricService';
 import { startRekey } from '../../services/accountRekey';
 import { logger } from '../../utils/logger.ts';
+import { generateDefaultUsername } from '../../utils/validation';
 
 interface RekeyFormProps {
   /** 'password' sets or changes passwords; 'refresh' keeps every password. */
-  mode: 'password' | 'refresh';
+  /**
+   * 'password' sets or changes passwords; 'refresh' keeps every password;
+   * 'add' keeps every password and creates one more account.
+   */
+  mode: 'password' | 'refresh' | 'add';
   onBack: () => void;
 }
 
@@ -75,6 +80,9 @@ const RekeyForm: React.FC<RekeyFormProps> = ({ mode, onBack }) => {
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [newConfirm, setNewConfirm] = useState('');
+  const [newUsername, setNewUsername] = useState('');
   const biometricRef = useRef<BiometricUpdateHandle | null>(null);
   const handedOver = useRef(false);
 
@@ -93,7 +101,8 @@ const RekeyForm: React.FC<RekeyFormProps> = ({ mode, onBack }) => {
 
   const changeCount = entries.filter(entry => entry.group === 'change').length;
   const keepCount = entries.length - changeCount;
-  const full = entries.length >= MAX_ENTRIES;
+  // In 'add' mode the new account takes one of the three places.
+  const full = entries.length + (mode === 'add' ? 1 : 0) >= MAX_ENTRIES;
   const biometricUsed = entries.some(entry => entry.biometric);
   // The group that must never be empty: at least one password changes in
   // 'password' mode, at least one account is kept in 'refresh' mode.
@@ -156,9 +165,15 @@ const RekeyForm: React.FC<RekeyFormProps> = ({ mode, onBack }) => {
     return new Set(filled).size !== filled.length;
   };
 
+  // The new account's password must differ from every other one.
+  const added = mode === 'add' ? [newPassword] : [];
   const duplicate =
-    hasDuplicate(entries.map(credentialOf)) ||
-    hasDuplicate(entries.map(finalOf));
+    hasDuplicate([...entries.map(credentialOf), ...added]) ||
+    hasDuplicate([...entries.map(finalOf), ...added]);
+  const newCheck = validatePassword(newPassword);
+  const newMismatch = newConfirm.length > 0 && newConfirm !== newPassword;
+  const newComplete =
+    mode !== 'add' || (newCheck.valid && newConfirm === newPassword);
   const complete = entries.every(entry => {
     if (credentialOf(entry).length === 0) return false;
     if (entry.group === 'keep') return true;
@@ -167,7 +182,7 @@ const RekeyForm: React.FC<RekeyFormProps> = ({ mode, onBack }) => {
       entry.confirmPassword === entry.newPassword
     );
   });
-  const canSubmit = complete && !duplicate && !starting;
+  const canSubmit = complete && newComplete && !duplicate && !starting;
 
   const start = async () => {
     setConfirmOpen(false);
@@ -181,6 +196,13 @@ const RekeyForm: React.FC<RekeyFormProps> = ({ mode, onBack }) => {
           newPassword: entry.group === 'change' ? entry.newPassword : undefined,
         })),
         biometric: biometricRef.current,
+        newAccount:
+          mode === 'add'
+            ? {
+                password: newPassword,
+                username: newUsername.trim() || generateDefaultUsername(),
+              }
+            : undefined,
       });
       // On success this screen has already been replaced by the progress
       // screen; nothing more to do here.
@@ -194,11 +216,13 @@ const RekeyForm: React.FC<RekeyFormProps> = ({ mode, onBack }) => {
   };
 
   const title =
-    mode === 'refresh'
-      ? t('security.refresh_title')
-      : passwordless
-        ? t('security.rekey_title_set')
-        : t('security.rekey_title_change');
+    mode === 'add'
+      ? t('security.add_title')
+      : mode === 'refresh'
+        ? t('security.refresh_title')
+        : passwordless
+          ? t('security.rekey_title_set')
+          : t('security.rekey_title_change');
 
   const renderEntry = (entry: Entry) => {
     const check = validatePassword(entry.newPassword);
@@ -374,6 +398,56 @@ const RekeyForm: React.FC<RekeyFormProps> = ({ mode, onBack }) => {
 
         {mode === 'password' && renderGroup('change')}
         {renderGroup('keep')}
+
+        {mode === 'add' && (
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-foreground">
+              {t('security.add_new_section')}
+            </p>
+            <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+              <RoundedInput
+                type="text"
+                value={newUsername}
+                onChange={event => setNewUsername(event.target.value)}
+                placeholder={t('security.add_username_placeholder')}
+                aria-label={t('security.add_username_placeholder')}
+                disabled={starting}
+              />
+              <RoundedInput
+                type="password"
+                value={newPassword}
+                onChange={event => {
+                  setNewPassword(event.target.value);
+                  setError(null);
+                }}
+                placeholder={t('security.add_password_label')}
+                aria-label={t('security.add_password_label')}
+                error={newPassword.length > 0 && !newCheck.valid}
+                disabled={starting}
+              />
+              <RoundedInput
+                type="password"
+                value={newConfirm}
+                onChange={event => setNewConfirm(event.target.value)}
+                placeholder={t('security.rekey_confirm_label')}
+                aria-label={t('security.rekey_confirm_label')}
+                error={newMismatch}
+                disabled={starting}
+              />
+              {newPassword.length > 0 && !newCheck.valid && (
+                <p className="text-xs text-destructive">{newCheck.error}</p>
+              )}
+              {newMismatch && (
+                <p className="text-xs text-destructive">
+                  {t('security.rekey_mismatch')}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t('security.add_after')}
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-start gap-3 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
           <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />

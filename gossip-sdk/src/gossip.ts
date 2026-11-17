@@ -1264,6 +1264,8 @@ class GossipSdk {
    *  1. `secureStorageBeginRekey()`
    *  2. `secureStorageAdmitRekey(password, newPassword?)` once per account to
    *     keep. Accounts that are not admitted are erased by the commit.
+   *     Optionally `secureStorageAdmitRekeyNew(password)` to create one new
+   *     account in a free slot.
    *  3. `secureStorageBuildRekeyCandidate()`. From here `secureStorageUnlock`,
    *     `queries`, `profiles`, session-blob calls and `secureStorageLock` act
    *     on the in-memory candidate, so account contents can be rewritten
@@ -1303,6 +1305,22 @@ class GossipSdk {
         password,
         newPassword
       );
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * Admit a new, empty account to the active rekey (at most one). It is
+   * created in a free slot when the candidate is built, and is never
+   * reported. Resolves `false` when the password is not acceptable, without
+   * saying why: it opens an existing account, or another admitted account
+   * ends up with it.
+   */
+  async secureStorageAdmitRekeyNew(password: string): Promise<boolean> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      return await this.requireConn().secureStorageAdmitRekeyNew(password);
     } finally {
       releaseLifecycle();
     }
