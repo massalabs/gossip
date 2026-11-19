@@ -2,7 +2,7 @@ import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Users } from 'react-feather';
-import type { LeaveChoice } from '@massalabs/gossip-sdk';
+import type { GroupInvitation, LeaveChoice } from '@massalabs/gossip-sdk';
 import { useMinuteTick } from '../../hooks/useMinuteTick';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { groupDisplayName, safeName } from '../../utils/groupName';
@@ -16,6 +16,7 @@ import {
 import { ROUTES } from '../../constants/routes';
 import { getSdk } from '../../stores/sdkStore';
 import GroupInvitationCard from './GroupInvitationCard';
+import ContinuationPrompt from './ContinuationPrompt';
 import SafeName from './SafeName';
 
 interface GroupListSectionProps {
@@ -29,8 +30,10 @@ const GroupRow: React.FC<{
   entry: GroupListEntry;
   name: string;
   preview: string;
+  /** Another person's new chat that continues this one (§5.12). */
+  continuation?: GroupInvitation;
   onOpen: () => void;
-}> = ({ entry, name, preview, onOpen }) => {
+}> = ({ entry, name, preview, continuation, onOpen }) => {
   const { t } = useTranslation('groups');
   const readOnly = entry.summary.status !== 'member';
   return (
@@ -76,6 +79,9 @@ const GroupRow: React.FC<{
               />
             )}
           </div>
+          {continuation && (
+            <ContinuationPrompt invitation={continuation} compact />
+          )}
         </div>
       </div>
     </div>
@@ -95,9 +101,12 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
   useMinuteTick();
   const available = useGroupStore(s => s.available);
   const groups = useGroupStore(s => s.groups);
-  // A migration is shown on its archive's row and inside it (§5.12).
+  // A migration is shown on its archive's row and inside it, and an
+  // invitation to continue a chat on that chat's row and inside it (§5.12).
   const allInvitations = useGroupStore(s => s.invitations);
-  const invitations = allInvitations.filter(i => !i.migrationOf);
+  const invitations = allInvitations.filter(
+    i => !i.migrationOf && !i.continues
+  );
   const refresh = useGroupStore(s => s.refresh);
   const me = useAccountStore(s => s.userProfile?.userId);
   const memberName = useGroupMemberName();
@@ -179,6 +188,9 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
                 entry={entry}
                 name={name}
                 preview={preview}
+                continuation={allInvitations.find(
+                  i => i.continues === entry.summary.groupId
+                )}
                 onOpen={() =>
                   navigate(ROUTES.group({ groupId: entry.summary.groupId }))
                 }

@@ -197,8 +197,8 @@
     "junction": "Conversation antérieure ci-dessus · cette discussion la poursuit",
     "waiting_contact": "En attente de l’acceptation de {{name}}.",
     "request_received": "{{name}} demande à devenir votre contact et à discuter avec vous.",
-    "superseded": "Votre nouvelle discussion avec {{name}} et la sienne ont été créées en même temps : la sienne est conservée.",
-    "superseded_lost": "Votre nouvelle discussion avec {{name}} et la sienne ont été créées en même temps : la sienne est conservée et les messages écrits dans la vôtre sont perdus.",
+    "continue_invitation": "{{name}} souhaite poursuivre cette conversation dans un nouveau groupe.",
+    "earlier_junction": "Discussion précédente ci-dessus · en lecture seule",
     "unsent": "Non envoyé"
   },
   "invite": {
@@ -212,6 +212,7 @@
     "owner": "Propriétaire",
     "continues": "Conversation antérieure",
     "continues_body": "Cette discussion poursuit votre conversation antérieure avec {{name}}, affichée en premier, en lecture seule.",
+    "continues_chat_body": "{{name}} souhaite poursuivre cette conversation dans un nouveau groupe. Si vous acceptez, votre discussion actuelle reste au-dessus, en lecture seule.",
     "warnings": "Avertissements",
     "untrusted_names": "Les noms sont choisis par ceux qui les envoient et peuvent imiter quelqu’un d’autre : vérifiez l’identifiant.",
     "choices": "Votre réponse",

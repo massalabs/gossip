@@ -64,4 +64,43 @@ describe('GroupListSection', () => {
     expect(names.some(n => n.includes('Archived'))).toBe(true);
     expect(names.some(n => n.includes('Erased'))).toBe(false);
   });
+
+  it("shows an invitation to continue a chat on that chat's row, not among the invitations", async () => {
+    useSdkStore.setState({
+      sdk: makeFakeGroups().sdk as unknown as GossipSdk,
+    });
+    useAccountStore.setState({ userProfile: { userId: 'me' } as never });
+    useGroupStore.setState({
+      available: true,
+      invitations: [
+        {
+          epochId: 'g2',
+          name: '',
+          members: ['me', 'bob'],
+          owner: 'bob',
+          receivedFrom: null,
+          closedBefore: false,
+          rejoins: null,
+          migrateFrom: 0,
+          migrationOf: 'bob',
+          continues: 'g1',
+        },
+      ],
+      groups: [
+        {
+          summary: summary({ groupId: 'g1', name: 'Chat' }),
+          lastMessage: null,
+          unread: false,
+        },
+      ],
+    } as never);
+    const r = await renderAt(<GroupListSection />);
+    unmount = r.unmount;
+    const rows = r.container.querySelectorAll('[data-testid="group-row"]');
+    expect(rows.length).toBe(1);
+    expect(
+      rows[0].querySelector('[data-testid="continuation-prompt"]')?.textContent
+    ).toContain('archive.continue_invitation');
+    expect(r.container.textContent).not.toContain('list.invitations_title');
+  });
 });

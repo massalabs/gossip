@@ -10,11 +10,6 @@ import {
 import { getSdk } from './sdkStore';
 import { createSelectors } from './utils/createSelectors';
 import { toDate } from '../utils/groupTimeline';
-import toast from 'react-hot-toast';
-import i18n from '../i18n';
-import { formatUserId } from '@massalabs/gossip-sdk';
-import { useDiscussionStore } from './discussionStore';
-import { isolate, safeName } from '../utils/groupName';
 
 /** The last visible message of a group, for the conversation list. */
 export interface GroupLastMessage {
@@ -33,7 +28,13 @@ export interface GroupListEntry {
 interface GroupStoreState {
   /** Whether the group engine is open for this account. */
   available: boolean;
+  /**
+   * The conversations: replaced chats of two (`superseded`) are not among
+   * them, they are shown as the earlier part of the chat that continues them.
+   */
   groups: GroupListEntry[];
+  /** Each replaced chat of two, with the chat that continues it. */
+  supersededBy: Record<string, string>;
   invitations: GroupInvitation[];
   /** The group whose conversation is open, if any. */
   currentGroupId: string | null;
@@ -83,6 +84,7 @@ const unread = new Set<string>();
 const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
   available: false,
   groups: [],
+  supersededBy: {},
   invitations: [],
   currentGroupId: null,
   version: 0,
@@ -107,37 +109,11 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
     };
     const sdk = getSdk();
     sdk.on(SdkEventType.GROUPS_CHANGED, onChanged);
-    // Two direct chats created at once (§5.12): the user is told which one
-    // is kept, and whether messages written in the other are lost.
-    const onSuperseded = (e: {
-      contactUserId: string | null;
-      lostMessages: boolean;
-    }) => {
-      const contact = e.contactUserId
-        ? useDiscussionStore
-            .getState()
-            .contacts.find(c => c.userId === e.contactUserId)
-        : undefined;
-      const name = isolate(
-        safeName(contact?.name) ||
-          (e.contactUserId ? formatUserId(e.contactUserId) : '')
-      );
-      const message = i18n.t(
-        e.lostMessages
-          ? 'groups:archive.superseded_lost'
-          : 'groups:archive.superseded',
-        { name }
-      );
-      if (e.lostMessages) toast.error(message);
-      else toast(message);
-    };
-    sdk.on(SdkEventType.DIRECT_CHAT_SUPERSEDED, onSuperseded);
     set({
       available: true,
       cleanupFn: () => {
         try {
           sdk.off(SdkEventType.GROUPS_CHANGED, onChanged);
-          sdk.off(SdkEventType.DIRECT_CHAT_SUPERSEDED, onSuperseded);
         } catch {
           // The SDK may already be gone.
         }
@@ -152,6 +128,7 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
     set({
       available: false,
       groups: [],
+      supersededBy: {},
       invitations: [],
       currentGroupId: null,
       cleanupFn: null,
@@ -164,11 +141,27 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
     try {
       const summaries = await groups.list();
       const entries: GroupListEntry[] = [];
+      const supersededBy: Record<string, string> = {};
       for (const summary of summaries) {
+        if (summary.status === 'superseded') {
+          if (summary.supersededBy) {
+            supersededBy[summary.groupId] = summary.supersededBy;
+          }
+          continue;
+        }
+        // A chat with nothing written yet shows the last message of the
+        // chats it continues.
+        let lastMessage = await lastMessageOf(groups, summary.groupId);
+        for (const e of [...summary.earlier].reverse()) {
+          if (lastMessage) break;
+          lastMessage = await lastMessageOf(groups, e).catch(() => null);
+        }
         entries.push({
           summary,
-          lastMessage: await lastMessageOf(groups, summary.groupId),
-          unread: unread.has(summary.groupId),
+          lastMessage,
+          unread:
+            unread.has(summary.groupId) ||
+            summary.earlier.some(e => unread.has(e)),
         });
       }
       entries.sort(
@@ -180,6 +173,7 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
       if (!get().available) return;
       set(state => ({
         groups: entries,
+        supersededBy,
         invitations,
         version: state.version + 1,
       }));
@@ -194,7 +188,13 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
   },
 
   markRead: (groupId: string) => {
-    if (!unread.delete(groupId)) return;
+    const earlier =
+      get().groups.find(g => g.summary.groupId === groupId)?.summary.earlier ??
+      [];
+    let changed = false;
+    for (const g of [groupId, ...earlier])
+      changed = unread.delete(g) || changed;
+    if (!changed) return;
     set(state => ({
       groups: state.groups.map(g =>
         g.summary.groupId === groupId ? { ...g, unread: false } : g

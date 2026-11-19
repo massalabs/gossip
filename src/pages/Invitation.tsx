@@ -227,10 +227,12 @@ const Invitation: React.FC = () => {
         </Section>
       )}
 
-      {invitation?.migrationOf && (
+      {(invitation?.migrationOf || invitation?.continues) && (
         <Section title={t('invite.continues')} testId="invite-continues">
           <p className="text-sm text-foreground">
-            {t('invite.continues_body', { name })}
+            {invitation.continues
+              ? t('invite.continues_chat_body', { name })
+              : t('invite.continues_body', { name })}
           </p>
         </Section>
       )}
