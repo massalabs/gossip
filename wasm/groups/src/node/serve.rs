@@ -182,7 +182,7 @@ impl Node {
         }
     }
 
-    fn take_request_token(&mut self, peer: &GossipId, now: u64) -> bool {
+    pub(crate) fn take_request_token(&mut self, peer: &GossipId, now: u64) -> bool {
         self.peer_mut(peer)
             .requests
             .take(1, REQUEST_BURST, REQUEST_REFILL_PER_MIN, now)

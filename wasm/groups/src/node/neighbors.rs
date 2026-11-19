@@ -126,50 +126,49 @@ impl Node {
             })
     }
 
-    /// A neighbor request from `from` naming its current epoch `chat` (§10.1, §13.6). A
-    /// non-member is ignored. An epoch this device does not hold is declined without
-    /// suggestions (D.6). With capacity, the request is accepted; otherwise it is declined
-    /// with suggestions.
+    /// A neighbor request from `from` naming its current epoch `chat` (§10.1, §13.6).
+    ///
+    /// It must not tell whether this device holds `chat` (D.6). Every request takes one token
+    /// of the peer's request budget, as a query entry does, whoever sends it and whatever it
+    /// names; without one it gets silence. Then the same decline with no suggestions answers,
+    /// by the same path and with no other state kept: an epoch this device does not hold or
+    /// holds in an inactive status (left, removed, waiting, dissolved, superseded, an
+    /// invitation, a closed marker); an epoch it holds of which `from` is no member; and a
+    /// removed peer of it (which is also told of its removal, §5.6, as on any contact). A
+    /// peer that shares nothing with this device gets that decline too, as it gets "not
+    /// available" for a tips scan (§12.1): answering a stranger is no new signal. A member
+    /// asking a device that holds the epoch is accepted while there is capacity, and
+    /// otherwise declined with suggestions.
     pub(crate) fn handle_neighbor_request(
         &mut self,
         cx: &mut Cx<'_>,
         from: GossipId,
         chat: ChatId,
     ) {
-        let r_chat = chat;
-        let Some(entry) = self.epochs.get(&chat).filter(|_| {
-            matches!(
-                self.group_status(&chat),
-                super::records::GroupStatus::Active
-            )
-        }) else {
-            if self.shares_epoch(&from) {
-                self.queue_work(
-                    from,
-                    Work::NeighborResponse {
-                        chat_id: chat,
-                        accepted: false,
-                        suggestions: Vec::new(),
-                    },
-                );
-            }
-            return;
-        };
-        if !entry.root.is_member(&from) || from == self.me {
+        if from == self.me || !self.take_request_token(&from, cx.now) {
             return;
         }
-        // A removed peer is no member of a current epoch: declined without suggestions, and
-        // told of its removal (§5.6).
+        let r_chat = chat;
+        let decline = Work::NeighborResponse {
+            chat_id: chat,
+            accepted: false,
+            suggestions: Vec::new(),
+        };
+        let member = self.epochs.get(&chat).is_some_and(|e| {
+            e.root.is_member(&from)
+                && matches!(
+                    self.group_status(&chat),
+                    super::records::GroupStatus::Active
+                )
+        });
+        if !member {
+            self.queue_work(from, decline);
+            return;
+        }
+        // A removed peer is no member of a current epoch: told of its removal (§5.6).
         if self.removed_peer(&chat, &from) {
             self.removed_contact(cx, chat, from);
-            self.queue_work(
-                from,
-                Work::NeighborResponse {
-                    chat_id: chat,
-                    accepted: false,
-                    suggestions: Vec::new(),
-                },
-            );
+            self.queue_work(from, decline);
             return;
         }
         // A former owner naming the parent of its handover as its current epoch is told of
