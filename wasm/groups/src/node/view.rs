@@ -378,10 +378,11 @@ impl Node {
                 .collect();
             let after: BTreeSet<GossipId> = root.members().iter().copied().collect();
             let gone: Vec<GossipId> = before.difference(&after).copied().collect();
-            // An outgoing owner that leaves the member list of its own handover left ("Hand
-            // over and leave", §5.8: "Everyone knows you left and who you named").
+            // A handover drops no one but the outgoing owner (§4.7), who left ("Hand over and
+            // leave", §5.8: "Everyone knows you left and who you named"): it has no removed
+            // member.
             let (left, removed): (Vec<GossipId>, Vec<GossipId>) = gone.into_iter().partition(|m| {
-                (handover && *m == by)
+                handover
                     || rec.parents.iter().any(|p| {
                         self.t.signed.contains(&(
                             *p,
