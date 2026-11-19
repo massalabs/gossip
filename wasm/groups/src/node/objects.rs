@@ -484,6 +484,9 @@ impl Node {
                 }
                 if *c != chat && !kept_lines.contains(c) {
                     self.drop_epoch(c);
+                    // A dissolved marker (a chat ID only, §14.2): the same root relayed
+                    // again is dropped, not an invitation.
+                    self.t.markers.insert(*c, Marker::Dissolved);
                 }
             }
         }
