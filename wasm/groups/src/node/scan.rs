@@ -6,9 +6,9 @@ use super::records::{
     FrozenKey, FrozenScan, LANE_KINDS, LaneKind, Purpose, ScanAttempt, ScanKey, ScanOp, Work,
 };
 use super::timing::{
-    FIRST_TTL_MS, FROZEN_ID_BYTES, LANE_OFFSET_MS, LANE_PERIOD_MS, LIVE_SCANS_PER_DEVICE,
-    LIVE_SCANS_PER_PEER, MAX_UNANSWERED_STAGES, MINUTE_MS, SCAN_TOMBSTONE_MS, draw_jitter,
-    jittered, next_ttl,
+    FIRST_TTL_MS, FROZEN_ID_BYTES, FROZEN_MAX_LIVE_MS, LANE_OFFSET_MS, LANE_PERIOD_MS,
+    LIVE_SCANS_PER_DEVICE, LIVE_SCANS_PER_PEER, MAX_UNANSWERED_STAGES, MINUTE_MS,
+    SCAN_TOMBSTONE_MS, draw_jitter, jittered, next_ttl,
 };
 use super::{Cx, Node, NodeError, PENALTY_MALFORMED};
 use crate::constants::{EVENT_ID_SIZE, ID_SIZE, MAX_PAGE_ENTRIES};
@@ -598,6 +598,8 @@ impl Node {
         // A removed peer is told of its removal (§5.6).
         self.removed_contact(cx, anchor, peer);
         let key: FrozenKey = (peer, anchor, scan_id);
+        // At most the request's bound, and no longer than this device's own (§12.2).
+        let live_until = live_until.min(cx.now.saturating_add(FROZEN_MAX_LIVE_MS));
         let page = AnswerOp::Page {
             anchor,
             scan_id,
@@ -831,6 +833,23 @@ impl Node {
             entries: list[start..end].to_vec(),
             skipped: 0,
         })
+    }
+
+    /// A page of `key` at `offset` was handed off: the final one releases the list (§12.2:
+    /// the responder may drop it whenever its policy says, a later request is answered
+    /// `restart`).
+    pub(crate) fn page_sent(&mut self, key: FrozenKey, offset: u64, now: u64) {
+        let fin = self
+            .t
+            .scans_in
+            .get(&key)
+            .and_then(|f| f.list.as_ref())
+            .is_some_and(|l| {
+                usize::try_from(offset).is_ok_and(|o| o.saturating_add(MAX_PAGE_ENTRIES) >= l.len())
+            });
+        if fin {
+            self.drop_frozen(key, now);
+        }
     }
 
     fn drop_frozen(&mut self, key: FrozenKey, now: u64) {
