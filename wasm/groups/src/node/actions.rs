@@ -968,8 +968,11 @@ impl Node {
                     epoch,
                     must_delete: true,
                     at,
-                } if cx.now >= at.saturating_add(super::objects::DISSOLVED_KEPT_MS) => {
-                    // The named root and the message go; side branches stay (§5.8).
+                } if cx.now >= at.saturating_add(super::objects::DISSOLVED_KEPT_MS)
+                    && self.t.epochs.contains(&epoch) =>
+                {
+                    // The named root and the message go; side branches stay (§5.8), in a group
+                    // that stays dissolved (see `recheck_status`).
                     self.drop_epoch(&epoch);
                     self.t.markers.insert(epoch, Marker::Dissolved);
                     self.rebuild_epochs();
@@ -1011,10 +1014,12 @@ impl Node {
                     add(last_request.saturating_add(super::objects::REQUEST_RESEND_MS));
                 }
                 GroupStatus::Dissolved {
+                    epoch,
                     must_delete: true,
                     at,
-                    ..
-                } => add(at.saturating_add(super::objects::DISSOLVED_KEPT_MS)),
+                } if self.t.epochs.contains(&epoch) => {
+                    add(at.saturating_add(super::objects::DISSOLVED_KEPT_MS));
+                }
                 _ => {}
             }
             // Only an owner acts on its pending removals; another device keeps none due.
