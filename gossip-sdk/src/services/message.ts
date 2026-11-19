@@ -323,6 +323,20 @@ export class MessageService {
    */
   private persistFlusher: () => Promise<void> = async () => {};
 
+  /**
+   * Receives the group plaintexts carried by keep-alives: the sender's 32-byte
+   * user ID and the plaintext. Set by `GossipSdk.openSession`.
+   */
+  private groupPlaintextHandler:
+    | ((from: Uint8Array, plaintext: Uint8Array) => Promise<void>)
+    | null = null;
+
+  setGroupPlaintextHandler(
+    handler: ((from: Uint8Array, plaintext: Uint8Array) => Promise<void>) | null
+  ): void {
+    this.groupPlaintextHandler = handler;
+  }
+
   setPersistFlusher(flusher: () => Promise<void>): void {
     this.persistFlusher = flusher;
   }
@@ -636,6 +650,19 @@ export class MessageService {
 
           // keep-alive messages are just useful to keep the session alive, we don't need to store them
           if (deserialized.type === MessageType.KEEP_ALIVE) {
+            // A keep-alive may carry a group plaintext: handed to the group
+            // engine, which keeps its own records; nothing about it is stored
+            // or logged here.
+            if (deserialized.groupPlaintext && this.groupPlaintextHandler) {
+              try {
+                await this.groupPlaintextHandler(
+                  out.user_id,
+                  deserialized.groupPlaintext
+                );
+              } catch {
+                log.error('group plaintext not processed');
+              }
+            }
             continue;
           }
 
