@@ -840,6 +840,43 @@ fn tips_are_unreferenced_available_events() {
     assert_eq!(g.tips(T0 + 6), Vec::<EventId>::new());
 }
 
+/// Regression (review of c11b2163, D.27 choice B): a pruned child must not hide its parent.
+/// E1 creates message 1; X1 creates message 2 with parent E1; X2 edits message 2 with parent
+/// X1, which prunes X1 as superseded. X1 answers "not available", so its parent links cannot
+/// be learned: if E1 were not a tip, a device that was offline would never find it, though
+/// it carries a current result.
+#[test]
+fn a_pruned_child_does_not_hide_its_parent() {
+    let mut f = Fixture::new();
+    let e1 = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "m1"));
+    let x1 = f.event(
+        T0 + 1,
+        2,
+        &[e1.event_id()],
+        text(2, f.bob.id, T0 + 1, T0 + 1, "m2"),
+    );
+    let x2 = f.event(
+        T0 + 2,
+        3,
+        &[x1.event_id()],
+        text(2, f.bob.id, T0 + 1, T0 + 2, "m2 edited"),
+    );
+    f.recv(&e1, T0);
+    f.recv(&x1, T0 + 1);
+    f.recv(&x2, T0 + 2);
+    let now = T0 + 3;
+    assert_eq!(f.state(&x1), PRUNED);
+    assert!(
+        f.epoch()
+            .serve(&f.store, &x1.event_id(), now)
+            .unwrap()
+            .is_none()
+    );
+    // Every available event is reachable from the tips by walking parents of available
+    // events; here E1 is a tip itself.
+    assert_eq!(f.tips(now), vec![e1.event_id(), x2.event_id()]);
+}
+
 #[test]
 fn a_cycle_exposes_its_available_members_as_frontier() {
     let mut f = Fixture::new();
