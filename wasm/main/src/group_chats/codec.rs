@@ -28,11 +28,11 @@ use groups::node::{
     TimelineItem, TimelineLine,
 };
 use groups::store::{Role, StoredResult};
-use groups::wire::{self, Entry, EntryItem, EventObject, QueryOp, SignedKind, Status};
+use groups::wire::{Entry, EntryItem, QueryOp, SignedKind, Status};
 use groups::{
-    Body, ChatId, Content, Dissolve, DissolveId, EventId, GossipId, GroupState, Kick, KickId,
-    Leave, LeaveId, LocalEdit, Merge, MessageType, ParentCommitment, Payload, RefChatId, RequestId,
-    Root, ScanId, SyncObjId,
+    Body, Challenge, ChatId, Content, Dissolve, DissolveId, EventId, GossipId, GroupSecret,
+    GroupState, Kick, KickId, Leave, LeaveId, LocalEdit, Merge, MessageType, ParentCommitment,
+    Payload, RefChatId, RequestId, Root, RootType, ScanId, SyncObjId,
 };
 
 use groups::ReplyTarget;
@@ -104,7 +104,8 @@ macro_rules! small_uint {
         }
     )*};
 }
-small_uint!(u8, u32);
+small_uint!(u8, u16, u32);
+impl Elem for u16 {}
 impl Elem for u32 {}
 
 impl Codec for bool {
@@ -281,7 +282,8 @@ ids!(
     ParentCommitment,
     LeaveId,
     KickId,
-    DissolveId
+    DissolveId,
+    Challenge
 );
 
 // ── Records ──────────────────────────────────────────────────────────────────
@@ -517,7 +519,8 @@ record!(Invitation {
     lookups,
     not_available,
     closed_before,
-    rejoins
+    rejoins,
+    fetched_for
 });
 variants!(EpochStatus { Installed, Invitation(invitation) });
 record!(EpochRecord {
@@ -552,7 +555,7 @@ record!(SignedRecord {
     object,
     received_at
 });
-variants!(Marker { Closed, Dissolved });
+variants!(Marker { Closed, ClosedFrom(peer), Dissolved });
 record!(ReplyCount { since, count, owed });
 record!(PendingLeave { leave, from, at });
 record!(HeldRoot { root, from, at });
@@ -626,6 +629,7 @@ record!(GroupSummary {
     status,
     side_branches,
     must_resolve,
+    former_owner_branches,
     links
 });
 record!(InvitationSummary {
@@ -657,64 +661,112 @@ record!(ReplyTarget {
     sync_obj_id
 });
 
-// ── Objects kept as the device's own encoding ────────────────────────────────
+// ── Roots and signed objects, by their fields ────────────────────────────────
 
-thread_local! {
-    /// Set when an object could not be encoded: the batch that holds it is refused
-    /// ([`take_encode_failure`]) instead of panicking or storing a broken record.
-    static ENCODE_FAILED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
-}
-
-/// Whether an object failed to encode since the last call; clears the flag.
-pub fn take_encode_failure() -> bool {
-    ENCODE_FAILED.with(|f| f.replace(false))
-}
-
-fn enc_object(object: EventObject) -> J {
-    // A held object was decoded or built under the limits, so it encodes again; if it
-    // ever does not, the batch is refused rather than stored without it.
-    match wire::encode_event_blob(&object) {
-        Ok(blob) => J::Str(hex(&blob)),
-        Err(_) => {
-            ENCODE_FAILED.with(|f| f.set(true));
-            J::Null
-        }
-    }
-}
-
-fn dec_object(j: &J) -> R<EventObject> {
-    wire::decode_event_blob(&unhex(j.as_str()?)?, groups::constants::PROTOCOL_VERSION)
-        .map_err(|e| e.to_string())
-}
-
-impl Codec for Root {
+impl Codec for GroupSecret {
     fn enc(&self) -> J {
-        enc_object(EventObject::Root(Box::new(self.clone())))
+        J::Str(hex(self.as_bytes()))
     }
     fn dec(j: &J) -> R<Self> {
-        match dec_object(j)? {
-            EventObject::Root(r) => Ok(*r),
-            _ => Err("expected a root".into()),
-        }
+        GroupSecret::from_slice(&unhex(j.as_str()?)?).map_err(|e| e.to_string())
     }
 }
 
-macro_rules! signed {
-    ($($t:ident),*) => {$(
-        impl Codec for $t {
-            fn enc(&self) -> J {
-                enc_object(EventObject::$t(self.clone()))
-            }
-            fn dec(j: &J) -> R<Self> {
-                match dec_object(j)? {
-                    EventObject::$t(o) => Ok(o),
-                    _ => Err(concat!("expected a ", stringify!($t)).into()),
-                }
-            }
-        }
-    )*};
+variants!(RootType {
+    Successor,
+    Handover
+});
+
+fn field<T: Codec>(j: &J, name: &str) -> R<T> {
+    T::dec(j.field(name)?).map_err(|e| format!("{name}: {e}"))
 }
-signed!(Leave, Kick, Dissolve);
+
+fn sig(j: &J) -> R<Vec<u8>> {
+    unhex(j.field("signature")?.as_str()?)
+}
+
+/// A root, stored by its version, fields and signature (§14.1), rebuilt with
+/// [`Root::from_fields`], which checks it as a received root is checked.
+impl Codec for Root {
+    fn enc(&self) -> J {
+        J::Obj(vec![
+            ("version".into(), J::Num(self.version())),
+            ("root_type".into(), self.root_type().enc()),
+            ("name".into(), J::Str(self.name().to_owned())),
+            ("parents".into(), self.parents().to_vec().enc()),
+            ("members".into(), self.members().to_vec().enc()),
+            ("group_secret".into(), self.group_secret().enc()),
+            ("owner".into(), J::Str(hex(self.owner_bytes()))),
+            ("epoch_challenge".into(), self.epoch_challenge().enc()),
+            (
+                "ref_chat_id_challenge".into(),
+                self.ref_chat_id_challenge().enc(),
+            ),
+            ("created_at".into(), J::Num(self.created_at())),
+            ("signature".into(), J::Str(hex(self.signature().as_bytes()))),
+        ])
+    }
+    fn dec(j: &J) -> R<Self> {
+        let parents: Vec<ParentCommitment> = field(j, "parents")?;
+        let members: Vec<GossipId> = field(j, "members")?;
+        Root::from_fields(
+            j.field("version")?.as_u64()?,
+            field(j, "root_type")?,
+            field(j, "name")?,
+            &parents,
+            &members,
+            &field::<GroupSecret>(j, "group_secret")?,
+            unhex(j.field("owner")?.as_str()?)?,
+            &field::<Challenge>(j, "epoch_challenge")?,
+            &field::<Challenge>(j, "ref_chat_id_challenge")?,
+            j.field("created_at")?.as_u64()?,
+            &sig(j)?,
+        )
+        .map_err(|e| format!("root: {e}"))
+    }
+}
+
+impl Codec for Leave {
+    fn enc(&self) -> J {
+        J::Obj(vec![
+            ("chat_id".into(), self.chat_id().enc()),
+            ("leaver".into(), self.leaver().enc()),
+            ("signature".into(), J::Str(hex(self.signature().as_bytes()))),
+        ])
+    }
+    fn dec(j: &J) -> R<Self> {
+        Leave::from_fields(field(j, "chat_id")?, field(j, "leaver")?, &sig(j)?)
+            .map_err(|e| format!("leave: {e}"))
+    }
+}
+
+impl Codec for Kick {
+    fn enc(&self) -> J {
+        J::Obj(vec![
+            ("chat_id".into(), self.chat_id().enc()),
+            ("removed".into(), self.removed().enc()),
+            ("signature".into(), J::Str(hex(self.signature().as_bytes()))),
+        ])
+    }
+    fn dec(j: &J) -> R<Self> {
+        Kick::from_fields(field(j, "chat_id")?, field(j, "removed")?, &sig(j)?)
+            .map_err(|e| format!("kick: {e}"))
+    }
+}
+
+impl Codec for Dissolve {
+    fn enc(&self) -> J {
+        J::Obj(vec![
+            ("chat_id".into(), self.chat_id().enc()),
+            ("must_delete".into(), J::Bool(self.must_delete())),
+            ("signature".into(), J::Str(hex(self.signature().as_bytes()))),
+        ])
+    }
+    fn dec(j: &J) -> R<Self> {
+        Dissolve::from_fields(field(j, "chat_id")?, field(j, "must_delete")?, &sig(j)?)
+            .map_err(|e| format!("dissolve: {e}"))
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1100,6 +1152,15 @@ mod tests {
             not_available: BTreeSet::from([peer]),
             closed_before: true,
             rejoins: Some(chat),
+            fetched_for: Some((chat, u16::MAX)),
+        }));
+        round_trip(EpochStatus::Invitation(Invitation {
+            received_at: 1,
+            lookups: BTreeSet::new(),
+            not_available: BTreeSet::new(),
+            closed_before: false,
+            rejoins: None,
+            fetched_for: None,
         }));
         for status in [
             GroupStatus::Active,
@@ -1118,7 +1179,10 @@ mod tests {
             round_trip(status);
         }
         round_trip(Marker::Closed);
+        round_trip(Marker::ClosedFrom(peer));
         round_trip(Marker::Dissolved);
+        // The key of an unverified leave: epoch, leaver, supplier.
+        round_trip((chat, peer, GossipId::from_bytes([12; 32])));
         round_trip(ReplyCount {
             since: 1,
             count: 2,
