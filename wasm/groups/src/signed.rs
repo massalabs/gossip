@@ -57,11 +57,7 @@ impl Leave {
         let leave = Self {
             chat_id: root.chat_id(),
             leaver,
-            signature: signing_key.sign_id(
-                CONTEXT_LEAVE_SIGNATURE,
-                id.as_bytes(),
-                randomness,
-            ),
+            signature: signing_key.sign_id(CONTEXT_LEAVE_SIGNATURE, id.as_bytes(), randomness),
         };
         leave.verify(root, leaver_keys)?;
         Ok(leave)
@@ -172,11 +168,7 @@ impl Kick {
         let kick = Self {
             chat_id: root.chat_id(),
             removed,
-            signature: owner_signing_key.sign_id(
-                CONTEXT_KICK_SIGNATURE,
-                id.as_bytes(),
-                randomness,
-            ),
+            signature: owner_signing_key.sign_id(CONTEXT_KICK_SIGNATURE, id.as_bytes(), randomness),
         };
         kick.verify(root)?;
         Ok(kick)
@@ -218,16 +210,50 @@ impl Kick {
     ///
     /// [`Error::IdMismatch`], [`Error::NotMember`] or [`Error::InvalidSignature`].
     pub fn verify(&self, root: &Root) -> Result<()> {
+        self.verify_with(root, root.owner_keys())
+    }
+
+    /// Verifies the kick against the root of the epoch it names, with the keys of `signer`:
+    /// the owner of that epoch, or another identity with authority over it (D.18, decided
+    /// by the caller).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::IdMismatch`], [`Error::NotMember`] or [`Error::InvalidSignature`].
+    pub fn verify_with(&self, root: &Root, signer: &UserPublicKeys) -> Result<()> {
         check_names_epoch(&self.chat_id, root)?;
         if !root.is_member(&self.removed) {
             return Err(Error::NotMember("the removed member"));
         }
         verify_id(
-            root.owner_keys(),
+            signer,
             CONTEXT_KICK_SIGNATURE,
             self.id().as_bytes(),
             &self.signature,
         )
+    }
+
+    /// Signs the kick of `removed` from the epoch `root` as the identity `signer_keys`, which
+    /// need not be `root`'s owner (D.18), and checks the signature with those keys.
+    ///
+    /// # Errors
+    ///
+    /// As [`Kick::sign`], against `signer_keys`.
+    pub fn sign_as(
+        root: &Root,
+        removed: GossipId,
+        signer: &dyn Signer,
+        signer_keys: &UserPublicKeys,
+        randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+    ) -> Result<Self> {
+        let id = kick_id(&root.chat_id(), &removed);
+        let kick = Self {
+            chat_id: root.chat_id(),
+            removed,
+            signature: signer.sign_id(CONTEXT_KICK_SIGNATURE, id.as_bytes(), randomness),
+        };
+        kick.verify_with(root, signer_keys)?;
+        Ok(kick)
     }
 
     /// The epoch the member is removed from.

@@ -1,6 +1,7 @@
 //! Tip scans (§12.1 to §12.3): the requester's paged scans, the responder's frozen lists,
 //! and the triggers and periodic lanes of recovery.
 
+use super::records::SHARED_SCAN;
 use super::records::{
     FrozenKey, FrozenScan, LANE_KINDS, LaneKind, Purpose, ScanAttempt, ScanKey, ScanOp, Work,
 };
@@ -9,7 +10,7 @@ use super::timing::{
     LIVE_SCANS_PER_PEER, MAX_UNANSWERED_STAGES, MINUTE_MS, SCAN_TOMBSTONE_MS, draw_jitter,
     jittered, next_ttl,
 };
-use super::{Cx, Node, NodeError, NotHandled, PENALTY_MALFORMED};
+use super::{Cx, Node, NodeError, PENALTY_MALFORMED};
 use crate::constants::{EVENT_ID_SIZE, ID_SIZE, MAX_PAGE_ENTRIES};
 use crate::dag;
 use crate::event::Payload;
@@ -54,7 +55,7 @@ impl Node {
             }
             return;
         }
-        if !self.may_receive(&chat, &peer, false) {
+        if !self.scan_peer_ok(&key) {
             if let Some(l) = lane {
                 self.lane_done(chat, l, cx.now);
             }
@@ -83,10 +84,26 @@ impl Node {
         );
     }
 
+    /// Whether the scan `key` may run with its peer: a member of the group's current epoch
+    /// that may receive anything of it; any other peer for a shared-chats scan (§4.11).
+    fn scan_peer_ok(&self, key: &ScanKey) -> bool {
+        if key.0 == SHARED_SCAN {
+            return key.1 != self.me;
+        }
+        self.gx.current.contains_key(&key.0)
+            && self.group_status(&key.0) == super::records::GroupStatus::Active
+            && self.may_receive(&self.cur(&key.0), &key.1, false)
+    }
+
+    /// Starts a shared-chats scan of `peer` (§4.11), or joins the one in progress.
+    pub(crate) fn scan_shared(&mut self, cx: &mut Cx<'_>, peer: GossipId) {
+        self.start_scan(cx, SHARED_SCAN, peer, None);
+    }
+
     /// Trigger 1 of §12.3: after accepting an invitation or adopting a root, scan two
     /// members (or as many as exist) concurrently, preferring existing sessions.
     pub(crate) fn initial_scans(&mut self, cx: &mut Cx<'_>, chat: ChatId) {
-        let mut pool = self.eligible(&chat);
+        let mut pool = self.eligible(&self.cur(&chat));
         let mut chosen = Vec::new();
         while chosen.len() < 2 && !pool.is_empty() {
             let with_session: Vec<usize> = (0..pool.len())
@@ -109,9 +126,9 @@ impl Node {
     /// completing it. Outstanding item queries are resent and paused tasks renewed.
     pub(crate) fn reconnected(&mut self, cx: &mut Cx<'_>, peer: GossipId) {
         self.reconnected_tasks(cx, peer);
-        let chats: Vec<ChatId> = self.epochs.keys().copied().collect();
+        let chats: Vec<ChatId> = self.sync_groups();
         for chat in chats {
-            if !self.may_receive(&chat, &peer, false) {
+            if !self.may_receive(&self.cur(&chat), &peer, false) {
                 continue;
             }
             let key = (chat, peer);
@@ -147,14 +164,19 @@ impl Node {
     /// queued or resent (after a reconnection or `expired`).
     pub(crate) fn scan_query(&self, chat: &ChatId, peer: &GossipId) -> Option<(QueryOp, u64)> {
         let op = self.t.scans_out.get(&(*chat, *peer))?;
-        matches!(op.attempt, ScanAttempt::Queued | ScanAttempt::Sent { .. }).then_some((
-            QueryOp::TipsScan {
-                anchor: *chat,
+        let q = if *chat == SHARED_SCAN {
+            QueryOp::SharedChatsScan {
                 scan_id: op.scan_id,
                 offset: op.offset,
-            },
-            op.ttl,
-        ))
+            }
+        } else {
+            QueryOp::TipsScan {
+                anchor: self.cur(chat),
+                scan_id: op.scan_id,
+                offset: op.offset,
+            }
+        };
+        matches!(op.attempt, ScanAttempt::Queued | ScanAttempt::Sent { .. }).then_some((q, op.ttl))
     }
 
     /// The page request was handed off at `sent_at`: the stage's local wait starts (a
@@ -211,18 +233,7 @@ impl Node {
                 }
                 self.answered(&peer);
                 for e in &p.entries {
-                    match e.item {
-                        EntryItem::Event(id) if e.chat_id == chat => {
-                            self.want_event(
-                                cx,
-                                chat,
-                                id,
-                                Some(peer),
-                                super::records::TriggerKind::Page,
-                            )?;
-                        }
-                        _ => self.not_handled_yet(NotHandled::PageEntry),
-                    }
+                    self.page_entry(cx, chat, peer, *e)?;
                 }
                 let at_offset = current
                     && self
@@ -288,7 +299,12 @@ impl Node {
                 // Legitimate: the responder is late on the root (§11.8, §12.1).
                 self.answered(&peer);
                 if current {
-                    self.not_handled_yet(NotHandled::AnchorRootNotice);
+                    // The responder is told of the anchor by a root notice (§12.1).
+                    if chat != SHARED_SCAN {
+                        let anchor = self.cur(&chat);
+                        self.queue_object_notice(peer, anchor, EntryItem::Root);
+                        self.stats.anchor_notices += 1;
+                    }
                     self.complete_scan(cx, key, ScanEnd::NotAvailable);
                 }
             }
@@ -404,7 +420,7 @@ impl Node {
     pub(crate) fn scan_timers(&mut self, cx: &mut Cx<'_>) {
         let keys: Vec<ScanKey> = self.t.scans_out.keys().copied().collect();
         for key in keys {
-            if !self.may_receive(&key.0, &key.1, false) {
+            if !self.scan_peer_ok(&key) {
                 self.complete_scan(cx, key, ScanEnd::Ended);
                 continue;
             }
@@ -480,7 +496,7 @@ impl Node {
             }
             LaneKind::Random => {
                 let pool: Vec<GossipId> = self
-                    .eligible(&chat)
+                    .eligible(&self.cur(&chat))
                     .into_iter()
                     .filter(|p| !self.is_neighbor(&chat, p) && Some(*p) != not)
                     .collect();
@@ -560,13 +576,21 @@ impl Node {
         use super::records::AnswerOp;
         // Not holding the anchor is legitimate (§12.1); a requester that is not a member of
         // the held anchor gets the same answer, so it cannot tell the two apart.
-        let member = self
-            .epochs
-            .get(&anchor)
-            .is_some_and(|e| e.root.is_member(&peer) && peer != self.me);
+        let member = self.epochs.get(&anchor).is_some_and(|e| {
+            e.root.is_member(&peer)
+                && peer != self.me
+                && e.state != crate::epoch::GroupState::Waiting
+        }) && !matches!(
+            self.group_status(&anchor),
+            super::records::GroupStatus::Removed { .. }
+                | super::records::GroupStatus::Left { .. }
+                | super::records::GroupStatus::Waiting { .. }
+        );
         if !member {
             return Ok(Some(AnswerOp::Status(Status::NotAvailable)));
         }
+        // A removed peer is told of its removal (§5.6).
+        self.removed_contact(cx, anchor, peer);
         let key: FrozenKey = (peer, anchor, scan_id);
         let page = AnswerOp::Page {
             anchor,
@@ -636,21 +660,24 @@ impl Node {
         peer: GossipId,
         anchor: ChatId,
     ) -> Result<Vec<Entry>, NodeError> {
-        let mut list = self.signed_scan_entries(anchor, peer);
-        // The epochs of the anchor's group that the requester is a member of: milestone 3
-        // has one epoch per group.
-        let removed = self.removed_peer(&anchor, &peer);
+        // The epochs of the anchor's group (with the groups linked to it by hand, §5.10)
+        // that the requester is a member of.
+        let listed = self.listed_epochs(&anchor, &peer);
+        let mut list = self.signed_scan_entries(&listed, anchor, peer);
         let mut deletions = Vec::new();
         let mut others = Vec::new();
-        for id in dag::tips(cx.ov, &anchor, cx.now)? {
-            let Some(row) = cx.ov.event_row(&anchor, &id)? else {
-                continue;
-            };
-            let Some(event) = row.event() else { continue };
-            if matches!(event.payload(), Payload::Delete { .. }) {
-                deletions.push(id);
-            } else if !removed {
-                others.push(id);
+        for chat in &listed {
+            let removed = self.removed_peer(chat, &peer);
+            for id in dag::tips(cx.ov, chat, cx.now)? {
+                let Some(row) = cx.ov.event_row(chat, &id)? else {
+                    continue;
+                };
+                let Some(event) = row.event() else { continue };
+                if matches!(event.payload(), Payload::Delete { .. }) {
+                    deletions.push((id, *chat));
+                } else if !removed {
+                    others.push((id, *chat));
+                }
             }
         }
         deletions.sort_unstable();
@@ -659,8 +686,8 @@ impl Node {
             deletions.into_iter().peekable(),
             others.into_iter().peekable(),
         );
-        let entry = |id| Entry {
-            chat_id: anchor,
+        let entry = |(id, chat_id)| Entry {
+            chat_id,
             item: EntryItem::Event(id),
         };
         loop {
@@ -682,10 +709,99 @@ impl Node {
         Ok(list)
     }
 
-    /// The signed objects a tip list starts with: every live signed leave and the dissolve
-    /// message of the current epoch, ascending (§12.1, D.1). Milestone 4: none yet.
-    fn signed_scan_entries(&mut self, _anchor: ChatId, _peer: GossipId) -> Vec<Entry> {
-        Vec::new()
+    /// The installed epochs of the group of `anchor`, and of the groups linked to it by
+    /// hand, that `peer` is a member of (§12.1).
+    fn listed_epochs(&self, anchor: &ChatId, peer: &GossipId) -> Vec<ChatId> {
+        let group = self.group_of(anchor);
+        let mut groups = vec![group];
+        if let Some(g) = self.t.group_recs.get(&group) {
+            groups.extend(g.links.iter().copied());
+        }
+        groups
+            .iter()
+            .flat_map(|g| self.group_epochs(g))
+            .filter(|c| self.epochs.get(c).is_some_and(|e| e.root.is_member(peer)))
+            .collect()
+    }
+
+    /// The signed objects a tip list starts with (§12.1, D.1 choice A): every signed leave
+    /// that is live for this device and the dissolve message of its current epoch, if held,
+    /// ascending by ID, among the listed epochs. Kicks are not listed.
+    ///
+    /// Then, an addition to §12.1: the root of this device's current epoch when the
+    /// requester is a member of it and it is not the anchor. A member that missed a root
+    /// and its notices learns it at the next scan, even when the new epoch holds no event
+    /// yet (an epoch with no tips lists nothing).
+    fn signed_scan_entries(
+        &mut self,
+        listed: &[ChatId],
+        anchor: ChatId,
+        peer: GossipId,
+    ) -> Vec<Entry> {
+        let mut objects: Vec<([u8; 32], Entry)> = Vec::new();
+        let group = listed.first().map(|c| self.group_of(c));
+        let current = group.and_then(|g| self.current_epoch(&g));
+        for (key, rec) in self.t.signed.iter() {
+            if !listed.contains(&key.0) {
+                continue;
+            }
+            let keep = match &rec.object {
+                super::records::SignedObject::Leave(l) => {
+                    self.leave_live(&l.chat_id(), &l.leaver())
+                }
+                super::records::SignedObject::Dissolve(d) => Some(d.chat_id()) == current,
+                super::records::SignedObject::Kick(_) => false,
+            };
+            if keep {
+                objects.push((
+                    key.2,
+                    Entry {
+                        chat_id: key.0,
+                        item: rec.object.item(),
+                    },
+                ));
+            }
+        }
+        objects.sort_by_key(|(id, _)| *id);
+        let mut out: Vec<Entry> = objects.into_iter().map(|(_, e)| e).collect();
+        if let Some(cur) = current
+            && cur != anchor
+            && listed.contains(&cur)
+            && !self.removed_peer(&cur, &peer)
+        {
+            out.push(Entry {
+                chat_id: cur,
+                item: EntryItem::Root,
+            });
+        }
+        out
+    }
+
+    /// One entry of a received page of the scan of group `group` with `peer` (§12.1,
+    /// §4.11): an event of an installed epoch is retrieved; an entry of an epoch this device
+    /// does not hold is handled as a root notice; a signed object as a notice of it.
+    fn page_entry(
+        &mut self,
+        cx: &mut Cx<'_>,
+        group: ChatId,
+        peer: GossipId,
+        e: Entry,
+    ) -> Result<(), NodeError> {
+        let kind = super::records::TriggerKind::Page;
+        if !self.installed(&e.chat_id) {
+            self.root_announced(cx, peer, e.chat_id, kind);
+            return Ok(());
+        }
+        match e.item {
+            EntryItem::Event(id) => {
+                if group != SHARED_SCAN {
+                    self.want_event(cx, e.chat_id, id, Some(peer), kind)?;
+                }
+            }
+            EntryItem::Root => {}
+            item => self.object_announced(cx, peer, e.chat_id, item, kind),
+        }
+        Ok(())
     }
 
     /// The page to answer at assembly, from the frozen list: at most 128 entries from

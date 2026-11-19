@@ -66,7 +66,7 @@ pub enum QueryEntry {
 }
 
 /// The kind of a signed object (§13.3 signed-object lookup).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SignedKind {
     /// A signed leave.
     Leave,

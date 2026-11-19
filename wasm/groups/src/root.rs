@@ -238,11 +238,8 @@ impl Root {
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
         parent: Option<&Root>,
     ) -> Result<Self> {
-        self.signature = signing_key.sign_id(
-            CONTEXT_ROOT_SIGNATURE,
-            self.chat_id.as_bytes(),
-            randomness,
-        );
+        self.signature =
+            signing_key.sign_id(CONTEXT_ROOT_SIGNATURE, self.chat_id.as_bytes(), randomness);
         self.verify_signature(parent)?;
         Ok(self)
     }

@@ -4,18 +4,20 @@
 //! is not a member of the relevant epoch is ignored silently, and counts and state are
 //! allocated only after authorization.
 
+use super::group::Via;
 use super::records::{AnswerOp, Purpose, Target, TaskKey, TriggerKind, Work};
+use super::records::{EpochStatus, SHARED_SCAN, SignedKey, SignedObject};
 use super::retrieval::Answer;
 use super::timing::{
     QUERY_CLOCK_TOLERANCE_MS, QUEUED_ANSWERS_PER_PEER, REQUEST_BURST, REQUEST_REFILL_PER_MIN,
     VERSION_NOTICE_INTERVAL_MS, VERSION_NOTICES_PER_PEER, deadline, ignored_query, may_answer,
 };
-use super::{Cx, Node, NodeError, NotHandled, PENALTY_MALFORMED};
+use super::{Cx, Node, NodeError, PENALTY_KEY_ANSWER, PENALTY_MALFORMED};
 use crate::event::{MessageEvent, Payload};
 use crate::ids::{ChatId, EventId, GossipId, SyncObjId};
 use crate::wire::{
     self, EntryItem, EventObject, Notice, Query, QueryEntry, QueryOp, Response, ResponseResult,
-    Status,
+    SignedKind, Status,
 };
 
 impl Node {
@@ -52,13 +54,18 @@ impl Node {
                 // the wire format has no status for a whole frame.
                 continue;
             }
-            let op = if !self.take_request_token(&from, cx.now) {
+            let ops = if !self.take_request_token(&from, cx.now) {
                 self.stats.busy_sent += 1;
-                AnswerOp::Status(Status::Busy)
+                vec![AnswerOp::Status(Status::Busy)]
             } else if !live {
-                AnswerOp::Status(Status::Expired)
+                vec![AnswerOp::Status(Status::Expired)]
+            } else if let QueryEntry::Op(op) = entry
+                && let Some(ops) =
+                    self.membership_answer(cx, from, op, deadline(q.sent_at, q.ttl))?
+            {
+                ops
             } else {
-                match entry {
+                vec![match entry {
                     QueryEntry::Malformed(_) => AnswerOp::Status(Status::Malformed),
                     QueryEntry::Op(QueryOp::Event { chat_id, event_id }) => AnswerOp::Event {
                         chat_id: *chat_id,
@@ -89,19 +96,28 @@ impl Node {
                         }
                     }
                     QueryEntry::Op(_) => continue,
-                }
+                }]
             };
-            queued += 1;
-            self.queue_work(
-                from,
-                Work::Answer {
-                    request_id: q.request_id,
-                    idx: idx as u32,
-                    sent_at: q.sent_at,
-                    ttl: q.ttl,
-                    op,
-                },
-            );
+            if let QueryEntry::Op(
+                QueryOp::Event { chat_id, .. } | QueryOp::SyncObj { chat_id, .. },
+            ) = entry
+            {
+                // A removed peer is told of its removal (§5.6).
+                self.removed_contact(cx, *chat_id, from);
+            }
+            for op in ops {
+                queued += 1;
+                self.queue_work(
+                    from,
+                    Work::Answer {
+                        request_id: q.request_id,
+                        idx: idx as u32,
+                        sent_at: q.sent_at,
+                        ttl: q.ttl,
+                        op,
+                    },
+                );
+            }
         }
         if alive {
             self.answered(&from);
@@ -127,25 +143,22 @@ impl Node {
                     member_of(self, chat_id)
                 }
                 QueryOp::TipsScan { .. } => from != self.me,
-                QueryOp::ChatById(_) | QueryOp::ChatByRef(_) | QueryOp::ChatByParent { .. } => {
-                    self.not_handled_yet(NotHandled::ChatLookup);
-                    false
+                // No epoch context: a requester that shares an accepted epoch (§4.11, §12.7).
+                QueryOp::ChatById(_)
+                | QueryOp::ChatByRef(_)
+                | QueryOp::ChatByParent { .. }
+                | QueryOp::SharedChatsScan { .. } => from != self.me && self.shares_epoch(&from),
+                // A member of the named epoch (§12.8).
+                QueryOp::SignedObject { chat_id, .. } | QueryOp::Removal { chat_id, .. } => {
+                    member_of(self, chat_id)
                 }
-                QueryOp::SharedChatsScan { .. } => {
-                    self.not_handled_yet(NotHandled::SharedChatsScan);
-                    false
-                }
-                QueryOp::SignedObject { .. } => {
-                    self.not_handled_yet(NotHandled::SignedObjectLookup);
-                    false
-                }
-                QueryOp::Removal { .. } => {
-                    self.not_handled_yet(NotHandled::RemovalLookup);
-                    false
-                }
-                QueryOp::Keys { .. } => {
-                    self.not_handled_yet(NotHandled::KeyQuery);
-                    false
+                // The requester, the responder and the subject are all members (§12.9).
+                QueryOp::Keys { chat_id, gossip_id } => {
+                    member_of(self, chat_id)
+                        && self
+                            .epochs
+                            .get(chat_id)
+                            .is_some_and(|e| e.root.is_member(gossip_id))
                 }
             },
         }
@@ -230,7 +243,8 @@ impl Node {
             Purpose::Scan(chat) => {
                 if let QueryOp::TipsScan {
                     scan_id, offset, ..
-                } = entry.op
+                }
+                | QueryOp::SharedChatsScan { scan_id, offset } = entry.op
                     && first
                 {
                     self.scan_answer(cx, chat, from, (scan_id, offset), &r.result, plausible)?;
@@ -240,9 +254,11 @@ impl Node {
         Ok(())
     }
 
-    /// Judges the answer to a lookup of `key`, and receives a returned event. A returned
-    /// item must match what was requested (§13.4): the epoch and the event ID, or the
-    /// epoch and the sync-object ID; otherwise the answer is invalid (§11.4).
+    /// Judges the answer to a lookup of `key`, and receives a returned item. A returned item
+    /// must match what was requested (§13.4): the epoch and the event ID or sync-object ID
+    /// of an event, the hash ID of a root or signed object, the parent commitment of a chat
+    /// lookup by parent, the GossipID of a key query; otherwise the answer is invalid
+    /// (§11.4).
     fn lookup_answer(
         &mut self,
         cx: &mut Cx<'_>,
@@ -253,15 +269,83 @@ impl Node {
         plausible: bool,
     ) -> Result<(Answer, Option<EventId>), NodeError> {
         Ok(match result {
-            ResponseResult::Event(blob) => match wire::decode_event_blob(blob, version) {
-                Ok(EventObject::Message(e)) if matches_lookup(&e, &key) => {
-                    let id = e.event_id();
-                    let a = self.receive_event(cx, from, e)?;
-                    (a, (a == Answer::Supplied).then_some(id))
+            ResponseResult::Event(blob) => {
+                match (wire::decode_event_blob(blob, version), key.target) {
+                    (Ok(EventObject::Message(e)), Target::Event(_) | Target::SyncObj(_))
+                        if matches_lookup(&e, &key) =>
+                    {
+                        let id = e.event_id();
+                        let a = self.receive_event(cx, from, e)?;
+                        (a, (a == Answer::Supplied).then_some(id))
+                    }
+                    (Ok(EventObject::Root(r)), Target::Root) if r.chat_id() == key.chat_id => {
+                        (self.receive_root(cx, from, *r, Via::Lookup)?, None)
+                    }
+                    (Ok(EventObject::Root(r)), Target::Parent(c))
+                        if self
+                            .held_root(&key.chat_id)
+                            .is_some_and(|child| child.commitment_for(&r.chat_id()) == c) =>
+                    {
+                        (self.receive_root(cx, from, *r, Via::Parent)?, None)
+                    }
+                    (
+                        Ok(
+                            obj @ (EventObject::Leave(_)
+                            | EventObject::Kick(_)
+                            | EventObject::Dissolve(_)),
+                        ),
+                        target,
+                    ) => {
+                        let obj = match obj {
+                            EventObject::Leave(l) => SignedObject::Leave(l),
+                            EventObject::Kick(k) => SignedObject::Kick(k),
+                            EventObject::Dissolve(d) => SignedObject::Dissolve(d),
+                            _ => unreachable!(),
+                        };
+                        let expected: Option<SignedKey> = match target {
+                            Target::Object(kind, id) => Some((key.chat_id, kind, id)),
+                            Target::Removal(m) => match &obj {
+                                SignedObject::Kick(_) => Some((
+                                    key.chat_id,
+                                    SignedKind::Kick,
+                                    *crate::hash::kick_id(&key.chat_id, &m).as_bytes(),
+                                )),
+                                SignedObject::Leave(_) => Some((
+                                    key.chat_id,
+                                    SignedKind::Leave,
+                                    *crate::hash::leave_id(&key.chat_id, &m).as_bytes(),
+                                )),
+                                SignedObject::Dissolve(_) => None,
+                            },
+                            _ => None,
+                        };
+                        match expected {
+                            Some(e) => (self.receive_signed(cx, from, obj, Some(e))?, None),
+                            None => (Answer::Invalid, None),
+                        }
+                    }
+                    _ => (Answer::Invalid, None),
                 }
+            }
+            ResponseResult::Keys(bytes) => match key.target {
+                Target::Keys(id) => match crate::keys::check_key_answer(bytes, &id) {
+                    Ok(_) => {
+                        self.cache_keys(cx, bytes);
+                        (Answer::Supplied, None)
+                    }
+                    Err(_) => {
+                        // The heaviest penalty (§4.3, §11.8); the candidate fails this pass.
+                        self.stats.wrong_keys += 1;
+                        self.penalize(&from, PENALTY_KEY_ANSWER);
+                        (Answer::Refused, None)
+                    }
+                },
                 _ => (Answer::Invalid, None),
             },
-            ResponseResult::Status(Status::NotAvailable) => (Answer::NotAvailable, None),
+            ResponseResult::Status(Status::NotAvailable) => {
+                self.membership_not_available(cx, from, key);
+                (Answer::NotAvailable, None)
+            }
             ResponseResult::Status(Status::Expired) => (Answer::Expired(plausible), None),
             ResponseResult::Status(Status::Busy) => (Answer::Busy, None),
             ResponseResult::Status(Status::Malformed) => (Answer::Refused, None),
@@ -288,15 +372,17 @@ impl Node {
             let id = match e.item {
                 EntryItem::Event(id) => id,
                 EntryItem::Root => {
-                    self.not_handled_yet(NotHandled::RootNotice);
+                    // Acted on although the epoch is unknown (§4.6, §13.7).
+                    self.root_announced(cx, from, chat, TriggerKind::Notice);
                     continue;
                 }
-                EntryItem::Leave(_) | EntryItem::Kick(_) | EntryItem::Dissolve(_) => {
-                    self.not_handled_yet(NotHandled::SignedObjectNotice);
+                item @ (EntryItem::Leave(_) | EntryItem::Kick(_) | EntryItem::Dissolve(_)) => {
+                    self.object_announced(cx, from, chat, item, TriggerKind::Notice);
                     continue;
                 }
             };
             if !self.may_receive(&chat, &from, false) {
+                self.removed_contact(cx, chat, from);
                 continue;
             }
             // A valid entry from a member: it is responsive (§10.1).
@@ -415,5 +501,213 @@ fn matches_lookup(e: &MessageEvent, key: &TaskKey) -> bool {
         && match key.target {
             Target::Event(id) => e.event_id() == id,
             Target::SyncObj(s) => e.payload().sync_obj_id() == s,
+            _ => false,
         }
+}
+
+impl Node {
+    /// The answers to a query entry of this milestone's operations (§12.6 to §12.9), decided
+    /// on receipt (content is assembled later, §15.1); `None` for the other operations.
+    /// "Not available" is the same whether the item is not held or the requester is not a
+    /// member of it (§12.7).
+    fn membership_answer(
+        &mut self,
+        cx: &mut Cx<'_>,
+        from: GossipId,
+        op: &QueryOp,
+        live_until: u64,
+    ) -> Result<Option<Vec<AnswerOp>>, NodeError> {
+        let na = AnswerOp::Status(Status::NotAvailable);
+        let root_for = |n: &Self, chat: &ChatId| {
+            if n.installed(chat) && n.epochs.get(chat).is_some_and(|e| e.root.is_member(&from)) {
+                AnswerOp::Root { chat_id: *chat }
+            } else {
+                AnswerOp::Status(Status::NotAvailable)
+            }
+        };
+        Ok(Some(match op {
+            QueryOp::ChatById(chat) => vec![root_for(self, chat)],
+            QueryOp::ChatByRef(r) => {
+                let chat = self
+                    .epochs
+                    .iter()
+                    .find(|(_, e)| e.root.ref_chat_id() == *r)
+                    .map(|(c, _)| *c);
+                vec![chat.map_or(na, |c| root_for(self, &c))]
+            }
+            QueryOp::ChatByParent {
+                chat_id,
+                commitment,
+            } => {
+                let child = self
+                    .held_root(chat_id)
+                    .filter(|c| c.is_member(&from) && c.is_member(&self.me))
+                    .filter(|c| c.parents().contains(commitment))
+                    .cloned();
+                let parent = child.and_then(|child| {
+                    self.epochs
+                        .keys()
+                        .find(|p| child.commitment_for(p) == *commitment)
+                        .copied()
+                });
+                vec![parent.map_or(na, |p| root_for(self, &p))]
+            }
+            QueryOp::SharedChatsScan { scan_id, offset } => {
+                vec![self.serve_shared_scan(cx, from, *scan_id, *offset, live_until)]
+            }
+            QueryOp::SignedObject { chat_id, kind, id } => {
+                let key = (*chat_id, *kind, *id);
+                let served = match self.t.signed.get(&key).map(|r| &r.object) {
+                    // A leave that is not live is kept for its leaver and for removal
+                    // lookups only (§5.3).
+                    Some(SignedObject::Leave(l)) => {
+                        l.leaver() == from || self.leave_live_anywhere(chat_id, &l.leaver())
+                    }
+                    Some(_) => true,
+                    None => false,
+                };
+                vec![if served {
+                    AnswerOp::Object {
+                        chat_id: *chat_id,
+                        item: super::objects::key_item(&key),
+                    }
+                } else {
+                    na
+                }]
+            }
+            QueryOp::Removal { chat_id, gossip_id } => {
+                let keys = [
+                    (
+                        *chat_id,
+                        SignedKind::Kick,
+                        *crate::hash::kick_id(chat_id, gossip_id).as_bytes(),
+                    ),
+                    (
+                        *chat_id,
+                        SignedKind::Leave,
+                        *crate::hash::leave_id(chat_id, gossip_id).as_bytes(),
+                    ),
+                ];
+                let ops: Vec<AnswerOp> = keys
+                    .iter()
+                    .filter(|k| self.t.signed.contains(k))
+                    .map(|k| AnswerOp::Object {
+                        chat_id: *chat_id,
+                        item: super::objects::key_item(k),
+                    })
+                    .collect();
+                if ops.is_empty() { vec![na] } else { ops }
+            }
+            QueryOp::Keys { gossip_id, .. } => vec![if self.t.keys.contains(gossip_id) {
+                AnswerOp::Keys {
+                    gossip_id: *gossip_id,
+                }
+            } else {
+                na
+            }],
+            _ => return Ok(None),
+        }))
+    }
+
+    /// A shared-chats scan request (§4.11, §12.6): the frozen list holds, ascending, every
+    /// accepted epoch this device retains whose members include the requester and itself
+    /// and of which it holds no successor that also lists the requester.
+    fn serve_shared_scan(
+        &mut self,
+        cx: &mut Cx<'_>,
+        peer: GossipId,
+        scan_id: crate::ids::ScanId,
+        offset: u64,
+        live_until: u64,
+    ) -> AnswerOp {
+        let key = (peer, SHARED_SCAN, scan_id);
+        let page = AnswerOp::Page {
+            anchor: SHARED_SCAN,
+            scan_id,
+            offset,
+        };
+        if let Some(f) = self.t.scans_in.get(&key).cloned() {
+            let Some(list) = f.list.as_ref().filter(|_| f.live_until >= cx.now) else {
+                return AnswerOp::Status(Status::Restart);
+            };
+            if offset > list.len() as u64 {
+                return AnswerOp::Status(Status::Malformed);
+            }
+            if let Some(f) = self.t.scans_in.get_mut(&key) {
+                f.live_until = live_until;
+            }
+            return page;
+        }
+        if offset != 0 {
+            return AnswerOp::Status(Status::Restart);
+        }
+        let list: Vec<crate::wire::Entry> = self
+            .shared_epochs(&peer)
+            .into_iter()
+            .map(|chat_id| crate::wire::Entry {
+                chat_id,
+                item: EntryItem::Root,
+            })
+            .collect();
+        self.t.scans_in.insert(
+            key,
+            super::records::FrozenScan {
+                list: Some(list),
+                live_until,
+                forget_at: 0,
+            },
+        );
+        page
+    }
+
+    /// The epochs a shared-chats scan of `peer` lists (§4.11), ascending.
+    pub(crate) fn shared_epochs(&self, peer: &GossipId) -> Vec<ChatId> {
+        self.epochs
+            .iter()
+            .filter(|(c, e)| {
+                e.root.is_member(peer)
+                    && e.root.is_member(&self.me)
+                    && self
+                        .t
+                        .epochs
+                        .get(c)
+                        .is_some_and(|r| r.status == EpochStatus::Installed)
+                    && !self.gx.children.get(c).is_some_and(|ch| {
+                        ch.iter()
+                            .any(|s| self.epochs.get(s).is_some_and(|se| se.root.is_member(peer)))
+                    })
+            })
+            .map(|(c, _)| *c)
+            .collect()
+    }
+
+    /// A "not available" to a lookup of this milestone (§11.8): a failed announcement for a
+    /// root the peer announced or listed; for a parent lookup, an answer counted for the
+    /// invitation prompt (§4.8), without penalty.
+    fn membership_not_available(&mut self, cx: &mut Cx<'_>, from: GossipId, key: TaskKey) {
+        match key.target {
+            Target::Root => {
+                let announced = self
+                    .t
+                    .tasks
+                    .get(&key)
+                    .and_then(|t| t.candidates.get(&from))
+                    .is_some_and(|c| c.trigger.is_some());
+                if announced {
+                    self.failed_announcement(cx, &from);
+                }
+            }
+            Target::Parent(_) => {
+                if let Some(r) = self.t.epochs.get_mut(&key.chat_id)
+                    && let EpochStatus::Invitation(inv) = &mut r.status
+                {
+                    inv.not_available.insert(from);
+                }
+                if self.prompt_due(&key.chat_id, cx.now) {
+                    self.changed(key.chat_id, super::records::ChangeKind::Invitation, cx.now);
+                }
+            }
+            _ => {}
+        }
+    }
 }

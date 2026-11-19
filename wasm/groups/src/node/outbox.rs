@@ -18,8 +18,8 @@ use crate::event::{MessageEvent, Payload};
 use crate::ids::{ChatId, EventId, GossipId, RequestId};
 use crate::rng::{Randomness, bytes};
 use crate::wire::{
-    self, Entry, EntryItem, EventObject, Frame, NeighborRequest, NeighborResponse, Notice, Query,
-    QueryEntry, QueryOp, Response, ResponseResult, Status, varint_len,
+    self, Entry, EntryItem, EventObject, Frame, LeaveRequest, NeighborRequest, NeighborResponse,
+    Notice, Query, QueryEntry, QueryOp, Response, ResponseResult, Status, varint_len,
 };
 
 use super::records::NodeStorage;
@@ -109,6 +109,8 @@ pub(crate) fn event_ref(w: &Work) -> Option<(ChatId, EventId)> {
 /// The answer categories of §13.9, in emission order. Pages are scheduled apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Category {
+    /// Roots, signed objects and key answers: sent first (§13.9, D.5).
+    Priority,
     Deletion,
     Ordinary,
     Status,
@@ -146,6 +148,10 @@ impl Node {
             self.work_refs.entry(r).or_default().insert(key);
         }
         self.t.queue.insert(key, work);
+    }
+
+    pub(crate) fn remove_queued(&mut self, key: &WorkKey) {
+        self.remove_work(key);
     }
 
     fn remove_work(&mut self, key: &WorkKey) {
@@ -444,6 +450,7 @@ impl Node {
         let mut queries: Vec<(WorkKey, Purpose, QueryOp, u64)> = Vec::new();
         let mut fulls: Vec<(WorkKey, ChatId, EventId, Frame)> = Vec::new();
         let mut notices: Vec<(WorkKey, Entry)> = Vec::new();
+        let mut objects: Vec<(WorkKey, Frame)> = Vec::new();
         let mut purposes: BTreeSet<Purpose> = BTreeSet::new();
         for (key, work) in items {
             match work {
@@ -475,15 +482,25 @@ impl Node {
                 Work::Query { purpose } => {
                     let q = match purpose {
                         Purpose::Task(t) => self.task_query(&t, &peer).map(|ttl| {
+                            let chat_id = t.chat_id;
                             let op = match t.target {
-                                Target::Event(event_id) => QueryOp::Event {
-                                    chat_id: t.chat_id,
-                                    event_id,
-                                },
+                                Target::Event(event_id) => QueryOp::Event { chat_id, event_id },
                                 Target::SyncObj(sync_obj_id) => QueryOp::SyncObj {
-                                    chat_id: t.chat_id,
+                                    chat_id,
                                     sync_obj_id,
                                 },
+                                Target::Root => QueryOp::ChatById(chat_id),
+                                Target::Parent(commitment) => QueryOp::ChatByParent {
+                                    chat_id,
+                                    commitment,
+                                },
+                                Target::Object(kind, id) => {
+                                    QueryOp::SignedObject { chat_id, kind, id }
+                                }
+                                Target::Removal(gossip_id) => {
+                                    QueryOp::Removal { chat_id, gossip_id }
+                                }
+                                Target::Keys(gossip_id) => QueryOp::Keys { chat_id, gossip_id },
                             };
                             (op, ttl)
                         }),
@@ -553,8 +570,24 @@ impl Node {
                     }),
                 )),
                 Work::VersionNotice => version_notice.push(key),
+                Work::Object { chat_id, item } => match self.object_blob(&peer, &chat_id, item) {
+                    Some(blob) => objects.push((key, Frame::Event(blob))),
+                    None => stale.push(key),
+                },
+                Work::ObjectNotice { chat_id, item } => {
+                    if self.object_blob(&peer, &chat_id, item).is_some() {
+                        notices.push((key, Entry { chat_id, item }));
+                    } else {
+                        stale.push(key);
+                    }
+                }
+                Work::Blob(blob) => objects.push((key, Frame::Event(blob))),
+                Work::LeaveRequest { chat_id } => {
+                    control.push((key, Frame::LeaveRequest(LeaveRequest { chat_id })));
+                }
             }
         }
+
         // Frames that cannot be encoded or do not fit an empty container are dropped with
         // their work rather than sent (they cannot be, and must not stay queued).
         let fits_alone = |f: &Frame| {
@@ -575,6 +608,13 @@ impl Node {
         drop_unfit(&mut pages);
         drop_unfit(&mut answers);
         fulls.retain(|(k, _, _, f)| {
+            let ok = fits_alone(f).is_some();
+            if !ok {
+                stale.push(*k);
+            }
+            ok
+        });
+        objects.retain(|(k, f)| {
             let ok = fits_alone(f).is_some();
             if !ok {
                 stale.push(*k);
@@ -664,6 +704,10 @@ impl Node {
                 ));
             }
         }
+        // Roots and signed objects before message events (§13.9, D.5).
+        for (k, f) in objects {
+            frames.push((f, vec![k], Pending::default()));
+        }
         for (k, chat, id, f) in fulls {
             frames.push((
                 f,
@@ -712,10 +756,10 @@ impl Node {
             ));
         };
         for (k, e) in notices {
-            // An event entry encodes to at most 64 bytes, so 128 of them stay under 16 KiB;
-            // both limits are kept explicitly.
+            // An entry encodes to at most 80 bytes, so 128 of them stay under 16 KiB; both
+            // limits are kept explicitly.
             if notice.entries.len() >= MAX_NOTICE_ENTRIES
-                || (notice.entries.len() + 1) * 64 > MAX_NOTICE_BYTES
+                || (notice.entries.len() + 1) * 80 > MAX_NOTICE_BYTES
             {
                 flush(&mut notice, &mut notice_keys, &mut frames);
             }
@@ -824,6 +868,26 @@ impl Node {
                     None => status(Status::NotAvailable),
                 }
             }
+            AnswerOp::Root { chat_id } | AnswerOp::Object { chat_id, .. } => {
+                let item = match op {
+                    AnswerOp::Object { item, .. } => item,
+                    _ => EntryItem::Root,
+                };
+                match self.object_blob(peer, &chat_id, item) {
+                    Some(blob) => {
+                        Some((Some(Category::Priority), ResponseResult::Event(blob), None))
+                    }
+                    None => status(Status::NotAvailable),
+                }
+            }
+            AnswerOp::Keys { gossip_id } => match self.t.keys.get(&gossip_id) {
+                Some(bytes) => Some((
+                    Some(Category::Priority),
+                    ResponseResult::Keys(bytes.clone()),
+                    None,
+                )),
+                None => status(Status::NotAvailable),
+            },
             AnswerOp::Page {
                 anchor,
                 scan_id,
@@ -846,7 +910,11 @@ impl Node {
         pages: Vec<ReadyAnswer>,
         answers: Vec<ReadyAnswer>,
     ) -> Vec<ReadyAnswer> {
+        let (priority, answers): (Vec<ReadyAnswer>, Vec<ReadyAnswer>) = answers
+            .into_iter()
+            .partition(|a| a.category == Category::Priority);
         let mut out = pages;
+        out.extend(priority);
         // Round-robin across requests: the n-th answer of every request before the
         // (n+1)-th of any, requests in queue order, ascending idx within each.
         let round_robin = |mut v: Vec<ReadyAnswer>| {
@@ -950,5 +1018,35 @@ fn event_answer(e: MessageEvent) -> Evaluated {
             ResponseResult::Status(Status::NotAvailable),
             None,
         ),
+    }
+}
+
+impl Node {
+    /// The blob of a root or signed object to send `peer`, decided at assembly (§15.1): it is
+    /// still held, and `peer` is a member of the epoch it names (for a root, of the root).
+    pub(crate) fn object_blob(
+        &self,
+        peer: &GossipId,
+        chat: &ChatId,
+        item: EntryItem,
+    ) -> Option<Vec<u8>> {
+        let root = self.held_root(chat)?;
+        if !root.is_member(peer) || *peer == self.me {
+            return None;
+        }
+        let object = match item {
+            EntryItem::Root => {
+                if !self.installed(chat) {
+                    return None;
+                }
+                EventObject::Root(Box::new(root.clone()))
+            }
+            EntryItem::Event(_) => return None,
+            item => {
+                let key = super::objects::item_key(*chat, item)?;
+                self.t.signed.get(&key)?.object.to_event_object()
+            }
+        };
+        wire::encode_event_blob(&object).ok()
     }
 }
