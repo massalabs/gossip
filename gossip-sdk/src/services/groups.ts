@@ -186,6 +186,9 @@ type Raw = Record<string, unknown>;
 
 const MAX_WAKEUP_MS = 60 * 60 * 1000;
 
+/** The longest wait between two sends of a stored ciphertext. */
+const MAX_OUTBOX_RETRY_MS = 60 * 60 * 1000;
+
 /**
  * Whether a send failed for good: the server answered a 4xx other than a
  * timeout or rate limiting. A 409 means that it holds another value under the
@@ -382,6 +385,8 @@ export class GroupService {
   private reopenTimer: ReturnType<typeof setTimeout> | null = null;
   private reopenDelay = 0;
   private closed = false;
+  /** Failed sends of each outbox row since this service opened. */
+  private outboxFailures = new Map<number, number>();
   /** A send is queued on the chain and has not started yet. */
   private pumpQueued = false;
   /**
@@ -831,6 +836,7 @@ export class GroupService {
         continue;
       }
       if (id !== null) {
+        this.outboxFailures.delete(id);
         await this.queries.groups.deleteOutbox(id).catch(() => undefined);
       }
       if (handOff && this.alive(e.node)) {
@@ -857,6 +863,7 @@ export class GroupService {
         await this.outboxFailed(row.id, error).catch(() => undefined);
         continue;
       }
+      this.outboxFailures.delete(row.id);
       await this.queries.groups.deleteOutbox(row.id).catch(() => undefined);
     }
   }
@@ -865,16 +872,24 @@ export class GroupService {
    * A stored ciphertext that failed to send. One the server refused for good
    * is deleted: its plaintext was handed off but is never published, so the
    * engine records no delivery hint for it and its events stay to be
-   * synchronised. Any other failure is retried.
+   * synchronised. Any other failure is retried, each wait twice the one
+   * before, up to an hour.
    */
   private async outboxFailed(id: number, error: unknown): Promise<void> {
     if (isFinalSendError(error)) {
+      this.outboxFailures.delete(id);
       await this.queries.groups.deleteOutbox(id);
       return;
     }
+    const failures = (this.outboxFailures.get(id) ?? 0) + 1;
+    this.outboxFailures.set(id, failures);
+    const delay = Math.min(
+      MAX_OUTBOX_RETRY_MS,
+      this.config.messages.retryDelayMs * 2 ** Math.min(failures - 1, 20)
+    );
     await this.queries.groups.rescheduleOutbox(
       id,
-      new Date(this.now() + this.config.messages.retryDelayMs)
+      new Date(this.now() + delay)
     );
   }
 
