@@ -272,15 +272,16 @@ impl Node {
             }
             Answer::Expired(plausible) => {
                 if let Run::Active {
-                    attempt: attempt @ Some(Attempt::Sent { .. }),
+                    attempt: Some(Attempt::Sent { .. }),
                     expired_resends,
                     ..
                 } = &mut task.run
                     && current
                     && (plausible || *expired_resends < MAX_EXPIRED_RESENDS)
                 {
+                    // The attempt stays sent with its local deadline: the resend does not
+                    // change the stage (§11.4).
                     *expired_resends += 1;
-                    *attempt = Some(Attempt::Queued { peer });
                     self.stats.expired_resends += 1;
                     self.queue_work(
                         peer,
@@ -520,7 +521,7 @@ impl Node {
     }
 
     /// The query of `key` was handed off to `peer` at `sent_at` with `ttl`: the stage's
-    /// local wait starts (a reconnection resend keeps the one running), and the peer is
+    /// local wait starts (a resend keeps the one running), and the peer is
     /// outstanding until the request's deadline.
     pub(crate) fn task_sent(&mut self, key: TaskKey, peer: GossipId, sent_at: u64, ttl: u64) {
         let Some(task) = self.t.tasks.get_mut(&key) else {
@@ -555,7 +556,7 @@ impl Node {
     }
 
     /// The query entry to send for `key`, with its TTL, if the task still wants `peer`: a
-    /// queued attempt, or a reconnection resend of a sent one.
+    /// queued attempt, or a resend of a sent one (after a reconnection or `expired`).
     pub(crate) fn task_query(&self, key: &TaskKey, peer: &GossipId) -> Option<u64> {
         match self.t.tasks.get(key)?.run {
             Run::Active {
