@@ -1175,6 +1175,31 @@ impl Node {
         self.ri.dirty.insert(child);
     }
 
+    /// Removes the roots fetched as parents for the invitation `top` (§4.8), with their
+    /// tasks, unless another held root still names them.
+    pub(crate) fn drop_fetched_for(&mut self, top: ChatId) {
+        let fetched: BTreeSet<ChatId> = self
+            .t
+            .epochs
+            .iter()
+            .filter(|(_, r)| {
+                matches!(&r.status, EpochStatus::Invitation(i) if i.fetched_for.is_some_and(|(t, _)| t == top))
+            })
+            .map(|(c, _)| *c)
+            .collect();
+        for c in &fetched {
+            let needed = self
+                .named_by_of(c)
+                .iter()
+                .any(|x| *x != top && !fetched.contains(x));
+            if !needed {
+                self.take_record(c);
+                self.t.events.remove(&(*c, ChangeKind::Invitation));
+                self.drop_tasks_of(&[*c]);
+            }
+        }
+    }
+
     /// Drops the retrieval tasks keyed by the given epochs.
     pub(crate) fn drop_tasks_of(&mut self, chats: &[ChatId]) {
         let keys: Vec<TaskKey> = self
