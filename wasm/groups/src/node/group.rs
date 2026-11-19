@@ -615,11 +615,22 @@ impl Node {
         if let Some(old) = self.t.group_recs.remove(&from) {
             let g = self.group_rec_mut(into);
             g.links.extend(old.links);
+            g.links.remove(&into);
             g.junctions.extend(old.junctions);
             if g.local_name.is_none() {
                 g.local_name = old.local_name;
             }
             g.deposed.extend(old.deposed);
+            // The line followed is the one no handover deposed (§5.9): a group accepted on
+            // its own before its parents were found must not bring a former owner back.
+            if g.followed.is_none_or(|f| g.deposed.contains(&f))
+                && old.followed.is_some_and(|f| !g.deposed.contains(&f))
+            {
+                g.followed = old.followed;
+            }
+            for (m, at) in old.pending_removals {
+                g.pending_removals.entry(m).or_insert(at);
+            }
         }
         self.t.groups.remove(&from);
         let scans: Vec<_> = self
