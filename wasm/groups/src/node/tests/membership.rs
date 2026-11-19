@@ -2563,7 +2563,7 @@ fn hand_over_and_leave_with_an_unknown_parent_is_no_failed_announcement() {
                 if let Frame::Event(b) = &f
                     && matches!(wire::decode_event_blob(b, 1), Ok(EventObject::Root(r)) if r.chat_id() == h)
                 {
-                    net.recv_frames_m(2, 0, &[f.clone()]);
+                    net.recv_frames_m(2, 0, std::slice::from_ref(&f));
                 }
             }
         }
