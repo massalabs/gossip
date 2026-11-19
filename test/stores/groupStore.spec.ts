@@ -25,6 +25,7 @@ describe('groupStore', () => {
         body: { type: 'text', text: 'hi' },
         metadata: {},
         replyTo: [],
+        reactions: [],
       },
     ]);
     useSdkStore.setState({ sdk: fake.sdk as unknown as GossipSdk });
@@ -41,7 +42,12 @@ describe('groupStore', () => {
     const { groups, available } = useGroupStore.getState();
     expect(available).toBe(true);
     expect(groups.map(g => g.summary.groupId)).toEqual(['g2', 'g1']);
-    expect(groups[0].lastMessage).toEqual({ author: 'bob', text: 'hi', at: 5 });
+    expect(groups[0].lastMessage).toEqual({
+      author: 'bob',
+      text: 'hi',
+      at: 5,
+      media: false,
+    });
     expect(groups[1].lastMessage).toBeNull();
   });
 
@@ -62,6 +68,44 @@ describe('groupStore', () => {
     expect(unread).toEqual({ g1: false, g2: true });
     useGroupStore.getState().markRead('g2');
     expect(useGroupStore.getState().groups.every(g => !g.unread)).toBe(true);
+  });
+
+  it('does not mark a group unread when only reactions changed, and reads it again', async () => {
+    useGroupStore.getState().init();
+    await flush();
+    const before = useGroupStore.getState().version;
+    fake.sdk.emit(SdkEventType.GROUPS_CHANGED, {
+      changes: [{ groupId: 'g2', kind: 'Reactions' }],
+    });
+    await flush();
+    expect(useGroupStore.getState().groups.some(g => g.unread)).toBe(false);
+    expect(useGroupStore.getState().version).toBeGreaterThan(before);
+  });
+
+  it('shows a media message as an attachment in the list, never its data', async () => {
+    fake.state.timelines.set('g2', [
+      {
+        kind: 'message',
+        epochId: 'g2',
+        syncObjId: 's',
+        author: 'bob',
+        createdAt: 5n,
+        lastModifiedAt: 5n,
+        edited: false,
+        body: { type: 'media', mimetype: 'image/png', dataLength: 3 },
+        metadata: {},
+        replyTo: [],
+        reactions: [{ emoji: '👍', authors: ['me'], mine: true }],
+      },
+    ]);
+    useGroupStore.getState().init();
+    await flush();
+    expect(useGroupStore.getState().groups[0].lastMessage).toEqual({
+      author: 'bob',
+      text: '',
+      at: 5,
+      media: true,
+    });
   });
 
   it('reads invitations again on a change and stops listening on cleanup', async () => {

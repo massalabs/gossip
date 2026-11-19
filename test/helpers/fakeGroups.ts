@@ -42,6 +42,8 @@ export function makeFakeGroups() {
     deleteMessageLocally: vi.fn(async () => {}),
     editMessageLocally: vi.fn(async () => {}),
     retryMessage: vi.fn(async () => ({}) as never),
+    react: vi.fn(async () => ({}) as never),
+    unreact: vi.fn(async () => ({}) as never),
     messageLimits: { textBytes: 16_384, metadataBytes: 16_384 },
   };
   const sdk = {
