@@ -390,14 +390,16 @@ impl Node {
     /// The epochs among `held` (held parents named by `root`) over which the owner of
     /// `root` has verified authority (§4.7): for a handover root, its parent, whose owner
     /// signed it (the signature was verified against that parent on receipt); for a
-    /// successor root, every held parent, when each is owned by the root's owner or by a
-    /// previous owner in its line, and none otherwise.
+    /// successor root, each held parent owned by the root's owner or by a previous owner in
+    /// its line; the others are treated as unmatched (§4.7).
     ///
     /// Authority from a held handover counts only within the group of that handover's
     /// parent, as joined by the root lines this device holds (never by links made by hand):
-    /// the parents are judged group by group. A root naming one held parent it has no
-    /// authority over fails continuity as a whole: a new owner of one group of a former
-    /// owner cannot attach that owner's other groups.
+    /// the parents are judged group by group (D.69). A new owner of one group of a former
+    /// owner therefore cannot attach that owner's other groups, whose parents stay
+    /// unmatched, while its root still continues the parents it has authority over. (D.69
+    /// had the root fail as a whole: a device that could not verify one parent then split
+    /// the line its owner continued directly, against "Accept" in §4.8.)
     pub(crate) fn authorized_parents(&self, root: &Root, held: &[ChatId]) -> Vec<ChatId> {
         let held: Vec<ChatId> = held
             .iter()
@@ -411,19 +413,19 @@ impl Node {
         for c in &held {
             by_group.entry(self.group_of(c)).or_default().push(*c);
         }
+        let mut authorized = BTreeSet::new();
         for parents in by_group.values() {
             let authority = self.line_authority(root.owner_id(), parents);
-            let all = parents.iter().all(|c| {
+            authorized.extend(parents.iter().copied().filter(|c| {
                 self.t
                     .epochs
                     .get(c)
                     .is_some_and(|r| authority.contains(&r.root.owner_id()))
-            });
-            if !all {
-                return Vec::new();
-            }
+            }));
         }
-        held
+        held.into_iter()
+            .filter(|c| authorized.contains(c))
+            .collect()
     }
 
     // ── Receiving a root (§4.7, §4.8) ────────────────────────────────────────
