@@ -2456,3 +2456,66 @@ fn unverified_handover_roots_are_bounded_per_sender_and_asked_of_their_sender() 
         }
     }
 }
+
+/// Finding 10 of the review of 54711780: the identities whose kick naming an epoch is valid
+/// (D.18) were not transitive across successors (A to B, a successor by B, B to D: D was
+/// no authority), and a kick a device could not verify, for lack of the handover root,
+/// was penalised as a malformed object from the member that relayed it.
+#[test]
+fn kick_authorities_are_transitive_and_an_unverifiable_kick_is_no_penalty() {
+    let (mut net, g) = founded(4);
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    net.change(
+        1,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![],
+            name: Some("b".into()),
+        },
+    )
+    .unwrap();
+    net.exchange();
+    net.change(
+        1,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(2),
+            leave: false,
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    let auth = net.devs[3].node.kick_authorities(&g);
+    assert!(
+        auth.iter().any(|k| GossipId::of_keys(k) == gid(2)),
+        "the second new owner has authority over the first epoch"
+    );
+    // A kick signed by an identity this device cannot verify costs its relay nothing.
+    let root = net.devs[3].node.root(&g).unwrap();
+    let k = Kick::sign_as(
+        &root,
+        gid(3),
+        &ident(7).secret.dsa_signing_key,
+        &ident(7).public,
+        [5; 32],
+    )
+    .unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Kick(k)).unwrap();
+    let before = net.devs[3].node.score(&gid(1));
+    net.recv_frames_m(3, 1, &[Frame::Event(blob)]);
+    assert_eq!(net.devs[3].node.score(&gid(1)), before);
+}
