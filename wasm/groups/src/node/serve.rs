@@ -40,10 +40,13 @@ impl Node {
             .range((from, 0)..=(from, u64::MAX))
             .filter(|(_, w)| matches!(w, Work::Answer { .. }))
             .count();
+        let mut alive = false;
         for (idx, entry) in q.entries.iter().enumerate() {
             if !self.authorize(from, entry) {
                 continue;
             }
+            // An authorized entry from a member: it is online (§10.1).
+            alive = alive || self.shares_epoch(&from);
             if queued >= QUEUED_ANSWERS_PER_PEER {
                 // Dropped unanswered: one `busy` per entry cannot be bounded otherwise, and
                 // the wire format has no status for a whole frame.
@@ -99,6 +102,9 @@ impl Node {
                     op,
                 },
             );
+        }
+        if alive {
+            self.answered(&from);
         }
         Ok(())
     }
