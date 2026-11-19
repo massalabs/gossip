@@ -49,6 +49,7 @@ pub mod records;
 pub mod timing;
 
 mod hints;
+mod index;
 mod neighbors;
 mod outbox;
 mod retrieval;
@@ -172,6 +173,8 @@ pub struct Stats {
     pub received: u64,
     /// Invalid answers and frames received.
     pub invalid: u64,
+    /// Events received with a timestamp beyond `now + 5 min` (§9.6).
+    pub temporarily_invalid: u64,
     /// Penalties given.
     pub penalties: u64,
     /// Retrieval tasks created.
@@ -260,6 +263,8 @@ pub struct Node {
     work_refs: BTreeMap<(ChatId, EventId), BTreeSet<WorkKey>>,
     outbox: outbox::InFlight,
     sessions: BTreeSet<GossipId>,
+    /// The index of the tasks, derived from their records.
+    tix: index::TaskIndex,
     lookup_results: Vec<(ChatId, SyncObjId, LookupResult)>,
     stats: Stats,
 }
@@ -292,6 +297,7 @@ impl Node {
             work_refs: BTreeMap::new(),
             outbox: outbox::InFlight::default(),
             sessions: BTreeSet::new(),
+            tix: index::TaskIndex::default(),
             lookup_results: Vec::new(),
             stats: Stats::default(),
         };
@@ -308,6 +314,11 @@ impl Node {
             self.hint_lru.insert(hints::lru(h.used, *k));
             self.hint_age.insert((h.first, *k));
             *self.hint_count.entry(k.0).or_default() += 1;
+        }
+        self.tix.clear();
+        let keys: Vec<TaskKey> = self.t.tasks.keys().copied().collect();
+        for k in keys {
+            self.reindex(k);
         }
         self.work_refs.clear();
         let refs: Vec<((ChatId, EventId), WorkKey)> = self
@@ -919,7 +930,10 @@ impl Node {
             }
             // Silently dropped: not a member, removed, not accepted, a group state.
             Outcome::Rejected(_) => Ok(retrieval::Answer::Invalid),
-            Outcome::TemporarilyInvalid => Ok(retrieval::Answer::TemporarilyInvalid),
+            Outcome::TemporarilyInvalid => {
+                self.stats.temporarily_invalid += 1;
+                Ok(retrieval::Answer::TemporarilyInvalid)
+            }
             outcome => {
                 // `from` holds E in full (§10.3).
                 self.mark_seen(cx, chat, from, id)?;

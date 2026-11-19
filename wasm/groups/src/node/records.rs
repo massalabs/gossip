@@ -555,6 +555,11 @@ impl<K: Ord + Clone, V: Clone> Table<K, V> {
         self.map.contains_key(k)
     }
 
+    /// The keys written since the last commit (in this operation).
+    pub(crate) fn dirty_keys(&self) -> Vec<K> {
+        self.dirty.iter().cloned().collect()
+    }
+
     /// A mutable reference; the key is written at the next commit.
     pub(crate) fn get_mut(&mut self, k: &K) -> Option<&mut V> {
         let v = self.map.get_mut(k)?;

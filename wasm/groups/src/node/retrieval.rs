@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 
+use super::index::Blocked;
 use super::records::{
     Attempt, Candidate, CandidateState, Purpose, Run, Target, Task, TaskKey, Trigger, TriggerKind,
     Work,
@@ -97,7 +98,9 @@ impl Node {
         from: Option<(GossipId, TriggerKind)>,
     ) {
         if !self.t.tasks.contains(&key) {
-            if self.tasks_full(&key.chat_id) {
+            if self.t.tasks.len() >= QUEUED_MISSING_PER_GROUP.min(QUEUED_MISSING_PER_DEVICE)
+                && self.tasks_full(&key.chat_id)
+            {
                 self.stats.backpressure += 1;
                 return;
             }
@@ -280,44 +283,40 @@ impl Node {
     /// A task with no candidate left pauses (a sync-object lookup then completes, not
     /// found).
     pub(crate) fn schedule(&mut self, cx: &mut Cx<'_>) -> Result<(), NodeError> {
-        let mut load: BTreeMap<GossipId, usize> = BTreeMap::new();
-        let mut waiting: Vec<(u64, TaskKey)> = Vec::new();
-        for (key, task) in self.t.tasks.iter() {
-            match task.run {
-                Run::Active {
-                    attempt: Some(a), ..
-                } => *load.entry(a.peer()).or_default() += 1,
-                Run::Active { attempt: None, .. } => {
-                    let best = task
-                        .candidates
-                        .iter()
-                        .filter(|(_, c)| c.trigger.is_some() && c.state == CandidateState::Untried)
-                        .map(|(p, _)| self.score(p))
-                        .max()
-                        .unwrap_or(0);
-                    waiting.push((best, *key));
-                }
-                Run::Paused => {}
-            }
+        self.reindex_dirty();
+        self.tix.wake_until(cx.now);
+        self.tix.wake_free(ACTIVE_LOOKUPS_PER_PEER);
+        if self.tix.total >= ACTIVE_LOOKUPS_PER_DEVICE || self.tix.none_ready() {
+            return Ok(());
         }
-        let mut total: usize = load.values().sum();
-        // Tasks whose best triggering peer scores higher go first.
-        waiting.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        for (_, key) in waiting {
-            if total >= ACTIVE_LOOKUPS_PER_DEVICE {
+        // Only the ready tasks are ranked, highest priority first (tasks whose best
+        // triggering peer scores higher): a task found waiting is ranked again when what
+        // held it back changes (the task itself, a slot of one of its candidates, or the
+        // expiry of an outstanding request), see `index`.
+        let mut load = self.tix.load.clone();
+        while self.tix.total < ACTIVE_LOOKUPS_PER_DEVICE {
+            let Some(key) = self.tix.ready().next() else {
                 break;
-            }
+            };
             if past_deadline(&key, cx.now) {
+                // Removed by the next timer pass; not ranked meanwhile.
+                self.tix.block(
+                    key,
+                    Blocked {
+                        peers: Vec::new(),
+                        until: u64::MAX,
+                    },
+                );
                 continue;
             }
             match self.select(cx, &key, &load) {
                 Selection::Peer(peer) => {
-                    let task = self.t.tasks.get_mut(&key).expect("listed");
+                    let task = self.t.tasks.get_mut(&key).expect("ready");
                     if let Run::Active { attempt, .. } = &mut task.run {
                         *attempt = Some(Attempt::Queued { peer });
                     }
+                    self.reindex(key);
                     *load.entry(peer).or_default() += 1;
-                    total += 1;
                     self.queue_work(
                         peer,
                         Work::Query {
@@ -325,11 +324,40 @@ impl Node {
                         },
                     );
                 }
-                Selection::Wait => {}
-                Selection::Exhausted => self.pause(key),
+                Selection::Wait(b) => self.tix.block(key, b),
+                Selection::Exhausted => {
+                    self.pause(key);
+                    self.reindex(key);
+                }
             }
         }
         Ok(())
+    }
+
+    /// Brings the task index up to date for `key`.
+    pub(crate) fn reindex(&mut self, key: TaskKey) {
+        let prio = self.priority(&key);
+        self.tix.update(key, self.t.tasks.get(&key), prio);
+    }
+
+    /// Brings the task index up to date for every task written in this operation.
+    pub(crate) fn reindex_dirty(&mut self) {
+        for key in self.t.tasks.dirty_keys() {
+            self.reindex(key);
+        }
+    }
+
+    /// The scheduling priority of a task: the best score among its untried candidates with
+    /// a trigger, so that what honest, supplying peers announce goes first.
+    fn priority(&self, key: &TaskKey) -> u64 {
+        self.t.tasks.get(key).map_or(0, |task| {
+            task.candidates
+                .iter()
+                .filter(|(_, c)| c.trigger.is_some() && c.state == CandidateState::Untried)
+                .map(|(p, _)| self.score(p))
+                .max()
+                .unwrap_or(0)
+        })
     }
 
     fn pause(&mut self, key: TaskKey) {
@@ -360,7 +388,7 @@ impl Node {
     ) -> Selection {
         let task = self.t.tasks.get(key).expect("listed");
         let mut ranked: Vec<((u8, u64, u64), GossipId, bool)> = Vec::new();
-        let mut outstanding = false;
+        let mut until = u64::MAX;
         for peer in self.eligible(&key.chat_id) {
             let c = task
                 .candidates
@@ -370,8 +398,8 @@ impl Node {
             if c.state != CandidateState::Untried {
                 continue;
             }
-            if c.outstanding_until.is_some_and(|u| u >= cx.now) {
-                outstanding = true;
+            if let Some(u) = c.outstanding_until.filter(|u| *u >= cx.now) {
+                until = until.min(u.saturating_add(1));
                 continue;
             }
             let limited = load.get(&peer).copied().unwrap_or(0) >= ACTIVE_LOOKUPS_PER_PEER;
@@ -391,20 +419,19 @@ impl Node {
                 limited,
             ));
         }
-        if ranked.is_empty() {
-            return if outstanding {
-                Selection::Wait
-            } else {
-                Selection::Exhausted
-            };
-        }
         let Some(best) = ranked
             .iter()
             .filter(|(_, _, limited)| !limited)
             .map(|(k, _, _)| *k)
             .min()
         else {
-            return Selection::Wait;
+            if ranked.is_empty() && until == u64::MAX {
+                return Selection::Exhausted;
+            }
+            return Selection::Wait(Blocked {
+                peers: ranked.iter().map(|(_, p, _)| *p).collect(),
+                until,
+            });
         };
         let ties: Vec<GossipId> = ranked
             .iter()
@@ -469,30 +496,29 @@ impl Node {
     /// merged as one under an ID that was only known (§9.5). Requests already sent keep
     /// their validity through their correlation references.
     pub(crate) fn task_timers(&mut self, cx: &mut Cx<'_>) {
-        let keys: Vec<TaskKey> = self.t.tasks.keys().copied().collect();
-        for key in keys {
-            if past_deadline(&key, cx.now) {
-                self.t.tasks.remove(&key);
-                self.stats.tasks_expired += 1;
-                continue;
+        self.reindex_dirty();
+        while let Some(&(deadline, key)) = self.tix.deadlines.first() {
+            if deadline > cx.now {
+                break;
             }
-            let task = self.t.tasks.get(&key).expect("listed");
+            self.t.tasks.remove(&key);
+            self.reindex(key);
+            self.stats.tasks_expired += 1;
+        }
+        while let Some(&(local_deadline, key)) = self.tix.timers.first() {
+            if local_deadline > cx.now {
+                break;
+            }
+            let task = self.t.tasks.get(&key).expect("indexed");
             let Run::Active {
                 stage,
                 ttl,
-                attempt:
-                    Some(Attempt::Sent {
-                        peer,
-                        local_deadline,
-                    }),
+                attempt: Some(Attempt::Sent { peer, .. }),
                 ..
             } = task.run
             else {
-                continue;
+                unreachable!("a timer belongs to a sent attempt");
             };
-            if local_deadline > cx.now {
-                continue;
-            }
             // An unanswered timeout: the next stage, with the next TTL and a new jitter,
             // and at once the next candidate (no extra backoff).
             self.stats.timeouts += 1;
@@ -500,17 +526,18 @@ impl Node {
             let stage = stage + 1;
             if stage >= MAX_UNANSWERED_STAGES {
                 self.pause(key);
-                continue;
+            } else {
+                let jitter = draw_jitter(cx.rng);
+                let task = self.t.tasks.get_mut(&key).expect("indexed");
+                task.run = Run::Active {
+                    stage,
+                    ttl: next_ttl(ttl),
+                    jitter,
+                    attempt: None,
+                    expired_resends: 0,
+                };
             }
-            let jitter = draw_jitter(cx.rng);
-            let task = self.t.tasks.get_mut(&key).expect("listed");
-            task.run = Run::Active {
-                stage,
-                ttl: next_ttl(ttl),
-                jitter,
-                attempt: None,
-                expired_resends: 0,
-            };
+            self.reindex(key);
         }
     }
 
@@ -555,36 +582,21 @@ impl Node {
         }
     }
 
-    /// The earliest local deadline or lookup deadline of the tasks.
+    /// The earliest local deadline, lookup deadline or unblocking time of the tasks.
     pub(crate) fn task_wakeup(&self) -> Option<u64> {
-        self.t
-            .tasks
-            .iter()
-            .filter_map(|(k, t)| {
-                let local = match t.run {
-                    Run::Active {
-                        attempt: Some(Attempt::Sent { local_deadline, .. }),
-                        ..
-                    } => Some(local_deadline),
-                    _ => None,
-                };
-                let deadline = match k.target {
-                    Target::Event(id) => {
-                        Some(u64::try_from(crate::store::window_end(&id)).unwrap_or(u64::MAX))
-                    }
-                    Target::SyncObj(_) => None,
-                };
-                match (local, deadline) {
-                    (Some(a), Some(b)) => Some(a.min(b)),
-                    (a, b) => a.or(b),
-                }
-            })
-            .min()
+        [
+            self.tix.timers.first().map(|(t, _)| *t),
+            self.tix.deadlines.first().map(|(t, _)| *t),
+            self.tix.next_until(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 }
 
 enum Selection {
     Peer(GossipId),
-    Wait,
+    Wait(Blocked),
     Exhausted,
 }
