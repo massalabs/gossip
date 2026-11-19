@@ -1617,3 +1617,70 @@ fn accepting_the_other_line_after_a_dissolve_follows_it() {
     assert_eq!(s.current, s2, "{s:?}");
     assert_eq!(s.status, MyStatus::Member);
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=56`): an
+/// invitation accepted before its parent lookup succeeded dropped the lookup, so the two
+/// conversations were never joined (§4.8: the lookup keeps running in the background, and
+/// when it succeeds after an Accept they are joined).
+#[test]
+fn a_parent_lookup_goes_on_after_the_invitation_is_accepted() {
+    let (mut net, g) = founded(4);
+    net.say(1, &g, "old");
+    net.run(MIN);
+    net.offline[3] = true;
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![],
+            name: Some("x".into()),
+        },
+    )
+    .unwrap();
+    let e3 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("y".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.dropped.clear();
+    // Device 3 gets the last root only, while nobody can answer its parent lookup.
+    let root = net.devs[1].node.root(&e3).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+    net.offline = vec![true, true, true, false];
+    let now = net.now;
+    let dev = &mut net.devs[3];
+    dev.node
+        .handle_plaintext(&mut dev.store, gid(1), &pt, now, &mut net.rng)
+        .unwrap();
+    net.run(crate::constants::PROMPT_DELAY_MS + MIN);
+    assert_eq!(net.accept_all(3), vec![e3]);
+    assert_eq!(net.devs[3].node.groups().len(), 2);
+    // Back online, the lookup succeeds and the conversations are joined.
+    net.offline = vec![false; 4];
+    net.dropped.clear();
+    for d in 0..4 {
+        let now = net.now;
+        let dev = &mut net.devs[d];
+        for p in 0..4 {
+            if p != d {
+                dev.node
+                    .peer_reconnected(&mut dev.store, gid(p), now, &mut net.rng)
+                    .unwrap();
+            }
+        }
+    }
+    net.run(10 * MIN);
+    let groups = net.devs[3].node.groups();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert_eq!(groups[0].current, e3);
+    assert!(net.texts(3, &e3).contains(&"old".to_owned()));
+}
