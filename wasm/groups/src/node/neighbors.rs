@@ -280,7 +280,6 @@ impl Node {
         {
             return;
         }
-        r.failures = 0;
         let chats: Vec<ChatId> = self
             .t
             .groups
@@ -288,6 +287,11 @@ impl Node {
             .filter(|(_, g)| g.neighbors.contains(peer))
             .map(|(c, _)| *c)
             .collect();
+        if !chats.is_empty() {
+            // The count restarts for a replaced neighbor; for others it keeps them
+            // unresponsive until they answer.
+            self.peer_mut(peer).failures = 0;
+        }
         for chat in chats {
             let g = self.group_mut(chat);
             g.neighbors.remove(peer);

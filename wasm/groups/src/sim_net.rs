@@ -22,7 +22,7 @@
 //! Properties checked:
 //!
 //! - (a) **convergence**: after a final period in which every honest device stays reachable
-//!   (36 hours, clocks corrected), every honest device without local-only changes holds, at a
+//!   (72 hours by default, clocks corrected), every honest device without local-only changes holds, at a
 //!   common instant, the same retained events (rows and their parent links) and the same
 //!   objects, hence the same results; devices with local-only changes differ on purpose and
 //!   are checked for consistency only. Pruned stubs are not compared: an ID pruned everywhere
@@ -45,6 +45,7 @@
 //! - `GROUPS_NET_SEED=<n>`: replay one seed;
 //! - `GROUPS_NET_SEEDS=<n>`: run seeds `GROUPS_NET_FIRST` (default 0) to `+ n`;
 //! - `GROUPS_NET_HOURS=<n>`: hours of activity per run (default 8);
+//! - `GROUPS_NET_FINAL=<n>`: hours of the final period (default 72);
 //! - `GROUPS_NET_DEBUG=1`: on a divergence, print the engines' state.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -68,8 +69,8 @@ const SECOND: u64 = 1_000;
 const MINUTE: u64 = 60 * SECOND;
 const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
-/// The final period in which every honest device stays online.
-const FINAL_HOURS: u64 = 36;
+/// The final period in which every honest device stays online, by default (hours).
+const FINAL_HOURS: u64 = 72;
 
 /// The stated bounds of property (c), per device and simulated hour.
 pub(crate) struct Limits {
@@ -128,6 +129,7 @@ pub(crate) struct Counters {
     max_plaintexts_hour: u64,
     max_bytes_hour: u64,
     max_lookups_hour: u64,
+    max_task_runs: u64,
 }
 
 impl Counters {
@@ -172,6 +174,7 @@ impl Counters {
         self.max_plaintexts_hour = self.max_plaintexts_hour.max(o.max_plaintexts_hour);
         self.max_bytes_hour = self.max_bytes_hour.max(o.max_bytes_hour);
         self.max_lookups_hour = self.max_lookups_hour.max(o.max_lookups_hour);
+        self.max_task_runs = self.max_task_runs.max(o.max_task_runs);
     }
 
     fn missing(&self) -> Vec<&'static str> {
@@ -242,6 +245,8 @@ struct Device {
     seen: Vec<Vec<u8>>,
     /// Hostile devices: the fake IDs announced.
     announced: Vec<EventId>,
+    /// Hostile devices: every ID announced, repeats included.
+    announced_log: Vec<EventId>,
     /// The engine's counters before its last crash, summed.
     stats_before: crate::node::Stats,
 }
@@ -317,7 +322,7 @@ impl Sim {
                 }
                 // Mostly small skews; sometimes a fast clock beyond the 5-minute bound.
                 // One device of every fourth seed has a clock beyond the bound.
-                let fast = (i == 2 && seed % 4 == 1) || chance(&mut rng, 10);
+                let fast = ((i == 1 || i == 2) && seed % 4 == 1) || chance(&mut rng, 10);
                 let skew = if fast {
                     (10 + below(&mut rng, 50)) as i64 * MINUTE as i64
                 } else {
@@ -341,6 +346,7 @@ impl Sim {
                     hours: BTreeMap::new(),
                     seen: Vec::new(),
                     announced: Vec::new(),
+                    announced_log: Vec::new(),
                     stats_before: crate::node::Stats::default(),
                 }
             })
@@ -735,6 +741,17 @@ impl Sim {
         self.counters.edits += 1;
     }
 
+    /// The most times one ID was announced by the hostile members.
+    fn announced_most(&self) -> u64 {
+        let mut counts: BTreeMap<EventId, u64> = BTreeMap::new();
+        for d in &self.devs {
+            for id in &d.announced_log {
+                *counts.entry(*id).or_default() += 1;
+            }
+        }
+        counts.values().copied().max().unwrap_or(0)
+    }
+
     // ── Hostile members ──────────────────────────────────────────────────────
 
     fn hostile_step(&mut self, d: usize) {
@@ -824,6 +841,7 @@ impl Sim {
             return;
         }
         self.counters.fake_notices += ids.len() as u64;
+        self.devs[d].announced_log.extend(ids.iter().copied());
         let n = Frame::Notice(Notice {
             entries: ids
                 .into_iter()
@@ -955,7 +973,7 @@ impl Sim {
                 .next
                 .min(self.now + below(&mut self.rng, MINUTE));
         }
-        let end = self.now + FINAL_HOURS * HOUR;
+        let end = self.now + env_u64("GROUPS_NET_FINAL").unwrap_or(FINAL_HOURS) * HOUR;
         while self.now < end {
             self.advance();
         }
@@ -1199,16 +1217,25 @@ fn run(seed: u64, hours: u64) -> Counters {
         sim.counters.temporarily_invalid += s.temporarily_invalid;
         dev.node = Some(node);
     }
+    let most_runs = sim.announced_most() + sim.counters.session_resets + 2;
     // No task retries forever: alone, without answers, every task ends within its lookup
     // deadline or its twenty stages (a sync-object lookup has no deadline).
     for &d in &honest {
         let dev = &mut sim.devs[d];
         let node = dev.node.as_mut().expect("booted");
+        // A paused task is renewed only by new evidence (§11.5): an announcement, a page
+        // listing it, or a reconnection. Hostile members announce the same fake ID again and
+        // again; each announcement may renew it once.
+        let most = most_runs;
         assert!(
-            node.max_task_runs() <= 200,
-            "device {d}: a task ran {} times",
+            u64::from(node.max_task_runs()) <= most,
+            "device {d}: a task ran {} times, more than {most}",
             node.max_task_runs()
         );
+        sim.counters.max_task_runs = sim
+            .counters
+            .max_task_runs
+            .max(u64::from(node.max_task_runs()));
         let mut t = at;
         while t < at + 40 * DAY {
             t += 6 * HOUR;
