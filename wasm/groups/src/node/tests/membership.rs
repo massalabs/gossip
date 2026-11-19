@@ -3877,3 +3877,91 @@ fn hand_over_and_leave_still_delivers_the_roots_not_sent_yet() {
         assert!(net.devs[d].node.root(&e).is_some(), "device {d}");
     }
 }
+
+/// Found by the membership simulation once it used "hand over and leave": the heir got the
+/// handover root while nobody could answer its parent lookup, accepted it as a group of its
+/// own, and joined it with its earlier conversation once the parents came. The joined group
+/// followed the heir without counting the former owner as deposed: the former owner's roots
+/// then dated the heir's (D.72), and the heir did not answer the former owner with its
+/// handover (§5.6).
+#[test]
+fn a_handover_accepted_before_its_parent_deposes_the_former_owner_once_joined() {
+    let (mut net, g) = founded(4);
+    net.offline[1] = true;
+    let mut epochs = Vec::new();
+    for name in ["x", "y"] {
+        epochs.push(
+            net.change(
+                0,
+                g,
+                GroupChange::Successor {
+                    add: vec![],
+                    remove: vec![],
+                    name: Some(name.into()),
+                },
+            )
+            .unwrap(),
+        );
+    }
+    // Draws that make the handover root's ID sort before the group's: the joined group
+    // keeps the record of the handover's group.
+    for _ in 0..3 {
+        let _: [u8; 32] = crate::rng::bytes(&mut net.rng);
+    }
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: true,
+                name: None,
+            },
+        )
+        .unwrap();
+    assert!(h < g);
+    net.exchange();
+    net.dropped.clear();
+    // Device 1 gets the last successor and the handover root only, while nobody can answer
+    // its parent lookup: both are invitations, and the user accepts the handover.
+    let blob = |net: &MNet, c: &ChatId| {
+        let root = net.devs[2].node.root(c).unwrap();
+        wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap()
+    };
+    let frames = [
+        Frame::Event(blob(&net, &epochs[1])),
+        Frame::Event(blob(&net, &h)),
+    ];
+    net.offline = vec![true, false, true, true];
+    net.recv_frames_m(1, 2, &frames);
+    net.run(crate::node::timing::PROMPT_DELAY_MS + MIN);
+    assert!(
+        net.devs[1]
+            .node
+            .invitations(net.now)
+            .iter()
+            .any(|i| i.chat_id == h)
+    );
+    assert_eq!(net.accept(1, h), h);
+    net.offline = vec![false, false, false, false];
+    net.dropped.clear();
+    for d in 1..4 {
+        let now = net.now;
+        let dev = &mut net.devs[d];
+        for p in 1..4 {
+            if p != d {
+                dev.node
+                    .peer_reconnected(&mut dev.store, gid(p), now, &mut net.rng)
+                    .unwrap();
+            }
+        }
+    }
+    net.run(3 * HOUR);
+    let groups = net.devs[1].node.groups();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert!(net.devs[1].node.root(&epochs[0]).is_some());
+    let group = net.devs[1].node.tables().epochs.get(&h).unwrap().group;
+    let rec = net.devs[1].node.tables().group_recs.get(&group).unwrap();
+    assert_eq!(rec.followed, Some(gid(1)));
+    assert!(rec.deposed.contains(&gid(0)), "{rec:?}");
+}
