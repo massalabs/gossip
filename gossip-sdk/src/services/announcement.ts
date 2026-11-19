@@ -101,6 +101,21 @@ export class AnnouncementService {
   }
 
   /**
+   * Connections (§5.12): a session asked by a member of a group this device
+   * accepted is accepted automatically and silently (`isCoMember`, `accept`);
+   * `processed` is told of every announcement read from a peer.
+   */
+  private connections?: {
+    isCoMember: (contactUserId: string) => Promise<boolean>;
+    accept: (contactUserId: string) => Promise<void>;
+    processed: (contactUserId: string) => Promise<void>;
+  };
+
+  setConnectionPolicy(policy: AnnouncementService['connections']): void {
+    this.connections = policy;
+  }
+
+  /**
    * Posts an announcement to the board and, when one is given and the mesh is
    * on, the entry addressing it to the peer, on the mesh only: an internet
    * node never sees it. Only the board post decides success: a peer running
@@ -683,12 +698,20 @@ export class AnnouncementService {
       contactUserId
     );
     const isNewContact = !contact;
+    // A member of a group this device accepted: connected without a prompt,
+    // and no conversation is created (§5.12).
+    const automatic = isNewContact
+      ? ((await this.connections?.isCoMember(contactUserId)) ?? false)
+      : contact!.connection === 'automatic';
 
     if (isNewContact) {
       // Use extracted username if present, otherwise generate temporary name
-      const name =
-        username ||
-        (await this._generateTemporaryContactName(this.session.userIdEncoded));
+      const name = automatic
+        ? (username ?? '')
+        : username ||
+          (await this._generateTemporaryContactName(
+            this.session.userIdEncoded
+          ));
 
       await this.queries.contacts.insert({
         ownerUserId: this.session.userIdEncoded,
@@ -698,6 +721,7 @@ export class AnnouncementService {
         isOnline: false,
         lastSeen: new Date(),
         createdAt: new Date(),
+        connection: automatic ? 'automatic' : 'accepted',
       });
 
       contact = await this.queries.contacts.getByOwnerAndUser(
@@ -715,11 +739,24 @@ export class AnnouncementService {
     const { discussionId } = await this._handleReceivedDiscussion(
       this.session.userIdEncoded,
       contactUserId,
-      message
+      automatic ? undefined : message,
+      automatic
     );
 
+    if (
+      automatic &&
+      this.session.peerSessionStatus(contactUserIdRaw) ===
+        SessionStatus.PeerRequested
+    ) {
+      try {
+        await this.connections?.accept(contactUserId);
+      } catch {
+        log.error('automatic connection not accepted');
+      }
+    }
+
     // Store announcement message as an incoming message if present
-    if (message) {
+    if (message && !automatic) {
       const timestamp = new Date(result.timestamp);
       const windowStart = new Date(timestamp.getTime() - 1000);
       const windowEnd = new Date(timestamp.getTime() + 1000);
@@ -751,6 +788,11 @@ export class AnnouncementService {
     }
 
     await this.refreshService?.stateUpdate();
+    try {
+      await this.connections?.processed(contactUserId);
+    } catch {
+      log.error('announcement not reported');
+    }
 
     return {
       success: true,
@@ -762,7 +804,8 @@ export class AnnouncementService {
   private async _handleReceivedDiscussion(
     ownerUserId: string,
     contactUserId: string,
-    message?: string
+    message?: string,
+    automatic = false
   ): Promise<{ discussionId: number }> {
     const log = logger.forMethod('handleReceivedDiscussion');
 
@@ -795,6 +838,7 @@ export class AnnouncementService {
         contactUserId
       );
       if (
+        !automatic &&
         newDiscussion &&
         contactRow &&
         this.session.peerSessionStatus(decodeUserId(contactUserId)) ===
@@ -824,7 +868,7 @@ export class AnnouncementService {
       ownerUserId,
       contactUserId
     );
-    if (discussion && contactRow) {
+    if (!automatic && discussion && contactRow) {
       this.eventEmitter.emit(SdkEventType.SESSION_REQUESTED, {
         discussion: toDiscussion(discussion),
         contact: contactRow,

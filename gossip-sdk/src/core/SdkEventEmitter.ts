@@ -26,6 +26,11 @@ export enum SdkEventType {
   CONTACT_DELETED = 'contactDeleted',
   /** Group chats changed: invitations, membership, messages, state. */
   GROUPS_CHANGED = 'groupsChanged',
+  /**
+   * Two direct chats were created at once (§5.12): the one closed and the
+   * one kept, and whether messages written in the closed one were lost.
+   */
+  DIRECT_CHAT_SUPERSEDED = 'directChatSuperseded',
   ERROR = 'error',
 }
 
@@ -56,6 +61,12 @@ export type SdkEvents = {
   [SdkEventType.CONTACT_DELETED]: { contactUserId: string };
   [SdkEventType.GROUPS_CHANGED]: {
     changes: GroupChange[];
+  };
+  [SdkEventType.DIRECT_CHAT_SUPERSEDED]: {
+    contactUserId: string | null;
+    groupId: string;
+    by: string;
+    lostMessages: boolean;
   };
   [SdkEventType.ERROR]: { error: Error; context: string };
 };
