@@ -14,8 +14,12 @@
  *   requester's device founds it once the session is active, and the
  *   accepter's device adopts it without a prompt.
  * - **Links.** A discussion names the direct chat that continues it
- *   (`linkedGroupId`); the link follows the group kept when two creations
- *   crossed (`Superseded`), and is found again from the groups held.
+ *   (`linkedGroupId`); the link follows the chat that continues a replaced
+ *   one (`Superseded`, kept as history), and is found again from the groups
+ *   held.
+ * - **Accepted contacts.** The contacts the user accepted are declared to the
+ *   engine (only they get a version notice, §13.8); automatic connections
+ *   never are.
  * - **Connections.** Members of groups this device accepted are connected
  *   automatically and silently (an `automatic` contact and its discussion,
  *   which is a session record, never a conversation); automatic connections
@@ -83,8 +87,15 @@ export class ConversationService {
     status: SessionStatus;
   }) => {
     if (p.status !== SessionStatus.Active) return;
-    void this.enqueue(() => this.foundOwedDirectChats()).catch(() =>
-      logger.error('direct chats not founded')
+    void this.enqueue(async () => {
+      await this.foundOwedDirectChats();
+      await this.syncAcceptedContacts();
+    }).catch(() => logger.error('direct chats not founded'));
+  };
+
+  private readonly onContactDeleted = () => {
+    void this.enqueue(() => this.syncAcceptedContacts()).catch(() =>
+      logger.error('accepted contacts not declared')
     );
   };
 
@@ -115,6 +126,7 @@ export class ConversationService {
       SdkEventType.SESSION_STATUS_CHANGED,
       this.onSessionStatus
     );
+    this.eventEmitter.on(SdkEventType.CONTACT_DELETED, this.onContactDeleted);
     await this.catchUp().catch(() =>
       logger.error('conversations not caught up')
     );
@@ -129,6 +141,7 @@ export class ConversationService {
       SdkEventType.SESSION_STATUS_CHANGED,
       this.onSessionStatus
     );
+    this.eventEmitter.off(SdkEventType.CONTACT_DELETED, this.onContactDeleted);
   }
 
   /** Resolves once the work queued so far has run (for tests). */
@@ -143,6 +156,7 @@ export class ConversationService {
   catchUp(): Promise<void> {
     return this.enqueue(async () => {
       await this.declareArchives();
+      await this.syncAcceptedContacts();
       await this.reconcileLinks();
       await this.foundOwedDirectChats();
       await this.syncConnections();
@@ -245,7 +259,10 @@ export class ConversationService {
       if (
         d &&
         (inv.migrationOf === inv.owner ||
-          (!d.linkedGroupId && (await this.isDirectChat(groupId))))
+          inv.continues !== null ||
+          !d.linkedGroupId ||
+          !(await this.groups.get(d.linkedGroupId))) &&
+        (await this.isDirectChat(groupId))
       ) {
         await this.link(d, groupId);
       }
@@ -297,15 +314,35 @@ export class ConversationService {
     return g !== null && (await this.directPeer(g)) !== null;
   }
 
+  /**
+   * The group that continues `groupId`: itself, or for a replaced chat of two
+   * the chat that superseded it, followed to the end. Null when not held.
+   */
+  private async continuing(groupId: GroupId): Promise<GroupSummary | null> {
+    let g = await this.groups.get(groupId);
+    for (
+      let i = 0;
+      i < 32 && g?.status === 'superseded' && g.supersededBy;
+      i++
+    ) {
+      g = await this.groups.get(g.supersededBy);
+    }
+    return g;
+  }
+
   /** The direct chat with `peer` this device holds, by its group key. */
   async directChatWith(peer: string): Promise<GroupId | null> {
     const d = await this.discussionOf(peer);
     if (d?.linkedGroupId) {
-      const g = await this.groups.get(d.linkedGroupId);
-      if (g && g.status !== 'dissolved-deleted') return g.groupId;
+      const g = await this.continuing(d.linkedGroupId);
+      if (g && g.status !== 'dissolved-deleted' && g.status !== 'superseded') {
+        return g.groupId;
+      }
     }
     for (const g of await this.groups.list()) {
-      if (g.status === 'dissolved-deleted') continue;
+      if (g.status === 'dissolved-deleted' || g.status === 'superseded') {
+        continue;
+      }
       if ((await this.directPeer(g)) === peer) return g.groupId;
     }
     return null;
@@ -340,14 +377,27 @@ export class ConversationService {
   private async reconcileLinks(): Promise<void> {
     const held = new Map<string, GroupId>();
     const keys = new Set<GroupId>();
+    const superseded = new Set<GroupId>();
     for (const g of await this.groups.list()) {
       if (g.status === 'dissolved-deleted') continue;
+      if (g.status === 'superseded') {
+        superseded.add(g.groupId);
+        continue;
+      }
       keys.add(g.groupId);
       const peer = await this.directPeer(g);
       if (peer && !held.has(peer)) held.set(peer, g.groupId);
     }
     for (const d of await this.discussionRows()) {
       if (d.linkedGroupId && keys.has(d.linkedGroupId)) continue;
+      if (d.linkedGroupId && superseded.has(d.linkedGroupId)) {
+        // The archive's link follows the chat that continues it.
+        const g = await this.continuing(d.linkedGroupId);
+        if (g && keys.has(g.groupId)) {
+          await this.link(d, g.groupId);
+          continue;
+        }
+      }
       const found = held.get(d.contactUserId);
       if (found) await this.link(d, found);
     }
@@ -378,6 +428,18 @@ export class ConversationService {
   async contactRequestAccepted(contactUserId: string): Promise<void> {
     await this.groups.consentToDirectChat(contactUserId, true);
     await this.acceptAsContact(contactUserId);
+    await this.syncAcceptedContacts();
+  }
+
+  /**
+   * Declares to the engine the contacts the user accepted, and clears those
+   * removed (§13.8). Automatic connections are never declared.
+   */
+  private async syncAcceptedContacts(): Promise<void> {
+    const accepted = (await this.queries.contacts.getByOwner(this.owner))
+      .filter(c => c.connection === 'accepted' && c.userId !== this.owner)
+      .map(c => c.userId);
+    await this.groups.setAcceptedContacts(accepted);
   }
 
   /**
@@ -419,7 +481,8 @@ export class ConversationService {
     for (const c of changes) {
       if (c.kind === 'Connections') connections = true;
       if (c.kind !== 'Superseded' || !c.by) continue;
-      // Two creations at once: the conversation continues in `by`.
+      // A chat of two replaced: the conversation continues in `by`, the
+      // replaced chat kept as its history.
       const d = (await this.discussionRows()).find(
         x => x.linkedGroupId === c.groupId
       );
@@ -428,7 +491,7 @@ export class ConversationService {
         contactUserId: d?.contactUserId ?? null,
         groupId: c.groupId,
         by: c.by,
-        lostMessages: c.lostMessages === true,
+        hasMessages: c.hasMessages === true,
       });
     }
     await this.reconcileLinks();

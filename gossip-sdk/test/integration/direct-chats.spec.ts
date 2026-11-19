@@ -102,9 +102,11 @@ describe('Direct chats, contacts and connections', { timeout: 300_000 }, () => {
     }
   }
 
-  /** The groups each peer holds, by key. */
+  /** The conversations each peer holds, by key: replaced chats of two aside. */
   async function keys(p: GossipSdk): Promise<string[]> {
-    return (await p.groups.list()).map(g => g.groupId);
+    return (await p.groups.list())
+      .filter(g => g.status !== 'superseded')
+      .map(g => g.groupId);
   }
 
   it('keeps the conversations of an upgraded account as archives, declared to the engine', async () => {
@@ -191,11 +193,11 @@ describe('Direct chats, contacts and connections', { timeout: 300_000 }, () => {
     expect(await keys(bob)).toEqual([groupId]);
   });
 
-  it('settles crossing migrations on one group, the other deleted', async () => {
+  it('settles crossing migrations on one group, the other kept as its history', async () => {
     const [alice, bob] = await open(2);
     await setupSession(alice, bob, 'Bob', 'Alice');
     for (const p of [alice, bob]) await p.conversations.catchUp();
-    const superseded: { by: string; lostMessages: boolean }[] = [];
+    const superseded: { by: string; hasMessages: boolean }[] = [];
     for (const p of [alice, bob]) {
       p.on(SdkEventType.DIRECT_CHAT_SUPERSEDED, e => superseded.push(e));
     }
@@ -216,9 +218,118 @@ describe('Direct chats, contacts and connections', { timeout: 300_000 }, () => {
       const other = p === alice ? bob : alice;
       expect((await p.discussions.get(other.userId))?.linkedGroupId).toBe(kept);
       expect(await p.groups.invitations()).toEqual([]);
+      // Nothing is erased: the replaced chat is read-only history of the
+      // kept one, with what was written in it.
+      const old = await p.groups.get(lost);
+      expect(old).toMatchObject({ status: 'superseded', supersededBy: kept });
+      expect((await p.groups.get(kept))?.earlier).toEqual([lost]);
+      expect(await texts(p.groups, lost)).toEqual(['lost']);
     }
-    expect(superseded).toEqual([{ ...superseded[0], by: kept }]);
-    expect(superseded[0].lostMessages).toBe(true);
+    expect(superseded.length).toBeGreaterThan(0);
+    for (const e of superseded) expect(e.by).toBe(kept);
+    expect(superseded.some(e => e.hasMessages)).toBe(true);
+  });
+
+  it('asks to continue in the chat of a person who declined with a signed leave and migrated', async () => {
+    const [alice, bob] = await open(2);
+    await setupSession(alice, bob, 'Bob', 'Alice');
+    for (const p of [alice, bob]) await p.conversations.catchUp();
+
+    const a = await alice.conversations.migrate(bob.userId);
+    await alice.groups.sendMessage(a, 'before the decline');
+    await deliver();
+    const inv = await bob.conversations.migrationInvitation(alice.userId);
+    await bob.conversations.declineInvitation(inv!.epochId, 'Signed');
+    // The owner's device founds the successor without him a while later.
+    await deliver(12, 5 * 60_000);
+    expect((await alice.groups.get(a))?.members).toEqual([alice.userId]);
+
+    const b = await bob.conversations.migrate(alice.userId);
+    expect(b).not.toBe(a);
+    await deliver();
+    const asked = (await alice.groups.invitations()).find(i => i.epochId === b);
+    expect(asked).toMatchObject({ owner: bob.userId, continues: a });
+    expect(await keys(alice)).toEqual([a]);
+
+    expect(await alice.conversations.acceptInvitation(b)).toBe(b);
+    await deliver();
+    expect(await keys(alice)).toEqual([b]);
+    expect((await alice.groups.get(b))?.earlier).toEqual([a]);
+    expect(await texts(alice.groups, a)).toEqual(['before the decline']);
+    for (const p of [alice, bob]) {
+      const other = p === alice ? bob : alice;
+      expect((await p.discussions.get(other.userId))?.linkedGroupId).toBe(b);
+      expect(await p.conversations.directChatWith(other.userId)).toBe(b);
+    }
+    await alice.groups.sendMessage(b, 'continued');
+    await deliver();
+    expect(await texts(bob.groups, b)).toEqual(['continued']);
+  });
+
+  it('starts the group engine empty when its stored records no longer decode, archives untouched', async () => {
+    const [alice, bob] = await open(2);
+    await setupSession(alice, bob, 'Bob', 'Alice');
+    await alice.queries.messages.insert({
+      ownerUserId: alice.userId,
+      contactUserId: bob.userId,
+      content: 'from before the upgrade',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.READ,
+      messageId: new Uint8Array(MESSAGE_ID_SIZE).fill(2),
+      timestamp: new Date(clock - 60_000),
+    });
+    await alice.conversations.catchUp();
+    const a = await alice.conversations.migrate(bob.userId);
+    await alice.groups.settle();
+    const snapshot = await alice.queries.groups.loadSnapshot(alice.userId);
+    const record = snapshot.node.find(n => n.kind === 'group_recs');
+    expect(record).toBeDefined();
+    // A record as an earlier build wrote it.
+    await alice.queries.groups.applyBatches(alice.userId, [
+      {
+        rows: [],
+        removedRows: [],
+        edges: [],
+        objects: [],
+        node: [{ ...record!, fields: '{"status":"Active"}' }],
+        erase: [],
+      },
+    ]);
+
+    await (alice.groups as unknown as { reopen: () => Promise<void> }).reopen();
+
+    expect(await alice.groups.list()).toEqual([]);
+    expect(await alice.groups.get(a)).toBeNull();
+    const d = await alice.discussions.get(bob.userId);
+    expect(d?.isArchive).toBe(true);
+    const archived = await alice.queries.messages.getByOwnerAndContact(
+      alice.userId,
+      bob.userId
+    );
+    expect(archived.map(m => m.content)).toContain('from before the upgrade');
+    // The archive can be migrated again.
+    await alice.conversations.catchUp();
+    const again = await alice.conversations.migrate(bob.userId);
+    expect(await keys(alice)).toEqual([again]);
+  });
+
+  it('declares the accepted contacts to the engine, never an automatic connection', async () => {
+    const [alice, bob] = await open(2);
+    await setupSession(alice, bob, 'Bob', 'Alice');
+    for (const p of [alice, bob]) await p.conversations.catchUp();
+    const declared = (p: GossipSdk) =>
+      JSON.parse(
+        (
+          engine(p) as unknown as { accepted_contacts: () => string }
+        ).accepted_contacts()
+      ) as string[];
+    expect(declared(alice)).toEqual([bytesToHex(bob.userIdBytes)]);
+    expect(declared(bob)).toEqual([bytesToHex(alice.userIdBytes)]);
+
+    await alice.contacts.delete(bob.userId);
+    await alice.conversations.settle();
+    expect(declared(alice)).toEqual([]);
   });
 
   it('gives a new contact one direct chat without a second prompt', async () => {
