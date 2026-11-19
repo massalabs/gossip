@@ -1532,3 +1532,25 @@ fn an_uncorrelated_response_still_supplies_its_event() {
     );
     assert!(net.held(0, &f.event_id()));
 }
+
+/// Found by the membership simulation (seed 45): a root in a response that could no longer
+/// be correlated was received as one delivered in full, which prompts again for a group the
+/// user closed (§4.8 case 1). Only message events are taken from such a response.
+#[test]
+fn an_uncorrelated_response_never_delivers_a_root() {
+    let mut net = Net::new(3, 1);
+    let other = epoch_root(3, 0x40);
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(other.clone()))).unwrap();
+    net.recv_frames(
+        0,
+        member(1),
+        &[Frame::Response(Response {
+            request_id: Some(RequestId::from_bytes(
+                [9; crate::constants::REQUEST_ID_SIZE],
+            )),
+            idx: 0,
+            result: ResponseResult::Event(blob),
+        })],
+    );
+    assert!(net.devs[0].node.root(&other.chat_id()).is_none());
+}

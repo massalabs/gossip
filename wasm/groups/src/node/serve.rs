@@ -269,8 +269,10 @@ impl Node {
     }
 
     /// A response that can no longer be correlated with a request (past its deadline, or
-    /// unknown): a valid event blob in it is processed as an event frame would be (§2.2:
-    /// correlation only serves the retry state); anything else is dropped.
+    /// unknown): a valid message event in it is processed as an event frame would be (§2.2:
+    /// correlation only serves the retry state). A root or a signed object is not: how a
+    /// device treats one depends on how it reached it (a root delivered in full prompts
+    /// again after a close, §4.8), and the same object can be fetched again by ID.
     fn uncorrelated(
         &mut self,
         cx: &mut Cx<'_>,
@@ -278,8 +280,10 @@ impl Node {
         version: u64,
         result: &ResponseResult,
     ) -> Result<(), NodeError> {
-        if let ResponseResult::Event(blob) = result {
-            self.receive_blob(cx, from, blob, version)?;
+        if let ResponseResult::Event(blob) = result
+            && let Ok(EventObject::Message(e)) = wire::decode_event_blob(blob, version)
+        {
+            self.receive_event(cx, from, e)?;
         }
         Ok(())
     }
