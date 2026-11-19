@@ -460,11 +460,14 @@ impl Node {
             self.adopt(cx, root, from, installed, true)?;
             return Ok(Answer::Supplied);
         }
-        // Case 3: a parent matches a closed-chat marker.
-        if matched
+        // Case 3: the parents match closed-chat markers. Only when every parent does: a
+        // root that adds back a member who closed the group names the epoch it closed beside
+        // one it never held, and is an invitation (§5.10).
+        let closed = matched
             .iter()
-            .any(|c| self.t.markers.get(c) == Some(&Marker::Closed))
-        {
+            .filter(|c| self.t.markers.get(c) == Some(&Marker::Closed))
+            .count();
+        if closed > 0 && closed == root.parents().len() {
             self.t.markers.insert(id, Marker::Closed);
             return Ok(Answer::Supplied);
         }
