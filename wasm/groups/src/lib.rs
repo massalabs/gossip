@@ -39,6 +39,8 @@ pub mod store;
 pub mod wire;
 
 #[cfg(test)]
+mod sim;
+#[cfg(test)]
 mod test_support;
 
 pub use epoch::local::{ChangeError, LocalEdit, Published};
