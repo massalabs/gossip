@@ -522,17 +522,15 @@ fn the_largest_event_can_be_served_in_an_answer() {
     assert_eq!(answer_event(&r[0]), Some(e));
 }
 
-/// Found by review (code at `6a916f2e`): `busy` cost the answering member nothing. A member
-/// answering `busy` to everything was asked again every minute for ever, counted as
-/// responsive (its timeouts were forgotten), and its scans waited a whole stage TTL after
-/// each `busy` and never advanced.
+/// §2.2: `busy` is back-pressure, never a failure (it replaces a rule that counted three
+/// `busy` in a row as a timeout: measured, nine `busy` in 192 s made an honest member
+/// unresponsive and paused its tasks). A member answering `busy` to everything stays
+/// responsive and keeps its score, is never failed for a task, and is asked again after a
+/// growing, capped wait, so that it costs bounded work; its scans keep their stage.
 #[test]
-fn a_member_answering_busy_forever_runs_out_of_chances() {
+fn busy_is_back_pressure_never_a_failure() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
-    for t in 0..3 {
-        net.devs[0].node.note_timeout(&member(1), T0 + t);
-    }
     let id = EventId::new(T0, [5; 16]);
     net.recv_frames(0, member(1), &[notice(chat, &[id])]);
     let now = net.now;
@@ -540,9 +538,12 @@ fn a_member_answering_busy_forever_runs_out_of_chances() {
     dev.node
         .peer_reconnected(&mut dev.store, member(1), now, &mut net.rng)
         .unwrap();
+    let score = net.devs[0].node.score(&member(1));
     let mut lookups = 0;
     let mut scan_ttls = Vec::new();
-    for _ in 0..30 {
+    let mut busy = 0;
+    // Seventy minutes.
+    for _ in 0..60 {
         for s in super::retrieval::sent_queries(&mut net, 0) {
             if s.to != member(1) {
                 continue;
@@ -553,21 +554,63 @@ fn a_member_answering_busy_forever_runs_out_of_chances() {
                 _ => {}
             }
             super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Busy));
+            busy += 1;
         }
         net.now += 70_000;
         net.tick(0);
     }
-    assert!(
-        !net.devs[0].node.responsive(&member(1)),
-        "busy is no answer"
+    assert!(busy >= 9, "{busy}");
+    let node = &net.devs[0].node;
+    assert!(node.responsive(&member(1)), "busy is no failure");
+    assert_eq!(node.unanswered_ms(&member(1)), 0);
+    assert_eq!(node.score(&member(1)), score);
+    // Asked after waits of about 1, 2, 4, 8, 16 and 32 minutes: at most seven times.
+    assert!((2..=8).contains(&lookups), "asked {lookups} times");
+    // The scan never advanced its stage on `busy`.
+    assert!(scan_ttls.iter().all(|t| *t == MIN), "{scan_ttls:?}");
+    // The lookup is still active, its candidate untried.
+    let task = node
+        .t
+        .tasks
+        .iter()
+        .find(|(k, _)| k.target == Target::Event(id))
+        .map(|(_, t)| t.clone())
+        .expect("the task is kept");
+    assert_eq!(
+        task.candidates.get(&member(1)).map(|c| c.state),
+        Some(crate::node::records::CandidateState::Untried)
     );
-    assert!(lookups <= 3, "asked {lookups} times in one run");
-    // Three `busy` count as a timeout: the scan's stage advances; the waits after `busy`
-    // stay about a minute whatever the stage.
-    assert!(
-        scan_ttls.iter().filter(|t| **t > MIN).count() >= 3,
-        "{scan_ttls:?}"
-    );
+}
+
+/// §2.2: in a group of two the only candidate answering `busy` is never lost: once it has
+/// room again, it supplies the event.
+#[test]
+fn busy_never_loses_the_only_candidate() {
+    let mut net = Net::new(2, 1);
+    let chat = net.chat();
+    let e = net.event(T0, 5, &[], 1);
+    net.recv_frames(0, member(1), &[notice(chat, &[e.event_id()])]);
+    let mut answered = 0;
+    for _ in 0..600 {
+        for s in super::retrieval::sent_queries(&mut net, 0) {
+            if !matches!(s.op, QueryOp::Event { .. }) {
+                continue;
+            }
+            if answered < 12 {
+                super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Busy));
+            } else {
+                super::retrieval::answer(&mut net, 0, &s, ResponseResult::Event(blob(&e)));
+            }
+            answered += 1;
+        }
+        if net.held(0, &e.event_id()) {
+            break;
+        }
+        net.now += MIN;
+        net.tick(0);
+    }
+    assert!(answered > 12);
+    assert!(net.held(0, &e.event_id()));
 }
 
 /// Found by review (code at `6a916f2e`): the lookup deadline of a task came from its ID's
