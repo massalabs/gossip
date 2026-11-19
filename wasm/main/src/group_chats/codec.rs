@@ -643,11 +643,13 @@ record!(InvitationSummary {
 });
 variants!(TimelineLine {
     Founded { epoch, owner },
+    Joined { epoch, by },
     EpochChange { epoch, by, added, removed, left, renamed, new_owner },
     YouWereRemoved,
     YouLeft,
     Dissolved,
-    NotAMember { from, to }
+    NotAMember { from, to },
+    AddedBack { epoch, by }
 });
 record!(VisibleMessage {
     chat_id,

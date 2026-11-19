@@ -84,13 +84,23 @@ fn only_the_creator_reads_that_the_group_was_created() {
             owner: gid(0)
         }
     );
-    for (d, epoch) in [(1, g), (2, g), (3, e2)] {
-        let lines = net.lines(d, &epoch);
-        assert!(
-            !matches!(lines[0], TimelineLine::Founded { .. }),
-            "device {d}: {lines:?}"
+    for d in 1..3 {
+        assert_eq!(
+            net.lines(d, &g)[0],
+            TimelineLine::Joined {
+                epoch: g,
+                by: gid(0)
+            },
+            "device {d}"
         );
     }
+    assert_eq!(
+        net.lines(3, &e2),
+        vec![TimelineLine::Joined {
+            epoch: e2,
+            by: gid(0)
+        }]
+    );
 }
 
 /// Issue "joiner timeline lines": at the junction of a member added back, "<owner> added
@@ -127,15 +137,14 @@ fn a_member_added_back_reads_who_added_it_back() {
     net.run(MIN);
     let lines = net.lines(2, &g);
     let tail: Vec<&TimelineLine> = lines.iter().skip(1).collect();
-    // The line after the junction names who added the device back, and only that.
     assert!(
         matches!(
             tail[..],
             [
                 TimelineLine::YouWereRemoved,
                 TimelineLine::NotAMember { .. },
-                TimelineLine::EpochChange { epoch, by, added, removed, .. },
-            ] if *epoch == e3 && *by == gid(0) && *added == vec![gid(2)] && removed.is_empty()
+                TimelineLine::AddedBack { epoch, by },
+            ] if *epoch == e3 && *by == gid(0)
         ),
         "{lines:?}"
     );

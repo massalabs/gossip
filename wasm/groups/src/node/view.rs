@@ -4,7 +4,7 @@
 //! since the last call. No UI concern: names are returned as stored, never sanitised (the
 //! display rules of §5.11 belong to the interface).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::records::{ChangeKind, EpochStatus, GroupStatus, NodeStorage, SignedObject};
 use super::{Node, NodeError};
@@ -83,12 +83,22 @@ pub struct InvitationSummary {
 /// A line of the timeline (§5.6, §5.8, §5.10, §7.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TimelineLine {
-    /// The first epoch held of the group.
+    /// "<owner> created the group": the first epoch of a group this device created.
     Founded {
         /// The epoch.
         epoch: ChatId,
         /// Its owner.
         owner: GossipId,
+    },
+    /// "<by> added you": the first epoch this device holds of a group created elsewhere. A
+    /// member cannot tell a founding root from a successor whose parents it does not hold (a
+    /// parent commitment hides the epoch it names, §4.5), so this line does not say the
+    /// group was created.
+    Joined {
+        /// The epoch.
+        epoch: ChatId,
+        /// Who signed its root (§4.7).
+        by: GossipId,
     },
     /// A root that changed the members, the name or the owner, at its time `T`.
     EpochChange {
@@ -121,6 +131,15 @@ pub enum TimelineLine {
         /// The time `T` of the root that added the device back.
         to: u64,
     },
+    /// "<by> added you back" (§5.10), after [`TimelineLine::NotAMember`]: in place of the
+    /// change line of that root, whose comparison with the last epoch the device held
+    /// would ascribe to `by` every change made while the device was not a member.
+    AddedBack {
+        /// The epoch that added the device back.
+        epoch: ChatId,
+        /// Who signed its root (§4.7).
+        by: GossipId,
+    },
 }
 
 /// An item of the timeline, in order.
@@ -138,16 +157,23 @@ pub enum TimelineItem {
 }
 
 impl TimelineItem {
-    fn order(&self) -> (u64, u8, [u8; 32], ChatId) {
+    /// Lines before messages at one time; among lines, those of roots, then those of the
+    /// device's own state, then the end of a junction (§5.10).
+    fn order(&self) -> (u64, u8, u8, [u8; 32], ChatId) {
         match self {
-            TimelineItem::Message(m) => (m.content.created_at, 1, m.result_hash, m.chat_id),
+            TimelineItem::Message(m) => (m.content.created_at, 1, 0, m.result_hash, m.chat_id),
             TimelineItem::Line { at, line } => {
-                let epoch = match line {
+                let (rank, epoch) = match line {
                     TimelineLine::Founded { epoch, .. }
-                    | TimelineLine::EpochChange { epoch, .. } => *epoch,
-                    _ => ChatId::from_bytes([0xff; 32]),
+                    | TimelineLine::Joined { epoch, .. }
+                    | TimelineLine::EpochChange { epoch, .. } => (0, *epoch),
+                    TimelineLine::AddedBack { epoch, .. } => (2, *epoch),
+                    TimelineLine::YouWereRemoved
+                    | TimelineLine::YouLeft
+                    | TimelineLine::Dissolved
+                    | TimelineLine::NotAMember { .. } => (1, ChatId::from_bytes([0xff; 32])),
                 };
-                (*at, 0, [0; 32], epoch)
+                (*at, 0, rank, [0; 32], epoch)
             }
         }
     }
@@ -259,40 +285,74 @@ impl Node {
             .into_iter()
             .map(TimelineItem::Message)
             .collect();
+        let junctions: Vec<(u64, u64)> = self
+            .t
+            .group_recs
+            .get(&group)
+            .map(|g| g.junctions.clone())
+            .unwrap_or_default();
+        // The root that added the device back at each junction: the one whose time `T` the
+        // junction stored when the device accepted it (§5.10, §7.5), which lists the device.
+        let added_back: BTreeMap<ChatId, u64> = junctions
+            .iter()
+            .filter_map(|(from, to)| {
+                epochs
+                    .iter()
+                    .filter(|e| {
+                        self.t
+                            .epochs
+                            .get(e)
+                            .is_some_and(|r| r.line_time == Some(*to) && r.root.is_member(&self.me))
+                    })
+                    .min()
+                    .map(|e| (*e, (*from).max(*to)))
+            })
+            .collect();
         for e in &epochs {
             let Some(rec) = self.t.epochs.get(e) else {
                 continue;
             };
             let at = rec.line_time.unwrap_or(rec.received_at);
             let root = &rec.root;
-            if rec.parents.is_empty() {
-                items.push(TimelineItem::Line {
-                    at,
-                    line: TimelineLine::Founded {
-                        epoch: *e,
-                        owner: root.owner_id(),
-                    },
-                });
-                continue;
-            }
             let parents: Vec<&crate::root::Root> = rec
                 .parents
                 .iter()
                 .filter_map(|p| self.t.epochs.get(p).map(|r| &r.root))
                 .collect();
+            // Who signed the root (§4.7): a handover root is signed by the owner of its
+            // parent, which a device must hold to verify it.
+            let handover = root.root_type() == RootType::Handover;
+            let by = match parents.first() {
+                Some(p) if handover => p.owner_id(),
+                _ => root.owner_id(),
+            };
+            if let Some(at) = added_back.get(e) {
+                items.push(TimelineItem::Line {
+                    at: *at,
+                    line: TimelineLine::AddedBack { epoch: *e, by },
+                });
+                continue;
+            }
+            if rec.parents.is_empty() {
+                // Created here: the device founded the group (§4.6); it never builds a root
+                // whose parents it does not hold otherwise.
+                let line = if rec.from == self.me {
+                    TimelineLine::Founded {
+                        epoch: *e,
+                        owner: root.owner_id(),
+                    }
+                } else {
+                    TimelineLine::Joined { epoch: *e, by }
+                };
+                items.push(TimelineItem::Line { at, line });
+                continue;
+            }
             let before: BTreeSet<GossipId> = parents
                 .iter()
                 .flat_map(|p| p.members().iter().copied())
                 .collect();
             let after: BTreeSet<GossipId> = root.members().iter().copied().collect();
             let gone: Vec<GossipId> = before.difference(&after).copied().collect();
-            // A handover root is signed by the owner of its parent, which a device must hold
-            // to verify it (§4.7).
-            let handover = root.root_type() == RootType::Handover;
-            let by = match parents.first() {
-                Some(p) if handover => p.owner_id(),
-                _ => root.owner_id(),
-            };
             // An outgoing owner that leaves the member list of its own handover left ("Hand
             // over and leave", §5.8: "Everyone knows you left and who you named").
             let (left, removed): (Vec<GossipId>, Vec<GossipId>) = gone.into_iter().partition(|m| {
@@ -339,7 +399,7 @@ impl Node {
                 }),
                 GroupStatus::Active | GroupStatus::Waiting { .. } => {}
             }
-            for (from, to) in &g.junctions {
+            for (from, to) in &junctions {
                 items.push(TimelineItem::Line {
                     at: *from,
                     line: TimelineLine::YouWereRemoved,
