@@ -510,3 +510,51 @@ fn the_largest_event_can_be_served_in_an_answer() {
     let r = responses(&out[&member(2)]);
     assert_eq!(answer_event(&r[0]), Some(e));
 }
+
+/// Found by review (code at `6a916f2e`): `busy` cost the answering member nothing. A member
+/// answering `busy` to everything was asked again every minute for ever, counted as
+/// responsive (its timeouts were forgotten), and its scans waited a whole stage TTL after
+/// each `busy` and never advanced.
+#[test]
+fn a_member_answering_busy_forever_runs_out_of_chances() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    for t in 0..3 {
+        net.devs[0].node.note_timeout(&member(1), T0 + t);
+    }
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    dev.node
+        .peer_reconnected(&mut dev.store, member(1), now, &mut net.rng)
+        .unwrap();
+    let mut lookups = 0;
+    let mut scan_ttls = Vec::new();
+    for _ in 0..30 {
+        for s in super::retrieval::sent_queries(&mut net, 0) {
+            if s.to != member(1) {
+                continue;
+            }
+            match s.op {
+                QueryOp::Event { .. } => lookups += 1,
+                QueryOp::TipsScan { .. } => scan_ttls.push(s.ttl),
+                _ => {}
+            }
+            super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Busy));
+        }
+        net.now += 70_000;
+        net.tick(0);
+    }
+    assert!(
+        !net.devs[0].node.responsive(&member(1)),
+        "busy is no answer"
+    );
+    assert!(lookups <= 3, "asked {lookups} times in one run");
+    // Three `busy` count as a timeout: the scan's stage advances; the waits after `busy`
+    // stay about a minute whatever the stage.
+    assert!(
+        scan_ttls.iter().filter(|t| **t > MIN).count() >= 3,
+        "{scan_ttls:?}"
+    );
+}
