@@ -2898,7 +2898,11 @@ fn closing_the_only_shared_group_leaves_only_markers() {
     let t = dev.node.tables();
     assert!(t.epochs.len() == 0 && t.group_recs.len() == 0 && t.signed.len() == 0);
     assert_eq!(t.peers.len(), 0, "peer records of former members");
-    assert_eq!(t.keys.len(), 0, "keys of former members");
+    // Its own keys only (device-level: the signer gives them again at every tick).
+    assert!(
+        t.keys.keys().all(|k| *k == gid(2)),
+        "keys of former members"
+    );
     assert_eq!(t.requests.len(), 0, "correlation references");
     assert_eq!(
         t.tasks.len() + t.scans_out.len() + t.scans_in.len() + t.hints.len(),
@@ -2906,4 +2910,14 @@ fn closing_the_only_shared_group_leaves_only_markers() {
     );
     assert_eq!(t.queue.len(), 0);
     assert!(t.markers.len() >= 1);
+    // What remains is device-level: the markers, `meta.next_seq` and its own keys.
+    assert_eq!(
+        t.held_roots.len()
+            + t.unverified.len()
+            + t.events.len()
+            + t.lookup_results.len()
+            + t.groups.len()
+            + t.replies.len(),
+        0
+    );
 }

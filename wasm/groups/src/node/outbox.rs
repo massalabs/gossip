@@ -631,7 +631,8 @@ impl Node {
         // entry, ordinary messages before statuses (§13.9).
         let ordered = self.allocate(peer, pages, answers);
         let mut sendable_answers = Vec::new();
-        {
+        // The peer record is touched only when there are answers to charge to it.
+        if !ordered.is_empty() {
             let r = self.peer_mut(&peer);
             for a in ordered {
                 let cost = a.len as u64;
