@@ -150,7 +150,7 @@ mod tests {
         c.edges.insert(id(2), vec![id(1)]);
         let mut obj = ObjectRecord::empty(sync);
         obj.pending_versions.insert((30, id(2)));
-        obj.pending_deletion = Some((20, id(1)));
+        obj.pending_deletions.insert((20, id(1)));
         c.objects.insert(sync, obj);
         store.commit(c).unwrap();
         assert_eq!(store.commits(), 1);

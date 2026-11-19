@@ -172,8 +172,10 @@ pub struct ObjectRecord {
     pub current_events: BTreeSet<EventId>,
     /// The admitted pending future versions, as `(due, eventId)` (§7.3).
     pub pending_versions: BTreeSet<(u64, EventId)>,
-    /// The earliest pending scheduled deletion, as `(due, eventId)` (§7.4).
-    pub pending_deletion: Option<(u64, EventId)>,
+    /// The pending scheduled deletions, as `(due, eventId)` (§7.4). The earliest one applies;
+    /// every one is kept until then, so that which deletion events stay available does not
+    /// depend on arrival timing (this departs from "only the earliest is kept").
+    pub pending_deletions: BTreeSet<(u64, EventId)>,
 }
 
 impl ObjectRecord {
@@ -185,7 +187,7 @@ impl ObjectRecord {
             current: None,
             current_events: BTreeSet::new(),
             pending_versions: BTreeSet::new(),
-            pending_deletion: None,
+            pending_deletions: BTreeSet::new(),
         }
     }
 
@@ -203,7 +205,7 @@ impl ObjectRecord {
             sync_obj_id: self.sync_obj_id,
             kind: PendingKind::Version,
         });
-        let deletion = self.pending_deletion.iter().map(|(due, id)| PendingItem {
+        let deletion = self.pending_deletions.iter().map(|(due, id)| PendingItem {
             due: *due,
             event_id: *id,
             sync_obj_id: self.sync_obj_id,

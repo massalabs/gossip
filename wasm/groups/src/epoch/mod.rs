@@ -80,8 +80,7 @@ pub enum Merge {
     /// It replaced the current result (or created it, or deleted the message); the
     /// superseded events were pruned.
     Won,
-    /// It lost and was pruned: an older version, content after a deletion, or a later
-    /// scheduled deletion.
+    /// It lost and was pruned: an older version, or content after a deletion.
     Lost,
     /// It carries the current result and stays available beside the other carriers.
     Identical,
@@ -349,10 +348,9 @@ fn activate_due<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, now: u64) -> Result
                 merge_effective(tx, &mut obj, event)?;
             }
             PendingKind::Deletion => {
-                if obj.pending_deletion != Some((item.due, item.event_id)) {
+                if !obj.pending_deletions.remove(&(item.due, item.event_id)) {
                     continue;
                 }
-                obj.pending_deletion = None;
                 absorb(tx, &mut obj, Some(event), PendingFate::Normalize)?;
             }
         }
@@ -477,21 +475,14 @@ pub(crate) fn apply_new<S: StorageRead + ?Sized>(
         Payload::Delete {
             scheduled_at: Some(due),
             ..
-        } if due > now && !obj.is_deleted() => match obj.pending_deletion {
-            // Only the earliest pending deletion is kept; ties go to the smaller event ID.
-            Some(kept) if kept < (due, id) => {
-                prune(tx, id);
-                Merge::Lost
-            }
-            replaced => {
-                if let Some((_, old)) = replaced {
-                    prune(tx, old);
-                }
-                obj.pending_deletion = Some((due, id));
-                hold(tx, event, Role::PendingDeletion { due });
-                Merge::Pending
-            }
-        },
+        } if due > now && !obj.is_deleted() => {
+            // Every scheduled deletion is kept; the earliest applies, and the others are then
+            // applied with it. Pruning the later ones, as §7.4 says, makes their availability
+            // depend on whether they arrived before or after the earliest one applied.
+            obj.pending_deletions.insert((due, id));
+            hold(tx, event, Role::PendingDeletion { due });
+            Merge::Pending
+        }
         Payload::Delete { .. } => absorb(tx, &mut obj, Some(event), PendingFate::Normalize)?,
     };
     tx.put_object(obj);
@@ -539,13 +530,13 @@ fn merge_effective<S: StorageRead + ?Sized>(
     Ok(merge)
 }
 
-/// What happens to a pending scheduled deletion when the message is deleted otherwise.
+/// What happens to the pending scheduled deletions when the message is deleted otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PendingFate {
-    /// It is applied with the deletion: stored and served in its immediate form, as an
-    /// additional carrier of the tombstone.
+    /// They are applied with the deletion: stored and served in their immediate form, as
+    /// additional carriers of the tombstone.
     Normalize,
-    /// It is pruned (a local-only deletion must not make this device serve a deletion
+    /// They are pruned (a local-only deletion must not make this device serve a deletion
     /// before its time, §9.3).
     Prune,
 }
@@ -569,7 +560,7 @@ pub(crate) fn absorb<S: StorageRead + ?Sized>(
         }
         obj.current = Some(StoredResult::Tombstone);
     }
-    if let Some((_, pending)) = obj.pending_deletion.take() {
+    for (_, pending) in core::mem::take(&mut obj.pending_deletions) {
         match fate {
             PendingFate::Normalize => {
                 if let Some(event) = tx.row(&pending)?.and_then(|r| r.event().cloned()) {
@@ -679,7 +670,8 @@ pub(crate) fn check_invariants<R: StorageRead + ?Sized>(
                 return Err(format!("carrier {id:?} is past its window"));
             }
         }
-        if obj.is_deleted() && (!obj.pending_versions.is_empty() || obj.pending_deletion.is_some())
+        if obj.is_deleted()
+            && (!obj.pending_versions.is_empty() || !obj.pending_deletions.is_empty())
         {
             return Err(format!("{s:?} is deleted but has pending work"));
         }
@@ -690,7 +682,7 @@ pub(crate) fn check_invariants<R: StorageRead + ?Sized>(
                 return Err(format!("pending version {id:?} inconsistent at {now}"));
             }
         }
-        if let Some((due, id)) = obj.pending_deletion {
+        for &(due, id) in &obj.pending_deletions {
             claim(id)?;
             let row = rows.get(&id).ok_or("pending deletion without row")?;
             if row.role() != Some(Role::PendingDeletion { due }) || due <= now {

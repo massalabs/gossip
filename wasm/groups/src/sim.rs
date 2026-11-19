@@ -16,13 +16,13 @@
 //! - `GROUPS_SIM_SEEDS=<n>`: run seeds `GROUPS_SIM_FIRST` (default 0) to `+ n`;
 //! - `GROUPS_SIM_STEPS=<n>`: steps per run (default 160).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use crate::constants::RETENTION_MS;
 use crate::display::view;
 use crate::epoch::{Epoch, GroupState, Outcome, Sender, check_invariants};
-use crate::event::{Body, Payload};
+use crate::event::Body;
 use crate::ids::{ChatId, EventId, GossipId, SyncObjId};
 use crate::rng::TestRng;
 use crate::root::Root;
@@ -80,8 +80,6 @@ struct Sim {
     seq: u64,
     /// Every blob ever sent, for the replay checks.
     log: Vec<Vec<u8>>,
-    /// Sync objects that received two or more scheduled deletions.
-    scheduled_deletions: BTreeMap<SyncObjId, u32>,
     steps: usize,
 }
 
@@ -122,7 +120,6 @@ impl Sim {
             queue: Vec::new(),
             seq: 0,
             log: Vec::new(),
-            scheduled_deletions: BTreeMap::new(),
             steps,
         }
     }
@@ -306,13 +303,9 @@ impl Sim {
                 };
                 self.pick(&alive).and_then(|sync| {
                     let device = &mut self.devices[d];
-                    let p = epoch
+                    epoch
                         .publish_deletion(&mut device.store, now, &mut self.rng, sync, at)
-                        .ok();
-                    if p.is_some() && at.is_some() {
-                        *self.scheduled_deletions.entry(sync).or_default() += 1;
-                    }
-                    p
+                        .ok()
                 })
             }
             55..=59 => {
@@ -387,32 +380,6 @@ impl Sim {
             epoch.tick(&mut self.devices[i].store, now).unwrap();
         }
     }
-
-    /// Deletion events of objects that received several scheduled deletions, in any of
-    /// `stores`: whether such an event stays available depends on arrival timing (§7.4), so
-    /// it is left out of the tip and availability comparisons.
-    fn timing_dependent(&self, stores: &[&MemoryStorage]) -> BTreeSet<EventId> {
-        let mut out = BTreeSet::new();
-        for store in stores {
-            for r in store.event_rows(&self.chat()).unwrap() {
-                if let Some(Payload::Delete { sync_obj_id, .. }) = r.event().map(|e| e.payload())
-                    && self
-                        .scheduled_deletions
-                        .get(sync_obj_id)
-                        .copied()
-                        .unwrap_or(0)
-                        >= 2
-                {
-                    out.insert(r.event_id);
-                }
-            }
-        }
-        out
-    }
-
-    fn device_stores(&self) -> Vec<&MemoryStorage> {
-        self.devices.iter().map(|d| &d.store).collect()
-    }
 }
 
 /// What must agree between devices.
@@ -425,7 +392,7 @@ struct Snapshot {
     available: Vec<EventId>,
 }
 
-fn snapshot(store: &MemoryStorage, root: &Root, now: u64, skip: &BTreeSet<EventId>) -> Snapshot {
+fn snapshot(store: &MemoryStorage, root: &Root, now: u64) -> Snapshot {
     let chat = root.chat_id();
     let results = store
         .objects(&chat)
@@ -442,13 +409,12 @@ fn snapshot(store: &MemoryStorage, root: &Root, now: u64, skip: &BTreeSet<EventI
         .tips(store, now)
         .unwrap()
         .into_iter()
-        .filter(|t| !skip.contains(t))
         .collect();
     let available = store
         .event_rows(&chat)
         .unwrap()
         .into_iter()
-        .filter(|r| r.available(now) && !skip.contains(&r.event_id))
+        .filter(|r| r.available(now))
         .map(|r| r.event_id)
         .collect();
     Snapshot {
@@ -511,11 +477,10 @@ fn check_convergence(sim: &mut Sim, label: &str) {
     // Every device is compared at the same global instant; skews are a few minutes and
     // nothing is due or expires within them at the checkpoints of `run`.
     let at = sim.now;
-    let skip = sim.timing_dependent(&sim.device_stores());
-    let first = snapshot(&sim.devices[0].store, sim.root, at, &skip);
+    let first = snapshot(&sim.devices[0].store, sim.root, at);
     for (i, d) in sim.devices.iter().enumerate() {
         check_invariants(&d.store, &sim.chat(), sim.clock(i)).expect("invariants");
-        let s = snapshot(&d.store, sim.root, at, &skip);
+        let s = snapshot(&d.store, sim.root, at);
         assert_same(&s, &first, &format!("{label}, device {i} against device 0"));
     }
 }
@@ -540,24 +505,20 @@ fn run(seed: u64, steps: usize) {
         full_state(&b, &sim.chat()),
         "replay orders differ"
     );
-    let mut stores = sim.device_stores();
-    stores.push(&a);
-    let skip = sim.timing_dependent(&stores);
     assert_same(
-        &snapshot(&a, sim.root, now, &skip),
-        &snapshot(&sim.devices[0].store, sim.root, now, &skip),
+        &snapshot(&a, sim.root, now),
+        &snapshot(&sim.devices[0].store, sim.root, now),
         "replay against device 0",
     );
 
     // Pruning never changes a result, not even after everything arrives again.
-    let none = BTreeSet::new();
-    let before = snapshot(&sim.devices[0].store, sim.root, now, &none);
+    let before = snapshot(&sim.devices[0].store, sim.root, now);
     let mut pruned = sim.devices[0].store.clone();
     let epoch = sim.epoch();
     let k = 1 + below(&mut sim.rng, 8) as usize;
     epoch.evict(&mut pruned, now, k).unwrap();
     check_invariants(&pruned, &sim.chat(), now).expect("invariants after eviction");
-    let after = snapshot(&pruned, sim.root, now, &none);
+    let after = snapshot(&pruned, sim.root, now);
     assert_eq!(before.results, after.results, "eviction changed a result");
     assert_eq!(before.view, after.view, "eviction changed the view");
     let sender = Sender::Peer {
@@ -570,7 +531,7 @@ fn run(seed: u64, steps: usize) {
             .unwrap();
     }
     check_invariants(&pruned, &sim.chat(), now).expect("invariants after redelivery");
-    let again = snapshot(&pruned, sim.root, now, &none);
+    let again = snapshot(&pruned, sim.root, now);
     assert_eq!(before.results, again.results, "redelivery changed a result");
     assert_eq!(before.view, again.view, "redelivery changed the view");
 

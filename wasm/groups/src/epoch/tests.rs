@@ -637,27 +637,35 @@ fn a_due_scheduled_deletion_applies_on_arrival() {
 }
 
 #[test]
-fn only_the_earliest_pending_deletion_is_kept() {
+fn every_scheduled_deletion_is_kept_and_the_earliest_applies() {
     let mut f = Fixture::new();
     let c = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "c"));
     let d10 = f.event(T0, 2, &[], del(1, Some(T0 + 10_000)));
     let d20 = f.event(T0, 3, &[], del(1, Some(T0 + 20_000)));
     let d5 = f.event(T0, 4, &[], del(1, Some(T0 + 5_000)));
     f.recv(&c, T0);
-    assert_eq!(f.recv(&d10, T0), Outcome::Accepted(Merge::Pending));
-    // A later one is pruned at once.
-    assert_eq!(f.recv(&d20, T0), Outcome::Accepted(Merge::Lost));
-    assert_eq!(f.state(&d20), PRUNED);
-    // An earlier one arriving later replaces the pending one.
-    assert_eq!(f.recv(&d5, T0), Outcome::Accepted(Merge::Pending));
-    assert_eq!(f.state(&d10), PRUNED);
-    assert_eq!(f.obj(1).pending_deletion, Some((T0 + 5_000, d5.event_id())));
-    // Equal times: the smaller event ID is kept, whatever the order.
-    let tie = f.event(T0, 0, &[], del(1, Some(T0 + 5_000)));
-    assert_eq!(f.recv(&tie, T0), Outcome::Accepted(Merge::Pending));
-    assert_eq!(f.state(&d5), PRUNED);
-    let tie_hi = f.event(T0, 9, &[], del(1, Some(T0 + 5_000)));
-    assert_eq!(f.recv(&tie_hi, T0), Outcome::Accepted(Merge::Lost));
+    for d in [&d10, &d20, &d5] {
+        assert_eq!(f.recv(d, T0), Outcome::Accepted(Merge::Pending));
+    }
+    assert_eq!(f.obj(1).pending_deletions.len(), 3);
+    assert_eq!(
+        f.epoch().next_wakeup(&f.store, T0).unwrap(),
+        Some(T0 + 5_000)
+    );
+    f.tick(T0 + 4_999);
+    assert_eq!(f.current_text(1).as_deref(), Some("c"));
+    // The earliest applies, and the others with it, all in their immediate form.
+    f.tick(T0 + 5_000);
+    let o = f.obj(1);
+    assert!(o.is_deleted() && o.pending_deletions.is_empty());
+    for d in [&d5, &d10, &d20] {
+        assert_eq!(held_role(f.state(d)), Some(Role::Current));
+        assert_eq!(
+            *f.row(d.event_id()).unwrap().event().unwrap().payload(),
+            del(1, None)
+        );
+    }
+    assert_eq!(f.state(&c), PRUNED);
 }
 
 #[test]
@@ -672,7 +680,7 @@ fn an_immediate_deletion_clears_pending_work() {
     f.recv(&ds, T0);
     assert_eq!(f.recv(&di, T0 + 2), Outcome::Accepted(Merge::Won));
     let o = f.obj(1);
-    assert!(o.is_deleted() && o.pending_versions.is_empty() && o.pending_deletion.is_none());
+    assert!(o.is_deleted() && o.pending_versions.is_empty() && o.pending_deletions.is_empty());
     assert_eq!(f.state(&v), PRUNED);
     // The pending deletion is applied with it, in its immediate form.
     assert_eq!(held_role(f.state(&ds)), Some(Role::Current));
