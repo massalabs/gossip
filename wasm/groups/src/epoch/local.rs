@@ -298,7 +298,7 @@ impl Epoch<'_> {
         for (_, old_id) in core::mem::take(&mut obj.pending_versions) {
             prune(&mut tx, old_id);
         }
-        // A pending scheduled deletion carries no content; it stays pending.
+        // Pending scheduled deletions carry no content; they stay pending.
         tx.put_object(obj);
         let changes = tx.into_changes();
         store.commit(changes)?;
@@ -306,8 +306,8 @@ impl Epoch<'_> {
     }
 
     /// A local-only deletion (§9.2, §9.3): the message is replaced by its tombstone, nothing
-    /// is sent, and every event of the message is pruned to a stub, a pending scheduled
-    /// deletion included.
+    /// is sent, and every event of the message is pruned to a stub, pending scheduled
+    /// deletions included.
     ///
     /// # Errors
     ///
