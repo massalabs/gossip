@@ -756,7 +756,11 @@ impl Node {
             // a former owner's branch, or naming an epoch of the former owner as the last one
             // of a member added back (§5.10), kicks no one from it.
             if proot.owner_id() != self.me {
-                foreign.extend(proot.members().iter().copied());
+                // Counted below when it is an end this root merges (a former owner's
+                // branch); the members an earlier epoch lists were dropped long ago.
+                if self.gx.children.get(p).is_none_or(BTreeSet::is_empty) {
+                    foreign.extend(proot.members().iter().copied());
+                }
                 continue;
             }
             for m in proot.members() {
