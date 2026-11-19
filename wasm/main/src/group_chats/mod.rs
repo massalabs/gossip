@@ -449,6 +449,10 @@ impl GroupsNode {
             .map_err(js)
     }
 
+    /// An edit starts from the message's current metadata (§2.2: entries a client does not
+    /// know, `replyTo` included, survive it). `metadata` is a patch: `[]` or `null` keeps
+    /// everything, an array of `[name, hex]` sets those entries, and
+    /// `{"set":[[name, hex], …],"remove":[name, …]}` also removes.
     pub fn publish_edit(
         &mut self,
         epoch: &[u8],
@@ -491,7 +495,8 @@ impl GroupsNode {
     }
 
     /// `edit`: `{"body":…|null,"author":hex|null,"created_at":…|null,
-    /// "last_modified_at":…|null,"metadata":…|null,"edited":bool|null}`.
+    /// "last_modified_at":…|null,"metadata":…|null,"edited":bool|null}`; `metadata` is a
+    /// patch as for `publish_edit`, `null` keeping everything.
     pub fn local_edit(
         &mut self,
         epoch: &[u8],

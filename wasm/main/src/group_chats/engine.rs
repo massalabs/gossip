@@ -404,7 +404,7 @@ impl Core {
         now: u64,
     ) -> R<String> {
         let body: Body = parse(body)?;
-        let metadata: BTreeMap<String, Vec<u8>> = parse(metadata)?;
+        let metadata: groups::MetadataPatch = parse(metadata)?;
         self.node
             .publish_edit(
                 &mut self.store,
