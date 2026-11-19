@@ -3286,3 +3286,50 @@ The revised section is planned to state the following.
 
 - **A (recommended):** this list is complete and correct.
 - **B:** changes or additions.
+
+### D.15 Canonical encoding of `UserPublicKeys` (§3, §4.3, §12.9)
+
+*Found during implementation.*
+
+*Current text:* the owner field of a root and a key answer are "`UserPublicKeys`, serialized with
+bincode", and are checked by deriving the GossipID.
+
+*Context:* the existing parser accepts extra bytes after a valid key bundle, and deriving the
+GossipID serializes the parsed keys again.
+Bytes that are not the canonical encoding therefore pass the check, and the same owner keys could
+give several root IDs.
+The code refuses any input that does not equal the re-serialized keys.
+
+- **A (recommended):** state that the owner field and key answers MUST be the canonical bincode
+  encoding, and that a receiver MUST refuse bytes that differ from the re-serialized keys.
+- **B:** leave the text as it is and rely on the implementation.
+
+### D.16 Nonzero GossipIDs in a member list (§4.1, §4.7)
+
+*Found during implementation.*
+
+*Current text:* §4.7 step 1 requires every GossipID of the member list to be nonzero; the table of
+§4.1 does not mention it.
+
+*Context:* the two places should agree.
+The code applies the rule of §4.7.
+
+- **A (recommended):** add "nonzero" to the `members` row of §4.1.
+- **B:** remove the requirement from §4.7.
+
+### D.17 Signed-object IDs do not include a version (§5.3, §5.6, §5.8, §13.1)
+
+*Found during implementation.*
+
+*Current text:* a leave, a kick and a dissolve message travel with a version prefix, but `leaveId`,
+`kickId` and `dissolveId` hash no version, while the root ID does.
+
+*Context:* nothing is wrong at version 1.
+If a later version gave one of these objects different fields, the old and the new form would share
+an ID.
+
+- **A (recommended):** add one sentence: a later version that changes the fields of a signed object
+  MUST also use a new hash domain for its ID.
+- **B:** add the version to the three IDs now, which changes them.
+- **C:** leave the text as it is.
+
