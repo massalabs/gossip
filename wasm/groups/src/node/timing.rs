@@ -104,8 +104,9 @@ pub const REQUEST_REFILL_PER_MIN: u64 = 16;
 /// query entry beyond it is dropped unanswered, so a peer flooding queries while the
 /// answers cannot leave does not grow the queue. Not given by §17.4; provisional.
 pub const QUEUED_ANSWERS_PER_PEER: usize = 2 * REQUEST_BURST as usize;
-/// Versions for which the version notices sent to one peer are remembered (§13.8); the
-/// oldest is forgotten beyond it. Not given by §13.8; provisional.
+/// Version notices sent to one peer in 24 hours at most, and versions remembered for it
+/// (§13.8): a version is forgotten only 24 hours after its notice, so a peer cycling through
+/// version numbers gets at most this many a day. Local policy.
 pub const VERSION_NOTICES_PER_PEER: usize = 4;
 /// The per-peer response budget: bytes of answers this device sends a peer, burst.
 pub const RESPONSE_BURST: u64 = 1024 * 1024;
