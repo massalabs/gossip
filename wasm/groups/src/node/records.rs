@@ -132,6 +132,8 @@ pub enum Attempt {
         peer: GossipId,
         /// `sent_at + floor(ttl × r)`.
         local_deadline: u64,
+        /// The `sent_at` of the query first sent for the stage (resends keep it).
+        sent_at: u64,
     },
 }
 
@@ -212,6 +214,8 @@ pub enum ScanAttempt {
     Sent {
         /// `sent_at + floor(ttl × r)`.
         local_deadline: u64,
+        /// The `sent_at` of the request first sent for the stage (resends keep it).
+        sent_at: u64,
     },
     /// Waiting before the next request: after `busy`, or while retrieval is backlogged.
     Waiting {
@@ -359,6 +363,9 @@ pub struct PeerRecord {
     pub failures: u32,
     /// When the first of those timeouts happened.
     pub first_failure: u64,
+    /// The `sent_at` of the last query whose timeout was counted: the entries of one query
+    /// that time out together count once.
+    pub last_timeout_query: u64,
     /// Its request budget (entries it may make this device answer).
     pub requests: Bucket,
     /// Its response budget (bytes of answers sent to it).

@@ -481,8 +481,13 @@ impl Node {
     /// The scheduling priority of a task: the best score among its untried, responsive
     /// candidates with a trigger, so that what honest, supplying peers announce goes first. Below [`CREDIBLE`] the task is suspect: every announcer
     /// said it did not have the event, or never answered, or scores below an unmeasured peer.
+    /// A sync-object lookup, asked for by the user and announced by no one, is credible.
     pub(crate) fn priority(&self, key: &TaskKey) -> u64 {
-        self.t.tasks.get(key).map_or(0, |task| {
+        let floor = match key.target {
+            Target::SyncObj(_) => CREDIBLE,
+            Target::Event(_) => 0,
+        };
+        floor.max(self.t.tasks.get(key).map_or(0, |task| {
             task.candidates
                 .iter()
                 .filter(|(p, c)| {
@@ -491,7 +496,7 @@ impl Node {
                 .map(|(p, _)| self.score(p))
                 .max()
                 .unwrap_or(0)
-        })
+        }))
     }
 
     fn pause(&mut self, key: TaskKey) {
@@ -610,6 +615,7 @@ impl Node {
             *attempt = Some(Attempt::Sent {
                 peer,
                 local_deadline: sent_at.saturating_add(jittered(ttl, *jitter)),
+                sent_at,
             });
         }
         let c = task.candidates.entry(peer).or_insert_with(Candidate::new);
@@ -665,14 +671,14 @@ impl Node {
             }
             let task = self.t.tasks.get(&key).expect("indexed");
             let Run::Active {
-                attempt: Some(Attempt::Sent { peer, .. }),
+                attempt: Some(Attempt::Sent { peer, sent_at, .. }),
                 ..
             } = task.run
             else {
                 unreachable!("a timer belongs to a sent attempt");
             };
             self.stats.timeouts += 1;
-            self.note_timeout(&peer, cx.now);
+            self.note_query_timeout(&peer, sent_at, cx.now);
             self.next_stage(cx, key);
         }
     }

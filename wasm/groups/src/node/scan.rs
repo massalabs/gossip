@@ -165,6 +165,7 @@ impl Node {
         {
             op.attempt = ScanAttempt::Sent {
                 local_deadline: sent_at.saturating_add(jittered(op.ttl, op.jitter)),
+                sent_at,
             };
         }
     }
@@ -400,9 +401,12 @@ impl Node {
             }
             let op = self.t.scans_out.get(&key).expect("listed").clone();
             match op.attempt {
-                ScanAttempt::Sent { local_deadline } if local_deadline <= cx.now => {
+                ScanAttempt::Sent {
+                    local_deadline,
+                    sent_at,
+                } if local_deadline <= cx.now => {
                     self.stats.timeouts += 1;
-                    self.note_timeout(&key.1, cx.now);
+                    self.note_query_timeout(&key.1, sent_at, cx.now);
                     self.next_scan_stage(cx, key);
                 }
                 ScanAttempt::Waiting { until } if until <= cx.now => {
@@ -734,7 +738,7 @@ impl Node {
             .scans_out
             .iter()
             .filter_map(|(_, op)| match op.attempt {
-                ScanAttempt::Sent { local_deadline } => Some(local_deadline),
+                ScanAttempt::Sent { local_deadline, .. } => Some(local_deadline),
                 ScanAttempt::Waiting { until } => Some(until),
                 ScanAttempt::Queued => None,
             });

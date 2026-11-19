@@ -264,6 +264,21 @@ impl Node {
         out
     }
 
+    /// The query sent to `peer` at `sent_at` timed out: counted by [`Node::note_timeout`]
+    /// once, however many of its entries time out.
+    pub(crate) fn note_query_timeout(&mut self, peer: &GossipId, sent_at: u64, now: u64) {
+        if self
+            .t
+            .peers
+            .get(peer)
+            .is_some_and(|r| r.last_timeout_query == sent_at && r.failures > 0)
+        {
+            return;
+        }
+        self.peer_mut(peer).last_timeout_query = sent_at;
+        self.note_timeout(peer, now);
+    }
+
     /// A query to `peer` timed out unanswered at `now`. A peer that keeps failing, at least
     /// [`NEIGHBOR_FAILURES`] timeouts in a row spread over [`NEIGHBOR_UNRESPONSIVE_MS`] or
     /// more without any valid answer, is replaced in every group where it is a neighbor
