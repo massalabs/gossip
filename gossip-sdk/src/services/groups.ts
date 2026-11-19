@@ -30,7 +30,10 @@ import {
   group_max_text_bytes,
   group_metadata_bytes,
 } from '../wasm/bindings.js';
-import type { SessionModule } from '../wasm/session.js';
+import {
+  SessionMessageTooLargeError,
+  type SessionModule,
+} from '../wasm/session.js';
 import type { IMessageProtocol } from '../api/messageProtocol/types.js';
 import type { Queries, GroupBatch } from '../db/queries/index.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
@@ -874,10 +877,19 @@ export class GroupService {
       node.abandon(o.handle);
       return false;
     }
-    const sent = await this.session.sendMessage(
-      o.to,
-      serializeGroupPlaintext(o.plaintext)
-    );
+    let sent: Awaited<ReturnType<SessionModule['sendMessage']>>;
+    try {
+      sent = await this.session.sendMessage(
+        o.to,
+        serializeGroupPlaintext(o.plaintext)
+      );
+    } catch (error) {
+      // Refused before encryption (it may not fit one packet): the session
+      // did not move. The engine never assembles one this large.
+      if (!(error instanceof SessionMessageTooLargeError)) throw error;
+      node.abandon(o.handle);
+      return false;
+    }
     if (!this.alive(node)) return false;
     if (!sent) {
       // The session refused to encrypt (the peer lags too far behind) while

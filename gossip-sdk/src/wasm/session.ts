@@ -31,6 +31,39 @@ function freeWasm(value: { free(): void; __wbg_ptr?: number }): void {
   if (value.__wbg_ptr === undefined || value.__wbg_ptr !== 0) value.free();
 }
 
+/**
+ * The largest encrypted packet a client stores under a seeker (§13.10): the
+ * largest payload a phone relays over the mesh. The backend refuses more.
+ */
+export const SESSION_PACKET_MAX_BYTES = 65_536;
+
+/**
+ * The most the session layer adds to what it encrypts (§13.10: two ML-KEM-768
+ * ciphertexts, a fresh public key, a signed envelope and framing; measured
+ * against a group plaintext, the group message type included).
+ */
+export const SESSION_OVERHEAD_MAX_BYTES = 3_632;
+
+/**
+ * The largest session message handed to the session for encryption: one
+ * larger may not fit one packet once encrypted.
+ */
+export const SESSION_MESSAGE_MAX_BYTES =
+  SESSION_PACKET_MAX_BYTES - SESSION_OVERHEAD_MAX_BYTES;
+
+/**
+ * A session message refused before encryption because it may not fit one
+ * packet (`SESSION_MESSAGE_MAX_BYTES`). The session did not advance.
+ */
+export class SessionMessageTooLargeError extends Error {
+  constructor(readonly size: number) {
+    super(
+      `session:too-large: ${size} bytes, at most ${SESSION_MESSAGE_MAX_BYTES}`
+    );
+    this.name = 'SessionMessageTooLargeError';
+  }
+}
+
 export interface ReceivedMessage {
   message: Uint8Array;
   user_id: Uint8Array;
@@ -365,6 +398,11 @@ export class SessionModule {
    * Send a message to a peer.
    * IMPORTANT: This persists session state before returning.
    * The returned output should only be sent to network AFTER this resolves.
+   *
+   * Encryption advances the session, so a message that may not fit one
+   * packet once encrypted is refused before it (§13.10): this throws a
+   * `SessionMessageTooLargeError` and the session is left as it was. This is
+   * the one place where anything is handed to the session for encryption.
    */
   async sendMessage(
     peerId: Uint8Array,
@@ -372,6 +410,9 @@ export class SessionModule {
   ): Promise<SendMessageOutput | undefined> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
+    }
+    if (message.length > SESSION_MESSAGE_MAX_BYTES) {
+      throw new SessionMessageTooLargeError(message.length);
     }
 
     const result = this.sessionManager.send_message(peerId, message);
