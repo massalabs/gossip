@@ -461,7 +461,7 @@ impl MessageEvent {
     /// # Errors
     ///
     /// The first rule broken.
-    pub fn from_proto(version: u64, p: proto::GroupMessageEvent) -> Result<Self> {
+    pub(crate) fn from_proto(version: u64, p: proto::GroupMessageEvent) -> Result<Self> {
         if version != EVENT_VERSION {
             return Err(Error::UnsupportedEventVersion(version));
         }
@@ -495,7 +495,7 @@ impl MessageEvent {
 
     /// The protobuf form.
     #[must_use]
-    pub fn to_proto(&self) -> proto::GroupMessageEvent {
+    pub(crate) fn to_proto(&self) -> proto::GroupMessageEvent {
         proto::GroupMessageEvent {
             event_id: self.event_id.as_bytes().to_vec(),
             chat_id: self.chat_id.as_bytes().to_vec(),

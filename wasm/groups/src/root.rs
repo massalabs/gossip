@@ -253,7 +253,7 @@ impl Root {
     /// # Errors
     ///
     /// The first rule broken.
-    pub fn from_proto(version: u64, p: proto::GroupRoot) -> Result<Self> {
+    pub(crate) fn from_proto(version: u64, p: proto::GroupRoot) -> Result<Self> {
         if version != EVENT_VERSION {
             return Err(Error::UnsupportedEventVersion(version));
         }
@@ -348,7 +348,7 @@ impl Root {
 
     /// The protobuf form of this root.
     #[must_use]
-    pub fn to_proto(&self) -> proto::GroupRoot {
+    pub(crate) fn to_proto(&self) -> proto::GroupRoot {
         proto::GroupRoot {
             r#type: self.root_type as i32,
             name: self.name.clone(),

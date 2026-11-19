@@ -5,9 +5,27 @@
 //! plaintext = varint(PROTOCOL_VERSION) ‖ protobuf(Container)
 //! eventBlob = varint(eventVersion) ‖ protobuf(Event)
 //! ```
+//!
+//! [`decode_plaintext`] and [`decode_event_blob`] are the only ways in, and
+//! [`encode_plaintext`] and [`encode_event_blob`] the only ways out: each runs the strict check
+//! of Appendix C before `prost` sees the bytes, and the limits of §13.10. The protobuf structs
+//! and the conversions of the typed objects to and from them stay inside the crate, so that a
+//! caller cannot decode with `prost` directly and skip those checks.
+//!
+//! ```compile_fail
+//! use groups::wire::proto;
+//! ```
+//!
+//! ```compile_fail
+//! let _ = groups::Leave::from_proto(&Default::default());
+//! ```
+//!
+//! ```compile_fail
+//! let _ = groups::Root::from_proto(1, Default::default());
+//! ```
 
 mod frames;
-pub mod proto;
+pub(crate) mod proto;
 pub(crate) mod strict;
 
 pub use frames::{

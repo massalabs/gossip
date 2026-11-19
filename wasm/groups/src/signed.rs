@@ -66,7 +66,7 @@ impl Leave {
     /// # Errors
     ///
     /// [`Error::BadLength`] for a field of the wrong length.
-    pub fn from_proto(p: &proto::Leave) -> Result<Self> {
+    pub(crate) fn from_proto(p: &proto::Leave) -> Result<Self> {
         Ok(Self {
             chat_id: ChatId::from_slice(&p.chat_id)?,
             leaver: GossipId::from_slice(&p.gossip_id)?,
@@ -76,7 +76,7 @@ impl Leave {
 
     /// The protobuf form.
     #[must_use]
-    pub fn to_proto(&self) -> proto::Leave {
+    pub(crate) fn to_proto(&self) -> proto::Leave {
         proto::Leave {
             chat_id: self.chat_id.as_bytes().to_vec(),
             gossip_id: self.leaver.as_bytes().to_vec(),
@@ -175,7 +175,7 @@ impl Kick {
     /// # Errors
     ///
     /// [`Error::BadLength`] for a field of the wrong length.
-    pub fn from_proto(p: &proto::Kick) -> Result<Self> {
+    pub(crate) fn from_proto(p: &proto::Kick) -> Result<Self> {
         Ok(Self {
             chat_id: ChatId::from_slice(&p.chat_id)?,
             removed: GossipId::from_slice(&p.gossip_id)?,
@@ -185,7 +185,7 @@ impl Kick {
 
     /// The protobuf form.
     #[must_use]
-    pub fn to_proto(&self) -> proto::Kick {
+    pub(crate) fn to_proto(&self) -> proto::Kick {
         proto::Kick {
             chat_id: self.chat_id.as_bytes().to_vec(),
             gossip_id: self.removed.as_bytes().to_vec(),
@@ -278,7 +278,7 @@ impl Dissolve {
     /// # Errors
     ///
     /// [`Error::BadLength`] for a field of the wrong length.
-    pub fn from_proto(p: &proto::Dissolve) -> Result<Self> {
+    pub(crate) fn from_proto(p: &proto::Dissolve) -> Result<Self> {
         Ok(Self {
             chat_id: ChatId::from_slice(&p.chat_id)?,
             must_delete: p.must_delete,
@@ -288,7 +288,7 @@ impl Dissolve {
 
     /// The protobuf form.
     #[must_use]
-    pub fn to_proto(&self) -> proto::Dissolve {
+    pub(crate) fn to_proto(&self) -> proto::Dissolve {
         proto::Dissolve {
             chat_id: self.chat_id.as_bytes().to_vec(),
             must_delete: self.must_delete,
