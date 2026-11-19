@@ -4,6 +4,7 @@ mod dissemination;
 mod neighbors;
 mod packing;
 mod queries;
+mod regressions;
 mod retrieval;
 mod scans;
 mod storage;
