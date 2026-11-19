@@ -8,7 +8,8 @@
   "filter": {
     "all": "全部",
     "unread": "未读",
-    "pending": "待处理"
+    "pending": "待处理",
+    "archived": "存档"
   },
   "message_input": {
     "replying_to": "回复",

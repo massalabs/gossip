@@ -10,6 +10,11 @@ import {
 import { getSdk } from './sdkStore';
 import { createSelectors } from './utils/createSelectors';
 import { toDate } from '../utils/groupTimeline';
+import toast from 'react-hot-toast';
+import i18n from '../i18n';
+import { formatUserId } from '@massalabs/gossip-sdk';
+import { useDiscussionStore } from './discussionStore';
+import { isolate, safeName } from '../utils/groupName';
 
 /** The last visible message of a group, for the conversation list. */
 export interface GroupLastMessage {
@@ -102,11 +107,37 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
     };
     const sdk = getSdk();
     sdk.on(SdkEventType.GROUPS_CHANGED, onChanged);
+    // Two direct chats created at once (§5.12): the user is told which one
+    // is kept, and whether messages written in the other are lost.
+    const onSuperseded = (e: {
+      contactUserId: string | null;
+      lostMessages: boolean;
+    }) => {
+      const contact = e.contactUserId
+        ? useDiscussionStore
+            .getState()
+            .contacts.find(c => c.userId === e.contactUserId)
+        : undefined;
+      const name = isolate(
+        safeName(contact?.name) ||
+          (e.contactUserId ? formatUserId(e.contactUserId) : '')
+      );
+      const message = i18n.t(
+        e.lostMessages
+          ? 'groups:archive.superseded_lost'
+          : 'groups:archive.superseded',
+        { name }
+      );
+      if (e.lostMessages) toast.error(message);
+      else toast(message);
+    };
+    sdk.on(SdkEventType.DIRECT_CHAT_SUPERSEDED, onSuperseded);
     set({
       available: true,
       cleanupFn: () => {
         try {
           sdk.off(SdkEventType.GROUPS_CHANGED, onChanged);
+          sdk.off(SdkEventType.DIRECT_CHAT_SUPERSEDED, onSuperseded);
         } catch {
           // The SDK may already be gone.
         }

@@ -181,5 +181,41 @@
     "send": "Send the resolution",
     "sent": "Resolution sent",
     "identical": "Every version has the same members: confirm to merge them."
+  },
+  "archive": {
+    "badge": "Archive",
+    "read_only": "Earlier conversation, kept on this device and read only.",
+    "migrate": "Migrate to a new group",
+    "migrate_hint": "Continues this conversation in a new chat with {{name}}. Your earlier messages stay on this device and are shown first; nothing of them is sent.",
+    "migrated": "New chat created",
+    "migrate_failed": "The new chat could not be created",
+    "archive": "Archive",
+    "unarchive": "Move back to the list",
+    "archived": "Moved to the archived list",
+    "unarchived": "Moved back to the list",
+    "invitation": "{{name}} invites you to continue this conversation in a new chat.",
+    "junction": "Earlier conversation above · this chat continues it",
+    "waiting_contact": "Waiting for {{name}} to accept your request.",
+    "request_received": "{{name}} asks to become your contact and to chat with you.",
+    "superseded": "Your new chat with {{name}} and theirs were created at the same time: theirs is kept.",
+    "superseded_lost": "Your new chat with {{name}} and theirs were created at the same time: theirs is kept, and the messages written in yours are lost.",
+    "unsent": "Not sent"
+  },
+  "invite": {
+    "title": "Invitation",
+    "who_asks": "Who asks",
+    "asks_contact_and_chat": "{{name}} asks to become your contact and to open a chat with you.",
+    "their_message": "Their message",
+    "add_contact": "Contact",
+    "add_contact_hint": "Accepting adds {{name}} to your contacts.",
+    "group": "Group",
+    "owner": "Owner",
+    "continues": "Earlier conversation",
+    "continues_body": "This chat continues your earlier conversation with {{name}}. It is shown first, read only.",
+    "warnings": "Warnings",
+    "untrusted_names": "Names are chosen by the people who send them and may imitate someone else: check the user ID.",
+    "choices": "Your answer",
+    "open": "Open",
+    "not_found": "This invitation is no longer pending."
   }
 }

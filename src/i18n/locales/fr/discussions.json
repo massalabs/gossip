@@ -8,7 +8,8 @@
   "filter": {
     "all": "Toutes",
     "unread": "Non lues",
-    "pending": "En attente"
+    "pending": "En attente",
+    "archived": "Archives"
   },
   "message_input": {
     "replying_to": "En réponse à",

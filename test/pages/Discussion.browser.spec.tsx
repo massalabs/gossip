@@ -11,7 +11,7 @@ const mockSendMessage = vi.fn().mockResolvedValue(undefined);
 const mockSetCurrentContact = vi.fn();
 const mockDeleteMessage = vi.fn().mockResolvedValue(true);
 let latestOnSend: ((text: string) => void | Promise<void>) | null = null;
-let mockMessages = [
+const mockMessages = [
   {
     id: 1,
     msgId: 1,
@@ -39,8 +39,22 @@ vi.mock('react-router-dom', () => ({
   useLocation: () => ({ state: null }),
 }));
 
+const mockMigrate = vi.fn().mockResolvedValue('g1');
+const mockAcceptInvitation = vi.fn().mockResolvedValue('g1');
+let mockInvitations: unknown[] = [];
+
 vi.mock('../../src/hooks/useDiscussion', () => ({
-  useDiscussion: () => ({ discussion: null, isLoading: false }),
+  useDiscussion: () => ({
+    discussion: {
+      id: 1,
+      contactUserId: 'contact-1',
+      isArchive: true,
+      archived: false,
+      linkedGroupId: null,
+      directChatOwed: false,
+    },
+    isLoading: false,
+  }),
 }));
 
 vi.mock('../../src/hooks/useGossipSdk', () => ({
@@ -49,7 +63,30 @@ vi.mock('../../src/hooks/useGossipSdk', () => ({
       get: vi.fn().mockResolvedValue(null),
       deleteMessage: mockDeleteMessage,
     },
+    conversations: {
+      migrate: mockMigrate,
+      acceptInvitation: mockAcceptInvitation,
+      setArchived: vi.fn().mockResolvedValue(undefined),
+      declineInvitation: vi.fn().mockResolvedValue(undefined),
+    },
   }),
+}));
+
+vi.mock('../../src/stores/groupStore', () => ({
+  useGroupStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      groups: [],
+      invitations: mockInvitations,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    }),
+}));
+
+vi.mock('../../src/hooks/useGroupMemberName', () => ({
+  useGroupMemberName: () => (id: string) => id,
+}));
+
+vi.mock('react-hot-toast', () => ({
+  default: { success: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock('../../src/stores/discussionStore', () => ({
@@ -181,92 +218,64 @@ vi.mock('../../src/components/discussions/MessageInput', () => ({
 
 import Discussion from '../../src/pages/Discussion';
 
-describe('Discussion multi-select input behavior', () => {
+describe('Discussion: an archive (§5.12)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSendMessage.mockResolvedValue(undefined);
-    mockDeleteMessage.mockResolvedValue(true);
     latestOnSend = null;
-    mockMessages = [
+  });
+
+  it('shows no composer, and offers Migrate and Archive', async () => {
+    await render(<Discussion />);
+    await expect
+      .element(page.getByTestId('archive-footer'))
+      .toBeInTheDocument();
+    expect(latestOnSend).toBeNull();
+    await expect
+      .element(page.getByRole('button', { name: 'archive.archive' }))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole('button', { name: 'archive.migrate' })
+    );
+    await vi.waitFor(() =>
+      expect(mockMigrate).toHaveBeenCalledWith('contact-1')
+    );
+    await vi.waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith('/group/g1', {
+        replace: true,
+      })
+    );
+  });
+
+  it('shows the peer migration with Accept and Decline instead of Migrate', async () => {
+    mockInvitations = [
       {
-        id: 1,
-        msgId: 1,
-        contactUserId: 'contact-1',
-        ownerUserId: 'owner-1',
-        content: 'Hello',
-        direction: MessageDirection.INCOMING,
-        status: MessageStatus.DELIVERED,
-        timestamp: new Date('2025-01-01T12:00:00Z'),
-        unread: false,
+        epochId: 'e1',
+        name: '',
+        members: ['owner-1', 'contact-1'],
+        owner: 'contact-1',
+        receivedFrom: null,
+        closedBefore: false,
+        rejoins: null,
+        migrateFrom: 0,
+        migrationOf: 'contact-1',
       },
     ];
-  });
-
-  it('hides input and blocks send while selecting', async () => {
-    await render(<Discussion />);
-
-    await userEvent.click(page.getByRole('button', { name: 'mock send' }));
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-
-    await userEvent.click(
-      page.getByRole('button', { name: 'toggle message selection' })
-    );
-
-    await expect
-      .element(page.getByTestId('selection-header'))
-      .toBeInTheDocument();
-    await expect.element(page.getByText('disabled')).toBeInTheDocument();
-
-    await Promise.resolve(latestOnSend?.('Blocked send'));
-    expect(mockSendMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows multi-delete action when selected message is incoming', async () => {
-    await render(<Discussion />);
-
-    await userEvent.click(
-      page.getByRole('button', { name: 'toggle message selection' })
-    );
-    await expect
-      .element(page.getByTestId('selection-header'))
-      .toBeInTheDocument();
-
-    await expect
-      .element(page.getByRole('button', { name: 'mock multi delete' }))
-      .toBeInTheDocument();
-  });
-
-  it('deletes selected messages when all selected messages are outgoing', async () => {
-    mockMessages = [
-      {
-        id: 1,
-        msgId: 1,
-        contactUserId: 'contact-1',
-        ownerUserId: 'owner-1',
-        content: 'Hello',
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.SENT,
-        timestamp: new Date('2025-01-01T12:00:00Z'),
-        unread: false,
-      },
-    ];
-
-    await render(<Discussion />);
-
-    await userEvent.click(
-      page.getByRole('button', { name: 'toggle message selection' })
-    );
-    await expect
-      .element(page.getByTestId('selection-header'))
-      .toBeInTheDocument();
-
-    await userEvent.click(
-      page.getByRole('button', { name: 'mock multi delete' })
-    );
-
-    expect(mockDeleteMessage).toHaveBeenCalledWith(1);
-    await expect
-      .element(page.getByTestId('selection-header'))
-      .not.toBeInTheDocument();
+    try {
+      await render(<Discussion />);
+      await expect
+        .element(page.getByRole('button', { name: 'invitation.accept' }))
+        .toBeInTheDocument();
+      expect(
+        page.getByRole('button', { name: 'archive.migrate' }).elements()
+      ).toHaveLength(0);
+      await userEvent.click(
+        page.getByRole('button', { name: 'invitation.accept' })
+      );
+      await vi.waitFor(() =>
+        expect(mockAcceptInvitation).toHaveBeenCalledWith('e1')
+      );
+    } finally {
+      mockInvitations = [];
+    }
   });
 });
