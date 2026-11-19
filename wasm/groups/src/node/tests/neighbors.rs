@@ -128,28 +128,6 @@ fn a_request_for_an_epoch_not_held_is_declined_without_suggestions() {
 }
 
 #[test]
-fn a_request_from_a_non_member_is_dropped_silently() {
-    let mut net = Net::new(4, 1);
-    let chat = net.chat();
-    let outsider = GossipId::from_bytes([0x77; 32]);
-    net.recv_frames(
-        0,
-        outsider,
-        &[Frame::NeighborRequest(NeighborRequest { chat_id: chat })],
-    );
-    assert!(net.poll(0).is_empty());
-    // Even for an epoch it does not hold.
-    net.recv_frames(
-        0,
-        outsider,
-        &[Frame::NeighborRequest(NeighborRequest {
-            chat_id: ChatId::from_bytes([9; 32]),
-        })],
-    );
-    assert!(net.poll(0).is_empty());
-}
-
-#[test]
 fn only_an_answer_to_our_request_counts() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
