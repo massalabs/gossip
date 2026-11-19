@@ -540,7 +540,8 @@ pub(crate) fn apply_new<S: StorageRead + ?Sized>(
         .unwrap_or_else(|| ObjectRecord::empty(sync));
     let merge = match event.payload().clone() {
         Payload::Content(c) => {
-            if obj.is_deleted() {
+            // A deletion has no effect on a reaction (§7.1).
+            if obj.is_deleted() && !c.is_reaction() {
                 prune(tx, id);
                 Merge::Lost
             } else if c.last_modified_at > now {
@@ -576,7 +577,8 @@ pub(crate) fn apply_new<S: StorageRead + ?Sized>(
     Ok(merge)
 }
 
-/// Merges an effective non-delete result into the object (§7.1).
+/// Merges an effective non-delete result into the object (§7.1): by [`Content::rank`]; the
+/// tombstone absorbs every result but a reaction, which replaces it.
 fn merge_effective<S: StorageRead + ?Sized>(
     tx: &mut Tx<'_, S>,
     obj: &mut ObjectRecord,
@@ -588,14 +590,14 @@ fn merge_effective<S: StorageRead + ?Sized>(
         unreachable!("only non-delete results are merged here");
     };
     let merge = match &obj.current {
-        Some(StoredResult::Tombstone) => {
+        Some(StoredResult::Tombstone) if !incoming.is_reaction() => {
             prune(tx, id);
             return Ok(Merge::Lost);
         }
-        None => Merge::Won,
+        Some(StoredResult::Tombstone) | None => Merge::Won,
         Some(cur @ StoredResult::Content(c)) => {
-            let current_key = (c.last_modified_at, cur.result_hash(&chat, obj.sync_obj_id));
-            let incoming_key = (incoming.last_modified_at, event.result_hash());
+            let current_key = c.rank(cur.result_hash(&chat, obj.sync_obj_id));
+            let incoming_key = incoming.rank(event.result_hash());
             match incoming_key.cmp(&current_key) {
                 core::cmp::Ordering::Greater => Merge::Won,
                 core::cmp::Ordering::Less => {
@@ -621,6 +623,11 @@ fn merge_effective<S: StorageRead + ?Sized>(
 /// (carriers and pending versions) is pruned (§7.1, §7.4). `carrier` is the deletion event,
 /// stored in its immediate form; `None` for a local-only deletion.
 ///
+/// A deletion has no effect on a reaction (§7.1, §7.6): when the current result is one, the
+/// deletion loses and is pruned; otherwise the tombstone is stored as for any message, but
+/// pending versions of a reaction are kept, and a reaction replaces the tombstone when it
+/// takes effect ([`merge_effective`]).
+///
 /// Pending scheduled deletions are left as they are: each keeps its scheduled form until its
 /// own time and is normalised then (D.31), so that what a device serves depends only on the
 /// event and the clock.
@@ -629,13 +636,23 @@ pub(crate) fn absorb<S: StorageRead + ?Sized>(
     obj: &mut ObjectRecord,
     carrier: Option<MessageEvent>,
 ) -> Result<Merge, StorageError> {
+    if matches!(&obj.current, Some(StoredResult::Content(c)) if c.is_reaction()) {
+        if let Some(event) = carrier {
+            prune(tx, event.event_id());
+        }
+        return Ok(Merge::Lost);
+    }
     let was_deleted = obj.is_deleted();
     if !was_deleted {
         for old in core::mem::take(&mut obj.current_events) {
             prune(tx, old);
         }
-        for (_, old) in core::mem::take(&mut obj.pending_versions) {
-            prune(tx, old);
+        for (due, old) in core::mem::take(&mut obj.pending_versions) {
+            if pending_reaction(tx, old)? {
+                obj.pending_versions.insert((due, old));
+            } else {
+                prune(tx, old);
+            }
         }
         obj.current = Some(StoredResult::Tombstone);
     }
@@ -648,6 +665,17 @@ pub(crate) fn absorb<S: StorageRead + ?Sized>(
     } else {
         Merge::Won
     })
+}
+
+/// Whether the pending version `id` is a reaction.
+fn pending_reaction<S: StorageRead + ?Sized>(
+    tx: &Tx<'_, S>,
+    id: EventId,
+) -> Result<bool, StorageError> {
+    Ok(tx
+        .row(&id)?
+        .and_then(|r| r.event().cloned())
+        .is_some_and(|e| matches!(e.payload(), Payload::Content(c) if c.is_reaction())))
 }
 
 /// The form stored and served once a deletion is applied: without `last_modified_at`, same
@@ -738,7 +766,12 @@ pub(crate) fn check_invariants<R: StorageRead + ?Sized>(
                 return Err(format!("carrier {id:?} is past its window"));
             }
         }
-        if obj.is_deleted() && !obj.pending_versions.is_empty() {
+        let is_reaction = |id: &EventId| {
+            rows.get(id)
+                .and_then(EventRow::event)
+                .is_some_and(|e| matches!(e.payload(), Payload::Content(c) if c.is_reaction()))
+        };
+        if obj.is_deleted() && obj.pending_versions.iter().any(|(_, id)| !is_reaction(id)) {
             return Err(format!("{s:?} is deleted but has pending versions"));
         }
         for (due, id) in &obj.pending_versions {

@@ -12,7 +12,7 @@ use super::{Epoch, GroupState, Merge, absorb, apply_new, expire, prune, tick};
 use crate::constants::MAX_SCHEDULE_MS;
 use crate::dag;
 use crate::error::Error;
-use crate::event::{Body, Content, MessageEvent, Payload};
+use crate::event::{Body, Content, MessageEvent, Payload, Reaction, ReactionAction};
 use crate::ids::{EventId, GossipId, SyncObjId};
 use crate::rng::{Randomness, bytes};
 use crate::store::tx::Tx;
@@ -209,7 +209,9 @@ impl Epoch<'_> {
         let metadata: MetadataPatch = metadata.into();
         let scheduled = scheduled_time(scheduled_for, now)?;
         self.publish(store, now, rng, |tx| {
-            let current = current_content(&object(tx, &sync_obj_id)?)?;
+            let obj = object(tx, &sync_obj_id)?;
+            refuse_reaction(&obj)?;
+            let current = current_content(&obj)?;
             let last_modified_at = match scheduled {
                 Some(s) => s,
                 None => next_modification(now, current.last_modified_at)?,
@@ -226,8 +228,55 @@ impl Epoch<'_> {
         })
     }
 
+    /// Publishes a version of the reaction of `author` (this device's identity) with `emoji`
+    /// to the message `target` (§7.6): its ID is computed from the three; a first version is
+    /// dated `now`, a later one `max(now, previous + 1)` with the previous date of the current
+    /// applied reaction (§7.2), its creation date kept. Whether the target exists is not
+    /// checked, as on receipt.
+    ///
+    /// # Errors
+    ///
+    /// [`ChangeError`]; nothing was committed then.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_reaction<S: Storage + ?Sized>(
+        &self,
+        store: &mut S,
+        now: u64,
+        rng: &mut dyn Randomness,
+        author: GossipId,
+        target: SyncObjId,
+        emoji: String,
+        action: ReactionAction,
+    ) -> Result<Published, ChangeError> {
+        let reaction = Reaction {
+            target,
+            emoji,
+            action,
+        };
+        let sync_obj_id = reaction.sync_obj_id(&author);
+        self.publish(store, now, rng, |tx| {
+            let current = tx.object(&sync_obj_id)?.and_then(|o| match o.current {
+                Some(StoredResult::Content(c)) if c.is_reaction() => Some(c),
+                _ => None,
+            });
+            let (created_at, last_modified_at) = match current {
+                Some(c) => (c.created_at, next_modification(now, c.last_modified_at)?),
+                None => (now, now),
+            };
+            Ok(Payload::Content(Content {
+                sync_obj_id,
+                author,
+                created_at,
+                last_modified_at,
+                body: Body::Reaction(reaction),
+                edited: false,
+                metadata: BTreeMap::new(),
+            }))
+        })
+    }
+
     /// Publishes a deletion of a message of this epoch: immediate, or scheduled for `S`
-    /// (§7.4).
+    /// (§7.4). A reaction is never deleted (§7.6).
     ///
     /// # Errors
     ///
@@ -242,9 +291,11 @@ impl Epoch<'_> {
     ) -> Result<Published, ChangeError> {
         let scheduled_at = scheduled_time(scheduled_for, now)?;
         self.publish(store, now, rng, |tx| {
-            if object(tx, &sync_obj_id)?.is_deleted() {
+            let obj = object(tx, &sync_obj_id)?;
+            if obj.is_deleted() {
                 return Err(ChangeError::Deleted);
             }
+            refuse_reaction(&obj)?;
             Ok(Payload::Delete {
                 sync_obj_id,
                 scheduled_at,
@@ -335,6 +386,15 @@ impl Epoch<'_> {
         tick(&mut tx, now)?;
         let mut obj = object(&tx, &sync_obj_id)?;
         let old = current_content(&obj)?;
+        // A reaction stays a reaction: its type is what exempts it from deletion.
+        if old.is_reaction()
+            && edit
+                .body
+                .as_ref()
+                .is_some_and(|b| !matches!(b, Body::Reaction(_)))
+        {
+            return Err(ChangeError::Invalid(Error::NotAllowed("a reaction")));
+        }
         let content_edit = edit.body.as_ref().is_some_and(|b| *b != old.body)
             || edit.metadata.apply(&old.metadata) != old.metadata;
         let mut new = old.clone();
@@ -410,6 +470,7 @@ impl Epoch<'_> {
         if obj.is_deleted() {
             return Err(ChangeError::Deleted);
         }
+        refuse_reaction(&obj)?;
         absorb(&mut tx, &mut obj, None)?;
         tx.put_object(obj);
         let (changes, pruned) = tx.finish()?;
@@ -423,6 +484,16 @@ fn object<S: StorageRead + ?Sized>(
     sync_obj_id: &SyncObjId,
 ) -> Result<ObjectRecord, ChangeError> {
     tx.object(sync_obj_id)?.ok_or(ChangeError::UnknownMessage)
+}
+
+/// A reaction changes only by a new version of itself, and is never deleted (§7.6).
+fn refuse_reaction(obj: &ObjectRecord) -> Result<(), ChangeError> {
+    match &obj.current {
+        Some(StoredResult::Content(c)) if c.is_reaction() => {
+            Err(ChangeError::Invalid(Error::NotAllowed("a reaction")))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn current_content(obj: &ObjectRecord) -> Result<Content, ChangeError> {
