@@ -153,6 +153,12 @@ export async function deleteContact(
         contactUserId,
         tx
       );
+      // Group ciphertexts waiting for this contact name it: they go too.
+      await queries.groups.deleteOutboxByContact(
+        ownerUserId,
+        contactUserId,
+        tx
+      );
     });
 
     // Discard peer from session manager (WASM state, outside transaction)

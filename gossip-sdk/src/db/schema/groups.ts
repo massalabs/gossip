@@ -92,7 +92,9 @@ export const groupRecords = sqliteTable(
 export const groupOutbox = sqliteTable(
   'groupOutbox',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
+    // A rowid key without AUTOINCREMENT: no sqlite_sequence counter keeps a
+    // count of the group ciphertexts ever stored.
+    id: integer('id').primaryKey(),
     ownerUserId: text('ownerUserId').notNull(),
     contactUserId: text('contactUserId').notNull(),
     seeker: bytes('seeker').notNull(),

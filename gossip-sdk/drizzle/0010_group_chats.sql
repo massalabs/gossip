@@ -24,7 +24,7 @@ CREATE TABLE `groupObjects` (
 );
 --> statement-breakpoint
 CREATE TABLE `groupOutbox` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`id` integer PRIMARY KEY NOT NULL,
 	`ownerUserId` text NOT NULL,
 	`contactUserId` text NOT NULL,
 	`seeker` blob NOT NULL,

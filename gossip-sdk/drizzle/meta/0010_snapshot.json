@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b2ebe650-bc90-47ee-ab99-b6762ccb470d",
+  "id": "a93e5b64-e2cf-4f66-84a1-e0f6902dc601",
   "prevId": "c6f82de7-f835-4e29-bd5b-7e584f2195da",
   "tables": {
     "accountSettings": {
@@ -578,7 +578,7 @@
           "type": "integer",
           "primaryKey": true,
           "notNull": true,
-          "autoincrement": true
+          "autoincrement": false
         },
         "ownerUserId": {
           "name": "ownerUserId",
