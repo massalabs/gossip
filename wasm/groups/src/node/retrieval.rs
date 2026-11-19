@@ -232,6 +232,10 @@ impl Node {
             Target::Parent(_) => self
                 .held_root(&key.chat_id)
                 .is_some_and(|r| r.is_member(peer)),
+            // The own removal from an epoch held as an invitation (see `invite`).
+            Target::Removal(m) if m == self.me && !self.installed(&key.chat_id) => self
+                .held_root(&key.chat_id)
+                .is_some_and(|r| r.is_member(peer)),
             _ => self.may_receive(&key.chat_id, peer, false),
         }
     }
@@ -259,6 +263,11 @@ impl Node {
                     .filter(|(_, c)| c.trigger.is_some())
                     .map(|(p, _)| *p)
                     .collect()
+            }
+            // The own removal from an epoch held as an invitation: from the member that
+            // listed it.
+            Target::Removal(m) if m == self.me && !self.installed(&key.chat_id) => {
+                task.candidates.keys().copied().collect()
             }
             Target::Parent(_) => self
                 .held_root(&key.chat_id)
@@ -335,6 +344,18 @@ impl Node {
                     self.parent_lookup_over(&key, cx.now);
                     self.supplied(&peer, key.chat_id, key.target);
                 }
+            }
+            return;
+        }
+        // The own removal from an epoch held as an invitation is not there: the invitation
+        // stands, and is shown once due (§4.8).
+        if answer == Answer::NotAvailable
+            && key.target == Target::Removal(self.me)
+            && !self.installed(&key.chat_id)
+        {
+            self.t.tasks.remove(&key);
+            if self.prompt_due(&key.chat_id, cx.now) {
+                self.changed(key.chat_id, super::records::ChangeKind::Invitation, cx.now);
             }
             return;
         }

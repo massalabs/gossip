@@ -164,7 +164,15 @@ impl Node {
             // An epoch this device does not hold cannot be checked: dropped (§5.6).
             return Ok(Answer::Refused);
         };
-        if rec.status != EpochStatus::Installed {
+        // The device's own kick or leave naming an epoch it holds as an invitation, and nothing
+        // of its line: a device that lost everything learns from a member's scan that it was
+        // removed from that epoch (§4.11, §5.6). It is installed read-only, never prompted.
+        let removal_of_invitation = matches!(
+            &rec.status,
+            EpochStatus::Invitation(i) if i.fetched_for.is_none()
+        ) && self.removes_me(&obj, &chat)
+            && self.holds_nothing_around(&chat, &rec.root);
+        if rec.status != EpochStatus::Installed && !removal_of_invitation {
             return Ok(Answer::Refused);
         }
         let root = rec.root;
@@ -239,8 +247,62 @@ impl Node {
             chat_id: chat,
             target: Target::Object(key.1, key.2),
         });
+        if removal_of_invitation {
+            self.install_removed(cx, chat)?;
+        }
         self.apply_signed(cx, &obj)?;
         Ok(Answer::Supplied)
+    }
+
+    /// Whether this device holds no installed epoch that `root` (of `chat`) continues or that
+    /// continues it: nothing of its line, as after a reinstall.
+    fn holds_nothing_around(&self, chat: &ChatId, root: &crate::root::Root) -> bool {
+        !self
+            .gx
+            .epochs
+            .values()
+            .flatten()
+            .any(|c| root.names_parent(c))
+            && !self
+                .ri
+                .named_by
+                .get(chat)
+                .is_some_and(|s| s.iter().any(|c| self.installed(c)))
+    }
+
+    /// Whether `obj` is this device's own kick or own leave naming `chat`.
+    fn removes_me(&self, obj: &SignedObject, chat: &ChatId) -> bool {
+        match obj {
+            SignedObject::Kick(k) => k.removed() == self.me,
+            SignedObject::Leave(l) => l.leaver() == self.me && l.chat_id() == *chat,
+            SignedObject::Dissolve(_) => false,
+        }
+    }
+
+    /// Installs the invitation `chat` as a group of its own, which the own kick or leave
+    /// about to be applied makes read-only (§5.6, D.2): no prompt, and its parent lookups,
+    /// the roots fetched for it and its removal lookup stop. Nothing of the epoch's history
+    /// is fetched: a read-only group starts nothing.
+    fn install_removed(&mut self, cx: &mut Cx<'_>, chat: ChatId) -> Result<(), NodeError> {
+        let Some(rec) = self.take_record(&chat) else {
+            return Ok(());
+        };
+        self.t.events.remove(&(chat, ChangeKind::Invitation));
+        self.t.markers.remove(&chat);
+        let tasks: Vec<TaskKey> = self
+            .t
+            .tasks
+            .keys()
+            .filter(|k| {
+                k.chat_id == chat && matches!(k.target, Target::Parent(_) | Target::Removal(_))
+            })
+            .copied()
+            .collect();
+        for k in tasks {
+            self.resolve(k);
+        }
+        self.drop_fetched_for(chat);
+        self.adopt(cx, rec.root, rec.from, Vec::new(), false)
     }
 
     /// The effects of a newly stored signed object.

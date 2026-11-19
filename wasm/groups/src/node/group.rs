@@ -1018,6 +1018,20 @@ impl Node {
             _ => None,
         };
         let hidden = fetched_for.is_some();
+        // Listed by a shared-chats scan, it may be the last epoch of a group this device was
+        // removed from, whose kick or leave the listing member sends with it (§4.11, §5.6).
+        let listed = via == Via::Lookup
+            && root.is_member(&self.me)
+            && self
+                .t
+                .tasks
+                .get(&TaskKey {
+                    chat_id: id,
+                    target: Target::Root,
+                })
+                .and_then(|t| t.candidates.get(&from))
+                .and_then(|c| c.trigger)
+                .is_some_and(|t| t.kind == TriggerKind::Page);
         if !hidden && !self.room_for_invitation(cx, &from) {
             self.stats.capped += 1;
             return;
@@ -1043,6 +1057,20 @@ impl Node {
                 state_override: None,
             },
         );
+        if listed {
+            // In case that record is lost on the way, it is looked up from the listing member,
+            // which is no claim of it: a "not available" costs it nothing (§11.8).
+            let key = TaskKey {
+                chat_id: id,
+                target: Target::Removal(self.me),
+            };
+            self.trigger(cx, key, None);
+            if let Some(t) = self.t.tasks.get_mut(&key) {
+                t.candidates
+                    .entry(from)
+                    .or_insert_with(super::records::Candidate::new);
+            }
+        }
         for c in lookups {
             // Parent lookups count in the root fetches a peer may cause (§11.8); beyond,
             // the commitment is not looked up, and the prompt does not wait for it.
@@ -1081,7 +1109,12 @@ impl Node {
         if inv.received_at == u64::MAX {
             return false;
         }
-        inv.lookups.is_empty()
+        // A root a scan listed waits for the removal lookup it started (§4.11, §5.6).
+        let removal_pending = self.t.tasks.contains(&TaskKey {
+            chat_id: *chat,
+            target: Target::Removal(self.me),
+        });
+        (inv.lookups.is_empty() && !removal_pending)
             || now >= inv.received_at.saturating_add(PROMPT_DELAY_MS)
             || inv.not_available.contains(&rec.root.owner_id())
             || inv.not_available.len() >= PROMPT_NOT_AVAILABLE
