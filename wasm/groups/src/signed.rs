@@ -25,6 +25,13 @@ fn check_names_epoch(chat_id: &ChatId, root: &Root) -> Result<()> {
 }
 
 /// A signed leave: "I leave this epoch's group" (§5.3).
+///
+/// # Identity
+///
+/// The object's identity is its ID, [`Leave::id`]: the signature is not hashed, and ML-DSA
+/// signing is randomized, so two valid copies of one object may carry different signatures.
+/// `==` compares the signature too and tells such copies apart; storage and relaying MUST
+/// deduplicate by ID, never by `==`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Leave {
     chat_id: ChatId,
@@ -134,6 +141,13 @@ impl Leave {
 }
 
 /// A kick: "this member is removed from this epoch", signed by that epoch's owner (§5.6).
+///
+/// # Identity
+///
+/// The object's identity is its ID, [`Kick::id`]: the signature is not hashed, and ML-DSA
+/// signing is randomized, so two valid copies of one object may carry different signatures.
+/// `==` compares the signature too and tells such copies apart; storage and relaying MUST
+/// deduplicate by ID, never by `==`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Kick {
     chat_id: ChatId,
@@ -238,6 +252,13 @@ impl Kick {
 }
 
 /// A dissolve message: "this group is ended", signed by the epoch's owner (§5.8).
+///
+/// # Identity
+///
+/// The object's identity is its ID, [`Dissolve::id`]: the signature is not hashed, and ML-DSA
+/// signing is randomized, so two valid copies of one object may carry different signatures.
+/// `==` compares the signature too and tells such copies apart; storage and relaying MUST
+/// deduplicate by ID, never by `==`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dissolve {
     chat_id: ChatId,
@@ -462,6 +483,33 @@ mod tests {
         let mut p = kick.to_proto();
         p.signature.pop();
         assert!(matches!(Kick::from_proto(&p), Err(Error::BadLength { .. })));
+    }
+
+    #[test]
+    fn identity_is_the_id_not_equality() {
+        // Signing is randomized: two valid copies of one object differ in their signatures.
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = founding(&alice, &[&alice, &bob]);
+        let key = &alice.secret.dsa_signing_key;
+        let l1 = Leave::sign(&root, &bob.public, &bob.secret.dsa_signing_key, [1; 32]).unwrap();
+        let l2 = Leave::sign(&root, &bob.public, &bob.secret.dsa_signing_key, [2; 32]).unwrap();
+        assert_ne!(l1, l2);
+        assert_eq!(l1.id(), l2.id());
+        let k1 = Kick::sign(&root, bob.id, key, [1; 32]).unwrap();
+        let k2 = Kick::sign(&root, bob.id, key, [2; 32]).unwrap();
+        assert_ne!(k1, k2);
+        assert_eq!(k1.id(), k2.id());
+        let d1 = Dissolve::sign(&root, false, key, [1; 32]).unwrap();
+        let d2 = Dissolve::sign(&root, false, key, [2; 32]).unwrap();
+        assert_ne!(d1, d2);
+        assert_eq!(d1.id(), d2.id());
+        let params = || crate::root::tests::params(&alice, &[&alice, &bob], 0x10);
+        let parent = [ChatId::from_bytes([0xd0; 32])];
+        let r1 = Root::create_successor(params(), &parent, key, [1; 32]).unwrap();
+        let r2 = Root::create_successor(params(), &parent, key, [2; 32]).unwrap();
+        assert_ne!(r1, r2);
+        assert_eq!(r1.chat_id(), r2.chat_id());
     }
 
     #[test]

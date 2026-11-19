@@ -75,6 +75,9 @@ pub fn fits_empty_container(blob_len: usize) -> bool {
 }
 
 /// A root, a signed object or a message event: the content of an event blob (§13.1).
+///
+/// `==` compares the signatures of roots and signed objects, which differ between two valid
+/// copies of one object; deduplicate by ID (see [`Root`] and [`Leave`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventObject {
     /// `GROUP_ROOT` (boxed: a root carries the owner's keys inline).
