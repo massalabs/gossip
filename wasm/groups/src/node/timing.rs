@@ -80,6 +80,32 @@ pub const RESPONSE_BURST: u64 = 1024 * 1024;
 pub const RESPONSE_REFILL_PER_MIN: u64 = 256 * 1024;
 /// Parent edges examined per scheduling turn by the traversals this layer runs (§17.4).
 pub const EDGES_PER_TURN: usize = 4_096;
+/// Invitations not answered yet that one peer may make this device keep (provisional): a
+/// new one beyond it is dropped.
+pub const INVITATIONS_PER_SENDER: usize = 16;
+/// Invitations not answered yet in total (provisional). Beyond it, the newest invitation
+/// of the peer with the most is dropped for a peer with fewer, never one of a peer with as
+/// few.
+pub const INVITATIONS_PER_DEVICE: usize = 256;
+/// Roots fetched as parents for one invitation, and their distance from it, at most
+/// (provisional). A member offline through more epochs gets the prompt and joins the rest
+/// as it arrives.
+pub const FETCHED_PARENTS_PER_INVITATION: usize = 256;
+/// See [`FETCHED_PARENTS_PER_INVITATION`].
+pub const FETCHED_PARENT_DEPTH: u16 = 256;
+/// Closed-chat markers recorded for roots one peer delivered that continue a closed epoch
+/// (§4.8 case 3), at most, and in total (provisional).
+pub const INHERITED_MARKERS_PER_SENDER: usize = 64;
+/// See [`INHERITED_MARKERS_PER_SENDER`].
+pub const INHERITED_MARKERS_PER_DEVICE: usize = 4_096;
+/// Handover roots kept unverified while their parent is looked up, per delivering peer and
+/// in total (provisional, §4.7).
+pub const HELD_ROOTS_PER_SENDER: usize = 4;
+/// See [`HELD_ROOTS_PER_SENDER`].
+pub const HELD_ROOTS_PER_DEVICE: usize = 64;
+/// Signed leaves kept while their leaver's keys are fetched, per delivering peer
+/// (provisional).
+pub const UNVERIFIED_LEAVES_PER_SENDER: usize = 32;
 /// The device-wide ceiling of plaintexts assembled per call, rotated fairly across peers.
 /// §17.4 leaves its value to profiling; this one is provisional.
 pub const PLAINTEXTS_PER_POLL: usize = 64;

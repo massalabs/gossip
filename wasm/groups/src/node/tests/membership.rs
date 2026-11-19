@@ -2230,7 +2230,7 @@ fn a_stranger_cannot_make_a_device_keep_unbounded_records() {
     }
     let t = net.devs[0].node.tables();
     assert!(
-        t.epochs.len() <= 16,
+        t.epochs.len() <= timing::INVITATIONS_PER_SENDER,
         "{} epoch records",
         t.epochs.len()
     );
