@@ -871,3 +871,107 @@ fn oversized_event_blobs_are_refused() {
     let frame = len_field(n);
     assert_eq!(single_frame_plaintext_len(frame), MAX_PLAINTEXT_BYTES);
 }
+
+// ── Strict check: one case per `oneof` ───────────────────────────────────────
+
+/// `key ‖ len ‖ bytes` for a length-delimited field whose key fits one byte.
+fn raw_field(key: u8, bytes: &[u8]) -> Vec<u8> {
+    let mut out = vec![key];
+    prost::encoding::encode_varint(bytes.len() as u64, &mut out);
+    out.extend_from_slice(bytes);
+    out
+}
+
+fn blob_of(event: &[u8]) -> Vec<u8> {
+    [&[0x01][..], event].concat()
+}
+
+#[test]
+fn a_frame_holds_one_kind() {
+    let leave_request = frame_bytes(proto::FrameKind::LeaveRequest(proto::LeaveRequest {
+        chat_id: vec![1; 32],
+    }));
+    let neighbor_request = frame_bytes(proto::FrameKind::NeighborRequest(proto::NeighborRequest {
+        chat_id: vec![1; 32],
+    }));
+    assert_eq!(
+        one_frame([leave_request.clone(), neighbor_request.clone()].concat()),
+        Err(Error::Malformed("two cases of one oneof"))
+    );
+    // An event frame and another kind.
+    let event = frame_bytes(proto::FrameKind::Event(vec![0x01]));
+    assert_eq!(
+        one_frame([neighbor_request, event].concat()),
+        Err(Error::Malformed("two cases of one oneof"))
+    );
+    // The same kind twice is standard protobuf: the occurrences merge.
+    let other = frame_bytes(proto::FrameKind::LeaveRequest(proto::LeaveRequest {
+        chat_id: vec![2; 32],
+    }));
+    assert_eq!(
+        one_frame([leave_request, other].concat()),
+        Ok(Frame::LeaveRequest(LeaveRequest {
+            chat_id: ChatId::from_bytes([2; 32])
+        }))
+    );
+}
+
+#[test]
+fn every_oneof_holds_one_case() {
+    // Event.kind: a leave and a kick in one blob.
+    let objects = objects();
+    let leave = encode_event_blob(&objects[2]).unwrap();
+    let kick = encode_event_blob(&objects[3]).unwrap();
+    let both = [&leave[..], &kick[1..]].concat();
+    assert_eq!(
+        decode_event_blob(&both, 1),
+        Err(Error::Malformed("two cases of one oneof"))
+    );
+
+    // MessagePayload.body: a text and a content body.
+    let EventObject::Message(m) = &objects[1] else {
+        panic!()
+    };
+    let mut event = m.to_proto();
+    let payload = event.payload.take().unwrap();
+    let payload = [payload.encode_to_vec(), raw_field(0x4a, &[1])].concat();
+    let message = [event.encode_to_vec(), raw_field(0x2a, &payload)].concat();
+    assert_eq!(
+        decode_event_blob(&blob_of(&raw_field(0x12, &message)), 1),
+        Err(Error::Malformed("two cases of one oneof"))
+    );
+
+    // QueryEntry.op: two operations in one entry; only that entry is malformed.
+    let ops = all_ops();
+    let two_ops = [ops[3].encode(), ops[4].encode()].concat();
+    // ChatLookup.by: a chat ID and a reference, sent as two occurrences of chat_lookup, which
+    // merge into one lookup with two keys.
+    let two_keys = [ops[0].encode(), ops[1].encode()].concat();
+    let Ok(Frame::Query(q)) = one_frame(raw_query(
+        vec![two_ops, two_keys, ops[0].encode()],
+        vec![9; 16],
+    )) else {
+        panic!()
+    };
+    assert_eq!(
+        q.entries,
+        vec![
+            QueryEntry::Malformed(Error::Malformed("two cases of one oneof")),
+            QueryEntry::Malformed(Error::Malformed("two cases of one oneof")),
+            QueryEntry::Op(ops[0].clone()),
+        ]
+    );
+
+    // Response.result: a status and keys.
+    let response = proto::Response {
+        request_id: vec![1; 16],
+        idx: 0,
+        result: Some(proto::ResponseResult::Status(proto::Status::Busy as i32)),
+    }
+    .encode_to_vec();
+    let response = [response, raw_field(0x32, &[1, 2])].concat();
+    assert_eq!(
+        one_frame(raw_field(0x1a, &response)),
+        Err(Error::Malformed("two cases of one oneof"))
+    );
+}

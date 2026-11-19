@@ -441,6 +441,7 @@ const STATUSES: &[u64] = &[0, 2, 3, 4, 5, 6];
 pub(crate) static CONTAINER: Schema = Schema {
     name: "Container",
     fields: &[(1, Kind::Opaque)],
+    oneofs: &[],
 };
 
 pub(crate) static FRAME: Schema = Schema {
@@ -454,6 +455,7 @@ pub(crate) static FRAME: Schema = Schema {
         (6, Kind::Msg(&NEIGHBOR_RESPONSE)),
         (7, Kind::Msg(&LEAVE_REQUEST)),
     ],
+    oneofs: &[&[1, 2, 3, 4, 5, 6, 7]],
 };
 
 static QUERY: Schema = Schema {
@@ -465,6 +467,7 @@ static QUERY: Schema = Schema {
         // Entries are checked one by one, so that a bad entry is isolated (§13.7).
         (4, Kind::Opaque),
     ],
+    oneofs: &[],
 };
 
 pub(crate) static QUERY_ENTRY: Schema = Schema {
@@ -479,27 +482,32 @@ pub(crate) static QUERY_ENTRY: Schema = Schema {
         (7, Kind::Msg(&TWO_IDS)),
         (8, Kind::Msg(&TWO_IDS)),
     ],
+    oneofs: &[&[1, 2, 3, 4, 5, 6, 7, 8]],
 };
 
 static CHAT_LOOKUP: Schema = Schema {
     name: "ChatLookup",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes), (3, Kind::Msg(&TWO_IDS))],
+    oneofs: &[&[1, 2, 3]],
 };
 
 /// `ParentRef`, `EventLookup`, `SyncObjLookup`, `KeyQuery` and `RemovalLookup`: two `bytes`.
 static TWO_IDS: Schema = Schema {
     name: "two-identifier message",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes)],
+    oneofs: &[],
 };
 
 static SHARED_CHATS_SCAN: Schema = Schema {
     name: "SharedChatsScan",
     fields: &[(1, Kind::Bytes), (2, Kind::Uint64)],
+    oneofs: &[],
 };
 
 static TIPS_SCAN: Schema = Schema {
     name: "TipsScan",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes), (3, Kind::Uint64)],
+    oneofs: &[],
 };
 
 static OBJECT_LOOKUP: Schema = Schema {
@@ -509,6 +517,7 @@ static OBJECT_LOOKUP: Schema = Schema {
         (2, Kind::Enum(OBJECT_KINDS)),
         (3, Kind::Bytes),
     ],
+    oneofs: &[],
 };
 
 static RESPONSE: Schema = Schema {
@@ -521,6 +530,7 @@ static RESPONSE: Schema = Schema {
         (5, Kind::Enum(STATUSES)),
         (6, Kind::Bytes),
     ],
+    oneofs: &[&[3, 4, 5, 6]],
 };
 
 static PAGE: Schema = Schema {
@@ -529,13 +539,15 @@ static PAGE: Schema = Schema {
         (1, Kind::Bytes),
         (2, Kind::Uint64),
         (3, Kind::Uint64),
-        (4, Kind::Msg(&ENTRY)),
+        (4, Kind::RepeatedMsg(&ENTRY)),
     ],
+    oneofs: &[],
 };
 
 static NOTICE: Schema = Schema {
     name: "Notice",
-    fields: &[(1, Kind::Msg(&ENTRY))],
+    fields: &[(1, Kind::RepeatedMsg(&ENTRY))],
+    oneofs: &[],
 };
 
 static ENTRY: Schema = Schema {
@@ -545,33 +557,39 @@ static ENTRY: Schema = Schema {
         (2, Kind::Enum(OBJECT_KINDS)),
         (3, Kind::Bytes),
     ],
+    oneofs: &[],
 };
 
 static NEIGHBOR_REQUEST: Schema = Schema {
     name: "NeighborRequest",
     fields: &[(1, Kind::Bytes)],
+    oneofs: &[],
 };
 
 static NEIGHBOR_RESPONSE: Schema = Schema {
     name: "NeighborResponse",
     fields: &[(1, Kind::Bytes), (2, Kind::Bool), (3, Kind::Bytes)],
+    oneofs: &[],
 };
 
 static LEAVE_REQUEST: Schema = Schema {
     name: "LeaveRequest",
     fields: &[(1, Kind::Bytes)],
+    oneofs: &[],
 };
 
 // Metadata values (§7.6).
 
 pub(crate) static REPLY_TO: Schema = Schema {
     name: "ReplyTo",
-    fields: &[(1, Kind::Msg(&REPLY_TARGET))],
+    fields: &[(1, Kind::RepeatedMsg(&REPLY_TARGET))],
+    oneofs: &[],
 };
 
 static REPLY_TARGET: Schema = Schema {
     name: "ReplyTarget",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes)],
+    oneofs: &[],
 };
 
 // Event blobs (§13.1).
@@ -589,6 +607,7 @@ pub(crate) static EVENT: Schema = Schema {
         (4, Kind::Msg(&SIGNED_OBJECT)),
         (5, Kind::Msg(&DISSOLVE)),
     ],
+    oneofs: &[&[1, 2, 3, 4, 5]],
 };
 
 static GROUP_ROOT: Schema = Schema {
@@ -605,17 +624,20 @@ static GROUP_ROOT: Schema = Schema {
         (9, Kind::Uint64),
         (10, Kind::Bytes),
     ],
+    oneofs: &[],
 };
 
 /// `Leave` and `Kick` have the same fields.
 static SIGNED_OBJECT: Schema = Schema {
     name: "Leave/Kick",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes), (3, Kind::Bytes)],
+    oneofs: &[],
 };
 
 static DISSOLVE: Schema = Schema {
     name: "Dissolve",
     fields: &[(1, Kind::Bytes), (2, Kind::Bool), (3, Kind::Bytes)],
+    oneofs: &[],
 };
 
 static GROUP_MESSAGE_EVENT: Schema = Schema {
@@ -627,6 +649,7 @@ static GROUP_MESSAGE_EVENT: Schema = Schema {
         (4, Kind::Bytes),
         (5, Kind::Msg(&MESSAGE_PAYLOAD)),
     ],
+    oneofs: &[],
 };
 
 static MESSAGE_PAYLOAD: Schema = Schema {
@@ -641,17 +664,20 @@ static MESSAGE_PAYLOAD: Schema = Schema {
         (7, Kind::Str),
         (8, Kind::Msg(&FORWARD)),
         (9, Kind::Bytes),
-        (10, Kind::Msg(&METADATA_ENTRY)),
+        (10, Kind::RepeatedMsg(&METADATA_ENTRY)),
     ],
+    oneofs: &[&[7, 8, 9]],
 };
 
 /// The implicit entry message of `map<string, bytes>`.
 static METADATA_ENTRY: Schema = Schema {
     name: "MetadataEntry",
     fields: &[(1, Kind::Str), (2, Kind::Bytes)],
+    oneofs: &[],
 };
 
 static FORWARD: Schema = Schema {
     name: "Forward",
     fields: &[(1, Kind::Enum(MESSAGE_TYPES)), (2, Kind::Bytes)],
+    oneofs: &[],
 };
