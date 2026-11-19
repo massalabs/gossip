@@ -137,7 +137,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     () =>
       new Map(
         invitations
-          .filter(i => i.migrationOf)
+          .filter(i => i.migrationOf && !i.continues)
           .map(i => [i.migrationOf as string, i])
       ),
     [invitations]

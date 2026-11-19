@@ -197,8 +197,8 @@
     "junction": "Earlier conversation above · this chat continues it",
     "waiting_contact": "Waiting for {{name}} to accept your request.",
     "request_received": "{{name}} asks to become your contact and to chat with you.",
-    "superseded": "Your new chat with {{name}} and theirs were created at the same time: theirs is kept.",
-    "superseded_lost": "Your new chat with {{name}} and theirs were created at the same time: theirs is kept, and the messages written in yours are lost.",
+    "continue_invitation": "{{name}} wants to continue this conversation in a new group.",
+    "earlier_junction": "Earlier chat above · read only",
     "unsent": "Not sent"
   },
   "invite": {
@@ -212,6 +212,7 @@
     "owner": "Owner",
     "continues": "Earlier conversation",
     "continues_body": "This chat continues your earlier conversation with {{name}}. It is shown first, read only.",
+    "continues_chat_body": "{{name}} wants to continue this conversation in a new group. Accepting keeps your current chat above it, read only.",
     "warnings": "Warnings",
     "untrusted_names": "Names are chosen by the people who send them and may imitate someone else: check the user ID.",
     "choices": "Your answer",

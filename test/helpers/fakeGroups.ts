@@ -77,6 +77,9 @@ export function summary(over: Partial<GroupSummary> = {}): GroupSummary {
     formerOwnerBranches: [],
     mustResolve: false,
     links: [],
+    supersededBy: null,
+    earlier: [],
+    tookPart: null,
     ...over,
   };
 }

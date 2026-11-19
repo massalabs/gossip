@@ -197,8 +197,8 @@
     "junction": "以上为早先的对话 · 此聊天是它的延续",
     "waiting_contact": "正在等待 {{name}} 接受你的请求。",
     "request_received": "{{name}} 请求成为你的联系人并与你聊天。",
-    "superseded": "你与 {{name}} 的新聊天和对方的聊天同时创建：保留对方的聊天。",
-    "superseded_lost": "你与 {{name}} 的新聊天和对方的聊天同时创建：保留对方的聊天，你在自己的聊天中写的消息已丢失。",
+    "continue_invitation": "{{name}} 希望在新群组中继续此对话。",
+    "earlier_junction": "以上为之前的聊天 · 只读",
     "unsent": "未发送"
   },
   "invite": {
@@ -212,6 +212,7 @@
     "owner": "所有者",
     "continues": "早先的对话",
     "continues_body": "此聊天延续你与 {{name}} 早先的对话，早先的对话只读并显示在最前面。",
+    "continues_chat_body": "{{name}} 希望在新群组中继续此对话。接受后，当前聊天将作为只读记录保留在上方。",
     "warnings": "警告",
     "untrusted_names": "名称由发送者自行选择，可能冒充他人：请核对用户 ID。",
     "choices": "你的回复",

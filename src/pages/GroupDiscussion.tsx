@@ -25,6 +25,8 @@ import {
 } from '../utils/groupTimeline';
 import GroupTimelineLine from '../components/groups/GroupTimelineLine';
 import ArchivePrefix from '../components/groups/ArchivePrefix';
+import EarlierChats from '../components/groups/EarlierChats';
+import ContinuationPrompt from '../components/groups/ContinuationPrompt';
 import { useDiscussionStore } from '../stores/discussionStore';
 import SafeName from '../components/groups/SafeName';
 import { useGroupMemberName } from '../hooks/useGroupMemberName';
@@ -115,6 +117,12 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     s.groups.find(g => g.summary.groupId === groupId)
   );
   const refresh = useGroupStore(s => s.refresh);
+  // A replaced chat of two opens the chat that continues it (§5.12).
+  const supersededBy = useGroupStore(s => s.supersededBy[groupId]);
+  // Another person's new chat that continues this one, to answer here.
+  const continuation = useGroupStore(s =>
+    s.invitations.find(i => i.continues === groupId)
+  );
   // The earlier one-to-one conversation this direct chat continues (§5.12).
   const archivePeer = useDiscussionStore(
     s => s.discussions.find(d => d.linkedGroupId === groupId)?.contactUserId
@@ -131,6 +139,12 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     setCurrentGroup(groupId);
     return () => setCurrentGroup(null);
   }, [groupId, setCurrentGroup]);
+
+  useEffect(() => {
+    if (supersededBy) {
+      navigate(ROUTES.group({ groupId: supersededBy }), { replace: true });
+    }
+  }, [supersededBy, navigate]);
 
   const [timeline, setTimeline] = useState<GroupTimelineItem[]>([]);
   useEffect(() => {
@@ -263,7 +277,7 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     </HeaderBar>
   );
 
-  const footer = canWrite ? (
+  const composer = canWrite ? (
     <MessageInput
       key={draft?.n ?? 0}
       initialValue={draft?.text}
@@ -301,6 +315,14 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
       )}
     </div>
   );
+  const footer = continuation ? (
+    <>
+      <ContinuationPrompt invitation={continuation} />
+      {composer}
+    </>
+  ) : (
+    composer
+  );
 
   return (
     <DiscussionLayout header={header} footer={footer}>
@@ -310,11 +332,19 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
         data-testid="group-timeline"
       >
         {archivePeer && <ArchivePrefix contactUserId={archivePeer} />}
-        {timeline.length === 0 && !archivePeer && (
-          <p className="text-center text-sm text-muted-foreground mt-8">
-            {t('timeline.empty')}
-          </p>
-        )}
+        <EarlierChats
+          earlier={group.earlier}
+          me={me}
+          memberName={memberName}
+          version={version}
+        />
+        {timeline.length === 0 &&
+          !archivePeer &&
+          group.earlier.length === 0 && (
+            <p className="text-center text-sm text-muted-foreground mt-8">
+              {t('timeline.empty')}
+            </p>
+          )}
         {timeline.map((item, i) =>
           item.kind === 'line' ? (
             <GroupTimelineLine

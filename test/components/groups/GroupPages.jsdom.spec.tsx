@@ -118,6 +118,62 @@ describe('group pages', () => {
     expect(useGroupStore.getState().currentGroupId).toBe('g1');
   });
 
+  it('shows the chats a chat replaced before its timeline, read only, and asks to continue in a new one', async () => {
+    fake.state.groups = [
+      summary({ groupId: 'g0', status: 'superseded', supersededBy: 'g1' }),
+      summary({ earlier: ['g0'] }),
+    ];
+    fake.state.timelines.set('g0', [
+      message({
+        epochId: 'g0',
+        syncObjId: 's0',
+        body: { type: 'text', text: 'old' },
+      }),
+    ]);
+    fake.state.timelines.set('g1', [message({})]);
+    fake.state.invitations = [
+      {
+        epochId: 'g2',
+        name: '',
+        members: ['me', 'bob'],
+        owner: 'bob',
+        receivedFrom: null,
+        closedBefore: false,
+        rejoins: null,
+        migrateFrom: 0,
+        migrationOf: null,
+        continues: 'g1',
+      },
+    ];
+    useGroupStore.getState().init();
+    await act(flush);
+    expect(useGroupStore.getState().groups.map(g => g.summary.groupId)).toEqual(
+      ['g1']
+    );
+    expect(useGroupStore.getState().supersededBy).toEqual({ g0: 'g1' });
+    const r = await renderAt(
+      <GroupDiscussion />,
+      '/group/g1',
+      '/group/:groupId'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    const earlier = r.container.querySelector('[data-testid="earlier-chats"]')!;
+    expect(earlier.textContent).toContain('old');
+    expect(
+      earlier.querySelector('[data-testid="earlier-junction"]')
+    ).not.toBeNull();
+    const prompt = r.container.querySelector(
+      '[data-testid="continuation-prompt"]'
+    )!;
+    expect(prompt.textContent).toContain('archive.continue_invitation');
+    expect(
+      prompt.querySelector('[data-testid="continuation-accept"]')
+    ).not.toBeNull();
+    // Still writable: declining changes nothing.
+    expect(r.container.querySelector('textarea')).not.toBeNull();
+  });
+
   it('disables the composer with its reason when read only', async () => {
     const r = await openGroup('removed');
     unmount = r.unmount;
