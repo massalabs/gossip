@@ -508,6 +508,28 @@ fn a_pruned_identical_event_is_restored_while_its_window_is_open() {
     assert_eq!(g.state(&a), PRUNED);
 }
 
+/// Regression (review of c11b2163, D.33 choice A): an event arriving under a pruned ID with
+/// other parents was restored and served with the new parents, while the stored parent
+/// links, which the tips use, kept the first ones.
+#[test]
+fn a_pruned_event_arriving_with_other_parents_stays_pruned() {
+    let mut f = Fixture::new();
+    let p = f.event(T0, 9, &[], text(9, f.bob.id, T0, T0, "p"));
+    let q = f.event(T0, 8, &[], text(8, f.bob.id, T0, T0, "q"));
+    let a = f.event(T0 + 1, 1, &[p.event_id()], text(1, f.bob.id, T0, T0, "a"));
+    for e in [&p, &q, &a] {
+        f.recv(e, T0 + 1);
+    }
+    ep(&f.root).evict(&mut f.store, T0 + 2, 3).unwrap();
+    let other = f.event(T0 + 1, 1, &[q.event_id()], text(1, f.bob.id, T0, T0, "a"));
+    assert_eq!(other.event_id(), a.event_id());
+    assert_eq!(f.recv(&other, T0 + 3), Outcome::KeptPruned);
+    assert_eq!(f.state(&a), PRUNED);
+    // With its own parents it is restored.
+    assert_eq!(f.recv(&a, T0 + 4), Outcome::Restored);
+    assert_eq!(f.row(a.event_id()).unwrap().event(), Some(&a));
+}
+
 // ── Scheduled future versions (§7.3) ────────────────────────────────────────
 
 #[test]
