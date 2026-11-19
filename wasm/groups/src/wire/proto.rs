@@ -561,3 +561,15 @@ static LEAVE_REQUEST: Schema = Schema {
     name: "LeaveRequest",
     fields: &[(1, Kind::Bytes)],
 };
+
+// Metadata values (§7.6).
+
+pub(crate) static REPLY_TO: Schema = Schema {
+    name: "ReplyTo",
+    fields: &[(1, Kind::Msg(&REPLY_TARGET))],
+};
+
+static REPLY_TARGET: Schema = Schema {
+    name: "ReplyTarget",
+    fields: &[(1, Kind::Bytes), (2, Kind::Bytes)],
+};
