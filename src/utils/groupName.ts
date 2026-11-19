@@ -111,12 +111,14 @@ export function safeName(
 /**
  * The name of a group as the list, the header and previews show it: the local
  * name when set, else the group name, else a name built from the members
- * (rule 5.11: an empty name is allowed).
+ * (rule 5.11: an empty name is allowed), else `fallback`: a group with no
+ * name and no one else left, such as a direct chat the other person declined.
  */
 export function groupDisplayName(
   group: { name: string; localName: string | null; members: string[] },
   memberName: (userId: string) => string,
-  me?: string
+  me?: string,
+  fallback = ''
 ): string {
   const local = safeName(group.localName);
   if (local) return local;
@@ -125,7 +127,10 @@ export function groupDisplayName(
   const others = group.members.filter(m => m !== me);
   const names = others.slice(0, 3).map(memberName);
   const rest = others.length - names.length;
-  return safeName(rest > 0 ? `${names.join(', ')} +${rest}` : names.join(', '));
+  return (
+    safeName(rest > 0 ? `${names.join(', ')} +${rest}` : names.join(', ')) ||
+    fallback
+  );
 }
 
 /**

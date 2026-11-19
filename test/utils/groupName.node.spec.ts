@@ -49,4 +49,16 @@ describe('safeName (§5.11)', () => {
       )
     ).toBe('Mine');
   });
+
+  it('falls back when no name is set and no one else is left', () => {
+    // A direct chat the other person declined or left.
+    expect(
+      groupDisplayName(
+        { name: '', localName: null, members: ['me'] },
+        id => id,
+        'me',
+        'Unnamed group'
+      )
+    ).toBe('Unnamed group');
+  });
 });

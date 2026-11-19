@@ -130,7 +130,12 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
     .filter(entry => entry.summary.status !== 'dissolved-deleted')
     .map(entry => ({
       entry,
-      name: groupDisplayName(entry.summary, memberName, me),
+      name: groupDisplayName(
+        entry.summary,
+        memberName,
+        me,
+        t('invitation.unnamed')
+      ),
     }))
     .filter(g => !query || g.name.toLowerCase().includes(query))
     .filter(g => !unreadOnly || g.entry.unread);

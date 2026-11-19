@@ -196,7 +196,12 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const service = getGroupService();
   const blocked = composerBlockedReason(group);
   const canWrite = blocked === null;
-  const title = groupDisplayName(group, memberName, me);
+  const title = groupDisplayName(
+    group,
+    memberName,
+    me,
+    t('invitation.unnamed')
+  );
   const maxTextBytes = service?.messageLimits.textBytes;
   const target = (m: GroupMessage): InputTarget => ({
     content: messageText(m, t),
