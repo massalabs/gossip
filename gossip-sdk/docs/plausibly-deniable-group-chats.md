@@ -3634,3 +3634,318 @@ only an ID of the wrong length is skipped.
 - **A (recommended):** "entries it carries" means entries as received, skipped ones included.
 - **B:** a page with any invalid entry is refused whole (D.23, choice B).
 
+
+### D.38 A lane that is still scanning at its turn (§12.3)
+
+*Found by simulation of the implementation.*
+
+*Current text:* the lanes start in turn, and a start "waits until it is eligible".
+
+*Context:* a lane scanning a member that never answers stays pending through all its stages, about
+two weeks.
+Read literally, the other lanes wait behind it, so one silent member stops periodic recovery for
+the whole group.
+The code skips the turn.
+
+- **A (recommended):** a lane still pending at its turn skips that turn; the other lanes go on.
+- **B:** bound how long a lane may stay pending, then abandon its scan.
+- **C:** keep the text.
+
+### D.39 Resends after `expired` (§11.4)
+
+*Found by simulation of the implementation.*
+
+*Current text:* the requester resends after an `expired` status, with no bound.
+
+*Context:* a peer that always answers `expired` keeps the requester sending forever.
+A fixed small bound is wrong the other way: a member back from a long absence gets honest
+`expired` answers to queries that waited in its mailbox, and a bound of 2 left it unable to
+recover in the simulation.
+
+- **A (recommended):** unlimited resends when the status is plausible, that is when the request
+  was at or past its deadline minus 5 minutes when the status arrived; otherwise at most 2 per
+  stage.
+- **B:** a fixed bound per stage in all cases.
+- **C:** no bound (current text).
+
+### D.40 Scan restarts (§12.2)
+
+*Found during implementation.*
+
+*Current text:* on `restart` the requester starts a fresh scan; nothing bounds how often.
+
+*Context:* a peer answering `restart` to every page keeps the scan running forever.
+
+- **A (recommended):** at most 3 restarts of one scan with one peer since the last page that made
+  progress; then the scan ends as failed.
+  The number is provisional.
+- **B:** no bound.
+
+### D.41 The stub left when a retrieval task reaches its deadline (§11.6)
+
+*Found during implementation.*
+
+*Current text:* at the deadline the device "prunes the ID to a generic stub".
+
+*Context:* for an ID that was only announced and never held, a stored stub is one record per fake
+ID a hostile member announces.
+The deadline is computed from the ID, so the device needs no record to refuse it later.
+The code stores nothing.
+
+- **A (recommended):** say the stub is implicit for an ID that was never held: nothing is stored.
+- **B:** a stored stub, with a limit on their number.
+
+### D.42 A member that announces IDs it never supplies (§11.8, §17.4)
+
+*Found by simulation of the implementation. This is the largest open point of the retrieval
+design.*
+
+*Current text:* the score counts supplied items and penalties; a timeout is not a penalty.
+Device-wide fairness is left to the implementation.
+
+*Context:* a member that announces fake IDs and stays silent pays nothing.
+Each fake ID costs up to one lookup per other member, lives up to 14 days, fills responders'
+request budgets and the queue of 65,536 IDs, and in the simulation it delayed honest retrieval by
+days.
+The code adds rules of its own: a task none of whose untried announcers is responsive with a score
+of at least 0.5 may use only a quarter of the lookup slots; responsive candidates are asked first;
+a task waits for a responsive member rather than ask one that stopped answering.
+Any sign of life from a member (an answer, a notice, an accepted event, a query) makes it
+responsive again; `busy` does not.
+An announcement whose event turns up counts like a supply, and a "not available" penalty is
+withdrawn when the event turns up later; a member stays credible after up to 4 failed
+announcements.
+When the queue of missing IDs is full, the missing parent of an accepted event evicts a task of
+the restricted kind.
+These rules are not in the text and a hostile member may try to turn them against honest ones.
+One known cost: a member that deletes messages locally answers "not available" for what it
+announced, and can lose standing with its peers; telling it apart would break deniability.
+
+- **A (recommended):** specify an unresponsiveness factor in the score and a quota for tasks
+  announced only by peers that did not supply what they announced, with the code's rules as the
+  starting point, after their review.
+- **B:** leave it to implementations, and state the attack in the security section.
+- **C:** apply the root-announcement pause to events as well (simple, but it slows honest flows).
+
+### D.43 A device whose clock runs fast gets no answers (§11.3)
+
+*Found during implementation.*
+
+*Current text:* a receiver ignores a query whose `sent_at` is more than 5 minutes ahead of its
+clock.
+
+*Context:* such a device never recovers anything and cannot tell why.
+
+- **A (recommended):** the receiver answers with a status (`expired`, or a new one) instead of
+  staying silent, within the usual limits.
+- **B:** keep the silence.
+
+### D.44 One attempt at a time with long waits (§11.2, §11.4)
+
+*Found by simulation of the implementation; no change is made in the code.*
+
+*Context:* a task asks one candidate at a time, and later stages wait up to 24 hours.
+One unresponsive candidate costs up to a day per stage, which is where the remaining convergence
+delays in the simulation come from.
+
+- **A (recommended):** keep it for this version and state the delay; revisit with measurements.
+- **B:** allow two candidates in parallel from the second stage on.
+
+### D.45 "A conflicting immutable context is rejected" (§12.2)
+
+*Found during implementation.*
+
+*Context:* the key of a scan already holds everything the text calls its context, so the
+implementer found no case the sentence can apply to.
+
+- **A (recommended):** remove the sentence, or name the fields it means.
+- **B:** keep it.
+
+### D.46 Details the code had to choose (§10, §11, §13.9, §17.4)
+
+*Found during implementation. Each is a guess where the text gives no value; listed together so
+they can be confirmed or changed.*
+
+- Score: `(supplied + 1) / (supplied + penalty + 2)`, both halved when their total passes 1,024.
+  Penalty weights: wrong key answer 64, wrong root 16, malformed 4, "not available" after
+  announcing 1.
+- "Per-peer request budget": the number of query entries a peer may make this device answer; over
+  it the answer is `busy`. The response budget counts bytes of answers.
+- `busy`: the peer is asked again about a minute later. A `malformed` status ends the peer's turn
+  for this run without a penalty.
+- Neighbors: pending requests count against capacity; requests and declines expire after 24
+  hours; a removed peer is neither suggested nor accepted; a neighbor is replaced once its queries
+  have waited 2 days in total without an answer, and candidates rank responsive members first.
+- Candidate order: responsive members before unresponsive ones; then peers that triggered the
+  task, then neighbors, then members with a session, then others; then score, then trigger time.
+  §11.2 gives the tiers only.
+- Dissemination: "own message" means a deletion or a message this device authored; an edit or
+  retry of another member's message goes out as notices.
+- A sync-object lookup goes on after "not available" and ends "not found" when no candidate is
+  left (§12.5 says it "completes on its answer").
+- Packing order in a plaintext: control frames, pages, answers, queries (page requests first),
+  full events, notices.
+- At most 64 plaintexts handed to the transport per poll, rotating across peers.
+
+- **A (recommended):** confirm them one by one when the numbers of D.4 are settled.
+- **B:** leave them to implementations.
+
+### D.47 Rules not implemented yet (§12.1, §17.4, D.8)
+
+*Recorded so they are not forgotten; no decision is needed unless one is dropped.*
+
+- §12.1: "run the scan with another peer" for scans outside the lanes.
+- §17.4: the traversal budget is applied to ancestor sampling only, not to the tip computation,
+  which needs the full tip set at once.
+- D.8: the fallback for an edit in an older epoch with no eligible neighbor (it needs several
+  epochs).
+
+- **A (recommended):** implement the first and third; for the second, say in §17.4 that the tip
+  set is exempt and bounded by the limits on held events.
+- **B:** apply the budget to tips too, with a rule for a partial tip set.
+
+### D.48 Small points from the merge fixes (§9.1, §14.2)
+
+*Found during review of the implementation.*
+
+- D.34 is applied strictly: a local-only edit is also refused when the automatic date
+  `previous + 1` would be later than now.
+- Rejection markers are evicted in order of the oldest event timestamp first.
+
+- **A (recommended):** state both.
+- **B:** other rules, to be given.
+
+### D.49 Does a resend restart the wait of its stage (§11.4, §12.3)
+
+*Found during review of the implementation; it caused a convergence failure in simulation.*
+
+*Current text:* a resend after a reconnection or an `expired` status does "not change the stage, TTL
+progression or jitter". The local wait is not named.
+
+*Context:* the first implementation restarted the wait at each resend.
+A member that resets its session more often than the stage's TTL then holds a task or a scan
+forever, and one honest device never got an edit the others held.
+
+- **A (recommended):** a resend keeps the stage's original local deadline. The code does this.
+- **B:** a resend restarts the wait, with a bound on resends per stage.
+
+### D.50 Largest event against the frame that carries it (§13.10)
+
+*Found during review of the implementation.*
+
+*Current text:* an event is admitted if it fits an empty container as an event frame.
+
+*Context:* a lookup answer carries the event in a response frame, which adds `request_id` and
+`idx`.
+An event of the largest admitted size cannot be served by lookup at all; the first implementation
+crashed on it.
+The limit must be one every device computes the same way, since it decides validity.
+
+- **A (recommended):** an event is admitted only if it fits an empty container inside the largest
+  frame that can carry it (a response frame with the longest `request_id` and `idx`). The code does
+  this: the largest event blob is 262,107 bytes, 28 fewer than before.
+- **B:** keep the limit and serve such an event in a plaintext of its own with a special frame.
+
+### D.51 A tips scan from a peer that is not a member (§12.1, §13.7)
+
+*Found during review of the implementation.*
+
+*Current text:* §12.1 answers "not available" for an anchor the device does not hold; §13.7 keeps
+silent toward a peer that is not a member of a held epoch.
+
+*Context:* together they tell any peer with a session whether the device holds a given epoch:
+"not available" means no, silence means yes.
+
+- **A (recommended):** a requester that is not a member of the held epoch gets the same answer as
+  for an unheld anchor. The code does this.
+- **B:** silence in both cases (an honest member then cannot tell "not held" from a lost message).
+
+### D.52 `busy` without a bound (§11.4, §13.4, §17.4)
+
+*Found during review of the implementation.*
+
+*Current text:* `busy` asks the requester to come back later; no bound, and the text does not say
+whether it counts as an answer.
+
+*Context:* a member that answers `busy` to everything was asked 2,885 times in three simulated
+days, kept its standing, and as a neighbor stopped both neighbor lanes.
+
+- **A (recommended):** `busy` is not an answer for the score or for responsiveness; after 3 in a
+  row from one peer for one task or scan, it counts as a timeout. The code does this; the number
+  is provisional.
+- **B:** leave it to implementations.
+
+### D.53 An announced ID dated far in the future (§11.6, §17.4)
+
+*Found during review of the implementation.*
+
+*Current text:* the lookup deadline of an ID is computed from its timestamp, with no upper bound on
+that timestamp. A full queue "pauses paging"; nothing is said about IDs from notices and parent
+references.
+
+*Context:* 65,536 IDs dated ten years ahead never expire and fill the queue of missing IDs for
+good; later missing IDs of the group are then dropped.
+
+- **A (recommended):** a task ends at the earlier of the ID's deadline and its creation plus the
+  retention period, and a full queue never loses the parent reference of an accepted event. The
+  code does this.
+- **B:** refuse an announced ID dated beyond a fixed margin after now.
+
+### D.54 Queued answers and version notices (§13.8, §17.4)
+
+*Found during review of the implementation.*
+
+*Current text:* one version notice per peer and version; over budget the answer is `busy`. Neither
+has a bound.
+
+*Context:* each over-budget query entry queued one stored `busy` answer, and each distinct version
+number one stored notice, without limit.
+
+- **A (recommended):** a cap on queued answers per peer, beyond which entries are dropped, and a
+  cap on version notices per peer. The code does this with provisional numbers: 256 queued answers
+  per peer, one queued version notice per peer, and the last 4 versions remembered.
+- **B:** leave it to implementations.
+
+### D.55 What a notice reveals about processing (§11.7)
+
+*Found during review of the implementation; no change is made in the code.*
+
+*Context:* a member can send a notice for an ID and learn, from whether a lookup comes back,
+whether the device has already processed that ID.
+This is known to members only and concerns held-or-seen, not content.
+
+- **A (recommended):** state it in the security section.
+- **B:** look up a random share of already processed IDs as cover.
+
+### D.56 Neighbor capacity and ending a relation (§10.1)
+
+*Found during review of the implementation; no change is made in the code.*
+
+*Context:* "capacity" is not defined; the code takes it equal to the target of 10.
+In a large group where everyone already has 10 neighbors, a newcomer is declined by all.
+There is no message to end a relation, so the sets become one-sided, and the use of suggestions is
+not specified (a declining member can steer the choice).
+
+- **A (recommended):** capacity above the target (for example twice), an explicit end of a
+  relation, and suggestions used only as candidates ranked like the others.
+- **B:** keep the text and state the limits.
+
+### D.57 Is a page entry an announcement (§11.8, §12.2)
+
+*Found during review of the implementation.*
+
+*Context:* "not available" after announcing is penalised, but §12.2 lets a frozen list keep IDs
+pruned since it was frozen, so an honest responder can be penalised for its own page.
+
+- **A (recommended):** a page entry is not an announcement for the penalty. The code does this.
+- **B:** it is, and a frozen list drops pruned IDs.
+
+### D.58 Ancestors marked as seen by a relay (§10.3)
+
+*Raised during review; plausible, not shown by a test.*
+
+*Context:* when a peer delivers an event, its ancestors are marked as seen by that peer, though a
+relay may not hold those parents.
+
+- **A (recommended):** check with a test when several epochs are in place, then decide.
+- **B:** mark only the delivered event.
