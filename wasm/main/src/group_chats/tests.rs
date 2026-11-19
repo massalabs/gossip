@@ -779,3 +779,26 @@ fn an_edit_keeps_metadata_by_default() {
         .unwrap();
     assert_eq!(metadata(&net), r#"[["x.unknown","0102"]]"#);
 }
+
+/// Records the engine can no longer decode (stored by an earlier build) are refused with an
+/// error the caller recognises, so that it can start the engine's tables again.
+#[test]
+fn records_that_no_longer_decode_are_refused_as_undecodable() {
+    let mut net = Net::new(2);
+    let b = net.peers[1].id();
+    let g = net.peers[0].core.create_group("x".into(), vec![b], net.now).unwrap();
+    assert_ne!(g, ChatId::from_bytes([0; 32]));
+    net.peers[0].persist();
+    let mut snapshot = net.peers[0].db.snapshot();
+    let record = snapshot
+        .node
+        .iter_mut()
+        .find(|n| n.kind == "group_recs")
+        .expect("a group record");
+    record.fields = Some(r#"{"status":"Active"}"#.into());
+    let (public, secret) = keys("peer 0");
+    let error = Core::open(IdentityKey::new(public, &secret), &snapshot)
+        .err()
+        .expect("refused");
+    assert!(error.starts_with("groups:undecodable: "), "{error}");
+}
