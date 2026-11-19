@@ -106,12 +106,10 @@ const NewDiscussion: React.FC = () => {
           </span>
         </Button>
         <Button
-          onClick={() => {}}
+          onClick={() => navigate(ROUTES.newGroup())}
           variant="outline"
           size="custom"
-          disabled
-          title={t('new_discussion.coming_soon')}
-          className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 opacity-60 cursor-not-allowed"
+          className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
         >
           <Users className="mr-4" />
           <span className="text-base font-normal flex-1 text-left">
