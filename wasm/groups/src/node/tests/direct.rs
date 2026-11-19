@@ -793,3 +793,243 @@ fn a_losing_root_delivered_again_is_never_prompted() {
     assert!(net.devs[keep_dev].node.invitations(now + DAY).is_empty());
     assert_eq!(net.group_keys(keep_dev), vec![kept]);
 }
+
+// ── Who took part, and continuing a conversation in a new chat (§5.12) ─────────
+
+impl MNet {
+    /// `d` founds its automatic chat with `p`, which `p` adopts under a consent and in
+    /// which both write. Returns the chat.
+    fn chat_taken_part_in(&mut self, d: usize, p: usize) -> ChatId {
+        self.consent(p, d, true);
+        let g = self.create_with(d, &[p], Some(0)).unwrap();
+        self.run(2 * MIN);
+        assert_eq!(self.group_keys(p), vec![g]);
+        self.say(d, &g, "from the owner");
+        self.say(p, &g, "from the other");
+        self.run(2 * MIN);
+        g
+    }
+
+    fn took_part(&self, d: usize, g: &ChatId) -> Option<bool> {
+        self.summary(d, g).unwrap().took_part
+    }
+
+    fn backup(&self, d: usize) -> crate::store::MemoryStorage {
+        self.devs[d].store.clone()
+    }
+
+    fn restore(&mut self, d: usize, store: crate::store::MemoryStorage) {
+        self.devs[d].store = store;
+        self.restart(d);
+    }
+
+    /// The due invitation of `d` for `chat`.
+    fn invitation(&self, d: usize, chat: &ChatId) -> Option<InvitationSummary> {
+        self.devs[d]
+            .node
+            .invitations(self.now + crate::node::timing::PROMPT_DELAY_MS)
+            .into_iter()
+            .find(|i| i.chat_id == *chat)
+    }
+}
+
+/// The owner of an automatic chat records, for good, that the other person took part: a
+/// message, a notice or a query of it in that chat; nothing it sends itself, no answer of the
+/// peer. Other groups have no such fact.
+#[test]
+fn the_owner_records_that_the_other_person_took_part() {
+    let mut net = MNet::new(2, true);
+    let g = net.create_with(0, &[1], Some(0)).unwrap();
+    net.say(0, &g, "alone");
+    net.run(2 * MIN);
+    // An invitation not answered: the peer took no part, whatever the owner sends.
+    assert_eq!(net.took_part(0, &g), Some(false));
+    net.accept(1, g);
+    net.run(2 * MIN);
+    assert_eq!(net.took_part(0, &g), Some(true));
+    net.restart(0);
+    assert_eq!(net.took_part(0, &g), Some(true));
+    // The adopting side and an ordinary group have no such fact.
+    assert_eq!(net.took_part(1, &g), None);
+    let plain = net.create_with(0, &[1], None).unwrap();
+    assert_eq!(net.took_part(0, &plain), None);
+}
+
+/// Case 5: the other person took part in the owner's chat for a long time, then founds a
+/// new one: the owner gets an invitation to continue the conversation there, and nothing
+/// changes unless it accepts; on accepting, its chat is superseded by the new one.
+#[test]
+fn a_new_chat_after_taking_part_is_an_invitation_to_continue() {
+    let (l, h) = sorted_pair();
+    for accept in [false, true] {
+        let mut net = MNet::new(2, true);
+        let gh = net.chat_taken_part_in(h, l);
+        net.run(HOUR);
+        let gl = net.create_with(l, &[h], Some(0)).unwrap();
+        net.run(2 * MIN);
+        let inv = net.invitation(h, &gl).expect("an invitation");
+        assert_eq!(inv.continues, Some(gh));
+        assert_eq!(net.group_keys(h), vec![gh]);
+        assert!(net.superseded(h).is_empty());
+        if accept {
+            assert_eq!(net.accept(h, gl), gl);
+            assert_eq!(net.group_keys(h), vec![gl]);
+            assert_eq!(net.superseded(h), vec![(gh, gl)]);
+            assert_eq!(net.summary(h, &gl).unwrap().earlier, vec![gh]);
+            assert_eq!(net.texts(h, &gh).len(), 2, "nothing erased");
+            net.say(h, &gl, "continued");
+            net.run(2 * MIN);
+            assert!(net.texts(l, &gl).contains(&"continued".to_owned()));
+        } else {
+            let s = signer(h);
+            let now = net.now;
+            let dev = &mut net.devs[h];
+            dev.node
+                .decline_invitation(
+                    &mut dev.store,
+                    &s,
+                    gl,
+                    LeaveChoice::Silent,
+                    now,
+                    &mut net.rng,
+                )
+                .unwrap();
+            net.run(2 * MIN);
+            assert_eq!(net.group_keys(h), vec![gh]);
+            assert!(net.superseded(h).is_empty());
+            assert_eq!(net.summary(h, &gh).unwrap().status, MyStatus::Member);
+        }
+    }
+}
+
+/// Case 6: the other person founds a new chat. If it never took part in the owner's, the
+/// tie rule decides with no prompt; if it took part, it is an invitation to continue.
+#[test]
+fn a_new_chat_from_the_peer_that_sorts_last_follows_whether_it_took_part() {
+    let (l, h) = sorted_pair();
+    // Never took part: the chat of the device that sorts first is kept, no prompt.
+    let mut net = MNet::new(2, true);
+    let gl = net.create_with(l, &[h], Some(0)).unwrap();
+    let _ = net.outgoing(l);
+    let gh = net.create_with(h, &[l], Some(0)).unwrap();
+    net.deliver(h, l);
+    assert!(net.invitation(l, &gh).is_none());
+    assert_eq!(net.group_keys(l), vec![gl]);
+    assert_eq!(net.superseded(l), vec![(gh, gl)]);
+    // Took part, then restored from a backup made before it held the chat: its new chat is
+    // an invitation to continue.
+    let mut net = MNet::new(2, true);
+    let before = net.backup(h);
+    let gl = net.chat_taken_part_in(l, h);
+    net.restore(h, before);
+    net.run(HOUR);
+    let gh = net.create_with(h, &[l], Some(0)).unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.invitation(l, &gh).and_then(|i| i.continues), Some(gl));
+    assert_eq!(net.group_keys(l), vec![gl]);
+    // Accepted: the chain of earlier chats follows.
+    net.accept(l, gh);
+    assert_eq!(net.superseded(l), vec![(gl, gh)]);
+    assert_eq!(net.summary(l, &gh).unwrap().earlier, vec![gl]);
+}
+
+/// Case 4: the device that sorts first ignored or declined the other's chat, then founds
+/// its own: the other switches to it by itself, its own superseded.
+#[test]
+fn a_declined_chat_is_replaced_without_a_prompt() {
+    let (l, h) = sorted_pair();
+    for choice in [LeaveChoice::Silent, LeaveChoice::Signed] {
+        let mut net = MNet::new(2, true);
+        let gh = net.create_with(h, &[l], Some(0)).unwrap();
+        net.run(2 * MIN);
+        let s = signer(l);
+        let now = net.now;
+        let dev = &mut net.devs[l];
+        dev.node
+            .decline_invitation(&mut dev.store, &s, gh, choice, now, &mut net.rng)
+            .unwrap();
+        net.run(HOUR);
+        let gl = net.create_with(l, &[h], Some(0)).unwrap();
+        net.run(2 * MIN);
+        assert!(net.invitation(h, &gl).is_none(), "{choice:?}");
+        assert_eq!(net.group_keys(h), vec![gl], "{choice:?}");
+        assert_eq!(net.superseded(h), vec![(gh, gl)], "{choice:?}");
+    }
+}
+
+/// Case 7: the device that sorts first took part in the other's chat, is restored from a
+/// backup made before, and founds its own: the other gets an invitation to continue, and
+/// they converge on the new chat once it accepts.
+#[test]
+fn a_restored_device_that_took_part_founds_a_chat_to_continue() {
+    let (l, h) = sorted_pair();
+    let mut net = MNet::new(2, true);
+    let before = net.backup(l);
+    let gh = net.chat_taken_part_in(h, l);
+    net.restore(l, before);
+    net.run(HOUR);
+    let gl = net.create_with(l, &[h], Some(0)).unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.invitation(h, &gl).and_then(|i| i.continues), Some(gh));
+    assert_eq!(net.group_keys(h), vec![gh]);
+    net.accept(h, gl);
+    net.run(2 * MIN);
+    for d in [l, h] {
+        assert_eq!(net.group_keys(d), vec![gl], "device {d}");
+    }
+    assert_eq!(net.superseded(h), vec![(gh, gl)]);
+}
+
+/// Case 8: the owner restored from a backup made before the other person took part: the
+/// fact is absent, and the other's new chat replaces its own by itself. Nothing is erased.
+#[test]
+fn an_owner_restored_before_the_other_took_part_switches_by_itself() {
+    let (l, h) = sorted_pair();
+    let mut net = MNet::new(2, true);
+    net.consent(l, h, true);
+    let gh = net.create_with(h, &[l], Some(0)).unwrap();
+    let before = net.backup(h);
+    net.run(2 * MIN);
+    net.say(l, &gh, "from the other");
+    net.run(2 * MIN);
+    assert_eq!(net.took_part(h, &gh), Some(true));
+    net.restore(h, before);
+    assert_eq!(net.took_part(h, &gh), Some(false));
+    net.run(HOUR);
+    let gl = net.create_with(l, &[h], Some(0)).unwrap();
+    net.run(2 * MIN);
+    assert!(net.invitation(h, &gl).is_none());
+    assert_eq!(net.group_keys(h), vec![gl]);
+    assert_eq!(net.superseded(h), vec![(gh, gl)]);
+    assert_eq!(net.superseded(l), vec![(gh, gl)]);
+    assert!(net.texts(l, &gh).contains(&"from the other".to_owned()));
+}
+
+/// Case 1, the late order: the device that sorts last switches to the other's chat and takes
+/// part in it before its own creating root, made before, reaches the other: still the tie
+/// rule, no prompt.
+#[test]
+fn a_crossing_root_arriving_after_the_switch_is_no_invitation() {
+    let (l, h) = sorted_pair();
+    let mut net = MNet::new(2, true);
+    let gl = net.create_with(l, &[h], Some(0)).unwrap();
+    let gh = net.create_with(h, &[l], Some(0)).unwrap();
+    // The root of the device that sorts last is held back; the other's arrives.
+    let held: Vec<(usize, Vec<u8>)> = net.outgoing(h);
+    net.deliver(l, h);
+    assert_eq!(net.group_keys(h), vec![gl]);
+    net.now += MIN;
+    net.say(h, &gl, "switched");
+    net.run(2 * MIN);
+    assert_eq!(net.took_part(l, &gl), Some(true));
+    for (r, pt) in held {
+        let now = net.now;
+        let dev = &mut net.devs[r];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(h), &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    assert!(net.invitation(l, &gh).is_none());
+    assert_eq!(net.group_keys(l), vec![gl]);
+    assert_eq!(net.superseded(l), vec![(gh, gl)]);
+}
