@@ -9,7 +9,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::records::{AnswerOp, Purpose, RefEntry, RequestRef, Target, Work, WorkKey};
-use super::timing::{PLAINTEXTS_PER_POLL, RESPONSE_BURST, RESPONSE_REFILL_PER_MIN};
+use super::timing::{
+    ABANDON_BACKOFF_MS, PLAINTEXTS_PER_POLL, RESPONSE_BURST, RESPONSE_REFILL_PER_MIN,
+};
 use super::{Cx, Node, NodeError};
 use crate::constants::{
     MAX_NOTICE_BYTES, MAX_NOTICE_ENTRIES, MAX_PLAINTEXT_BYTES, MAX_QUERY_ENTRIES, PROTOCOL_VERSION,
@@ -75,6 +77,10 @@ struct Pending {
     scans: u64,
     notices: u64,
     answers: u64,
+    /// Bytes of answers charged to the peer's response budget, given back on an abandon.
+    charged: u64,
+    /// When it was assembled.
+    assembled_at: u64,
     /// The plaintext is current only before this instant: the first due item of an epoch
     /// (a deletion or activation that may change what it carries) or the end of the window
     /// of an event it carries, whichever comes first.
@@ -94,6 +100,10 @@ pub(crate) struct InFlight {
     rotation: u64,
     /// The position in the 3:1 pattern of each peer's response allocation (§13.9).
     ratio: BTreeMap<GossipId, u8>,
+    /// Peers reported without a session: their work stays queued.
+    no_session: BTreeSet<GossipId>,
+    /// Peers whose work waits after an abandon, until the given instant.
+    backoff: BTreeMap<GossipId, u64>,
 }
 
 /// The event a queued full send or notice refers to.
@@ -226,10 +236,22 @@ impl Node {
         rng: &mut dyn Randomness,
     ) -> Result<Vec<Outgoing>, NodeError> {
         let before = self.outbox.next;
+        // Nothing sendable: nothing is assembled and nothing committed.
+        let any = self
+            .t
+            .queue
+            .keys()
+            .any(|k| !self.outbox.items.contains(k) && self.assemblable(&k.0, now));
+        if !any {
+            return Ok(Vec::new());
+        }
         let r = self.run(store, now, rng, |n, cx| {
             let mut peers: Vec<GossipId> = Vec::new();
             for (k, _) in n.t.queue.iter() {
-                if !n.outbox.items.contains(k) && peers.last() != Some(&k.0) {
+                if !n.outbox.items.contains(k)
+                    && peers.last() != Some(&k.0)
+                    && n.assemblable(&k.0, cx.now)
+                {
                     peers.push(k.0);
                 }
             }
@@ -262,6 +284,7 @@ impl Node {
                         })
                         .fold(due, u64::min)
                         .max(cx.now.saturating_add(1));
+                    pending.assembled_at = cx.now;
                     let handle = n.outbox.next;
                     n.outbox.next += 1;
                     n.outbox.items.extend(pending.items.iter().copied());
@@ -279,19 +302,57 @@ impl Node {
             // Nothing is in flight from a failed assembly.
             let failed: Vec<u64> = self.outbox.sent.range(before..).map(|(h, _)| *h).collect();
             for h in failed {
-                self.abandon(h);
+                self.release(h);
             }
         }
         r
     }
 
     /// Forgets an assembled plaintext that will not be sent: its work is assembled again.
+    ///
+    /// The answers it carried are not charged to the peer's response budget, and the peer's
+    /// work waits [`ABANDON_BACKOFF_MS`] before it is assembled again, unless a session or a
+    /// reconnection is reported for it first ([`Node::set_session`],
+    /// [`Node::peer_reconnected`]).
     pub fn abandon(&mut self, handle: u64) {
-        self.outbox.stale.remove(&handle);
-        if let Some(p) = self.outbox.sent.remove(&handle) {
-            for k in p.items {
-                self.outbox.items.remove(&k);
+        if let Some(p) = self.release(handle) {
+            if let Some(peer) = p.peer {
+                if p.charged > 0 && self.t.peers.contains(&peer) {
+                    self.peer_mut(&peer)
+                        .responses
+                        .refund(p.charged, RESPONSE_BURST);
+                }
+                self.outbox
+                    .backoff
+                    .insert(peer, p.assembled_at.saturating_add(ABANDON_BACKOFF_MS));
             }
+        }
+    }
+
+    /// Forgets an assembled plaintext; its work is assembled again.
+    fn release(&mut self, handle: u64) -> Option<Pending> {
+        self.outbox.stale.remove(&handle);
+        let p = self.outbox.sent.remove(&handle)?;
+        for k in &p.items {
+            self.outbox.items.remove(k);
+        }
+        Some(p)
+    }
+
+    /// Whether the work of `peer` may be assembled at `now`: it has a session (or none was
+    /// reported missing) and no abandon holds it back.
+    pub(crate) fn assemblable(&self, peer: &GossipId, now: u64) -> bool {
+        !self.outbox.no_session.contains(peer)
+            && self.outbox.backoff.get(peer).is_none_or(|t| *t <= now)
+    }
+
+    /// A session with `peer` is reported, or its absence (in memory only).
+    pub(crate) fn session_changed(&mut self, peer: GossipId, has_session: bool) {
+        if has_session {
+            self.outbox.no_session.remove(&peer);
+            self.outbox.backoff.remove(&peer);
+        } else {
+            self.outbox.no_session.insert(peer);
         }
     }
 
@@ -658,6 +719,7 @@ impl Node {
                 vec![a.key],
                 Pending {
                     answers: 1,
+                    charged: a.len as u64,
                     events: a.event.into_iter().collect(),
                     ..Pending::default()
                 },
@@ -824,6 +886,7 @@ impl Node {
             p.scans += part.scans;
             p.notices += part.notices;
             p.answers += part.answers;
+            p.charged += part.charged;
         }
         if out.len() < room {
             finish(&mut current, &mut out);
