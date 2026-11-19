@@ -829,7 +829,8 @@ fn tips_are_unreferenced_available_events() {
         f.recv(e, T0 + 5);
     }
     assert_eq!(f.tips(T0 + 5), vec![b.event_id(), c.event_id()]);
-    // A pruned child still references its parents, so they do not become tips again.
+    // Only an available child hides its parents (D.27): once the child is pruned, an
+    // available parent is a tip again.
     ep(&f.root).evict(&mut f.store, T0 + 5, 3).unwrap();
     assert!(f.tips(T0 + 5).is_empty());
     let mut g = Fixture::new();
@@ -837,7 +838,7 @@ fn tips_are_unreferenced_available_events() {
     g.recv(&b, T0 + 5);
     ep(&g.root).evict(&mut g.store, T0 + 5, 3).unwrap();
     g.recv(&a, T0 + 6);
-    assert_eq!(g.tips(T0 + 6), Vec::<EventId>::new());
+    assert_eq!(g.tips(T0 + 6), vec![a.event_id()]);
 }
 
 /// Regression (review of c11b2163, D.27 choice B): a pruned child must not hide its parent.
