@@ -10,6 +10,7 @@ use crate::node::timing::RESPONSE_BURST;
 fn ready(rid: u8, idx: u32, category: Category, seq: u64) -> ReadyAnswer {
     ReadyAnswer {
         key: (member(1), seq),
+        event: None,
         request_id: RequestId::from_bytes([rid; 16]),
         idx,
         category,
@@ -374,4 +375,44 @@ fn the_device_ceiling_rotates_across_peers() {
     let b: BTreeSet<GossipId> = second.iter().map(|o| o.to).collect();
     assert_eq!(a.len() + b.len(), 79);
     assert!(a.is_disjoint(&b));
+}
+
+#[test]
+fn a_plaintext_in_flight_becomes_stale_when_its_event_is_pruned() {
+    let mut net = Net::new(2, 1);
+    neighbors_of(&mut net, 0, &[1]);
+    let e = net.publish(0, "hi");
+    let chat = net.chat();
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    assert!(dev.node.is_current(out[0].handle));
+    dev.node
+        .local_edit(
+            &mut dev.store,
+            chat,
+            e.payload().sync_obj_id(),
+            crate::LocalEdit {
+                body: Some(Body::Text("bye".into())),
+                ..Default::default()
+            },
+            now + 1,
+            &mut net.rng,
+        )
+        .unwrap();
+    assert!(!dev.node.is_current(out[0].handle));
+    // Abandoned, it is not assembled again: its work was invalidated with the prune.
+    dev.node.abandon(out[0].handle);
+    let again = dev
+        .node
+        .poll_outbox(&mut dev.store, now + 1, &mut net.rng)
+        .unwrap();
+    assert!(
+        again
+            .iter()
+            .all(|o| !full_events(&frames(&o.plaintext)).contains(&e.event_id()))
+    );
 }
