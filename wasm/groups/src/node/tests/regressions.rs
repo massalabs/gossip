@@ -405,3 +405,48 @@ fn a_reconnection_resend_does_not_extend_a_scan_stage() {
     }
     assert!(ttls.iter().any(|t| *t > MIN), "{ttls:?}");
 }
+
+/// Found by review (code at `6a916f2e`; the cause of seed 2168 for reconnections): a resend
+/// after `expired` restarted the local wait of the stage, for lookups and scans alike.
+/// §11.4: such resends do not change the stage.
+#[test]
+fn an_expired_resend_does_not_extend_the_stage() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    dev.node
+        .peer_reconnected(&mut dev.store, member(2), now, &mut net.rng)
+        .unwrap();
+    let sent = super::retrieval::sent_queries(&mut net, 0);
+    let lookup = sent
+        .iter()
+        .find(|s| matches!(s.op, QueryOp::Event { .. }))
+        .unwrap();
+    let scan = sent
+        .iter()
+        .find(|s| matches!(s.op, QueryOp::TipsScan { .. }))
+        .unwrap();
+    assert_eq!((lookup.to, scan.to), (member(1), member(2)));
+    // Both answer `expired` early in the stage, then nothing.
+    net.now += 50_000;
+    super::retrieval::answer(&mut net, 0, lookup, ResponseResult::Status(Status::Expired));
+    super::retrieval::answer(&mut net, 0, scan, ResponseResult::Status(Status::Expired));
+    let resent = super::retrieval::sent_queries(&mut net, 0);
+    assert_eq!(resent.len(), 2, "{resent:?}");
+    net.now += 20_000;
+    net.tick(0);
+    let next = super::retrieval::sent_queries(&mut net, 0);
+    assert!(
+        next.iter()
+            .any(|s| matches!(s.op, QueryOp::Event { .. }) && s.to == member(2)),
+        "the lookup moves on: {next:?}"
+    );
+    assert!(
+        next.iter()
+            .any(|s| matches!(s.op, QueryOp::TipsScan { .. }) && s.ttl > MIN),
+        "the scan moves to its next stage: {next:?}"
+    );
+}
