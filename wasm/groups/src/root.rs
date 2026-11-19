@@ -866,12 +866,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn migrate_from_only_on_a_root_that_creates_a_group_of_two() {
+    fn migrate_from_is_set_only_on_a_group_of_two_but_never_makes_a_root_invalid() {
         let alice = identity(1);
         let bob = identity(2);
         let carol = identity(3);
         let root = migration(&alice, &[&alice, &bob], 0).unwrap();
-        // Another member count, at creation and on receipt.
+        // The creator refuses another member count.
         assert_eq!(
             migration(&alice, &[&alice], 0).map(|_| ()),
             Err(Error::MigrateFrom)
@@ -880,32 +880,19 @@ pub(crate) mod tests {
             migration(&alice, &[&alice, &bob, &carol], 0).map(|_| ()),
             Err(Error::MigrateFrom)
         );
+        // A receiver accepts the field, well encoded, on any root: on more members, several
+        // parents, a handover, and with a format version it does not know. Whether to act on
+        // it is decided elsewhere (§5.12).
         let big = founding(&alice, &[&alice, &bob, &carol]);
+        let r = modified(&big, |p| p.migrate_from = Some(0)).unwrap();
+        assert_eq!(r.migrate_from(), Some(0));
+        assert!(modified(&root, |p| p.parents = vec![vec![1; 32], vec![2; 32]]).is_ok());
+        assert!(modified(&root, |p| p.r#type = 1).is_ok());
         assert_eq!(
-            modified(&big, |p| p.migrate_from = Some(0)).map(|_| ()),
-            Err(Error::MigrateFrom)
-        );
-        // More than one parent: not a root that creates a group.
-        assert_eq!(
-            modified(&root, |p| p.parents = vec![vec![1; 32], vec![2; 32]]).map(|_| ()),
-            Err(Error::MigrateFrom)
-        );
-        // A handover never creates a group.
-        assert_eq!(
-            modified(&root, |p| p.r#type = 1).map(|_| ()),
-            Err(Error::MigrateFrom)
-        );
-        // The builder of a successor with several parents refuses it too.
-        assert_eq!(
-            Root::create_founding(
-                params(&alice, &[&alice, &bob, &carol], 0x10),
-                ChatId::from_bytes([0xd0; 32]),
-                Some(0),
-                &alice.secret.dsa_signing_key,
-                [0; 32],
-            )
-            .map(|_| ()),
-            Err(Error::MigrateFrom)
+            modified(&root, |p| p.migrate_from = Some(u64::MAX))
+                .unwrap()
+                .migrate_from(),
+            Some(u64::MAX)
         );
         // Without it, a founding root is what it was.
         let plain = Root::create_founding(
