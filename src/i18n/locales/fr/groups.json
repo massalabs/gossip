@@ -94,7 +94,8 @@
     "disabled_left": "Vous avez quitté ce groupe. Il est en lecture seule.",
     "disabled_waiting": "En attente que le propriétaire vous retire. Les messages ont été supprimés.",
     "disabled_dissolved": "Ce groupe a été dissous par son propriétaire.",
-    "disabled_resolve": "Le groupe a des versions concurrentes. Résolvez-les dans les détails du groupe avant d'envoyer."
+    "disabled_resolve": "Le groupe a des versions concurrentes. Résolvez-les dans les détails du groupe avant d'envoyer.",
+    "too_long": "Ce message est trop long pour un groupe. Raccourcissez-le et renvoyez-le."
   },
   "message_menu": {
     "reply": "Répondre",
