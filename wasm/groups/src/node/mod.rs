@@ -439,8 +439,11 @@ impl Node {
     /// Applies what is due in every epoch, as every operation does first (§7.4: before any
     /// message access or publication), and invalidates the work of what it pruned.
     fn apply_due(&mut self, cx: &mut Cx<'_>) -> Result<(), NodeError> {
-        let entries: Vec<(ChatId, Arc<EpochEntry>)> =
-            self.epochs.iter().map(|(c, e)| (*c, Arc::clone(e))).collect();
+        let entries: Vec<(ChatId, Arc<EpochEntry>)> = self
+            .epochs
+            .iter()
+            .map(|(c, e)| (*c, Arc::clone(e)))
+            .collect();
         for (chat, entry) in entries {
             let pruned = entry.epoch().tick(cx.ov, cx.now)?;
             self.invalidate(chat, &pruned);
