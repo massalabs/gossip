@@ -2041,3 +2041,54 @@ fn a_new_owner_cannot_take_over_another_group_of_the_former_owner() {
         EpochStatus::Invitation(_)
     ));
 }
+
+/// Finding 4 of the review of 54711780: a member that left with a signed leave and was
+/// added back (a) rejected the root that adds it back silently, since its extra parent is
+/// the epoch the member closed; (b) once in, its old leave was live again through that extra
+/// parent, and the owner's automatic successor removed it again.
+#[test]
+fn a_member_that_left_can_be_added_back() {
+    let (mut net, g) = founded(4);
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    assert!(!net.summary(0, &g).unwrap().members.contains(&gid(3)));
+    let z = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(3)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    let inv: Vec<ChatId> = net.devs[3]
+        .node
+        .invitations(net.now)
+        .iter()
+        .map(|i| i.chat_id)
+        .collect();
+    assert_eq!(inv, vec![z], "(a) the invitation is shown");
+    net.accept(3, z);
+    net.run(3 * MIN);
+    let s0 = net.summary(0, &g).unwrap();
+    assert!(
+        s0.members.contains(&gid(3)),
+        "(b) not removed again: {s0:?}"
+    );
+    assert_eq!(s0.current, z);
+}
