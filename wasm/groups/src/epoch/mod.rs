@@ -1,12 +1,13 @@
 //! The message state of one epoch: receiving events (§6.3, §9.5, §9.6), merging results
 //! (§7.1), scheduled versions and deletions (§7.3, §7.4), retention and eviction (§8), and
-//! the handling of known IDs (§9.5) and temporarily invalid events (§9.6).
+//! the local changes of §9 ([`local`]).
 //!
 //! Every operation takes the local clock `now` (and, when it creates something, a
 //! [`Randomness`](crate::Randomness)) as an argument, first applies what is due at `now`
 //! (activations, then retention pruning), and commits all its writes in one
 //! [`Changes`](crate::store::Changes) (§15.2).
 
+pub mod local;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -352,7 +353,7 @@ fn activate_due<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, now: u64) -> Result
                     continue;
                 }
                 obj.pending_deletion = None;
-                absorb(tx, &mut obj, event)?;
+                absorb(tx, &mut obj, Some(event), PendingFate::Normalize)?;
             }
         }
         tx.put_object(obj);
@@ -491,7 +492,7 @@ pub(crate) fn apply_new<S: StorageRead + ?Sized>(
                 Merge::Pending
             }
         },
-        Payload::Delete { .. } => absorb(tx, &mut obj, event)?,
+        Payload::Delete { .. } => absorb(tx, &mut obj, Some(event), PendingFate::Normalize)?,
     };
     tx.put_object(obj);
     Ok(merge)
@@ -538,13 +539,25 @@ fn merge_effective<S: StorageRead + ?Sized>(
     Ok(merge)
 }
 
+/// What happens to a pending scheduled deletion when the message is deleted otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingFate {
+    /// It is applied with the deletion: stored and served in its immediate form, as an
+    /// additional carrier of the tombstone.
+    Normalize,
+    /// It is pruned (a local-only deletion must not make this device serve a deletion
+    /// before its time, §9.3).
+    Prune,
+}
+
 /// Applies a deletion: the tombstone absorbs the message, every content event of it is
-/// pruned, and pending deletion work is cleared (§7.1, §7.4): a pending scheduled deletion is
-/// applied with it. Deletion events are stored in their immediate form.
+/// pruned, and pending deletion work is cleared (§7.1, §7.4). `carrier` is the deletion
+/// event, stored in its immediate form; `None` for a local-only deletion.
 pub(crate) fn absorb<S: StorageRead + ?Sized>(
     tx: &mut Tx<'_, S>,
     obj: &mut ObjectRecord,
-    carrier: MessageEvent,
+    carrier: Option<MessageEvent>,
+    fate: PendingFate,
 ) -> Result<Merge, StorageError> {
     let was_deleted = obj.is_deleted();
     if !was_deleted {
@@ -556,14 +569,21 @@ pub(crate) fn absorb<S: StorageRead + ?Sized>(
         }
         obj.current = Some(StoredResult::Tombstone);
     }
-    if let Some((_, pending)) = obj.pending_deletion.take()
-        && let Some(event) = tx.row(&pending)?.and_then(|r| r.event().cloned())
-    {
-        obj.current_events.insert(pending);
+    if let Some((_, pending)) = obj.pending_deletion.take() {
+        match fate {
+            PendingFate::Normalize => {
+                if let Some(event) = tx.row(&pending)?.and_then(|r| r.event().cloned()) {
+                    obj.current_events.insert(pending);
+                    hold(tx, immediate_form(&event), Role::Current);
+                }
+            }
+            PendingFate::Prune => prune(tx, pending),
+        }
+    }
+    if let Some(event) = carrier {
+        obj.current_events.insert(event.event_id());
         hold(tx, immediate_form(&event), Role::Current);
     }
-    obj.current_events.insert(carrier.event_id());
-    hold(tx, immediate_form(&carrier), Role::Current);
     Ok(if was_deleted {
         Merge::Identical
     } else {
