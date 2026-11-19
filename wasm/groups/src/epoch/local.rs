@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{Epoch, GroupState, Merge, PendingFate, absorb, apply_new, expire, prune, tick};
+use super::{Epoch, GroupState, Merge, absorb, apply_new, expire, prune, tick};
 use crate::constants::MAX_SCHEDULE_MS;
 use crate::dag;
 use crate::error::Error;
@@ -326,8 +326,9 @@ impl Epoch<'_> {
     }
 
     /// A local-only deletion (§9.2, §9.3): the message is replaced by its tombstone, nothing
-    /// is sent, and every event of the message is pruned to a stub, pending scheduled
-    /// deletions included.
+    /// is sent, and every content event of the message is pruned to a stub. Pending scheduled
+    /// deletions carry no content and stay pending, as on a local-only edit (D.28, D.31):
+    /// each keeps its scheduled form until its own time.
     ///
     /// # Errors
     ///
@@ -347,7 +348,7 @@ impl Epoch<'_> {
         if obj.is_deleted() {
             return Err(ChangeError::Deleted);
         }
-        absorb(&mut tx, &mut obj, None, PendingFate::Prune)?;
+        absorb(&mut tx, &mut obj, None)?;
         tx.put_object(obj);
         let changes = tx.into_changes();
         store.commit(changes)?;
@@ -923,7 +924,7 @@ mod tests {
     }
 
     #[test]
-    fn a_local_deletion_prunes_everything_and_sends_nothing() {
+    fn a_local_deletion_prunes_every_content_event_and_sends_nothing() {
         let mut f = Fixture::new();
         let a = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "a"));
         let v = f.event(T0, 2, &[], text(1, f.bob.id, T0, T0 + MIN, "v"));
@@ -937,11 +938,17 @@ mod tests {
             .unwrap();
         assert_eq!(f.store.commits(), before + 1);
         assert!(f.obj(1).is_deleted());
-        for e in [&a, &v, &ds] {
+        for e in [&a, &v] {
             assert_eq!(f.row(e.event_id()).unwrap().state, RowState::Pruned);
         }
-        // Nothing of the message is served: no early deletion either.
-        assert!(f.tips(T0 + 1).is_empty());
+        // No content is served. The scheduled deletion carries none: it stays pending and is
+        // served in its scheduled form until its own time (D.28, D.31), never earlier in its
+        // immediate form.
+        assert_eq!(f.tips(T0 + 1), vec![ds.event_id()]);
+        assert_eq!(
+            f.epoch().serve(&f.store, &ds.event_id(), T0 + 1).unwrap(),
+            Some(ds.clone())
+        );
         assert_eq!(
             ep(&f.root).local_delete(&mut f.store, T0 + 1, sid(1)),
             Err(ChangeError::Deleted)
@@ -950,7 +957,7 @@ mod tests {
         let d = f.event(T0 + 2, 4, &[], del(1, None));
         assert_eq!(f.recv(&d, T0 + 2), Outcome::Accepted(Merge::Identical));
         check(&f, T0 + 2);
-        // Retention later prunes it like any other event.
+        // Retention later prunes them like any other event.
         f.tick(T0 + 2 + RETENTION_MS);
         assert!(f.tips(T0 + 2 + RETENTION_MS).is_empty());
     }

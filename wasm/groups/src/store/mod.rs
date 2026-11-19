@@ -172,9 +172,10 @@ pub struct ObjectRecord {
     pub current_events: BTreeSet<EventId>,
     /// The admitted pending future versions, as `(due, eventId)` (§7.3).
     pub pending_versions: BTreeSet<(u64, EventId)>,
-    /// The pending scheduled deletions, as `(due, eventId)` (§7.4). The earliest one applies;
-    /// every one is kept until then, so that which deletion events stay available does not
-    /// depend on arrival timing (this departs from "only the earliest is kept").
+    /// The pending scheduled deletions, as `(due, eventId)` (§7.4). Each is kept in its
+    /// scheduled form until its own time, also beside a tombstone, and is then normalised
+    /// into one more carrier of the tombstone; the earliest one deletes the message (D.26,
+    /// D.31; this departs from "only the earliest is kept").
     pub pending_deletions: BTreeSet<(u64, EventId)>,
 }
 
