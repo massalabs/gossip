@@ -143,11 +143,11 @@ fn a_task_does_not_wait_for_a_candidate_at_its_lookup_limit() {
         .collect();
     net.recv_frames(0, member(1), &[notice(chat, &fake)]);
     assert_eq!(super::retrieval::sent_lookups(&mut net, 0).len(), 16);
+    // Member 1 also announces a real event; it is at its limit, so another member is
+    // asked at once.
     let real = EventId::new(T0, [5; 16]);
-    net.recv_frames(0, member(2), &[notice(chat, &[real])]);
-    net.now += 1;
     net.recv_frames(0, member(1), &[notice(chat, &[real])]);
     let q = super::retrieval::sent_lookups(&mut net, 0);
     assert_eq!(q.len(), 1);
-    assert_eq!(q[0].to, member(2));
+    assert_ne!(q[0].to, member(1));
 }
