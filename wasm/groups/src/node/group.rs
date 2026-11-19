@@ -770,7 +770,17 @@ impl Node {
         let Some(cur) = self.current_epoch(&group) else {
             return;
         };
+        // After "Dissolve & Delete" the dissolved epoch is erased in the end, while side
+        // branches stay (§5.8): the one left current is no later root the device accepted, and
+        // the group stays dissolved. A former owner's branch, whose handover was erased with
+        // the line, would otherwise take the group back (§5.9, D.76).
+        let erased = |n: &Self, e: &ChatId| !n.t.epochs.contains(e);
         match self.group_status(&group) {
+            GroupStatus::Dissolved {
+                epoch,
+                must_delete: true,
+                ..
+            } if erased(self, &epoch) => {}
             GroupStatus::Removed { epoch, .. }
             | GroupStatus::Left { epoch, .. }
             | GroupStatus::Dissolved { epoch, .. }
