@@ -789,6 +789,11 @@ fn query_floods_and_version_floods_queue_a_bounded_amount() {
     }
     let (answers, _) = queued_for_peer(&net, 0, member(1));
     assert!(answers <= 512, "{answers} answers queued");
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    dev.node
+        .set_accepted_contact(&mut dev.store, member(2), true, now, &mut net.rng)
+        .unwrap();
     for v in 2..300u64 {
         let mut pt = Vec::new();
         prost::encoding::encode_varint(v, &mut pt);

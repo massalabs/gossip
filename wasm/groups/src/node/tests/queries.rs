@@ -290,25 +290,135 @@ fn membership_queries_are_answered_and_strangers_ignored() {
     assert!(net.poll(0).is_empty());
 }
 
+impl Net {
+    /// Device `d` declares (or clears) `peer` as a contact its user accepted.
+    fn contact(&mut self, d: usize, peer: GossipId, accepted: bool) {
+        let now = self.now;
+        let dev = &mut self.devs[d];
+        dev.node
+            .set_accepted_contact(&mut dev.store, peer, accepted, now, &mut self.rng)
+            .unwrap();
+    }
+
+    fn restart_node(&mut self, d: usize) {
+        let dev = &mut self.devs[d];
+        dev.node = Node::open(&dev.store, member(d)).unwrap();
+    }
+}
+
+/// A plaintext of wire version `v` and `len` bytes in all, whatever follows the prefix.
+fn of_version(v: u64, len: usize) -> Vec<u8> {
+    let mut pt = Vec::new();
+    prost::encoding::encode_varint(v, &mut pt);
+    pt.resize(len.max(pt.len()), 0);
+    pt
+}
+
+/// §13.8: a plaintext of a higher version is answered with one version notice, at most once
+/// per peer and version per 24 hours, and only to a contact the user accepted, whether or not
+/// it shares a group; never a penalty.
 #[test]
-fn a_higher_version_gets_one_version_notice_per_day() {
+fn a_higher_version_from_an_accepted_contact_gets_one_version_notice_per_day() {
     let mut net = Net::new(3, 1);
-    let higher = [2u8, 0];
-    net.recv(0, member(1), &higher);
+    let stranger = GossipId::from_bytes([0x77; 32]);
+    net.contact(0, stranger, true);
+    net.restart_node(0);
+    assert_eq!(net.devs[0].node.accepted_contacts(), vec![stranger]);
+    let higher = of_version(2, 2);
+    net.recv(0, stranger, &higher);
     let out = net.poll(0);
-    assert_eq!(out.len(), 1);
-    assert_eq!(out[0].1, wire::version_notice());
-    net.recv(0, member(1), &higher);
+    assert_eq!(out, vec![(stranger, wire::version_notice())]);
+    net.recv(0, stranger, &higher);
     assert!(net.poll(0).is_empty());
     net.now += DAY;
-    net.recv(0, member(1), &higher);
+    net.recv(0, stranger, &higher);
     assert_eq!(net.poll(0).len(), 1);
-    // A lower version, and a non-member, get nothing.
-    net.recv(0, member(1), &[0u8]);
-    net.recv(0, GossipId::from_bytes([0x77; 32]), &higher);
+    // Larger than any version-1 plaintext may be: the prefix is read first.
+    net.recv(
+        0,
+        stranger,
+        &of_version(3, crate::constants::MAX_PLAINTEXT_BYTES + 10),
+    );
+    assert_eq!(net.poll(0), vec![(stranger, wire::version_notice())]);
+    // Cleared: nothing more.
+    net.contact(0, stranger, false);
+    net.now += DAY;
+    net.recv(0, stranger, &higher);
     assert!(net.poll(0).is_empty());
-    // The version notice of a peer records its version.
-    net.recv(0, member(2), &wire::version_notice());
+    assert_eq!(net.devs[0].node.score(&stranger), 500_000);
+}
+
+/// No version notice for a co-member that is no accepted contact (its connection is
+/// automatic), nor for an unknown peer, nor for a lower version; no penalty either way.
+#[test]
+fn a_higher_version_from_anyone_else_gets_silence() {
+    let mut net = Net::new(3, 1);
+    let before = net.devs[0].node.score(&member(1));
+    net.recv(0, member(1), &of_version(2, 2));
+    net.recv(0, GossipId::from_bytes([0x77; 32]), &of_version(2, 2));
+    net.contact(0, member(2), true);
+    net.recv(0, member(2), &of_version(0, 2));
+    assert!(net.poll(0).is_empty());
+    assert_eq!(net.devs[0].node.score(&member(1)), before);
+    assert_eq!(net.devs[0].node.score(&member(2)), before);
+}
+
+/// A peer cycling through version numbers gets at most a few notices a day, and the device
+/// remembers a bounded number of versions for it.
+#[test]
+fn a_peer_cycling_versions_gets_a_bounded_number_of_notices() {
+    let mut net = Net::new(3, 1);
+    net.contact(0, member(2), true);
+    let mut sent = 0;
+    for v in 2..300u64 {
+        net.recv(0, member(2), &of_version(v, 2));
+        sent += net.poll(0).len();
+    }
+    assert_eq!(sent, crate::node::timing::VERSION_NOTICES_PER_PEER);
+    let remembered = net.devs[0]
+        .node
+        .t
+        .peers
+        .get(&member(2))
+        .map_or(0, |r| r.version_notices.len());
+    assert!(remembered <= crate::node::timing::VERSION_NOTICES_PER_PEER);
+    net.now += DAY;
+    for v in 300..310u64 {
+        net.recv(0, member(2), &of_version(v, 2));
+        sent += net.poll(0).len();
+    }
+    assert_eq!(sent, 2 * crate::node::timing::VERSION_NOTICES_PER_PEER);
+}
+
+/// A version-1 plaintext that is merely malformed gets no notice: it is rejected, and a
+/// member that sends it is penalised as before.
+#[test]
+fn a_malformed_version_one_plaintext_gets_no_notice() {
+    let mut net = Net::new(3, 1);
+    net.contact(0, member(1), true);
+    let container = proto::Container {
+        frames: vec![vec![0xff, 0xff]],
+    };
+    let mut pt = vec![1u8];
+    pt.extend(container.encode_to_vec());
+    net.recv(0, member(1), &pt);
+    assert!(net.poll(0).is_empty());
+    assert!(net.devs[0].node.score(&member(1)) < 500_000);
+}
+
+/// A version notice received, solicited or not, from any peer in any state, changes nothing
+/// but the version recorded for a peer that shares a group, and is never a penalty.
+#[test]
+fn a_version_notice_received_is_never_an_error() {
+    let mut net = Net::new(3, 1);
+    let stranger = GossipId::from_bytes([0x77; 32]);
+    for from in [member(1), member(2), stranger] {
+        let before = net.devs[0].node.score(&from);
+        net.recv(0, from, &wire::version_notice());
+        net.recv(0, from, &wire::version_notice());
+        assert_eq!(net.devs[0].node.score(&from), before);
+    }
+    assert!(net.poll(0).is_empty());
     assert_eq!(
         net.devs[0].node.t.peers.get(&member(2)).unwrap().version,
         Some(1)
