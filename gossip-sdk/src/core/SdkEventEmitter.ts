@@ -6,6 +6,7 @@ import { logger } from '../utils/logs.js';
 import mitt from 'mitt';
 import type { Message, Discussion, Contact } from '../db';
 import type { SessionStatus } from '../wasm/bindings';
+import type { GroupChangeKind } from '../services/groups.js';
 
 export enum SdkEventType {
   MESSAGE_RECEIVED = 'messageReceived',
@@ -23,6 +24,8 @@ export enum SdkEventType {
   DISCUSSION_UPDATED = 'discussionUpdated',
   MESSAGE_ACKNOWLEDGED = 'messageAcknowledged',
   CONTACT_DELETED = 'contactDeleted',
+  /** Group chats changed: invitations, membership, messages, state. */
+  GROUPS_CHANGED = 'groupsChanged',
   ERROR = 'error',
 }
 
@@ -51,6 +54,9 @@ export type SdkEvents = {
     messageDbId: number;
   };
   [SdkEventType.CONTACT_DELETED]: { contactUserId: string };
+  [SdkEventType.GROUPS_CHANGED]: {
+    changes: { groupId: string; kind: GroupChangeKind }[];
+  };
   [SdkEventType.ERROR]: { error: Error; context: string };
 };
 
