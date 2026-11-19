@@ -503,26 +503,25 @@ const GroupSettings: React.FC = () => {
           ) : (
             <ul className="max-h-[50vh] overflow-y-auto divide-y divide-border">
               {addable.map(c => (
-                <li
-                  key={c.userId}
-                  className="flex items-center justify-between py-2 gap-2"
-                >
-                  <span className="text-sm min-w-0 truncate">
-                    <SafeName name={c.name} />
-                  </span>
-                  <input
-                    type="checkbox"
-                    aria-label={c.name}
-                    checked={toAdd.has(c.userId)}
-                    onChange={() =>
-                      setToAdd(s => {
-                        const n = new Set(s);
-                        if (n.has(c.userId)) n.delete(c.userId);
-                        else n.add(c.userId);
-                        return n;
-                      })
-                    }
-                  />
+                <li key={c.userId}>
+                  <label className="flex items-center justify-between py-2 gap-2 cursor-pointer">
+                    <span className="text-sm min-w-0 truncate">
+                      <SafeName name={c.name} />
+                    </span>
+                    <input
+                      type="checkbox"
+                      aria-label={c.name}
+                      checked={toAdd.has(c.userId)}
+                      onChange={() =>
+                        setToAdd(s => {
+                          const n = new Set(s);
+                          if (n.has(c.userId)) n.delete(c.userId);
+                          else n.add(c.userId);
+                          return n;
+                        })
+                      }
+                    />
+                  </label>
                 </li>
               ))}
             </ul>
