@@ -12,6 +12,7 @@ members = [
     "sessions",
     "main",
     "secure-storage",
+    "groups",
     "uniffi-bindgen",
     # Offline Bluetooth mesh node (native only), see mesh/README.md
     "mesh/gossip-wire",
