@@ -1125,7 +1125,11 @@ impl Node {
         version: u64,
     ) -> Result<retrieval::Answer, NodeError> {
         let event = match wire::decode_event_blob(blob, version) {
-            Ok(EventObject::Message(e)) => e,
+            Ok(EventObject::Message(e)) => {
+                // A message event frame is taking part in a chat of two (§5.12).
+                self.note_participation(cx, &e.chat_id(), from);
+                e
+            }
             Ok(EventObject::Root(r)) => return self.receive_root(cx, from, *r, group::Via::Direct),
             Ok(EventObject::Leave(l)) => {
                 return self.receive_signed(cx, from, records::SignedObject::Leave(l), None);

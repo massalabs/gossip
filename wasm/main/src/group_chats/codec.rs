@@ -693,7 +693,8 @@ record!(InvitationSummary {
     closed_before,
     rejoins,
     migrate_from,
-    migration_of
+    migration_of,
+    continues
 });
 variants!(TimelineLine {
     Founded { epoch, owner },

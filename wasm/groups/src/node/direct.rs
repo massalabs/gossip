@@ -17,6 +17,13 @@
 //!   [`ChangeKind::Superseded`]. It is judged whenever the
 //!   second of the two becomes held: on receipt, on creation, and when the caller declares
 //!   what it knows.
+//! - **Continuing a conversation.** The owner of an automatic chat records, for good, when
+//!   the other person first took part in it (a message event, a notice of one or a query
+//!   about its messages, received from that person in that chat). A creating root from that
+//!   person founded after it took part is no crossing: it is an invitation that continues
+//!   this device's chat ([`super::InvitationSummary::continues`]); accepting it supersedes
+//!   that chat, declining leaves it. A root founded before (by the two clocks) still follows
+//!   the tie rule.
 //! - **What the caller declares** decides the receiving side only. A **migration**
 //!   ([`Node::migration_of`]) is shown when the caller declared an earlier conversation with
 //!   the owner at that version ([`Node::set_earlier_conversation`]); a **new contact**'s chat
@@ -202,7 +209,8 @@ impl Node {
 
     /// This device's own migration group with `peer` at format `version` that a peer's
     /// creation pairs with: an installed root it created founding a group of the two with
-    /// that `migrate_from`, continued by no successor it holds, in an active group.
+    /// that `migrate_from`, in an active group that is still a chat of the two (or of this
+    /// device alone, after the peer's signed decline), owned by this device.
     fn own_migration(&self, peer: GossipId, version: u64) -> Option<ChatId> {
         self.t
             .epochs
@@ -217,11 +225,22 @@ impl Node {
                     && r.root.migrate_from() == Some(version)
                     && r.root.members().len() == 2
                     && r.root.is_member(&peer)
-                    && self.gx.children.get(c).is_none_or(BTreeSet::is_empty)
                     && self.group_status(c) == GroupStatus::Active
+                    && self.still_of_two(c, peer)
             })
             .map(|(c, _)| *c)
             .min()
+    }
+
+    /// Whether the current epoch of the group of `chat` is owned by this device and lists no
+    /// one but this device and `peer`.
+    fn still_of_two(&self, chat: &ChatId, peer: GossipId) -> bool {
+        self.current_epoch(chat)
+            .and_then(|c| self.t.epochs.get(&c))
+            .is_some_and(|r| {
+                r.root.owner_id() == self.me
+                    && r.root.members().iter().all(|m| *m == self.me || *m == peer)
+            })
     }
 
     /// The peer's migration groups with this device at format `version` that this device
@@ -260,6 +279,10 @@ impl Node {
             return Ok(false);
         };
         if let Some(mine) = self.own_migration(peer, v) {
+            if self.continues_after_part(root, mine) {
+                // An invitation to continue the conversation in the peer's chat.
+                return Ok(false);
+            }
             self.settle_pair(cx, mine, root.clone(), from)?;
             return Ok(true);
         }
@@ -362,6 +385,55 @@ impl Node {
         Ok(())
     }
 
+    /// Records that the other person of an automatic chat of two this device founded took
+    /// part in it (§5.12): `from` sent it, about an epoch `chat` of it, a message event, a
+    /// notice of one or a query about its messages. Kept for good, with when it was first
+    /// seen.
+    pub(crate) fn note_participation(&mut self, cx: &mut Cx<'_>, chat: &ChatId, from: GossipId) {
+        if from == self.me || !self.t.epochs.contains(chat) {
+            return;
+        }
+        let group = self.group_of(chat);
+        if self
+            .t
+            .group_recs
+            .get(&group)
+            .is_some_and(|g| g.took_part.is_some())
+            || !self.own_direct_chat(&group)
+            || !self
+                .t
+                .epochs
+                .get(&group)
+                .is_some_and(|r| r.root.is_member(&from))
+        {
+            return;
+        }
+        self.group_rec_mut(group).took_part = Some(cx.now);
+    }
+
+    /// Whether the peer's creating root `theirs`, for the same two and `migrate_from` as
+    /// this device's own chat `mine`, continues the conversation rather than crossing it
+    /// (§5.12): the peer took part in `mine`, and founded `theirs` after that, as far as the
+    /// two clocks tell. A root founded before (two creations at once, the peer's root arriving
+    /// after the peer switched to `mine` and took part) is settled by the tie rule.
+    fn continues_after_part(&self, theirs: &Root, mine: ChatId) -> bool {
+        self.t
+            .group_recs
+            .get(&self.group_of(&mine))
+            .and_then(|g| g.took_part)
+            .is_some_and(|at| theirs.created_at() > at)
+    }
+
+    /// The chat of this device that the creating root `root` of a peer (an invitation)
+    /// continues (§5.12): its own automatic chat with that peer, in which the peer took part
+    /// before founding `root`. Accepting it supersedes that chat.
+    pub(crate) fn continued_by(&self, root: &Root, parent_held: bool) -> Option<ChatId> {
+        let (peer, v) = self.direct_creation(root, parent_held)?;
+        let mine = self.own_migration(peer, v)?;
+        self.continues_after_part(root, mine)
+            .then(|| self.group_of(&mine))
+    }
+
     /// Whether `group` is an automatic chat of two this device founded (§5.12): its first
     /// epoch is a creating root of this device and one other, with a known `migrate_from`.
     pub(crate) fn own_direct_chat(&self, group: &ChatId) -> bool {
@@ -405,7 +477,9 @@ impl Node {
                 continue;
             };
             if let Some(mine) = self.own_migration(peer, v) {
-                self.settle_pair(cx, mine, rec.root, rec.from)?;
+                if !self.continues_after_part(&rec.root, mine) {
+                    self.settle_pair(cx, mine, rec.root, rec.from)?;
+                }
                 continue;
             }
             if !self.holds_direct_chat(&peer)

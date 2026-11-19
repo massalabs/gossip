@@ -48,6 +48,17 @@ impl Node {
             if !self.authorize(from, entry) {
                 continue;
             }
+            // A query about the messages of a chat of two is taking part in it (§5.12).
+            if let QueryEntry::Op(
+                QueryOp::Event { chat_id, .. }
+                | QueryOp::SyncObj { chat_id, .. }
+                | QueryOp::TipsScan {
+                    anchor: chat_id, ..
+                },
+            ) = entry
+            {
+                self.note_participation(cx, chat_id, from);
+            }
             // An authorized entry from a member: it is online (§10.1).
             alive = alive || self.shares_epoch(&from);
             if queued >= QUEUED_ANSWERS_PER_PEER {
@@ -435,7 +446,11 @@ impl Node {
         for e in n.entries {
             let chat = e.chat_id;
             let id = match e.item {
-                EntryItem::Event(id) => id,
+                EntryItem::Event(id) => {
+                    // A notice of a message is taking part in a chat of two (§5.12).
+                    self.note_participation(cx, &chat, from);
+                    id
+                }
                 EntryItem::Root => {
                     // Acted on although the epoch is unknown (§4.6, §13.7), but only from a
                     // peer that shares an active accepted epoch with this device: otherwise
