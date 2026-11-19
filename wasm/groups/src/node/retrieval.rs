@@ -349,8 +349,9 @@ impl Node {
     /// preferring existing sessions; within a tier by score, then by the receipt time of the
     /// trigger (newer first), exact ties uniformly at random. A peer that answered "not
     /// available" or failed in this run, or whose earlier request is still outstanding, is
-    /// skipped. When the best candidate already has 16 lookups outstanding the task waits
-    /// for it rather than asking a lower-ranked peer.
+    /// skipped, and so is a peer that already has 16 lookups outstanding (§17.4): the next
+    /// candidate is asked instead, so that a peer announcing many IDs cannot hold back the
+    /// retrieval of what others can supply.
     fn select(
         &mut self,
         cx: &mut Cx<'_>,
@@ -390,21 +391,26 @@ impl Node {
                 limited,
             ));
         }
-        let Some(best) = ranked.iter().map(|(k, _, _)| *k).min() else {
+        if ranked.is_empty() {
             return if outstanding {
                 Selection::Wait
             } else {
                 Selection::Exhausted
             };
+        }
+        let Some(best) = ranked
+            .iter()
+            .filter(|(_, _, limited)| !limited)
+            .map(|(k, _, _)| *k)
+            .min()
+        else {
+            return Selection::Wait;
         };
         let ties: Vec<GossipId> = ranked
             .iter()
             .filter(|(k, _, limited)| *k == best && !limited)
             .map(|(_, p, _)| *p)
             .collect();
-        if ties.is_empty() {
-            return Selection::Wait;
-        }
         Selection::Peer(ties[uniform_below(cx.rng, ties.len())])
     }
 
