@@ -385,6 +385,8 @@ struct Sim {
     dissolver: Option<usize>,
     /// The owner forked and must resolve.
     forked: bool,
+    /// The first end of the owner's fork, which its restored device does not hold at first.
+    fork_end: Option<ChatId>,
     /// A second group of the founder, with the same members (the target of a takeover).
     second: Option<ChatId>,
     /// Signed objects built by hostile devices.
@@ -522,6 +524,7 @@ impl Sim {
             dissolved: false,
             dissolver: None,
             forked: false,
+            fork_end: None,
             second: None,
             forged_objects: Vec::new(),
             former_roots: BTreeSet::new(),
@@ -1307,17 +1310,16 @@ impl Sim {
                 Step::OwnerFork => {
                     // The owner creates a successor, then restores its backup and creates
                     // another one of an earlier epoch: two competing ends.
-                    if self
-                        .change(
-                            o,
-                            GroupChange::Successor {
-                                add: vec![],
-                                remove: vec![],
-                                name: Some("A".into()),
-                            },
-                        )
-                        .is_some()
-                    {
+                    let a = self.change(
+                        o,
+                        GroupChange::Successor {
+                            add: vec![],
+                            remove: vec![],
+                            name: Some("A".into()),
+                        },
+                    );
+                    if a.is_some() {
+                        self.fork_end = a;
                         self.send(o);
                         if let Some((b, held)) = self.devs[o].backup.take() {
                             self.devs[o].store = b;
@@ -1400,6 +1402,12 @@ impl Sim {
                             && !self.devs[*d].restored
                     });
                     let Some(heir) = heir else { continue };
+                    // The owner's device restored from its backup does not hold the other end
+                    // of its fork yet: the handover leaves that end to the former owner's line,
+                    // which the members listed in no handover root keep following (§5.9).
+                    let unresolved = self
+                        .fork_end
+                        .is_some_and(|a| !self.node(o).tables().epochs.contains(&a));
                     if self
                         .change(
                             o,
@@ -1412,6 +1420,9 @@ impl Sim {
                         )
                         .is_some()
                     {
+                        if unresolved {
+                            self.split = true;
+                        }
                         self.counters.handovers += 1;
                         if let Some(old) = self.group_of(o).map(|s| s.current) {
                             // Its root of the former epoch is the line's previous end.
@@ -2876,6 +2887,32 @@ mod direct {
                 match kind {
                     Kind::Migration { .. } => {
                         let (a, b) = (migration(x, y), migration(y, x));
+                        if a != b || a.len() != 1 {
+                            for d in [x, y] {
+                                let dev = &self.devs[d];
+                                eprintln!(
+                                    "device {d} {:?}: created {:?} accepted {:?} migrated {:?}",
+                                    gid(d),
+                                    dev.created,
+                                    dev.accepted,
+                                    dev.migrated
+                                );
+                                for (g, r) in self.groups(d) {
+                                    eprintln!(
+                                        "  holds {g:?} owner {:?} mf {:?}",
+                                        r.owner_id(),
+                                        r.migrate_from()
+                                    );
+                                }
+                            }
+                            eprintln!(
+                                "script {:?}",
+                                self.script
+                                    .iter()
+                                    .filter(|s| (s.1 == x || s.1 == y) && (s.2 == x || s.2 == y))
+                                    .collect::<Vec<_>>()
+                            );
+                        }
                         assert_eq!(a.len(), 1, "pair {x} {y}: {a:?}");
                         assert_eq!(a, b, "pair {x} {y}");
                     }
