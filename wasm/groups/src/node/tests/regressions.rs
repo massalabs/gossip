@@ -1389,3 +1389,27 @@ fn a_query_from_a_member_shows_it_is_alive() {
     );
     assert!(net.devs[0].node.responsive(&member(1)));
 }
+
+/// Found by the network simulation's check that honest members stay credible (code at
+/// `52917e98`, seed 15): an honest relay that had supplied and truly announced nothing to this
+/// device yet answered "not available" twice for events it had announced and pruned since
+/// (superseded by edits nobody had asked for), and was suspect with a score of 1/4.
+#[test]
+fn two_failed_announcements_leave_a_member_credible() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let gone: Vec<EventId> = (7..9u8).map(|r| EventId::new(T0, [r; 16])).collect();
+    net.recv_frames(0, member(1), &[notice(chat, &gone)]);
+    for s in super::retrieval::sent_lookups(&mut net, 0) {
+        if s.to == member(1) {
+            super::retrieval::answer(
+                &mut net,
+                0,
+                &s,
+                ResponseResult::Status(Status::NotAvailable),
+            );
+        }
+    }
+    let score = net.devs[0].node.score(&member(1));
+    assert!(score >= super::super::index::CREDIBLE, "{score}");
+}
