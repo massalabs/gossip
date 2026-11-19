@@ -2683,19 +2683,25 @@ mod direct {
                         .consent_to_direct_chat(&mut dev.store, gid(d), true, now, &mut self.rng)
                         .unwrap();
                     dev.consented.insert(d);
+                    // The requester founds the chat, as every automatic group of two, with
+                    // migrate_from = 0.
                     let dev = &mut self.devs[d];
                     let g = dev
                         .node
-                        .create_group(
+                        .create_group_with(
                             &mut dev.store,
                             &s,
                             String::new(),
                             vec![gid(peer)],
+                            GroupOptions {
+                                migrate_from: Some(0),
+                            },
                             now,
                             &mut self.rng,
                         )
                         .unwrap();
                     dev.created.insert(g);
+                    dev.migrated.insert(peer);
                 }
                 Kind::Plain => {
                     let dev = &mut self.devs[d];
@@ -2863,7 +2869,7 @@ mod direct {
                     let owner = root.owner_id();
                     let p = (0..N).find(|i| gid(*i) == owner).unwrap();
                     assert_eq!(root.members().len(), 2, "device {d}: {g:?}");
-                    let consent = dev.consented.contains(&p) && root.migrate_from().is_none();
+                    let consent = dev.consented.contains(&p) && root.migrate_from() == Some(0);
                     let tie = dev.migrated.contains(&p)
                         && root.migrate_from() == Some(0)
                         && owner.as_bytes() < gid(d).as_bytes();
@@ -2917,21 +2923,10 @@ mod direct {
                         assert_eq!(a, b, "pair {x} {y}");
                     }
                     Kind::Contact { .. } => {
-                        // The chat founded by each requester is held by both (two when the
-                        // requests crossed: nothing ties a group to a request).
-                        let of = |d: usize, p: usize| -> BTreeSet<ChatId> {
-                            self.groups(d)
-                                .into_iter()
-                                .filter(|(_, r)| {
-                                    r.members().len() == 2
-                                        && r.is_member(&gid(p))
-                                        && r.migrate_from().is_none()
-                                })
-                                .map(|(g, _)| g)
-                                .collect()
-                        };
-                        assert!(!of(x, y).is_empty(), "contact {x} {y}");
-                        assert_eq!(of(x, y), of(y, x), "contact {x} {y}");
+                        // One chat, held by both, also when the requests crossed.
+                        let (a, b) = (migration(x, y), migration(y, x));
+                        assert_eq!(a.len(), 1, "contact {x} {y}: {a:?}");
+                        assert_eq!(a, b, "contact {x} {y}");
                     }
                     Kind::Plain => {
                         let held = self.groups(y).values().any(|r| {
@@ -2959,7 +2954,7 @@ mod direct {
                     && r.root.members().len() == 2
                 {
                     sim.counters.direct_consents += u64::from(
-                        r.root.migrate_from().is_none()
+                        r.root.migrate_from() == Some(0)
                             && d.consented.iter().any(|p| gid(*p) == r.root.owner_id()),
                     );
                 }
