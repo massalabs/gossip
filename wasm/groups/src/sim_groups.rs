@@ -1722,8 +1722,9 @@ impl Sim {
                     r.status == EpochStatus::Installed
                         && r.root.root_type() == crate::root::RootType::Handover
                 });
+                let _ = holds_handover;
                 assert!(
-                    !self.former_roots.contains(&s.current) || !holds_handover,
+                    !self.former_roots.contains(&s.current),
                     "device {d} follows a former owner's root"
                 );
             }
@@ -1753,7 +1754,7 @@ impl Sim {
                 // Dissolve & Delete erases roots on a best-effort basis: a member that
                 // lagged cannot fetch the epochs that would join its conversations.
                 assert!(
-                    unverifiable || self.dissolve_delete,
+                    unverifiable,
                     "device {d} shows the group as {} conversations",
                     conversations.len()
                 );
@@ -1873,8 +1874,6 @@ impl Sim {
                     && !dev.closed
                     && !dev.restored
                     && !self.split
-                    // A side branch a Dissolve & Delete leaves stays active (§5.8).
-                    && !self.dissolved
                 {
                     assert!(
                         self.group_of(d)
@@ -1906,9 +1905,7 @@ impl Sim {
                 // Dissolve & Delete removes the handover roots a remaining side branch of a
                 // former owner was judged against: that branch may stay current on its own
                 // (reported as a limit, not checked).
-                if self.dissolve_delete && self.former_roots.contains(&s.current) {
-                    continue;
-                }
+
                 assert!(
                     matches!(s.status, MyStatus::Dissolved { .. }),
                     "device {d} did not apply the dissolve: {s:?}"
