@@ -5,7 +5,6 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
-import { MessageDirection, MessageStatus, MessageType } from '../../src/db';
 import { MockMessageProtocol } from '../mocks';
 import { setupSession } from '../utils';
 import { GossipSdk } from '../../src/gossip';
@@ -20,7 +19,6 @@ import type {
   MessageProtocolResponse,
 } from '../../src/api/messageProtocol/types';
 import type { SessionModule } from '../../src/wasm/session';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
 import { getTestStorageConfig } from '../testDb';
 
 /** Wraps a shared store with what a lossy, slow, partitionable path does. */
@@ -134,42 +132,6 @@ async function openPeer(
   return { sdk, internet, mesh };
 }
 
-async function sendText(from: GossipSdk, to: GossipSdk, content: string) {
-  const result = await from.messages.send({
-    ownerUserId: from.userId,
-    contactUserId: to.userId,
-    content,
-    type: MessageType.TEXT,
-    direction: MessageDirection.OUTGOING,
-    status: MessageStatus.WAITING_SESSION,
-    timestamp: new Date(),
-  });
-  expect(result.success).toBe(true);
-}
-
-async function texts(owner: GossipSdk, contact: GossipSdk): Promise<string[]> {
-  return (await owner.messages.getMessages(contact.userId))
-    .filter(
-      m =>
-        m.type === MessageType.TEXT && m.direction === MessageDirection.INCOMING
-    )
-    .map(m => m.content);
-}
-
-/** Fetches until `count` texts arrived or the attempts run out. */
-async function receive(
-  owner: GossipSdk,
-  contact: GossipSdk,
-  count: number
-): Promise<string[]> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    await owner.messages.fetch();
-    const received = await texts(owner, contact);
-    if (received.length >= count) return received;
-  }
-  return texts(owner, contact);
-}
-
 function sessionOf(sdk: GossipSdk): SessionModule {
   return (sdk as unknown as { state: { session: SessionModule } }).state
     .session;
@@ -198,85 +160,6 @@ describe('Messaging over internet and mesh transports', () => {
     await bob.sdk.destroy();
   });
 
-  it('keeps the conversation going over the mesh when the internet is cut', async () => {
-    alice.internet.down = true;
-    bob.internet.down = true;
-
-    await sendText(alice.sdk, bob.sdk, 'one');
-    await sendText(alice.sdk, bob.sdk, 'two');
-    await sendText(alice.sdk, bob.sdk, 'three');
-    expect(await receive(bob.sdk, alice.sdk, 3)).toEqual([
-      'one',
-      'two',
-      'three',
-    ]);
-    expect(internetStore.getStoredMessages().size).toBe(0);
-
-    // the reply over the mesh acknowledges Alice's messages
-    await sendText(bob.sdk, alice.sdk, 'got them');
-    expect(await receive(alice.sdk, bob.sdk, 1)).toEqual(['got them']);
-    const sent = (await alice.sdk.messages.getMessages(bob.sdk.userId)).filter(
-      m => m.direction === MessageDirection.OUTGOING
-    );
-    expect(sent.map(m => m.status)).toEqual([
-      MessageStatus.DELIVERED,
-      MessageStatus.DELIVERED,
-      MessageStatus.DELIVERED,
-    ]);
-    expect(bob.sdk.discussions.getStatus(alice.sdk.userId)).toBe(
-      SessionStatus.Active
-    );
-  });
-
-  it('marks messages that reached only the mesh', async () => {
-    alice.internet.down = true;
-    await sendText(alice.sdk, bob.sdk, 'mesh only');
-    alice.internet.down = false;
-    await sendText(alice.sdk, bob.sdk, 'both');
-    expect(await receive(bob.sdk, alice.sdk, 2)).toEqual(['mesh only', 'both']);
-
-    const sent = (await alice.sdk.messages.getMessages(bob.sdk.userId)).filter(
-      m =>
-        m.type === MessageType.TEXT && m.direction === MessageDirection.OUTGOING
-    );
-    expect(sent.map(m => m.metadata?.via)).toEqual(['mesh', undefined]);
-    const received = (
-      await bob.sdk.messages.getMessages(alice.sdk.userId)
-    ).filter(
-      m =>
-        m.type === MessageType.TEXT && m.direction === MessageDirection.INCOMING
-    );
-    // read right away: not delayed
-    expect(received.map(m => m.metadata?.delayed)).toEqual([
-      undefined,
-      undefined,
-    ]);
-  });
-
-  it('posts to the internet node what only the mesh took, once it answers', async () => {
-    alice.internet.down = true;
-    await sendText(alice.sdk, bob.sdk, 'later');
-    const onServer = internetStore.getStoredMessages().size;
-    // no server yet: the ciphertext waits in Alice's storage
-    expect(await alice.sdk.messages.repostMeshOnly()).toBe(0);
-    alice.internet.down = false;
-    expect(await alice.sdk.messages.repostMeshOnly()).toBe(1);
-    expect(internetStore.getStoredMessages().size).toBe(onServer + 1);
-    expect(await alice.sdk.messages.repostMeshOnly()).toBe(0);
-    const [sent] = (
-      await alice.sdk.messages.getMessages(bob.sdk.userId)
-    ).filter(
-      m =>
-        m.type === MessageType.TEXT && m.direction === MessageDirection.OUTGOING
-    );
-    expect(sent.metadata?.via).toBeUndefined();
-    expect(sent.status).toBe(MessageStatus.SENT);
-
-    // Bob, away from the mesh, reads it from the internet node
-    bob.mesh.down = true;
-    expect(await receive(bob.sdk, alice.sdk, 1)).toEqual(['later']);
-  });
-
   it('posts to the internet node an announcement only the mesh took', async () => {
     alice.internet.down = true;
     const boardBefore = internetStore.getStoredAnnouncements().length;
@@ -302,104 +185,6 @@ describe('Messaging over internet and mesh transports', () => {
     expect(discussion?.sendAnnouncement).toBeNull();
   });
 
-  it('delivers each message once despite delays, duplicates and reordering', async () => {
-    for (const path of [alice.internet, alice.mesh, bob.internet, bob.mesh]) {
-      path.duplicate = true;
-      path.shuffle = true;
-      path.maxDelayMs = 5;
-    }
-    const sentTexts = ['a', 'b', 'c', 'd', 'e'];
-    for (const text of sentTexts) await sendText(alice.sdk, bob.sdk, text);
-
-    expect(await receive(bob.sdk, alice.sdk, sentTexts.length)).toEqual(
-      sentTexts
-    );
-    expect(bob.sdk.discussions.getStatus(alice.sdk.userId)).toBe(
-      SessionStatus.Active
-    );
-  });
-
-  it('switches between transports as partitions come and go', async () => {
-    alice.mesh.down = true;
-    await sendText(alice.sdk, bob.sdk, 'over the internet');
-    alice.mesh.down = false;
-    alice.internet.down = true;
-    await sendText(alice.sdk, bob.sdk, 'over the mesh');
-
-    // Bob only reaches the internet first, then only the mesh
-    bob.mesh.down = true;
-    expect(await receive(bob.sdk, alice.sdk, 2)).toEqual(['over the internet']);
-    bob.mesh.down = false;
-    bob.internet.down = true;
-    expect(await receive(bob.sdk, alice.sdk, 2)).toEqual([
-      'over the internet',
-      'over the mesh',
-    ]);
-  });
-
-  it('reads pushed messages that arrive before their predecessors', async () => {
-    // Alice reaches neither store: capture what she sends instead
-    const captured: EncryptedMessage[] = [];
-    alice.internet.down = true;
-    meshStore.sendMessage = async message => {
-      captured.push(message);
-    };
-    bob.internet.down = true;
-    bob.mesh.down = true;
-    const sameSeeker = (a: Uint8Array, b: Uint8Array) =>
-      Buffer.from(a).equals(Buffer.from(b));
-
-    // A sender draws a fresh seeker for one message in four, and a message
-    // at a seeker Bob could not predict is only readable in order. Send
-    // rounds of three until Bob predicted a whole round (each round has a
-    // little more than one chance in two).
-    const expected: string[] = [];
-    let readOutOfOrder = false;
-    for (let round = 0; round < 16 && !readOutOfOrder; round++) {
-      captured.length = 0;
-      const sent = ['first', 'second', 'third'].map(text => `${text} ${round}`);
-      for (const text of sent) await sendText(alice.sdk, bob.sdk, text);
-      expect(captured).toHaveLength(3);
-      const [first, second, third] = captured;
-      const ahead = sessionOf(bob.sdk).getMessageBoardLookaheadKeys();
-
-      if (
-        sameSeeker(second.seeker, ahead[0]) &&
-        sameSeeker(third.seeker, ahead[1])
-      ) {
-        await bob.sdk.messages.ingestMessages([third]);
-        await bob.sdk.messages.ingestMessages([second, second]);
-        expect(await texts(bob.sdk, alice.sdk)).toEqual(expected);
-        await bob.sdk.messages.ingestMessages([first]);
-        readOutOfOrder = true;
-      } else {
-        // as a mesh node does: each one once Bob asks for its seeker
-        for (const message of captured) {
-          await bob.sdk.messages.ingestMessages([message]);
-        }
-      }
-      expected.push(...sent);
-      expect(await receive(bob.sdk, alice.sdk, expected.length)).toEqual(
-        expected
-      );
-    }
-    expect(readOutOfOrder).toBe(true);
-  });
-
-  it('ignores junk posted at a seeker instead of closing the session', async () => {
-    const [seeker] = sessionOf(bob.sdk).getMessageBoardReadKeys();
-    await bob.sdk.messages.ingestMessages([
-      { seeker, ciphertext: new Uint8Array([1, 2, 3]) },
-    ]);
-    await bob.sdk.messages.fetch();
-    expect(bob.sdk.discussions.getStatus(alice.sdk.userId)).toBe(
-      SessionStatus.Active
-    );
-
-    await sendText(alice.sdk, bob.sdk, 'still here');
-    expect(await receive(bob.sdk, alice.sdk, 1)).toEqual(['still here']);
-  });
-
   it('asks the mesh for the next messages and for addressed re-announcements', async () => {
     await bob.sdk.messages.fetch();
     const session = sessionOf(bob.sdk);
@@ -416,34 +201,6 @@ describe('Messaging over internet and mesh transports', () => {
     await alice.sdk.closeSession();
     expect(alice.mesh.wanted).toEqual([]);
     expect(alice.mesh.localWanted).toEqual([]);
-  });
-
-  it('brings a re-announcement to a contact who cannot reach the board', async () => {
-    for (const path of [alice.internet, alice.mesh, bob.internet, bob.mesh]) {
-      path.noBoard = true;
-    }
-    const reset = await alice.sdk.discussions.createSessionForContact(
-      bob.sdk.userId,
-      new Uint8Array(0)
-    );
-    expect(reset.success).toBe(true);
-    expect(internetStore.getStoredAnnouncements()).toHaveLength(2);
-
-    const mailboxes = sessionOf(bob.sdk)
-      .getReannouncementMailboxKeys()
-      .map(seeker => Buffer.from(seeker).toString('base64'));
-    const fetched = await bob.sdk.announcements.fetch();
-    expect(fetched.newAnnouncementsCount).toBe(1);
-
-    // the addressed entry and its seeker never went near the internet node
-    for (const path of [alice.internet, bob.internet]) {
-      for (const mailbox of mailboxes) {
-        expect(path.seenSeekers.has(mailbox)).toBe(false);
-      }
-    }
-
-    await sendText(alice.sdk, bob.sdk, 'new session');
-    expect(await receive(bob.sdk, alice.sdk, 1)).toEqual(['new session']);
   });
 
   it('accepts announcements pushed by a transport', async () => {

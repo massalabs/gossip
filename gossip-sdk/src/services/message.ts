@@ -13,7 +13,7 @@ import {
   MESSAGE_ID_SIZE,
 } from '../db/index.js';
 import { type MessageRow } from '../db/index.js';
-import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import { decodeUserId } from '../utils/userId.js';
 import {
   IMessageProtocol,
   EncryptedMessage,
@@ -22,14 +22,7 @@ import {
 import { SessionStatus } from '../wasm/bindings.js';
 import { SessionModule } from '../wasm/index.js';
 import {
-  serializeRegularMessage,
-  serializeReplyMessage,
-  serializeForwardMessage,
   serializeKeepAliveMessage,
-  serializeDeleteMessage,
-  serializeEditMessage,
-  serializeReactionMessage,
-  serializeRetentionPolicyMessage,
   deserializeMessage,
   isGroupMessage,
 } from '../utils/messageSerialization.js';
@@ -258,33 +251,12 @@ export function placeIncomingMessage(
   };
 }
 
-interface Decrypted {
-  content: string;
-  sentAt: Date;
-  /** The session read it past its age limit or dated before the previous one. */
-  stale?: boolean;
-  senderId: string;
-  seeker: Uint8Array;
-  messageId: Uint8Array; // 12-byte random ID
-  replyTo?: {
-    originalMsgId: Uint8Array;
-  };
-  forwardOf?: {
-    originalContent: string;
-    originalContactId?: Uint8Array;
-  };
-  deleteOf?: {
-    originalMsgId: Uint8Array;
-  };
-  editOf?: {
-    originalMsgId: Uint8Array;
-  };
-  reactionOf?: {
-    originalMsgId: Uint8Array;
-  };
-  encryptedMessage: Uint8Array;
-  type: MessageType;
-}
+/**
+ * The error of a send in the earlier one-to-one format (§2.1): conversations
+ * are groups, and nothing of that format is sent any more.
+ */
+export const LEGACY_FORMAT_NOT_SENT =
+  'The one-to-one format is no longer sent: conversations are groups';
 
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
@@ -344,13 +316,6 @@ export class MessageService {
 
   setPersistFlusher(flusher: () => Promise<void>): void {
     this.persistFlusher = flusher;
-  }
-
-  /** Emit MESSAGE_RECEIVED with a Message that may not have a DB id yet */
-  private emitMessageReceived(
-    message: Omit<Message, 'id'> & { id?: number }
-  ): void {
-    this.eventEmitter.emit(SdkEventType.MESSAGE_RECEIVED, message);
   }
 
   constructor(
@@ -418,7 +383,7 @@ export class MessageService {
 
       let previousSeekers = new Set<string>();
       let iterations = 0;
-      let newMessagesCount = 0;
+      const newMessagesCount = 0;
       let seekers: Uint8Array[] = [];
       // every seeker waited on during this fetch, to drop pushed messages once read
       const waitedSeekers = new Map<string, Uint8Array>();
@@ -478,15 +443,8 @@ export class MessageService {
           continue;
         }
 
-        const { decrypted: decryptedMessages, acknowledgedSeekers } =
+        const { acknowledgedSeekers } =
           await this.decryptMessages(encryptedMessages);
-        if (decryptedMessages.length > 0) {
-          const storedIds = await this.storeDecryptedMessages(
-            decryptedMessages,
-            this.session.userIdEncoded
-          );
-          newMessagesCount += storedIds.length;
-        }
 
         log.info('acknowledged seekers', {
           acknowledgedSeekers: Array.from(acknowledgedSeekers),
@@ -629,13 +587,18 @@ export class MessageService {
     return result.messageId;
   }
 
+  /**
+   * Decrypts what the board holds for us. A session message is read for the
+   * session (its acknowledgements) and then by its type only (§2.1, §13.1): a
+   * group plaintext goes to the group engine, a keep-alive carries nothing,
+   * and anything else, the earlier one-to-one format and types this release
+   * does not know included, is ignored: no row, no event, no log of it.
+   */
   private async decryptMessages(encrypted: EncryptedMessage[]): Promise<{
-    decrypted: Decrypted[];
     acknowledgedSeekers: Set<string>;
   }> {
     const log = logger.forMethod('decryptMessages');
 
-    const decrypted: Decrypted[] = [];
     const acknowledgedSeekers: Set<string> = new Set();
 
     for (const msg of encrypted) {
@@ -646,69 +609,34 @@ export class MessageService {
         );
         if (!out) continue;
 
+        // Acknowledgements belong to the session, whatever the message holds.
+        out.acknowledged_seekers.forEach((seeker: Uint8Array) =>
+          acknowledgedSeekers.add(encodeToBase64(seeker))
+        );
+
+        let deserialized: ReturnType<typeof deserializeMessage>;
         try {
-          const deserialized = deserializeMessage(out.message);
-
-          out.acknowledged_seekers.forEach((seeker: Uint8Array) =>
-            acknowledgedSeekers.add(encodeToBase64(seeker))
-          );
-
-          // A group message is handed to the group engine, which keeps its
-          // own records; nothing about it is stored or logged here.
-          if (isGroupMessage(deserialized)) {
-            if (deserialized.groupPlaintext && this.groupPlaintextHandler) {
-              try {
-                await this.groupPlaintextHandler(
-                  out.user_id,
-                  deserialized.groupPlaintext
-                );
-              } catch {
-                log.error('group plaintext not processed');
-              }
-            }
-            continue;
-          }
-
-          // keep-alive messages are just useful to keep the session alive, we don't need to store them
-          if (deserialized.type === MessageType.KEEP_ALIVE) {
-            continue;
-          }
-
-          // Delete control messages are handled at storage time; keep them in decrypted array
-
-          if (
-            !deserialized.messageId ||
-            deserialized.messageId.length !== MESSAGE_ID_SIZE
-          ) {
-            log.warn('missing or invalid messageId, skipping message', {
-              messageId: deserialized.messageId,
-            });
-          }
-
-          decrypted.push({
-            content: deserialized.content,
-            sentAt: new Date(Number(out.timestamp)),
-            stale: out.stale,
-            senderId: encodeUserId(out.user_id),
-            seeker: msg.seeker,
-            messageId: deserialized.messageId ?? new Uint8Array(),
-            encryptedMessage: msg.ciphertext,
-            type: deserialized.type,
-            replyTo: deserialized.replyTo,
-            forwardOf: deserialized.forwardOf,
-            deleteOf: deserialized.deleteOf,
-            editOf: deserialized.editOf,
-            reactionOf: deserialized.reactionOf,
-          });
-        } catch (deserializationError) {
-          log.error('deserialization failed', {
-            error:
-              deserializationError instanceof Error
-                ? deserializationError.message
-                : 'Unknown error',
-            seeker: encodeToBase64(msg.seeker),
-          });
+          deserialized = deserializeMessage(out.message);
+        } catch {
+          continue;
         }
+
+        // A group message is handed to the group engine, which keeps its
+        // own records; nothing about it is stored or logged here.
+        if (isGroupMessage(deserialized)) {
+          if (deserialized.groupPlaintext && this.groupPlaintextHandler) {
+            try {
+              await this.groupPlaintextHandler(
+                out.user_id,
+                deserialized.groupPlaintext
+              );
+            } catch {
+              log.error('group plaintext not processed');
+            }
+          }
+        }
+        // Keep-alives only keep the session alive; every other type is
+        // ignored.
       } catch (e) {
         log.error('decryption failed', {
           error: e instanceof Error ? e.message : 'Unknown error',
@@ -717,7 +645,7 @@ export class MessageService {
       }
     }
 
-    return { decrypted, acknowledgedSeekers };
+    return { acknowledgedSeekers };
   }
 
   /**
@@ -731,295 +659,6 @@ export class MessageService {
     const kinds = this.messageProtocol.takeAcceptedBy?.(seeker);
     if (!kinds || kinds.includes('internet')) return undefined;
     return { ...(msg.metadata ?? {}), via: 'mesh' };
-  }
-
-  private async storeDecryptedMessages(
-    decrypted: Decrypted[],
-    ownerUserId: string
-  ): Promise<number[]> {
-    const log = logger.forMethod('storeDecryptedMessages');
-
-    const storedIds: number[] = [];
-
-    for (const message of decrypted) {
-      // Handle delete control messages by updating the referenced message in-place
-      if (
-        message.type === MessageType.DELETED &&
-        message.deleteOf?.originalMsgId
-      ) {
-        const target = await this.findMessageByMsgId(
-          message.deleteOf.originalMsgId,
-          ownerUserId,
-          message.senderId
-        );
-
-        if (!target || !target.id) {
-          log.warn('delete target not found', {
-            originalMsgId: encodeToBase64(message.deleteOf.originalMsgId),
-          });
-          continue;
-        }
-
-        const resDb = await this.PerformDeleteMessage(target);
-        if (!resDb.success) {
-          throw new Error(
-            resDb.error?.message ?? 'Failed to delete message from db'
-          );
-        }
-
-        continue;
-      }
-
-      // Handle EDIT control messages by updating the referenced message in-place
-      if (message.editOf?.originalMsgId) {
-        const target = await this.findMessageByMsgId(
-          message.editOf.originalMsgId,
-          ownerUserId,
-          message.senderId
-        );
-
-        if (!target || !target.id) {
-          log.warn('edit target not found', {
-            originalMsgId: encodeToBase64(message.editOf.originalMsgId),
-          });
-          continue;
-        }
-
-        const mergedMetadata = {
-          ...(target.metadata ?? {}),
-          edited: true,
-        };
-
-        // Emit before DB write so UI updates instantly
-        this.emitMessageReceived({
-          ...target,
-          content: message.content,
-          metadata: mergedMetadata,
-        });
-
-        const res = await this.performEditMessage(
-          message.content,
-          target,
-          mergedMetadata
-        );
-        if (!res.success) {
-          throw new Error(res.error?.message ?? 'Failed to edit message in db');
-        }
-
-        // Do not insert a new message row for edit control messages
-        continue;
-      }
-
-      // Handle retention policy control messages by updating the discussion setting
-      if (message.type === MessageType.RETENTION_POLICY) {
-        const durationSeconds = parseInt(message.content, 10);
-        const duration =
-          isNaN(durationSeconds) || durationSeconds <= 0
-            ? null
-            : durationSeconds;
-        await this.queries.discussions.updateByOwnerAndContact(
-          ownerUserId,
-          message.senderId,
-          {
-            messageRetentionDuration: duration,
-            retentionPolicySetAt: duration ? Date.now() : null,
-          }
-        );
-        const discussion = await this.queries.discussions.getByOwnerAndContact(
-          ownerUserId,
-          message.senderId
-        );
-        if (!discussion) {
-          this.eventEmitter.emit(SdkEventType.ERROR, {
-            error: new Error(
-              'could no retrieve discussion after updating retention policy'
-            ),
-            context: 'storeDecryptedMessages',
-          });
-          continue;
-        }
-        this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
-        // Do not insert a new message row for retention policy control messages
-        continue;
-      }
-
-      // Handle reaction messages by inserting a separate row
-      if (
-        message.type === MessageType.REACTION &&
-        message.reactionOf?.originalMsgId
-      ) {
-        const discussion = await this.queries.discussions.getByOwnerAndContact(
-          ownerUserId,
-          message.senderId
-        );
-
-        if (!discussion) {
-          log.error('no discussion for incoming reaction message', {
-            senderId: message.senderId,
-            preview: message.content.slice(0, 16),
-          });
-          continue;
-        }
-
-        const reactionAt = placeIncomingMessage(
-          message.sentAt,
-          !!message.stale,
-          Date.now()
-        ).timestamp;
-        const id = await this.queries.messages.insert({
-          messageId: message.messageId,
-          ownerUserId,
-          contactUserId: discussion.contactUserId,
-          content: message.content,
-          type: MessageType.REACTION,
-          direction: MessageDirection.INCOMING,
-          status: MessageStatus.DELIVERED,
-          timestamp: reactionAt,
-          metadata: serializeMetadata({}),
-          reactionOf: serializeReactionOf(message.reactionOf),
-        });
-
-        this.emitMessageReceived({
-          id,
-          messageId: message.messageId,
-          ownerUserId,
-          contactUserId: discussion.contactUserId,
-          content: message.content,
-          type: MessageType.REACTION,
-          direction: MessageDirection.INCOMING,
-          status: MessageStatus.DELIVERED,
-          timestamp: reactionAt,
-          reactionOf: message.reactionOf,
-        });
-
-        storedIds.push(id);
-        // Do not update discussion lastMessageContent for reactions
-        continue;
-      }
-
-      const discussion = await this.queries.discussions.getByOwnerAndContact(
-        ownerUserId,
-        message.senderId
-      );
-
-      if (!discussion) {
-        log.error('no discussion for incoming message', {
-          senderId: message.senderId,
-          preview: message.content.slice(0, 50),
-        });
-        continue;
-      }
-
-      // If received msg has same messageId as a previously received msg
-      const isDuplicate = await this.handleDuplicateMessageId(
-        message,
-        ownerUserId
-      );
-
-      if (isDuplicate) {
-        log.info('Duplicate message received, skip  ping', {
-          senderId: message.senderId,
-          preview: message.content.slice(0, 30),
-        });
-        continue;
-      }
-
-      if (message.replyTo?.originalMsgId) {
-        const original = await this.findMessageByMsgId(
-          message.replyTo.originalMsgId,
-          ownerUserId,
-          message.senderId
-        );
-        if (!original) {
-          log.warn('reply target not found', {
-            originalMsgId: encodeToBase64(message.replyTo.originalMsgId),
-          });
-        }
-      }
-
-      const placed = placeIncomingMessage(
-        message.sentAt,
-        !!message.stale,
-        Date.now()
-      );
-      // the sender's own date stays available when it was not used
-      const incomingMetadata = placed.delayed
-        ? {
-            delayed: true,
-            ...(placed.untrustedSentAt && {
-              sentAt: message.sentAt.getTime(),
-            }),
-          }
-        : {};
-      const incomingMsg: Omit<Message, 'id'> = {
-        messageId: message.messageId,
-        ownerUserId,
-        contactUserId: discussion.contactUserId,
-        content: message.content,
-        type: message.type,
-        direction: MessageDirection.INCOMING,
-        status: MessageStatus.DELIVERED,
-        timestamp: placed.timestamp,
-        metadata: incomingMetadata,
-        replyTo: message.replyTo,
-        forwardOf: message.forwardOf,
-      };
-
-      const id = await this.queries.messages.insert({
-        messageId: message.messageId,
-        ownerUserId,
-        contactUserId: discussion.contactUserId,
-        content: message.content,
-        type: message.type,
-        direction: MessageDirection.INCOMING,
-        status: MessageStatus.DELIVERED,
-        timestamp: placed.timestamp,
-        metadata: serializeMetadata(incomingMetadata),
-        replyTo: serializeReplyTo(message.replyTo),
-        forwardOf: serializeForwardOf(message.forwardOf),
-      });
-
-      // Update discussion in SQLite
-      const now = new Date();
-      await this.queries.discussions.updateById(discussion.id, {
-        lastMessageId: id,
-        lastMessageContent: message.content,
-        lastMessageTimestamp: placed.timestamp,
-        updatedAt: now,
-        lastSyncTimestamp: now,
-      });
-      await this.queries.discussions.incrementUnreadCount(discussion.id);
-
-      storedIds.push(id);
-
-      // Re-emit with DB id so the store patches the optimistic message
-      this.emitMessageReceived({ ...incomingMsg, id });
-      this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
-    }
-
-    return storedIds;
-  }
-
-  /**
-   * Checks for duplicate incoming messages based on messageId (12-byte random).
-   * Returns true if a message with the same messageId already exists (skips storage).
-   */
-  private async handleDuplicateMessageId(
-    message: Decrypted,
-    ownerUserId: string
-  ): Promise<boolean> {
-    if (message.messageId && message.messageId.length > 0) {
-      const existing = await this.queries.messages.findByMessageId(
-        ownerUserId,
-        message.senderId,
-        message.messageId
-      );
-
-      if (existing) {
-        return true;
-      }
-    }
-    return false;
   }
 
   async findMessageByMsgId(
@@ -1085,6 +724,12 @@ export class MessageService {
     log.info('queueing message', {
       messageType: message.type,
     });
+
+    // §2.1: the earlier one-to-one format is no longer sent; only the
+    // session's own keep-alives go through this queue.
+    if (message.type !== MessageType.KEEP_ALIVE) {
+      return { success: false, error: LEGACY_FORMAT_NOT_SENT };
+    }
 
     const peerId = decodeUserId(message.contactUserId);
     if (peerId.length !== 32) {
@@ -1163,129 +808,17 @@ export class MessageService {
     };
   }
 
+  /**
+   * The session message of a queued row. Only keep-alives are queued now
+   * (§2.1); a row of the earlier one-to-one format is never serialized again.
+   */
   private async serializeMessage(
     message: Message
   ): Promise<Result<Uint8Array, string>> {
-    const log = logger.forMethod('serializeMessage');
-
-    if (
-      !message.messageId &&
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.RETENTION_POLICY
-    ) {
-      return {
-        success: false,
-        error: 'Message ID is required',
-      };
+    if (message.type === MessageType.KEEP_ALIVE) {
+      return { success: true, data: serializeKeepAliveMessage() };
     }
-
-    if (message.replyTo) {
-      const originalMessage = await this.findMessageByMsgId(
-        message.replyTo.originalMsgId,
-        message.ownerUserId,
-        message.contactUserId
-      );
-
-      if (!originalMessage) {
-        return {
-          success: false,
-          error: 'Original message not found for reply',
-        };
-      }
-
-      return {
-        success: true,
-        data: serializeReplyMessage(
-          message.content,
-          message.replyTo.originalMsgId,
-          message.messageId!
-        ),
-      };
-    } else if (message.type === MessageType.KEEP_ALIVE) {
-      return {
-        success: true,
-        data: serializeKeepAliveMessage(),
-      };
-    } else if (message.type === MessageType.RETENTION_POLICY) {
-      const durationSeconds = parseInt(message.content, 10);
-      return {
-        success: true,
-        data: serializeRetentionPolicyMessage(
-          isNaN(durationSeconds) || durationSeconds < 0 ? 0 : durationSeconds
-        ),
-      };
-    } else if (message.type === MessageType.DELETED && message.deleteOf) {
-      // Serialize a delete control message targeting an existing messageId
-      const originalMsgId = message.deleteOf.originalMsgId;
-      if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
-        return {
-          success: false,
-          error: 'Original messageId is required for delete messages',
-        };
-      }
-      return {
-        success: true,
-        data: serializeDeleteMessage(originalMsgId, message.messageId!),
-      };
-    } else if (message.editOf) {
-      const originalMsgId = message.editOf.originalMsgId;
-      if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
-        return {
-          success: false,
-          error: 'Original messageId is required for edit messages',
-        };
-      }
-
-      return {
-        success: true,
-        data: serializeEditMessage(
-          message.content,
-          originalMsgId,
-          message.messageId!
-        ),
-      };
-    } else if (message.forwardOf) {
-      try {
-        return {
-          success: true,
-          data: serializeForwardMessage(
-            message.forwardOf.originalContent ?? '',
-            message.content,
-            message.messageId!,
-            message.forwardOf.originalContactId
-          ),
-        };
-      } catch (error) {
-        log.error('failed to serialize forward message', error);
-        return {
-          success: false,
-          error: 'Failed to serialize forward message',
-        };
-      }
-    } else if (message.type === MessageType.REACTION && message.reactionOf) {
-      const originalMsgId = message.reactionOf.originalMsgId;
-      if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
-        return {
-          success: false,
-          error: 'Original messageId is required for reaction messages',
-        };
-      }
-
-      return {
-        success: true,
-        data: serializeReactionMessage(
-          message.content,
-          originalMsgId,
-          message.messageId!
-        ),
-      };
-    } else {
-      // Regular message with type tag
-      return {
-        success: true,
-        data: serializeRegularMessage(message.content, message.messageId!),
-      };
-    }
+    return { success: false, error: LEGACY_FORMAT_NOT_SENT };
   }
 
   /**
@@ -1374,6 +907,17 @@ export class MessageService {
         // READY SQL write. The READY block below still handles retries
         // (delayed sends, post-failure retries), where the encrypted
         // bytes need to survive a restart.
+        // A row of the earlier one-to-one format that was never encrypted is
+        // never sent (§2.1): it stays in its archive, unsent. One encrypted
+        // before (READY) is sent as stored below: the session already moved
+        // for it, and the peer's chain of seekers needs it.
+        if (
+          currentStatus === MessageStatus.WAITING_SESSION &&
+          msg.type !== MessageType.KEEP_ALIVE
+        ) {
+          continue;
+        }
+
         if (
           currentStatus === MessageStatus.WAITING_SESSION &&
           sessionStatus === SessionStatus.Active
@@ -1766,7 +1310,9 @@ export class MessageService {
   }
 
   /**
-   * Count pending outgoing messages for a contact (WAITING_SESSION/READY).
+   * Count the outgoing messages for a contact that will still be sent
+   * (WAITING_SESSION/READY): a row of the earlier one-to-one format never
+   * encrypted stays unsent in its archive (§2.1) and does not count.
    */
   async getPendingSendCount(contactUserId: string): Promise<number> {
     const ownerUserId = this.session.userIdEncoded;
@@ -1774,7 +1320,11 @@ export class MessageService {
       ownerUserId,
       contactUserId
     );
-    return rows.length;
+    return rows.filter(
+      r =>
+        r.type === MessageType.KEEP_ALIVE ||
+        r.status !== MessageStatus.WAITING_SESSION
+    ).length;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -2002,56 +1552,12 @@ export class MessageService {
   }
 
   /**
-   * Delete a message by its database ID (outgoing or incoming in 1-to-1).
-   * Marks the local message as deleted and enqueues a delete control message
-   * so the peer can mark their copy as deleted as well.
-   *
-   * Both sides can delete any message for plausible deniability.
+   * Deleting a message of an archive for everyone would send the earlier
+   * one-to-one format (§2.1): refused, nothing changes. Returns false.
    */
   async deleteMessage(id: number): Promise<boolean> {
-    const row = await this.queries.messages.getById(id);
-    if (!row) return false;
-    if (!row.messageId)
-      throw new Error('Cannot delete a message that has no messageId');
-
-    const ownerUserId = this.session.userIdEncoded;
-
-    const callbackAfterDbCommit: (() => void) | null =
-      await this.queries.conn.withTransaction(async tx => {
-        const res = await this.PerformDeleteMessage(rowToMessage(row), tx);
-        if (!res.success) {
-          tx.rollback(); // if deleting the message from the db fails, rollback the transaction
-          throw new Error(
-            res.error?.message ?? 'Failed to delete message from db'
-          );
-        }
-
-        // Send the delete control message to the peer
-        const controlMessage: Omit<Message, 'id'> = {
-          ownerUserId,
-          contactUserId: row.contactUserId,
-          content: '',
-          type: MessageType.DELETED,
-          direction: MessageDirection.OUTGOING,
-          status: MessageStatus.WAITING_SESSION,
-          timestamp: new Date(),
-          deleteOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
-        };
-
-        const result = await this.sendMessage(controlMessage, tx);
-        if (!result.success) {
-          tx.rollback(); // if sending the delete control message fails, rollback the transaction
-          throw new Error(result.error ?? 'Failed to enqueue delete message');
-        }
-        return res.data;
-      }, 'immediate');
-
-    if (callbackAfterDbCommit) {
-      callbackAfterDbCommit();
-    }
-    await this.processSendQueueForContact(row.contactUserId);
-
-    return true;
+    void id;
+    return false;
   }
 
   async sendReaction(
@@ -2073,124 +1579,14 @@ export class MessageService {
     return result;
   }
 
-  private async performEditMessage(
-    newContent: string,
-    originalMsg: Message,
-    metadata: Record<string, unknown>,
-    tx?: GossipSqliteTx
-  ): Promise<Result<(() => void) | null, Error>> {
-    if (!originalMsg.id) {
-      return { success: false, error: new Error('Message ID is required') };
-    }
-    const db = tx ?? this.queries.conn.db;
-    let discussionUpdatedId: number | undefined;
-    try {
-      await db
-        .update(schema.messages)
-        .set({ content: newContent, metadata: serializeMetadata(metadata) })
-        .where(eq(schema.messages.id, originalMsg.id))
-        .returning();
-
-      const discussion = await this.queries.discussions.getByOwnerAndContact(
-        originalMsg.ownerUserId,
-        originalMsg.contactUserId,
-        tx
-      );
-      if (!discussion) {
-        return { success: false, error: new Error('Discussion not found') };
-      }
-      if (discussion.lastMessageId === originalMsg.id) {
-        await this.queries.discussions.updateById(
-          discussion.id,
-          {
-            lastMessageContent: newContent,
-            updatedAt: new Date(),
-          },
-          tx
-        );
-        discussionUpdatedId = discussion.id;
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error : new Error(String(error)),
-      };
-    }
-
-    const postDbCommit = () => {
-      if (discussionUpdatedId) {
-        this.eventEmitter.emit(
-          SdkEventType.DISCUSSION_UPDATED,
-          discussionUpdatedId
-        );
-      }
-    };
-
-    if (!tx) {
-      // if we are not in a db transaction, we can just emit the event and return
-      postDbCommit();
-      return { success: true, data: null };
-    } else {
-      // if we are in a db transaction, we need to return a function that will be called after the transaction is committed
-      return { success: true, data: postDbCommit };
-    }
-  }
-
   /**
-   * Edit an outgoing message by its database ID.
-   * Updates the local content (preserving timestamp) and enqueues an edit
-   * control message so the peer can update their copy as well.
+   * Editing a message of an archive would send the earlier one-to-one format
+   * (§2.1): refused, nothing changes. Returns false.
    */
   async editMessage(id: number, newContent: string): Promise<boolean> {
-    const row = await this.queries.messages.getById(id);
-    if (!row) return false;
-    if (row.direction !== MessageDirection.OUTGOING) return false;
-    if (!row.messageId || row.messageId.length !== MESSAGE_ID_SIZE)
-      throw new Error('Cannot edit a message that has no valid messageId');
-
-    const ownerUserId = this.session.userIdEncoded;
-
-    const existingMetadata = deserializeMetadata(row.metadata) ?? {};
-    const mergedMetadata = { ...existingMetadata, edited: true };
-
-    const callbackAfterDbCommit: (() => void) | null =
-      await this.queries.conn.withTransaction(async tx => {
-        const res = await this.performEditMessage(
-          newContent,
-          rowToMessage(row),
-          mergedMetadata,
-          tx
-        );
-        if (!res.success) {
-          tx.rollback();
-          throw new Error(res.error?.message ?? 'Failed to edit message in db');
-        }
-
-        const controlMessage: Omit<Message, 'id'> = {
-          ownerUserId,
-          contactUserId: row.contactUserId,
-          content: newContent,
-          type: MessageType.TEXT,
-          direction: MessageDirection.OUTGOING,
-          status: MessageStatus.WAITING_SESSION,
-          timestamp: new Date(),
-          editOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
-          metadata: { control: 'edit' },
-        };
-
-        const result = await this.sendMessage(controlMessage, tx);
-        if (!result.success) {
-          tx.rollback();
-          throw new Error(result.error ?? 'Failed to enqueue edit message');
-        }
-        return res.data;
-      }, 'immediate');
-
-    if (callbackAfterDbCommit) {
-      callbackAfterDbCommit();
-    }
-    await this.processSendQueueForContact(row.contactUserId);
-    return true;
+    void id;
+    void newContent;
+    return false;
   }
 
   /**
