@@ -2,7 +2,8 @@
 //!
 //! Pure logic of the plausibly deniable group chats protocol
 //! (`gossip-sdk/docs/plausibly-deniable-group-chats.md`, wire version 1): identifiers and the
-//! hash projection, roots, signed objects, message events and the wire format.
+//! hash projection, roots, signed objects, message events, the wire format, and the message
+//! state of an epoch with its merge rules and storage records.
 //!
 //! The crate does no I/O: no network, no clock, no randomness source and no storage.
 //! Randomness (secrets, challenges, event IDs, signing randomness) and the current time are
@@ -13,6 +14,7 @@
 //! - [`Leave`], [`Kick`], [`Dissolve`]: the signed objects (§5.3, §5.6, §5.8).
 //! - [`MessageEvent`]: the message event and its result projection (§6).
 //! - [`wire`]: the plaintext, container, frames and event blobs (§13, Appendix C).
+//! - [`store`]: the local records of §14.1 and the storage trait, with an in-memory store.
 
 #![warn(missing_docs)]
 
@@ -25,6 +27,7 @@ mod ids;
 mod keys;
 mod root;
 mod signed;
+pub mod store;
 pub mod wire;
 
 #[cfg(test)]
