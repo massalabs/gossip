@@ -17,13 +17,15 @@
 //!   [`ChangeKind::Superseded`]. It is judged whenever the
 //!   second of the two becomes held: on receipt, on creation, and when the caller declares
 //!   what it knows.
-//! - **Continuing a conversation.** The owner of an automatic chat records, for good, when
-//!   the other person first took part in it (a message event, a notice of one or a query
-//!   about its messages, received from that person in that chat). A creating root from that
-//!   person founded after it took part is no crossing: it is an invitation that continues
-//!   this device's chat ([`super::InvitationSummary::continues`]); accepting it supersedes
-//!   that chat, declining leaves it. A root founded before (by the two clocks) still follows
-//!   the tie rule.
+//! - **Continuing a conversation.** The owner of an automatic chat records, for good,
+//!   whether the other person took part in it (a message event, a notice of one or a query
+//!   about its messages, received from that person in that chat): a local fact, never sent
+//!   and compared with no date. The device that keeps its own chat by the tie rule settles
+//!   the other's as history and is never asked. When the other's chat wins the tie, this
+//!   device switches to it by itself while the other person never took part in its own, and
+//!   otherwise holds it as an invitation that continues its chat
+//!   ([`super::InvitationSummary::continues`]): accepting it supersedes that chat, declining
+//!   leaves it. A chat the other person left is never kept against its new one.
 //! - **What the caller declares** decides the receiving side only. A **migration**
 //!   ([`Node::migration_of`]) is shown when the caller declared an earlier conversation with
 //!   the owner at that version ([`Node::set_earlier_conversation`]); a **new contact**'s chat
@@ -315,7 +317,7 @@ impl Node {
             return Ok(false);
         };
         if let Some(mine) = self.own_migration(peer, v) {
-            if self.continues_after_part(root, mine) {
+            if self.continues_mine(root, mine) {
                 // An invitation to continue the conversation in the peer's chat.
                 return Ok(false);
             }
@@ -338,9 +340,9 @@ impl Node {
         Ok(false)
     }
 
-    /// Two creations at once (§5.12): `mine`, this device's own migration group, and
-    /// `theirs`, the peer's creating root, not installed here. The group whose owner sorts
-    /// first is kept; the other is closed at once.
+    /// Two automatic chats for one pair (§5.12): `mine`, this device's own migration group,
+    /// and `theirs`, the peer's creating root, not installed here. The group the tie rule
+    /// keeps ([`Node::keeps_mine`]) continues; the other is held superseded at once.
     fn settle_pair(
         &mut self,
         cx: &mut Cx<'_>,
@@ -357,7 +359,7 @@ impl Node {
             self.drop_fetched_for(id);
         }
         self.t.markers.remove(&id);
-        if theirs.owner_id().as_bytes() < self.me.as_bytes() {
+        if !self.keeps_mine(&theirs, mine) {
             self.adopt(cx, theirs, from, Vec::new(), false)?;
             self.changed(id, ChangeKind::Joined, cx.now);
             self.supersede(cx, mine, id)?;
@@ -367,8 +369,12 @@ impl Node {
             // duplicate.
             let by = self.group_of(&mine);
             self.group_rec_mut(id).status = GroupStatus::Superseded { by, at: cx.now };
+            let peer = theirs.owner_id();
             self.adopt(cx, theirs, from, Vec::new(), false)?;
             self.supersede(cx, id, mine)?;
+            // The peer founded its chat without holding this one: lost on the way, or the
+            // peer restored a backup made before. It gets this device's root again.
+            self.queue_object(peer, mine, crate::wire::EntryItem::Root);
         }
         Ok(())
     }
@@ -423,18 +429,14 @@ impl Node {
 
     /// Records that the other person of an automatic chat of two this device founded took
     /// part in it (§5.12): `from` sent it, about an epoch `chat` of it, a message event, a
-    /// notice of one or a query about its messages. Kept for good, with when it was first
-    /// seen.
-    pub(crate) fn note_participation(&mut self, cx: &mut Cx<'_>, chat: &ChatId, from: GossipId) {
+    /// notice of one or a query about its messages. A local fact, kept for good, with no
+    /// date.
+    pub(crate) fn note_participation(&mut self, chat: &ChatId, from: GossipId) {
         if from == self.me || !self.t.epochs.contains(chat) {
             return;
         }
         let group = self.group_of(chat);
-        if self
-            .t
-            .group_recs
-            .get(&group)
-            .is_some_and(|g| g.took_part.is_some())
+        if self.t.group_recs.get(&group).is_some_and(|g| g.took_part)
             || !self.own_direct_chat(&group)
             || !self
                 .t
@@ -444,29 +446,42 @@ impl Node {
         {
             return;
         }
-        self.group_rec_mut(group).took_part = Some(cx.now);
+        self.group_rec_mut(group).took_part = true;
+    }
+
+    /// Whether the tie rule keeps this device's own chat `mine` against the peer's creating
+    /// root `theirs` for the same two and `migrate_from` (§5.12): its own GossipID sorts
+    /// first, and the peer is still a member of `mine` (a chat the peer left or declined
+    /// cannot continue the conversation with it).
+    fn keeps_mine(&self, theirs: &Root, mine: ChatId) -> bool {
+        let peer = theirs.owner_id();
+        self.me.as_bytes() < peer.as_bytes()
+            && self
+                .current_epoch(&self.group_of(&mine))
+                .and_then(|c| self.t.epochs.get(&c))
+                .is_some_and(|r| r.root.is_member(&peer))
     }
 
     /// Whether the peer's creating root `theirs`, for the same two and `migrate_from` as
-    /// this device's own chat `mine`, continues the conversation rather than crossing it
-    /// (§5.12): the peer took part in `mine`, and founded `theirs` after that, as far as the
-    /// two clocks tell. A root founded before (two creations at once, the peer's root arriving
-    /// after the peer switched to `mine` and took part) is settled by the tie rule.
-    fn continues_after_part(&self, theirs: &Root, mine: ChatId) -> bool {
-        self.t
-            .group_recs
-            .get(&self.group_of(&mine))
-            .and_then(|g| g.took_part)
-            .is_some_and(|at| theirs.created_at() > at)
+    /// this device's own chat `mine`, is an invitation to continue the conversation rather
+    /// than a switch without a prompt (§5.12): the peer's chat wins the tie, and the peer took
+    /// part in `mine`. The side that keeps its own chat is never asked.
+    fn continues_mine(&self, theirs: &Root, mine: ChatId) -> bool {
+        !self.keeps_mine(theirs, mine)
+            && self
+                .t
+                .group_recs
+                .get(&self.group_of(&mine))
+                .is_some_and(|g| g.took_part)
     }
 
     /// The chat of this device that the creating root `root` of a peer (an invitation)
-    /// continues (§5.12): its own automatic chat with that peer, in which the peer took part
-    /// before founding `root`. Accepting it supersedes that chat.
+    /// continues (§5.12): its own automatic chat with that peer, which `root` wins by the tie
+    /// rule, and in which the peer took part. Accepting it supersedes that chat.
     pub(crate) fn continued_by(&self, root: &Root, parent_held: bool) -> Option<ChatId> {
         let (peer, v) = self.direct_creation(root, parent_held)?;
         let mine = self.own_migration(peer, v)?;
-        self.continues_after_part(root, mine)
+        self.continues_mine(root, mine)
             .then(|| self.group_of(&mine))
     }
 
@@ -513,7 +528,7 @@ impl Node {
                 continue;
             };
             if let Some(mine) = self.own_migration(peer, v) {
-                if !self.continues_after_part(&rec.root, mine) {
+                if !self.continues_mine(&rec.root, mine) {
                     self.settle_pair(cx, mine, rec.root, rec.from)?;
                 }
                 continue;

@@ -907,7 +907,7 @@ mod tests {
                     kind: JunctionKind::Dissolved,
                 },
             ],
-            took_part: Some(7),
+            took_part: true,
             earlier: vec![chat],
         });
         round_trip(StoredResult::Content(Content {

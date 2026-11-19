@@ -57,7 +57,7 @@ impl Node {
                 },
             ) = entry
             {
-                self.note_participation(cx, chat_id, from);
+                self.note_participation(chat_id, from);
             }
             // An authorized entry from a member: it is online (§10.1).
             alive = alive || self.shares_epoch(&from);
@@ -448,7 +448,7 @@ impl Node {
             let id = match e.item {
                 EntryItem::Event(id) => {
                     // A notice of a message is taking part in a chat of two (§5.12).
-                    self.note_participation(cx, &chat, from);
+                    self.note_participation(&chat, from);
                     id
                 }
                 EntryItem::Root => {
