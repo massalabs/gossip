@@ -1181,10 +1181,22 @@ impl Node {
             .into_iter()
             .filter(|c| self.installed(c))
             .collect();
+        let ancestor = self.leads_to_accepted(&chat);
         if held.is_empty() {
+            // An invitation with no held parent (a founding root, or one whose parents are
+            // not found yet) that leads to a root the user accepted: part of that
+            // conversation, joined to it by the link of its child; a parent found later
+            // links in turn.
+            if ancestor {
+                let Some(rec) = self.take_record(&chat) else {
+                    return Ok(());
+                };
+                self.t.events.remove(&(chat, ChangeKind::Invitation));
+                self.drop_tasks_of(&[chat]);
+                return self.adopt(cx, rec.root, rec.from, Vec::new(), false);
+            }
             return Ok(());
         }
-        let ancestor = self.leads_to_accepted(&chat);
         if inv.rejoins.is_some() && !ancestor {
             return Ok(());
         }
