@@ -87,6 +87,16 @@ export interface GroupInvitation {
   closedBefore: boolean;
   /** Accepting rejoins this group. */
   rejoins: GroupId | null;
+  /**
+   * The format version of the earlier conversation its root says it continues
+   * (§5.12), as carried; null for an ordinary group.
+   */
+  migrateFrom: number | null;
+  /**
+   * The peer (user ID) whose earlier conversation this device shows it as
+   * continuing (§5.12): shown inside that archive. Null otherwise.
+   */
+  migrationOf: string | null;
 }
 
 export type GroupMessageBody =
@@ -127,6 +137,8 @@ export interface GroupEpoch {
   members: string[];
   owner: string;
   createdAt: bigint;
+  /** The format version of the earlier conversation it continues, or null. */
+  migrateFrom: number | null;
 }
 
 /** A local-only edit (§9.1): each given field replaces the stored one. */
@@ -204,12 +216,55 @@ export type GroupChangeKind =
   | 'Messages'
   | 'ReadOnly'
   | 'Fork'
-  | 'Closed';
+  | 'Closed'
+  /**
+   * Two creations at once (§5.12): this group was closed for `by`, which
+   * continues the same conversation; `lostMessages` if anything was written
+   * in it.
+   */
+  | 'Superseded'
+  /**
+   * What `isCoMember`, `connectionsToRevoke` and `peersWantingConnection`
+   * answer may have changed (`groupId` is all zeros).
+   */
+  | 'Connections';
 
 export interface GroupChange {
   /** The group key, or the epoch of an invitation. */
   groupId: GroupId;
   kind: GroupChangeKind;
+  /** For `Superseded`: the group kept. */
+  by?: GroupId;
+  /** For `Superseded`: messages were written in the group closed. */
+  lostMessages?: boolean;
+}
+
+/** The key of the changes about the device rather than a group. */
+export const GROUP_DEVICE_KEY: GroupId = '0'.repeat(64);
+
+/** The format version of the earlier one-to-one conversations (§5.12). */
+export const EARLIER_FORMAT_VERSION = 0;
+
+function optionalNumber(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/** Concatenated 32-byte user IDs. */
+function idsOf(users: string[]): Uint8Array {
+  const ids = new Uint8Array(users.length * 32);
+  users.forEach((m, i) => ids.set(decodeUserId(m), i * 32));
+  return ids;
+}
+
+/** Users of concatenated 32-byte IDs. */
+function usersOf(ids: Uint8Array): string[] {
+  const out: string[] = [];
+  for (let i = 0; i + 32 <= ids.length; i += 32) {
+    out.push(encodeUserId(ids.slice(i, i + 32)));
+  }
+  return out;
 }
 
 /** How a member leaves a group or declines an invitation (§5.2). */
@@ -784,10 +839,18 @@ export class GroupService {
     await this.persist();
     if (changes.length > 0) {
       this.eventEmitter.emit(SdkEventType.GROUPS_CHANGED, {
-        changes: changes.map(c => ({
-          groupId: c.group as string,
-          kind: variant(c.kind)[0] as GroupChangeKind,
-        })),
+        changes: changes.map(c => {
+          const [kind, r] = variant(c.kind);
+          const change: GroupChange = {
+            groupId: c.group as string,
+            kind: kind as GroupChangeKind,
+          };
+          if (kind === 'Superseded') {
+            change.by = r.by as string;
+            change.lostMessages = r.lost_messages === true;
+          }
+          return change;
+        }),
       });
     }
   }
@@ -1039,10 +1102,88 @@ export class GroupService {
   createGroup(name: string, members: string[]): Promise<GroupId> {
     return this.run(async node => {
       await this.learnMembers(node, members);
-      const ids = new Uint8Array(members.length * 32);
-      members.forEach((m, i) => ids.set(decodeUserId(m), i * 32));
-      return bytesToHex(node.create_group(name, ids, this.now()));
+      return bytesToHex(node.create_group(name, idsOf(members), this.now()));
     });
+  }
+
+  /**
+   * Founds the direct chat of this device and `peer` (§5.12), for a
+   * migration or a new contact: a group of two with `migrate_from = 0`.
+   * Returns the group kept, which is the peer's own creation when it is held
+   * and its owner sorts first.
+   */
+  createDirectChat(name: string, peer: string): Promise<GroupId> {
+    return this.run(async node => {
+      await this.learnMembers(node, [peer]);
+      return bytesToHex(
+        node.create_group_with(
+          name,
+          idsOf([peer]),
+          EARLIER_FORMAT_VERSION,
+          this.now()
+        )
+      );
+    });
+  }
+
+  /**
+   * Declares the earlier conversations this device holds (§5.12, condition
+   * 3), one per peer, in format 0; those already declared are left as they
+   * are. Never cleared here: an archive stays an earlier conversation.
+   */
+  declareEarlierConversations(peers: string[]): Promise<void> {
+    return this.run(node => {
+      const declared = new Set(
+        (JSON.parse(node.earlier_conversations()) as [string, string][])
+          .filter(([, v]) => Number(v) === EARLIER_FORMAT_VERSION)
+          .map(([p]) => p)
+      );
+      for (const peer of peers) {
+        if (declared.has(hexOfUser(peer))) continue;
+        node.set_earlier_conversation(
+          decodeUserId(peer),
+          EARLIER_FORMAT_VERSION,
+          true,
+          this.now()
+        );
+      }
+    });
+  }
+
+  /**
+   * Consents (or withdraws the consent) to the direct chat `peer` founds
+   * after this user accepted its contact request (§5.12): one-shot, 14 days.
+   */
+  consentToDirectChat(peer: string, consent: boolean): Promise<void> {
+    return this.run(node =>
+      node.consent_to_direct_chat(decodeUserId(peer), consent, this.now())
+    );
+  }
+
+  /** Whether this device holds a direct chat with `peer` (§5.12). */
+  holdsDirectChat(peer: string): Promise<boolean> {
+    return this.read(n => n.holds_direct_chat(decodeUserId(peer)));
+  }
+
+  /** Whether `peer` is a member of a group this device has accepted. */
+  isCoMember(peer: string): Promise<boolean> {
+    return this.read(n => n.is_co_member(decodeUserId(peer)));
+  }
+
+  /** Among `peers`, those whose automatic connection may be revoked. */
+  async connectionsToRevoke(peers: string[]): Promise<string[]> {
+    if (peers.length === 0) return [];
+    return usersOf(await this.read(n => n.connections_to_revoke(idsOf(peers))));
+  }
+
+  /** Members of accepted groups with which no session is reported. */
+  async peersWantingConnection(): Promise<string[]> {
+    return usersOf(await this.read(n => n.peers_wanting_connection()));
+  }
+
+  /** The public keys the engine holds for `peer` (a member), if any. */
+  keysOf(peer: string): Promise<Uint8Array | null> {
+    return this.read(n => n.keys(decodeUserId(peer)) ?? null);
   }
 
   /** As the owner: adds and removes members, renames. Returns the new epoch. */
@@ -1211,13 +1352,19 @@ export class GroupService {
     });
   }
 
-  /** Edits one of this account's messages, in the epoch that holds it. */
+  /**
+   * Edits one of this account's messages, in the epoch that holds it. The
+   * edit keeps the message's metadata (§2.2: entries this client does not
+   * know, `replyTo` included): `metadata` sets entries and `removeMetadata`
+   * removes them; neither keeps everything.
+   */
   editMessage(
     epochId: GroupId,
     syncObjId: GroupId,
     message: GroupMessageBody | string,
     options: {
       metadata?: Record<string, Uint8Array>;
+      removeMetadata?: string[];
       scheduledFor?: number;
     } = {}
   ): Promise<GroupPublished> {
@@ -1225,10 +1372,17 @@ export class GroupService {
       typeof message === 'string'
         ? { type: 'text' as const, text: message }
         : message;
-    const meta = metadataJson(options.metadata);
+    const set = metadataJson(options.metadata);
+    const remove = [...new Set(options.removeMetadata ?? [])].sort();
+    const meta =
+      remove.length > 0
+        ? JSON.stringify({ set: JSON.parse(set), remove })
+        : options.metadata && Object.keys(options.metadata).length > 0
+          ? set
+          : 'null';
     try {
       checkText(b);
-      checkMetadata(meta);
+      checkMetadata(set);
     } catch (e) {
       return Promise.reject(e);
     }
@@ -1366,6 +1520,8 @@ export class GroupService {
         : null,
       closedBefore: r.closed_before as boolean,
       rejoins: (r.rejoins as string | null) ?? null,
+      migrateFrom: optionalNumber(r.migrate_from),
+      migrationOf: r.migration_of ? userIdOf(r.migration_of as string) : null,
     }));
   }
 
@@ -1381,6 +1537,7 @@ export class GroupService {
       members: (r.members as string[]).map(userIdOf),
       owner: userIdOf(r.owner as string),
       createdAt: BigInt(r.created_at as string),
+      migrateFrom: optionalNumber(r.migrate_from),
     };
   }
 
