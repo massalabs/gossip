@@ -285,15 +285,7 @@ impl Node {
                     .filter(|c| rec.root.names_parent(c))
                     .copied()
                     .collect();
-            let auth = n.line_authority(rec.root.owner_id(), &held);
-            let parents: Vec<ChatId> = held
-                .into_iter()
-                .filter(|c| {
-                    n.t.epochs
-                        .get(c)
-                        .is_some_and(|r| auth.contains(&r.root.owner_id()))
-                })
-                .collect();
+            let parents = n.authorized_parents(&rec.root, &held);
             if let Some(g) = inv
                 .rejoins
                 .or_else(|| parents.first().map(|p| n.group_of(p)))
