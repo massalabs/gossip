@@ -101,21 +101,20 @@ impl Node {
     }
 
     /// Trigger 1 of §12.3: after accepting an invitation or adopting a root, scan two
-    /// members (or as many as exist) concurrently, preferring existing sessions.
+    /// members (or as many as exist) concurrently, preferring existing sessions, then a
+    /// good score.
     pub(crate) fn initial_scans(&mut self, cx: &mut Cx<'_>, chat: ChatId) {
-        let mut pool = self.eligible(&self.cur(&chat));
-        let mut chosen = Vec::new();
-        while chosen.len() < 2 && !pool.is_empty() {
-            let with_session: Vec<usize> = (0..pool.len())
-                .filter(|i| self.sessions.contains(&pool[*i]))
-                .collect();
-            let i = if with_session.is_empty() {
-                uniform_below(cx.rng, pool.len())
-            } else {
-                with_session[uniform_below(cx.rng, with_session.len())]
-            };
-            chosen.push(pool.swap_remove(i));
-        }
+        // Members with a session first; within each tier, drawn by score (§11.8), so that
+        // members that forge or never answer are rarely the only ones asked: these scans
+        // bring the new epoch's signed objects, which a page listed before its root was held
+        // could not deliver (§4.8).
+        let (with_session, others): (Vec<GossipId>, Vec<GossipId>) = self
+            .eligible(&self.cur(&chat))
+            .into_iter()
+            .partition(|p| self.sessions.contains(p));
+        let mut chosen = self.draw_by_score(cx.rng, with_session, 2);
+        let rest = 2 - chosen.len();
+        chosen.extend(self.draw_by_score(cx.rng, others, rest));
         for peer in chosen {
             self.start_scan(cx, chat, peer, None);
         }
