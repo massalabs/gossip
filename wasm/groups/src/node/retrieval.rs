@@ -408,7 +408,7 @@ impl Node {
     /// a trigger that were not asked in vain twice already, so that what honest, supplying
     /// peers announce goes first. Below [`CREDIBLE`] the task is suspect: every announcer
     /// said it did not have the event, or never answered, or scores below an unmeasured peer.
-    fn priority(&self, key: &TaskKey) -> u64 {
+    pub(crate) fn priority(&self, key: &TaskKey) -> u64 {
         self.t.tasks.get(key).map_or(0, |task| {
             task.candidates
                 .iter()
