@@ -18,8 +18,11 @@
 //!
 //! Hostile members: **silent** (never answers), **announcer** (announces real and fake IDs,
 //! again and again, and answers "not available" to every query, or "restart" to half of the
-//! page requests), **liar** (answers every query with invalid data) and **flooder** (floods
-//! notices of fake IDs and never answers).
+//! page requests), **liar** (answers every query with invalid data or, to half of the page
+//! requests, pages of a list said to hold a billion entries, and pushes once an event of the
+//! largest size), **flooder** (floods notices of fake IDs, half of them dated years ahead,
+//! and query frames, and never answers) and **staller** (answers `busy`, `expired` or
+//! `restart` to everything).
 //!
 //! Properties checked:
 //!
@@ -45,7 +48,8 @@
 //! Environment variables (local runs; the default run takes a few seconds):
 //!
 //! - `GROUPS_NET_SEED=<n>`: replay one seed;
-//! - `GROUPS_NET_SEEDS=<n>`: run seeds `GROUPS_NET_FIRST` (default 0) to `+ n`;
+//! - `GROUPS_NET_SEEDS=<n>`: run seeds `GROUPS_NET_FIRST` (default 0) to `+ n` (default 5,
+//!   in which every hostile kind and every situation occurs);
 //! - `GROUPS_NET_HOURS=<n>`: hours of activity per run (default 8);
 //! - `GROUPS_NET_FINAL=<n>`: hours of the final period (default 72);
 //! - `GROUPS_NET_DEBUG=1`: on a divergence, print the engines' state.
@@ -119,6 +123,12 @@ pub(crate) struct Counters {
     announcer: u64,
     liar: u64,
     flooder: u64,
+    staller: u64,
+    stalled_answers: u64,
+    far_ahead_ids: u64,
+    query_floods: u64,
+    huge_pages: u64,
+    huge_events: u64,
     invalid_answers: u64,
     fake_notices: u64,
     scans_completed: u64,
@@ -164,6 +174,12 @@ impl Counters {
             announcer,
             liar,
             flooder,
+            staller,
+            stalled_answers,
+            far_ahead_ids,
+            query_floods,
+            huge_pages,
+            huge_events,
             invalid_answers,
             fake_notices,
             scans_completed,
@@ -206,6 +222,12 @@ impl Counters {
             ("announcer", self.announcer),
             ("liar", self.liar),
             ("flooder", self.flooder),
+            ("staller", self.staller),
+            ("stalled_answers", self.stalled_answers),
+            ("far_ahead_ids", self.far_ahead_ids),
+            ("query_floods", self.query_floods),
+            ("huge_pages", self.huge_pages),
+            ("huge_events", self.huge_events),
             ("invalid_answers", self.invalid_answers),
             ("fake_notices", self.fake_notices),
             ("scans_completed", self.scans_completed),
@@ -229,6 +251,7 @@ enum Hostility {
     Announcer,
     Liar,
     Flooder,
+    Staller,
 }
 
 struct Device {
@@ -252,6 +275,10 @@ struct Device {
     hours: BTreeMap<u64, (u64, u64, u64)>,
     /// Hostile devices: event blobs seen.
     seen: Vec<Vec<u8>>,
+    /// The liar: whether it pushed its largest event.
+    pushed_huge: bool,
+    /// Honest devices: plaintexts sent carrying the liar's largest event.
+    huge_sends: u64,
     /// Hostile devices: the fake IDs announced.
     announced: Vec<EventId>,
     /// Hostile devices: every ID announced, repeats included.
@@ -286,6 +313,8 @@ struct Sim {
     /// Whether sessions are still reset during the final period (not in every third seed,
     /// so that resends after reconnections do not mask a missed retry).
     resets_in_final: bool,
+    /// The liar's event of the largest size, once pushed.
+    huge: Option<EventId>,
 }
 
 fn below(rng: &mut TestRng, n: u64) -> u64 {
@@ -319,17 +348,19 @@ impl Sim {
             Hostility::Announcer,
             Hostility::Liar,
             Hostility::Flooder,
+            Hostility::Staller,
         ];
         let mut counters = Counters::default();
         let devs = (0..n)
             .map(|i| {
-                // Every kind occurs in any four consecutive seeds.
-                let hostile = (i >= honest).then(|| kinds[(seed as usize + i - honest) % 4]);
+                // Every kind occurs in any five consecutive seeds.
+                let hostile = (i >= honest).then(|| kinds[(seed as usize + i - honest) % 5]);
                 match hostile {
                     Some(Hostility::Silent) => counters.silent += 1,
                     Some(Hostility::Announcer) => counters.announcer += 1,
                     Some(Hostility::Liar) => counters.liar += 1,
                     Some(Hostility::Flooder) => counters.flooder += 1,
+                    Some(Hostility::Staller) => counters.staller += 1,
                     None => {}
                 }
                 // Mostly small skews; sometimes a fast clock beyond the 5-minute bound.
@@ -362,6 +393,8 @@ impl Sim {
                     inbox: Vec::new(),
                     hours: BTreeMap::new(),
                     seen: Vec::new(),
+                    pushed_huge: false,
+                    huge_sends: 0,
                     announced: Vec::new(),
                     announced_log: Vec::new(),
                     stats_before: crate::node::Stats::default(),
@@ -383,6 +416,7 @@ impl Sim {
             script_done: false,
             ops: 0,
             resets_in_final: seed % 3 != 2,
+            huge: None,
         };
         for d in 0..n {
             if sim.devs[d].hostile.is_none() {
@@ -619,9 +653,14 @@ impl Sim {
             self.check_sent(d, &o.plaintext);
             self.op(d, |n, s, now, rng| n.handed_off(s, handle, now, rng))
                 .expect("handoff");
+            // The liar's event of the largest size is bounded on its own: every member that
+            // lacks it must get it once, a quarter of a MiB each time, beyond the idle
+            // target of (c).
+            let huge = self.huge_bytes(&o.plaintext);
+            self.devs[d].huge_sends += u64::from(huge > 0);
             let e = self.devs[d].hours.entry(hour).or_default();
             e.0 += 1;
-            e.1 += o.plaintext.len() as u64;
+            e.1 += o.plaintext.len() as u64 - huge;
             e.2 += lookups;
             self.transmit(d, o.to, o.plaintext);
             if chance(&mut self.rng, 90) {
@@ -819,6 +858,28 @@ impl Sim {
         }
     }
 
+    /// The bytes of the liar's largest event that `plaintext` carries.
+    fn huge_bytes(&self, plaintext: &[u8]) -> u64 {
+        let Some(id) = self.huge else {
+            return 0;
+        };
+        decode(plaintext)
+            .into_iter()
+            .filter_map(|f| match f {
+                Frame::Event(b)
+                | Frame::Response(Response {
+                    result: ResponseResult::Event(b),
+                    ..
+                }) => Some(b),
+                _ => None,
+            })
+            .filter(|b| {
+                matches!(wire::decode_event_blob(b, 1), Ok(EventObject::Message(e)) if e.event_id() == id)
+            })
+            .map(|b| b.len() as u64)
+            .sum()
+    }
+
     /// The most times one ID was announced by the hostile members.
     fn announced_most(&self) -> u64 {
         let mut counts: BTreeMap<EventId, u64> = BTreeMap::new();
@@ -849,10 +910,16 @@ impl Sim {
                     }) => {
                         self.devs[d].seen.push(b);
                     }
-                    Frame::Query(q) if matches!(kind, Hostility::Liar | Hostility::Announcer) => {
-                        // The liar answers invalid data; the announcer answers "not
-                        // available" to everything it announced, and "restart" to half of
-                        // the page requests, which the requester must bound.
+                    Frame::Query(q)
+                        if matches!(
+                            kind,
+                            Hostility::Liar | Hostility::Announcer | Hostility::Staller
+                        ) =>
+                    {
+                        // The liar answers invalid data or endless pages; the announcer
+                        // answers "not available" to everything it announced, and "restart"
+                        // to half of the page requests, which the requester must bound; the
+                        // staller answers `busy`, `expired` or `restart` to everything.
                         let frames: Vec<Frame> = q
                             .entries
                             .iter()
@@ -860,6 +927,13 @@ impl Sim {
                             .map(|(i, e)| {
                                 let result = if kind == Hostility::Liar {
                                     self.lie(d, e)
+                                } else if kind == Hostility::Staller {
+                                    self.counters.stalled_answers += 1;
+                                    ResponseResult::Status(match below(&mut self.rng, 3) {
+                                        0 => Status::Busy,
+                                        1 => Status::Expired,
+                                        _ => Status::Restart,
+                                    })
                                 } else if matches!(e, QueryEntry::Op(QueryOp::TipsScan { .. }))
                                     && chance(&mut self.rng, 50)
                                 {
@@ -893,6 +967,43 @@ impl Sim {
         if target == self.devs[d].id {
             return;
         }
+        if kind == Hostility::Liar && !self.devs[d].pushed_huge && self.now > START + HOUR {
+            // Once, an event of the largest size, valid, to one honest device: the others
+            // fetch it from there, in answers.
+            self.devs[d].pushed_huge = true;
+            self.counters.huge_events += 1;
+            let e = largest_event(&self.root, self.devs[d].id, self.now, &mut self.rng);
+            self.huge = Some(e.event_id());
+            let blob = wire::encode_event_blob(&EventObject::Message(e)).expect("fits");
+            let pt = wire::encode_plaintext(&[Frame::Event(blob)]).expect("fits");
+            self.transmit(d, member(0), pt);
+        }
+        if kind == Hostility::Flooder && chance(&mut self.rng, 4) {
+            // A query frame of lookups of fake IDs and a scan, to be answered.
+            let mut entries: Vec<QueryEntry> = (0..15)
+                .map(|_| {
+                    QueryEntry::Op(QueryOp::Event {
+                        chat_id: chat,
+                        event_id: fake(&mut self.rng, self.now),
+                    })
+                })
+                .collect();
+            entries.push(QueryEntry::Op(QueryOp::TipsScan {
+                anchor: chat,
+                scan_id: crate::ids::ScanId::from_bytes(bytes(&mut self.rng)),
+                offset: 0,
+            }));
+            self.counters.query_floods += entries.len() as u64;
+            let q = Frame::Query(crate::wire::Query {
+                request_id: crate::ids::RequestId::from_bytes(bytes(&mut self.rng)),
+                sent_at: self.now,
+                ttl: MINUTE,
+                entries,
+            });
+            if let Ok(pt) = wire::encode_plaintext(&[q]) {
+                self.transmit(d, target, pt);
+            }
+        }
         let mut ids: Vec<EventId> = Vec::new();
         match kind {
             Hostility::Announcer if chance(&mut self.rng, 20) => {
@@ -914,8 +1025,15 @@ impl Sim {
                 }
             }
             Hostility::Flooder if chance(&mut self.rng, 4) => {
-                for _ in 0..16 {
-                    ids.push(fake(&mut self.rng, self.now));
+                for i in 0..16 {
+                    if i % 2 == 0 {
+                        // Dated one to ten years ahead.
+                        self.counters.far_ahead_ids += 1;
+                        let ahead = (1 + below(&mut self.rng, 10)) * 365 * DAY;
+                        ids.push(EventId::new(self.now + ahead, bytes(&mut self.rng)));
+                    } else {
+                        ids.push(fake(&mut self.rng, self.now));
+                    }
                 }
             }
             _ => {}
@@ -943,6 +1061,25 @@ impl Sim {
     /// or bytes that do not decode.
     fn lie(&mut self, d: usize, e: &QueryEntry) -> ResponseResult {
         match e {
+            QueryEntry::Op(QueryOp::TipsScan {
+                scan_id, offset, ..
+            }) if chance(&mut self.rng, 50) => {
+                // A valid page of a list said to hold a billion entries.
+                self.counters.huge_pages += 1;
+                ResponseResult::Page(Page {
+                    scan_id: *scan_id,
+                    offset: *offset,
+                    count: 1_000_000_000_u64.saturating_sub(*offset).max(1),
+                    entries: vec![Entry {
+                        chat_id: self.chat(),
+                        item: EntryItem::Event(EventId::new(
+                            self.now - below(&mut self.rng, DAY),
+                            bytes(&mut self.rng),
+                        )),
+                    }],
+                    skipped: 0,
+                })
+            }
             QueryEntry::Op(QueryOp::TipsScan { offset, .. }) => ResponseResult::Page(Page {
                 scan_id: crate::ids::ScanId::from_bytes(bytes(&mut self.rng)),
                 offset: *offset,
@@ -1291,8 +1428,16 @@ fn run(seed: u64, hours: u64) -> Counters {
         }
         sim.counters.behind_pruned += sim.behind.len() as u64;
     }
-    // (c) Work per device and hour.
+    // (c) Work per device and hour. The liar's largest event, counted apart, is sent by
+    // each device at most twice per other member (a resend after a crash or `expired`
+    // may repeat one).
     for (d, dev) in sim.devs.iter().enumerate() {
+        let most = 2 * (sim.devs.len() as u64 - 1);
+        assert!(
+            dev.huge_sends <= most,
+            "device {d} sent the largest event {} times",
+            dev.huge_sends
+        );
         for (h, (p, b, l)) in &dev.hours {
             assert!(
                 *p <= LIMITS.plaintexts,
@@ -1424,6 +1569,44 @@ fn run(seed: u64, hours: u64) -> Counters {
     sim.counters
 }
 
+/// The largest message event `author` can create at `now`: its blob fits the admission
+/// limit exactly.
+fn largest_event(
+    root: &Root,
+    author: GossipId,
+    now: u64,
+    rng: &mut TestRng,
+) -> crate::event::MessageEvent {
+    let id = EventId::new(now, bytes(rng));
+    let sync = SyncObjId::from_bytes(bytes(rng));
+    let make = |n: usize| {
+        crate::event::MessageEvent::create(
+            root,
+            id,
+            &[],
+            crate::event::Payload::Content(crate::event::Content {
+                sync_obj_id: sync,
+                author,
+                created_at: now,
+                last_modified_at: now,
+                body: Body::Media(vec![7; n]),
+                edited: false,
+                metadata: BTreeMap::new(),
+            }),
+        )
+    };
+    let (mut lo, mut hi) = (0, crate::constants::MAX_PLAINTEXT_BYTES);
+    while lo + 1 < hi {
+        let mid = usize::midpoint(lo, hi);
+        if make(mid).is_ok() {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    make(lo).expect("fits")
+}
+
 /// The answers of a peer that answers every request at once and never supplies anything:
 /// `busy`, `expired` or "not available" to lookups, and `busy`, `expired`, `restart` or a
 /// page of one fake ID out of a list said to be huge to page requests.
@@ -1479,7 +1662,7 @@ fn network_simulation() {
         Some(seed) => vec![seed],
         None => {
             let first = env_u64("GROUPS_NET_FIRST").unwrap_or(0);
-            let count = env_u64("GROUPS_NET_SEEDS").unwrap_or(4);
+            let count = env_u64("GROUPS_NET_SEEDS").unwrap_or(5);
             (first..first + count).collect()
         }
     };
@@ -1502,7 +1685,7 @@ fn network_simulation() {
         "network simulation counters over {} seeds: {total:?}",
         seeds.len()
     );
-    if single.is_none() && seeds.len() >= 4 {
+    if single.is_none() && seeds.len() >= 5 {
         assert!(
             total.missing().is_empty(),
             "situations never exercised: {:?}",
