@@ -217,6 +217,11 @@ pub struct Stats {
     pub announcer_pauses: u64,
     /// Kicks or leaves sent to removed peers (§5.6).
     pub removal_replies: u64,
+    /// Handover roots sent to their former owner (§5.6).
+    pub handover_replies: u64,
+    /// Handover roots of this device's own, in which it is no member, received while it
+    /// still owned their line: it learnt that it left.
+    pub handovers_learnt: u64,
     /// Owner-only requests processed (§5.4).
     pub leave_requests: u64,
     /// Successors created automatically after leaves or requests (§5.5).
@@ -1162,9 +1167,8 @@ impl Node {
             id: from,
             removed: entry.removed.contains(&from),
         };
-        if entry.removed.contains(&from) {
-            self.removed_contact(cx, chat, from);
-        }
+        // A removed peer is told of its removal, a former owner of its handover (§5.6).
+        self.removed_contact(cx, chat, from);
         let received = entry
             .epoch()
             .receive(cx.ov, sender, event.clone(), cx.now)?;

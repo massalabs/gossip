@@ -888,11 +888,16 @@ impl Node {
 
     // ── Replies to removed peers (§5.6, §10.4) ───────────────────────────────
 
-    /// `peer`, removed from `chat`, sent this device a frame for `chat`: it is answered with
+    /// `peer` sent this device a frame for `chat`. Removed from `chat`, it is answered with
     /// the kick naming it or its signed leave, at most three times a day; when this device
-    /// holds neither, it looks them up with a removal lookup first (§5.6).
+    /// holds neither, it looks them up with a removal lookup first (§5.6). The former owner
+    /// of a held handover root that `chat` leads to (its parent, or an earlier epoch of its
+    /// line) is answered with that root in the same way: a device of the former owner
+    /// restored from a backup made before the handover learns that it handed over, and
+    /// left if it did.
     pub(crate) fn removed_contact(&mut self, cx: &mut Cx<'_>, chat: ChatId, peer: GossipId) {
-        if !self.removed_peer(&chat, &peer) {
+        let removed = self.removed_peer(&chat, &peer);
+        if !removed && self.handover_owed(&chat, &peer).is_none() {
             return;
         }
         let now = cx.now;
@@ -912,7 +917,7 @@ impl Node {
         }
         r.owed = true;
         self.t.replies.insert((chat, peer), r);
-        if !self.send_owed(cx, chat, peer) {
+        if !self.send_owed(cx, chat, peer) && removed {
             self.trigger(
                 cx,
                 TaskKey {
@@ -924,8 +929,9 @@ impl Node {
         }
     }
 
-    /// Sends `peer` its kick or leave for `chat` if it is owed one and the daily count
-    /// allows it. Returns whether a record was held.
+    /// Sends `peer` its kick or leave for `chat`, or the handover root it signed (see
+    /// [`Node::removed_contact`]), if it is owed one and the daily count allows it. Returns
+    /// whether a record was held.
     pub(crate) fn send_owed(&mut self, _cx: &mut Cx<'_>, chat: ChatId, peer: GossipId) -> bool {
         let kick = (
             chat,
@@ -938,7 +944,7 @@ impl Node {
         // the epoch it was removed from. A leave of an earlier epoch that is live for
         // `chat` comes with its root and the roots between: the device can tell it applies.
         let (key, chain) = if self.t.signed.contains(&kick) {
-            (kick, Vec::new())
+            (Some(kick), Vec::new())
         } else if let Some(leave) = self.leave_for(&chat, &peer) {
             // A leave of an earlier epoch is verified against that epoch's root, which the
             // device may not hold (restored from a backup older than it, it got `chat` as an
@@ -947,10 +953,13 @@ impl Node {
             if leave.0 != chat {
                 chain.insert(0, leave.0);
             }
-            (leave, chain)
+            (Some(leave), chain)
         } else if let Some(later) = self.later_removal(&chat, &peer) {
             let chain = self.line_between(&chat, &later.0, &peer);
-            (later, chain)
+            (Some(later), chain)
+        } else if let Some(chain) = self.handover_owed(&chat, &peer) {
+            // The roots from `chat` to the handover root, which ends the chain.
+            (None, chain)
         } else {
             return false;
         };
@@ -963,7 +972,11 @@ impl Node {
         r.owed = false;
         r.count += 1;
         self.t.replies.insert((chat, peer), r);
-        self.stats.removal_replies += 1;
+        if key.is_some() {
+            self.stats.removal_replies += 1;
+        } else {
+            self.stats.handover_replies += 1;
+        }
         for c in chain.into_iter().take(ROOTS_PER_REPLY) {
             if let Some(root) = self.held_root(&c).cloned()
                 && let Ok(blob) = crate::wire::encode_event_blob(&EventObject::Root(Box::new(root)))
@@ -971,8 +984,94 @@ impl Node {
                 self.queue_work(peer, Work::Blob(blob));
             }
         }
-        self.queue_object(peer, key.0, key_item(&key));
+        if let Some(key) = key {
+            self.queue_object(peer, key.0, key_item(&key));
+        }
         true
+    }
+
+    /// When `peer` is the former owner of a held handover root that `chat` leads to, the
+    /// roots to send it, ending with that handover root (§5.6): `chat` is the handover's
+    /// parent, or an earlier epoch from which a line of epochs `peer` is a member of leads to
+    /// it (the roots between come first, D.62); or `chat` is the handover root itself, which
+    /// does not list `peer`. The latest such handover when there are several. `None` for any
+    /// other peer: only an owner a handover deposed here is looked for.
+    pub(crate) fn handover_owed(&self, chat: &ChatId, peer: &GossipId) -> Option<Vec<ChatId>> {
+        let group = self.group_of(chat);
+        if *peer == self.me
+            || !self
+                .t
+                .group_recs
+                .get(&group)
+                .is_some_and(|g| g.deposed.contains(peer))
+        {
+            return None;
+        }
+        self.t
+            .epochs
+            .iter()
+            .filter(|(_, r)| {
+                r.group == group
+                    && r.status == EpochStatus::Installed
+                    && r.root.root_type() == crate::root::RootType::Handover
+                    && r.parents
+                        .first()
+                        .and_then(|p| self.t.epochs.get(p))
+                        .is_some_and(|p| p.root.owner_id() == *peer)
+            })
+            .filter_map(|(h, r)| {
+                let chain = if h == chat {
+                    if r.root.is_member(peer) {
+                        return None;
+                    }
+                    vec![*h]
+                } else {
+                    self.line_between(chat, h, peer)
+                };
+                (!chain.is_empty()).then_some(((r.root.created_at(), *h), chain))
+            })
+            .max_by_key(|(k, _)| *k)
+            .map(|(_, chain)| chain)
+    }
+
+    /// A valid handover root this device signed, as the owner of its held parent `parent`,
+    /// and in which it is no member: a copy of this account handed the group over and left
+    /// ("Hand over and leave", §5.7), and this device, restored from a backup made before,
+    /// still owns its line. It adopts the consequence: the group becomes read-only, "You
+    /// left". Nothing changes when the line it follows has moved on since (the group was
+    /// handed back and it was added again, for instance): the parent must be its current
+    /// epoch, or an ancestor of it through roots of its own.
+    pub(crate) fn left_by_handover(&mut self, cx: &mut Cx<'_>, parent: ChatId) {
+        let group = self.group_of(&parent);
+        if self.group_status(&group) != GroupStatus::Active {
+            return;
+        }
+        let Some(current) = self.current_epoch(&group) else {
+            return;
+        };
+        let mut own_line = BTreeSet::new();
+        let mut stack = vec![current];
+        while let Some(c) = stack.pop() {
+            if let Some(r) = self.t.epochs.get(&c)
+                && r.status == EpochStatus::Installed
+                && r.root.owner_id() == self.me
+                && own_line.insert(c)
+            {
+                stack.extend(r.parents.iter().copied());
+            }
+        }
+        if !own_line.contains(&parent) {
+            return;
+        }
+        self.stats.handovers_learnt += 1;
+        self.set_read_only(
+            cx,
+            group,
+            GroupStatus::Left {
+                epoch: current,
+                at: cx.now,
+            },
+        );
     }
 
     /// The installed epochs after `anc` up to `desc` on a line of epochs `peer` is a member

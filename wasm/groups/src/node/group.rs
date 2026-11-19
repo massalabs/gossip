@@ -475,6 +475,27 @@ impl Node {
             self.hold_handover(cx, from, root);
             return Ok(Answer::Supplied);
         }
+        // A handover root this device signed for a parent it holds, without itself: a copy
+        // of this account handed over and left, which members tell it (§5.6).
+        if root.root_type() == RootType::Handover
+            && !root.is_member(&self.me)
+            && root.is_member(&from)
+            && from != self.me
+            && let Some(parent) = root
+                .match_parents(self.t.epochs.keys())
+                .into_iter()
+                .find(|c| {
+                    self.t.epochs.get(c).is_some_and(|r| {
+                        r.status == EpochStatus::Installed && r.root.owner_id() == self.me
+                    })
+                })
+            && root
+                .verify_signature(self.t.epochs.get(&parent).map(|r| &r.root))
+                .is_ok()
+        {
+            self.left_by_handover(cx, parent);
+            return Ok(Answer::Supplied);
+        }
         if !root.is_member(&self.me) || !(root.is_member(&from) || signer_left) || from == self.me {
             self.failed_announcement(cx, &from);
             return Ok(Answer::Invalid);
