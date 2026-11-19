@@ -121,6 +121,19 @@ impl Db {
     }
 }
 
+/// A snapshot with its lists in key order, to compare two of them.
+fn normalized(mut s: BatchOut) -> BatchOut {
+    s.rows
+        .sort_by(|a, b| (&a.chat_id, &a.event_id).cmp(&(&b.chat_id, &b.event_id)));
+    s.edges
+        .sort_by(|a, b| (&a.chat_id, &a.event_id).cmp(&(&b.chat_id, &b.event_id)));
+    s.objects
+        .sort_by(|a, b| (&a.chat_id, &a.sync_obj_id).cmp(&(&b.chat_id, &b.sync_obj_id)));
+    s.node
+        .sort_by(|a, b| (&a.kind, &a.key).cmp(&(&b.kind, &b.key)));
+    s
+}
+
 struct Peer {
     core: Core,
     db: Db,
@@ -159,9 +172,12 @@ impl Peer {
         }
     }
 
-    /// Drops the engine and opens it again from the tables.
+    /// Drops the engine and opens it again from the tables: the tables hold exactly the
+    /// engine's records, and the engine opened from them holds them again.
     fn reopen(&mut self) {
         self.persist();
+        let tables = normalized(self.db.snapshot());
+        assert_eq!(normalized(self.core.snapshot().unwrap()), tables);
         let (_, secret) = keys(&self.secret_seed);
         self.core = Core::open(
             IdentityKey::new(self.public.clone(), &secret),
@@ -169,6 +185,7 @@ impl Peer {
         )
         .unwrap();
         assert_eq!(self.core.report.orphans, 0);
+        assert_eq!(normalized(self.core.snapshot().unwrap()), tables);
     }
 }
 
@@ -365,6 +382,11 @@ fn three_members_create_invite_message_edit_delete_remove_leave() {
         group_json(&net.peers[2], group).field("status").unwrap(),
         &J::Str("Removed".into())
     );
+
+    // Every node reopens again, now holding kicks, removed states and later epochs.
+    for i in 0..3 {
+        net.peers[i].reopen();
+    }
 
     // Bob leaves with a signed leave: the group is closed on his device and erased from
     // his tables but for a closed-chat marker per end.
