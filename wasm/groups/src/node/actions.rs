@@ -747,24 +747,37 @@ impl Node {
         // One kick per parent epoch and member of it not in the new root, except members
         // whose live leave this device holds (§5.6, D.10).
         let mut kicks: Vec<Kick> = Vec::new();
+        let mut foreign: BTreeSet<GossipId> = BTreeSet::new();
         for p in &parents {
             let Some(proot) = self.t.epochs.get(p).map(|r| r.root.clone()) else {
                 continue;
             };
+            // Only the owner of an epoch signs a kick naming it (§5.6): a new owner resolving
+            // a former owner's branch, or naming an epoch of the former owner as the last one
+            // of a member added back (§5.10), kicks no one from it.
+            if proot.owner_id() != self.me {
+                foreign.extend(proot.members().iter().copied());
+                continue;
+            }
             for m in proot.members() {
                 if root.is_member(m) || *m == self.me || leavers.contains(m) {
                     continue;
                 }
-                let kick = if proot.owner_id() == self.me {
-                    Kick::sign(&proot, *m, signer, bytes(cx.rng))
-                } else {
-                    // A resolution by a new owner over a previous owner's branch (D.18).
-                    Kick::sign_as(&proot, *m, signer, &my_keys, bytes(cx.rng))
-                }
-                .map_err(NodeError::Root)?;
-                kicks.push(kick);
+                kicks.push(Kick::sign(&proot, *m, signer, bytes(cx.rng)).map_err(NodeError::Root)?);
             }
         }
+        // A member dropped from such an epoch is told by a kick from an epoch of this owner
+        // among the parents, when it is in one; a member only on the former owner's branch is
+        // not told (a known limit), counted.
+        self.stats.removed_without_kick += foreign
+            .iter()
+            .filter(|m| {
+                !root.is_member(m)
+                    && **m != self.me
+                    && !leavers.contains(m)
+                    && !kicks.iter().any(|k| k.removed() == **m)
+            })
+            .count() as u64;
         let leaving = !root.is_member(&self.me);
         // Install, then deliver: the root to every other member, each kick to the member it
         // names, and every kick to the members in both the parent and the new root (§4.6).
