@@ -1845,6 +1845,8 @@ impl Sim {
                     && !dev.closed
                     && !dev.restored
                     && !self.split
+                    // A side branch a Dissolve & Delete leaves stays active (§5.8).
+                    && !self.dissolved
                 {
                     assert!(
                         self.group_of(d)
