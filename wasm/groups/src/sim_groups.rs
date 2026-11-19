@@ -340,8 +340,8 @@ struct Sim {
     former_roots: BTreeSet<ChatId>,
     /// Dissolve & Delete in this seed.
     dissolve_delete: bool,
-    /// Roots of a new owner naming the former owner's second group: forbidden on a device
-    /// that holds that group; a valid successor with one unmatched parent elsewhere.
+    /// Roots of a new owner naming its own line and the former owner's second group: a
+    /// successor in its line, whose parent in the second group stays unmatched (D.69).
     takeover_roots: BTreeSet<ChatId>,
 }
 
@@ -1464,8 +1464,9 @@ impl Sim {
     }
 
     /// The former owner `o`, after handing the group over, signs a successor of its old
-    /// epoch dated at the end of time; the heir builds a root continuing both its line and
-    /// the former owner's second group. Neither may take effect.
+    /// epoch dated at the end of time, which must never become current; the heir builds a
+    /// root naming both its line and the former owner's second group, which may continue
+    /// the heir's line only.
     fn after_handover(&mut self, o: usize, heir: usize, old: ChatId) {
         let members: Vec<GossipId> = self
             .node(o)
@@ -1514,6 +1515,9 @@ impl Sim {
             &b.secret.dsa_signing_key,
             bytes(&mut self.rng),
         ) {
+            // A successor of the new owner in its own line, with one parent in another group:
+            // legitimate there, never a continuation of the second group.
+            self.legit.insert(r.chat_id());
             self.takeover_roots.insert(r.chat_id());
             self.counters.takeovers += 1;
             let blob = wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap();
@@ -1681,22 +1685,14 @@ impl Sim {
             let node = self.node(d);
             // Nothing forbidden is accepted: no forged root is installed, and every installed
             // root of the group is legitimate.
-            let holds_second = self.second.is_some_and(|g2| {
-                node.tables()
-                    .epochs
-                    .get(&g2)
-                    .is_some_and(|r| r.status == EpochStatus::Installed)
-            });
             for (chat, rec) in node.tables().epochs.iter() {
-                if self.takeover_roots.contains(chat) {
-                    assert!(
-                        !(holds_second
-                            && rec.status == EpochStatus::Installed
-                            && rec.parents.len() > 1),
-                        "device {d} attached the second group to a takeover root"
-                    );
-                    continue;
-                }
+                // A takeover root continues its owner's own line, never the second group
+                // (D.69): that parent stays unmatched.
+                assert!(
+                    !(self.takeover_roots.contains(chat)
+                        && self.second.is_some_and(|g2| rec.parents.contains(&g2))),
+                    "device {d} attached the second group to a takeover root"
+                );
                 assert!(
                     !(self.forged.contains(chat) && rec.status == EpochStatus::Installed),
                     "device {d} installed a forged root"
