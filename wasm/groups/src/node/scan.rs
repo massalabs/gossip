@@ -115,7 +115,15 @@ impl Node {
             }
             let key = (chat, peer);
             match self.t.scans_out.get(&key).map(|op| op.attempt) {
-                Some(ScanAttempt::Sent { .. }) => self.resend_scan(key),
+                // The request stays sent with its local deadline: the resend does not change
+                // the stage (§11.4), so a peer whose session resets more often than the TTL
+                // cannot hold the scan past it.
+                Some(ScanAttempt::Sent { .. }) => self.queue_work(
+                    peer,
+                    Work::Query {
+                        purpose: Purpose::Scan(chat),
+                    },
+                ),
                 Some(_) => {}
                 None => self.start_scan(cx, chat, peer, None),
             }
@@ -135,10 +143,10 @@ impl Node {
     }
 
     /// The page request to send for the scan of `chat` with `peer`, with its TTL, if one is
-    /// queued.
+    /// queued or resent after a reconnection.
     pub(crate) fn scan_query(&self, chat: &ChatId, peer: &GossipId) -> Option<(QueryOp, u64)> {
         let op = self.t.scans_out.get(&(*chat, *peer))?;
-        (op.attempt == ScanAttempt::Queued).then_some((
+        matches!(op.attempt, ScanAttempt::Queued | ScanAttempt::Sent { .. }).then_some((
             QueryOp::TipsScan {
                 anchor: *chat,
                 scan_id: op.scan_id,
@@ -148,7 +156,8 @@ impl Node {
         ))
     }
 
-    /// The page request was handed off at `sent_at`: the stage's local wait starts.
+    /// The page request was handed off at `sent_at`: the stage's local wait starts (a
+    /// reconnection resend keeps the one running).
     pub(crate) fn scan_sent(&mut self, key: ScanKey, sent_at: u64) {
         if let Some(op) = self.t.scans_out.get_mut(&key)
             && op.attempt == ScanAttempt::Queued
