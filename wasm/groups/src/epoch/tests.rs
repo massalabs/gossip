@@ -708,6 +708,52 @@ fn a_scheduled_deletion_of_a_deleted_message_is_applied_at_once() {
     );
 }
 
+/// Regression (review of c11b2163, D.31 choice A): the served form of a scheduled deletion
+/// depends only on the event and the clock. After a local-only deletion, a scheduled deletion
+/// arriving again, or a new one, was stored and served at once in its immediate form, so a
+/// peer fetching it deleted the message before its time (§7.4).
+#[test]
+fn a_scheduled_deletion_is_never_served_before_its_own_time() {
+    let mut f = Fixture::new();
+    let a = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "a"));
+    let ds = f.event(T0, 2, &[], del(1, Some(T0 + 60 * MIN)));
+    f.recv(&a, T0);
+    f.recv(&ds, T0);
+    ep(&f.root)
+        .local_delete(&mut f.store, T0 + 1, sid(1))
+        .unwrap();
+    f.recv(&ds, T0 + 2);
+    let ds2 = f.event(T0 + 3, 3, &[], del(1, Some(T0 + 90 * MIN)));
+    f.recv(&ds2, T0 + 3);
+    // Served before its own due time: the scheduled form, or nothing; never the immediate
+    // form.
+    let served = |f: &Fixture, e: &MessageEvent, now: u64| {
+        f.epoch()
+            .serve(&f.store, &e.event_id(), now)
+            .unwrap()
+            .map(|s| s.payload().clone())
+    };
+    for now in [T0 + 3, T0 + 60 * MIN - 1] {
+        f.tick(now);
+        for e in [&ds, &ds2] {
+            let form = served(&f, e, now);
+            assert!(
+                form.is_none() || form.as_ref() == Some(e.payload()),
+                "{form:?} served at {now}"
+            );
+        }
+    }
+    // Each is normalised at its own time.
+    f.tick(T0 + 60 * MIN);
+    assert_eq!(served(&f, &ds, T0 + 60 * MIN), Some(del(1, None)));
+    assert_eq!(
+        served(&f, &ds2, T0 + 60 * MIN).as_ref(),
+        Some(ds2.payload())
+    );
+    f.tick(T0 + 90 * MIN);
+    assert_eq!(served(&f, &ds2, T0 + 90 * MIN), Some(del(1, None)));
+}
+
 #[test]
 fn the_immediate_form_of_a_pending_deletion_does_not_apply_it_early() {
     let mut f = Fixture::new();
