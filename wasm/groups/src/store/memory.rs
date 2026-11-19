@@ -1,9 +1,11 @@
-//! An in-memory [`Storage`], for tests and simulations.
+//! An in-memory [`Storage`], for tests and simulations, with the indexes a persistent
+//! backend would keep.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Changes, EventRow, ObjectRecord, PendingItem, Storage, StorageError, StorageRead, sort_pending,
+    Changes, EventRow, ObjectRecord, PendingItem, PendingKind, Role, RowState, Storage,
+    StorageError, StorageRead,
 };
 use crate::ids::{ChatId, EventId, SyncObjId};
 
@@ -12,6 +14,74 @@ struct EpochRecords {
     rows: BTreeMap<EventId, EventRow>,
     edges: BTreeMap<EventId, Vec<EventId>>,
     objects: BTreeMap<SyncObjId, ObjectRecord>,
+    // Indexes, derived from the records above.
+    held: BTreeSet<EventId>,
+    carriers: BTreeSet<EventId>,
+    markers: BTreeSet<EventId>,
+    pending: BTreeSet<(u64, EventId, PendingKind, SyncObjId)>,
+}
+
+impl EpochRecords {
+    fn unindex_row(&mut self, row: &EventRow) {
+        self.held.remove(&row.event_id);
+        self.carriers.remove(&row.event_id);
+        self.markers.remove(&row.event_id);
+    }
+
+    fn index_row(&mut self, row: &EventRow) {
+        match &row.state {
+            RowState::Held { role, .. } => {
+                self.held.insert(row.event_id);
+                if *role == Role::Current {
+                    self.carriers.insert(row.event_id);
+                }
+            }
+            RowState::TemporarilyInvalid => {
+                self.markers.insert(row.event_id);
+            }
+            RowState::Pruned => {}
+        }
+    }
+
+    fn pending_keys(
+        obj: &ObjectRecord,
+    ) -> impl Iterator<Item = (u64, EventId, PendingKind, SyncObjId)> + '_ {
+        obj.pending_items()
+            .map(|i| (i.due, i.event_id, i.kind, i.sync_obj_id))
+    }
+
+    fn put_row(&mut self, row: EventRow) {
+        if let Some(old) = self.rows.remove(&row.event_id) {
+            self.unindex_row(&old);
+        }
+        self.index_row(&row);
+        self.rows.insert(row.event_id, row);
+    }
+
+    fn remove_row(&mut self, id: &EventId) {
+        if let Some(old) = self.rows.remove(id) {
+            self.unindex_row(&old);
+        }
+    }
+
+    fn put_object(&mut self, obj: ObjectRecord) {
+        if let Some(old) = self.objects.remove(&obj.sync_obj_id) {
+            for k in Self::pending_keys(&old) {
+                self.pending.remove(&k);
+            }
+        }
+        self.pending.extend(Self::pending_keys(&obj));
+        self.objects.insert(obj.sync_obj_id, obj);
+    }
+}
+
+fn item((due, event_id, kind, sync_obj_id): (u64, EventId, PendingKind, SyncObjId)) -> PendingItem {
+    PendingItem {
+        due,
+        event_id,
+        sync_obj_id,
+        kind,
+    }
 }
 
 /// Every record in memory. A commit cannot fail, so it is trivially atomic.
@@ -76,6 +146,42 @@ impl StorageRead for MemoryStorage {
             .cloned())
     }
 
+    fn held_ids(&self, chat_id: &ChatId) -> Result<Vec<EventId>, StorageError> {
+        Ok(self
+            .epochs
+            .get(chat_id)
+            .map(|e| e.held.iter().copied().collect())
+            .unwrap_or_default())
+    }
+
+    fn carriers(
+        &self,
+        chat_id: &ChatId,
+        ts_until: u64,
+        limit: usize,
+    ) -> Result<Vec<EventRow>, StorageError> {
+        Ok(self
+            .epochs
+            .get(chat_id)
+            .map(|e| {
+                e.carriers
+                    .iter()
+                    .take_while(|id| id.timestamp() <= ts_until)
+                    .take(limit)
+                    .filter_map(|id| e.rows.get(id).cloned())
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    fn markers(&self, chat_id: &ChatId, limit: usize) -> Result<Vec<EventId>, StorageError> {
+        Ok(self
+            .epochs
+            .get(chat_id)
+            .map(|e| e.markers.iter().take(limit).copied().collect())
+            .unwrap_or_default())
+    }
+
     fn object(
         &self,
         chat_id: &ChatId,
@@ -101,19 +207,24 @@ impl StorageRead for MemoryStorage {
         chat_id: &ChatId,
         until: u64,
     ) -> Result<Vec<PendingItem>, StorageError> {
-        let mut items: Vec<PendingItem> = self
+        Ok(self
             .epochs
             .get(chat_id)
             .map(|e| {
-                e.objects
-                    .values()
-                    .flat_map(ObjectRecord::pending_items)
-                    .filter(|i| i.due <= until)
+                e.pending
+                    .iter()
+                    .take_while(|k| k.0 <= until)
+                    .map(|k| item(*k))
                     .collect()
             })
-            .unwrap_or_default();
-        sort_pending(&mut items);
-        Ok(items)
+            .unwrap_or_default())
+    }
+
+    fn first_pending(&self, chat_id: &ChatId) -> Result<Option<PendingItem>, StorageError> {
+        Ok(self
+            .epochs
+            .get(chat_id)
+            .and_then(|e| e.pending.first().map(|k| item(*k))))
     }
 }
 
@@ -123,9 +234,16 @@ impl Storage for MemoryStorage {
             return Ok(());
         }
         let epoch = self.epochs.entry(changes.chat_id).or_default();
-        epoch.rows.extend(changes.rows);
+        for row in changes.rows.into_values() {
+            epoch.put_row(row);
+        }
+        for id in &changes.removed_rows {
+            epoch.remove_row(id);
+        }
         epoch.edges.extend(changes.edges);
-        epoch.objects.extend(changes.objects);
+        for obj in changes.objects.into_values() {
+            epoch.put_object(obj);
+        }
         self.commits += 1;
         Ok(())
     }

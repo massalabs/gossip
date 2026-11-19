@@ -4,7 +4,8 @@
 use std::collections::BTreeMap;
 
 use super::{
-    Changes, EventRow, ObjectRecord, PendingItem, StorageError, StorageRead, sort_pending,
+    Changes, EventRow, ObjectRecord, PendingItem, Role, RowState, StorageError, StorageRead,
+    sort_pending,
 };
 use crate::ids::{ChatId, EventId, SyncObjId};
 
@@ -27,6 +28,9 @@ impl<'s, S: StorageRead + ?Sized> Tx<'s, S> {
     }
 
     pub(crate) fn row(&self, id: &EventId) -> Result<Option<EventRow>, StorageError> {
+        if self.changes.removed_rows.contains(id) {
+            return Ok(None);
+        }
         match self.changes.rows.get(id) {
             Some(r) => Ok(Some(r.clone())),
             None => self.store.event_row(&self.changes.chat_id, id),
@@ -34,7 +38,24 @@ impl<'s, S: StorageRead + ?Sized> Tx<'s, S> {
     }
 
     pub(crate) fn put_row(&mut self, row: EventRow) {
+        self.changes.removed_rows.remove(&row.event_id);
         self.changes.rows.insert(row.event_id, row);
+    }
+
+    /// Removes a temporary-rejection marker (§9.6).
+    pub(crate) fn remove_marker(&mut self, id: EventId) {
+        self.changes.rows.remove(&id);
+        self.changes.removed_rows.insert(id);
+    }
+
+    /// Whether the store's answer for `id` is replaced by a staged write.
+    fn staged(&self, id: &EventId) -> bool {
+        self.changes.rows.contains_key(id) || self.changes.removed_rows.contains(id)
+    }
+
+    /// How many entries of a store answer staged writes can replace.
+    fn staged_count(&self) -> usize {
+        self.changes.rows.len() + self.changes.removed_rows.len()
     }
 
     pub(crate) fn put_edges(&mut self, child: EventId, parents: Vec<EventId>) {
@@ -72,13 +93,85 @@ impl<S: StorageRead + ?Sized> StorageRead for Tx<'_, S> {
 
     fn event_rows(&self, chat_id: &ChatId) -> Result<Vec<EventRow>, StorageError> {
         let base = self.store.event_rows(chat_id)?;
-        if *chat_id != self.changes.chat_id || self.changes.rows.is_empty() {
+        if *chat_id != self.changes.chat_id || self.staged_count() == 0 {
             return Ok(base);
         }
         let mut merged: BTreeMap<EventId, EventRow> =
             base.into_iter().map(|r| (r.event_id, r)).collect();
         merged.extend(self.changes.rows.iter().map(|(k, v)| (*k, v.clone())));
+        for id in &self.changes.removed_rows {
+            merged.remove(id);
+        }
         Ok(merged.into_values().collect())
+    }
+
+    fn held_ids(&self, chat_id: &ChatId) -> Result<Vec<EventId>, StorageError> {
+        let base = self.store.held_ids(chat_id)?;
+        if *chat_id != self.changes.chat_id || self.staged_count() == 0 {
+            return Ok(base);
+        }
+        let mut ids: Vec<EventId> = base.into_iter().filter(|id| !self.staged(id)).collect();
+        ids.extend(
+            self.changes
+                .rows
+                .values()
+                .filter(|r| matches!(r.state, RowState::Held { .. }))
+                .map(|r| r.event_id),
+        );
+        ids.sort_unstable();
+        Ok(ids)
+    }
+
+    fn carriers(
+        &self,
+        chat_id: &ChatId,
+        ts_until: u64,
+        limit: usize,
+    ) -> Result<Vec<EventRow>, StorageError> {
+        if *chat_id != self.changes.chat_id || self.staged_count() == 0 {
+            return self.store.carriers(chat_id, ts_until, limit);
+        }
+        // Staged writes can replace at most `staged_count` of the store's answers.
+        let fetch = limit.saturating_add(self.staged_count());
+        let mut rows: Vec<EventRow> = self
+            .store
+            .carriers(chat_id, ts_until, fetch)?
+            .into_iter()
+            .filter(|r| !self.staged(&r.event_id))
+            .collect();
+        rows.extend(
+            self.changes
+                .rows
+                .values()
+                .filter(|r| r.role() == Some(Role::Current) && r.event_id.timestamp() <= ts_until)
+                .cloned(),
+        );
+        rows.sort_unstable_by_key(|r| r.event_id);
+        rows.truncate(limit);
+        Ok(rows)
+    }
+
+    fn markers(&self, chat_id: &ChatId, limit: usize) -> Result<Vec<EventId>, StorageError> {
+        if *chat_id != self.changes.chat_id || self.staged_count() == 0 {
+            return self.store.markers(chat_id, limit);
+        }
+        let fetch = limit.saturating_add(self.staged_count());
+        let mut ids: Vec<EventId> = self
+            .store
+            .markers(chat_id, fetch)?
+            .into_iter()
+            .filter(|id| !self.staged(id))
+            .collect();
+        ids.extend(
+            self.changes
+                .rows
+                .values()
+                .filter(|r| r.state == RowState::TemporarilyInvalid)
+                .map(|r| r.event_id),
+        );
+        ids.sort_unstable();
+        ids.truncate(limit);
+        Ok(ids)
     }
 
     fn edges(&self, chat_id: &ChatId) -> Result<Vec<(EventId, Vec<EventId>)>, StorageError> {
@@ -150,5 +243,90 @@ impl<S: StorageRead + ?Sized> StorageRead for Tx<'_, S> {
         );
         sort_pending(&mut items);
         Ok(items)
+    }
+
+    fn first_pending(&self, chat_id: &ChatId) -> Result<Option<PendingItem>, StorageError> {
+        if *chat_id != self.changes.chat_id || self.changes.objects.is_empty() {
+            return self.store.first_pending(chat_id);
+        }
+        Ok(self.pending_until(chat_id, u64::MAX)?.into_iter().next())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::epoch::tests::{Fixture, T0, text};
+    use crate::store::{Role, RowState, Storage};
+
+    /// The index reads of a transaction agree with its merged rows, whatever is staged.
+    #[test]
+    fn index_reads_see_the_staged_writes() {
+        let mut f = Fixture::new();
+        let chat = f.root.chat_id();
+        let held = |f: &Fixture, n: u8, role| EventRow {
+            event_id: EventId::new(T0 + u64::from(n), [n; 16]),
+            state: RowState::Held {
+                event: f.event(T0 + u64::from(n), n, &[], text(n, f.bob.id, T0, T0, "x")),
+                role,
+            },
+        };
+        let other = |n: u8, state| EventRow {
+            event_id: EventId::new(T0 + u64::from(n), [n; 16]),
+            state,
+        };
+        let mut c = Changes::new(chat);
+        for r in [
+            held(&f, 1, Role::Current),
+            held(&f, 2, Role::Current),
+            held(&f, 3, Role::PendingVersion { due: T0 + 9 }),
+            held(&f, 4, Role::Current),
+            other(5, RowState::TemporarilyInvalid),
+            other(6, RowState::TemporarilyInvalid),
+            other(7, RowState::Pruned),
+        ] {
+            c.rows.insert(r.event_id, r);
+        }
+        f.store.commit(c).unwrap();
+
+        let mut tx = Tx::new(&f.store, chat);
+        tx.put_row(other(1, RowState::Pruned));
+        tx.put_row(held(&f, 7, Role::Current));
+        tx.put_row(held(&f, 8, Role::Current));
+        tx.put_row(other(9, RowState::TemporarilyInvalid));
+        tx.remove_marker(EventId::new(T0 + 5, [5; 16]));
+
+        let rows = tx.event_rows(&chat).unwrap();
+        assert_eq!(rows.len(), 8);
+        let ids = |p: &dyn Fn(&EventRow) -> bool| -> Vec<EventId> {
+            rows.iter().filter(|r| p(r)).map(|r| r.event_id).collect()
+        };
+        let carriers = ids(&|r| r.role() == Some(Role::Current));
+        assert_eq!(carriers.len(), 4);
+        for limit in 0..6 {
+            for until in [T0, T0 + 2, T0 + 7, u64::MAX] {
+                let want: Vec<EventId> = carriers
+                    .iter()
+                    .filter(|id| id.timestamp() <= until)
+                    .take(limit)
+                    .copied()
+                    .collect();
+                let got: Vec<EventId> = tx
+                    .carriers(&chat, until, limit)
+                    .unwrap()
+                    .iter()
+                    .map(|r| r.event_id)
+                    .collect();
+                assert_eq!(got, want, "limit {limit}, until {until}");
+            }
+        }
+        let markers = ids(&|r| r.state == RowState::TemporarilyInvalid);
+        assert_eq!(tx.markers(&chat, usize::MAX).unwrap(), markers);
+        assert_eq!(tx.markers(&chat, 1).unwrap(), markers[..1]);
+        assert_eq!(
+            tx.held_ids(&chat).unwrap(),
+            ids(&|r| matches!(r.state, RowState::Held { .. }))
+        );
+        assert!(tx.row(&EventId::new(T0 + 5, [5; 16])).unwrap().is_none());
     }
 }
