@@ -539,7 +539,8 @@ fn a_random_lane_with_no_non_neighbor_is_skipped_and_a_lane_waits_a_day_after_co
         .find(|s| matches!(s.op, QueryOp::TipsScan { .. }))
         .unwrap();
     let (sid, _) = asked(&s);
-    net.now += HOUR;
+    // Answered before the request's deadline (a later answer is dropped, §13.4).
+    net.now += MIN / 2;
     answer(
         &mut net,
         0,
