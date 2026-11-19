@@ -380,4 +380,58 @@ describe('Direct chats, contacts and connections', { timeout: 300_000 }, () => {
     expect(await carol.messages.getVisibleMessages(bob.userId)).toEqual([]);
     expect(await keys(carol)).toEqual([groupId]);
   });
+
+  it('connects again a member who left, deleted the group and was added back', async () => {
+    const [alice, bob, carol] = await open(3);
+    await setupSession(alice, bob, 'Bob', 'Alice');
+    await setupSession(alice, carol, 'Carol', 'Alice');
+
+    const groupId = await alice.groups.createGroup('Trip', [
+      bob.userId,
+      carol.userId,
+    ]);
+    await deliver();
+    for (const p of [bob, carol]) {
+      const [inv] = await p.groups.invitations();
+      await p.conversations.acceptInvitation(inv.epochId);
+    }
+    await deliver(20, 10_000);
+    expect(bob.discussions.getStatus(carol.userId)).toBe(SessionStatus.Active);
+
+    // Bob leaves and deletes the group: he revokes his connection to Carol,
+    // who still holds epochs listing him and keeps hers.
+    await bob.groups.leave(groupId, 'Signed');
+    await deliver(10, 10_000);
+    if ((await bob.groups.get(groupId)) !== null) {
+      await bob.groups.deleteGroup(groupId);
+    }
+    await deliver();
+    expect((await alice.groups.get(groupId))?.members).not.toContain(
+      bob.userId
+    );
+    expect(
+      await bob.queries.contacts.getByOwnerAndUser(bob.userId, carol.userId)
+    ).toBeUndefined();
+
+    // Alice adds him back: Bob and Carol must be connected again.
+    await alice.groups.changeMembers(groupId, { add: [bob.userId] });
+    await deliver(10, 10_000);
+    const [inv] = await bob.groups.invitations();
+    expect(inv).toBeDefined();
+    const rejoined = await bob.conversations.acceptInvitation(inv.epochId);
+    await deliver(20, 10_000);
+
+    expect(bob.discussions.getStatus(carol.userId)).toBe(SessionStatus.Active);
+    expect(carol.discussions.getStatus(bob.userId)).toBe(SessionStatus.Active);
+
+    // The session is the same on both sides: with Alice away, a message of
+    // Bob's reaches Carol directly.
+    await alice.closeSession();
+    peers = [bob, carol];
+    await bob.groups.sendMessage(rejoined, 'from bob, added back');
+    await deliver(10, 10_000);
+    expect(await texts(carol.groups, groupId)).toContain(
+      'from bob, added back'
+    );
+  });
 });

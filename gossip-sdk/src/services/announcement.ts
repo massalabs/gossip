@@ -52,10 +52,21 @@ export interface AnnouncementReceptionResult {
 export const EstablishSessionError =
   'Session manager failed to establish outgoing session';
 
+/**
+ * How long after answering a connection's new announcement this device
+ * waits before answering another from the same peer: it ends any exchange
+ * of answers (both sides answering each other's).
+ */
+const CONNECTION_RENEWAL_ANSWER_MS = 10 * 60 * 1000;
+
 export class AnnouncementService {
   private messageProtocol: IMessageProtocol;
   private session: SessionModule;
   private isProcessingAnnouncements = false;
+  /** Peers our latest announcement was sent to and not answered yet. */
+  private awaitingAnswer = new Set<string>();
+  /** When a new announcement of each automatic connection was last answered. */
+  private renewalAnsweredAt = new Map<string, number>();
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
   private refreshService?: RefreshService;
@@ -195,6 +206,15 @@ export class AnnouncementService {
         success: false,
         error: new Error(EstablishSessionError),
       };
+    }
+
+    if (
+      this.session.peerSessionStatus(contactPublicKeys.derive_id()) ===
+      SessionStatus.SelfRequested
+    ) {
+      this.awaitingAnswer.add(contactUserId);
+    } else {
+      this.awaitingAnswer.delete(contactUserId);
     }
 
     log.info('announcement prepared for outgoing session', {
@@ -569,6 +589,17 @@ export class AnnouncementService {
     }
   }
 
+  /** Whether to answer a new announcement of this connection now. */
+  private _mayAnswerRenewal(contactUserId: string): boolean {
+    const now = Date.now();
+    const last = this.renewalAnsweredAt.get(contactUserId);
+    if (last !== undefined && now - last < CONNECTION_RENEWAL_ANSWER_MS) {
+      return false;
+    }
+    this.renewalAnsweredAt.set(contactUserId, now);
+    return true;
+  }
+
   private async _generateTemporaryContactName(
     ownerUserId: string
   ): Promise<string> {
@@ -751,11 +782,21 @@ export class AnnouncementService {
       automatic
     );
 
+    const answersOurs = this.awaitingAnswer.delete(contactUserId);
+    const statusNow = this.session.peerSessionStatus(contactUserIdRaw);
     if (
       automatic &&
-      this.session.peerSessionStatus(contactUserIdRaw) ===
-        SessionStatus.PeerRequested
+      (statusNow === SessionStatus.PeerRequested ||
+        (statusNow === SessionStatus.Active &&
+          !answersOurs &&
+          this._mayAnswerRenewal(contactUserId)))
     ) {
+      // A connection whose peer announced itself anew without answering
+      // ours, such as a member who revoked its connection to us when it left
+      // a group and opens it again once added back: the session it just
+      // made pairs our earlier announcement, which it no longer holds, so it
+      // waits for a new one from us. A contact the user accepted is left as
+      // before.
       try {
         await this.connections?.accept(contactUserId);
       } catch {
