@@ -52,6 +52,9 @@ pub struct GroupSummary {
     pub side_branches: Vec<ChatId>,
     /// This device owns competing ends and must resolve them before sending (§4.9).
     pub must_resolve: bool,
+    /// Ends of former owners in the current owner's line (§5.9). They block nothing; on the
+    /// current owner's device, resolving them is offered ([`super::GroupChange::Resolve`]).
+    pub former_owner_branches: Vec<ChatId>,
     /// The groups linked by hand (§5.10).
     pub links: Vec<ChatId>,
 }
@@ -192,6 +195,7 @@ impl Node {
                     .filter(|e| e != current)
                     .collect(),
                 must_resolve,
+                former_owner_branches: self.former_owner_ends(group),
                 links: g
                     .map(|g| g.links.iter().copied().collect())
                     .unwrap_or_default(),

@@ -1192,9 +1192,12 @@ fn a_new_owner_resolves_the_former_owners_branch() {
     let s = net.summary(1, &g).unwrap();
     assert_eq!(s.current, h);
     assert!(s.side_branches.contains(&a), "{s:?}");
-    assert!(
-        s.must_resolve,
-        "the new owner must resolve the former owner's branch"
+    // Offered to the new owner, without blocking it (finding 5 of the review of 54711780).
+    assert!(!s.must_resolve);
+    assert_eq!(
+        s.former_owner_branches,
+        vec![a],
+        "the new owner is offered the resolution"
     );
     let r = net
         .change(
@@ -2131,7 +2134,7 @@ fn a_former_owner_cannot_mute_or_freeze_the_new_owner() {
     }
     let s = net.summary(1, &g).unwrap();
     assert!(!s.must_resolve);
-    assert!(s.side_branches.contains(&a.chat_id()));
+    assert_eq!(s.former_owner_branches, vec![a.chat_id()]);
     // The new owner still sends and changes the group.
     net.say(1, &g, "still mine");
     let e = net

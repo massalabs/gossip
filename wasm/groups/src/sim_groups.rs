@@ -628,7 +628,7 @@ impl Sim {
     /// branch (§4.9: "include all").
     fn resolve_if_needed(&mut self, d: usize) {
         let Some(s) = self.group_of(d) else { return };
-        if !s.must_resolve || self.split {
+        if !(s.must_resolve || !s.former_owner_branches.is_empty()) || self.split {
             return;
         }
         let node = self.node(d);
