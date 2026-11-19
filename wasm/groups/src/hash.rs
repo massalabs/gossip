@@ -265,6 +265,19 @@ mod tests {
                 b"gossip.groups.message.picture",
             ],
         );
+        // ["gossip.groups.reaction.1", h'77..', h'22..', "👍"]: target, author, then the emoji
+        // as text.
+        assert_hashes(
+            reaction_sync_obj_id(&SyncObjId::from_bytes([0x77; 32]), &gid(), "\u{1f44d}")
+                .as_bytes(),
+            &[
+                &[0x84, 0x78, 0x18],
+                b"gossip.groups.reaction.1",
+                &b32(0x77),
+                &b32(0x22),
+                &[0x64, 0xf0, 0x9f, 0x91, 0x8d],
+            ],
+        );
     }
 
     // Fixed test vectors: computed once with this implementation and pinned.
@@ -308,6 +321,13 @@ mod tests {
         assert_eq!(
             hex::encode(registered_sync_obj_id("gossip.groups.message.picture").as_bytes()),
             "a7bab16213569600fa16199da6d2db6bf659d9ff9f4c2bbdbbb7dffbb4e71ad8"
+        );
+        assert_eq!(
+            hex::encode(
+                reaction_sync_obj_id(&SyncObjId::from_bytes([0x77; 32]), &gid(), "\u{1f44d}")
+                    .as_bytes()
+            ),
+            "809ae5de6e8a0174468116cc67c7345c8779bd86ca66961eadfdd57343e888be"
         );
     }
 

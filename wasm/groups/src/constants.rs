@@ -142,6 +142,7 @@ mod tests {
             DOMAIN_SECRET_PROOF,
             DOMAIN_RESULT,
             DOMAIN_SYNC_OBJ_NAME,
+            DOMAIN_REACTION,
         ];
         let contexts = [
             CONTEXT_ROOT_SIGNATURE,
@@ -188,6 +189,7 @@ mod tests {
             (DOMAIN_SECRET_PROOF, "gossip.groups.message.secret_proof.1"),
             (DOMAIN_RESULT, "gossip.groups.message.result.1"),
             (DOMAIN_SYNC_OBJ_NAME, "gossip.groups.sync_obj_name.1"),
+            (DOMAIN_REACTION, "gossip.groups.reaction.1"),
             (CONTEXT_ROOT_SIGNATURE, "gossip.groups.root.signature.1"),
             (CONTEXT_LEAVE_SIGNATURE, "gossip.groups.leave.signature.1"),
             (CONTEXT_KICK_SIGNATURE, "gossip.groups.kick.signature.1"),
@@ -200,7 +202,7 @@ mod tests {
         for (got, want) in strings {
             assert_eq!(got, want);
         }
-        let numbers: [(u64, u64); 25] = [
+        let numbers: [(u64, u64); 27] = [
             (PROTOCOL_VERSION, 1),
             (EVENT_VERSION, 1),
             (ID_SIZE as u64, 32),
@@ -216,6 +218,8 @@ mod tests {
             (MAX_REPLY_TARGETS as u64, 32),
             (MAX_TEXT_BYTES as u64, 16_384),
             (MAX_METADATA_BYTES as u64, 16_384),
+            (MAX_EMOJI_BYTES as u64, 64),
+            (MAX_MIMETYPE_BYTES as u64, 127),
             (MAX_PLAINTEXT_BYTES as u64, 57_344),
             (MAX_EVENT_BLOB_BYTES as u64, 57_307),
             (MAX_QUERY_ENTRIES as u64, 16),
