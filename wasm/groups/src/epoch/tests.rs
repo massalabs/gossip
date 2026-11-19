@@ -887,3 +887,39 @@ fn storage_failures_commit_nothing() {
     );
     assert_eq!(store.0, MemoryStorage::new());
 }
+
+/// Regression (simulation seed 7 at 22d9d782 with the scheduled-deletion exclusion off):
+/// which deletion events stay available must not depend on when a later scheduled deletion
+/// arrived relative to the activation of an earlier one.
+#[test]
+fn scheduled_deletions_end_up_available_whatever_the_arrival_timing() {
+    let mut early = Fixture::new();
+    let c = early.event(T0, 1, &[], text(1, early.bob.id, T0, T0, "c"));
+    let s1 = early.event(T0, 2, &[], del(1, Some(T0 + 5_000)));
+    let s2 = early.event(T0, 3, &[], del(1, Some(T0 + 10_000)));
+    // Both scheduled deletions arrive before the first applies.
+    for e in [&c, &s1, &s2] {
+        early.recv(e, T0);
+    }
+    early.tick(T0 + 20_000);
+    // The second one arrives after the first applied.
+    let mut late = Fixture::new();
+    late.recv(&c, T0);
+    late.recv(&s1, T0);
+    late.tick(T0 + 6_000);
+    late.recv(&s2, T0 + 7_000);
+    late.tick(T0 + 20_000);
+
+    let available = |f: &Fixture| -> Vec<EventId> {
+        f.store
+            .event_rows(&f.root.chat_id())
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.available(T0 + 20_000))
+            .map(|r| r.event_id)
+            .collect()
+    };
+    assert_eq!(early.obj(1).current, late.obj(1).current);
+    assert_eq!(available(&early), available(&late));
+    assert_eq!(early.tips(T0 + 20_000), late.tips(T0 + 20_000));
+}
