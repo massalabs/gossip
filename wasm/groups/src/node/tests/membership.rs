@@ -3286,3 +3286,71 @@ fn a_restored_member_learns_its_kick_from_an_archived_group() {
     net.run(10 * MIN);
     assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
 }
+
+/// Issue "member who left is invited again to an old epoch" (first real run): a member
+/// left by a signed leave at E2 and was added back at E4. The owner's tip list for E4's
+/// group names E1, the epoch before the one it left, which it also held and erased with the
+/// group, and which no closed-chat marker covered: it was fetched and offered as a fresh
+/// invitation, owner verified, with no "closed before" warning; accepted, it became a second
+/// copy of the group, which the device then pushed to the former owner as one more
+/// invitation.
+#[test]
+fn an_epoch_before_the_one_a_member_left_is_not_offered_to_it_again() {
+    let (mut net, e1) = founded(3);
+    net.say(0, &e1, "before");
+    net.say(1, &e1, "before too");
+    net.run(MIN);
+    net.change(
+        0,
+        e1,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(MIN);
+    let now = net.now;
+    let s = signer(1);
+    let dev = &mut net.devs[1];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            e1,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    assert!(net.devs[1].node.groups().is_empty());
+    assert!(!net.summary(0, &e1).unwrap().members.contains(&gid(1)));
+    let e4 = net
+        .change(
+            0,
+            e1,
+            GroupChange::Successor {
+                add: vec![gid(1)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(MIN);
+    let later = net.now + crate::constants::PROMPT_DELAY_MS;
+    let inv: Vec<ChatId> = net.devs[1]
+        .node
+        .invitations(later)
+        .iter()
+        .map(|i| i.chat_id)
+        .collect();
+    assert_eq!(inv, vec![e4]);
+    net.accept(1, e4);
+    net.run(10 * MIN);
+    let later = net.now + crate::constants::PROMPT_DELAY_MS;
+    let inv = net.devs[1].node.invitations(later);
+    assert!(inv.is_empty(), "an old epoch is offered again: {inv:?}");
+    assert_eq!(net.devs[1].node.groups().len(), 1);
+}
