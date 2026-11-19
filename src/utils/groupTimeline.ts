@@ -83,6 +83,19 @@ export function lineTexts(
   }
 }
 
+/**
+ * Whether a send failed because the message is too large for a group packet
+ * (§13.10): the engine refuses an event that does not fit one container.
+ */
+export function isTooLargeError(e: unknown): boolean {
+  return (
+    e instanceof Error &&
+    /does not fit one empty container|exceeds the container limit/.test(
+      e.message
+    )
+  );
+}
+
 /** The reason the composer is disabled, as an i18n key, or null. */
 export function composerBlockedReason(group: GroupSummary): string | null {
   switch (group.status) {

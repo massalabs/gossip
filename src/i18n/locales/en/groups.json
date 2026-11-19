@@ -94,7 +94,8 @@
     "disabled_left": "You left this group. It is read only.",
     "disabled_waiting": "Waiting for the owner to remove you. Messages were deleted.",
     "disabled_dissolved": "This group was dissolved by its owner.",
-    "disabled_resolve": "The group has competing versions. Resolve them in the group details before sending."
+    "disabled_resolve": "The group has competing versions. Resolve them in the group details before sending.",
+    "too_long": "This message is too long for a group. Shorten it and send it again."
   },
   "message_menu": {
     "reply": "Reply",

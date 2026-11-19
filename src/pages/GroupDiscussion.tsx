@@ -18,7 +18,11 @@ import BaseModal from '../components/ui/BaseModal';
 import FormInput from '../components/ui/FormInput';
 import MessageInput from '../components/discussions/MessageInput';
 import GroupMessageItem from '../components/groups/GroupMessageItem';
-import { composerBlockedReason, messageText } from '../utils/groupTimeline';
+import {
+  composerBlockedReason,
+  isTooLargeError,
+  messageText,
+} from '../utils/groupTimeline';
 import GroupTimelineLine from '../components/groups/GroupTimelineLine';
 import SafeName from '../components/groups/SafeName';
 import { useGroupMemberName } from '../hooks/useGroupMemberName';
@@ -54,6 +58,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const [replyingTo, setReplyingTo] = useState<InputTarget | null>(null);
   const [editing, setEditing] = useState<InputTarget | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
+  // The text of a send that failed, put back in a fresh composer (`n` keys it).
+  const [draft, setDraft] = useState<{ text: string; n: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -133,13 +139,27 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     if (!service) return;
     const reply = replyingTo?.message;
     setReplyingTo(null);
-    void run(() =>
-      service.sendMessage(group.groupId, text, {
+    void service
+      .sendMessage(group.groupId, text, {
         replyTo: reply
           ? [{ epochId: reply.epochId, syncObjId: reply.syncObjId }]
           : undefined,
       })
-    );
+      .then(
+        () => {
+          setDraft(null);
+          refresh();
+        },
+        (e: unknown) => {
+          // The composer was cleared on send: give the text back.
+          setDraft(d => ({ text, n: (d?.n ?? 0) + 1 }));
+          toast.error(
+            isTooLargeError(e)
+              ? t('composer.too_long')
+              : t('message_menu.failed')
+          );
+        }
+      );
   };
 
   const header = (
@@ -172,6 +192,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
 
   const footer = canWrite ? (
     <MessageInput
+      key={draft?.n ?? 0}
+      initialValue={draft?.text}
       onSend={send}
       placeholderKey="groups:composer.placeholder"
       replyingTo={replyingTo}

@@ -165,6 +165,41 @@ describe('group pages', () => {
     expect(fake.service.deleteMessage).toHaveBeenCalledWith('g1', 's1');
   });
 
+  it('keeps the text of a message the group refuses, and says it is too long', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    fake.service.sendMessage.mockRejectedValueOnce(
+      new Error('groups:change: does not fit one empty container')
+    );
+    const textarea = r.container.querySelector(
+      'textarea'
+    ) as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value'
+      )!.set!;
+      setter.call(textarea, 'a very long text');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+    });
+    await act(flush);
+    expect(fake.service.sendMessage).toHaveBeenCalledWith(
+      'g1',
+      'a very long text',
+      { replyTo: undefined }
+    );
+    const toast = (await import('react-hot-toast')).default;
+    expect(toast.error).toHaveBeenCalledWith('composer.too_long');
+    expect(
+      (r.container.querySelector('textarea') as HTMLTextAreaElement).value
+    ).toBe('a very long text');
+  });
+
   it('creates a group with contacts that have an active session only', async () => {
     fake.sdk.contacts.list.mockResolvedValue([
       { userId: 'alice', name: 'Alice' },
