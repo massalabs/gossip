@@ -15,16 +15,19 @@
 //! - [`MessageEvent`]: the message event and its result projection (§6).
 //! - [`wire`]: the plaintext, container, frames and event blobs (§13, Appendix C).
 //! - [`store`]: the local records of §14.1 and the storage trait, with an in-memory store.
+//! - [`dag`]: tips, the cycle frontier and parent selection (§6.1, §12.1).
 
 #![warn(missing_docs)]
 
 pub mod cbor;
 pub mod constants;
+pub mod dag;
 mod error;
 mod event;
 pub mod hash;
 mod ids;
 mod keys;
+mod rng;
 mod root;
 mod signed;
 pub mod store;
@@ -43,6 +46,7 @@ pub use ids::{
     ParentCommitment, RefChatId, RequestId, ScanId, SecretProof, SyncObjId,
 };
 pub use keys::{SignatureBytes, check_key_answer, parse_user_public_keys};
+pub use rng::Randomness;
 pub use root::{ReceiveContext, Root, RootParams, RootType, next_root_created_at};
 pub use signed::{Dissolve, Kick, Leave};
 pub use wire::EventObject;
