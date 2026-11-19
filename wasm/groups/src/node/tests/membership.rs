@@ -3198,3 +3198,55 @@ fn the_scans_after_adopting_a_root_prefer_members_with_a_good_score() {
         net.exchange();
     }
 }
+
+/// Open since D.76 (code at 7e8da430): "Dissolve & Delete" keeps a side branch that does not
+/// lead to the dissolved epoch, and erases the handover it was judged against when it is a
+/// former owner's branch. Two weeks later the dissolved root went too, the group was judged
+/// again, and the former owner's branch became the current epoch of an active group: the
+/// former owner took the group back.
+#[test]
+fn a_former_owners_branch_left_by_dissolve_and_delete_never_reactivates_the_group() {
+    let (mut net, g) = founded(3);
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    let params = crate::root::RootParams {
+        name: "mine again".into(),
+        members: (0..3).map(gid).collect(),
+        group_secret: crate::ids::GroupSecret::from_bytes([4; 32]),
+        owner: ident(0).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
+        created_at: net.now,
+    };
+    let a =
+        Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [1; 32]).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(a.clone()))).unwrap();
+    net.recv_frames_m(2, 0, &[Frame::Event(blob)]);
+    assert_eq!(
+        net.summary(2, &g).unwrap().former_owner_branches,
+        vec![a.chat_id()]
+    );
+    let now = net.now;
+    let s = signer(1);
+    let dev = &mut net.devs[1];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, g, true, now, &mut net.rng)
+        .unwrap();
+    net.exchange();
+    let deleted = MyStatus::Dissolved { deleted: true };
+    assert_eq!(net.summary(2, &a.chat_id()).unwrap().status, deleted);
+    net.now += 15 * DAY;
+    net.tick(2);
+    let s = net.summary(2, &a.chat_id()).unwrap();
+    assert_eq!(s.status, deleted, "{s:?}");
+}
