@@ -1,7 +1,11 @@
+use std::collections::BTreeMap;
+
 use prost::Message;
 
 use super::*;
+use crate::event::{Body, Content, Payload};
 use crate::ids::{ChatId, EventId, GossipId, RequestId, ScanId, SyncObjId};
+use crate::root::tests::founding;
 use crate::test_support::identity;
 
 const TS: u64 = 1_700_000_000_000;
@@ -661,4 +665,209 @@ fn neighbor_and_leave_request_frames() {
         })])
         .is_err()
     );
+}
+
+// ── Event blobs ──────────────────────────────────────────────────────────────
+
+fn objects() -> Vec<EventObject> {
+    let alice = identity(1);
+    let bob = identity(2);
+    let root = founding(&alice, &[&alice, &bob]);
+    let message = MessageEvent::create(
+        &root,
+        EventId::new(TS, [9; 16]),
+        &[EventId::new(TS - 1, [1; 16])],
+        Payload::Content(Content {
+            sync_obj_id: SyncObjId::from_bytes([7; 32]),
+            author: bob.id,
+            created_at: TS,
+            last_modified_at: TS,
+            body: Body::Text("hello".into()),
+            edited: false,
+            metadata: BTreeMap::from([("k".to_owned(), vec![1, 2, 3])]),
+        }),
+    )
+    .unwrap();
+    let leave = Leave::sign(&root, &bob.public, &bob.secret.dsa_signing_key, [1; 32]).unwrap();
+    let kick = Kick::sign(&root, bob.id, &alice.secret.dsa_signing_key, [2; 32]).unwrap();
+    let dissolve = Dissolve::sign(&root, true, &alice.secret.dsa_signing_key, [3; 32]).unwrap();
+    vec![
+        EventObject::Root(Box::new(root)),
+        EventObject::Message(message),
+        EventObject::Leave(leave),
+        EventObject::Kick(kick),
+        EventObject::Dissolve(dissolve),
+    ]
+}
+
+#[test]
+fn event_blobs_round_trip() {
+    for object in objects() {
+        let blob = encode_event_blob(&object).unwrap();
+        assert_eq!(blob[0], 0x01, "version prefix");
+        assert_eq!(decode_event_blob(&blob, 1).unwrap(), object);
+        // Through a plaintext, in an event frame and in a response.
+        let response = Frame::Response(Response {
+            request_id: Some(RequestId::from_bytes([4; 16])),
+            idx: 3,
+            result: ResponseResult::Event(blob.clone()),
+        });
+        let bytes = encode_plaintext(&[Frame::Event(blob.clone()), response.clone()]).unwrap();
+        let p = decode_plaintext(&bytes).unwrap();
+        assert_eq!(p.version, 1);
+        assert_eq!(p.frames, vec![Ok(Frame::Event(blob.clone())), Ok(response)]);
+        let Ok(Frame::Event(b)) = &p.frames[0] else {
+            panic!()
+        };
+        assert_eq!(decode_event_blob(b, p.version).unwrap(), object);
+    }
+}
+
+#[test]
+fn event_blob_version_rules() {
+    let blob = encode_event_blob(&objects().remove(2)).unwrap();
+    let rest = &blob[1..];
+    let with = |v: &[u8]| [v, rest].concat();
+    assert_eq!(
+        decode_event_blob(&with(&[0x02]), 1),
+        Err(Error::EventVersionAbovePlaintext {
+            event: 2,
+            plaintext: 1
+        })
+    );
+    // Supported plaintext, unsupported event version.
+    assert_eq!(
+        decode_event_blob(&with(&[0x02]), 2),
+        Err(Error::UnsupportedEventVersion(2))
+    );
+    assert_eq!(
+        decode_event_blob(&with(&[0x00]), 1),
+        Err(Error::UnsupportedEventVersion(0))
+    );
+    // A non-minimal varint still reads as version 1.
+    assert!(decode_event_blob(&with(&[0x81, 0x00]), 1).is_ok());
+    assert_eq!(decode_event_blob(&[], 1), Err(Error::InvalidVersionPrefix));
+    assert_eq!(
+        decode_event_blob(&[0x80], 1),
+        Err(Error::InvalidVersionPrefix)
+    );
+}
+
+#[test]
+fn event_blob_malformed() {
+    let blob = encode_event_blob(&objects().remove(4)).unwrap();
+    // Unknown field in Event.
+    let mut b = blob.clone();
+    b.extend_from_slice(&[0x30, 0x00]);
+    assert_eq!(
+        decode_event_blob(&b, 1),
+        Err(Error::Malformed("unknown field"))
+    );
+    // Unknown oneof case of Event (field 6).
+    assert_eq!(
+        decode_event_blob(&[0x01, 0x32, 0x00], 1),
+        Err(Error::Malformed("unknown field"))
+    );
+    // No kind.
+    assert_eq!(
+        decode_event_blob(&[0x01], 1),
+        Err(Error::Missing("event kind"))
+    );
+    // Dissolve with must_delete = 2.
+    let mut d = proto::Dissolve {
+        chat_id: vec![1; 32],
+        must_delete: false,
+        signature: vec![0; crypto_dsa::SIGNATURE_SIZE],
+    }
+    .encode_to_vec();
+    d.extend_from_slice(&[0x10, 0x02]);
+    let mut b = vec![0x01, 0x2a];
+    prost::encoding::encode_varint(d.len() as u64, &mut b);
+    b.extend_from_slice(&d);
+    assert_eq!(
+        decode_event_blob(&b, 1),
+        Err(Error::Malformed("bool out of range"))
+    );
+    // Unknown root type.
+    let EventObject::Root(root) = objects().remove(0) else {
+        panic!()
+    };
+    let mut r = root.to_proto();
+    r.r#type = 7;
+    let b = [
+        vec![0x01],
+        proto::Event {
+            kind: Some(proto::EventKind::GroupRoot(r)),
+        }
+        .encode_to_vec(),
+    ]
+    .concat();
+    assert_eq!(
+        decode_event_blob(&b, 1),
+        Err(Error::Malformed("unknown enum value"))
+    );
+    // Unknown message type.
+    let EventObject::Message(m) = objects().remove(1) else {
+        panic!()
+    };
+    let mut p = m.to_proto();
+    p.payload.as_mut().unwrap().r#type = 5;
+    let b = [
+        vec![0x01],
+        proto::Event {
+            kind: Some(proto::EventKind::GroupMessageEvent(p)),
+        }
+        .encode_to_vec(),
+    ]
+    .concat();
+    assert_eq!(
+        decode_event_blob(&b, 1),
+        Err(Error::Malformed("unknown enum value"))
+    );
+    // Invalid UTF-8 in a text body.
+    let mut p = m.to_proto();
+    p.payload.as_mut().unwrap().body = Some(proto::Body::Content(vec![0xff]));
+    let mut b = [
+        vec![0x01],
+        proto::Event {
+            kind: Some(proto::EventKind::GroupMessageEvent(p)),
+        }
+        .encode_to_vec(),
+    ]
+    .concat();
+    // Turn field 9 (bytes) of the payload into field 7 (string): same length, same bytes.
+    let pos = b.windows(3).position(|w| w == [0x4a, 0x01, 0xff]).unwrap();
+    b[pos] = 0x3a;
+    assert_eq!(
+        decode_event_blob(&b, 1),
+        Err(Error::InvalidUtf8("MessagePayload"))
+    );
+}
+
+#[test]
+fn oversized_event_blobs_are_refused() {
+    let blob = [vec![0x01], vec![0; MAX_PLAINTEXT_BYTES]].concat();
+    assert_eq!(decode_event_blob(&blob, 1), Err(Error::DoesNotFitContainer));
+    let alice = identity(1);
+    let root = founding(&alice, &[&alice]);
+    let big = Payload::Content(Content {
+        sync_obj_id: SyncObjId::from_bytes([7; 32]),
+        author: alice.id,
+        created_at: TS,
+        last_modified_at: TS,
+        body: Body::Media(vec![0; MAX_PLAINTEXT_BYTES]),
+        edited: false,
+        metadata: BTreeMap::new(),
+    });
+    assert_eq!(
+        MessageEvent::create(&root, EventId::new(TS, [0; 16]), &[], big),
+        Err(Error::DoesNotFitContainer)
+    );
+    // The bound is exact.
+    let mut n = MAX_PLAINTEXT_BYTES;
+    while !fits_empty_container(n) {
+        n -= 1;
+    }
+    let frame = len_field(n);
+    assert_eq!(single_frame_plaintext_len(frame), MAX_PLAINTEXT_BYTES);
 }

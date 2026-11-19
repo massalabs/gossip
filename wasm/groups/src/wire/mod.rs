@@ -15,8 +15,11 @@ pub use frames::{
     QueryEntry, QueryOp, Response, ResponseResult, SignedKind, Status,
 };
 
-use crate::constants::{MAX_PLAINTEXT_BYTES, PROTOCOL_VERSION};
+use crate::constants::{EVENT_VERSION, MAX_PLAINTEXT_BYTES, PROTOCOL_VERSION};
 use crate::error::{Error, Result};
+use crate::event::MessageEvent;
+use crate::root::Root;
+use crate::signed::{Dissolve, Kick, Leave};
 use strict::Reader;
 
 /// Number of bytes of `value` as a protobuf varint.
@@ -51,6 +54,105 @@ pub fn single_frame_plaintext_len(frame_len: usize) -> usize {
 #[must_use]
 pub fn fits_empty_container(blob_len: usize) -> bool {
     single_frame_plaintext_len(len_field(blob_len)) <= MAX_PLAINTEXT_BYTES
+}
+
+/// A root, a signed object or a message event: the content of an event blob (§13.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventObject {
+    /// `GROUP_ROOT` (boxed: a root carries the owner's keys inline).
+    Root(Box<Root>),
+    /// `GROUP_MESSAGE_EVENT`.
+    Message(MessageEvent),
+    /// `LEAVE`.
+    Leave(Leave),
+    /// `KICK`.
+    Kick(Kick),
+    /// `DISSOLVE`.
+    Dissolve(Dissolve),
+}
+
+impl EventObject {
+    /// The event version the object is encoded under.
+    #[must_use]
+    pub fn version(&self) -> u64 {
+        match self {
+            EventObject::Root(r) => r.version(),
+            EventObject::Message(m) => m.version(),
+            // Signed objects exist only in version 1; they keep no other version.
+            EventObject::Leave(_) | EventObject::Kick(_) | EventObject::Dissolve(_) => {
+                EVENT_VERSION
+            }
+        }
+    }
+
+    fn to_proto(&self) -> proto::EventKind {
+        match self {
+            EventObject::Root(r) => proto::EventKind::GroupRoot(r.to_proto()),
+            EventObject::Message(m) => proto::EventKind::GroupMessageEvent(m.to_proto()),
+            EventObject::Leave(l) => proto::EventKind::Leave(l.to_proto()),
+            EventObject::Kick(k) => proto::EventKind::Kick(k.to_proto()),
+            EventObject::Dissolve(d) => proto::EventKind::Dissolve(d.to_proto()),
+        }
+    }
+}
+
+/// Encodes an event blob under the object's own version.
+///
+/// # Errors
+///
+/// [`Error::DoesNotFitContainer`] if the blob would not fit one empty container (§13.10).
+pub fn encode_event_blob(object: &EventObject) -> Result<Vec<u8>> {
+    let event = proto::Event {
+        kind: Some(object.to_proto()),
+    };
+    let mut out = Vec::new();
+    encode_varint(object.version(), &mut out);
+    prost::Message::encode(&event, &mut out).expect("a Vec grows as needed");
+    if !fits_empty_container(out.len()) {
+        return Err(Error::DoesNotFitContainer);
+    }
+    Ok(out)
+}
+
+/// Decodes and validates an event blob carried in a plaintext of version `plaintext_version`
+/// (§13.1).
+///
+/// The event version is read first; it must be at most the plaintext's and supported. The
+/// object is then validated under its own version: roots by §4.7 steps 1 and 3, message
+/// events by §6.1, §6.2 and §7.2, signed objects by their field lengths. Signatures, secret
+/// proofs and membership need the epoch and are checked separately.
+///
+/// # Errors
+///
+/// [`Error::EventVersionAbovePlaintext`], [`Error::UnsupportedEventVersion`],
+/// [`Error::DoesNotFitContainer`], [`Error::Malformed`] or the rule the object breaks.
+pub fn decode_event_blob(blob: &[u8], plaintext_version: u64) -> Result<EventObject> {
+    let mut r = Reader::new(blob);
+    let version = r.varint().map_err(|_| Error::InvalidVersionPrefix)?;
+    if version > plaintext_version {
+        return Err(Error::EventVersionAbovePlaintext {
+            event: version,
+            plaintext: plaintext_version,
+        });
+    }
+    if version != EVENT_VERSION {
+        return Err(Error::UnsupportedEventVersion(version));
+    }
+    if !fits_empty_container(blob.len()) {
+        return Err(Error::DoesNotFitContainer);
+    }
+    let event: proto::Event = strict::decode(r.rest(), &proto::EVENT)?;
+    match event.kind.ok_or(Error::Missing("event kind"))? {
+        proto::EventKind::GroupRoot(p) => {
+            Root::from_proto(version, p).map(|r| EventObject::Root(Box::new(r)))
+        }
+        proto::EventKind::GroupMessageEvent(p) => {
+            MessageEvent::from_proto(version, p).map(EventObject::Message)
+        }
+        proto::EventKind::Leave(p) => Leave::from_proto(&p).map(EventObject::Leave),
+        proto::EventKind::Kick(p) => Kick::from_proto(&p).map(EventObject::Kick),
+        proto::EventKind::Dissolve(p) => Dissolve::from_proto(&p).map(EventObject::Dissolve),
+    }
 }
 
 /// A decoded plaintext: its version and each frame, decoded on its own.

@@ -42,3 +42,4 @@ pub use ids::{
 pub use keys::{SignatureBytes, check_key_answer, parse_user_public_keys};
 pub use root::{ReceiveContext, Root, RootParams, RootType, next_root_created_at};
 pub use signed::{Dissolve, Kick, Leave};
+pub use wire::EventObject;
