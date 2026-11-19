@@ -1523,7 +1523,9 @@ fn an_uncorrelated_response_still_supplies_its_event() {
         0,
         member(2),
         &[Frame::Response(Response {
-            request_id: Some(RequestId::from_bytes([9; crate::constants::REQUEST_ID_SIZE])),
+            request_id: Some(RequestId::from_bytes(
+                [9; crate::constants::REQUEST_ID_SIZE],
+            )),
             idx: 0,
             result: ResponseResult::Event(blob(&f)),
         })],
