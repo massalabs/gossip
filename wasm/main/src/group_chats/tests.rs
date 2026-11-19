@@ -687,7 +687,7 @@ fn crossing_migrations_consents_and_connections() {
     );
     let c = net.peers[0]
         .core
-        .create_group("c".into(), vec![ids[2]], now)
+        .create_group_with("c".into(), vec![ids[2]], Some(0), now)
         .unwrap();
     net.peers[0].persist();
     net.settle(1_000);
@@ -702,6 +702,8 @@ fn crossing_migrations_consents_and_connections() {
     );
     assert_eq!(net.peers[2].core.invitations(net.now), "[]");
     assert_eq!(net.peers[2].core.direct_chat_consents(), "[]");
+    assert!(net.peers[2].core.holds_direct_chat(ids[0]));
+    assert!(!net.peers[2].core.holds_direct_chat(ids[1]));
 }
 
 /// §2.2 through the bindings: an edit keeps the metadata it does not patch, `[]` keeping

@@ -243,10 +243,11 @@ impl GroupsNode {
         Ok(g.as_bytes().to_vec())
     }
 
-    /// As `create_group`, for a group of this device and the one other member that continues
-    /// an earlier conversation of format `migrate_from` (`0`: the earlier one-to-one format,
-    /// §5.12), or `undefined` for none. Returns the group kept: the peer's own migration,
-    /// when it is held and its owner sorts first ("two creations at once").
+    /// As `create_group`, for an automatic group of this device and the one other member
+    /// (§5.12): `migrate_from = 0` both for a migration of an earlier conversation and for the
+    /// chat founded after an accepted contact request; `undefined` for "New group". Returns
+    /// the group kept: the peer's own creation, when it is held and its owner sorts first
+    /// ("two creations at once").
     pub fn create_group_with(
         &mut self,
         name: String,
@@ -304,6 +305,12 @@ impl GroupsNode {
     /// The consents not used yet, in JSON: `[["<peer hex>", "<expires at>"], …]`.
     pub fn direct_chat_consents(&self) -> String {
         self.core.direct_chat_consents()
+    }
+
+    /// Whether this device holds a direct chat with `peer` (an automatic group of the two,
+    /// however it grew since): a later creation from it is then an ordinary invitation.
+    pub fn holds_direct_chat(&self, peer_id: &[u8]) -> Result<bool, JsValue> {
+        Ok(self.core.holds_direct_chat(peer(peer_id)?))
     }
 
     /// Whether `peer` is a member of a group this device holds and has accepted: a
