@@ -394,6 +394,16 @@ impl Node {
         }
     }
 
+    /// Whether `peer` answers: fewer than three queries in a row timed out since its last
+    /// valid answer. Within a tier of §11.2 responsive peers come first, and a task waits
+    /// for a responsive peer at its lookup limit rather than asking an unresponsive one.
+    pub(crate) fn responsive(&self, peer: &GossipId) -> bool {
+        self.t
+            .peers
+            .get(peer)
+            .is_none_or(|r| r.failures < super::neighbors::NEIGHBOR_FAILURES)
+    }
+
     /// The scheduling priority of a task: the best score among its untried candidates with
     /// a trigger that were not asked in vain twice already, so that what honest, supplying
     /// peers announce goes first. Below [`CREDIBLE`] the task is suspect: every announcer
@@ -438,7 +448,7 @@ impl Node {
         load: &BTreeMap<GossipId, usize>,
     ) -> Selection {
         let task = self.t.tasks.get(key).expect("listed");
-        let mut ranked: Vec<((u8, u64, u64), GossipId, bool)> = Vec::new();
+        let mut ranked: Vec<(Rank, GossipId, bool)> = Vec::new();
         let mut until = u64::MAX;
         for peer in self.eligible(&key.chat_id) {
             let c = task
@@ -465,7 +475,12 @@ impl Node {
             };
             let at = c.trigger.map_or(0, |t| t.at);
             ranked.push((
-                (tier, u64::MAX - self.score(&peer), u64::MAX - at),
+                (
+                    tier,
+                    u8::from(!self.responsive(&peer)),
+                    u64::MAX - self.score(&peer),
+                    u64::MAX - at,
+                ),
                 peer,
                 limited,
             ));
@@ -489,6 +504,19 @@ impl Node {
             .filter(|(k, _, limited)| *k == best && !limited)
             .map(|(_, p, _)| *p)
             .collect();
+        // Rather than a member that stopped answering, for a stage of up to a day, wait for
+        // a responsive one whose slots are full: one frees in minutes when it is online.
+        let busy_responsive: Vec<GossipId> = ranked
+            .iter()
+            .filter(|(_, p, limited)| *limited && self.responsive(p))
+            .map(|(_, p, _)| *p)
+            .collect();
+        if best.1 == 1 && !busy_responsive.is_empty() {
+            return Selection::Wait(Blocked {
+                peers: busy_responsive,
+                until,
+            });
+        }
         Selection::Peer(ties[uniform_below(cx.rng, ties.len())])
     }
 
@@ -645,6 +673,10 @@ impl Node {
         .min()
     }
 }
+
+/// The rank of a candidate, smaller first: tier, unresponsive, inverse score, inverse
+/// receipt time of its trigger.
+type Rank = (u8, u8, u64, u64);
 
 enum Selection {
     Peer(GossipId),
