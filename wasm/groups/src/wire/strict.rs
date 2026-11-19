@@ -8,7 +8,7 @@
 //! - an enum value that the schema does not define (status 1 is reserved, so unknown);
 //! - a `uint32` above `u32::MAX` and a `bool` other than 0 or 1, which a decoder would
 //!   otherwise convert lossily (§1.1);
-//! - a truncated field or a varint longer than 64 bits.
+//! - text that is not UTF-8, a truncated field or a varint longer than 64 bits.
 //!
 //! Repeated fields and repeated occurrences of a singular field are accepted as protobuf
 //! defines them (the last scalar wins, embedded messages merge): they are other encodings of
@@ -29,6 +29,8 @@ pub(crate) enum Kind {
     Enum(&'static [u64]),
     /// `bytes`.
     Bytes,
+    /// `string`: UTF-8.
+    Str,
     /// An embedded message, checked recursively.
     Msg(&'static Schema),
     /// A length-delimited field checked separately by the caller (an embedded message whose
@@ -135,6 +137,11 @@ pub(crate) fn check(buf: &[u8], schema: &Schema) -> Result<()> {
             (Kind::Bytes | Kind::Opaque, WIRE_LEN) => {
                 r.len_delimited()?;
             }
+            (Kind::Str, WIRE_LEN) => {
+                if core::str::from_utf8(r.len_delimited()?).is_err() {
+                    return Err(Error::InvalidUtf8(schema.name));
+                }
+            }
             (Kind::Msg(inner), WIRE_LEN) => check(r.len_delimited()?, inner)?,
             _ => return Err(Error::Malformed("wrong wire type")),
         }
@@ -192,7 +199,7 @@ mod tests {
             (2, Kind::Uint32),
             (3, Kind::Bool),
             (4, Kind::Enum(&[0, 2])),
-            (5, Kind::Bytes),
+            (5, Kind::Str),
             (6, Kind::Msg(&INNER)),
             (7, Kind::Opaque),
         ],
@@ -200,7 +207,7 @@ mod tests {
 
     #[test]
     fn accepts_known_fields() {
-        // 1: 300, 2: 7, 3: true, 4: 2, 5: b"h\xc3\xa9", 6: {1: 0x01}, 7: opaque garbage
+        // 1: 300, 2: 7, 3: true, 4: 2, 5: "hé", 6: {1: 0x01}, 7: opaque garbage
         let buf = [
             0x08, 0xac, 0x02, 0x10, 0x07, 0x18, 0x01, 0x20, 0x02, 0x2a, 0x03, b'h', 0xc3, 0xa9,
             0x32, 0x03, 0x0a, 0x01, 0x01, 0x3a, 0x02, 0xff, 0xff,
@@ -231,7 +238,7 @@ mod tests {
             check(&[0x0a, 0x00], &TEST),
             Err(Error::Malformed("wrong wire type"))
         );
-        // Field 5 (bytes) as varint.
+        // Field 5 (string) as varint.
         assert!(check(&[0x28, 0x00], &TEST).is_err());
         // Fixed64, fixed32 and group wire types.
         assert!(check(&[0x09, 0, 0, 0, 0, 0, 0, 0, 0], &TEST).is_err());
@@ -260,7 +267,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_truncation() {
+    fn rejects_invalid_utf8_and_truncation() {
+        assert_eq!(
+            check(&[0x2a, 0x01, 0xff], &TEST),
+            Err(Error::InvalidUtf8("Test"))
+        );
         assert!(check(&[0x2a, 0x05, b'a'], &TEST).is_err());
         assert!(check(&[0x08], &TEST).is_err());
         assert!(check(&[0x08, 0x80], &TEST).is_err());

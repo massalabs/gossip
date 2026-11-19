@@ -573,3 +573,85 @@ static REPLY_TARGET: Schema = Schema {
     name: "ReplyTarget",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes)],
 };
+
+// Event blobs (§13.1).
+
+const ROOT_TYPES: &[u64] = &[0, 1];
+
+const MESSAGE_TYPES: &[u64] = &[0, 1, 2, 3, 4];
+
+pub(crate) static EVENT: Schema = Schema {
+    name: "Event",
+    fields: &[
+        (1, Kind::Msg(&GROUP_ROOT)),
+        (2, Kind::Msg(&GROUP_MESSAGE_EVENT)),
+        (3, Kind::Msg(&SIGNED_OBJECT)),
+        (4, Kind::Msg(&SIGNED_OBJECT)),
+        (5, Kind::Msg(&DISSOLVE)),
+    ],
+};
+
+static GROUP_ROOT: Schema = Schema {
+    name: "GroupRoot",
+    fields: &[
+        (1, Kind::Enum(ROOT_TYPES)),
+        (2, Kind::Str),
+        (3, Kind::Bytes),
+        (4, Kind::Bytes),
+        (5, Kind::Bytes),
+        (6, Kind::Bytes),
+        (7, Kind::Bytes),
+        (8, Kind::Bytes),
+        (9, Kind::Uint64),
+        (10, Kind::Bytes),
+    ],
+};
+
+/// `Leave` and `Kick` have the same fields.
+static SIGNED_OBJECT: Schema = Schema {
+    name: "Leave/Kick",
+    fields: &[(1, Kind::Bytes), (2, Kind::Bytes), (3, Kind::Bytes)],
+};
+
+static DISSOLVE: Schema = Schema {
+    name: "Dissolve",
+    fields: &[(1, Kind::Bytes), (2, Kind::Bool), (3, Kind::Bytes)],
+};
+
+static GROUP_MESSAGE_EVENT: Schema = Schema {
+    name: "GroupMessageEvent",
+    fields: &[
+        (1, Kind::Bytes),
+        (2, Kind::Bytes),
+        (3, Kind::Bytes),
+        (4, Kind::Bytes),
+        (5, Kind::Msg(&MESSAGE_PAYLOAD)),
+    ],
+};
+
+static MESSAGE_PAYLOAD: Schema = Schema {
+    name: "MessagePayload",
+    fields: &[
+        (1, Kind::Bytes),
+        (2, Kind::Enum(MESSAGE_TYPES)),
+        (3, Kind::Bytes),
+        (4, Kind::Uint64),
+        (5, Kind::Uint64),
+        (6, Kind::Bool),
+        (7, Kind::Str),
+        (8, Kind::Msg(&FORWARD)),
+        (9, Kind::Bytes),
+        (10, Kind::Msg(&METADATA_ENTRY)),
+    ],
+};
+
+/// The implicit entry message of `map<string, bytes>`.
+static METADATA_ENTRY: Schema = Schema {
+    name: "MetadataEntry",
+    fields: &[(1, Kind::Str), (2, Kind::Bytes)],
+};
+
+static FORWARD: Schema = Schema {
+    name: "Forward",
+    fields: &[(1, Kind::Enum(MESSAGE_TYPES)), (2, Kind::Bytes)],
+};
