@@ -265,6 +265,17 @@ fn decode_node(nodes: &[NodeOut]) -> R<NodeRecords> {
     Ok(r)
 }
 
+/// A row that needs no root: a pruned stub or a temporary-rejection marker.
+fn decode_stub(row: &RowOut) -> R<EventRow> {
+    let event_id: EventId = parse(&row.event_id)?;
+    let state = match row.state.as_str() {
+        "pruned" => RowState::Pruned,
+        "marker" => RowState::TemporarilyInvalid,
+        s => return Err(format!("bad row state {s}")),
+    };
+    Ok(EventRow { event_id, state })
+}
+
 fn decode_row(root: &Root, row: &RowOut) -> R<EventRow> {
     let event_id: EventId = parse(&row.event_id)?;
     let state = match (row.state.as_str(), &row.fields) {
@@ -293,8 +304,8 @@ fn decode_row(root: &Root, row: &RowOut) -> R<EventRow> {
 /// What opening from a snapshot found that it could not use.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct OpenReport {
-    /// Message records of an epoch without an epoch record: the engine never keeps them, so
-    /// they are left behind by an interrupted erase and dropped.
+    /// Retained event rows of an epoch without an epoch record (they cannot be rebuilt
+    /// without its root): the engine never keeps them, so they are dropped.
     pub orphans: u32,
 }
 
@@ -303,52 +314,43 @@ pub fn decode_snapshot(s: &BatchOut) -> R<(MemoryStorage, OpenReport)> {
     let records = decode_node(&s.node)?;
     let mut report = OpenReport::default();
     let mut epochs: BTreeMap<ChatId, Changes> = BTreeMap::new();
-    let slot = |chat: &str, report: &mut OpenReport| -> R<Option<(ChatId, &Root)>> {
-        let chat: ChatId = parse(chat)?;
-        match records.epochs.get(&chat) {
-            Some(rec) => Ok(Some((chat, &rec.root))),
-            None => {
-                report.orphans += 1;
-                Ok(None)
-            }
-        }
-    };
+    fn entry(epochs: &mut BTreeMap<ChatId, Changes>, chat: ChatId) -> &mut Changes {
+        epochs.entry(chat).or_insert_with(|| Changes::new(chat))
+    }
     for row in &s.rows {
-        if let Some((chat, root)) = slot(&row.chat_id, &mut report)? {
-            let r = decode_row(root, row).map_err(|e| format!("row {}: {e}", row.event_id))?;
-            epochs
-                .entry(chat)
-                .or_insert_with(|| Changes::new(chat))
-                .rows
-                .insert(r.event_id, r);
+        let chat: ChatId = parse(&row.chat_id)?;
+        // A held row is rebuilt against its epoch's root; the engine never keeps one
+        // without it, so one found alone is what an interrupted erase left.
+        let root = records.epochs.get(&chat).map(|r| &r.root);
+        if row.state == "held" && root.is_none() {
+            report.orphans += 1;
+            continue;
         }
+        let r = match root {
+            Some(root) => decode_row(root, row),
+            None => decode_stub(row),
+        }
+        .map_err(|e| format!("row {}: {e}", row.event_id))?;
+        entry(&mut epochs, chat).rows.insert(r.event_id, r);
     }
     for e in &s.edges {
-        if let Some((chat, _)) = slot(&e.chat_id, &mut report)? {
-            epochs
-                .entry(chat)
-                .or_insert_with(|| Changes::new(chat))
-                .edges
-                .insert(parse(&e.event_id)?, parse(&e.parents)?);
-        }
+        let chat: ChatId = parse(&e.chat_id)?;
+        entry(&mut epochs, chat)
+            .edges
+            .insert(parse(&e.event_id)?, parse(&e.parents)?);
     }
     for o in &s.objects {
-        if let Some((chat, _)) = slot(&o.chat_id, &mut report)? {
-            let sync_obj_id: SyncObjId = parse(&o.sync_obj_id)?;
-            let j = J::parse(&o.fields)?;
-            let obj = ObjectRecord {
-                sync_obj_id,
-                current: Codec::dec(j.field("current")?)?,
-                current_events: Codec::dec(j.field("currentEvents")?)?,
-                pending_versions: Codec::dec(j.field("pendingVersions")?)?,
-                pending_deletions: Codec::dec(j.field("pendingDeletions")?)?,
-            };
-            epochs
-                .entry(chat)
-                .or_insert_with(|| Changes::new(chat))
-                .objects
-                .insert(sync_obj_id, obj);
-        }
+        let chat: ChatId = parse(&o.chat_id)?;
+        let sync_obj_id: SyncObjId = parse(&o.sync_obj_id)?;
+        let j = J::parse(&o.fields)?;
+        let obj = ObjectRecord {
+            sync_obj_id,
+            current: Codec::dec(j.field("current")?)?,
+            current_events: Codec::dec(j.field("currentEvents")?)?,
+            pending_versions: Codec::dec(j.field("pendingVersions")?)?,
+            pending_deletions: Codec::dec(j.field("pendingDeletions")?)?,
+        };
+        entry(&mut epochs, chat).objects.insert(sync_obj_id, obj);
     }
     let mut node = NodeChanges::default();
     macro_rules! each {

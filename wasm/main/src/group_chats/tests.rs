@@ -2,7 +2,7 @@
 //! with every batch persisted into a model of the SDK's tables and every node reopened from
 //! those tables.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::codec::{Codec, hex};
 use super::engine::{Core, IdentityKey};
@@ -397,33 +397,25 @@ fn three_members_create_invite_message_edit_delete_remove_leave() {
     net.peers[1].persist();
     net.settle(1_000);
     assert_eq!(net.peers[1].core.group(group), "null");
-    // The request correlation references of the closed group's queries stay until they
-    // expire, `sent_at + 1.05 × ttl + 5 min` (the engine does not drop them on close); the
-    // change notices until taken.
     net.peers[1].core.take_changes(net.now).unwrap();
-    net.now += 600_000;
-    net.peers[1].core.tick(net.now).unwrap();
     net.peers[1].persist();
+    // Bob shared no other group with anyone: nothing is left but the closed-chat
+    // marker(s) and the engine's counter, without waiting for anything to expire.
     assert!(net.peers[1].db.rows.is_empty());
     assert!(net.peers[1].db.edges.is_empty());
     assert!(net.peers[1].db.objects.is_empty());
-    assert!(
-        !net.peers[1].db.mentions(&hex(group.as_bytes())) || {
-            // Only the closed-chat marker may name the group.
-            net.peers[1].db.node.iter().all(|((k, key), f)| {
-                !(key.contains(&hex(group.as_bytes())) || f.contains(&hex(group.as_bytes())))
-                    || k == "markers"
-            })
-        }
-    );
-    let kinds: Vec<&str> = net.peers[1]
+    // Bob's own keys are the one exception: the signer records them again at every
+    // tick, and they are not about the group.
+    let own = J::Str(hex(b.as_bytes())).to_text();
+    let left: Vec<(String, String)> = net.peers[1]
         .db
         .node
         .keys()
-        .map(|(k, _)| k.as_str())
-        .filter(|k| !matches!(*k, "keys" | "peers" | "meta"))
+        .filter(|(kind, key)| !(kind == "keys" && *key == own))
+        .cloned()
         .collect();
-    assert!(kinds.iter().all(|k| *k == "markers"), "{kinds:?}");
+    let kinds: BTreeSet<&str> = left.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(kinds, BTreeSet::from(["markers", "meta"]), "{left:?}");
     // Message content is gone from Bob's tables.
     assert!(!net.peers[1].db.mentions(&hex("hello all".as_bytes())));
     assert!(!net.peers[1].db.mentions("hello all"));
@@ -471,4 +463,98 @@ fn a_reply_names_the_reference_of_its_target_epoch() {
     assert_eq!(e.field("name").unwrap(), &J::Str("G".into()));
     assert_eq!(e.field("members").unwrap().as_arr().unwrap().len(), 2);
     assert_eq!(net.peers[1].core.epoch(group), "null");
+}
+
+/// A store over the SQL-table model, as the SDK's database applies batches: reads decode
+/// the tables, a commit applies the encoded batch, and a failure can be injected.
+struct DbStore {
+    db: Db,
+    fail: bool,
+}
+
+impl DbStore {
+    fn mem(&self) -> groups::store::MemoryStorage {
+        super::store::decode_snapshot(&self.db.snapshot())
+            .unwrap()
+            .0
+    }
+}
+
+mod db_store {
+    use super::DbStore;
+    use groups::node::records::{Batch, NodeRecords, NodeStorage};
+    use groups::store::{
+        Changes, EventRow, ObjectRecord, PendingItem, Storage, StorageError, StorageRead,
+    };
+    use groups::{ChatId, EventId, SyncObjId};
+
+    type R<T> = Result<T, StorageError>;
+
+    impl StorageRead for DbStore {
+        fn event_row(&self, c: &ChatId, e: &EventId) -> R<Option<EventRow>> {
+            self.mem().event_row(c, e)
+        }
+        fn event_rows(&self, c: &ChatId) -> R<Vec<EventRow>> {
+            self.mem().event_rows(c)
+        }
+        fn edges(&self, c: &ChatId) -> R<Vec<(EventId, Vec<EventId>)>> {
+            self.mem().edges(c)
+        }
+        fn parents(&self, c: &ChatId, e: &EventId) -> R<Option<Vec<EventId>>> {
+            self.mem().parents(c, e)
+        }
+        fn held_ids(&self, c: &ChatId) -> R<Vec<EventId>> {
+            self.mem().held_ids(c)
+        }
+        fn carriers(&self, c: &ChatId, ts: u64, limit: usize) -> R<Vec<EventRow>> {
+            self.mem().carriers(c, ts, limit)
+        }
+        fn markers(&self, c: &ChatId, limit: usize) -> R<Vec<EventId>> {
+            self.mem().markers(c, limit)
+        }
+        fn object(&self, c: &ChatId, s: &SyncObjId) -> R<Option<ObjectRecord>> {
+            self.mem().object(c, s)
+        }
+        fn objects(&self, c: &ChatId) -> R<Vec<ObjectRecord>> {
+            self.mem().objects(c)
+        }
+        fn pending_until(&self, c: &ChatId, until: u64) -> R<Vec<PendingItem>> {
+            self.mem().pending_until(c, until)
+        }
+        fn first_pending(&self, c: &ChatId) -> R<Option<PendingItem>> {
+            self.mem().first_pending(c)
+        }
+    }
+
+    impl Storage for DbStore {
+        fn commit(&mut self, changes: Changes) -> R<()> {
+            self.commit_batch(Batch {
+                epochs: vec![changes],
+                ..Batch::default()
+            })
+        }
+    }
+
+    impl NodeStorage for DbStore {
+        fn load_node(&self) -> R<NodeRecords> {
+            self.mem().load_node()
+        }
+        fn commit_batch(&mut self, batch: Batch) -> R<()> {
+            if self.fail {
+                return Err(StorageError("injected".into()));
+            }
+            self.db.apply(&super::super::store::encode_batch(&batch));
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn the_table_model_passes_the_engine_conformance_check() {
+    let mut store = DbStore {
+        db: Db::default(),
+        fail: false,
+    };
+    groups::node::conformance::check_batch_with_erase(&mut store, &mut |s, fail| s.fail = fail)
+        .unwrap();
 }
