@@ -74,6 +74,7 @@ impl Node {
 
     /// Rebuilds the installed epochs and the group index from the records.
     pub(crate) fn rebuild_epochs(&mut self) {
+        self.refresh_lines();
         let mut gx = GroupIndex::default();
         for (chat, rec) in self.t.epochs.iter() {
             if rec.status != EpochStatus::Installed {
@@ -130,6 +131,41 @@ impl Node {
         }
         self.epochs = entries;
         self.gx = gx;
+    }
+
+    /// Moves the line followed past every held handover from it (§5.9): a group whose
+    /// record follows a former owner while it holds that owner's handover (as a join of two
+    /// groups can leave it) follows the new owner, the former one deposed. Handovers are
+    /// taken in the order they were received, so that of two handovers from one owner the
+    /// first adopted wins.
+    fn refresh_lines(&mut self) {
+        let mut handovers: Vec<(u64, ChatId, GossipId, GossipId)> = Vec::new();
+        for (c, r) in self.t.epochs.iter() {
+            if r.status != EpochStatus::Installed || r.root.root_type() != RootType::Handover {
+                continue;
+            }
+            let Some(prev) = r
+                .parents
+                .first()
+                .and_then(|p| self.t.epochs.get(p))
+                .map(|p| p.root.owner_id())
+            else {
+                continue;
+            };
+            handovers.push((r.received_at, r.group, prev, r.root.owner_id()));
+            let _ = c;
+        }
+        handovers.sort();
+        for (_, group, prev, next) in handovers {
+            let Some(g) = self.t.group_recs.get(&group) else {
+                continue;
+            };
+            if g.followed == Some(prev) && prev != next && !g.deposed.contains(&next) {
+                let g = self.group_rec_mut(group);
+                g.deposed.insert(prev);
+                g.followed = Some(next);
+            }
+        }
     }
 
     /// The current epoch of a group among its installed `epochs` (§4.9, §5.9): among the
