@@ -608,4 +608,45 @@ describe('Group chats', { timeout: 120_000 }, () => {
     expect(gaps[gaps.length - 1]).toBeGreaterThan(gaps[0]);
     expect(Math.max(...gaps)).toBeLessThanOrEqual(60 * 60 * 1000);
   });
+  it('posts one ciphertext per seeker while group and one-to-one sends interleave', async () => {
+    const groupId = await twoMemberGroup();
+    const proto = internals(alice).messageProtocol;
+    const send = proto.sendMessage.bind(proto);
+    const posted = new Map<string, Set<string>>();
+    vi.spyOn(proto, 'sendMessage').mockImplementation(async (m: unknown) => {
+      const { seeker, ciphertext } = m as {
+        seeker: Uint8Array;
+        ciphertext: Uint8Array;
+      };
+      const key = bytesToHex(seeker);
+      const values = posted.get(key) ?? new Set<string>();
+      values.add(bytesToHex(ciphertext));
+      posted.set(key, values);
+      return send(m as never);
+    });
+    const oneToOne = (i: number) =>
+      alice.messages.send({
+        ownerUserId: alice.userId,
+        contactUserId: bob.userId,
+        content: `direct ${i}`,
+        type: MessageType.TEXT,
+        direction: 1 as never,
+        status: 0 as never,
+        timestamp: new Date(),
+      } as never);
+    await Promise.all(
+      Array.from({ length: 8 }, (_, i) => [
+        alice.groups.sendMessage(groupId, `group ${i}`),
+        oneToOne(i),
+      ]).flat()
+    );
+    await alice.groups.settle();
+    await deliver();
+    expect(posted.size).toBeGreaterThan(0);
+    for (const values of posted.values()) expect(values.size).toBe(1);
+    // One clock for all: the sends share a time and are ordered by hash.
+    expect((await texts(bob.groups, groupId)).sort()).toEqual(
+      ['first', ...Array.from({ length: 8 }, (_, i) => `group ${i}`)].sort()
+    );
+  });
 });
