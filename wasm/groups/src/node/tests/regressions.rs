@@ -937,3 +937,65 @@ fn neighbor_replacement_needs_two_days_of_unanswered_asks_and_sticks() {
         "{asked:?}"
     );
 }
+
+/// Checks that device `d` has nothing to do before its next wake-up: a copy of it rebuilt
+/// from its storage and ticked just before then changes nothing and sends nothing. Returns
+/// the wake-up.
+fn assert_idle_until_wakeup(net: &mut Net, d: usize) -> u64 {
+    let now = net.now;
+    let wake = net.devs[d]
+        .node
+        .next_wakeup(&net.devs[d].store, now)
+        .unwrap()
+        .unwrap_or(now + 30 * DAY);
+    if wake <= now + 1 {
+        return wake;
+    }
+    let mut store = net.devs[d].store.clone();
+    let mut node = Node::open(&store, member(d)).unwrap();
+    node.install_epoch(&mut store, config(&net.root), false, now, &mut net.rng)
+        .unwrap();
+    let before = store.clone();
+    node.tick(&mut store, wake - 1, &mut net.rng).unwrap();
+    let out = node
+        .poll_outbox(&mut store, wake - 1, &mut net.rng)
+        .unwrap();
+    assert!(
+        store == before && out.is_empty(),
+        "at {now}: something was due before the wake-up at {wake}"
+    );
+    wake
+}
+
+/// Found by review (code at `6a916f2e`): `next_wakeup` missed the first run of a freshly
+/// installed group, the end of a neighbor cooldown, and the turn of a lane whose scan is
+/// still pending, so a device sleeping until it would have missed them.
+#[test]
+fn a_device_sleeping_until_its_next_wakeup_misses_nothing() {
+    let mut net = Net::new(4, 1);
+    let chat = net.chat();
+    for _ in 0..200 {
+        let wake = assert_idle_until_wakeup(&mut net, 0);
+        net.now = net.now.max(wake);
+        net.tick(0);
+        // Member 1 declines every neighbor request; the others never answer.
+        for (to, frames) in net.poll_frames(0) {
+            if to == member(1)
+                && frames
+                    .iter()
+                    .any(|f| matches!(f, Frame::NeighborRequest(_)))
+            {
+                net.recv_frames(
+                    0,
+                    member(1),
+                    &[Frame::NeighborResponse(crate::wire::NeighborResponse {
+                        chat_id: chat,
+                        accepted: false,
+                        suggestions: Vec::new(),
+                    })],
+                );
+            }
+        }
+        net.now += 1;
+    }
+}
