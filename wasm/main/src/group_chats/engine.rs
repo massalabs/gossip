@@ -110,8 +110,14 @@ pub struct Core {
 
 impl Core {
     /// Opens the engine of the identity `public`/`secret` from a snapshot of its records.
+    ///
+    /// # Errors
+    ///
+    /// `groups:undecodable: …` when a stored record cannot be decoded (one written by an
+    /// earlier build): the caller may start the engine's tables again.
     pub fn open(identity: IdentityKey, snapshot: &BatchOut) -> R<Self> {
-        let (mem, report) = decode_snapshot(snapshot)?;
+        let (mem, report) =
+            decode_snapshot(snapshot).map_err(|e| format!("groups:undecodable: {e}"))?;
         let store = Store {
             mem,
             pending: Vec::new(),
