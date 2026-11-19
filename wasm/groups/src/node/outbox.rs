@@ -315,17 +315,17 @@ impl Node {
     /// reconnection is reported for it first ([`Node::set_session`],
     /// [`Node::peer_reconnected`]).
     pub fn abandon(&mut self, handle: u64) {
-        if let Some(p) = self.release(handle) {
-            if let Some(peer) = p.peer {
-                if p.charged > 0 && self.t.peers.contains(&peer) {
-                    self.peer_mut(&peer)
-                        .responses
-                        .refund(p.charged, RESPONSE_BURST);
-                }
-                self.outbox
-                    .backoff
-                    .insert(peer, p.assembled_at.saturating_add(ABANDON_BACKOFF_MS));
+        if let Some(p) = self.release(handle)
+            && let Some(peer) = p.peer
+        {
+            if p.charged > 0 && self.t.peers.contains(&peer) {
+                self.peer_mut(&peer)
+                    .responses
+                    .refund(p.charged, RESPONSE_BURST);
             }
+            self.outbox
+                .backoff
+                .insert(peer, p.assembled_at.saturating_add(ABANDON_BACKOFF_MS));
         }
     }
 
