@@ -1884,8 +1884,9 @@ fn not_available(r: &ResponseResult) -> bool {
 }
 
 /// Finding 2 of the review of 54711780: a removed peer was answered like a member for the
-/// epoch it was removed from (its root, keys, other members' records), and a device that
-/// was kicked kept answering for its epochs and listing them in shared-chats scans.
+/// epoch it was removed from (keys, other members' records), and a device that was kicked
+/// kept answering for its epochs and listing them in shared-chats scans. Its root, which
+/// lists the removed peer, is answered since the decision on shared-chats scans (§4.11).
 #[test]
 fn removed_peers_and_removed_devices_answer_not_available() {
     let (mut net, g) = founded(4);
@@ -1935,9 +1936,11 @@ fn removed_peers_and_removed_devices_answer_not_available() {
             .map(|(_, r)| r.clone())
             .collect::<Vec<_>>()
     };
+    // The root of the epoch it was removed from, the last that lists it, is answered: a
+    // shared-chats scan lists it for that peer (§4.11, D.74).
     assert!(
-        by_idx(0).iter().all(not_available),
-        "root to a removed peer"
+        matches!(&by_idx(0)[..], [ResponseResult::Event(_)]),
+        "the root of the last epoch that lists a removed peer"
     );
     assert!(
         by_idx(1).iter().all(not_available),

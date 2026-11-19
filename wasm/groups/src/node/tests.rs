@@ -8,6 +8,7 @@ mod neighbors;
 mod packing;
 mod queries;
 mod regressions;
+mod removal_scan;
 mod retrieval;
 pub(crate) mod scans;
 mod storage;
