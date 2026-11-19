@@ -912,7 +912,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn member_limit_and_container_limit() {
+    fn a_root_at_the_member_limit_fits_a_container() {
         let alice = identity(1);
         let mut members: Vec<GossipId> = (1u16..512)
             .map(|i| {
@@ -932,9 +932,26 @@ pub(crate) mod tests {
         )
         .unwrap();
         assert_eq!(root.members().len(), 512);
-        // About 24 KB at 512 members (§4.4).
+        // About 24 KB at 512 members (§4.4), well within one empty container (§4.6).
         let blob_len = wire::event_blob_len(1, prost::Message::encoded_len(&root.to_proto()));
         assert!(blob_len > 20_000 && blob_len < 26_000, "{blob_len}");
+        assert!(wire::fits_empty_container(blob_len));
+        // One more member is refused by the member limit, not by the container limit.
+        let mut p = params(&alice, &[], 0x10);
+        p.members = root.members().to_vec();
+        p.members.push(GossipId::from_bytes([0xff; 32]));
+        assert!(matches!(
+            Root::create_successor(
+                p,
+                &[ChatId::from_bytes([0xd0; 32])],
+                &alice.secret.dsa_signing_key,
+                [0; 32],
+            ),
+            Err(Error::TooMany {
+                field: "members",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1059,8 +1076,8 @@ pub(crate) mod tests {
             handover.verify_signature(None),
             Err(Error::HandoverParentMissing)
         );
-        // Checked against the root's own owner, the signature fails: a handover never passes
-        // for a successor.
+        // Given a root that is not its parent, even one owned by the new owner, the handover
+        // is refused before any signature check.
         let other = founding(&bob, &[&bob, &carol]);
         assert_eq!(
             handover.verify_signature(Some(&other)),
