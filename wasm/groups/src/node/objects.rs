@@ -220,6 +220,11 @@ impl Node {
         };
         if !valid {
             self.stats.invalid += 1;
+            // A kick this device cannot verify may be valid by a handover it does not hold
+            // (D.18): its relay is not penalised.
+            if matches!(obj, SignedObject::Kick(_)) {
+                return Ok(Answer::Refused);
+            }
             self.penalize(&from, PENALTY_MALFORMED);
             return Ok(Answer::Invalid);
         }
@@ -265,9 +270,13 @@ impl Node {
         loop {
             let mut grew = false;
             for (c, r) in self.t.epochs.iter() {
+                // A handover from the line, or a successor in it by an owner already listed
+                // (A to B, a successor by B, B to D: D has authority too).
+                let handover = r.root.root_type() == RootType::Handover;
+                let by_listed = owners.iter().any(|(o, _)| *o == r.root.owner_id());
                 if r.status != EpochStatus::Installed
-                    || r.root.root_type() != RootType::Handover
                     || line.contains(c)
+                    || !(handover || by_listed)
                 {
                     continue;
                 }
