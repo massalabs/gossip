@@ -1234,4 +1234,36 @@ mod tests {
         });
         round_trip(None::<u64>);
     }
+
+    /// The SDK reads the lines by these names (`gossip-sdk/src/services/groups.ts`).
+    #[test]
+    fn timeline_lines_name_their_actor() {
+        let epoch = ChatId::from_bytes([1; 32]);
+        let by = GossipId::from_bytes([2; 32]);
+        let lines = [
+            TimelineLine::Founded { epoch, owner: by },
+            TimelineLine::Joined { epoch, by },
+            TimelineLine::EpochChange {
+                epoch,
+                by,
+                added: vec![],
+                removed: vec![],
+                left: vec![by],
+                renamed: None,
+                new_owner: Some(by),
+            },
+            TimelineLine::NotAMember { from: 1, to: 2 },
+            TimelineLine::AddedBack { epoch, by },
+        ];
+        for line in lines {
+            round_trip(line);
+        }
+        let text = TimelineLine::AddedBack { epoch, by }.enc().to_text();
+        let j = J::parse(&text).unwrap();
+        assert_eq!(j.field("t").unwrap().as_str().unwrap(), "AddedBack");
+        assert_eq!(j.field("by").unwrap(), &by.enc());
+        let j = TimelineLine::Joined { epoch, by }.enc();
+        assert_eq!(j.field("t").unwrap().as_str().unwrap(), "Joined");
+        assert_eq!(j.field("epoch").unwrap(), &epoch.enc());
+    }
 }
