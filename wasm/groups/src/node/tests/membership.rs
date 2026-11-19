@@ -3354,3 +3354,63 @@ fn an_epoch_before_the_one_a_member_left_is_not_offered_to_it_again() {
     assert!(inv.is_empty(), "an old epoch is offered again: {inv:?}");
     assert_eq!(net.devs[1].node.groups().len(), 1);
 }
+
+/// Found by the membership simulation's check that no old epoch is offered again (seed 115
+/// once a member that left is added back): a member that left while it held only the first
+/// epoch is later given a root two epochs down that line, and the epoch between. The epoch
+/// between continues the closed one and was recorded closed (§4.8 case 3), but the root
+/// waiting for it as a parent was still offered as an invitation once its lookup was over.
+#[test]
+fn a_root_whose_parent_turns_out_closed_is_no_invitation() {
+    let (mut net, g) = founded(3);
+    net.offline[2] = true;
+    for name in ["x", "y"] {
+        net.change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some(name.into()),
+            },
+        )
+        .unwrap();
+        net.exchange();
+    }
+    let now = net.now;
+    let s = signer(2);
+    let dev = &mut net.devs[2];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    assert!(net.devs[2].node.groups().is_empty());
+    // The two roots arrive late, the newer first, while the owner cannot answer lookups.
+    net.offline[2] = false;
+    net.offline[0] = true;
+    let late: Vec<Vec<u8>> = core::mem::take(&mut net.dropped)
+        .into_iter()
+        .filter(|(from, to, _)| *from == 0 && *to == 2)
+        .map(|(_, _, pt)| pt)
+        .collect();
+    for pt in late.iter().rev() {
+        let now = net.now;
+        let dev = &mut net.devs[2];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(0), pt, now, &mut net.rng)
+            .unwrap();
+    }
+    net.run(MIN);
+    let later = net.now + crate::constants::PROMPT_DELAY_MS;
+    let inv = net.devs[2].node.invitations(later);
+    assert!(
+        inv.is_empty(),
+        "a root of a closed line is offered: {inv:?}"
+    );
+}
