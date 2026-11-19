@@ -380,3 +380,28 @@ fn a_reconnection_resend_does_not_extend_the_stage() {
     }
     assert!(asked.contains(&member(2)), "{asked:?}");
 }
+
+/// Seen in the network simulation (code at `32561cec`, seed 2168): as for lookups, a
+/// reconnection resend of a page request restarted the local wait of the stage, so a scan of
+/// a member that never answers but whose session reset more often than the TTL never timed
+/// out, and its lanes stayed pending with it.
+#[test]
+fn a_reconnection_resend_does_not_extend_a_scan_stage() {
+    let mut net = Net::new(3, 1);
+    let mut ttls = Vec::new();
+    for _ in 0..8 {
+        let now = net.now;
+        let dev = &mut net.devs[0];
+        dev.node
+            .peer_reconnected(&mut dev.store, member(1), now, &mut net.rng)
+            .unwrap();
+        net.tick(0);
+        for s in super::retrieval::sent_queries(&mut net, 0) {
+            if matches!(s.op, QueryOp::TipsScan { .. }) && s.to == member(1) {
+                ttls.push(s.ttl);
+            }
+        }
+        net.now += MIN / 2;
+    }
+    assert!(ttls.iter().any(|t| *t > MIN), "{ttls:?}");
+}
