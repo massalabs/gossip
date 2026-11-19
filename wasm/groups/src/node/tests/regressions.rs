@@ -450,3 +450,63 @@ fn an_expired_resend_does_not_extend_the_stage() {
         "the scan moves to its next stage: {next:?}"
     );
 }
+
+/// The largest message event that can be created: its blob fits the admission limit exactly.
+fn largest_event(net: &Net) -> MessageEvent {
+    let make = |n: usize| {
+        MessageEvent::create(
+            &net.root,
+            EventId::new(T0, [5; 16]),
+            &[],
+            Payload::Content(Content {
+                sync_obj_id: SyncObjId::from_bytes([5; 32]),
+                author: member(1),
+                created_at: T0,
+                last_modified_at: T0,
+                body: Body::Media(vec![7; n]),
+                edited: false,
+                metadata: BTreeMap::new(),
+            }),
+        )
+    };
+    let (mut lo, mut hi) = (0, crate::constants::MAX_PLAINTEXT_BYTES);
+    while lo + 1 < hi {
+        let mid = usize::midpoint(lo, hi);
+        if make(mid).is_ok() {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    make(lo).unwrap()
+}
+
+/// Found by review (code at `6a916f2e`): an event that fits an empty container as an event
+/// frame did not fit as a response frame, which adds `request_id` and `idx`, so assembling
+/// the answer to a lookup of it panicked, and again after every restart since the answer
+/// work is stored.
+#[test]
+fn the_largest_event_can_be_served_in_an_answer() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let e = largest_event(&net);
+    net.give(0, 1, &e);
+    assert!(net.held(0, &e.event_id()));
+    net.poll(0);
+    net.recv_frames(
+        0,
+        member(2),
+        &[query(
+            1,
+            net.now,
+            MIN,
+            vec![QueryOp::Event {
+                chat_id: chat,
+                event_id: e.event_id(),
+            }],
+        )],
+    );
+    let out = net.poll_frames(0);
+    let r = responses(&out[&member(2)]);
+    assert_eq!(answer_event(&r[0]), Some(e));
+}
