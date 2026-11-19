@@ -17,9 +17,14 @@ pub mod constants;
 mod error;
 pub mod hash;
 mod ids;
+mod keys;
+
+#[cfg(test)]
+mod test_support;
 
 pub use error::{Error, Result};
 pub use ids::{
     Challenge, ChatId, DissolveId, EventId, GossipId, GroupSecret, KickId, LeaveId,
     ParentCommitment, RefChatId, RequestId, ScanId, SecretProof, SyncObjId,
 };
+pub use keys::{SignatureBytes, check_key_answer, parse_user_public_keys};
