@@ -2398,3 +2398,61 @@ fn accepting_a_rejoin_after_deleting_the_group_starts_a_new_one() {
     assert_eq!(joined, z);
     assert!(net.devs[2].node.tables().group_recs.get(&g).is_none());
 }
+
+/// Finding 9 of the review of 54711780: handover roots whose parent is not held were kept
+/// unverified, 64 for the whole device, with no expiry: a stranger filled every slot, and
+/// the parent lookup of each went to the members the unverified root lists.
+#[test]
+fn unverified_handover_roots_are_bounded_per_sender_and_asked_of_their_sender() {
+    let (mut net, _g) = founded(3);
+    let stranger = ident(7);
+    let members = vec![gid(0), gid(1), gid(2), stranger.id];
+    for i in 0..10u8 {
+        let params = |owner: &auth::UserPublicKeys, seed: u8| crate::root::RootParams {
+            name: format!("h{i}"),
+            members: members.clone(),
+            group_secret: crate::ids::GroupSecret::from_bytes([seed; 32]),
+            owner: owner.clone(),
+            epoch_challenge: crate::ids::Challenge::from_bytes([seed.wrapping_add(1); 32]),
+            ref_chat_id_challenge: crate::ids::Challenge::from_bytes([seed.wrapping_add(2); 32]),
+            created_at: net.now,
+        };
+        let parent = Root::create_successor(
+            params(&stranger.public, i),
+            &[ChatId::from_bytes([i; 32])],
+            &stranger.secret.dsa_signing_key,
+            [1; 32],
+        )
+        .unwrap();
+        let h = Root::create_handover(
+            params(&ident(0).public, i.wrapping_add(100)),
+            &parent,
+            &stranger.secret.dsa_signing_key,
+            [2; 32],
+        )
+        .unwrap();
+        let blob = wire::encode_event_blob(&EventObject::Root(Box::new(h))).unwrap();
+        let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+        let now = net.now;
+        let dev = &mut net.devs[0];
+        dev.node
+            .handle_plaintext(&mut dev.store, stranger.id, &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    assert!(net.devs[0].node.tables().held_roots.len() <= 4);
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    for o in out {
+        if o.to == gid(1) || o.to == gid(2) {
+            for f in frames(&o.plaintext) {
+                assert!(
+                    !matches!(f, Frame::Query(q) if q.entries.iter().any(|e| matches!(e, QueryEntry::Op(QueryOp::ChatByParent { .. }))))
+                );
+            }
+        }
+    }
+}
