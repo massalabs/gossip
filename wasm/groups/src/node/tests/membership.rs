@@ -2714,3 +2714,51 @@ fn dissolve_and_delete_keeps_side_branches_and_only_the_named_root() {
     assert!(net.devs[d].node.root(&a).is_some(), "the side branch stays");
     assert!(net.texts(d, &a).contains(&"on the side".to_owned()));
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=0`): a
+/// device held a handover root in a group whose record still followed the former owner (a
+/// join of two groups kept the line of the one that had not adopted the handover), so a
+/// root the former owner signed after its handover became current.
+#[test]
+fn a_held_handover_always_moves_the_line_followed() {
+    let (mut net, g) = founded(3);
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    // The record as a join left it: following the former owner, nothing deposed.
+    let node = &mut net.devs[2].node;
+    let key = node.group_of(&h);
+    let gr = node.group_rec_mut(key);
+    gr.followed = Some(gid(0));
+    gr.deposed.clear();
+    node.rebuild_epochs();
+    let a = ident(0);
+    let params = crate::root::RootParams {
+        name: "back".into(),
+        members: (0..3).map(gid).collect(),
+        group_secret: crate::ids::GroupSecret::from_bytes([4; 32]),
+        owner: a.public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
+        created_at: u64::MAX,
+    };
+    let r = Root::create_successor(params, &[g], &a.secret.dsa_signing_key, [1; 32]).unwrap();
+    net.recv_frames_m(
+        2,
+        0,
+        &[Frame::Event(
+            wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap(),
+        )],
+    );
+    assert_eq!(net.current(2, &g), Some(h));
+}
