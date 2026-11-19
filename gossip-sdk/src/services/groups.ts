@@ -428,15 +428,9 @@ export class GroupService {
       try {
         const now = this.now();
         node.learn_keys(this.session.ourPk.to_bytes(), now);
-        for (const contact of await this.queries.contacts.getByOwner(
-          this.owner
-        )) {
-          try {
-            node.learn_keys(contact.publicKeys, now);
-          } catch {
-            // Keys that are not canonical are not cached.
-          }
-        }
+        // Contacts' keys are not loaded here: the engine keeps keys only of
+        // identities it shares a group with, and asks members for the keys it
+        // lacks; members added by this device are learnt from their contact.
         this.tellSessions(node);
         // Not through `persist`, which reopens on failure.
         await this.queries.groups.applyBatches(
@@ -869,20 +863,9 @@ export class GroupService {
    * what it changed is durable; replies are sent in the background.
    */
   handlePlaintext(from: Uint8Array, plaintext: Uint8Array): Promise<void> {
+    // The sender's keys are not added from its contact: a plaintext may be
+    // for a group closed here, and the engine asks for the keys it needs.
     return this.run(async node => {
-      if (!node.keys(from)) {
-        const contact = await this.queries.contacts.getByOwnerAndUser(
-          this.owner,
-          encodeUserId(from)
-        );
-        if (contact) {
-          try {
-            node.learn_keys(contact.publicKeys, this.now());
-          } catch {
-            // Not canonical keys: the engine asks for them.
-          }
-        }
-      }
       node.handle_plaintext(from, plaintext, this.now());
     });
   }
