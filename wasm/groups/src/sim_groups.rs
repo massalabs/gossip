@@ -458,14 +458,20 @@ impl Sim {
 
     /// The group as device `d` sees it: the group whose key or an epoch is the founding
     /// epoch, or the group of any legitimate epoch it holds.
+    ///
+    /// A device may hold the group as two conversations: a root whose authority it cannot
+    /// verify (it does not hold the handover that gives it) is an invitation that starts a
+    /// separate group (§5.9, D.3). The one whose current epoch is the latest is the
+    /// conversation the user follows; the other is history it may link by hand.
     fn group_of(&self, d: usize) -> Option<crate::node::GroupSummary> {
         let node = self.node(d);
-        let g = self.group?;
-        node.group(&g).or_else(|| {
-            node.groups()
-                .into_iter()
-                .find(|s| self.legit.contains(&s.current) || self.legit.contains(&s.group))
-        })
+        node.groups()
+            .into_iter()
+            .filter(|s| self.legit.contains(&s.current))
+            .max_by_key(|s| {
+                let at = node.root(&s.current).map_or(0, |r| r.created_at());
+                (u8::from(s.status == MyStatus::Member), at, s.current)
+            })
     }
 
     fn honest(&self) -> Vec<usize> {
