@@ -35,6 +35,7 @@ import {
 } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
+import { useGroupStore } from './groupStore';
 import { useSelfMessageStore } from './selfMessageStore';
 import {
   deriveAccountFromMnemonic,
@@ -635,6 +636,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       const resetTransientAccountStores = (): void => {
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
+        useGroupStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
       };
       if (!sdk.isSecureStorage || accounts.length === 0) {
@@ -745,6 +747,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Filling the account briefly published its profile to the stores.
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
+        useGroupStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
         useAppStore.getState().resetAccountSettings();
         set({ ...clearAccountState(), isLoading: false });
@@ -1104,6 +1107,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (SECURE_STORAGE_ENABLED) void clearAccountTraces();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
+        useGroupStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
         onboardingAllocatedSlots.clear();
         useAppStore.getState().resetAccountSettings();
