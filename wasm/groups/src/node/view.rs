@@ -256,7 +256,7 @@ impl Node {
                 earlier: g.map(|g| g.earlier.clone()).unwrap_or_default(),
                 took_part: self
                     .own_direct_chat(group)
-                    .then(|| g.is_some_and(|g| g.took_part.is_some())),
+                    .then(|| g.is_some_and(|g| g.took_part)),
             });
         }
         out

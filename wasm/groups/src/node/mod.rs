@@ -1127,7 +1127,7 @@ impl Node {
         let event = match wire::decode_event_blob(blob, version) {
             Ok(EventObject::Message(e)) => {
                 // A message event frame is taking part in a chat of two (§5.12).
-                self.note_participation(cx, &e.chat_id(), from);
+                self.note_participation(&e.chat_id(), from);
                 e
             }
             Ok(EventObject::Root(r)) => return self.receive_root(cx, from, *r, group::Via::Direct),

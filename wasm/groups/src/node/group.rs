@@ -347,7 +347,7 @@ impl Node {
                     local_name: None,
                     pending_removals: BTreeMap::new(),
                     junctions: Vec::new(),
-                    took_part: None,
+                    took_part: false,
                     earlier: Vec::new(),
                 },
             );

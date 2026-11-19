@@ -925,10 +925,11 @@ pub struct GroupRecord {
     pub pending_removals: BTreeMap<GossipId, u64>,
     /// Junctions after being added back (§5.10).
     pub junctions: Vec<Junction>,
-    /// An automatic chat of two this device owns (§5.12): when this device first received
-    /// from the other person, inside this chat, a message event, a notice of one or a query
-    /// about its messages. A stored fact, kept for good: it is never recomputed.
-    pub took_part: Option<u64>,
+    /// An automatic chat of two this device owns (§5.12): whether this device received from
+    /// the other person, inside this chat, a message event, a notice of one or a query about
+    /// its messages. A local fact, never sent and compared with no date, kept for good: it is
+    /// never recomputed.
+    pub took_part: bool,
     /// An automatic chat of two (§5.12): the chats of the same two it superseded, oldest
     /// first, theirs flattened before each. Local, never sent.
     pub earlier: Vec<ChatId>,
