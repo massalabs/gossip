@@ -20,10 +20,15 @@ fn frame_bytes(kind: proto::FrameKind) -> Vec<u8> {
     proto::Frame { kind: Some(kind) }.encode_to_vec()
 }
 
+/// The frames of a plaintext, decoded.
+fn frames_of(plaintext: &[u8]) -> Vec<Result<Frame>> {
+    decode_plaintext(plaintext).unwrap().frames().collect()
+}
+
 fn one_frame(bytes: Vec<u8>) -> Result<Frame> {
-    let mut p = decode_plaintext(&plaintext_of(vec![bytes])).unwrap();
-    assert_eq!(p.frames.len(), 1);
-    p.frames.remove(0)
+    let mut frames = frames_of(&plaintext_of(vec![bytes]));
+    assert_eq!(frames.len(), 1);
+    frames.remove(0)
 }
 
 // ── Plaintext and container ──────────────────────────────────────────────────
@@ -39,8 +44,7 @@ fn plaintext_prefix_and_size() {
         decode_plaintext(&[0x00]),
         Err(Error::UnsupportedLowerVersion(0))
     );
-    let empty = decode_plaintext(&[0x01]).unwrap();
-    assert!(empty.frames.is_empty());
+    assert!(frames_of(&[0x01]).is_empty());
     let mut big = vec![0x01];
     big.resize(MAX_PLAINTEXT_BYTES + 1, 0);
     assert_eq!(
@@ -54,7 +58,7 @@ fn version_notice_shape() {
     let notice = version_notice();
     let p = decode_plaintext(&notice).unwrap();
     assert_eq!(p.version, PROTOCOL_VERSION);
-    let Ok(Frame::Response(r)) = &p.frames[0] else {
+    let Some(Ok(Frame::Response(r))) = &p.frames().next() else {
         panic!()
     };
     assert!(r.is_version_notice());
@@ -96,11 +100,11 @@ fn container_errors_reject_everything_frame_errors_only_the_frame() {
     // A bad frame between good ones.
     let unknown_kind = vec![0x42, 0x00]; // field 8
     let bytes = plaintext_of(vec![good.clone(), unknown_kind, vec![], good]);
-    let p = decode_plaintext(&bytes).unwrap();
-    assert!(p.frames[0].is_ok());
-    assert_eq!(p.frames[1], Err(Error::Malformed("unknown field")));
-    assert_eq!(p.frames[2], Err(Error::Missing("frame kind")));
-    assert!(p.frames[3].is_ok());
+    let frames = frames_of(&bytes);
+    assert!(frames[0].is_ok());
+    assert_eq!(frames[1], Err(Error::Malformed("unknown field")));
+    assert_eq!(frames[2], Err(Error::Missing("frame kind")));
+    assert!(frames[3].is_ok());
 }
 
 #[test]
@@ -174,7 +178,7 @@ fn query(entries: Vec<QueryEntry>) -> Frame {
 fn queries_round_trip() {
     let frame = query(all_ops().into_iter().map(QueryEntry::Op).collect());
     let bytes = encode_plaintext(std::slice::from_ref(&frame)).unwrap();
-    assert_eq!(decode_plaintext(&bytes).unwrap().frames, vec![Ok(frame)]);
+    assert_eq!(frames_of(&bytes), vec![Ok(frame)]);
 }
 
 fn raw_query(entries: Vec<Vec<u8>>, request_id: Vec<u8>) -> Vec<u8> {
@@ -351,12 +355,7 @@ fn responses_round_trip() {
         Frame::Notice(Notice { entries }),
     ];
     let bytes = encode_plaintext(&frames).unwrap();
-    let decoded: Vec<Frame> = decode_plaintext(&bytes)
-        .unwrap()
-        .frames
-        .into_iter()
-        .map(|f| f.unwrap())
-        .collect();
+    let decoded: Vec<Frame> = frames_of(&bytes).into_iter().map(|f| f.unwrap()).collect();
     assert_eq!(decoded, frames);
     let Frame::Response(Response {
         result: ResponseResult::Keys(k),
@@ -615,12 +614,7 @@ fn neighbor_and_leave_request_frames() {
         Frame::LeaveRequest(LeaveRequest { chat_id: c }),
     ];
     let bytes = encode_plaintext(&frames).unwrap();
-    let decoded: Vec<Frame> = decode_plaintext(&bytes)
-        .unwrap()
-        .frames
-        .into_iter()
-        .map(|f| f.unwrap())
-        .collect();
+    let decoded: Vec<Frame> = frames_of(&bytes).into_iter().map(|f| f.unwrap()).collect();
     assert_eq!(decoded, frames);
 
     let raw = |accepted: bool, suggestions: Vec<Vec<u8>>| {
@@ -715,8 +709,9 @@ fn event_blobs_round_trip() {
         let bytes = encode_plaintext(&[Frame::Event(blob.clone()), response.clone()]).unwrap();
         let p = decode_plaintext(&bytes).unwrap();
         assert_eq!(p.version, 1);
-        assert_eq!(p.frames, vec![Ok(Frame::Event(blob.clone())), Ok(response)]);
-        let Ok(Frame::Event(b)) = &p.frames[0] else {
+        let frames: Vec<Result<Frame>> = p.frames().collect();
+        assert_eq!(frames, vec![Ok(Frame::Event(blob.clone())), Ok(response)]);
+        let Ok(Frame::Event(b)) = &frames[0] else {
             panic!()
         };
         assert_eq!(decode_event_blob(b, p.version).unwrap(), object);
@@ -872,7 +867,7 @@ fn oversized_event_blobs_are_refused() {
     assert_eq!(single_frame_plaintext_len(frame), MAX_PLAINTEXT_BYTES);
 }
 
-// ── Strict check: one case per `oneof` ───────────────────────────────────────
+// ── Strict check: one case per `oneof`, counts before decoding ───────────────
 
 /// `key ‖ len ‖ bytes` for a length-delimited field whose key fits one byte.
 fn raw_field(key: u8, bytes: &[u8]) -> Vec<u8> {
@@ -974,4 +969,99 @@ fn every_oneof_holds_one_case() {
         one_frame(raw_field(0x1a, &response)),
         Err(Error::Malformed("two cases of one oneof"))
     );
+}
+
+#[test]
+fn counts_are_limited_across_merged_occurrences() {
+    // Two notices of 100 entries in one frame merge into one of 200.
+    let notice = |n: u8| {
+        frame_bytes(proto::FrameKind::Notice(proto::Notice {
+            entries: (0..n).map(|i| entry(i).to_proto()).collect(),
+        }))
+    };
+    assert!(one_frame(notice(100)).is_ok());
+    assert_eq!(
+        one_frame([notice(100), notice(100)].concat()),
+        Err(Error::TooMany {
+            field: "notice entries",
+            max: 128,
+            got: 200
+        })
+    );
+    // Two query frames of 9 entries each merge into one of 18.
+    let q = raw_query(vec![all_ops()[0].encode(); 9], vec![9; 16]);
+    assert_eq!(
+        one_frame([q.clone(), q].concat()),
+        Err(Error::TooMany {
+            field: "query entries",
+            max: 16,
+            got: 18
+        })
+    );
+}
+
+#[test]
+fn event_blob_counts_are_limited_before_decoding() {
+    let objects = objects();
+    let EventObject::Root(root) = &objects[0] else {
+        panic!()
+    };
+    let blob = |kind: proto::EventKind| blob_of(&proto::Event { kind: Some(kind) }.encode_to_vec());
+    let mut p = root.to_proto();
+    p.members = (0u16..513)
+        .map(|i| {
+            let mut m = vec![0; 32];
+            m[30..].copy_from_slice(&i.to_be_bytes());
+            m
+        })
+        .collect();
+    assert_eq!(
+        decode_event_blob(&blob(proto::EventKind::GroupRoot(p)), 1),
+        Err(Error::TooMany {
+            field: "members",
+            max: 512,
+            got: 513
+        })
+    );
+    let mut p = root.to_proto();
+    p.parents = vec![vec![]; 33];
+    assert_eq!(
+        decode_event_blob(&blob(proto::EventKind::GroupRoot(p)), 1),
+        Err(Error::TooMany {
+            field: "parents",
+            max: 32,
+            got: 33
+        })
+    );
+    let EventObject::Message(m) = &objects[1] else {
+        panic!()
+    };
+    let mut p = m.to_proto();
+    p.parents = vec![vec![]; 17];
+    assert_eq!(
+        decode_event_blob(&blob(proto::EventKind::GroupMessageEvent(p)), 1),
+        Err(Error::TooMany {
+            field: "parents",
+            max: 16,
+            got: 17
+        })
+    );
+}
+
+#[test]
+fn a_plaintext_of_empty_frames_is_judged_frame_by_frame() {
+    // 131,071 empty frames: each is rejected on its own as it is read.
+    let n = (MAX_PLAINTEXT_BYTES - 1) / 2;
+    let mut bytes = vec![0x01];
+    for _ in 0..n {
+        bytes.extend_from_slice(&[0x0a, 0x00]);
+    }
+    assert!(bytes.len() <= MAX_PLAINTEXT_BYTES && bytes.len() + 2 > MAX_PLAINTEXT_BYTES);
+    let p = decode_plaintext(&bytes).unwrap();
+    let mut count = 0;
+    for frame in p.frames() {
+        assert_eq!(frame, Err(Error::Missing("frame kind")));
+        count += 1;
+    }
+    assert_eq!(count, n);
 }

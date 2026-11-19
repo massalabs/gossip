@@ -173,20 +173,40 @@ pub fn decode_event_blob(blob: &[u8], plaintext_version: u64) -> Result<EventObj
     }
 }
 
-/// A decoded plaintext: its version and each frame, decoded on its own.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Plaintext {
+/// A received plaintext whose prefix and container passed the checks of §13.1 and §13.8.
+///
+/// Frames are decoded one at a time by [`Plaintext::frames`], so that nothing is built for a
+/// frame before it is judged: a plaintext of 262,144 bytes can hold about 131,000 empty
+/// frames, and decoding them all at once would allocate far more than the plaintext itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Plaintext<'a> {
     /// The plaintext prefix version; event blobs inside are decoded against it.
     pub version: u64,
-    /// Each frame, or why it was rejected. A bad frame does not reject the others.
-    pub frames: Vec<Result<Frame>>,
+    /// The encoded `Container`, already checked.
+    container: &'a [u8],
+}
+
+impl<'a> Plaintext<'a> {
+    /// Each frame in order, decoded and validated on its own, or why it was rejected. A bad
+    /// frame does not reject the others.
+    pub fn frames(&self) -> impl Iterator<Item = Result<Frame>> + 'a {
+        let mut r = Reader::new(self.container);
+        core::iter::from_fn(move || {
+            if r.is_empty() {
+                return None;
+            }
+            // The container passed the strict check: every field is a complete `frames`.
+            let frame = r.varint().and_then(|_| r.len_delimited());
+            Some(frame.and_then(Frame::decode))
+        })
+    }
 }
 
 /// Decodes a received plaintext (§13.1, §13.7, §13.8, §13.10).
 ///
 /// The size limit is checked first, then the version prefix is read before any protobuf
 /// parsing. An invalid container rejects the whole plaintext; each frame is then decoded and
-/// validated on its own, and inside a query each entry is isolated.
+/// validated on its own by [`Plaintext::frames`], and inside a query each entry is isolated.
 ///
 /// # Errors
 ///
@@ -194,7 +214,7 @@ pub struct Plaintext {
 /// [`Error::UnsupportedHigherVersion`] (answer with [`version_notice`], at most once per peer
 /// and version per 24 hours), [`Error::UnsupportedLowerVersion`] (drop silently), or
 /// [`Error::Malformed`] for an invalid container.
-pub fn decode_plaintext(bytes: &[u8]) -> Result<Plaintext> {
+pub fn decode_plaintext(bytes: &[u8]) -> Result<Plaintext<'_>> {
     if bytes.len() > MAX_PLAINTEXT_BYTES {
         return Err(Error::PlaintextTooLarge(bytes.len()));
     }
@@ -206,9 +226,11 @@ pub fn decode_plaintext(bytes: &[u8]) -> Result<Plaintext> {
     if version < PROTOCOL_VERSION {
         return Err(Error::UnsupportedLowerVersion(version));
     }
-    let container: proto::Container = strict::decode(r.rest(), &proto::CONTAINER)?;
-    let frames = container.frames.iter().map(|f| Frame::decode(f)).collect();
-    Ok(Plaintext { version, frames })
+    strict::check(r.rest(), &proto::CONTAINER)?;
+    Ok(Plaintext {
+        version,
+        container: r.rest(),
+    })
 }
 
 /// Encodes frames into one plaintext at [`PROTOCOL_VERSION`].
