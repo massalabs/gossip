@@ -616,3 +616,46 @@ fn the_neighbor_lanes_visit_every_neighbor_before_repeating() {
         forget_at: 0,
     };
 }
+
+#[test]
+fn a_page_with_skipped_entries_is_used_and_its_sender_penalised() {
+    use prost::Message;
+
+    use crate::wire::proto;
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let s = start(&mut net, 1);
+    let (sid, _) = asked(&s);
+    let entry = |id: Vec<u8>| proto::Entry {
+        chat_id: chat.as_bytes().to_vec(),
+        kind: 0,
+        id,
+    };
+    let page = proto::Page {
+        scan_id: sid.as_bytes().to_vec(),
+        offset: 0,
+        count: 2,
+        entries: vec![
+            entry(vec![1; 5]),
+            entry(EventId::new(T0, [7; 16]).as_bytes().to_vec()),
+        ],
+    };
+    let r = proto::Response {
+        request_id: s.rid.as_bytes().to_vec(),
+        idx: s.idx,
+        result: Some(proto::ResponseResult::Page(page)),
+    };
+    let frame = proto::Frame {
+        kind: Some(proto::FrameKind::Response(r)),
+    };
+    let container = proto::Container {
+        frames: vec![frame.encode_to_vec()],
+    };
+    let mut pt = vec![1u8];
+    pt.extend(container.encode_to_vec());
+    net.recv(0, member(1), &pt);
+    assert!(net.devs[0].node.score(&member(1)) < 500_000);
+    // The valid entry is used, and the page counts as final with its skipped entry (D.37).
+    assert_eq!(net.devs[0].node.t.tasks.len(), 1);
+    assert_eq!(net.devs[0].node.stats.scans_completed, 1);
+}
