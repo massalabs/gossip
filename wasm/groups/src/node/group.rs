@@ -37,6 +37,24 @@ pub(crate) struct GroupIndex {
     pub(crate) current: BTreeMap<ChatId, ChatId>,
 }
 
+/// Which held roots (epoch records and handover roots kept while their parent is looked up)
+/// each held root names as a parent, and the reverse, maintained as records come and go,
+/// so that adopting a chain of roots costs time linear in its length; and the records whose
+/// neighbourhood changed, which [`Node::reconsider`] examines.
+#[derive(Debug, Default)]
+pub(crate) struct RootIndex {
+    /// Child → the held roots it names.
+    pub(crate) names: BTreeMap<ChatId, BTreeSet<ChatId>>,
+    /// Parent → the held roots that name it.
+    pub(crate) named_by: BTreeMap<ChatId, BTreeSet<ChatId>>,
+    /// Records to examine.
+    pub(crate) dirty: BTreeSet<ChatId>,
+}
+
+/// Records [`Node::reconsider`] examines in one operation at most; the rest is examined by
+/// the next operations, each committing its progress. Provisional.
+pub(crate) const RECONSIDER_STEPS: usize = 64;
+
 /// How a root reached this device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Via {
@@ -399,7 +417,7 @@ impl Node {
             self.failed_announcement(cx, &from);
             return Ok(Answer::Invalid);
         }
-        self.t.held_roots.remove(&id);
+        self.take_held(&id);
         let closed_before = self.t.markers.get(&id) == Some(&Marker::Closed);
         // Continuity (§4.7): the held parents over which the owner has authority.
         let held: Vec<ChatId> = matched
@@ -416,7 +434,6 @@ impl Node {
         // Case 1, closed by the user: a full root delivered directly prompts again.
         if closed_before {
             self.invite(cx, from, root, Vec::new(), true, None, via);
-            self.reconsider(cx)?;
             return Ok(Answer::Supplied);
         }
         // Case 2: a retained member.
@@ -445,11 +462,7 @@ impl Node {
                     // (§5.4).
                     self.adopt(cx, root, from, installed, false)?;
                 }
-                _ => {
-                    self.invite(cx, from, root, Vec::new(), false, Some(p), via);
-                    // It may lead to a root the user accepted.
-                    self.reconsider(cx)?;
-                }
+                _ => self.invite(cx, from, root, Vec::new(), false, Some(p), via),
             }
             return Ok(Answer::Supplied);
         }
@@ -461,7 +474,6 @@ impl Node {
             .copied()
             .collect();
         self.invite(cx, from, root, unmatched, false, None, via);
-        self.reconsider(cx)?;
         Ok(Answer::Supplied)
     }
 
@@ -472,7 +484,7 @@ impl Node {
             return;
         }
         let commitment = root.parents()[0];
-        self.t.held_roots.insert(
+        self.put_held(
             id,
             HeldRoot {
                 root,
@@ -552,7 +564,7 @@ impl Node {
             .filter_map(|p| self.t.epochs.get(p))
             .map(|r| r.root.owner_id())
             .next();
-        self.t.epochs.insert(
+        self.put_record(
             id,
             EpochRecord {
                 root: root.clone(),
@@ -616,7 +628,6 @@ impl Node {
                 }
             }
         }
-        self.reconsider(cx)?;
         Ok(())
     }
 
@@ -751,7 +762,7 @@ impl Node {
     ) {
         let id = root.chat_id();
         let hidden = via == Via::Parent;
-        self.t.epochs.insert(
+        self.put_record(
             id,
             EpochRecord {
                 root,
@@ -805,133 +816,262 @@ impl Node {
             || inv.not_available.len() >= PROMPT_NOT_AVAILABLE
     }
 
-    /// After an epoch was installed: invitations and held handover roots that continue an
-    /// installed epoch are handled again (§4.8: the lookup succeeded); accepted roots that
-    /// continue it are linked to it (the two conversations are joined).
+    // ── The root index and the worklist ──────────────────────────────────────
+
+    /// Stores an epoch record and indexes the parents its root names.
+    pub(crate) fn put_record(&mut self, id: ChatId, rec: EpochRecord) {
+        let fresh = !self.t.epochs.contains(&id) && !self.t.held_roots.contains(&id);
+        self.t.epochs.insert(id, rec);
+        if fresh {
+            self.index_add(id);
+        }
+        self.ri.dirty.insert(id);
+    }
+
+    /// Removes an epoch record and its index entries.
+    pub(crate) fn take_record(&mut self, id: &ChatId) -> Option<EpochRecord> {
+        let rec = self.t.epochs.remove(id)?;
+        if !self.t.held_roots.contains(id) {
+            self.index_remove(id);
+        }
+        Some(rec)
+    }
+
+    /// Stores a handover root kept while its parent is looked up.
+    fn put_held(&mut self, id: ChatId, h: HeldRoot) {
+        let fresh = !self.t.epochs.contains(&id) && !self.t.held_roots.contains(&id);
+        self.t.held_roots.insert(id, h);
+        if fresh {
+            self.index_add(id);
+        }
+        self.ri.dirty.insert(id);
+    }
+
+    /// Removes a kept handover root.
+    pub(crate) fn take_held(&mut self, id: &ChatId) -> Option<HeldRoot> {
+        let h = self.t.held_roots.remove(id)?;
+        if !self.t.epochs.contains(id) {
+            self.index_remove(id);
+        }
+        Some(h)
+    }
+
+    fn index_add(&mut self, id: ChatId) {
+        let Some(root) = self.held_root(&id).cloned() else {
+            return;
+        };
+        let others: Vec<ChatId> = self
+            .t
+            .epochs
+            .keys()
+            .chain(self.t.held_roots.keys())
+            .filter(|c| **c != id)
+            .copied()
+            .collect();
+        for y in others {
+            if root.names_parent(&y) {
+                self.ri.names.entry(id).or_default().insert(y);
+                self.ri.named_by.entry(y).or_default().insert(id);
+            }
+            if self.held_root(&y).is_some_and(|r| r.names_parent(&id)) {
+                self.ri.names.entry(y).or_default().insert(id);
+                self.ri.named_by.entry(id).or_default().insert(y);
+            }
+        }
+    }
+
+    fn index_remove(&mut self, id: &ChatId) {
+        for p in self.ri.names.remove(id).unwrap_or_default() {
+            if let Some(s) = self.ri.named_by.get_mut(&p) {
+                s.remove(id);
+            }
+        }
+        for c in self.ri.named_by.remove(id).unwrap_or_default() {
+            if let Some(s) = self.ri.names.get_mut(&c) {
+                s.remove(id);
+            }
+        }
+        self.ri.dirty.remove(id);
+    }
+
+    /// Rebuilds the root index from the records (after a load), and marks every record to
+    /// be examined.
+    pub(crate) fn rebuild_root_index(&mut self) {
+        self.ri = RootIndex::default();
+        let ids: Vec<ChatId> = self
+            .t
+            .epochs
+            .keys()
+            .chain(self.t.held_roots.keys())
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for (i, a) in ids.iter().enumerate() {
+            let ra = self.held_root(a).cloned();
+            for b in &ids[i + 1..] {
+                let b_names_a = self.held_root(b).is_some_and(|r| r.names_parent(a));
+                if ra.as_ref().is_some_and(|r| r.names_parent(b)) {
+                    self.ri.names.entry(*a).or_default().insert(*b);
+                    self.ri.named_by.entry(*b).or_default().insert(*a);
+                }
+                if b_names_a {
+                    self.ri.names.entry(*b).or_default().insert(*a);
+                    self.ri.named_by.entry(*a).or_default().insert(*b);
+                }
+            }
+        }
+        self.ri.dirty = ids.into_iter().collect();
+    }
+
+    fn names_of(&self, id: &ChatId) -> Vec<ChatId> {
+        self.ri
+            .names
+            .get(id)
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    fn named_by_of(&self, id: &ChatId) -> Vec<ChatId> {
+        self.ri
+            .named_by
+            .get(id)
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Whether the invitation `x` leads, through invitations, to an installed root: the user
+    /// accepted a root it is an ancestor of (§4.8: the two conversations are joined).
+    fn leads_to_accepted(&self, x: &ChatId) -> bool {
+        let mut seen = BTreeSet::new();
+        let mut stack = self.named_by_of(x);
+        while let Some(c) = stack.pop() {
+            if !seen.insert(c) {
+                continue;
+            }
+            match self.t.epochs.get(&c).map(|r| &r.status) {
+                Some(EpochStatus::Installed) => return true,
+                Some(EpochStatus::Invitation(_)) => stack.extend(self.named_by_of(&c)),
+                None => {}
+            }
+        }
+        false
+    }
+
+    /// Examines the records whose neighbourhood changed (§4.8: the lookup succeeded, the
+    /// conversations are joined), from a worklist, never by recursion, at most
+    /// [`RECONSIDER_STEPS`] of them per operation: a held handover root whose parent is now
+    /// held is received; an invitation that continues an installed epoch with authority is
+    /// adopted, as is one that leads to a root the user accepted; an installed root that
+    /// continues an installed epoch it is not linked to yet is linked to it.
     pub(crate) fn reconsider(&mut self, cx: &mut Cx<'_>) -> Result<(), NodeError> {
-        for _ in 0..64 {
-            let installed: Vec<ChatId> = self
-                .t
-                .epochs
-                .iter()
-                .filter(|(_, r)| r.status == EpochStatus::Installed)
-                .map(|(c, _)| *c)
-                .collect();
-            // A held handover root whose parent is now held.
-            let held: Vec<ChatId> = self
-                .t
-                .held_roots
-                .iter()
-                .filter(|(_, h)| installed.iter().any(|c| h.root.names_parent(c)))
-                .map(|(c, _)| *c)
-                .collect();
-            if let Some(c) = held.first() {
-                let h = self.t.held_roots.remove(c).expect("listed");
-                self.receive_root(cx, h.from, h.root, Via::Lookup)?;
+        for _ in 0..RECONSIDER_STEPS {
+            let Some(c) = self.ri.dirty.pop_first() else {
+                return Ok(());
+            };
+            if self.t.held_roots.contains(&c) && !self.t.epochs.contains(&c) {
+                if self.names_of(&c).iter().any(|p| self.installed(p)) {
+                    let h = self.take_held(&c).expect("held");
+                    self.receive_root(cx, h.from, h.root, Via::Lookup)?;
+                }
                 continue;
             }
-            // The invitations that are ancestors of a root the user accepted, through other
-            // such invitations: they continue that conversation, whatever the state of the
-            // group they continue (§4.8: "the two conversations are joined").
-            let mut ancestors: BTreeSet<ChatId> = BTreeSet::new();
-            loop {
-                let found: Vec<ChatId> =
-                    self.t
-                        .epochs
-                        .iter()
-                        .filter(|(c, r)| {
-                            matches!(r.status, EpochStatus::Invitation(_)) && !ancestors.contains(c)
-                        })
-                        .filter(|(c, _)| {
-                            installed.iter().chain(ancestors.iter()).any(|d| {
-                                self.t.epochs.get(d).is_some_and(|r| r.root.names_parent(c))
-                            })
-                        })
-                        .map(|(c, _)| *c)
-                        .collect();
-                if found.is_empty() {
-                    break;
+            match self.t.epochs.get(&c).map(|r| r.status.clone()) {
+                Some(EpochStatus::Invitation(inv)) => self.try_adopt_invitation(cx, c, &inv)?,
+                Some(EpochStatus::Installed) => {
+                    for x in self.named_by_of(&c) {
+                        if self.installed(&x) {
+                            self.try_link(cx, x);
+                        } else {
+                            self.ri.dirty.insert(x);
+                        }
+                    }
+                    // Invitations it names: ancestors of an accepted root.
+                    for p in self.names_of(&c) {
+                        if !self.installed(&p) {
+                            self.ri.dirty.insert(p);
+                        }
+                    }
+                    self.try_link(cx, c);
                 }
-                ancestors.extend(found);
+                None => {}
             }
-            // An invitation that now continues an installed epoch with authority.
-            let mut next: Option<(ChatId, Vec<ChatId>)> = None;
-            for (chat, rec) in self.t.epochs.iter() {
-                let EpochStatus::Invitation(inv) = &rec.status else {
-                    continue;
-                };
-                let fetched_for_accepted = ancestors.contains(chat);
-                if inv.rejoins.is_some() && !fetched_for_accepted {
-                    continue;
-                }
-                let held: Vec<ChatId> = installed
-                    .iter()
-                    .filter(|c| rec.root.names_parent(c))
-                    .copied()
-                    .collect();
-                if held.is_empty() {
-                    continue;
-                }
-                let ok: Vec<ChatId> = self
-                    .authorized_parents(&rec.root, &held)
-                    .into_iter()
-                    .filter(|c| fetched_for_accepted || self.group_status(c) == GroupStatus::Active)
-                    .collect();
-                if !ok.is_empty() {
-                    next = Some((*chat, ok));
-                    break;
-                }
-            }
-            if let Some((chat, parents)) = next {
-                let rec = self.t.epochs.remove(&chat).expect("listed");
-                self.t.events.remove(&(chat, ChangeKind::Invitation));
-                self.drop_tasks_of(&[chat]);
-                self.adopt(cx, rec.root, rec.from, parents, true)?;
-                continue;
-            }
-            // An installed epoch whose root continues an installed epoch of another group.
-            let mut link: Option<(ChatId, ChatId)> = None;
-            for (chat, rec) in self.t.epochs.iter() {
-                if rec.status != EpochStatus::Installed {
-                    continue;
-                }
-                let named: Vec<ChatId> = installed
-                    .iter()
-                    .filter(|c| *c != chat && rec.root.names_parent(c))
-                    .copied()
-                    .collect();
-                if named.iter().all(|c| rec.parents.contains(c)) {
-                    continue;
-                }
-                // Authority is judged with every held parent: a resolution's link to a
-                // former owner's branch rests on the handover on its other parent.
-                if let Some(c) = self
-                    .authorized_parents(&rec.root, &named)
-                    .into_iter()
-                    .find(|c| !rec.parents.contains(c))
-                {
-                    link = Some((*chat, c));
-                }
-                if link.is_some() {
-                    break;
-                }
-            }
-            if let Some((child, parent)) = link {
-                let (gc, gp) = (self.group_of(&child), self.group_of(&parent));
-                if let Some(r) = self.t.epochs.get_mut(&child) {
-                    r.parents.push(parent);
-                    r.parents.sort_unstable();
-                }
-                let into = gc.min(gp);
-                self.merge_groups(gc.max(gp), into);
-                self.rebuild_epochs();
-                self.recheck_status(cx, into);
-                self.changed(into, ChangeKind::Membership, cx.now);
-                continue;
-            }
-            break;
         }
         Ok(())
+    }
+
+    fn try_adopt_invitation(
+        &mut self,
+        cx: &mut Cx<'_>,
+        chat: ChatId,
+        inv: &Invitation,
+    ) -> Result<(), NodeError> {
+        let held: Vec<ChatId> = self
+            .names_of(&chat)
+            .into_iter()
+            .filter(|c| self.installed(c))
+            .collect();
+        if held.is_empty() {
+            return Ok(());
+        }
+        let ancestor = self.leads_to_accepted(&chat);
+        if inv.rejoins.is_some() && !ancestor {
+            return Ok(());
+        }
+        let Some(root) = self.t.epochs.get(&chat).map(|r| r.root.clone()) else {
+            return Ok(());
+        };
+        let ok: Vec<ChatId> = self
+            .authorized_parents(&root, &held)
+            .into_iter()
+            .filter(|c| ancestor || self.group_status(c) == GroupStatus::Active)
+            .collect();
+        if ok.is_empty() {
+            return Ok(());
+        }
+        let rec = self.take_record(&chat).expect("listed");
+        self.t.events.remove(&(chat, ChangeKind::Invitation));
+        self.drop_tasks_of(&[chat]);
+        self.adopt(cx, rec.root, rec.from, ok, true)
+    }
+
+    /// Links the installed epoch `child` to an installed epoch its root continues with
+    /// authority that it is not linked to yet, joining their groups. Authority is judged
+    /// with every held parent: a resolution's link to a former owner's branch rests on the
+    /// handover on its other parent.
+    fn try_link(&mut self, cx: &mut Cx<'_>, child: ChatId) {
+        let Some(rec) = self.t.epochs.get(&child) else {
+            return;
+        };
+        let named: Vec<ChatId> = self
+            .names_of(&child)
+            .into_iter()
+            .filter(|c| self.installed(c))
+            .collect();
+        if named.iter().all(|c| rec.parents.contains(c)) {
+            return;
+        }
+        let root = rec.root.clone();
+        let linked = rec.parents.clone();
+        let Some(parent) = self
+            .authorized_parents(&root, &named)
+            .into_iter()
+            .find(|c| !linked.contains(c))
+        else {
+            return;
+        };
+        let (gc, gp) = (self.group_of(&child), self.group_of(&parent));
+        if let Some(r) = self.t.epochs.get_mut(&child) {
+            r.parents.push(parent);
+            r.parents.sort_unstable();
+        }
+        let into = gc.min(gp);
+        self.merge_groups(gc.max(gp), into);
+        self.rebuild_epochs();
+        self.recheck_status(cx, into);
+        self.changed(into, ChangeKind::Membership, cx.now);
+        // Its other parents may link too.
+        self.ri.dirty.insert(child);
     }
 
     /// Drops the retrieval tasks keyed by the given epochs.
