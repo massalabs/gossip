@@ -657,6 +657,11 @@ impl Node {
             for (m, at) in old.pending_removals {
                 g.pending_removals.entry(m).or_insert(at);
             }
+            // A conversation the user accepted makes the joined group active again (as on
+            // accepting an invitation to rejoin, §5.10).
+            if old.status == GroupStatus::Active {
+                g.status = GroupStatus::Active;
+            }
         }
         self.t.groups.remove(&from);
         let scans: Vec<_> = self
@@ -771,7 +776,17 @@ impl Node {
                 let EpochStatus::Invitation(inv) = &rec.status else {
                     continue;
                 };
-                if inv.rejoins.is_some() {
+                // A root fetched as the parent of a root the user accepted continues that
+                // conversation, whatever the state of the group it continues (§4.8: "the
+                // two conversations are joined").
+                let fetched_for_accepted = inv.received_at == u64::MAX
+                    && installed.iter().any(|c| {
+                        self.t
+                            .epochs
+                            .get(c)
+                            .is_some_and(|r| r.root.names_parent(chat))
+                    });
+                if inv.rejoins.is_some() && !fetched_for_accepted {
                     continue;
                 }
                 let held: Vec<ChatId> = installed
@@ -785,7 +800,7 @@ impl Node {
                 let ok: Vec<ChatId> = self
                     .authorized_parents(&rec.root, &held)
                     .into_iter()
-                    .filter(|c| self.group_status(c) == GroupStatus::Active)
+                    .filter(|c| fetched_for_accepted || self.group_status(c) == GroupStatus::Active)
                     .collect();
                 if !ok.is_empty() {
                     next = Some((*chat, ok));
@@ -835,6 +850,8 @@ impl Node {
                 let into = gc.min(gp);
                 self.merge_groups(gc.max(gp), into);
                 self.rebuild_epochs();
+                // Its own leave may apply to the joined line (D.2).
+                self.check_own_leave(cx, into);
                 self.changed(into, ChangeKind::Membership, cx.now);
                 continue;
             }
