@@ -45,7 +45,9 @@ mod sim;
 mod test_support;
 
 pub use epoch::local::{ChangeError, LocalEdit, Published};
-pub use epoch::{Epoch, GroupState, MAX_TIMER_WAIT_MS, Merge, Outcome, Rejection, Sender};
+pub use epoch::{
+    Epoch, GroupState, MAX_TIMER_WAIT_MS, Merge, Outcome, Received, Rejection, Sender,
+};
 pub use error::{Error, Result};
 pub use event::{
     Body, Content, MessageEvent, MessageType, Payload, ReplyTarget, decode_reply_to,

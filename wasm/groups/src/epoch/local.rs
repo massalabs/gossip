@@ -58,6 +58,8 @@ pub struct Published {
     pub event: MessageEvent,
     /// Its local merge.
     pub merge: Merge,
+    /// The events the publication pruned that were retained before it, ascending (§9.3).
+    pub pruned: Vec<EventId>,
 }
 
 /// A local-only edit (§9.1): each `Some` field replaces the stored one. Its `Debug` output
@@ -248,9 +250,13 @@ impl Epoch<'_> {
             .map_err(ChangeError::Invalid)?;
         let merge = apply_new(&mut tx, event.clone(), now)?;
         expire(&mut tx, now)?;
-        let changes = tx.into_changes();
+        let (changes, pruned) = tx.finish()?;
         store.commit(changes)?;
-        Ok(Published { event, merge })
+        Ok(Published {
+            event,
+            merge,
+            pruned,
+        })
     }
 
     /// A local-only edit (§9.1), then the withdrawal of shareability (§9.3): the stored
@@ -261,6 +267,9 @@ impl Epoch<'_> {
     /// date is given. Dates beyond `now + MAX_SCHEDULE` are refused, so that a Retry stays
     /// valid; the new result must pass every rule a published one passes.
     ///
+    /// Returns every ID the operation pruned, ascending, so that pending outgoing work that
+    /// refers to them can be invalidated (§9.3).
+    ///
     /// # Errors
     ///
     /// [`ChangeError`]; nothing was committed then.
@@ -270,7 +279,7 @@ impl Epoch<'_> {
         now: u64,
         sync_obj_id: SyncObjId,
         edit: LocalEdit,
-    ) -> Result<(), ChangeError> {
+    ) -> Result<Vec<EventId>, ChangeError> {
         if !self.accepted {
             return Err(ChangeError::NotAccepted);
         }
@@ -320,15 +329,17 @@ impl Epoch<'_> {
         }
         // Pending scheduled deletions carry no content; they stay pending.
         tx.put_object(obj);
-        let changes = tx.into_changes();
+        let (changes, pruned) = tx.finish()?;
         store.commit(changes)?;
-        Ok(())
+        Ok(pruned)
     }
 
     /// A local-only deletion (§9.2, §9.3): the message is replaced by its tombstone, nothing
     /// is sent, and every content event of the message is pruned to a stub. Pending scheduled
     /// deletions carry no content and stay pending, as on a local-only edit (D.28, D.31):
     /// each keeps its scheduled form until its own time.
+    ///
+    /// Returns every ID the operation pruned, ascending (§9.3).
     ///
     /// # Errors
     ///
@@ -338,7 +349,7 @@ impl Epoch<'_> {
         store: &mut S,
         now: u64,
         sync_obj_id: SyncObjId,
-    ) -> Result<(), ChangeError> {
+    ) -> Result<Vec<EventId>, ChangeError> {
         if !self.accepted {
             return Err(ChangeError::NotAccepted);
         }
@@ -350,9 +361,9 @@ impl Epoch<'_> {
         }
         absorb(&mut tx, &mut obj, None)?;
         tx.put_object(obj);
-        let changes = tx.into_changes();
+        let (changes, pruned) = tx.finish()?;
         store.commit(changes)?;
-        Ok(())
+        Ok(pruned)
     }
 }
 
@@ -762,7 +773,7 @@ mod tests {
         for e in [&a, &a2, &v, &ds] {
             f.recv(e, T0);
         }
-        ep(&f.root)
+        let pruned = ep(&f.root)
             .local_edit(
                 &mut f.store,
                 T0 + 10,
@@ -773,6 +784,8 @@ mod tests {
                 },
             )
             .unwrap();
+        // The pruned IDs are reported, so that pending work referring to them can be dropped.
+        assert_eq!(pruned, vec![a.event_id(), a2.event_id(), v.event_id()]);
         for e in [&a, &a2, &v] {
             assert_eq!(f.row(e.event_id()).unwrap().state, RowState::Pruned);
             assert!(f.has_edges(e.event_id()));
@@ -933,9 +946,10 @@ mod tests {
             f.recv(e, T0);
         }
         let before = f.store.commits();
-        ep(&f.root)
+        let pruned = ep(&f.root)
             .local_delete(&mut f.store, T0 + 1, sid(1))
             .unwrap();
+        assert_eq!(pruned, vec![a.event_id(), v.event_id()]);
         assert_eq!(f.store.commits(), before + 1);
         assert!(f.obj(1).is_deleted());
         for e in [&a, &v] {
