@@ -419,11 +419,11 @@ impl Node {
             match work {
                 Work::Full { chat_id, event_id } => {
                     match self.sendable(cx, &peer, &chat_id, &event_id)? {
-                        Some(e) => {
-                            let blob = wire::encode_event_blob(&EventObject::Message(e))
-                                .expect("a stored event fits a container");
-                            fulls.push((key, chat_id, event_id, Frame::Event(blob)));
-                        }
+                        Some(e) => match wire::encode_event_blob(&EventObject::Message(e)) {
+                            Ok(blob) => fulls.push((key, chat_id, event_id, Frame::Event(blob))),
+                            // Stored under a larger bound: it cannot be carried.
+                            Err(_) => stale.push(key),
+                        },
                         None => stale.push(key),
                     }
                 }
@@ -525,6 +525,32 @@ impl Node {
                 Work::VersionNotice => version_notice.push(key),
             }
         }
+        // Frames that cannot be encoded or do not fit an empty container are dropped with
+        // their work rather than sent (they cannot be, and must not stay queued).
+        let fits_alone = |f: &Frame| {
+            f.encode()
+                .ok()
+                .map(|b| b.len())
+                .filter(|len| wire::single_frame_plaintext_len(*len) <= MAX_PLAINTEXT_BYTES)
+        };
+        let mut drop_unfit = |v: &mut Vec<ReadyAnswer>| {
+            v.retain(|a| {
+                let ok = fits_alone(&a.frame).is_some();
+                if !ok {
+                    stale.push(a.key);
+                }
+                ok
+            });
+        };
+        drop_unfit(&mut pages);
+        drop_unfit(&mut answers);
+        fulls.retain(|(k, _, _, f)| {
+            let ok = fits_alone(f).is_some();
+            if !ok {
+                stale.push(*k);
+            }
+            ok
+        });
         for k in &stale {
             self.remove_work(k);
             self.stats.invalidated += 1;
@@ -692,15 +718,18 @@ impl Node {
             }
             let (frames, mut pending, _) =
                 core::mem::replace(cur, (Vec::new(), Pending::default(), base));
-            let pt = wire::encode_plaintext(&frames).expect("packed within the limits");
+            // Packed by exact sizes within the limits; should encoding fail anyway, the
+            // work stays queued rather than the engine panicking.
+            let Ok(pt) = wire::encode_plaintext(&frames) else {
+                return;
+            };
             pending.peer = Some(peer);
             pending.bytes = pt.len() as u64;
             out.push((pt, pending));
         };
         for (frame, keys, part) in frames {
-            let len = match frame.encode() {
-                Ok(b) => b.len(),
-                Err(_) => continue,
+            let Some(len) = fits_alone(&frame) else {
+                continue;
             };
             let add = framed(len);
             if current.2 + add > MAX_PLAINTEXT_BYTES {
@@ -874,7 +903,13 @@ fn event_answer(e: MessageEvent) -> Evaluated {
     } else {
         Category::Ordinary
     };
-    let blob =
-        wire::encode_event_blob(&EventObject::Message(e)).expect("a stored event fits a container");
-    (Some(category), ResponseResult::Event(blob), carried)
+    match wire::encode_event_blob(&EventObject::Message(e)) {
+        Ok(blob) => (Some(category), ResponseResult::Event(blob), carried),
+        // Stored under a larger bound (an older version): it cannot be carried.
+        Err(_) => (
+            Some(Category::Status),
+            ResponseResult::Status(Status::NotAvailable),
+            None,
+        ),
+    }
 }
