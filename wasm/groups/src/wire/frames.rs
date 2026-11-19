@@ -745,7 +745,7 @@ impl NeighborResponse {
 
     fn from_proto(p: &proto::NeighborResponse) -> Result<Self> {
         check_entry_list("suggestions", p.suggestions.len(), MAX_NEIGHBOR_SUGGESTIONS)?;
-        let r = Self {
+        let mut r = Self {
             chat_id: ChatId::from_slice(&p.chat_id)?,
             accepted: p.accepted,
             suggestions: p
@@ -754,6 +754,11 @@ impl NeighborResponse {
                 .map(|s| GossipId::from_slice(s))
                 .collect::<Result<_>>()?,
         };
+        // Suggestions in an acceptance mean nothing: ignored, not malformed (§2.2). The
+        // format limits above still hold; this device never sends them.
+        if r.accepted {
+            r.suggestions.clear();
+        }
         r.check()?;
         Ok(r)
     }
