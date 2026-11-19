@@ -460,9 +460,12 @@ impl GroupsNode {
 
     // ── Messages ─────────────────────────────────────────────────────────────
 
-    /// `body`: `{"t":"Text","text":…}`, `{"t":"Forward","content_type":"Text","content":hex}`,
-    /// `{"t":"Reaction","reaction":hex}` or `{"t":"Media","media":hex}`; `metadata`: an array
-    /// of `[name, hex]`. Returns `{eventId, syncObjId, merge}` in JSON.
+    /// `body`: `{"t":"Text","text":…}`,
+    /// `{"t":"Forward","content_type":"Text"|"Media","content":hex}` (a forwarded media
+    /// message is the canonical encoding of a `Media`), or
+    /// `{"t":"Media","media":{"mimetype":…,"data":hex}}`; a reaction goes through
+    /// `publish_reaction`. `metadata`: an array of `[name, hex]`. Returns
+    /// `{eventId, syncObjId, merge}` in JSON.
     pub fn publish_message(
         &mut self,
         epoch: &[u8],
@@ -474,6 +477,38 @@ impl GroupsNode {
         let scheduled_for = scheduled_for.map(ms).transpose()?;
         self.core
             .publish_message(chat(epoch)?, body, metadata, scheduled_for, ms(now)?)
+            .map_err(js)
+    }
+
+    /// A media message (§7.6): `mimetype` is `type/subtype` (lowercase, no parameters, at most
+    /// 127 bytes), `data` any bytes the event can hold; `metadata` as for `publish_message`
+    /// (a name or a caption). Returns `{eventId, syncObjId, merge}` in JSON.
+    pub fn publish_media(
+        &mut self,
+        epoch: &[u8],
+        mimetype: String,
+        data: Vec<u8>,
+        metadata: &str,
+        now: f64,
+    ) -> Result<String, JsValue> {
+        self.core
+            .publish_media(chat(epoch)?, mimetype, data, metadata, ms(now)?)
+            .map_err(js)
+    }
+
+    /// Adds (`add`) or removes this device's reaction `emoji` (1 to 64 bytes of UTF-8) to the
+    /// message `target` of `epoch`, the target's own epoch (§7.6). Returns
+    /// `{eventId, syncObjId, merge}` in JSON; `syncObjId` is the reaction's.
+    pub fn publish_reaction(
+        &mut self,
+        epoch: &[u8],
+        target: &[u8],
+        emoji: String,
+        add: bool,
+        now: f64,
+    ) -> Result<String, JsValue> {
+        self.core
+            .publish_reaction(chat(epoch)?, sync(target)?, emoji, add, ms(now)?)
             .map_err(js)
     }
 
@@ -575,8 +610,31 @@ impl GroupsNode {
         Ok(self.core.invitations(ms(now)?))
     }
 
+    /// The timeline in JSON. A message lists `reactions` as `[[author, emoji], …]`; a media
+    /// message (or a forwarded one) comes without its data, with `data_len`: read the data
+    /// with `media`.
     pub fn timeline(&self, epoch: &[u8], now: f64) -> Result<String, JsValue> {
         self.core.timeline(chat(epoch)?, ms(now)?).map_err(js)
+    }
+
+    /// The media message `sync_obj_id` of `epoch` with its data: `{mimetype, data}` (`data`
+    /// a `Uint8Array`), or `null` when the message is not visible or holds no media.
+    pub fn media(&self, epoch: &[u8], sync_obj_id: &[u8], now: f64) -> Result<JsValue, JsValue> {
+        let Some((mimetype, data)) = self
+            .core
+            .media(chat(epoch)?, sync(sync_obj_id)?, ms(now)?)
+            .map_err(js)?
+        else {
+            return Ok(JsValue::NULL);
+        };
+        let obj = js_sys::Object::new();
+        set(&obj, "mimetype", &JsValue::from_str(&mimetype));
+        set(
+            &obj,
+            "data",
+            &js_sys::Uint8Array::from(data.as_slice()).into(),
+        );
+        Ok(obj.into())
     }
 
     /// The changes since the last call, in JSON: `[{group, kind}]`.

@@ -414,6 +414,47 @@ impl Core {
             .map_err(err)
     }
 
+    /// A media message of `data` (any bytes) and `mimetype` (`type/subtype`, §7.6), with
+    /// `metadata` as for [`Self::publish_message`].
+    pub fn publish_media(
+        &mut self,
+        chat: ChatId,
+        mimetype: String,
+        data: Vec<u8>,
+        metadata: &str,
+        now: u64,
+    ) -> R<String> {
+        let metadata: BTreeMap<String, Vec<u8>> = parse(metadata)?;
+        self.node
+            .publish_media(
+                &mut self.store,
+                chat,
+                mimetype,
+                data,
+                metadata,
+                now,
+                &mut rng,
+            )
+            .map(|p| published(&p))
+            .map_err(err)
+    }
+
+    /// Adds or removes this device's reaction `emoji` to the message `target` of the epoch
+    /// `chat` (§7.6).
+    pub fn publish_reaction(
+        &mut self,
+        chat: ChatId,
+        target: SyncObjId,
+        emoji: String,
+        add: bool,
+        now: u64,
+    ) -> R<String> {
+        self.node
+            .publish_reaction(&mut self.store, chat, target, emoji, add, now, &mut rng)
+            .map(|p| published(&p))
+            .map_err(err)
+    }
+
     pub fn publish_edit(
         &mut self,
         chat: ChatId,
@@ -513,6 +554,21 @@ impl Core {
         self.node
             .timeline(&self.store, &chat, now)
             .map(|t| t.enc().view_text())
+            .map_err(err)
+    }
+
+    /// The media message `sync_obj_id` of the epoch `chat` with its data, which the timeline
+    /// leaves out: `(mimetype, data)`, or `None` when the message is not visible or holds no
+    /// media.
+    pub fn media(
+        &self,
+        chat: ChatId,
+        sync_obj_id: SyncObjId,
+        now: u64,
+    ) -> R<Option<(String, Vec<u8>)>> {
+        self.node
+            .media(&self.store, &chat, &sync_obj_id, now)
+            .map(|m| m.map(|m| (m.mimetype, m.data)))
             .map_err(err)
     }
 
