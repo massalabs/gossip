@@ -63,6 +63,20 @@ impl Leave {
         Ok(leave)
     }
 
+    /// Rebuilds a leave from its stored fields (lengths checked as decoding does; the
+    /// signature is checked by [`Leave::verify`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadLength`] for a signature of the wrong length.
+    pub fn from_fields(chat_id: ChatId, leaver: GossipId, signature: &[u8]) -> Result<Self> {
+        Ok(Self {
+            chat_id,
+            leaver,
+            signature: SignatureBytes::from_slice(signature)?,
+        })
+    }
+
     /// Parses a received leave (lengths only; the signature is checked by [`Leave::verify`]).
     ///
     /// # Errors
@@ -172,6 +186,20 @@ impl Kick {
         };
         kick.verify(root)?;
         Ok(kick)
+    }
+
+    /// Rebuilds a kick from its stored fields (lengths checked as decoding does; the
+    /// signature is checked by [`Kick::verify`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadLength`] for a signature of the wrong length.
+    pub fn from_fields(chat_id: ChatId, removed: GossipId, signature: &[u8]) -> Result<Self> {
+        Ok(Self {
+            chat_id,
+            removed,
+            signature: SignatureBytes::from_slice(signature)?,
+        })
     }
 
     /// Parses a received kick (lengths only; the signature is checked by [`Kick::verify`]).
@@ -316,6 +344,20 @@ impl Dissolve {
         Ok(dissolve)
     }
 
+    /// Rebuilds a dissolve message from its stored fields (lengths checked as decoding
+    /// does; the signature is checked by [`Dissolve::verify`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadLength`] for a signature of the wrong length.
+    pub fn from_fields(chat_id: ChatId, must_delete: bool, signature: &[u8]) -> Result<Self> {
+        Ok(Self {
+            chat_id,
+            must_delete,
+            signature: SignatureBytes::from_slice(signature)?,
+        })
+    }
+
     /// Parses a received dissolve message (lengths only; the signature is checked by
     /// [`Dissolve::verify`]).
     ///
@@ -383,6 +425,44 @@ impl Dissolve {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signed_objects_rebuild_from_their_fields() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = founding(&alice, &[&alice, &bob]);
+        let l = Leave::sign(&root, &bob.public, &bob.secret.dsa_signing_key, [1; 32]).unwrap();
+        let back = Leave::from_fields(l.chat_id(), l.leaver(), l.signature().as_bytes()).unwrap();
+        assert_eq!(back, l);
+        back.verify(&root, &bob.public).unwrap();
+        let k = Kick::sign(&root, bob.id, &alice.secret.dsa_signing_key, [2; 32]).unwrap();
+        assert_eq!(
+            Kick::from_fields(k.chat_id(), k.removed(), k.signature().as_bytes()).unwrap(),
+            k
+        );
+        let d = Dissolve::sign(&root, true, &alice.secret.dsa_signing_key, [3; 32]).unwrap();
+        assert_eq!(
+            Dissolve::from_fields(d.chat_id(), true, d.signature().as_bytes()).unwrap(),
+            d
+        );
+        assert!(Leave::from_fields(l.chat_id(), l.leaver(), &[0; 3]).is_err());
+        let r = Root::from_fields(
+            root.version(),
+            root.root_type(),
+            root.name().to_owned(),
+            root.parents(),
+            root.members(),
+            root.group_secret(),
+            root.owner_bytes().to_vec(),
+            root.epoch_challenge(),
+            root.ref_chat_id_challenge(),
+            root.created_at(),
+            root.signature().as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(r, root);
+        r.verify_signature(None).unwrap();
+    }
     use crate::keys::sign_id;
     use crate::root::tests::founding;
     use crate::test_support::identity;

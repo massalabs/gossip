@@ -350,6 +350,45 @@ impl Root {
         Ok(root)
     }
 
+    /// Rebuilds a root from its stored fields, validating them as decoding does (§4.7 steps
+    /// 1 and 3) and computing its ID; the signature bytes are taken as stored and checked by
+    /// [`Root::verify_signature`] as for a received root. For a backend that stores fields
+    /// rather than an encoding.
+    ///
+    /// # Errors
+    ///
+    /// The first rule broken, as [`crate::wire::decode_event_blob`] would report it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_fields(
+        version: u64,
+        root_type: RootType,
+        name: String,
+        parents: &[ParentCommitment],
+        members: &[GossipId],
+        group_secret: &GroupSecret,
+        owner: Vec<u8>,
+        epoch_challenge: &Challenge,
+        ref_chat_id_challenge: &Challenge,
+        created_at: u64,
+        signature: &[u8],
+    ) -> Result<Self> {
+        Self::from_proto(
+            version,
+            proto::GroupRoot {
+                r#type: root_type as i32,
+                name,
+                parents: parents.iter().map(|p| p.as_bytes().to_vec()).collect(),
+                members: members.iter().map(|m| m.as_bytes().to_vec()).collect(),
+                group_secret: group_secret.as_bytes().to_vec(),
+                owner,
+                epoch_challenge: epoch_challenge.as_bytes().to_vec(),
+                ref_chat_id_challenge: ref_chat_id_challenge.as_bytes().to_vec(),
+                created_at,
+                signature: signature.to_vec(),
+            },
+        )
+    }
+
     /// The protobuf form of this root.
     #[must_use]
     pub(crate) fn to_proto(&self) -> proto::GroupRoot {
