@@ -182,17 +182,30 @@ impl Node {
             .collect()
     }
 
-    /// Whether the group's ends compete for its owner: two or more ends name the owner of
-    /// the current epoch (§4.9). Ends of other owners' lines are side branches (§5.9).
+    /// The ends the owner of the current epoch must resolve (§4.9, §5.9): two or more ends
+    /// whose owners are that owner or a previous owner in its line (it may take their
+    /// branches as parents, §4.7). Ends of a rival line, owned by another identity the same
+    /// former owner handed the group to, are side branches it cannot resolve.
+    ///
+    /// §5.9 says the new owner "may" resolve a branch of the former owner; it is treated as
+    /// a fork to resolve so that the members of that branch only are not left behind.
     pub(crate) fn fork_to_resolve(&self, group: &ChatId) -> Vec<ChatId> {
         let Some(cur) = self.current_epoch(group) else {
             return Vec::new();
         };
-        let owner = self.t.epochs.get(&cur).map(|r| r.root.owner_id());
+        let Some(owner) = self.t.epochs.get(&cur).map(|r| r.root.owner_id()) else {
+            return Vec::new();
+        };
+        let authority = self.line_authority(owner, &[cur]);
         let ends: Vec<ChatId> = self
             .ends(group)
             .into_iter()
-            .filter(|c| self.t.epochs.get(c).map(|r| r.root.owner_id()) == owner)
+            .filter(|c| {
+                self.t
+                    .epochs
+                    .get(c)
+                    .is_some_and(|r| authority.contains(&r.root.owner_id()))
+            })
             .collect();
         if ends.len() > 1 { ends } else { Vec::new() }
     }
