@@ -2162,3 +2162,81 @@ fn a_former_owner_cannot_mute_or_freeze_the_new_owner() {
         .unwrap();
     assert!(net.devs[1].node.root(&r).unwrap().parents().len() == 2);
 }
+
+/// Finding 6 of the review of 54711780: any peer with a session could make a device keep
+/// unbounded records: 40 self-signed roots, each with 32 unmatched parents, gave 41 epoch
+/// records and 1,281 retrieval tasks.
+#[test]
+fn a_stranger_cannot_make_a_device_keep_unbounded_records() {
+    let mut net = MNet::new(2, true);
+    let stranger = ident(7);
+    for i in 0..40u8 {
+        let params = crate::root::RootParams {
+            name: format!("spam {i}"),
+            members: vec![gid(0), stranger.id],
+            group_secret: crate::ids::GroupSecret::from_bytes([i; 32]),
+            owner: stranger.public.clone(),
+            epoch_challenge: crate::ids::Challenge::from_bytes([i; 32]),
+            ref_chat_id_challenge: crate::ids::Challenge::from_bytes([i.wrapping_add(1); 32]),
+            created_at: net.now,
+        };
+        let parents: Vec<ChatId> = (0..32u8)
+            .map(|p| {
+                ChatId::from_bytes([
+                    i ^ 0x80,
+                    p,
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16,
+                    17,
+                    18,
+                    19,
+                    20,
+                    21,
+                    22,
+                    23,
+                    24,
+                    25,
+                    26,
+                    27,
+                    28,
+                    29,
+                    30,
+                ])
+            })
+            .collect();
+        let r = Root::create_successor(params, &parents, &stranger.secret.dsa_signing_key, [i; 32])
+            .unwrap();
+        let blob = wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap();
+        let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+        let now = net.now;
+        let dev = &mut net.devs[0];
+        dev.node
+            .handle_plaintext(&mut dev.store, stranger.id, &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    let t = net.devs[0].node.tables();
+    assert!(
+        t.epochs.len() <= 16,
+        "{} epoch records",
+        t.epochs.len()
+    );
+    assert!(
+        t.tasks.len() <= group::ROOT_FETCHES_PER_PEER,
+        "{} tasks",
+        t.tasks.len()
+    );
+}
