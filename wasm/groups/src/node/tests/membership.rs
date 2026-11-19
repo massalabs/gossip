@@ -2921,3 +2921,56 @@ fn closing_the_only_shared_group_leaves_only_markers() {
         0
     );
 }
+
+/// SDK review (B): `poll_outbox` assembled plaintexts for a peer marked without a session,
+/// and an abandoned plaintext was assembled again at once, each poll committing.
+#[test]
+fn no_assembly_without_a_session_and_no_loop_after_abandon() {
+    let (mut net, g) = founded(3);
+    net.exchange();
+    let now = net.now;
+    net.devs[0].node.set_session(gid(1), false);
+    net.devs[0].node.set_session(gid(2), false);
+    net.say(0, &g, "hello");
+    let dev = &mut net.devs[0];
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    assert!(out.is_empty(), "assembled for peers without a session");
+    let commits = dev.store.commits();
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    assert!(out.is_empty());
+    assert_eq!(
+        dev.store.commits(),
+        commits,
+        "a poll with nothing sendable committed"
+    );
+    // With a session again: assembled; abandoned: not assembled again at once.
+    dev.node.set_session(gid(1), true);
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    assert!(!out.is_empty());
+    for o in &out {
+        dev.node.abandon(o.handle);
+    }
+    let commits = dev.store.commits();
+    let again = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    assert!(again.is_empty(), "assembled again right after an abandon");
+    assert_eq!(dev.store.commits(), commits);
+    // A reconnection makes it eligible again.
+    dev.node.set_session(gid(1), true);
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    assert!(!out.is_empty());
+}
