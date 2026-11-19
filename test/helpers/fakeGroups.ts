@@ -73,6 +73,7 @@ export function summary(over: Partial<GroupSummary> = {}): GroupSummary {
     owner: 'me',
     status: 'member',
     sideBranches: [],
+    formerOwnerBranches: [],
     mustResolve: false,
     links: [],
     ...over,
