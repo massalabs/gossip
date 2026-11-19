@@ -574,6 +574,74 @@ mod tests {
     }
 
     #[test]
+    fn changes_over_the_size_limits_are_refused() {
+        let mut f = Fixture::new();
+        let mut rng = TestRng::new(1);
+        let sync = content_of(&hello(&mut f, &mut rng, T0)).sync_obj_id;
+        let commits = f.store.commits();
+        let author = f.alice.id;
+        let short = || Body::Text("x".into());
+        let long = || Body::Text("x".repeat(16_385));
+        let none = BTreeMap::new;
+        // 16,385 bytes as encoded (see `event::tests`).
+        let big = || BTreeMap::from([("k".to_owned(), vec![0; 16_376])]);
+        let too_long = |field, got| {
+            ChangeError::Invalid(Error::TooMany {
+                field,
+                max: 16_384,
+                got,
+            })
+        };
+        for (body, metadata, err) in [
+            (long(), none(), too_long("text", 16_385)),
+            (short(), big(), too_long("metadata", 16_385)),
+        ] {
+            assert_eq!(
+                ep(&f.root)
+                    .publish_message(
+                        &mut f.store,
+                        T0 + 1,
+                        &mut rng,
+                        author,
+                        body.clone(),
+                        metadata.clone(),
+                        None,
+                    )
+                    .map(|_| ()),
+                Err(err.clone())
+            );
+            assert_eq!(
+                ep(&f.root)
+                    .publish_edit(
+                        &mut f.store,
+                        T0 + 1,
+                        &mut rng,
+                        sync,
+                        body.clone(),
+                        metadata.clone(),
+                        None,
+                    )
+                    .map(|_| ()),
+                Err(err.clone())
+            );
+            assert_eq!(
+                ep(&f.root).local_edit(
+                    &mut f.store,
+                    T0 + 1,
+                    sync,
+                    LocalEdit {
+                        body: Some(body),
+                        metadata: Some(metadata),
+                        ..Default::default()
+                    },
+                ),
+                Err(err)
+            );
+        }
+        assert_eq!(f.store.commits(), commits);
+    }
+
+    #[test]
     fn an_edit_keeps_creation_and_author_and_moves_time_forward() {
         let mut f = Fixture::new();
         let mut rng = TestRng::new(1);

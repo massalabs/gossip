@@ -774,6 +774,98 @@ mod tests {
     }
 
     #[test]
+    fn text_and_metadata_have_size_limits() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let make = |p: Payload| MessageEvent::create(&root, EventId::new(TS, [9; 16]), &[], p);
+        let too_long = |field, got| {
+            Err(Error::TooMany {
+                field,
+                max: 16_384,
+                got,
+            })
+        };
+        // Text: encoded UTF-8 bytes, not characters.
+        assert!(make(text(alice.id, &"x".repeat(16_384))).is_ok());
+        assert_eq!(
+            make(text(alice.id, &"x".repeat(16_385))),
+            too_long("text", 16_385)
+        );
+        assert!(make(text(alice.id, &"\u{e9}".repeat(8_192))).is_ok());
+        assert_eq!(
+            make(text(alice.id, &"\u{e9}".repeat(8_193))),
+            too_long("text", 16_386)
+        );
+        // The text of a forward is text too; other content is bounded by the container.
+        let body = |b: Body| {
+            let mut p = text(alice.id, "");
+            content(&mut p).body = b;
+            p
+        };
+        let forward = |content_type, n| Body::Forward {
+            content_type,
+            content: vec![b'x'; n],
+        };
+        assert!(make(body(forward(MessageType::Text, 16_384))).is_ok());
+        assert_eq!(
+            make(body(forward(MessageType::Text, 16_385))),
+            too_long("text", 16_385)
+        );
+        assert!(make(body(forward(MessageType::Media, 40_000))).is_ok());
+        assert!(make(body(Body::Media(vec![0; 40_000]))).is_ok());
+        // Metadata: every key and value together, as encoded. One entry of a 1-byte key and
+        // an n-byte value (127 < n < 16,384) is 9 + n bytes: field key, entry length (2),
+        // key field (3), value field key and length (3).
+        let with = |entries: &[(&str, usize)]| {
+            let mut p = text(alice.id, "x");
+            content(&mut p).metadata = entries
+                .iter()
+                .map(|(k, n)| ((*k).to_owned(), vec![0; *n]))
+                .collect();
+            p
+        };
+        assert!(make(with(&[("m", 16_375)])).is_ok());
+        assert_eq!(make(with(&[("m", 16_376)])), too_long("metadata", 16_385));
+        // The framing counts: 2,731 entries of a 2-byte key and no value are 6 bytes each,
+        // although their keys hold only 5,462 bytes.
+        let keys: Vec<String> = (0..2_731u16)
+            .map(|i| {
+                format!(
+                    "{}{}",
+                    char::from(b'0' + (i / 64) as u8),
+                    char::from(b'0' + (i % 64) as u8)
+                )
+            })
+            .collect();
+        let small: Vec<(&str, usize)> = keys.iter().map(|k| (k.as_str(), 0)).collect();
+        assert!(make(with(&small[..2_730])).is_ok());
+        assert_eq!(make(with(&small)), too_long("metadata", 16_386));
+        // Received events follow the same rules.
+        let event = make(text(alice.id, "x")).unwrap();
+        let received = |f: &dyn Fn(&mut proto::MessagePayload)| {
+            let mut p = event.to_proto();
+            f(p.payload.as_mut().unwrap());
+            MessageEvent::from_proto(1, p)
+        };
+        assert_eq!(
+            received(&|p| p.body = Some(proto::Body::Text("x".repeat(16_385)))),
+            too_long("text", 16_385)
+        );
+        assert_eq!(
+            received(&|p| {
+                p.metadata.insert("m".to_owned(), vec![0; 16_376]);
+            }),
+            too_long("metadata", 16_385)
+        );
+        assert!(
+            received(&|p| {
+                p.metadata.insert("m".to_owned(), vec![0; 16_375]);
+            })
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn field_rules() {
         let alice = identity(1);
         let root = founding(&alice, &[&alice]);
