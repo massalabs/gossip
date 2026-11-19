@@ -416,6 +416,7 @@ impl Node {
         // Case 1, closed by the user: a full root delivered directly prompts again.
         if closed_before {
             self.invite(cx, from, root, Vec::new(), true, None, via);
+            self.reconsider(cx)?;
             return Ok(Answer::Supplied);
         }
         // Case 2: a retained member.
@@ -444,7 +445,11 @@ impl Node {
                     // (§5.4).
                     self.adopt(cx, root, from, installed, false)?;
                 }
-                _ => self.invite(cx, from, root, Vec::new(), false, Some(p), via),
+                _ => {
+                    self.invite(cx, from, root, Vec::new(), false, Some(p), via);
+                    // It may lead to a root the user accepted.
+                    self.reconsider(cx)?;
+                }
             }
             return Ok(Answer::Supplied);
         }
@@ -456,6 +461,7 @@ impl Node {
             .copied()
             .collect();
         self.invite(cx, from, root, unmatched, false, None, via);
+        self.reconsider(cx)?;
         Ok(Answer::Supplied)
     }
 
@@ -824,22 +830,37 @@ impl Node {
                 self.receive_root(cx, h.from, h.root, Via::Lookup)?;
                 continue;
             }
+            // The invitations that are ancestors of a root the user accepted, through other
+            // such invitations: they continue that conversation, whatever the state of the
+            // group they continue (§4.8: "the two conversations are joined").
+            let mut ancestors: BTreeSet<ChatId> = BTreeSet::new();
+            loop {
+                let found: Vec<ChatId> =
+                    self.t
+                        .epochs
+                        .iter()
+                        .filter(|(c, r)| {
+                            matches!(r.status, EpochStatus::Invitation(_)) && !ancestors.contains(c)
+                        })
+                        .filter(|(c, _)| {
+                            installed.iter().chain(ancestors.iter()).any(|d| {
+                                self.t.epochs.get(d).is_some_and(|r| r.root.names_parent(c))
+                            })
+                        })
+                        .map(|(c, _)| *c)
+                        .collect();
+                if found.is_empty() {
+                    break;
+                }
+                ancestors.extend(found);
+            }
             // An invitation that now continues an installed epoch with authority.
             let mut next: Option<(ChatId, Vec<ChatId>)> = None;
             for (chat, rec) in self.t.epochs.iter() {
                 let EpochStatus::Invitation(inv) = &rec.status else {
                     continue;
                 };
-                // A root fetched as the parent of a root the user accepted continues that
-                // conversation, whatever the state of the group it continues (§4.8: "the
-                // two conversations are joined").
-                let fetched_for_accepted = inv.received_at == u64::MAX
-                    && installed.iter().any(|c| {
-                        self.t
-                            .epochs
-                            .get(c)
-                            .is_some_and(|r| r.root.names_parent(chat))
-                    });
+                let fetched_for_accepted = ancestors.contains(chat);
                 if inv.rejoins.is_some() && !fetched_for_accepted {
                     continue;
                 }
