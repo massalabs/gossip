@@ -99,8 +99,9 @@ pub enum Outcome {
     /// The ID is already retained: its first valid interpretation is kept and the arrival is
     /// ignored (§7.1).
     Duplicate,
-    /// The ID was processed and pruned; the payload equals the current result and its window
-    /// is open, so it is available again. It was not reapplied and is not announced (§9.5).
+    /// The ID was processed and pruned; the payload equals the current result, the parents
+    /// equal the stored parent links and its window is open, so it is available again. It was
+    /// not reapplied and is not announced (§9.5, D.33).
     Restored,
     /// The ID was processed and pruned and stays so (§9.5).
     KeptPruned,
@@ -411,7 +412,9 @@ pub(crate) fn receive_in<S: StorageRead + ?Sized>(
     }
 }
 
-/// §9.5 for a processed, pruned ID.
+/// §9.5 for a processed, pruned ID. The event is restored only when its payload projection
+/// equals the current result and its parents equal the stored parent links (D.33, choice A:
+/// an ID keeps its first valid interpretation entirely, §7.1), while its window is open.
 fn restore<S: StorageRead + ?Sized>(
     tx: &mut Tx<'_, S>,
     event: MessageEvent,
@@ -426,7 +429,10 @@ fn restore<S: StorageRead + ?Sized>(
         .current
         .as_ref()
         .is_some_and(|cur| cur.result_hash(&chat, sync) == event.result_hash());
-    if !identical || !in_window(&event.event_id(), now) {
+    let same_parents = tx
+        .parents(&chat, &event.event_id())?
+        .is_some_and(|p| p == event.parents());
+    if !identical || !same_parents || !in_window(&event.event_id(), now) {
         return Ok(Outcome::KeptPruned);
     }
     // The same rule as on first arrival (D.31): a scheduled deletion keeps its scheduled form

@@ -1032,6 +1032,9 @@ fn storage_failures_commit_nothing() {
         fn edges(&self, c: &ChatId) -> Result<Vec<(EventId, Vec<EventId>)>, StorageError> {
             self.0.edges(c)
         }
+        fn parents(&self, c: &ChatId, e: &EventId) -> Result<Option<Vec<EventId>>, StorageError> {
+            self.0.parents(c, e)
+        }
         fn object(&self, c: &ChatId, s: &SyncObjId) -> Result<Option<ObjectRecord>, StorageError> {
             self.0.object(c, s)
         }

@@ -307,6 +307,18 @@ pub trait StorageRead {
     /// A backend failure.
     fn edges(&self, chat_id: &ChatId) -> Result<Vec<(EventId, Vec<EventId>)>, StorageError>;
 
+    /// The stored parent links of the processed event `event_id`, ascending; `None` when it
+    /// was never processed.
+    ///
+    /// # Errors
+    ///
+    /// A backend failure.
+    fn parents(
+        &self,
+        chat_id: &ChatId,
+        event_id: &EventId,
+    ) -> Result<Option<Vec<EventId>>, StorageError>;
+
     /// The current object of `(chat_id, sync_obj_id)`.
     ///
     /// # Errors
