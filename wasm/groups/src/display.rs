@@ -4,7 +4,7 @@
 use crate::error::{Error, Result};
 use crate::event::{Content, Payload};
 use crate::ids::{ChatId, SyncObjId};
-use crate::store::{StorageError, StorageRead, StoredResult};
+use crate::store::{ObjectRecord, StorageError, StorageRead, StoredResult};
 
 /// A message of the view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,8 +57,12 @@ pub fn is_visible(content: &Content, now: u64) -> bool {
 
 /// The visible messages of the epochs `chat_ids` (all the epochs and side branches of a
 /// group), in one chronological order (§7.5). Deleted messages, pending future content and
-/// results whose dates are still in the future are hidden. Run
-/// [`crate::Epoch::tick`] on each epoch first so that due versions are applied.
+/// results whose dates are still in the future are hidden.
+///
+/// The view is computed as if everything due at `now` had been applied, whether or not
+/// [`crate::Epoch::tick`] ran: a message whose earliest pending deletion is due is hidden,
+/// and a pending version that is due is merged with the current result by the rule of §7.1
+/// (the greatest `(last_modified_at, resultHash)`). Nothing is written.
 ///
 /// # Errors
 ///
@@ -71,15 +75,10 @@ pub fn view<R: StorageRead + ?Sized>(
     let mut out = Vec::new();
     for chat_id in chat_ids {
         for obj in store.objects(chat_id)? {
-            if let Some(StoredResult::Content(c)) = obj.current
-                && is_visible(&c, now)
+            if let Some(m) = effective(store, chat_id, &obj, now)?
+                && is_visible(&m.content, now)
             {
-                let result_hash = Payload::Content(c.clone()).result_hash(chat_id);
-                out.push(VisibleMessage {
-                    chat_id: *chat_id,
-                    content: c,
-                    result_hash,
-                });
+                out.push(m);
             }
         }
     }
@@ -90,6 +89,54 @@ pub fn view<R: StorageRead + ?Sized>(
             .then(a.sync_obj_id().cmp(&b.sync_obj_id()))
     });
     Ok(out)
+}
+
+/// The non-delete result of `obj` once everything due at `now` is applied, or `None` when it
+/// is deleted by then or has no result yet.
+fn effective<R: StorageRead + ?Sized>(
+    store: &R,
+    chat_id: &ChatId,
+    obj: &ObjectRecord,
+    now: u64,
+) -> core::result::Result<Option<VisibleMessage>, StorageError> {
+    if obj.is_deleted()
+        || obj
+            .pending_deletions
+            .first()
+            .is_some_and(|(due, _)| *due <= now)
+    {
+        return Ok(None);
+    }
+    let candidate = |content: Content| {
+        let result_hash = Payload::Content(content.clone()).result_hash(chat_id);
+        VisibleMessage {
+            chat_id: *chat_id,
+            content,
+            result_hash,
+        }
+    };
+    let mut best = match &obj.current {
+        Some(StoredResult::Content(c)) => Some(candidate(c.clone())),
+        _ => None,
+    };
+    for (_, id) in obj
+        .pending_versions
+        .iter()
+        .take_while(|(due, _)| *due <= now)
+    {
+        let Some(Payload::Content(c)) = store
+            .event_row(chat_id, id)?
+            .and_then(|r| r.event().map(|e| e.payload().clone()))
+        else {
+            continue;
+        };
+        let m = candidate(c);
+        let key = |m: &VisibleMessage| (m.content.last_modified_at, m.result_hash);
+        if best.as_ref().is_none_or(|b| key(&m) > key(b)) {
+            best = Some(m);
+        }
+    }
+    Ok(best)
 }
 
 /// `M` of §7.5: the greatest `created_at` among the visible messages held in the root's
@@ -232,6 +279,35 @@ mod tests {
         let chat = f.root.chat_id();
         assert_eq!(view(&f.store, &[chat], T0 + 999).unwrap().len(), 1);
         assert!(view(&f.store, &[chat], T0 + 1_000).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_due_version_is_shown_without_a_tick() {
+        let mut f = Fixture::new();
+        let a = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "a"));
+        let b = f.event(T0, 2, &[], text(1, f.bob.id, T0, T0 + 1_000, "b"));
+        let c = f.event(T0, 3, &[], text(1, f.bob.id, T0, T0 + 2_000, "c"));
+        let s = f.event(T0, 4, &[], text(2, f.bob.id, T0 + 500, T0 + 500, "s"));
+        for e in [&a, &b, &c, &s] {
+            f.recv(e, T0);
+        }
+        let chat = f.root.chat_id();
+        let texts = |f: &Fixture, now| -> Vec<String> {
+            view(&f.store, &[chat], now)
+                .unwrap()
+                .into_iter()
+                .map(|m| match m.content.body {
+                    crate::event::Body::Text(t) => t,
+                    _ => String::new(),
+                })
+                .collect()
+        };
+        assert_eq!(texts(&f, T0 + 999), ["a", "s"]);
+        assert_eq!(texts(&f, T0 + 1_000), ["b", "s"]);
+        assert_eq!(texts(&f, T0 + 2_000), ["c", "s"]);
+        // The same as after a tick.
+        f.tick(T0 + 2_000);
+        assert_eq!(texts(&f, T0 + 2_000), ["c", "s"]);
     }
 
     #[test]
