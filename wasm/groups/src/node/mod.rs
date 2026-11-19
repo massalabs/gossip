@@ -283,6 +283,8 @@ pub struct Node {
     gx: group::GroupIndex,
     /// Epochs whose message records this operation erases.
     erase: BTreeSet<ChatId>,
+    /// Which held roots each held root names as a parent, and the reverse (derived).
+    ri: group::RootIndex,
 }
 
 impl core::fmt::Debug for Node {
@@ -317,6 +319,7 @@ impl Node {
             stats: Stats::default(),
             gx: group::GroupIndex::default(),
             erase: BTreeSet::new(),
+            ri: group::RootIndex::default(),
         };
         node.reload(store)?;
         Ok(node)
@@ -327,6 +330,7 @@ impl Node {
         self.erase.clear();
         self.epochs.clear();
         self.rebuild_epochs();
+        self.rebuild_root_index();
         self.hint_lru.clear();
         self.hint_age.clear();
         self.hint_count.clear();
@@ -531,6 +535,7 @@ impl Node {
                 self.apply_due(&mut cx)
                     .and_then(|()| f(self, &mut cx))
                     .and_then(|v| {
+                        self.reconsider(&mut cx)?;
                         self.schedule(&mut cx)?;
                         Ok(v)
                     })
@@ -594,7 +599,7 @@ impl Node {
         self.run(store, now, rng, |n, cx| {
             let group = n.group_of(&chat);
             let previous = n.t.epochs.get(&chat).cloned();
-            n.t.epochs.insert(
+            n.put_record(
                 chat,
                 records::EpochRecord {
                     root: config.root,
@@ -759,6 +764,10 @@ impl Node {
         self.timer_wakeups(now, &mut add);
         if let Some(t) = self.group_wakeup() {
             add(t);
+        }
+        // Roots left to adopt by the bounded worklist of the last operation.
+        if !self.ri.dirty.is_empty() {
+            add(now);
         }
         Ok(at)
     }

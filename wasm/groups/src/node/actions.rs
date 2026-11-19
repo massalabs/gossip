@@ -274,7 +274,7 @@ impl Node {
             let EpochStatus::Invitation(inv) = rec.status else {
                 return Err(NodeError::UnknownEpoch);
             };
-            n.t.epochs.remove(&chat);
+            n.take_record(&chat);
             n.t.markers.remove(&chat);
             n.t.events.remove(&(chat, ChangeKind::Invitation));
             // The parent lookup keeps running: when it succeeds, the conversations are
@@ -351,7 +351,7 @@ impl Node {
             if !matches!(rec.status, EpochStatus::Invitation(_)) {
                 return Err(NodeError::UnknownEpoch);
             }
-            n.t.epochs.remove(&chat);
+            n.take_record(&chat);
             n.t.events.remove(&(chat, ChangeKind::Invitation));
             n.drop_tasks_of(&[chat]);
             match choice {
@@ -364,7 +364,7 @@ impl Node {
                 }
                 LeaveChoice::AskToBeKicked => {
                     let root = rec.root.clone();
-                    n.t.epochs.insert(
+                    n.put_record(
                         chat,
                         EpochRecord {
                             status: EpochStatus::Installed,

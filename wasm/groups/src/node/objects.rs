@@ -497,7 +497,7 @@ impl Node {
             .collect();
         for c in &epochs {
             self.erase_messages(*c);
-            self.t.epochs.remove(c);
+            self.take_record(c);
             let signed: Vec<SignedKey> = self
                 .t
                 .signed
