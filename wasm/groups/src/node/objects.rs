@@ -125,7 +125,7 @@ impl Node {
 
     /// The leaves waiting for the keys of `id` are verified again.
     fn retry_unverified(&mut self, cx: &mut Cx<'_>, id: GossipId) {
-        let keys: Vec<(ChatId, GossipId)> = self
+        let keys: Vec<(ChatId, GossipId, GossipId)> = self
             .t
             .unverified
             .keys()
@@ -186,10 +186,19 @@ impl Node {
                     if !root.is_member(&l.leaver()) {
                         return Ok(Answer::Invalid);
                     }
-                    // The keys are not carried (§5.3): fetched, then verified.
-                    if self.t.unverified.len() < UNVERIFIED_LEAVES {
+                    // The keys are not carried (§5.3): fetched, then verified. Kept per
+                    // relay, so that a forged copy cannot replace a genuine one, and
+                    // bounded per relay and in total; one not kept is not counted supplied.
+                    let mine = self.t.unverified.keys().filter(|k| k.2 == from).count();
+                    if self.t.unverified.len() >= UNVERIFIED_LEAVES
+                        || mine >= super::timing::UNVERIFIED_LEAVES_PER_SENDER
+                    {
+                        self.stats.capped += 1;
+                        return Ok(Answer::Refused);
+                    }
+                    {
                         self.t.unverified.insert(
-                            (chat, l.leaver()),
+                            (chat, l.leaver(), from),
                             PendingLeave {
                                 leave: l.clone(),
                                 from,
@@ -439,7 +448,8 @@ impl Node {
         };
         self.stop_sync(group);
         if must_delete {
-            // The named epoch and every earlier epoch that leads to it (§5.8).
+            // The named epoch and every earlier epoch that leads to it (§5.8); side
+            // branches that do not lead to it are not erased.
             let mut erase = BTreeSet::new();
             let mut stack = vec![chat];
             while let Some(c) = stack.pop() {
@@ -449,8 +459,32 @@ impl Node {
                     stack.extend(r.parents.iter().copied());
                 }
             }
+            // The epochs a remaining side branch descends from keep their root (its line);
+            // the others but the named one are deleted at once: only the named root and
+            // the message are kept two weeks.
+            let mut kept_lines = BTreeSet::new();
+            for e in self.ends(&group) {
+                if e == chat {
+                    continue;
+                }
+                let mut stack = vec![e];
+                while let Some(c) = stack.pop() {
+                    if kept_lines.insert(c)
+                        && let Some(r) = self.t.epochs.get(&c)
+                    {
+                        stack.extend(r.parents.iter().copied());
+                    }
+                }
+            }
             for c in &erase {
                 self.erase_messages(*c);
+                // Erased: nothing is fetched into it again, even after a rejoin.
+                if let Some(r) = self.t.epochs.get_mut(c) {
+                    r.state_override = Some(crate::epoch::GroupState::Dissolved);
+                }
+                if *c != chat && !kept_lines.contains(c) {
+                    self.drop_epoch(c);
+                }
             }
         }
         self.rebuild_epochs();
@@ -492,6 +526,44 @@ impl Node {
             self.t.tasks.remove(&k);
             self.reindex(k);
         }
+    }
+
+    /// Deletes one epoch's record and what is kept with it: its signed objects, pending
+    /// leaves, reply counts, tasks and messages.
+    pub(crate) fn drop_epoch(&mut self, c: &ChatId) {
+        self.erase_messages(*c);
+        self.take_record(c);
+        let signed: Vec<SignedKey> = self
+            .t
+            .signed
+            .keys()
+            .filter(|k| k.0 == *c)
+            .copied()
+            .collect();
+        for k in signed {
+            self.t.signed.remove(&k);
+        }
+        let pending: Vec<_> = self
+            .t
+            .unverified
+            .keys()
+            .filter(|k| k.0 == *c)
+            .copied()
+            .collect();
+        for k in pending {
+            self.t.unverified.remove(&k);
+        }
+        let replies: Vec<_> = self
+            .t
+            .replies
+            .keys()
+            .filter(|k| k.0 == *c)
+            .copied()
+            .collect();
+        for k in replies {
+            self.t.replies.remove(&k);
+        }
+        self.drop_tasks_of(&[*c]);
     }
 
     /// Closes a group (§14.2): its roots, secrets, messages, signed objects, tasks, hints

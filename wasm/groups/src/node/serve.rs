@@ -749,7 +749,13 @@ impl Node {
     /// missing epochs is sent the roots it needs with its removal record instead
     /// (`send_owed`).
     pub(crate) fn root_served_to(&self, chat: &ChatId, peer: &GossipId) -> bool {
-        self.serves(chat)
+        // A dissolved group keeps its named root to announce the dissolve message (§5.8).
+        let dissolved_named = self.installed(chat)
+            && matches!(
+                self.group_status(chat),
+                super::records::GroupStatus::Dissolved { epoch, .. } if epoch == *chat
+            );
+        (self.serves(chat) || dissolved_named)
             && self
                 .epochs
                 .get(chat)

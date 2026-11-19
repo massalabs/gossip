@@ -938,8 +938,15 @@ impl Node {
                     must_delete: true,
                     at,
                 } if cx.now >= at.saturating_add(super::objects::DISSOLVED_KEPT_MS) => {
-                    self.close_group(cx, g, false);
+                    // The named root and the message go; side branches stay (§5.8).
+                    self.drop_epoch(&epoch);
                     self.t.markers.insert(epoch, Marker::Dissolved);
+                    self.rebuild_epochs();
+                    if self.group_epochs(&g).is_empty() {
+                        self.close_group(cx, g, false);
+                    } else {
+                        self.recheck_status(cx, g);
+                    }
                 }
                 _ => {}
             }

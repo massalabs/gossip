@@ -422,6 +422,21 @@ impl Node {
                 .epochs
                 .iter()
                 .any(|(c, r)| root.names_parent(c) && r.root.owner_id() == from);
+        // A handover delivered by a peer that is no member of it, whose parent is not held:
+        // possibly the outgoing owner of a "hand over and leave"; it cannot be judged yet,
+        // and is kept while its parent is looked up, without penalty (§4.7).
+        if root.root_type() == RootType::Handover
+            && root.is_member(&self.me)
+            && !root.is_member(&from)
+            && from != self.me
+            && !root
+                .match_parents(self.t.epochs.keys())
+                .iter()
+                .any(|c| self.t.epochs.contains(c))
+        {
+            self.hold_handover(cx, from, root);
+            return Ok(Answer::Supplied);
+        }
         if !root.is_member(&self.me) || !(root.is_member(&from) || signer_left) || from == self.me {
             self.failed_announcement(cx, &from);
             return Ok(Answer::Invalid);
@@ -626,6 +641,7 @@ impl Node {
         };
         let m = crate::display::greatest_visible_created_at(cx.ov, &parents, cx.now)?;
         let line_time = crate::display::root_line_time(root.created_at(), cx.now, m).ok();
+        let joined = groups.len() > 1;
         let previous_owner = parents
             .iter()
             .filter_map(|p| self.t.epochs.get(p))
@@ -676,7 +692,7 @@ impl Node {
                 self.relay_root(cx, id);
             }
             self.initial_scans(cx, group);
-            if before != self.current_epoch(&group) {
+            if before != self.current_epoch(&group) || joined {
                 self.current_changed(cx, group);
                 self.recheck_status(cx, group);
             }
@@ -699,6 +715,10 @@ impl Node {
                     }
                 }
             }
+        }
+        if joined && !active {
+            // Joined with a read-only group: judged again from the joined current epoch.
+            self.recheck_status(cx, group);
         }
         Ok(())
     }
