@@ -8,14 +8,18 @@
 //!
 //! The owner founds a group and, following a script with random times, adds members,
 //! removes them, adds a removed member back, renames the group and hands it over (in some
-//! seeds to a member that is offline for hours), and adds back the member that left by a
-//! signed leave; members leave by a signed leave or by
+//! seeds to a member that is offline for hours, in odd seeds leaving in the handover; the
+//! former owner's device is then restored from a backup made just before the handover and
+//! must learn from the members that it handed over, and left if it did), and adds back the
+//! member that left by a signed leave; members leave by a signed leave or by
 //! asking to be kicked; the owner's automatic successor applies them. Some seeds end with a
 //! dissolve. A device is restored from an old backup (a rollback) after its removal or its
 //! leave, and must learn it again. In some seeds the owner restores its own backup and
 //! creates a second successor of the same epoch (a fork, then resolved); in others a
-//! hostile owner hands the group over twice, to two members, from the same epoch, and never
-//! resolves. Users post, edit (also in older epochs) and delete messages throughout. Users
+//! hostile owner signs handover roots that drop or add a member (forgeries to reject), then
+//! hands the group over twice, to two members, from the same epoch, and never resolves. A
+//! former owner's branch lists the stranger, whom the new owner drops when it resolves the
+//! branch: no kick can be signed for it (a known limit, counted). Users post, edit (also in older epochs) and delete messages throughout. Users
 //! accept the invitations of the group's legitimate owners and decline the others.
 //!
 //! Hostile members: they forge roots (their own, with no authority, and with broken
@@ -30,7 +34,9 @@
 //!   agree);
 //! - **removal is learnt**: every honest device removed from the group (by a kick, or by its
 //!   own leave seen again after a rollback) shows the group as removed or left, or has
-//!   closed it;
+//!   closed it; a former owner restored from before its handover is no longer the owner, and
+//!   shows the group as left when it left in the handover;
+//! - **kicks**: every kick stored is signed by the owner of the epoch it names;
 //! - **nothing forbidden is accepted**: no honest device installs a forged root, and every
 //!   root an honest device installed in the group was created by a legitimate owner;
 //! - **a former owner never takes the group back**: its root after the handover is never
@@ -164,6 +170,20 @@ struct Counters {
     direct_replays: u64,
     /// `migrate_from` forged by a hostile owner on a larger group.
     direct_forged: u64,
+    /// Handover roots signed by a hostile owner that drop or add a member: forgeries every
+    /// device holding the parent rejects (§4.7).
+    forged_member_handovers: u64,
+    /// "Hand over and leave".
+    handovers_left: u64,
+    /// Former owners restored from a backup made before their handover.
+    former_owner_rollbacks: u64,
+    /// Former owners restored so that learnt the handover again: left, or no longer owner.
+    former_owners_relearnt: u64,
+    /// Handover roots sent to their former owner by members (§5.6).
+    handover_replies: u64,
+    /// Members only on a former owner's branch that a new owner's resolution dropped: no kick
+    /// can be signed for them, and they are not told (a known limit; reported).
+    removed_without_kick: u64,
 }
 
 impl Counters {
@@ -223,7 +243,13 @@ impl Counters {
             direct_superseded,
             direct_consents,
             direct_replays,
-            direct_forged
+            direct_forged,
+            forged_member_handovers,
+            handovers_left,
+            former_owner_rollbacks,
+            former_owners_relearnt,
+            handover_replies,
+            removed_without_kick
         );
         self.max_plaintexts_hour = self.max_plaintexts_hour.max(o.max_plaintexts_hour);
         self.max_bytes_hour = self.max_bytes_hour.max(o.max_bytes_hour);
@@ -280,6 +306,11 @@ impl Counters {
             ("direct_consents", self.direct_consents),
             ("direct_replays", self.direct_replays),
             ("direct_forged", self.direct_forged),
+            ("forged_member_handovers", self.forged_member_handovers),
+            ("handovers_left", self.handovers_left),
+            ("former_owner_rollbacks", self.former_owner_rollbacks),
+            ("former_owners_relearnt", self.former_owners_relearnt),
+            ("handover_replies", self.handover_replies),
         ];
         all.iter()
             .filter(|(_, n)| *n == 0)
@@ -328,11 +359,15 @@ struct Device {
     closed: bool,
     /// Restored from an old backup after its removal or leave.
     restored: bool,
+    /// A former owner restored from a backup made before its handover: whether it left in
+    /// that handover.
+    former_restored: Option<bool>,
     /// The messages it published, by epoch: for later edits and deletions.
     mine: Vec<(ChatId, crate::ids::SyncObjId)>,
     /// The engine's counters before its last restart: removal replies, failed
-    /// announcements, automatic successors.
-    engine: (u64, u64, u64),
+    /// announcements, automatic successors, handover replies, members removed without a
+    /// kick.
+    engine: (u64, u64, u64, u64, u64),
 }
 
 /// A step of the owner's script, run at its time by whoever owns the group then.
@@ -352,6 +387,7 @@ enum Step {
     LongChain,
     Handover,
     DoubleHandover,
+    FormerOwnerRollback,
     Dissolve,
 }
 
@@ -416,6 +452,11 @@ struct Sim {
     /// Roots an honest device signed outside its engine, given to it once it has installed
     /// their parent: the device, the parent, the member that gives it, the plaintext.
     own_roots: Vec<(usize, ChatId, usize, Vec<u8>)>,
+    /// The seed: "hand over and leave" in odd seeds.
+    seed: u64,
+    /// A former owner's backup made just before its handover, restored later: the device,
+    /// the store and its installed epochs, and whether it left in the handover.
+    former_backup: Option<(usize, MemoryStorage, BTreeSet<ChatId>, bool)>,
 }
 
 fn below(rng: &mut TestRng, n: u64) -> u64 {
@@ -463,8 +504,9 @@ impl Sim {
                 left: false,
                 closed: false,
                 restored: false,
+                former_restored: None,
                 mine: Vec::new(),
-                engine: (0, 0, 0),
+                engine: (0, 0, 0, 0, 0),
             })
             .collect();
         // The script: at hour h (with jitter), the step. Members are chosen among the
@@ -538,6 +580,8 @@ impl Sim {
             parents_seen: BTreeMap::new(),
             stale_invitations: Vec::new(),
             own_roots: Vec::new(),
+            seed,
+            former_backup: None,
         };
         for d in 0..n {
             sim.boot(d);
@@ -613,6 +657,8 @@ impl Sim {
             dev.engine.0 += s.removal_replies;
             dev.engine.1 += s.failed_announcements;
             dev.engine.2 += s.auto_successors;
+            dev.engine.3 += s.handover_replies;
+            dev.engine.4 += s.removed_without_kick;
         }
         dev.node = Some(Node::open(&dev.store, dev.id).expect("open"));
     }
@@ -1029,6 +1075,19 @@ impl Sim {
                 members.extend(r.members().iter().copied());
             }
         }
+        // But the stranger a former owner's branch lists, whom the user does not know: it is
+        // dropped without a kick, none can be signed for that branch (§5.6, a known limit).
+        // Nor is a former owner that left taken back.
+        let former: BTreeSet<GossipId> = s
+            .former_owner_branches
+            .iter()
+            .filter_map(|e| node.root(e).map(|r| r.owner_id()))
+            .collect();
+        for x in &self.devs {
+            if (x.stranger || former.contains(&x.id)) && !s.members.contains(&x.id) {
+                members.remove(&x.id);
+            }
+        }
         members.remove(&self.devs[d].id);
         let change = GroupChange::Resolve {
             members: members.into_iter().collect(),
@@ -1110,7 +1169,10 @@ impl Sim {
     fn owner(&self) -> Option<usize> {
         self.honest().into_iter().find(|d| {
             self.group_of(*d).is_some_and(|s| {
-                s.owner == self.devs[*d].id && s.status == MyStatus::Member && !self.devs[*d].closed
+                s.owner == self.devs[*d].id
+                    && s.status == MyStatus::Member
+                    && !self.devs[*d].closed
+                    && self.devs[*d].former_restored.is_none()
             })
         })
     }
@@ -1143,6 +1205,25 @@ impl Sim {
                 return;
             }
             self.script.remove(0);
+            if step == Step::FormerOwnerRollback {
+                // The former owner's device is restored from its backup made just before the
+                // handover: it holds itself the owner of the parent epoch again, and must learn
+                // from the members that it handed over, and left if it did (§5.6).
+                if let Some((a, store, held, left)) = self.former_backup.take() {
+                    // What it has not sent yet goes first (a crash may stop a send).
+                    for _ in 0..3 {
+                        self.send(a);
+                    }
+                    self.devs[a].store = store;
+                    self.devs[a].held = held;
+                    self.devs[a].lost = true;
+                    self.devs[a].closed = false;
+                    self.devs[a].former_restored = Some(left);
+                    self.boot(a);
+                    self.counters.former_owner_rollbacks += 1;
+                }
+                continue;
+            }
             let Some(o) = self.owner() else {
                 // Nobody owns the group right now (a new owner away, a fork): later.
                 if self.now < self.end_active {
@@ -1400,42 +1481,46 @@ impl Sim {
                             && s.members.contains(&self.devs[*d].id)
                             && !self.devs[*d].closed
                             && !self.devs[*d].restored
+                            && self.devs[*d].former_restored.is_none()
                     });
                     let Some(heir) = heir else { continue };
+                    // "Hand over and leave" in odd seeds; the former owner is restored later
+                    // from a backup made now (once per seed).
+                    let leave = self.seed % 2 == 1;
+                    let backup = (self.former_backup.is_none() && !self.dissolve_delete)
+                        .then(|| (self.devs[o].store.clone(), self.devs[o].held.clone()));
                     // The owner's device restored from its backup does not hold the other end
                     // of its fork yet: the handover leaves that end to the former owner's line,
                     // which the members listed in no handover root keep following (§5.9).
                     let unresolved = self
                         .fork_end
                         .is_some_and(|a| !self.node(o).tables().epochs.contains(&a));
-                    if self
-                        .change(
-                            o,
-                            GroupChange::Handover {
-                                new_owner: id(heir),
-                                leave: false,
-                                name: None,
-                            },
-                        )
-                        .is_some()
-                    {
+                    if let Some(h) = self.change(
+                        o,
+                        GroupChange::Handover {
+                            new_owner: id(heir),
+                            leave,
+                            name: None,
+                        },
+                    ) {
                         if unresolved {
                             self.split = true;
                         }
                         self.counters.handovers += 1;
-                        if let Some(old) = self.group_of(o).map(|s| s.current) {
-                            // Its root of the former epoch is the line's previous end.
-                            let prev = self.node(o).root(&old).and_then(|_| {
-                                self.node(o)
-                                    .tables()
-                                    .epochs
-                                    .get(&old)
-                                    .and_then(|r| r.parents.first().copied())
-                            });
-                            if let Some(prev) = prev {
-                                self.after_handover(o, heir, prev);
-                            }
+                        if leave {
+                            self.devs[o].closed = true;
+                            self.counters.handovers_left += 1;
                         }
+                        // Sent before the device can be restored from its backup.
+                        self.send(o);
+                        if let Some((store, held)) = backup {
+                            self.former_backup = Some((o, store, held, leave));
+                            let at = self.now + 30 * MINUTE + below(&mut self.rng, 30 * MINUTE);
+                            self.script.push((at, Step::FormerOwnerRollback));
+                            self.script.sort_by_key(|(t, _)| *t);
+                        }
+                        // The handover's parent is the epoch that was current.
+                        self.after_handover(o, heir, s.current, h, s.members.clone(), leave);
                         if chance(&mut self.rng, 50) || self.counters.handovers_to_offline == 0 {
                             self.devs[heir].online = false;
                             self.devs[heir].away_until = self.now + 2 * HOUR;
@@ -1444,9 +1529,13 @@ impl Sim {
                         }
                     }
                 }
+                Step::FormerOwnerRollback => {}
                 Step::DoubleHandover => {
                     // A hostile owner: two handovers of one epoch, to two members.
                     let Some(s) = self.group_of(o) else { continue };
+                    // First, validly signed handovers of its epoch that drop a member, or add
+                    // one: forgeries, rejected by every device that holds the epoch (§4.7).
+                    self.forge_member_handovers(o, s.current);
                     let heirs: Vec<usize> = self
                         .honest()
                         .into_iter()
@@ -1829,19 +1918,93 @@ impl Sim {
         self.transmit(d, to, pt);
     }
 
-    /// The former owner `o`, after handing the group over, signs a successor of its old
-    /// epoch dated at the end of time, which must never become current; the heir builds a
-    /// root naming both its line and the former owner's second group, which may continue
-    /// the heir's line only.
-    fn after_handover(&mut self, o: usize, heir: usize, old: ChatId) {
-        let members: Vec<GossipId> = self
-            .node(o)
-            .root(&old)
-            .map(|r| r.members().to_vec())
-            .unwrap_or_default();
+    /// The owner `o`, hostile, signs handover roots of its epoch `epoch` to another member,
+    /// one that drops a member other than itself and one that adds the stranger, and sends
+    /// them to the members: valid signatures, invalid roots (§4.7).
+    fn forge_member_handovers(&mut self, o: usize, epoch: ChatId) {
+        let Some(parent) = self.node(o).root(&epoch) else {
+            return;
+        };
+        let others: Vec<GossipId> = parent
+            .members()
+            .iter()
+            .filter(|m| **m != self.devs[o].id)
+            .copied()
+            .collect();
+        let Some(stranger) = self.devs.iter().find(|x| x.stranger).map(|x| x.id) else {
+            return;
+        };
+        if others.len() < 2 {
+            return;
+        }
+        let new_owner = others[0];
+        let Some(owner_keys) = self.node(o).keys(&new_owner) else {
+            return;
+        };
+        let dropped: Vec<GossipId> = parent
+            .members()
+            .iter()
+            .filter(|m| **m != others[1])
+            .copied()
+            .collect();
+        let mut added: Vec<GossipId> = parent.members().to_vec();
+        added.push(stranger);
+        added.sort();
+        for members in [dropped, added] {
+            let challenge = Challenge::from_bytes(bytes(&mut self.rng));
+            let unsigned = crate::wire::proto::GroupRoot {
+                r#type: crate::wire::proto::RootType::Handover as i32,
+                name: parent.name().to_owned(),
+                parents: vec![
+                    crate::hash::parent_commitment(&challenge, &epoch)
+                        .as_bytes()
+                        .to_vec(),
+                ],
+                members: members.iter().map(|m| m.as_bytes().to_vec()).collect(),
+                group_secret: bytes::<32>(&mut self.rng).to_vec(),
+                owner: owner_keys.clone(),
+                epoch_challenge: challenge.as_bytes().to_vec(),
+                ref_chat_id_challenge: bytes::<32>(&mut self.rng).to_vec(),
+                created_at: self.now,
+                signature: vec![0; crypto_dsa::SIGNATURE_SIZE],
+                migrate_from: None,
+            };
+            let r = Root::forge_unchecked(unsigned, &ident(o).secret.dsa_signing_key);
+            self.forged.insert(r.chat_id());
+            self.counters.forged_member_handovers += 1;
+            let blob = wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap();
+            for m in parent.members() {
+                if *m != self.devs[o].id {
+                    let pt = wire::encode_plaintext(&[Frame::Event(blob.clone())]).unwrap();
+                    self.transmit(o, *m, pt);
+                }
+            }
+        }
+    }
+
+    /// The former owner `o`, after handing the group over in `h`, signs a successor of its
+    /// old epoch `old`, of `members`, dated at the end of time, which must never become
+    /// current; it lists the stranger too, a member only on that branch, which the new owner
+    /// drops when it resolves the branch, without a kick (a known limit, counted). The heir
+    /// builds a root naming both its line and the former owner's second group, which may
+    /// continue the heir's line only.
+    fn after_handover(
+        &mut self,
+        o: usize,
+        heir: usize,
+        old: ChatId,
+        h: ChatId,
+        members: Vec<GossipId>,
+        left: bool,
+    ) {
         if members.is_empty() {
             return;
         }
+        let stranger = self.devs.iter().find(|x| x.stranger).map(|x| x.id);
+        let mut back_members = members.clone();
+        back_members.extend(stranger);
+        back_members.sort();
+        back_members.dedup();
         let params =
             |owner: &auth::UserPublicKeys, rng: &mut TestRng, at: u64, name: &str| RootParams {
                 name: name.into(),
@@ -1853,7 +2016,8 @@ impl Sim {
                 created_at: at,
             };
         let a = ident(o);
-        let p = params(&a.public, &mut self.rng, u64::MAX, "back");
+        let mut p = params(&a.public, &mut self.rng, u64::MAX, "back");
+        p.members = back_members;
         if let Ok(r) =
             Root::create_successor(p, &[old], &a.secret.dsa_signing_key, bytes(&mut self.rng))
         {
@@ -1870,11 +2034,18 @@ impl Sim {
                 }
             }
         }
-        let (Some(second), Some(cur)) = (self.second, self.node(o).current_epoch(&old)) else {
+        let (Some(second), cur) = (self.second, h) else {
             return;
         };
         let b = ident(heir);
-        let p = params(&b.public, &mut self.rng, self.now, "taken");
+        let mut p = params(&b.public, &mut self.rng, self.now, "taken");
+        // The members of the handover: without the former owner when it left.
+        let h_members: Vec<GossipId> = members
+            .iter()
+            .filter(|m| !left || **m != a.id)
+            .copied()
+            .collect();
+        p.members = h_members.clone();
         if let Ok(r) = Root::create_successor(
             p,
             &[cur, second],
@@ -1887,7 +2058,7 @@ impl Sim {
             self.takeover_roots.insert(r.chat_id());
             self.counters.takeovers += 1;
             let blob = wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap();
-            for m in &members {
+            for m in &h_members {
                 if *m != b.id {
                     let pt = wire::encode_plaintext(&[Frame::Event(blob.clone())]).unwrap();
                     self.transmit(heir, *m, pt);
@@ -1896,9 +2067,14 @@ impl Sim {
             // The heir's device holds the root it signed, as it holds one the engine builds,
             // once it holds the handover it continues. Otherwise the root could reach the
             // heir only after the heir dissolved that epoch, which no other device would then
-            // follow.
-            let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
-            self.own_roots.push((heir, cur, o, pt));
+            // follow. It is given by a member of it.
+            let giver = (0..self.devs.len()).find(|x| {
+                *x != heir && !self.devs[*x].hostile && h_members.contains(&self.devs[*x].id)
+            });
+            if let Some(giver) = giver {
+                let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+                self.own_roots.push((heir, cur, giver, pt));
+            }
         }
     }
 
@@ -2166,12 +2342,18 @@ impl Sim {
                     "device {d}: the second group was taken over"
                 );
             }
-            // Every stored kick verifies with an authority of its epoch.
+            // Every stored kick is of a legitimate epoch and signed by its owner (§5.6): no
+            // device created one it could not sign.
             for (_, r) in node.tables().signed.iter() {
                 if let SignedObject::Kick(k) = &r.object {
                     assert!(
                         self.legit.contains(&k.chat_id()),
                         "device {d} keeps a kick of an epoch that is not legitimate"
+                    );
+                    let root = node.root(&k.chat_id()).expect("kept with its root");
+                    assert!(
+                        k.verify(&root).is_ok(),
+                        "device {d} keeps a kick not signed by its epoch's owner"
                     );
                 }
             }
@@ -2196,6 +2378,31 @@ impl Sim {
             if dev.restored && learnt {
                 self.counters.relearnt_removals += 1;
             }
+        }
+        // A former owner restored from a backup made before its handover learnt it from the
+        // members (§5.6): it is not the owner any more, and shows the group as left when it
+        // left in the handover.
+        for &d in &honest {
+            let Some(left) = self.devs[d].former_restored else {
+                continue;
+            };
+            if self.dissolved {
+                continue;
+            }
+            let me = self.devs[d].id;
+            let s = self.group_of(d);
+            if left {
+                assert!(
+                    s.as_ref().is_none_or(|s| s.status != MyStatus::Member),
+                    "device {d}, a former owner that left, is a member again: {s:?}"
+                );
+            } else {
+                assert!(
+                    s.as_ref().is_some_and(|s| s.owner != me),
+                    "device {d}, a former owner, still holds itself the owner: {s:?}"
+                );
+            }
+            self.counters.former_owners_relearnt += 1;
         }
         // Convergence of the members of the current epoch.
         // A remnant of "Dissolve & Delete" (counted above) is no line to converge on.
@@ -2321,7 +2528,14 @@ impl Sim {
             for &d in &honest {
                 let dev = &self.devs[d];
                 let Some(s) = self.group_of(d) else { continue };
-                if dev.closed || dev.removed || dev.restored || self.remnant(d, &s) {
+                // A former owner that left in its handover: it is no member of the dissolved
+                // line.
+                if dev.closed
+                    || dev.removed
+                    || dev.restored
+                    || dev.former_restored == Some(true)
+                    || self.remnant(d, &s)
+                {
                     continue;
                 }
                 if self.split && !dissolved.contains(&s.current) {
@@ -2364,6 +2578,8 @@ impl Sim {
             self.counters.removal_replies += s.removal_replies + e.0;
             self.counters.failed_announcements += s.failed_announcements + e.1;
             self.counters.auto_successors += s.auto_successors + e.2;
+            self.counters.handover_replies += s.handover_replies + e.3;
+            self.counters.removed_without_kick += s.removed_without_kick + e.4;
         }
     }
 }
