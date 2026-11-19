@@ -53,10 +53,11 @@ fn slot_of(task: &Task, prio: u64) -> Slot {
 }
 
 /// The priority from which a task is credible: one of its untried, responsive triggering
-/// candidates scores at least this. Strictly below the score after one failed announcement
-/// and no supply (1/3), which an honest member may give for an event pruned in between,
-/// and above the score after two (1/4).
-pub(crate) const CREDIBLE: u64 = 300_000;
+/// candidates scores at least this. With nothing supplied or truly announced, a member
+/// stays credible after up to four failed announcements (1/6), which an honest relay gives
+/// for events pruned or superseded since it announced them, and becomes suspect at the
+/// fifth (1/7); a member announcing IDs that never turn up passes it within a few of them.
+pub(crate) const CREDIBLE: u64 = 150_000;
 
 fn dec(map: &mut BTreeMap<GossipId, usize>, peer: &GossipId) {
     if let Some(n) = map.get_mut(peer) {

@@ -594,6 +594,7 @@ fn a_full_queue_of_suspect_ids_makes_room_for_a_missing_parent() {
     let chat = net.chat();
     // Member 3 is discredited, then floods the queue.
     net.devs[0].node.penalize(&member(3), PENALTY_MALFORMED);
+    net.devs[0].node.penalize(&member(3), PENALTY_MALFORMED);
     let full = super::super::timing::QUEUED_MISSING_PER_GROUP;
     for chunk in 0..full / 128 {
         let ids: Vec<EventId> = (0..128u32)
