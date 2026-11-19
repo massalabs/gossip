@@ -15,6 +15,7 @@ import {
 } from '../../stores/groupStore';
 import { ROUTES } from '../../constants/routes';
 import { getSdk } from '../../stores/sdkStore';
+import { useDiscussionStore } from '../../stores/discussionStore';
 import GroupInvitationCard from './GroupInvitationCard';
 import ContinuationPrompt from './ContinuationPrompt';
 import SafeName from './SafeName';
@@ -110,6 +111,12 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
   const refresh = useGroupStore(s => s.refresh);
   const me = useAccountStore(s => s.userProfile?.userId);
   const memberName = useGroupMemberName();
+  const discussions = useDiscussionStore(s => s.discussions);
+  const linkedPeer = new Map(
+    discussions.flatMap(d =>
+      d.linkedGroupId ? [[d.linkedGroupId, d.contactUserId] as const] : []
+    )
+  );
 
   const accept = useCallback(
     async (epochId: string) => {
@@ -143,7 +150,10 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
         entry.summary,
         memberName,
         me,
-        t('invitation.unnamed')
+        // A chat of two the other person left still names that person.
+        linkedPeer.has(entry.summary.groupId)
+          ? memberName(linkedPeer.get(entry.summary.groupId)!)
+          : t('invitation.unnamed')
       ),
     }))
     .filter(g => !query || g.name.toLowerCase().includes(query))

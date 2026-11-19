@@ -4,6 +4,7 @@ import React from 'react';
 import GroupListSection from '../../../src/components/groups/GroupListSection';
 import { useGroupStore } from '../../../src/stores/groupStore';
 import { useAccountStore } from '../../../src/stores/accountStore';
+import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import { makeFakeGroups, summary } from '../../helpers/fakeGroups';
 import { useSdkStore } from '../../../src/stores/sdkStore';
 import type { GossipSdk } from '@massalabs/gossip-sdk';
@@ -102,5 +103,32 @@ describe('GroupListSection', () => {
       rows[0].querySelector('[data-testid="continuation-prompt"]')?.textContent
     ).toContain('archive.continue_invitation');
     expect(r.container.textContent).not.toContain('list.invitations_title');
+  });
+
+  it('names a chat of two the other person left after that person', async () => {
+    useSdkStore.setState({
+      sdk: makeFakeGroups().sdk as unknown as GossipSdk,
+    });
+    useAccountStore.setState({ userProfile: { userId: 'me' } as never });
+    useDiscussionStore.setState({
+      discussions: [{ contactUserId: 'carol', linkedGroupId: 'g1' }],
+    } as never);
+    useGroupStore.setState({
+      available: true,
+      invitations: [],
+      groups: [
+        {
+          summary: summary({ groupId: 'g1', name: '', members: ['me'] }),
+          lastMessage: null,
+          unread: false,
+        },
+      ],
+    } as never);
+    const r = await renderAt(<GroupListSection />);
+    unmount = r.unmount;
+    const row = r.container.querySelector('[data-testid="group-row"]')!;
+    expect(row.textContent).toContain('carol');
+    expect(row.textContent).not.toContain('invitation.unnamed');
+    useDiscussionStore.setState({ discussions: [] } as never);
   });
 });
