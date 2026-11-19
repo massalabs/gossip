@@ -1449,3 +1449,42 @@ fn joining_a_group_keeps_a_kick_of_its_current_epoch() {
         GroupStatus::Removed { .. }
     ));
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=25`): a
+/// member away through several epochs and removed in the last one is still at the first
+/// when it comes back. No kick names that epoch, and it cannot check the kick of the epoch
+/// it was removed from without that epoch's root, which nothing sent it: it never learnt
+/// its removal.
+#[test]
+fn a_member_away_through_several_epochs_learns_its_removal() {
+    let (mut net, g) = founded(4);
+    net.offline[3] = true;
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![],
+            name: Some("x".into()),
+        },
+    )
+    .unwrap();
+    net.exchange();
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(3)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    net.offline[3] = false;
+    net.dropped.clear();
+    assert_eq!(net.current(3, &g), Some(g));
+    net.say(3, &g, "anyone?");
+    net.run(5 * MIN);
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
+}
