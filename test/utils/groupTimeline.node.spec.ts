@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { GroupSummary } from '@massalabs/gossip-sdk';
 import {
   composerBlockedReason,
+  isTooLargeError,
   lineTexts,
 } from '../../src/utils/groupTimeline';
 
@@ -19,6 +20,25 @@ describe('group timeline helpers', () => {
     formerOwnerBranches: [],
     links: [],
   };
+
+  it('recognizes every refusal of a message too large for a group', () => {
+    const too = [
+      'groups:too-large: text of 16385 bytes, at most 16384',
+      'groups:too-large: metadata of 16385 bytes, at most 16384',
+      'groups:change: text: at most 16384 allowed, got 16385',
+      'groups:change: metadata: at most 16384 allowed, got 16385',
+      'groups:change: does not fit one empty container',
+      'plaintext of 60000 bytes exceeds the container limit',
+    ];
+    for (const m of too) expect(isTooLargeError(new Error(m))).toBe(true);
+    expect(isTooLargeError(new Error('groups:change: unknown message'))).toBe(
+      false
+    );
+    expect(
+      isTooLargeError(new Error('groups:invalid: parents: at most 16 allowed'))
+    ).toBe(false);
+    expect(isTooLargeError('groups:too-large: text')).toBe(false);
+  });
 
   it('gives the reason the composer is disabled', () => {
     expect(composerBlockedReason(base)).toBeNull();
