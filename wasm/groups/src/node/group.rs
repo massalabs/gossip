@@ -1139,7 +1139,9 @@ impl Node {
             };
             if self.t.held_roots.contains(&c) && !self.t.epochs.contains(&c) {
                 if self.names_of(&c).iter().any(|p| self.installed(p)) {
-                    let h = self.take_held(&c).expect("held");
+                    let Some(h) = self.take_held(&c) else {
+                        continue;
+                    };
                     self.receive_root(cx, h.from, h.root, Via::Lookup)?;
                 }
                 continue;
@@ -1197,7 +1199,9 @@ impl Node {
         if ok.is_empty() {
             return Ok(());
         }
-        let rec = self.take_record(&chat).expect("listed");
+        let Some(rec) = self.take_record(&chat) else {
+            return Ok(());
+        };
         self.t.events.remove(&(chat, ChangeKind::Invitation));
         self.drop_tasks_of(&[chat]);
         self.adopt(cx, rec.root, rec.from, ok, true)
@@ -1429,7 +1433,9 @@ impl Node {
         else {
             return false;
         };
-        let (_, newest) = *victims.iter().max().expect("non-empty");
+        let Some(&(_, newest)) = victims.iter().max() else {
+            return false;
+        };
         self.take_record(&newest);
         self.t.events.remove(&(newest, ChangeKind::Invitation));
         self.drop_tasks_of(&[newest]);

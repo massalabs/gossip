@@ -164,7 +164,12 @@ impl Node {
     ) -> Result<(), NodeError> {
         self.run(store, now, rng, |n, cx| {
             let cur = n.current_epoch(&group).ok_or(NodeError::UnknownEpoch)?;
-            let root = n.t.epochs.get(&cur).expect("current").root.clone();
+            let root =
+                n.t.epochs
+                    .get(&cur)
+                    .ok_or(NodeError::UnknownEpoch)?
+                    .root
+                    .clone();
             if root.owner_id() != n.me || n.group_status(&group) != GroupStatus::Active {
                 return Err(NodeError::NotOwner);
             }
@@ -211,7 +216,12 @@ impl Node {
         self.run(store, now, rng, |n, cx| {
             n.remember_own_keys(cx, signer);
             let cur = n.current_epoch(&group).ok_or(NodeError::UnknownEpoch)?;
-            let root = n.t.epochs.get(&cur).expect("current").root.clone();
+            let root =
+                n.t.epochs
+                    .get(&cur)
+                    .ok_or(NodeError::UnknownEpoch)?
+                    .root
+                    .clone();
             let only = root.members().len() == 1;
             if root.owner_id() == n.me && choice != LeaveChoice::Silent && !only {
                 return Err(NodeError::NotAllowed);
@@ -557,7 +567,13 @@ impl Node {
         if self.group_status(&group) != GroupStatus::Active {
             return Err(NodeError::NotAllowed);
         }
-        let cur_root = self.t.epochs.get(&cur).expect("current").root.clone();
+        let cur_root = self
+            .t
+            .epochs
+            .get(&cur)
+            .ok_or(NodeError::UnknownEpoch)?
+            .root
+            .clone();
         if cur_root.owner_id() != self.me {
             return Err(NodeError::NotOwner);
         }
@@ -817,8 +833,12 @@ impl Node {
             if pending.is_empty() {
                 continue;
             }
-            let first = pending.iter().map(|(_, t)| *t).min().expect("non-empty");
-            let last = pending.iter().map(|(_, t)| *t).max().expect("non-empty");
+            let Some(first) = pending.iter().map(|(_, t)| *t).min() else {
+                continue;
+            };
+            let Some(last) = pending.iter().map(|(_, t)| *t).max() else {
+                continue;
+            };
             if cx.now < last.saturating_add(SUCCESSOR_QUIET_MS)
                 && cx.now < first.saturating_add(SUCCESSOR_MAX_WAIT_MS)
             {

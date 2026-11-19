@@ -331,6 +331,7 @@ impl Node {
 
     fn reload<S: NodeStorage>(&mut self, store: &S) -> Result<(), NodeError> {
         self.t = Tables::from_records(store.load_node()?);
+        self.sanitize_loaded();
         self.erase.clear();
         self.epochs.clear();
         self.rebuild_epochs();
@@ -361,6 +362,35 @@ impl Node {
         // The plaintexts in flight stay so: a failed operation does not change them, and a
         // fresh engine starts with none, so their work is assembled again.
         Ok(())
+    }
+
+    /// Keeps the indices read from storage within their ranges, so that a damaged record
+    /// cannot make the engine index out of bounds: lane numbers below 4.
+    fn sanitize_loaded(&mut self) {
+        let groups: Vec<ChatId> = self
+            .t
+            .groups
+            .iter()
+            .filter(|(_, g)| g.cursor >= 4)
+            .map(|(k, _)| *k)
+            .collect();
+        for k in groups {
+            if let Some(g) = self.t.groups.get_mut(&k) {
+                g.cursor %= 4;
+            }
+        }
+        let scans: Vec<records::ScanKey> = self
+            .t
+            .scans_out
+            .iter()
+            .filter(|(_, op)| op.lanes.iter().any(|l| *l >= 4))
+            .map(|(k, _)| *k)
+            .collect();
+        for k in scans {
+            if let Some(op) = self.t.scans_out.get_mut(&k) {
+                op.lanes.retain(|l| *l < 4);
+            }
+        }
     }
 
     /// This device's identity.

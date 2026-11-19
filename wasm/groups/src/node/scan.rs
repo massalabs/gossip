@@ -252,7 +252,7 @@ impl Node {
                 let jitter = draw_jitter(cx.rng);
                 let op = self.t.scans_out.get_mut(&key).expect("current");
                 op.total = total;
-                op.offset = offset + p.received();
+                op.offset = offset.saturating_add(p.received());
                 // Progress: the restarts bound counts again from here.
                 op.restarts = 0;
                 op.stage = 0;
@@ -404,7 +404,9 @@ impl Node {
             if end == ScanEnd::NotAvailable && !moved {
                 let next = self.lane_peer(cx, chat, lane, Some(peer));
                 if let Some(next) = next {
-                    let g = self.t.groups.get_mut(&chat).expect("present");
+                    let Some(g) = self.t.groups.get_mut(&chat) else {
+                        continue;
+                    };
                     g.lanes[usize::from(lane)].moved = true;
                     g.lanes[usize::from(lane)].active = Some(next);
                     self.start_scan(cx, chat, next, Some(lane));
@@ -517,12 +519,16 @@ impl Node {
             return;
         };
         if g.first_online.is_none() {
-            let g = self.t.groups.get_mut(&chat).expect("present");
+            let Some(g) = self.t.groups.get_mut(&chat) else {
+                return;
+            };
             g.first_online = Some(now);
             g.cursor = 0;
             g.lanes[0].due = Some(now);
         }
-        let g = self.t.groups.get(&chat).expect("present");
+        let Some(g) = self.t.groups.get(&chat) else {
+            return;
+        };
         let i = g.cursor;
         let lane = g.lanes[usize::from(i)];
         let Some(due) = lane.due else {
@@ -540,7 +546,9 @@ impl Node {
             self.lane_peer(cx, chat, i, None)
         };
         let offset = jittered(LANE_OFFSET_MS, draw_jitter(cx.rng));
-        let g = self.t.groups.get_mut(&chat).expect("present");
+        let Some(g) = self.t.groups.get_mut(&chat) else {
+            return;
+        };
         let next = (i + 1) % 4;
         g.cursor = next;
         g.lanes[usize::from(next)].due = Some(now.saturating_add(offset));
