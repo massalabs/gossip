@@ -1287,3 +1287,40 @@ fn not_available_is_penalised_only_if_the_item_never_turns_up() {
     net.tick(0);
     assert!(net.devs[0].node.score(&member(3)) < 500_000);
 }
+
+/// Found by the network simulation's check that honest members stay credible (code at
+/// `6c956a44`, seed 217): an honest member that relays notices of what it receives, and
+/// prunes some of it (superseded by an edit) before others ask, answered "not available"
+/// for those while its true announcements earned it nothing unless the asker lacked them,
+/// so after two such answers it was suspect.
+#[test]
+fn true_announcements_keep_an_honest_relay_credible() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let known: Vec<MessageEvent> = (1..4u8).map(|r| net.event(T0, r, &[], 2)).collect();
+    for e in &known {
+        net.give(0, 2, e);
+    }
+    net.recv_frames(
+        0,
+        member(1),
+        &[notice(
+            chat,
+            &known.iter().map(MessageEvent::event_id).collect::<Vec<_>>(),
+        )],
+    );
+    let gone: Vec<EventId> = (7..9u8).map(|r| EventId::new(T0, [r; 16])).collect();
+    net.recv_frames(0, member(1), &[notice(chat, &gone)]);
+    for s in super::retrieval::sent_lookups(&mut net, 0) {
+        if s.to == member(1) {
+            super::retrieval::answer(
+                &mut net,
+                0,
+                &s,
+                ResponseResult::Status(Status::NotAvailable),
+            );
+        }
+    }
+    let score = net.devs[0].node.score(&member(1));
+    assert!(score >= super::super::index::CREDIBLE, "{score}");
+}
