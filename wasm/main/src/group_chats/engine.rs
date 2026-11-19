@@ -97,12 +97,19 @@ impl Core {
     }
 
     /// The batches committed since the last call, oldest first, to persist in that order.
-    pub fn take_batches(&mut self) -> Vec<BatchOut> {
-        self.store
-            .pending
-            .drain(..)
-            .map(|b| encode_batch(&b))
-            .collect()
+    ///
+    /// # Errors
+    ///
+    /// A record that could not be encoded: the batches stay pending, and the caller
+    /// reopens the engine from its database.
+    pub fn take_batches(&mut self) -> R<Vec<BatchOut>> {
+        super::codec::take_encode_failure();
+        let out: Vec<BatchOut> = self.store.pending.iter().map(encode_batch).collect();
+        if super::codec::take_encode_failure() {
+            return Err("groups:storage: a record could not be encoded".into());
+        }
+        self.store.pending.clear();
+        Ok(out)
     }
 
     /// The number of batches not taken yet.

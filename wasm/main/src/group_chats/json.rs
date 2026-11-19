@@ -187,8 +187,8 @@ impl Parser<'_> {
                 while matches!(self.peek(), Some(b'0'..=b'9')) {
                     self.i += 1;
                 }
-                let digits = core::str::from_utf8(&self.s[start..self.i]).expect("ascii");
-                digits
+                core::str::from_utf8(&self.s[start..self.i])
+                    .map_err(|_| "invalid number".to_string())?
                     .parse::<u64>()
                     .map(J::Num)
                     .map_err(|_| "number out of range".into())

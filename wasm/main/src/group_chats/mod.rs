@@ -103,7 +103,7 @@ impl GroupsNode {
     /// The batches committed since the last call, oldest first: an array of
     /// `{rows, removedRows, edges, objects, node, erase}`, to apply in order.
     pub fn take_batches(&mut self) -> Result<JsValue, JsValue> {
-        let b = self.core.take_batches();
+        let b = self.core.take_batches().map_err(js)?;
         serde_wasm_bindgen::to_value(&b).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 

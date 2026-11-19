@@ -150,7 +150,7 @@ impl Peer {
     }
 
     fn persist(&mut self) {
-        for b in self.core.take_batches() {
+        for b in self.core.take_batches().unwrap() {
             self.db.apply(&b);
         }
     }
