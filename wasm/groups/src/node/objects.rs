@@ -594,9 +594,14 @@ impl Node {
 
     // ── Liveness of a leave (§5.3) ───────────────────────────────────────────
 
-    /// Whether the leave of `member` for `chat` is live for the end `end`: the device holds
-    /// `chat`, `end` is `chat` or descends from it, and `member` is a member of every epoch
-    /// on at least one path from `chat` to `end` (through installed epochs).
+    /// Whether the leave of `member` for `chat` is live for the end `end` (§5.3): the device
+    /// holds `chat`, `end` is `chat` or descends from it, and `member` is a member of every
+    /// held epoch between them (through installed epochs).
+    ///
+    /// This is stricter than §5.3 ("every epoch on at least one path"): a leave is dead once
+    /// a held root on the line from `chat` to `end` omitted the leaver. A root that adds the
+    /// leaver back names the epoch it left as an extra parent (§5.10), which would otherwise
+    /// make the old leave live again and remove it once more.
     pub(crate) fn leave_live_for(&self, chat: &ChatId, member: &GossipId, end: &ChatId) -> bool {
         let member_of = |c: &ChatId| {
             self.t
@@ -607,24 +612,32 @@ impl Node {
         if !member_of(chat) || !member_of(end) {
             return false;
         }
-        let mut seen = BTreeSet::new();
+        // The held ancestors of `end`, itself included.
+        let mut ancestors = BTreeSet::new();
         let mut stack = vec![*end];
         while let Some(c) = stack.pop() {
-            if c == *chat {
-                return true;
-            }
-            if !seen.insert(c) {
+            if !ancestors.insert(c) {
                 continue;
             }
             if let Some(r) = self.t.epochs.get(&c) {
-                for p in &r.parents {
-                    if member_of(p) {
-                        stack.push(*p);
-                    }
-                }
+                stack.extend(r.parents.iter().copied());
             }
         }
-        false
+        if !ancestors.contains(chat) {
+            return false;
+        }
+        // Every one of them that descends from `chat` lists the member.
+        let mut between = BTreeSet::new();
+        let mut stack = vec![*chat];
+        while let Some(c) = stack.pop() {
+            if !ancestors.contains(&c) || !between.insert(c) {
+                continue;
+            }
+            if let Some(children) = self.gx.children.get(&c) {
+                stack.extend(children.iter().copied());
+            }
+        }
+        between.iter().all(member_of)
     }
 
     /// Whether the leave is live for the device's current epoch of its group (§5.3).
