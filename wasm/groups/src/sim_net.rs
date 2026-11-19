@@ -559,11 +559,9 @@ impl Sim {
         if per_mille(&mut self.rng, 3) {
             self.crash(d);
         }
-        let results = self.devs[d]
-            .node
-            .as_mut()
-            .map(Node::take_lookup_results)
-            .unwrap_or_default();
+        let results = self
+            .op(d, |n, s, now, rng| n.take_lookup_results(s, now, rng))
+            .expect("results");
         for (_, _, r) in results {
             if matches!(r, crate::node::LookupResult::Found(_)) {
                 self.counters.lookups_found += 1;

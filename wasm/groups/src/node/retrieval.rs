@@ -222,7 +222,7 @@ impl Node {
         if let Target::SyncObj(sync) = key.target
             && self.t.tasks.remove(&key).is_some()
         {
-            self.lookup_results.push((key.chat_id, sync, result));
+            self.t.lookup_results.insert((key.chat_id, sync), result);
         }
     }
 

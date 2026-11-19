@@ -265,7 +265,6 @@ pub struct Node {
     sessions: BTreeSet<GossipId>,
     /// The index of the tasks, derived from their records.
     tix: index::TaskIndex,
-    lookup_results: Vec<(ChatId, SyncObjId, LookupResult)>,
     stats: Stats,
 }
 
@@ -298,7 +297,6 @@ impl Node {
             outbox: outbox::InFlight::default(),
             sessions: BTreeSet::new(),
             tix: index::TaskIndex::default(),
-            lookup_results: Vec::new(),
             stats: Stats::default(),
         };
         node.reload(store)?;
@@ -348,8 +346,29 @@ impl Node {
     }
 
     /// The results of the sync-object lookups completed since the last call.
-    pub fn take_lookup_results(&mut self) -> Vec<(ChatId, SyncObjId, LookupResult)> {
-        core::mem::take(&mut self.lookup_results)
+    ///
+    /// The results are stored with the operation that completed the lookup, and removed by
+    /// this one: each is reported exactly once, across failed commits and restarts.
+    ///
+    /// # Errors
+    ///
+    /// A storage failure; nothing was removed and nothing is returned.
+    pub fn take_lookup_results<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<Vec<(ChatId, SyncObjId, LookupResult)>, NodeError> {
+        if self.t.lookup_results.len() == 0 {
+            return Ok(Vec::new());
+        }
+        self.run(store, now, rng, |n, _cx| {
+            let keys: Vec<(ChatId, SyncObjId)> = n.t.lookup_results.keys().copied().collect();
+            Ok(keys
+                .into_iter()
+                .filter_map(|k| n.t.lookup_results.remove(&k).map(|r| (k.0, k.1, r)))
+                .collect())
+        })
     }
 
     /// Whether `peer` is currently a neighbor in the group of `chat_id`.

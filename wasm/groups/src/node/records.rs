@@ -563,6 +563,7 @@ tables! {
     hints: HintKey => Hint,
     queue: WorkKey => Work,
     meta: () => Meta,
+    lookup_results: (ChatId, SyncObjId) => super::LookupResult,
 }
 
 /// A table of the in-memory copy: the records and the keys written since the last commit.
