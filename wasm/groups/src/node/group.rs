@@ -200,13 +200,8 @@ impl Node {
             .collect()
     }
 
-    /// The ends the owner of the current epoch must resolve (§4.9, §5.9): two or more ends
-    /// whose owners are that owner or a previous owner in its line (it may take their
-    /// branches as parents, §4.7). Ends of a rival line, owned by another identity the same
-    /// former owner handed the group to, are side branches it cannot resolve.
-    ///
-    /// §5.9 says the new owner "may" resolve a branch of the former owner; it is treated as
-    /// a fork to resolve so that the members of that branch only are not left behind.
+    /// The ends the owner of the current epoch must resolve before it sends again (§4.9):
+    /// two or more ends that it owns itself.
     pub(crate) fn fork_to_resolve(&self, group: &ChatId) -> Vec<ChatId> {
         let Some(cur) = self.current_epoch(group) else {
             return Vec::new();
@@ -214,7 +209,6 @@ impl Node {
         let Some(owner) = self.t.epochs.get(&cur).map(|r| r.root.owner_id()) else {
             return Vec::new();
         };
-        let authority = self.line_authority(owner, &[cur]);
         let ends: Vec<ChatId> = self
             .ends(group)
             .into_iter()
@@ -222,10 +216,33 @@ impl Node {
                 self.t
                     .epochs
                     .get(c)
-                    .is_some_and(|r| authority.contains(&r.root.owner_id()))
+                    .is_some_and(|r| r.root.owner_id() == owner)
             })
             .collect();
         if ends.len() > 1 { ends } else { Vec::new() }
+    }
+
+    /// The ends owned by a previous owner in the line of the current owner (§5.9: it may
+    /// take them as parents). They never block the current owner: a former owner can still
+    /// sign roots of its old epochs, and must not be able to stop its successor from
+    /// sending or changing the group. Resolving them is an explicit action
+    /// ([`GroupChange::Resolve`](super::GroupChange::Resolve)), offered to the caller.
+    pub(crate) fn former_owner_ends(&self, group: &ChatId) -> Vec<ChatId> {
+        let Some(cur) = self.current_epoch(group) else {
+            return Vec::new();
+        };
+        let Some(owner) = self.t.epochs.get(&cur).map(|r| r.root.owner_id()) else {
+            return Vec::new();
+        };
+        let authority = self.line_authority(owner, &[cur]);
+        self.ends(group)
+            .into_iter()
+            .filter(|c| {
+                self.t.epochs.get(c).is_some_and(|r| {
+                    r.root.owner_id() != owner && authority.contains(&r.root.owner_id())
+                })
+            })
+            .collect()
     }
 
     /// The group keys that run neighbors, lanes and scans: active groups with an installed
@@ -631,7 +648,12 @@ impl Node {
                 self.recheck_status(cx, group);
             }
             // §4.9: a device that is not the owner tells the owner of each competing end.
-            let fork = self.fork_to_resolve(&group);
+            let mut fork = self.fork_to_resolve(&group);
+            let former = self.former_owner_ends(&group);
+            if !former.is_empty() {
+                fork.extend(former);
+                fork.extend(self.current_epoch(&group));
+            }
             if !fork.is_empty() {
                 self.changed(group, ChangeKind::Fork, cx.now);
                 let owner = self

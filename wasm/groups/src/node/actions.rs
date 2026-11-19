@@ -600,12 +600,21 @@ impl Node {
                 (vec![cur], m, name.clone(), Some(*new_owner))
             }
             GroupChange::Resolve { members, name } => {
-                if fork.is_empty() {
+                // Its own competing ends, and the ends of former owners in its line (§5.9),
+                // the current epoch first; more than 32 are resolved in steps (§4.9).
+                let mut ends = vec![cur];
+                for e in fork.iter().chain(self.former_owner_ends(&group).iter()) {
+                    if !ends.contains(e) {
+                        ends.push(*e);
+                    }
+                }
+                ends.truncate(MAX_ROOT_PARENTS);
+                if ends.len() < 2 {
                     return Err(NodeError::Fork);
                 }
                 let mut m: BTreeSet<GossipId> = members.iter().copied().collect();
                 m.insert(self.me);
-                (fork.clone(), m, name.clone(), None)
+                (ends, m, name.clone(), None)
             }
         };
         // Members whose leave or request applies are left out (§5.5, §5.7).

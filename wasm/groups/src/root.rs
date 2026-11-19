@@ -100,16 +100,17 @@ pub struct Root {
 /// `created_at = max(now, L + 1)` for a new root, where `L` is the greatest `created_at`
 /// among the roots of the group the device holds; `now` for a new group (§4.6 step 4).
 ///
+/// `L + 1` saturates at `u64::MAX`: a root signed by another identity (a former owner) may
+/// carry any date, receivers check nothing on it, and the owner must never be unable to
+/// create a root because of it.
+///
 /// # Errors
 ///
-/// [`Error::Overflow`] if `L + 1` does not fit a u64.
+/// None; the `Result` is kept for the interface.
 pub fn next_root_created_at(now: u64, greatest_held: Option<u64>) -> Result<u64> {
     match greatest_held {
         None => Ok(now),
-        Some(l) => {
-            let next = l.checked_add(1).ok_or(Error::Overflow("created_at"))?;
-            Ok(now.max(next))
-        }
+        Some(l) => Ok(now.max(l.saturating_add(1))),
     }
 }
 
@@ -1176,9 +1177,6 @@ pub(crate) mod tests {
         assert_eq!(next_root_created_at(100, Some(50)), Ok(100));
         assert_eq!(next_root_created_at(100, Some(100)), Ok(101));
         assert_eq!(next_root_created_at(100, Some(500)), Ok(501));
-        assert_eq!(
-            next_root_created_at(100, Some(u64::MAX)),
-            Err(Error::Overflow("created_at"))
-        );
+        assert_eq!(next_root_created_at(100, Some(u64::MAX)), Ok(u64::MAX));
     }
 }
