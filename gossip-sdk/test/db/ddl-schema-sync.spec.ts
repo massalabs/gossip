@@ -45,6 +45,11 @@ const ALL_TABLES = [
   { drizzleTable: schema.pendingAnnouncements, name: 'pendingAnnouncements' },
   { drizzleTable: schema.activeSeekers, name: 'activeSeekers' },
   { drizzleTable: schema.announcementCursors, name: 'announcementCursors' },
+  { drizzleTable: schema.groupEventRows, name: 'groupEventRows' },
+  { drizzleTable: schema.groupEdges, name: 'groupEdges' },
+  { drizzleTable: schema.groupObjects, name: 'groupObjects' },
+  { drizzleTable: schema.groupRecords, name: 'groupRecords' },
+  { drizzleTable: schema.groupOutbox, name: 'groupOutbox' },
 ] as const;
 
 describe('Drizzle migration SQL', () => {
@@ -121,5 +126,6 @@ describe('Drizzle migration SQL', () => {
     expect(indexes).toContain('discussions_owner_contact_idx');
     expect(indexes).toContain('pending_announcements_announcement_idx');
     expect(indexes).toContain('active_seekers_seeker_idx');
+    expect(indexes).toContain('group_outbox_owner_idx');
   });
 });
