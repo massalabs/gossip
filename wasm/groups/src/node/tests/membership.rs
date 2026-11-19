@@ -13,10 +13,10 @@ use crate::rng::TestRng;
 use crate::store::MemoryStorage;
 use crate::test_support::{Identity, identity};
 
-/// Identities 1 to 8, derived once.
+/// Identities 0 to 11, derived once.
 pub(crate) fn ident(i: usize) -> &'static Identity {
     static IDS: OnceLock<Vec<Identity>> = OnceLock::new();
-    &IDS.get_or_init(|| (1..=8).map(|s| identity(s as u8 + 100)).collect())[i]
+    &IDS.get_or_init(|| (0..12).map(|s| identity(s as u8 + 101)).collect())[i]
 }
 
 pub(crate) fn signer(i: usize) -> KeySigner<'static> {

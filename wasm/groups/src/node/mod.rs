@@ -486,6 +486,12 @@ impl Node {
         self.t.peers.get(peer).map_or(0, |r| r.unanswered_ms)
     }
 
+    /// The node records (test checks).
+    #[cfg(test)]
+    pub(crate) fn tables(&self) -> &Tables {
+        &self.t
+    }
+
     /// The number of queued work items.
     #[must_use]
     pub fn queued(&self) -> usize {
