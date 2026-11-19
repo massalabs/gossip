@@ -169,6 +169,16 @@ impl Node {
             }
             return Ok(());
         };
+        // An actual answer from a member, correlated or not (one delayed past its request's
+        // deadline is dropped below), shows that it is alive (§10.1).
+        if self.shares_epoch(&from)
+            && !matches!(
+                r.result,
+                ResponseResult::Status(Status::Busy | Status::Expired)
+            )
+        {
+            self.answered(&from);
+        }
         // A reference lives until its request's deadline (§13.4), whether or not a tick has
         // dropped it yet.
         if self
