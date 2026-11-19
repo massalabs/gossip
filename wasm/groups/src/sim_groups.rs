@@ -1647,13 +1647,14 @@ impl Sim {
             2 => {
                 // A kick of another member, signed with its own key.
                 let victim = targets[0];
-                let Ok(k) = Kick::sign_as(
-                    &root,
-                    victim,
+                let id = crate::hash::kick_id(&root.chat_id(), &victim);
+                let sig = crate::keys::Signer::sign_id(
                     &me.secret.dsa_signing_key,
-                    &me.public,
+                    crate::constants::CONTEXT_KICK_SIGNATURE,
+                    id.as_bytes(),
                     bytes(&mut self.rng),
-                ) else {
+                );
+                let Ok(k) = Kick::from_fields(root.chat_id(), victim, sig.as_bytes()) else {
                     return;
                 };
                 self.forged_objects.push(SignedObject::Kick(k.clone()));

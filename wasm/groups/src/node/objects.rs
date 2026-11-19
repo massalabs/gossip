@@ -15,7 +15,6 @@ use super::{Cx, Node, NodeError, PENALTY_MALFORMED};
 use crate::hash::leave_id;
 use crate::ids::{ChatId, GossipId};
 use crate::keys::parse_user_public_keys;
-use crate::root::RootType;
 use crate::wire::{EntryItem, EventObject, SignedKind};
 
 /// Roots sent with one removal record to a member that missed epochs, at most.
@@ -218,22 +217,13 @@ impl Node {
                 };
                 l.verify(&root, &keys).is_ok()
             }
-            SignedObject::Kick(k) => {
-                root.is_member(&k.removed())
-                    && self
-                        .kick_authorities(&chat)
-                        .iter()
-                        .any(|keys| k.verify_with(&root, keys).is_ok())
-            }
+            // Only the owner of the epoch it names signs a kick (§5.6): no authority passes
+            // through a handover.
+            SignedObject::Kick(k) => k.verify(&root).is_ok(),
             SignedObject::Dissolve(d) => d.verify(&root).is_ok(),
         };
         if !valid {
             self.stats.invalid += 1;
-            // A kick this device cannot verify may be valid by a handover it does not hold
-            // (D.18): its relay is not penalised.
-            if matches!(obj, SignedObject::Kick(_)) {
-                return Ok(Answer::Refused);
-            }
             self.penalize(&from, PENALTY_MALFORMED);
             return Ok(Answer::Invalid);
         }
@@ -251,64 +241,6 @@ impl Node {
         });
         self.apply_signed(cx, &obj)?;
         Ok(Answer::Supplied)
-    }
-
-    /// The identities whose signature makes a kick naming `chat` valid (§5.6, D.18).
-    ///
-    /// D.18 is open; this follows its recommended choice A: the owner of `chat`, and every
-    /// identity to which a held handover root passes ownership from `chat` or one of its
-    /// held ancestors, transitively (a handover root signed by an identity already listed,
-    /// continuing an epoch of that identity). Only held handover roots count: a removed
-    /// member that does not hold the handover cannot verify such a kick (it is dropped, and
-    /// no lookup of the handover is made, a simplification of choice A).
-    pub(crate) fn kick_authorities(&self, chat: &ChatId) -> Vec<UserPublicKeys> {
-        let Some(rec) = self.t.epochs.get(chat) else {
-            return Vec::new();
-        };
-        let mut owners = vec![(rec.root.owner_id(), rec.root.owner_keys().clone())];
-        // `chat` and its held ancestors, then the handover roots taken.
-        let mut line: BTreeSet<ChatId> = BTreeSet::new();
-        let mut stack = vec![*chat];
-        while let Some(c) = stack.pop() {
-            if line.insert(c)
-                && let Some(r) = self.t.epochs.get(&c)
-            {
-                stack.extend(r.parents.iter().copied());
-            }
-        }
-        loop {
-            let mut grew = false;
-            for (c, r) in self.t.epochs.iter() {
-                // A handover from the line, or a successor in it by an owner already listed
-                // (A to B, a successor by B, B to D: D has authority too).
-                let handover = r.root.root_type() == RootType::Handover;
-                let by_listed = owners.iter().any(|(o, _)| *o == r.root.owner_id());
-                if r.status != EpochStatus::Installed
-                    || line.contains(c)
-                    || !(handover || by_listed)
-                {
-                    continue;
-                }
-                let from_line =
-                    r.parents.iter().any(|p| {
-                        line.contains(p)
-                            && self.t.epochs.get(p).is_some_and(|pr| {
-                                owners.iter().any(|(o, _)| *o == pr.root.owner_id())
-                            })
-                    });
-                if from_line {
-                    line.insert(*c);
-                    if !owners.iter().any(|(o, _)| *o == r.root.owner_id()) {
-                        owners.push((r.root.owner_id(), r.root.owner_keys().clone()));
-                    }
-                    grew = true;
-                }
-            }
-            if !grew {
-                break;
-            }
-        }
-        owners.into_iter().map(|(_, k)| k).collect()
     }
 
     /// The effects of a newly stored signed object.

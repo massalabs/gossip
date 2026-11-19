@@ -2445,10 +2445,9 @@ fn unverified_handover_roots_are_bounded_per_sender_and_asked_of_their_sender() 
     }
 }
 
-/// Finding 10 of the review of 54711780: the identities whose kick naming an epoch is valid
-/// (D.18) were not transitive across successors (A to B, a successor by B, B to D: D was
-/// no authority), and a kick a device could not verify, for lack of the handover root,
-/// was penalised as a malformed object from the member that relayed it.
+/// A kick is valid only when signed by the owner of the epoch it names (§5.6): a handover
+/// passes no authority over the former owner's epochs, so a kick a device cannot verify is
+/// invalid wherever it comes from, and its relay is penalised.
 #[test]
 fn a_kick_is_valid_only_signed_by_the_owner_of_its_epoch() {
     let (mut net, g) = founded(4);

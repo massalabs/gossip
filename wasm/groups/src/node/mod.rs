@@ -204,6 +204,9 @@ pub struct Stats {
     pub roots_created: u64,
     /// Kicks created.
     pub kicks_created: u64,
+    /// Members an owner's root dropped from a parent epoch owned by another identity (a
+    /// former owner's branch) and from none of its own: no kick can tell them (§5.6).
+    pub removed_without_kick: u64,
     /// Signed leaves and declines sent.
     pub leaves_sent: u64,
     /// Signed objects verified and stored.
