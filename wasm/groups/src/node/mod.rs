@@ -1199,11 +1199,14 @@ impl Node {
                 if let Outcome::Accepted(merge) = outcome {
                     // A superseded chat of two takes what its members send it, and fetches
                     // and relays nothing (§5.12).
-                    let active = self.group_status(&chat) == records::GroupStatus::Active;
-                    for parent in event.parents().iter().filter(|_| active) {
+                    let relays = !matches!(
+                        self.group_status(&chat),
+                        records::GroupStatus::Superseded { .. }
+                    );
+                    for parent in event.parents().iter().filter(|_| relays) {
                         self.want_event(cx, chat, *parent, Some(from), TriggerKind::Child)?;
                     }
-                    if active
+                    if relays
                         && merge != Merge::Lost
                         && entry.epoch().serve(cx.ov, &id, cx.now)?.is_some()
                     {
