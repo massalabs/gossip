@@ -152,6 +152,18 @@ struct Counters {
     long_chains: u64,
     max_plaintexts_hour: u64,
     max_bytes_hour: u64,
+    /// Direct chats (§5.12): migrations of an earlier conversation.
+    direct_migrations: u64,
+    /// Both devices of a pair founded their migration before seeing the other's.
+    direct_crossings: u64,
+    /// Losing groups closed by the tie rule.
+    direct_superseded: u64,
+    /// Groups of two adopted under a contact's consent.
+    direct_consents: u64,
+    /// Migration roots replayed by a hostile member to a third party.
+    direct_replays: u64,
+    /// `migrate_from` forged by a hostile owner on a larger group.
+    direct_forged: u64,
 }
 
 impl Counters {
@@ -205,7 +217,13 @@ impl Counters {
             former_owner_forks,
             takeovers,
             dissolve_deletes,
-            long_chains
+            long_chains,
+            direct_migrations,
+            direct_crossings,
+            direct_superseded,
+            direct_consents,
+            direct_replays,
+            direct_forged
         );
         self.max_plaintexts_hour = self.max_plaintexts_hour.max(o.max_plaintexts_hour);
         self.max_bytes_hour = self.max_bytes_hour.max(o.max_bytes_hour);
@@ -256,6 +274,12 @@ impl Counters {
             ("takeovers", self.takeovers),
             ("dissolve_deletes", self.dissolve_deletes),
             ("long_chains", self.long_chains),
+            ("direct_migrations", self.direct_migrations),
+            ("direct_crossings", self.direct_crossings),
+            ("direct_superseded", self.direct_superseded),
+            ("direct_consents", self.direct_consents),
+            ("direct_replays", self.direct_replays),
+            ("direct_forged", self.direct_forged),
         ];
         all.iter()
             .filter(|(_, n)| *n == 0)
@@ -2357,7 +2381,9 @@ fn run(seed: u64, hours: u64, final_hours: u64) -> Counters {
     if let Err(p) = r {
         std::panic::resume_unwind(p);
     }
-    sim.counters
+    let mut counters = sim.counters;
+    counters.add(&direct::run(seed));
+    counters
 }
 
 fn env_u64(name: &str) -> Option<u64> {
@@ -2421,5 +2447,487 @@ fn membership_simulation() {
             "situations never exercised: {:?}",
             total.missing()
         );
+    }
+}
+
+/// Direct chats (§5.12), run with every seed after the group above: honest devices that
+/// migrate their earlier conversations, sometimes both at once, contacts that consent to the
+/// chat the requester founds (sometimes both ways), ordinary groups of two left as
+/// invitations, and a hostile member that replays a migration root to a third party and
+/// forges `migrate_from` on a larger group. Plaintexts are delayed, reordered and
+/// duplicated; devices go offline.
+///
+/// Checks: both devices of every migrating pair end with the same single migration group;
+/// no device adopts a group it neither created, nor accepted, nor consented to, nor won by
+/// the tie rule; no device holds a root it is not a member of; a forged or replayed root is
+/// never acted on.
+mod direct {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use super::{Counters, HOUR, MINUTE, START, below, chance};
+    use crate::ids::{ChatId, GossipId};
+    use crate::node::records::{ChangeKind, EpochStatus};
+    use crate::node::tests::membership::{ident, signer};
+    use crate::node::{GroupOptions, Node};
+    use crate::rng::TestRng;
+    use crate::root::Root;
+    use crate::store::MemoryStorage;
+    use crate::wire::{self, EventObject, Frame};
+
+    const HONEST: usize = 5;
+    const HOSTILE: usize = 5;
+    const N: usize = 6;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Kind {
+        /// The first migrates; the second, if it has not seen the invitation yet, too.
+        Migration { both: bool },
+        /// The second consents; the first founds (and with `both`, the reverse too).
+        Contact { both: bool },
+        /// An ordinary group of two, left as an invitation.
+        Plain,
+    }
+
+    struct Dev {
+        store: MemoryStorage,
+        node: Node,
+        online: bool,
+        inbox: Vec<(u64, u64, usize, Vec<u8>)>,
+        created: BTreeSet<ChatId>,
+        accepted: BTreeSet<ChatId>,
+        consented: BTreeSet<usize>,
+        /// Peers it founded a migration with.
+        migrated: BTreeSet<usize>,
+    }
+
+    struct Sim {
+        rng: TestRng,
+        now: u64,
+        seq: u64,
+        devs: Vec<Dev>,
+        /// Scripted actions: when, who, with whom, what.
+        script: Vec<(u64, usize, usize, Kind)>,
+        pairs: Vec<(usize, usize, Kind)>,
+        forged: BTreeSet<ChatId>,
+        counters: Counters,
+    }
+
+    fn gid(i: usize) -> GossipId {
+        ident(i).id
+    }
+
+    impl Sim {
+        fn new(seed: u64) -> Self {
+            let mut rng = TestRng::new(seed ^ 0x6469_7263);
+            let mut devs: Vec<Dev> = (0..N)
+                .map(|i| Dev {
+                    store: MemoryStorage::new(),
+                    node: Node::open(&MemoryStorage::new(), gid(i)).unwrap(),
+                    online: true,
+                    inbox: Vec::new(),
+                    created: BTreeSet::new(),
+                    accepted: BTreeSet::new(),
+                    consented: BTreeSet::new(),
+                    migrated: BTreeSet::new(),
+                })
+                .collect();
+            for d in &mut devs {
+                for k in 0..N {
+                    d.node
+                        .learn_keys(&mut d.store, &ident(k).public.to_bytes(), START, &mut rng)
+                        .unwrap();
+                }
+            }
+            let mut sim = Self {
+                rng,
+                now: START,
+                seq: 0,
+                devs,
+                script: Vec::new(),
+                pairs: Vec::new(),
+                forged: BTreeSet::new(),
+                counters: Counters::default(),
+            };
+            // Every pair of honest devices gets a scenario; the first two pairs are a
+            // crossing migration and a contact, so that every seed has both.
+            let mut n = 0;
+            for a in 0..HONEST {
+                for b in a + 1..HONEST {
+                    let (x, y) = if chance(&mut sim.rng, 50) {
+                        (a, b)
+                    } else {
+                        (b, a)
+                    };
+                    let kind = match (n, below(&mut sim.rng, 5)) {
+                        (0, _) => Kind::Migration { both: true },
+                        (1, _) => Kind::Contact { both: false },
+                        (_, 0) => Kind::Migration { both: false },
+                        (_, 1) => Kind::Migration { both: true },
+                        (_, 2) => Kind::Contact { both: false },
+                        (_, 3) => Kind::Contact { both: true },
+                        _ => Kind::Plain,
+                    };
+                    n += 1;
+                    let t = START + below(&mut sim.rng, 2 * HOUR);
+                    let gap = below(&mut sim.rng, 5 * MINUTE);
+                    match kind {
+                        Kind::Migration { both } => {
+                            sim.declare(x, y);
+                            sim.declare(y, x);
+                            sim.script.push((t, x, y, kind));
+                            if both {
+                                sim.script.push((t + gap, y, x, kind));
+                            }
+                        }
+                        Kind::Contact { both } => {
+                            sim.script.push((t, x, y, kind));
+                            if both {
+                                sim.script.push((t + gap, y, x, kind));
+                            }
+                        }
+                        Kind::Plain => sim.script.push((t, x, y, kind)),
+                    }
+                    sim.pairs.push((x, y, kind));
+                }
+            }
+            // The hostile member migrates with an honest one that declared it.
+            let x = below(&mut sim.rng, HONEST as u64) as usize;
+            sim.declare(x, HOSTILE);
+            sim.script
+                .push((START + HOUR, HOSTILE, x, Kind::Migration { both: false }));
+            sim.script.sort_by_key(|s| s.0);
+            sim
+        }
+
+        fn declare(&mut self, d: usize, peer: usize) {
+            let now = self.now;
+            let dev = &mut self.devs[d];
+            dev.node
+                .set_earlier_conversation(&mut dev.store, gid(peer), 0, true, now, &mut self.rng)
+                .unwrap();
+        }
+
+        fn send(&mut self, from: usize, to: usize, bytes: Vec<u8>) {
+            let delay = below(&mut self.rng, 20 * MINUTE);
+            self.seq += 1;
+            let at = self.now + delay;
+            if chance(&mut self.rng, 5) {
+                self.seq += 1;
+                self.devs[to].inbox.push((
+                    at + below(&mut self.rng, HOUR),
+                    self.seq,
+                    from,
+                    bytes.clone(),
+                ));
+            }
+            self.devs[to].inbox.push((at, self.seq, from, bytes));
+        }
+
+        fn act(&mut self, d: usize, peer: usize, kind: Kind) {
+            let now = self.now;
+            let s = signer(d);
+            match kind {
+                Kind::Migration { .. } => {
+                    // §5.12: what was received first, then "Migrate" only if the peer's
+                    // invitation is not held.
+                    self.deliver_due(d);
+                    let held = self.devs[d]
+                        .node
+                        .invitations(now)
+                        .iter()
+                        .any(|i| i.migration_of == Some(gid(peer)));
+                    if held {
+                        return;
+                    }
+                    if !self.devs[peer].created.is_empty() && self.devs[peer].migrated.contains(&d)
+                    {
+                        self.counters.direct_crossings += 1;
+                    }
+                    let dev = &mut self.devs[d];
+                    let g = dev
+                        .node
+                        .create_group_with(
+                            &mut dev.store,
+                            &s,
+                            String::new(),
+                            vec![gid(peer)],
+                            GroupOptions {
+                                migrate_from: Some(0),
+                            },
+                            now,
+                            &mut self.rng,
+                        )
+                        .unwrap();
+                    dev.created.insert(g);
+                    dev.migrated.insert(peer);
+                    self.counters.direct_migrations += 1;
+                    if d == HOSTILE {
+                        self.hostile(g, peer);
+                    }
+                }
+                Kind::Contact { .. } => {
+                    // The peer accepted this device's request: it consents, this founds.
+                    let dev = &mut self.devs[peer];
+                    dev.node
+                        .consent_to_direct_chat(&mut dev.store, gid(d), true, now, &mut self.rng)
+                        .unwrap();
+                    dev.consented.insert(d);
+                    let dev = &mut self.devs[d];
+                    let g = dev
+                        .node
+                        .create_group(
+                            &mut dev.store,
+                            &s,
+                            String::new(),
+                            vec![gid(peer)],
+                            now,
+                            &mut self.rng,
+                        )
+                        .unwrap();
+                    dev.created.insert(g);
+                }
+                Kind::Plain => {
+                    let dev = &mut self.devs[d];
+                    let g = dev
+                        .node
+                        .create_group(
+                            &mut dev.store,
+                            &s,
+                            String::new(),
+                            vec![gid(peer)],
+                            now,
+                            &mut self.rng,
+                        )
+                        .unwrap();
+                    dev.created.insert(g);
+                }
+            }
+        }
+
+        /// The hostile member replays its migration root to a third party, and forges
+        /// `migrate_from` on a group of three.
+        fn hostile(&mut self, g: ChatId, peer: usize) {
+            let root = self.devs[HOSTILE].node.root(&g).unwrap();
+            let third = (peer + 1) % HONEST;
+            let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root.clone()))).unwrap();
+            let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+            self.send(HOSTILE, third, pt);
+            self.counters.direct_replays += 1;
+            let mut p = root.to_proto();
+            let mut members = vec![gid(HOSTILE), gid(peer), gid(third)];
+            members.sort();
+            p.members = members.iter().map(|m| m.as_bytes().to_vec()).collect();
+            p.created_at += 1;
+            let forged = Root::forge(p, &ident(HOSTILE).secret.dsa_signing_key);
+            self.forged.insert(forged.chat_id());
+            let blob = wire::encode_event_blob(&EventObject::Root(Box::new(forged))).unwrap();
+            let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+            for to in [peer, third] {
+                self.send(HOSTILE, to, pt.clone());
+            }
+            self.counters.direct_forged += 1;
+        }
+
+        fn deliver_due(&mut self, d: usize) {
+            let now = self.now;
+            let mut due: Vec<(u64, u64, usize, Vec<u8>)> = Vec::new();
+            let inbox = std::mem::take(&mut self.devs[d].inbox);
+            let mut rest = Vec::new();
+            for m in inbox {
+                if m.0 <= now {
+                    due.push(m);
+                } else {
+                    rest.push(m);
+                }
+            }
+            self.devs[d].inbox = rest;
+            due.sort_by_key(|m| (m.0, m.1));
+            for (_, _, from, bytes) in due {
+                let dev = &mut self.devs[d];
+                dev.node
+                    .handle_plaintext(&mut dev.store, gid(from), &bytes, now, &mut self.rng)
+                    .unwrap();
+            }
+        }
+
+        fn step(&mut self, d: usize) {
+            let now = self.now;
+            self.deliver_due(d);
+            let s = signer(d);
+            let dev = &mut self.devs[d];
+            dev.node
+                .tick_with(&mut dev.store, Some(&s), now, &mut self.rng)
+                .unwrap();
+            // The user accepts the migrations it is shown; ordinary invitations wait.
+            for inv in dev.node.invitations(now) {
+                if inv.migration_of.is_some() && d != HOSTILE {
+                    let g = dev
+                        .node
+                        .accept_invitation(&mut dev.store, inv.chat_id, now, &mut self.rng)
+                        .unwrap();
+                    dev.accepted.insert(g);
+                    dev.accepted.insert(inv.chat_id);
+                }
+            }
+            for c in dev
+                .node
+                .take_changes(&mut dev.store, now, &mut self.rng)
+                .unwrap()
+            {
+                if let ChangeKind::Superseded { .. } = c.kind {
+                    self.counters.direct_superseded += 1;
+                }
+            }
+            let dev = &mut self.devs[d];
+            let out = dev
+                .node
+                .poll_outbox(&mut dev.store, now, &mut self.rng)
+                .unwrap();
+            for o in out {
+                let dev = &mut self.devs[d];
+                dev.node
+                    .handed_off(&mut dev.store, o.handle, now, &mut self.rng)
+                    .unwrap();
+                if let Some(to) = (0..N).find(|i| gid(*i) == o.to) {
+                    self.send(d, to, o.plaintext);
+                }
+            }
+        }
+
+        fn run(&mut self) {
+            let active_end = START + 3 * HOUR;
+            let end = active_end + 8 * HOUR;
+            let mut next = 0;
+            while self.now < end {
+                while next < self.script.len() && self.script[next].0 <= self.now {
+                    let (_, d, peer, kind) = self.script[next];
+                    next += 1;
+                    self.act(d, peer, kind);
+                }
+                for d in 0..N {
+                    if self.now < active_end && chance(&mut self.rng, 3) {
+                        self.devs[d].online = !self.devs[d].online;
+                    }
+                    if self.now >= active_end {
+                        self.devs[d].online = true;
+                    }
+                    if self.devs[d].online {
+                        self.step(d);
+                    }
+                }
+                self.now += MINUTE;
+            }
+        }
+
+        /// The installed groups of device `d` with their founding root.
+        fn groups(&self, d: usize) -> BTreeMap<ChatId, Root> {
+            let node = &self.devs[d].node;
+            node.groups()
+                .into_iter()
+                .filter_map(|g| node.root(&g.group).map(|r| (g.group, r)))
+                .collect()
+        }
+
+        fn check(&self) {
+            for d in 0..N {
+                let node = &self.devs[d].node;
+                // A non-member never holds, installs or links a root.
+                for (c, r) in node.tables().epochs.iter() {
+                    assert!(r.root.is_member(&gid(d)), "device {d} holds {c:?}");
+                }
+                if d == HOSTILE {
+                    continue;
+                }
+                for (g, root) in self.groups(d) {
+                    assert!(
+                        !self.forged.contains(&g),
+                        "device {d} installed a forged root"
+                    );
+                    let dev = &self.devs[d];
+                    if dev.created.contains(&g) || dev.accepted.contains(&g) {
+                        continue;
+                    }
+                    // Adopted without a prompt: a group of two founded by the peer, under a
+                    // consent or won by the tie rule.
+                    let owner = root.owner_id();
+                    let p = (0..N).find(|i| gid(*i) == owner).unwrap();
+                    assert_eq!(root.members().len(), 2, "device {d}: {g:?}");
+                    let consent = dev.consented.contains(&p) && root.migrate_from().is_none();
+                    let tie = dev.migrated.contains(&p)
+                        && root.migrate_from() == Some(0)
+                        && owner.as_bytes() < gid(d).as_bytes();
+                    assert!(consent || tie, "device {d} adopted {g:?} of {p} unasked");
+                }
+                // Every forged root is at most an ordinary invitation.
+                for inv in node.invitations(u64::MAX / 2) {
+                    if self.forged.contains(&inv.chat_id) {
+                        assert_eq!((inv.migrate_from, inv.migration_of), (None, None));
+                    }
+                }
+            }
+            let migration = |d: usize, p: usize| -> BTreeSet<ChatId> {
+                self.groups(d)
+                    .into_iter()
+                    .filter(|(_, r)| r.migrate_from() == Some(0) && r.is_member(&gid(p)))
+                    .map(|(g, _)| g)
+                    .collect()
+            };
+            for &(x, y, kind) in &self.pairs {
+                match kind {
+                    Kind::Migration { .. } => {
+                        let (a, b) = (migration(x, y), migration(y, x));
+                        assert_eq!(a.len(), 1, "pair {x} {y}: {a:?}");
+                        assert_eq!(a, b, "pair {x} {y}");
+                    }
+                    Kind::Contact { .. } => {
+                        // The chat founded by each requester is held by both (two when the
+                        // requests crossed: nothing ties a group to a request).
+                        let of = |d: usize, p: usize| -> BTreeSet<ChatId> {
+                            self.groups(d)
+                                .into_iter()
+                                .filter(|(_, r)| {
+                                    r.members().len() == 2
+                                        && r.is_member(&gid(p))
+                                        && r.migrate_from().is_none()
+                                })
+                                .map(|(g, _)| g)
+                                .collect()
+                        };
+                        assert!(!of(x, y).is_empty(), "contact {x} {y}");
+                        assert_eq!(of(x, y), of(y, x), "contact {x} {y}");
+                    }
+                    Kind::Plain => {
+                        let held = self.groups(y).values().any(|r| {
+                            r.is_member(&gid(x))
+                                && r.migrate_from().is_none()
+                                && r.members().len() == 2
+                        });
+                        let consented = self.devs[y].consented.contains(&x)
+                            || self.devs[x].consented.contains(&y);
+                        assert!(!held || consented, "plain {x} {y} adopted");
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn run(seed: u64) -> Counters {
+        let mut sim = Sim::new(seed);
+        sim.run();
+        sim.check();
+        for d in &sim.devs {
+            for (_, r) in d.node.tables().epochs.iter() {
+                if matches!(r.status, EpochStatus::Installed)
+                    && r.from != d.node.me()
+                    && r.root.members().len() == 2
+                {
+                    sim.counters.direct_consents += u64::from(
+                        r.root.migrate_from().is_none()
+                            && d.consented.iter().any(|p| gid(*p) == r.root.owner_id()),
+                    );
+                }
+            }
+        }
+        sim.counters
     }
 }
