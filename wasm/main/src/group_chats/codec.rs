@@ -717,7 +717,9 @@ variants!(TimelineLine {
 record!(VisibleMessage {
     chat_id,
     content,
-    result_hash
+    result_hash,
+    reactions,
+    data_len
 });
 variants!(TimelineItem { Message(message), Line { at, line } });
 record!(Change { group, kind });
