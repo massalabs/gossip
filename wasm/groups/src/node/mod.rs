@@ -389,6 +389,40 @@ impl Node {
         self.t.tasks.iter().map(|(_, t)| t.runs).max().unwrap_or(0)
     }
 
+    /// Prints the node records (test debugging).
+    #[cfg(test)]
+    pub(crate) fn debug_dump(&self, ids: &[EventId]) {
+        for (_, g) in self.t.groups.iter() {
+            eprintln!(
+                "  lanes {:?} cursor {} cycle {}",
+                g.lanes,
+                g.cursor,
+                g.cycle.len()
+            );
+        }
+        for (k, op) in self.t.scans_out.iter() {
+            eprintln!("  scan with {:?}: {:?}", k.1, op);
+        }
+        let mut by_state: BTreeMap<String, usize> = BTreeMap::new();
+        for (k, t) in self.t.tasks.iter() {
+            let label = match t.run {
+                records::Run::Active { attempt, stage, .. } => format!(
+                    "active stage {stage} {:?}",
+                    attempt.map(|a| matches!(a, records::Attempt::Sent { .. }))
+                ),
+                records::Run::Paused => "paused".into(),
+            };
+            *by_state.entry(label).or_default() += 1;
+            if let Target::Event(id) = k.target
+                && ids.contains(&id)
+            {
+                eprintln!("  task {:?}: {:?} {:?}", id, t.run, t.candidates);
+            }
+        }
+        eprintln!("  tasks by state {by_state:?}");
+        eprintln!("  queue {}", self.t.queue.len());
+    }
+
     /// The number of queued work items.
     #[must_use]
     pub fn queued(&self) -> usize {
