@@ -182,7 +182,7 @@ fn migrate_from_is_ignored_when_a_condition_fails() {
     dev.node
         .handle_plaintext(&mut dev.store, gid(0), &pt, now, &mut net.rng)
         .unwrap();
-    net.run(crate::constants::PROMPT_DELAY_MS);
+    net.run(crate::node::timing::PROMPT_DELAY_MS);
     let inv = net.devs[1].node.invitations(net.now);
     let i = inv.iter().find(|i| i.chat_id == forged.chat_id()).unwrap();
     assert_eq!((i.migrate_from, i.migration_of), (None, None));
@@ -260,7 +260,7 @@ fn a_group_of_two_from_a_consented_contact_is_adopted_without_a_prompt() {
     assert!(net.devs[1].node.direct_chat_consents().is_empty());
     let inv = net.devs[1]
         .node
-        .invitations(net.now + crate::constants::PROMPT_DELAY_MS);
+        .invitations(net.now + crate::node::timing::PROMPT_DELAY_MS);
     assert!(inv.iter().any(|i| i.chat_id == second));
     // Messages flow in the adopted group.
     net.run(2 * MIN);
@@ -278,7 +278,7 @@ fn a_consent_covers_only_a_group_of_the_two_owned_by_that_peer() {
     let three = net.create_with(0, &[1, 2], None).unwrap();
     let other = net.create_with(2, &[1], Some(0)).unwrap();
     let plain = net.create_with(0, &[1], None).unwrap();
-    net.run(crate::constants::PROMPT_DELAY_MS);
+    net.run(crate::node::timing::PROMPT_DELAY_MS);
     let inv: Vec<ChatId> = net.devs[1]
         .node
         .invitations(net.now)

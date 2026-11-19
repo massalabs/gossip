@@ -1,5 +1,9 @@
-//! Protocol constants: the registry of Appendix A, the version numbers of §13.1 and the
-//! limits of §3, §4, §6, §7 and §13.10.
+//! The fixed numbers of wire version 1 (§2.2), also reachable as [`crate::fixed`]: the
+//! registry of Appendix A, the version numbers of §13.1, and every limit and time that decides
+//! validity or a deadline other devices rely on (§3, §4, §6, §7, §11.3, §13.10). Nothing here
+//! is local policy: changing a number means a new wire version. What this device chooses for
+//! itself (what it sends, how long it waits, how much it keeps) is in
+//! [`crate::node::policy`], never here, and no constant serves both roles.
 
 // ── Hash domains (Appendix A) ────────────────────────────────────────────────
 
@@ -113,10 +117,14 @@ pub const MAX_NEIGHBOR_SUGGESTIONS: usize = 10;
 pub const RETENTION_MS: u64 = 1_209_900_000;
 /// Scheduling limit `MAX_SCHEDULE`, in milliseconds (two weeks).
 pub const MAX_SCHEDULE_MS: u64 = 1_209_600_000;
-/// Invitation delay `PROMPT_DELAY`, in milliseconds (five minutes, §4.8).
-pub const PROMPT_DELAY_MS: u64 = 300_000;
 /// Clock tolerance for an event timestamp: `ts ≤ now + 5 min` (§7.2).
 pub const EVENT_TIMESTAMP_TOLERANCE_MS: u64 = 300_000;
+/// The largest `ttl` of a received query: 24 h; a query with a larger one is ignored
+/// (§11.3, §13.3).
+pub const MAX_TTL_MS: u64 = 86_400_000;
+/// The clock tolerance of a received query: `sent_at ≤ now + 5 min`, and the margin of its
+/// receiver deadline (§11.3).
+pub const QUERY_CLOCK_TOLERANCE_MS: u64 = 300_000;
 
 #[cfg(test)]
 mod tests {
@@ -164,6 +172,67 @@ mod tests {
         const MESH_PAYLOAD_BYTES: usize = 65_536;
         const SESSION_OVERHEAD_BYTES: usize = 3_632;
         const { assert!(MAX_PLAINTEXT_BYTES + SESSION_OVERHEAD_BYTES <= MESH_PAYLOAD_BYTES) };
+    }
+
+    /// Every fixed number of wire version 1, by literal (§2.2): an accidental change fails
+    /// here. The field numbers and enum values are pinned in `wire::proto`.
+    #[test]
+    fn every_fixed_number_is_pinned() {
+        let strings = [
+            (DOMAIN_ROOT, "gossip.groups.root.1"),
+            (DOMAIN_PREDECESSOR, "gossip.groups.predecessor.1"),
+            (DOMAIN_REFERENCE, "gossip.groups.reference.1"),
+            (DOMAIN_LEAVE, "gossip.groups.leave.1"),
+            (DOMAIN_KICK, "gossip.groups.kick.1"),
+            (DOMAIN_DISSOLVE, "gossip.groups.dissolve.1"),
+            (DOMAIN_SECRET_PROOF, "gossip.groups.message.secret_proof.1"),
+            (DOMAIN_RESULT, "gossip.groups.message.result.1"),
+            (DOMAIN_SYNC_OBJ_NAME, "gossip.groups.sync_obj_name.1"),
+            (CONTEXT_ROOT_SIGNATURE, "gossip.groups.root.signature.1"),
+            (CONTEXT_LEAVE_SIGNATURE, "gossip.groups.leave.signature.1"),
+            (CONTEXT_KICK_SIGNATURE, "gossip.groups.kick.signature.1"),
+            (
+                CONTEXT_DISSOLVE_SIGNATURE,
+                "gossip.groups.dissolve.signature.1",
+            ),
+            (METADATA_KEY_REPLY_TO, "replyTo"),
+        ];
+        for (got, want) in strings {
+            assert_eq!(got, want);
+        }
+        let numbers: [(u64, u64); 25] = [
+            (PROTOCOL_VERSION, 1),
+            (EVENT_VERSION, 1),
+            (ID_SIZE as u64, 32),
+            (EVENT_ID_SIZE as u64, 24),
+            (EVENT_ID_RANDOM_SIZE as u64, 16),
+            (REQUEST_ID_SIZE as u64, 16),
+            (MAX_NAME_BYTES as u64, 256),
+            (MIN_ROOT_PARENTS as u64, 1),
+            (MAX_ROOT_PARENTS as u64, 32),
+            (MIN_MEMBERS as u64, 1),
+            (MAX_MEMBERS as u64, 512),
+            (MAX_EVENT_PARENTS as u64, 16),
+            (MAX_REPLY_TARGETS as u64, 32),
+            (MAX_TEXT_BYTES as u64, 16_384),
+            (MAX_METADATA_BYTES as u64, 16_384),
+            (MAX_PLAINTEXT_BYTES as u64, 57_344),
+            (MAX_EVENT_BLOB_BYTES as u64, 57_307),
+            (MAX_QUERY_ENTRIES as u64, 16),
+            (MAX_NOTICE_ENTRIES as u64, 128),
+            (MAX_NOTICE_BYTES as u64, 16_384),
+            (MAX_PAGE_ENTRIES as u64, 128),
+            (MAX_PAGE_BYTES as u64, 16_384),
+            (MAX_NEIGHBOR_SUGGESTIONS as u64, 10),
+            (RETENTION_MS, 1_209_900_000),
+            (MAX_SCHEDULE_MS, 1_209_600_000),
+        ];
+        for (i, (got, want)) in numbers.into_iter().enumerate() {
+            assert_eq!(got, want, "number {i}");
+        }
+        assert_eq!(EVENT_TIMESTAMP_TOLERANCE_MS, 300_000);
+        assert_eq!(MAX_TTL_MS, 86_400_000);
+        assert_eq!(QUERY_CLOCK_TOLERANCE_MS, 300_000);
     }
 
     #[test]

@@ -953,7 +953,7 @@ impl Node {
             .t
             .held_roots
             .iter()
-            .filter(|(_, h)| cx.now >= h.at.saturating_add(crate::constants::RETENTION_MS))
+            .filter(|(_, h)| cx.now >= h.at.saturating_add(super::timing::HELD_ROOT_KEEP_MS))
             .map(|(c, _)| *c)
             .collect();
         for c in old {
@@ -1033,7 +1033,7 @@ impl Node {
         let mut at: Option<u64> = None;
         let mut add = |t: u64| at = Some(at.map_or(t, |a: u64| a.min(t)));
         for (_, h) in self.t.held_roots.iter() {
-            add(h.at.saturating_add(crate::constants::RETENTION_MS));
+            add(h.at.saturating_add(super::timing::HELD_ROOT_KEEP_MS));
         }
         for (c, r) in self.t.epochs.iter() {
             if let EpochStatus::Invitation(inv) = &r.status
@@ -1042,7 +1042,7 @@ impl Node {
             {
                 add(inv
                     .received_at
-                    .saturating_add(crate::constants::PROMPT_DELAY_MS));
+                    .saturating_add(super::timing::PROMPT_DELAY_MS));
             }
         }
         for (key, g) in self.t.group_recs.iter() {

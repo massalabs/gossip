@@ -48,6 +48,7 @@
 pub mod conformance;
 pub mod records;
 pub mod timing;
+pub use timing as policy;
 
 mod actions;
 mod backoff;

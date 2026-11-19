@@ -5,13 +5,14 @@ use super::records::SHARED_SCAN;
 use super::records::{
     FrozenKey, FrozenScan, LANE_KINDS, LaneKind, Purpose, ScanAttempt, ScanKey, ScanOp, Work,
 };
+use super::timing::PAGE_ENTRIES_SENT;
 use super::timing::{
     FIRST_TTL_MS, FROZEN_ID_BYTES, FROZEN_MAX_LIVE_MS, LANE_OFFSET_MS, LANE_PERIOD_MS,
     LIVE_SCANS_PER_DEVICE, LIVE_SCANS_PER_PEER, MAX_UNANSWERED_STAGES, MINUTE_MS,
     SCAN_TOMBSTONE_MS, draw_jitter, jittered, next_ttl,
 };
 use super::{Cx, Node, NodeError, PENALTY_MALFORMED};
-use crate::constants::{EVENT_ID_SIZE, ID_SIZE, MAX_PAGE_ENTRIES};
+use crate::constants::{EVENT_ID_SIZE, ID_SIZE};
 use crate::dag;
 use crate::event::Payload;
 use crate::ids::{ChatId, GossipId, ScanId};
@@ -825,7 +826,7 @@ impl Node {
         if start > list.len() {
             return ResponseResult::Status(Status::Malformed);
         }
-        let end = list.len().min(start + MAX_PAGE_ENTRIES);
+        let end = list.len().min(start + PAGE_ENTRIES_SENT);
         ResponseResult::Page(Page {
             scan_id: key.2,
             offset,
@@ -845,7 +846,8 @@ impl Node {
             .get(&key)
             .and_then(|f| f.list.as_ref())
             .is_some_and(|l| {
-                usize::try_from(offset).is_ok_and(|o| o.saturating_add(MAX_PAGE_ENTRIES) >= l.len())
+                usize::try_from(offset)
+                    .is_ok_and(|o| o.saturating_add(PAGE_ENTRIES_SENT) >= l.len())
             });
         if fin {
             self.drop_frozen(key, now);

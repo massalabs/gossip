@@ -323,7 +323,7 @@ fn the_prompt_waits_for_the_lookup_or_five_minutes() {
     net.offline[0] = true;
     net.exchange();
     assert!(net.devs[1].node.invitations(net.now).is_empty());
-    net.run(crate::constants::PROMPT_DELAY_MS);
+    net.run(crate::node::timing::PROMPT_DELAY_MS);
     assert_eq!(net.devs[1].node.invitations(net.now).len(), 1);
     let _ = g;
 }
@@ -1420,7 +1420,7 @@ fn an_accepted_root_after_a_leave_is_linked_through_its_fetched_parents() {
     dev.node
         .handle_plaintext(&mut dev.store, gid(1), &pt, now, &mut net.rng)
         .unwrap();
-    net.run(crate::constants::PROMPT_DELAY_MS + MIN);
+    net.run(crate::node::timing::PROMPT_DELAY_MS + MIN);
     net.accept_all(3);
     net.run(2 * MIN);
     let groups = net.devs[3].node.groups();
@@ -1664,7 +1664,7 @@ fn a_parent_lookup_goes_on_after_the_invitation_is_accepted() {
     dev.node
         .handle_plaintext(&mut dev.store, gid(1), &pt, now, &mut net.rng)
         .unwrap();
-    net.run(crate::constants::PROMPT_DELAY_MS + MIN);
+    net.run(crate::node::timing::PROMPT_DELAY_MS + MIN);
     assert_eq!(net.accept_all(3), vec![e3]);
     assert_eq!(net.devs[3].node.groups().len(), 2);
     // Back online, the lookup succeeds and the conversations are joined.
@@ -2315,7 +2315,7 @@ fn declining_an_invitation_removes_the_parents_fetched_for_it() {
     let root = net.devs[1].node.root(&e3).unwrap();
     let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
     net.recv_frames_m(3, 1, &[Frame::Event(blob)]);
-    net.run(crate::constants::PROMPT_DELAY_MS + MIN);
+    net.run(crate::node::timing::PROMPT_DELAY_MS + MIN);
     assert!(
         net.devs[3].node.tables().epochs.len() >= 2,
         "a parent was fetched"
@@ -2816,7 +2816,7 @@ fn a_member_back_after_a_dissolve_learns_it() {
             wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap(),
         )],
     );
-    net.run(crate::constants::PROMPT_DELAY_MS + MIN);
+    net.run(crate::node::timing::PROMPT_DELAY_MS + MIN);
     net.accept_all(2);
     net.run(30 * MIN);
     let groups = net.devs[2].node.groups();
@@ -2865,7 +2865,7 @@ fn a_root_erased_by_dissolve_and_delete_is_not_an_invitation_again() {
     assert!(
         net.devs[1]
             .node
-            .invitations(net.now + crate::constants::PROMPT_DELAY_MS)
+            .invitations(net.now + crate::node::timing::PROMPT_DELAY_MS)
             .is_empty()
     );
 }
@@ -3006,7 +3006,7 @@ fn an_unanswered_founding_root_joins_the_accepted_root_it_leads_to() {
     assert!(
         net.devs[2]
             .node
-            .invitations(net.now + crate::constants::PROMPT_DELAY_MS)
+            .invitations(net.now + crate::node::timing::PROMPT_DELAY_MS)
             .is_empty()
     );
     let groups = net.devs[2].node.groups();
@@ -3339,7 +3339,7 @@ fn an_epoch_before_the_one_a_member_left_is_not_offered_to_it_again() {
         )
         .unwrap();
     net.run(MIN);
-    let later = net.now + crate::constants::PROMPT_DELAY_MS;
+    let later = net.now + crate::node::timing::PROMPT_DELAY_MS;
     let inv: Vec<ChatId> = net.devs[1]
         .node
         .invitations(later)
@@ -3349,7 +3349,7 @@ fn an_epoch_before_the_one_a_member_left_is_not_offered_to_it_again() {
     assert_eq!(inv, vec![e4]);
     net.accept(1, e4);
     net.run(10 * MIN);
-    let later = net.now + crate::constants::PROMPT_DELAY_MS;
+    let later = net.now + crate::node::timing::PROMPT_DELAY_MS;
     let inv = net.devs[1].node.invitations(later);
     assert!(inv.is_empty(), "an old epoch is offered again: {inv:?}");
     assert_eq!(net.devs[1].node.groups().len(), 1);
@@ -3407,7 +3407,7 @@ fn a_root_whose_parent_turns_out_closed_is_no_invitation() {
             .unwrap();
     }
     net.run(MIN);
-    let later = net.now + crate::constants::PROMPT_DELAY_MS;
+    let later = net.now + crate::node::timing::PROMPT_DELAY_MS;
     let inv = net.devs[2].node.invitations(later);
     assert!(
         inv.is_empty(),

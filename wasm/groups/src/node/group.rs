@@ -14,13 +14,13 @@ use super::records::{
     Target, TaskKey, TriggerKind, Work,
 };
 use super::retrieval::Answer;
+use super::timing::PROMPT_DELAY_MS;
 use super::timing::{
     FETCHED_PARENT_DEPTH, FETCHED_PARENTS_PER_INVITATION, HELD_ROOTS_PER_DEVICE,
     HELD_ROOTS_PER_SENDER, INHERITED_MARKERS_PER_DEVICE, INHERITED_MARKERS_PER_SENDER,
     INVITATIONS_PER_DEVICE, INVITATIONS_PER_SENDER,
 };
 use super::{Cx, EpochEntry, Node, NodeError, PENALTY_ROOT_ANNOUNCEMENT};
-use crate::constants::PROMPT_DELAY_MS;
 use crate::epoch::GroupState;
 use crate::ids::{ChatId, GossipId, ParentCommitment};
 use crate::root::{Root, RootType};

@@ -223,7 +223,7 @@ impl Task {
                 Some(
                     by_id.min(
                         self.created_at
-                            .saturating_add(crate::constants::RETENTION_MS),
+                            .saturating_add(super::timing::TASK_LIFETIME_MS),
                     ),
                 )
             }
