@@ -151,3 +151,48 @@ fn a_task_does_not_wait_for_a_candidate_at_its_lookup_limit() {
     assert_eq!(q.len(), 1);
     assert_ne!(q[0].to, member(1));
 }
+
+/// Found by the network simulation (code at `341c83d9`, seed 24): a neighbor was replaced
+/// after three timeouts in a row, which a member offline for an hour reaches with the first
+/// TTLs, so with devices rarely online together every group lost all its neighbors. §10.1:
+/// an occasional delayed answer is not a failure.
+#[test]
+fn a_neighbor_that_answers_hours_late_is_kept() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    super::dissemination::neighbors_of(&mut net, 0, &[1, 2]);
+    for i in 0..3u8 {
+        net.recv_frames(0, member(1), &[notice(chat, &[EventId::new(T0, [i; 16])])]);
+        super::retrieval::sent_lookups(&mut net, 0);
+        net.now += 2 * MIN;
+        net.tick(0);
+        super::retrieval::sent_lookups(&mut net, 0);
+    }
+    assert!(net.devs[0].node.is_neighbor(&chat, &member(1)));
+}
+
+/// Found by the network simulation (code at `341c83d9`, seed 24): `busy` marked the peer as
+/// failed for the whole run, so a task never asked it again although it held the event and
+/// only had no budget left at that moment. `busy` means "retry later" (§13.4).
+#[test]
+fn a_busy_candidate_is_asked_again_later_in_the_same_run() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let e = net.event(T0, 5, &[], 1);
+    net.recv_frames(0, member(1), &[notice(chat, &[e.event_id()])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Status(Status::Busy));
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(q[0].to, member(2));
+    super::retrieval::answer(
+        &mut net,
+        0,
+        &q[0],
+        ResponseResult::Status(Status::NotAvailable),
+    );
+    net.now += HOUR;
+    net.tick(0);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(q.len(), 1, "member 1 is asked again");
+    assert_eq!(q[0].to, member(1));
+}
