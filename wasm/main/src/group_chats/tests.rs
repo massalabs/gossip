@@ -717,6 +717,138 @@ fn crossing_migrations_consents_and_connections() {
     assert!(!net.peers[2].core.holds_direct_chat(ids[1]));
 }
 
+/// Reactions and media through the bindings (§7.6): a reaction is listed on its target in the
+/// timeline JSON and removed by a later version; a media message comes with its length and
+/// its data is read on its own.
+#[test]
+fn reactions_and_media_through_the_bindings() {
+    let mut net = Net::new(2);
+    let b = net.peers[1].id();
+    let now = net.now;
+    let g = net.peers[0]
+        .core
+        .create_group("g".into(), vec![b], now)
+        .unwrap();
+    net.peers[0].persist();
+    net.settle(1_000);
+    let inv = J::parse(&net.peers[1].core.invitations(net.now)).unwrap();
+    let epoch: ChatId = Codec::dec(inv.as_arr().unwrap()[0].field("chat_id").unwrap()).unwrap();
+    net.peers[1].core.accept_invitation(epoch, net.now).unwrap();
+    net.peers[1].persist();
+    net.settle(1_000);
+    let sync_of = |published: &str| -> groups::SyncObjId {
+        Codec::dec(J::parse(published).unwrap().field("syncObjId").unwrap()).unwrap()
+    };
+    let now = net.now;
+    let hello = net.peers[0]
+        .core
+        .publish_message(g, &text("hello"), "[]", None, now)
+        .unwrap();
+    let data = vec![7u8; 3_000];
+    let media = net.peers[0]
+        .core
+        .publish_media(
+            g,
+            "image/png".into(),
+            data.clone(),
+            r#"[["name","00"]]"#,
+            now,
+        )
+        .unwrap();
+    net.peers[0].persist();
+    net.settle(1_000);
+    let now = net.now;
+    net.peers[1]
+        .core
+        .publish_reaction(g, sync_of(&hello), "\u{1f44d}".into(), true, now)
+        .unwrap();
+    net.peers[1].persist();
+    net.settle(1_000);
+    let messages = |net: &Net, i: usize| -> Vec<J> {
+        let t = J::parse(&net.peers[i].core.timeline(g, net.now).unwrap()).unwrap();
+        t.as_arr()
+            .unwrap()
+            .iter()
+            .filter_map(|item| item.field("message").ok().cloned())
+            .collect()
+    };
+    for i in 0..2 {
+        let m = messages(&net, i);
+        assert_eq!(m.len(), 2, "peer {i}: a reaction is no message");
+        let with = m
+            .iter()
+            .find(|m| {
+                m.field("content")
+                    .unwrap()
+                    .field("body")
+                    .unwrap()
+                    .field("t")
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    == "Text"
+            })
+            .unwrap();
+        assert_eq!(
+            with.field("reactions").unwrap().to_text(),
+            format!("[[\"{}\",\"\u{1f44d}\"]]", hex(b.as_bytes()))
+        );
+        let pic = m
+            .iter()
+            .find(|m| m.field("data_len").unwrap() != &J::Null)
+            .unwrap();
+        // A JavaScript read: every integer as a decimal string.
+        assert_eq!(pic.field("data_len").unwrap().as_str().unwrap(), "3000");
+        let shown = pic
+            .field("content")
+            .unwrap()
+            .field("body")
+            .unwrap()
+            .field("media")
+            .unwrap();
+        assert_eq!(
+            shown.field("mimetype").unwrap().as_str().unwrap(),
+            "image/png"
+        );
+        assert_eq!(shown.field("data").unwrap().as_str().unwrap(), "");
+        assert_eq!(
+            net.peers[i]
+                .core
+                .media(g, sync_of(&media), net.now)
+                .unwrap(),
+            Some(("image/png".to_owned(), data.clone()))
+        );
+    }
+    // Removed by a later version.
+    net.now += 1_000;
+    let now = net.now;
+    net.peers[1]
+        .core
+        .publish_reaction(g, sync_of(&hello), "\u{1f44d}".into(), false, now)
+        .unwrap();
+    net.peers[1].persist();
+    net.settle(1_000);
+    for i in 0..2 {
+        assert!(
+            messages(&net, i)
+                .iter()
+                .all(|m| m.field("reactions").unwrap().to_text() == "[]")
+        );
+    }
+    // Refused with the engine's error: a mimetype with parameters, an empty emoji.
+    let now = net.now;
+    let e = net.peers[0]
+        .core
+        .publish_media(g, "image/png; q=1".into(), vec![], "[]", now)
+        .unwrap_err();
+    assert!(e.starts_with("groups:change:"), "{e}");
+    let e = net.peers[0]
+        .core
+        .publish_reaction(g, sync_of(&hello), String::new(), true, now)
+        .unwrap_err();
+    assert!(e.starts_with("groups:change:"), "{e}");
+}
+
 /// §2.2 through the bindings: an edit keeps the metadata it does not patch, `[]` keeping
 /// everything, and a patch may remove entries.
 #[test]
@@ -786,7 +918,10 @@ fn an_edit_keeps_metadata_by_default() {
 fn records_that_no_longer_decode_are_refused_as_undecodable() {
     let mut net = Net::new(2);
     let b = net.peers[1].id();
-    let g = net.peers[0].core.create_group("x".into(), vec![b], net.now).unwrap();
+    let g = net.peers[0]
+        .core
+        .create_group("x".into(), vec![b], net.now)
+        .unwrap();
     assert_ne!(g, ChatId::from_bytes([0; 32]));
     net.peers[0].persist();
     let mut snapshot = net.peers[0].db.snapshot();

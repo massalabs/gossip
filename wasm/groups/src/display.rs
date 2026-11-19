@@ -322,6 +322,63 @@ mod tests {
     }
 
     #[test]
+    fn reactions_are_listed_on_their_target_as_if_ticked() {
+        use crate::ReactionAction::{Add, Remove};
+        use crate::epoch::tests::react;
+        let mut f = Fixture::new();
+        let chat = f.root.chat_id();
+        let (alice, bob) = (f.alice.id, f.bob.id);
+        let m = f.event(T0, 1, &[], text(1, bob, T0, T0, "m"));
+        let a = f.event(T0, 2, &[], react(1, alice, "+", Add, T0));
+        let b = f.event(T0, 3, &[], react(1, bob, "+", Add, T0));
+        let b_off = f.event(T0, 4, &[], react(1, bob, "+", Remove, T0 + 100));
+        let b_on = f.event(T0, 5, &[], react(1, bob, "+", Add, T0 + 200));
+        // A reaction to a message the device does not hold, and one that a deletion naming
+        // it cannot touch.
+        let orphan = f.event(T0, 6, &[], react(2, bob, "?", Add, T0));
+        let pending_under_tombstone = f.event(T0, 7, &[], react(1, alice, "-", Add, T0 + 300));
+        let d = f.event(
+            T0,
+            8,
+            &[],
+            Payload::Delete {
+                sync_obj_id: pending_under_tombstone.payload().sync_obj_id(),
+                scheduled_at: None,
+            },
+        );
+        for e in [
+            &m,
+            &a,
+            &b,
+            &b_off,
+            &b_on,
+            &orphan,
+            &pending_under_tombstone,
+            &d,
+        ] {
+            f.recv(e, T0);
+        }
+        let reactions = |f: &Fixture, now| {
+            let v = view(&f.store, &[chat], now).unwrap();
+            assert_eq!(v.len(), 1, "reactions are no messages");
+            v[0].reactions.clone()
+        };
+        let pair = |id: crate::GossipId, e: &str| (id, e.to_owned());
+        let mut both = vec![pair(alice, "+"), pair(bob, "+")];
+        both.sort();
+        assert_eq!(reactions(&f, T0), both);
+        assert_eq!(reactions(&f, T0 + 100), vec![pair(alice, "+")]);
+        let mut all = both.clone();
+        all.push(pair(alice, "-"));
+        all.sort();
+        assert_eq!(reactions(&f, T0 + 300), all);
+        // The same once ticked.
+        f.tick(T0 + 300);
+        assert_eq!(reactions(&f, T0 + 300), all);
+        assert_eq!(view(&f.store, &[chat], T0 + 300).unwrap()[0].data_len, None);
+    }
+
+    #[test]
     fn root_line_time_formula() {
         // No visible message in the parents: min(created_at, t_adopt).
         assert_eq!(root_line_time(100, 200, None), Ok(100));
