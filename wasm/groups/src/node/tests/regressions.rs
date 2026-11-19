@@ -299,3 +299,28 @@ fn a_busy_peer_is_asked_again_a_minute_later_whatever_the_stage() {
     assert_eq!(q.len(), 1);
     assert_eq!(q[0].to, member(1));
 }
+
+/// Found by the network simulation (code at `85ba8ff9`, seed 2008): when the responsive
+/// members had 16 lookups outstanding each, a task went to the only member with room, one
+/// that had not answered anything for a long time, and stayed there for a stage of up to a
+/// day, so a member back online could not supply the event meanwhile.
+#[test]
+fn a_task_waits_for_a_responsive_member_rather_than_asking_an_unresponsive_one() {
+    let mut net = Net::new(4, 1);
+    let chat = net.chat();
+    for t in 0..3 {
+        net.devs[0].node.note_timeout(&member(3), T0 + t);
+    }
+    let ids = |p: u8| -> Vec<EventId> {
+        (0..16u8)
+            .map(|i| EventId::new(T0, [p, i, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8]))
+            .collect()
+    };
+    net.recv_frames(0, member(1), &[notice(chat, &ids(1))]);
+    net.recv_frames(0, member(2), &[notice(chat, &ids(2))]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(q.len(), 32);
+    net.recv_frames(0, member(1), &[notice(chat, &[EventId::new(T0, [9; 16])])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert!(q.iter().all(|s| s.to != member(3)), "{q:?}");
+}
