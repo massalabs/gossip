@@ -2980,8 +2980,6 @@ fn no_assembly_without_a_session_and_no_loop_after_abandon() {
 /// a later root the user accepted, which it is an ancestor of: the device kept the old
 /// invitation and showed the group as two conversations.
 #[test]
-#[ignore = "open: joining a parentless invitation that leads to an accepted root made the \
-            simulation install roots it must not; see the milestone report"]
 fn an_unanswered_founding_root_joins_the_accepted_root_it_leads_to() {
     let mut net = MNet::new(3, true);
     let g = net.create(0, &[1, 2]);

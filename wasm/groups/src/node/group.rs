@@ -1130,7 +1130,8 @@ impl Node {
     /// conversations are joined), from a worklist, never by recursion, at most
     /// [`RECONSIDER_STEPS`] of them per operation: a held handover root whose parent is now
     /// held is received; an invitation that continues an installed epoch with authority is
-    /// adopted, as is one that leads to a root the user accepted; an installed root that
+    /// adopted, as is one that leads to a root the user accepted, or that an installed root
+    /// continues with authority (it is joined, D.66); an installed root that
     /// continues an installed epoch it is not linked to yet is linked to it.
     pub(crate) fn reconsider(&mut self, cx: &mut Cx<'_>) -> Result<(), NodeError> {
         for _ in 0..RECONSIDER_STEPS {
@@ -1181,23 +1182,20 @@ impl Node {
             .into_iter()
             .filter(|c| self.installed(c))
             .collect();
-        if held.is_empty() {
-            return Ok(());
-        }
         let ancestor = self.leads_to_accepted(&chat);
-        if inv.rejoins.is_some() && !ancestor {
-            return Ok(());
-        }
         let Some(root) = self.t.epochs.get(&chat).map(|r| r.root.clone()) else {
             return Ok(());
         };
-        let ok: Vec<ChatId> = self
-            .authorized_parents(&root, &held)
-            .into_iter()
-            .filter(|c| ancestor || self.group_status(c) == GroupStatus::Active)
-            .collect();
+        let ok: Vec<ChatId> = if held.is_empty() || (inv.rejoins.is_some() && !ancestor) {
+            Vec::new()
+        } else {
+            self.authorized_parents(&root, &held)
+                .into_iter()
+                .filter(|c| ancestor || self.group_status(c) == GroupStatus::Active)
+                .collect()
+        };
         if ok.is_empty() {
-            return Ok(());
+            return self.join_ancestor(cx, chat, &root);
         }
         let Some(rec) = self.take_record(&chat) else {
             return Ok(());
@@ -1205,6 +1203,38 @@ impl Node {
         self.t.events.remove(&(chat, ChangeKind::Invitation));
         self.drop_tasks_of(&[chat]);
         self.adopt(cx, rec.root, rec.from, ok, true)
+    }
+
+    /// D.66: an invitation that an installed root continues with authority is part of that
+    /// root's conversation, whether or not its own parents are held (a founding root, or an
+    /// epoch whose parents are still looked up): it is installed, and the worklist then
+    /// links the installed root to it. Authority is that of §4.7 seen from the child: a
+    /// successor continues an epoch of its own owner; a handover continues the epoch whose
+    /// owner signed it. An epoch of another owner (a former owner's other group that its
+    /// successor names, D.69) is never joined this way. Its parent lookups keep running.
+    fn join_ancestor(
+        &mut self,
+        cx: &mut Cx<'_>,
+        chat: ChatId,
+        root: &Root,
+    ) -> Result<(), NodeError> {
+        let continued = self.named_by_of(&chat).into_iter().any(|c| {
+            self.t.epochs.get(&c).is_some_and(|r| {
+                r.status == EpochStatus::Installed
+                    && match r.root.root_type() {
+                        RootType::Handover => r.root.verify_signature(Some(root)).is_ok(),
+                        RootType::Successor => r.root.owner_id() == root.owner_id(),
+                    }
+            })
+        });
+        if !continued {
+            return Ok(());
+        }
+        let Some(rec) = self.take_record(&chat) else {
+            return Ok(());
+        };
+        self.t.events.remove(&(chat, ChangeKind::Invitation));
+        self.adopt(cx, rec.root, rec.from, Vec::new(), false)
     }
 
     /// Links the installed epoch `child` to an installed epoch its root continues with
