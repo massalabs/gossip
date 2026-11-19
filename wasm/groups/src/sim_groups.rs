@@ -14,7 +14,8 @@
 //! member that left by a signed leave; members leave by a signed leave or by
 //! asking to be kicked; the owner's automatic successor applies them. Some seeds end with a
 //! dissolve. A device is restored from an old backup (a rollback) after its removal or its
-//! leave, and must learn it again. In some seeds the owner restores its own backup and
+//! leave, and must learn it again; in some seeds it is reinstalled with nothing instead, and
+//! learns of the group and of its removal from members' shared-chats scans (§4.11). In some seeds the owner restores its own backup and
 //! creates a second successor of the same epoch (a fork, then resolved); in others a
 //! hostile owner signs handover roots that drop or add a member (forgeries to reject), then
 //! hands the group over twice, to two members, from the same epoch, and never resolves. A
@@ -34,7 +35,7 @@
 //!   agree);
 //! - **removal is learnt**: every honest device removed from the group (by a kick, or by its
 //!   own leave seen again after a rollback) shows the group as removed or left, or has
-//!   closed it; a former owner restored from before its handover is no longer the owner, and
+//!   closed it; a reinstalled device shows it removed or left, never as an invitation; a former owner restored from before its handover is no longer the owner, and
 //!   shows the group as left when it left in the handover;
 //! - **kicks**: every kick stored is signed by the owner of the epoch it names;
 //! - **nothing forbidden is accepted**: no honest device installs a forged root, and every
@@ -120,6 +121,10 @@ struct Counters {
     resolutions: u64,
     rollbacks: u64,
     relearnt_removals: u64,
+    /// A removed or left device reinstalled with nothing, and that learnt its removal from
+    /// a member's shared-chats scan (§4.11).
+    reinstalls: u64,
+    reinstalled_relearnt: u64,
     invitations_accepted: u64,
     invitations_declined: u64,
     messages: u64,
@@ -215,6 +220,8 @@ impl Counters {
             resolutions,
             rollbacks,
             relearnt_removals,
+            reinstalls,
+            reinstalled_relearnt,
             invitations_accepted,
             invitations_declined,
             messages,
@@ -282,6 +289,8 @@ impl Counters {
             ("owner_forks", self.owner_forks),
             ("resolutions", self.resolutions),
             ("rollbacks", self.rollbacks),
+            ("reinstalls", self.reinstalls),
+            ("reinstalled_relearnt", self.reinstalled_relearnt),
             ("relearnt_removals", self.relearnt_removals),
             ("invitations_accepted", self.invitations_accepted),
             ("invitations_declined", self.invitations_declined),
@@ -371,6 +380,9 @@ struct Device {
     closed: bool,
     /// Restored from an old backup after its removal or leave.
     restored: bool,
+    /// Reinstalled with nothing after its removal or leave, instead of the rollback: it
+    /// learns of the group and of its removal from members' shared-chats scans (§4.11).
+    reinstalled: bool,
     /// A former owner restored from a backup made before its handover: whether it left in
     /// that handover.
     former_restored: Option<bool>,
@@ -516,6 +528,7 @@ impl Sim {
                 left: false,
                 closed: false,
                 restored: false,
+                reinstalled: false,
                 former_restored: None,
                 mine: Vec::new(),
                 engine: (0, 0, 0, 0, 0),
@@ -1386,6 +1399,38 @@ impl Sim {
                         self.counters.members_removed += 1;
                     }
                 }
+                // In seeds 1 and 2 modulo 4, the device is reinstalled instead (a kick in the
+                // first, a signed leave in the second); not with a double handover, whose two
+                // lines a member split between them may show as two conversations (a known
+                // limit of that scenario, also reached without a reinstall in other seeds).
+                Step::Rollback
+                    if matches!(self.seed % 4, 1 | 2)
+                        && self.seed % 3 != 2
+                        && (self.devs[self.restored].removed || self.devs[self.restored].left) =>
+                {
+                    let r = self.restored;
+                    self.devs[r].backup = None;
+                    self.devs[r].store = MemoryStorage::new();
+                    self.devs[r].held = BTreeSet::new();
+                    self.boot(r);
+                    // As at the start: its own keys, and the others' unless it knows nobody.
+                    let n = self.devs.len();
+                    let contacts = r != self.late && r != 5;
+                    for k in 0..n {
+                        if contacts || k == r {
+                            let bytes = ident(k).public.to_bytes();
+                            let now = self.now;
+                            self.op(r, |node, st, _, rng| node.learn_keys(st, &bytes, now, rng))
+                                .expect("keys");
+                        }
+                    }
+                    self.devs[r].restored = true;
+                    self.devs[r].reinstalled = true;
+                    self.devs[r].lost = true;
+                    self.devs[r].closed = false;
+                    self.counters.reinstalls += 1;
+                    self.scan_from_members(r);
+                }
                 Step::Rollback => {
                     let r = self.restored;
                     if let Some((b, held)) = self.devs[r].backup.take()
@@ -2152,9 +2197,36 @@ impl Sim {
         );
     }
 
+    /// A reinstalled device scans every honest member of the group for the chats they share
+    /// (§4.11), as the app does after a reinstall.
+    fn scan_from_members(&mut self, r: usize) {
+        let members: Vec<usize> = self
+            .honest()
+            .into_iter()
+            .filter(|m| *m != r)
+            .filter(|m| {
+                self.group_of(*m)
+                    .is_some_and(|s| s.status == MyStatus::Member)
+            })
+            .collect();
+        for m in members {
+            let peer = ident(m).id;
+            self.op(r, |n, st, now, rng| n.scan_shared_chats(st, peer, now, rng))
+                .expect("scan");
+        }
+        self.devs[r].online = true;
+        self.send(r);
+    }
+
     fn run(&mut self, final_hours: u64) {
         while self.now < self.end_active {
             self.advance();
+        }
+        // Scans sent while the members were away are sent again once they are all online.
+        for r in self.honest() {
+            if self.devs[r].reinstalled {
+                self.scan_from_members(r);
+            }
         }
         self.final_phase = true;
         for d in self.honest() {
@@ -2402,6 +2474,21 @@ impl Sim {
             };
             if dev.restored && learnt {
                 self.counters.relearnt_removals += 1;
+            }
+            // A reinstalled device holds the group again, read-only: it learnt of it and of
+            // its removal from a member's scan, and was never asked to accept it. An owner
+            // may have listed it again since (a fork from the owner's backup): then it is a
+            // member of the epoch it follows.
+            if dev.reinstalled {
+                let added_again = s.as_ref().is_some_and(|s| s.members.contains(&dev.id));
+                assert!(
+                    added_again
+                        || s.as_ref().is_some_and(|s| {
+                            matches!(s.status, MyStatus::Removed | MyStatus::Left)
+                        }),
+                    "device {d}, reinstalled after its removal, shows {s:?}"
+                );
+                self.counters.reinstalled_relearnt += 1;
             }
         }
         // A former owner restored from a backup made before its handover learnt it from the
