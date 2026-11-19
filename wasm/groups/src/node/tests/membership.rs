@@ -3250,3 +3250,39 @@ fn a_former_owners_branch_left_by_dissolve_and_delete_never_reactivates_the_grou
     let s = net.summary(2, &a.chat_id()).unwrap();
     assert_eq!(s.status, deleted, "{s:?}");
 }
+
+/// Regression (simulation, code at 6e7976a2, `GROUPS_MEMBERS_SEED=343`): a member removed by
+/// a kick, then restored from a backup older than the kick, stayed a member of its old epoch
+/// for ever once the group was dissolved and kept archived: an archive serves the dissolve
+/// message and the roots, but not the kick, and the dissolve names an epoch the removed member
+/// is not in. Its conversation stayed active with nobody in it.
+#[test]
+fn a_restored_member_learns_its_kick_from_an_archived_group() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[3].store.clone();
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(3)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
+    let now = net.now;
+    let s = signer(0);
+    let dev = &mut net.devs[0];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, g, false, now, &mut net.rng)
+        .unwrap();
+    net.exchange();
+    net.devs[3].store = backup;
+    net.restart(3);
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Member);
+    net.say(3, &g, "anyone?");
+    net.run(10 * MIN);
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
+}
