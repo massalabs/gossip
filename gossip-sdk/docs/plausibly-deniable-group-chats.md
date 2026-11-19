@@ -1361,14 +1361,26 @@ between two people. A device may come to hold two for the same pair with the sam
 neither continued by a later root: its own, and one created by the other person.
 
 A device remembers, for each automatic chat it created, whether the other person has ever **taken
-part** in it: whether it received from that person, inside that chat, a notice, an event or a
-query. This is stored on the chat for good; it is not deduced from retained events.
+part** in it. This is one local boolean, set by the first notice, event or query the device
+receives from that person inside that chat. It is never sent, never compared with any date, and
+not deduced from retained events.
 
-- **While the other person has never taken part in my chat,** the tie rule decides, without a
-  prompt: the chat whose owner's GossipID sorts first (raw bytes, ascending) is kept.
-- **Once the other person has taken part in my chat,** their chat is shown as an invitation to
-  continue the conversation: *"[Name] wants to continue this conversation in a new group."*
-  Accepting makes their chat the current one; declining changes nothing.
+**A chat competes only while both people are still listed in it.** If the automatic chat a device
+holds no longer lists the other person, because they declined visibly, left or were removed, that
+chat is history only. A new automatic chat from that person is then always shown as the invitation
+to continue below: one of the two ended the earlier chat on purpose, so the other must consent.
+
+When both chats still list both people, the device first applies the tie rule: the chat whose
+owner's GossipID sorts first (raw bytes, ascending) is the one to keep.
+
+- **If mine is the one to keep,** the other chat becomes history, without a prompt, whatever the
+  boolean says.
+- **If theirs is the one to keep and the other person has never taken part in mine,** the device
+  switches to theirs without a prompt.
+- **If theirs is the one to keep and the other person has taken part in mine,** their chat is
+  shown as an invitation to continue the conversation: *"[Name] wants to continue this
+  conversation in a new group."* Accepting makes their chat the current one; declining changes
+  nothing.
 - A second automatic chat created by the owner of the chat I already hold is an ordinary
   invitation.
 
@@ -1388,10 +1400,11 @@ each created. "Asked" means the invitation to continue above.
 | 2a | H creates after L accepted H's contact request; L has none yet | not asked: the contact was the consent | | G_H |
 | 2b | H migrates an earlier conversation with history; L has none yet | asked | | G_H if L accepts |
 | 3 | H creates and writes in G_H while L is offline; L had created G_L | not asked: keeps G_L, G_H is history | not asked: switches to G_L, G_H is history | G_L |
-| 4 | L ignored or declined H's invitation; later L creates G_L | not asked: keeps G_L | not asked: switches to G_L, G_H is history | G_L |
+| 4a | L ignored H's invitation without answering; later L creates G_L | not asked: keeps G_L | not asked: switches to G_L, G_H is history | G_L |
+| 4b | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L | asked | G_L if H accepts |
 | 5 | L took part in G_H, then sends a new G_L | | asked | G_H; G_L if H accepts |
-| 6 | H sends a new G_H; H never took part in G_L | not asked: keeps G_L | | G_L |
-| 7 | H sends a new G_H after taking part in G_L | asked | | G_L; G_H if L accepts |
+| 6 | H sends a new G_H, whether or not H took part in G_L | not asked: keeps G_L, G_H is history | | G_L |
+| 7 | H joined G_L, then restores an old backup and creates G_H | not asked: keeps G_L | not asked: switches to G_L | G_L |
 | 8 | L joined G_H, then restores an old backup and creates G_L | not asked: keeps G_L | asked | each on its own until H accepts, then G_L |
 | 9 | H restores a backup from before L took part; L sends G_L | | not asked: switches to G_L, G_H is history | G_L |
 
@@ -1459,8 +1472,8 @@ A message event carries:
 | --- | --- | --- |
 | 0 | `text` | UTF-8 text |
 | 1 | `forward` | `[content_type, content]`: a content-only copy (§7.6) |
-| 2 | `reaction` | defined by the content specification |
-| 3 | `media` | defined by the content specification; requires a `mimetype` |
+| 2 | `reaction` | `[target, emoji, action]` (§7.6) |
+| 3 | `media` | `[mimetype, data]` (§7.6) |
 | 4 | `delete` | no body (see below) |
 
 **Delete** is a tombstone carrying only `syncObjId` and `type = 4`, plus an optional
@@ -1474,9 +1487,10 @@ fullMessage = [chat_id, syncObjId, type, author, created_at, last_modified_at, b
                metadata]
 ```
 
-where `body` projects to a text string for `text`, to `[content_type, content]` for `forward`, to a
-byte string for `reaction` and `media`, and `metadata` projects to a CBOR map from text strings to
-byte strings.
+where `body` projects to a text string for `text`, to `[content_type, content]` for `forward`, to
+`[target, emoji, action]` for `reaction` (a byte string, a text string and an unsigned integer), to
+`[mimetype, data]` for `media` (a text string and a byte string), and `metadata` projects to a
+CBOR map from text strings to byte strings.
 A delete projects to `[chat_id, syncObjId, 4]`, without its pending `last_modified_at`.
 
 **Result hash** (local only, never stored or transmitted):
@@ -1524,6 +1538,10 @@ For an incoming event under a **new** event ID:
   regardless of timestamps or arrival order.
   A delete that arrives before any content still creates the tombstone.
 - Between non-delete results, the greatest `(last_modified_at, resultHash)` wins.
+- **Reactions** (§7.6) differ in two ways. A delete has **no effect** on a reaction: whatever
+  tombstone exists for its `syncObjId`, a reaction's state is decided only by its own versions.
+  And between two versions of a reaction with the same `last_modified_at`, a version whose action
+  is *remove* wins over one whose action is *add*; only then does `resultHash` decide.
 - **Wins:** replace the stored result, prune the superseded events and keep the incoming event
   available.
 - **Loses:** prune the incoming event; the stored winner and its available events are unchanged.
@@ -1741,17 +1759,69 @@ of the content specification.
 
 *Why:* references would leak source metadata and fail for recipients without source access.
 
-**Reactions and media** are separate message types whose schemas belong to the deferred content
-specification.
-Binding constraints for that specification:
+**Reactions.** A reaction is a message event of type `reaction`. Its body holds:
 
-- standalone media has a required `mimetype`;
-- other messages reference media elements from their metadata, with explicit source context and
-  stable element identity;
-- inline media inside text uses an ordered sequence of text spans and media-reference spans, not
-  offsets;
-- forwarded media is rebound into the destination chat;
-- media size and transfer limits are defined there, not by the text limits in this document.
+| Field | Rule |
+| --- | --- |
+| `target` | the `syncObjId` of the message reacted to, 32 bytes, in the same epoch |
+| `emoji` | UTF-8 text, 1 to 64 bytes |
+| `action` | `add` (0) or `remove` (1) |
+
+The person reacting is the event's `author` field.
+
+- **Identity.** The reaction's `syncObjId` MUST be
+
+  ```text
+  syncObjId = H("gossip.groups.reaction.1", target, author, emoji)
+  ```
+
+  A reaction whose `syncObjId` is anything else is malformed. A reaction is therefore unique per
+  message, per author and per emoji: a second one with the same three values is another version of
+  the same object, never a second reaction.
+- **Versions.** Adding and removing are versions of that one object, ranked like any message
+  (§7.1, §7.2): the greater `last_modified_at` wins, and a new version takes the later of now and
+  the previous date plus one, so a date in the future freezes nothing. On equal dates a *remove*
+  wins over an *add* (§7.1).
+- **No deletion.** A delete naming a reaction's `syncObjId` has no effect on it (§7.1): a reaction
+  can be removed and added again, never deleted for good.
+- **What is checked.** The lengths, that `emoji` is well-formed UTF-8, and the identity above.
+  Whether the text is an emoji is not checked: that changes with each Unicode release, and devices
+  must agree on validity. Whether the target exists is not checked either.
+- **What a device may keep.** After a *remove*, the `syncObjId` and the date are enough.
+- **Display.** A reaction is shown on its target while its current version is an *add*. The author
+  is a claim, like every author here; a device shows at most one reaction per author and emoji
+  because the identity allows only one. A reaction whose target is not shown is not shown.
+- A reaction is never forwarded: a forward whose content type is `reaction` is malformed.
+
+**Media.** A media message is a message event of type `media`. Its body holds:
+
+| Field | Rule |
+| --- | --- |
+| `mimetype` | says what `data` is; see below |
+| `data` | any bytes, possibly none; opaque to this protocol |
+
+- **The mimetype** MUST have the form `type/subtype`, at most 127 bytes in all. `type` and
+  `subtype` each start with a lowercase letter or a digit and continue with lowercase letters,
+  digits, `.`, `+` or `-`. No parameters follow it. A media message whose mimetype has another
+  form is malformed.
+- **Nothing else is checked.** Whether the mimetype is a known one, and whether `data` matches it,
+  never decide validity. A device that does not know a mimetype stores, serves and relays the
+  message like any other, and shows a placeholder.
+- **Size.** No limit applies to media as such. The only bound is that the event fits its
+  envelope (§13.10), like every event.
+- A forward whose content type is `media` carries the same two fields and is checked the same way.
+
+*Why a mimetype and nothing more:* it is how kinds of content are added within this wire version.
+A later release may define a new one, whether standard (`text/vcard` for a contact card) or its
+own under the vendor tree (`application/vnd.…`), and every device of version 1 carries it without
+understanding it. In particular the data may be a **reference** instead of the content itself: a
+description of a file (its size, its hash, a key, where to fetch it) whose bytes travel by other
+means, which is how files larger than an event can be shared without any change to this protocol.
+Names, captions and similar details go in the metadata (§6.2).
+
+A mimetype extends what a message can be, never how the protocol behaves: queries, merging and
+membership are untouched by it. A device SHOULD fetch what a reference points to only when its
+user asks, since fetching from elsewhere is seen by whoever serves it.
 
 ## 8. Retention
 
@@ -3040,8 +3110,8 @@ It never marks events invalid or pruned.
 
 ### 17.5 Deferred work
 
-- The content and media specification (media, reactions, inline spans, forwarded-media copying,
-  media limits).
+- Content beyond §7.6: inline spans, the mimetypes an application defines (file references among
+  them), and how media is copied when forwarded.
 - The peer score formula and replacement thresholds (§11.8).
 - Optional proactive neighbor rotation.
 - Score-weighted choice of extra dissemination recipients.
@@ -3080,6 +3150,7 @@ It never marks events invalid or pruned.
 | `gossip.groups.message.secret_proof.1` | `secret_proof` |
 | `gossip.groups.message.result.1` | message result hash |
 | `gossip.groups.sync_obj_name.1` | sync-object ID of a registered name |
+| `gossip.groups.reaction.1` | sync-object ID of a reaction (§7.6) |
 
 ### Signing contexts
 
@@ -3221,14 +3292,31 @@ message MessagePayload {
   oneof body {                          // absent for DELETE
     string text = 7;
     Forward forward = 8;
-    bytes content = 9;                  // REACTION, MEDIA (content specification)
+    Reaction reaction = 11;             // REACTION
+    Media media = 12;                   // MEDIA
   }
   map<string, bytes> metadata = 10;     // empty for DELETE
 }
 
+message Reaction {
+  bytes target = 1;                     // 32 bytes: syncObjId of the message reacted to
+  string emoji = 2;                     // 1..64 bytes
+  ReactionAction action = 3;
+}
+
+enum ReactionAction {
+  ADD = 0;
+  REMOVE = 1;
+}
+
+message Media {
+  string mimetype = 1;                  // type/subtype, at most 127 bytes
+  bytes data = 2;                       // opaque
+}
+
 message Forward {
-  MessageType content_type = 1;
-  bytes content = 2;
+  MessageType content_type = 1;         // TEXT or MEDIA
+  bytes content = 2;                    // TEXT: UTF-8 text; MEDIA: an encoded Media, canonical
 }
 
 message ReplyTo {                       // value of metadata key "replyTo"
