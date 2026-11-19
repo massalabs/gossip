@@ -1049,6 +1049,80 @@ fn the_largest_root_and_signed_objects_fit_one_container() {
     assert!(sizes[0].1 < MAX_EVENT_BLOB_BYTES / 2, "{sizes:?}");
 }
 
+/// A maximal message event: 16 parents, 32 reply targets, metadata and text at their
+/// limits, the longest timestamps; `body` turns the text into the body.
+fn maximal_event(body: impl Fn(String) -> Body) -> MessageEvent {
+    use crate::constants::{
+        MAX_EVENT_PARENTS, MAX_METADATA_BYTES, MAX_REPLY_TARGETS, MAX_SCHEDULE_MS, MAX_TEXT_BYTES,
+    };
+    use crate::event::{ReplyTarget, encode_reply_to};
+    let alice = identity(1);
+    let root = founding(&alice, &[&alice]);
+    let ts = u64::MAX - MAX_SCHEDULE_MS;
+    let parents: Vec<EventId> = (0..MAX_EVENT_PARENTS as u8)
+        .map(|i| EventId::new(ts - 1, [i; 16]))
+        .collect();
+    let targets: Vec<ReplyTarget> = (0..MAX_REPLY_TARGETS as u8)
+        .map(|i| ReplyTarget {
+            ref_chat_id: crate::RefChatId::from_bytes([i; 32]),
+            sync_obj_id: SyncObjId::from_bytes([!i; 32]),
+        })
+        .collect();
+    let mut metadata = BTreeMap::from([(
+        crate::constants::METADATA_KEY_REPLY_TO.to_owned(),
+        encode_reply_to(&targets).unwrap(),
+    )]);
+    // Filled up to the limit exactly.
+    let mut n = MAX_METADATA_BYTES - metadata_len(&metadata);
+    loop {
+        metadata.insert("m".to_owned(), vec![0xa5; n]);
+        if metadata_len(&metadata) <= MAX_METADATA_BYTES {
+            break;
+        }
+        n -= 1;
+    }
+    assert_eq!(metadata_len(&metadata), MAX_METADATA_BYTES);
+    MessageEvent::create(
+        &root,
+        EventId::new(ts, [0xff; 16]),
+        &parents,
+        Payload::Content(Content {
+            sync_obj_id: SyncObjId::from_bytes([0xff; 32]),
+            author: alice.id,
+            created_at: u64::MAX,
+            last_modified_at: u64::MAX,
+            body: body("\u{e9}".repeat(MAX_TEXT_BYTES / 2)),
+            edited: true,
+            metadata,
+        }),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_maximal_message_event_fits_one_container_with_room() {
+    let text = maximal_event(Body::Text);
+    let forward = maximal_event(|t| Body::Forward {
+        content_type: crate::event::MessageType::Text,
+        content: t.into_bytes(),
+    });
+    for event in [text, forward] {
+        let event = EventObject::Message(event);
+        let len = fitting_blob_len(&event);
+        // How many travel together in one plaintext, as event frames.
+        let blob = encode_event_blob(&event).unwrap();
+        let mut frames = vec![Frame::Event(blob.clone())];
+        while encode_plaintext(&frames).is_ok() {
+            frames.push(Frame::Event(blob.clone()));
+        }
+        let per_container = frames.len() - 1;
+        println!("maximal event: {len} bytes, {per_container} per container");
+        // Text and metadata are about 32 KiB: one fits with about 24 KB to spare.
+        assert!(len < 34_000 && MAX_EVENT_BLOB_BYTES - len > 23_000, "{len}");
+        assert_eq!(per_container, 1);
+    }
+}
+
 // ── Strict check: one case per `oneof`, counts before decoding ───────────────
 
 /// `key ‖ len ‖ bytes` for a length-delimited field whose key fits one byte.
