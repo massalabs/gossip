@@ -3333,3 +3333,185 @@ an ID.
 - **B:** add the version to the three IDs now, which changes them.
 - **C:** leave the text as it is.
 
+### D.18 Who signs the kick when a new owner resolves a fork (§5.6, §5.9)
+
+*Found during review of the implementation.*
+
+*Current text:* a kick is signed by the owner of the epoch it names (§5.6).
+After a handover from A to B, B may resolve a fork by taking A's branch as a parent (§5.9).
+
+*Context:* members of A's branch that B's root drops need kicks naming A's epoch, which by §5.6
+only A can sign.
+B cannot produce them, so those members are never told.
+The removed member is never shown the new root, but it may hold the handover root that made B the
+owner.
+
+- **A (recommended):** a kick naming an epoch is valid when signed by that epoch's owner, **or** by
+  an identity to which a handover root passes ownership from an ancestor of that epoch, when the
+  verifier holds that handover root.
+  A removed member that does not hold the handover root looks it up before accepting the kick.
+- **B:** no kick in this case; the removed members only stop being served.
+- **C:** B's resolution root is delivered to the removed members as proof, giving up the rule that
+  they never see the new epoch's ID.
+
+### D.19 Presence of `last_modified_at` on a message that is not a deletion (§6.2, Appendix C)
+
+*Found during review of the implementation.*
+
+*Current text:* the field is `optional` in the schema, with a comment only for deletions.
+The code refuses a non-deletion without it.
+
+- **A (recommended):** state in §6.2 that for every type except a deletion the field MUST be
+  present; an event without it is malformed.
+- **B:** an absent field reads as 0, as for other scalar fields.
+
+### D.20 What a forward may carry (§6.2, §7.6)
+
+*Found during review of the implementation.*
+
+*Current text:* a forward holds "a permitted copied content value", without defining "permitted".
+The code refuses a forward whose inner type is a forward or a deletion, and a forwarded text that
+is not valid UTF-8.
+
+- **A (recommended):** state the code's rule in §7.6.
+- **B:** any inner type and any bytes are accepted.
+
+### D.21 A `replyTo` list that is malformed (§7.6)
+
+*Found during review of the implementation.*
+
+*Current text:* a list has 1 to 32 targets and one with more than 32 is malformed; a receiver never
+rejects a message because of its references.
+The text does not say what happens to the **message** when the list is empty, too long, has a
+target of the wrong length or does not decode.
+The code treats the whole event as malformed.
+
+*Context:* "never rejects because of its references" is about targets that cannot be resolved, not
+about a list that breaks the format.
+
+- **A (recommended):** the event is malformed, and §7.6 says so, including for an empty list.
+- **B:** the message is kept and the list is ignored.
+
+### D.22 The result hash projection (§6.2)
+
+*Found during review of the implementation.*
+
+*Current text:* `H("...result.1", fullMessage)`, where `fullMessage` is itself a list.
+It can be read as a nested list `[domain, [chat_id, ...]]` or a flat one `[domain, chat_id, ...]`.
+The code uses the nested form, which is the literal reading.
+
+- **A (recommended):** state the nested form.
+- **B:** the flat form, which changes the hash.
+
+### D.23 One invalid entry in a notice or a page (§13.5, §13.7)
+
+*Found during review of the implementation.*
+
+*Current text:* §13.7 says invalid entries are isolated, which is clear for query entries only.
+The code refuses a whole notice or page when one entry has an ID of the wrong length.
+
+- **A (recommended):** the invalid entry is skipped and the others are used; the sender is
+  penalised as for one malformed item.
+- **B:** the whole frame is refused.
+
+### D.24 A frame that holds two kinds (§13.1)
+
+*Found during review of the implementation.*
+
+*Current text:* "each frame holds exactly one kind".
+Protobuf lets an encoder write two cases of one `oneof`, and decoders keep the last.
+The code accepts this and keeps the last.
+
+- **A (recommended):** a second, different case of the same `oneof` makes the message malformed,
+  for every `oneof` of the schema.
+- **B:** the last case wins, and §1 says so.
+
+### D.25 Arithmetic near the top of the integer range (§1, §7.2)
+
+*Found during review of the implementation.*
+
+*Current text:* §1 allows "checked or widened" arithmetic.
+For `ts + MAX_SCHEDULE` the two give different outcomes at the top of the 64-bit range: malformed
+for good, or temporarily invalid.
+
+- **A (recommended):** widened arithmetic is required for time bounds, so the outcome is the same
+  everywhere.
+- **B:** leave the text as it is; the values concerned are not reachable in practice.
+
+### D.26 Several scheduled deletions of one message (§7.4)
+
+*Found by simulation during implementation (code at commit `614a2345`, seed 7, 160 steps).*
+
+*Current text:* "only the earliest pending deletion is kept; later scheduled deletions are pruned
+immediately".
+
+*Context:* the result depends on arrival order.
+A later scheduled deletion is pruned when it arrives while an earlier one is pending, but is kept
+as one more event carrying the tombstone when it arrives after the earlier one has applied.
+A duplicate arriving after the tombstone (§9.5) can also restore a pruned deletion on some devices
+only.
+Honest devices then serve different deletion events and list different tips, for good.
+The code keeps every scheduled deletion pending; when the earliest applies, the others are applied
+with it in their immediate form.
+The cost is a few more events that hold no content.
+
+- **A (recommended):** the code's rule: every scheduled deletion is kept until the earliest applies,
+  then all are applied.
+- **B:** keep the current text and accept that devices may differ in which deletion events they
+  hold.
+
+### D.27 "Available child" or "accepted child" in the cycle frontier (§6.1, §12.1)
+
+*Found during implementation.*
+
+*Current text:* the cycle-frontier rule of §6.1 speaks of a component with "no available child"
+outside it; the tip definition of §12.1 says "no known accepted event references it".
+For a single event the two differ once a child has been pruned.
+
+- **A (recommended):** "accepted" in both places, which is what the code does: parent edges are kept
+  after pruning, so the answer does not change when an event is pruned.
+- **B:** "available" in both places.
+
+### D.28 A local-only edit and a pending scheduled deletion (§9.3)
+
+*Found during implementation.*
+
+*Current text:* a local-only change "prunes every event of that message".
+Read literally, a local-only edit would also prune a real scheduled deletion that is still pending,
+which cancels that deletion on the device.
+
+*Context:* the code keeps pending scheduled deletions through a local-only edit, since they hold no
+content, and prunes them only on a local-only deletion.
+
+- **A (recommended):** the code's rule.
+- **B:** the literal rule: the pending deletion is pruned too.
+
+### D.29 An edit dated later than now (§7.2, §7.3)
+
+*Found during implementation; the code follows the current text.*
+
+*Current text:* an edit sets `last_modified_at = max(now, previous + 1)`, and a version becomes
+active only when its date is reached.
+
+*Context:* after two edits in the same millisecond, or after the clock moved back, the new date is
+later than `now`, so the user's own edit waits as a hidden future version until that date.
+If `previous + 1` is beyond `now + MAX_SCHEDULE`, the edit cannot be published at all.
+The *Why* note "an edit wins locally even across clock rollback" is therefore true only after a
+wait.
+
+- **A (recommended):** keep the rule and correct the *Why* note; the device shows its own waiting
+  edit as "pending" in the meantime.
+- **B:** a version created by the device itself is shown at once on that device, whatever its date.
+- **C:** another rule.
+
+### D.30 Content stored twice in the logical records (§14.1)
+
+*Found during implementation.*
+
+*Current text:* "the stored fields of each available event are the only stored copy of that event's
+content", while the current object also holds the current result.
+
+- **A (recommended):** say that the current object **refers** to the event that carries the current
+  result, and holds no copy of the content.
+- **B:** allow the copy and require both to be deleted together.
+
