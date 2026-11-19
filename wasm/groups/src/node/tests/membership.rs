@@ -3495,3 +3495,46 @@ fn parent_commitment_bytes(challenge: &[u8], parent: &ChatId) -> Vec<u8> {
         .as_bytes()
         .to_vec()
 }
+
+/// A handover keeps a member whose signed leave the outgoing owner holds (§4.7): the new
+/// owner, which holds the leave too, applies it with its own successor (§5.5).
+#[test]
+fn a_leave_pending_at_a_handover_is_applied_by_the_new_owner() {
+    let (mut net, g) = founded(4);
+    let now = net.now;
+    let s = signer(2);
+    let dev = &mut net.devs[2];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.exchange();
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: true,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    let root = net.devs[1].node.root(&h).unwrap();
+    assert!(root.is_member(&gid(2)), "the handover keeps the leaver");
+    assert!(!root.is_member(&gid(0)));
+    net.run(2 * MIN);
+    let cur = net.current(1, &g).unwrap();
+    assert_ne!(cur, h);
+    let r = net.devs[1].node.root(&cur).unwrap();
+    assert!(!r.is_member(&gid(2)));
+    assert_eq!(net.current(3, &g), Some(cur));
+    assert_eq!(net.devs[1].node.stats().kicks_created, 0);
+}
