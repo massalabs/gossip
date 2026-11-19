@@ -1589,7 +1589,10 @@ fn largest_event(
                 author,
                 created_at: now,
                 last_modified_at: now,
-                body: Body::Media(vec![7; n]),
+                body: Body::Media(crate::Media {
+                    mimetype: "application/octet-stream".into(),
+                    data: vec![7; n],
+                }),
                 edited: false,
                 metadata: BTreeMap::new(),
             }),

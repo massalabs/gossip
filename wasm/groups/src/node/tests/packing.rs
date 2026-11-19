@@ -143,7 +143,10 @@ fn the_response_budget_holds_back_answers_beyond_it() {
                 author: member(1),
                 created_at: T0,
                 last_modified_at: T0,
-                body: Body::Media(vec![0x79; size]),
+                body: Body::Media(crate::Media {
+                    mimetype: "application/octet-stream".into(),
+                    data: vec![0x79; size],
+                }),
                 edited: false,
                 metadata: BTreeMap::new(),
             }),
