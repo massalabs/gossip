@@ -3162,3 +3162,39 @@ fn a_restored_member_that_never_held_its_left_epoch_learns_its_leave() {
     net.run(10 * MIN);
     assert_eq!(net.summary(3, &e2).unwrap().status, MyStatus::Left);
 }
+
+/// Regression (simulation, code at 7e8da430, `GROUPS_MEMBERS_SEED=175`): a device adopted the
+/// root of a dissolved epoch from a scan page whose dissolve entry it had to drop, since the
+/// epoch was not held yet (§4.8). The scans that adopting a root starts (§12.3, trigger 1) are
+/// what bring that dissolve; they went to two members drawn uniformly, both of which forged
+/// and never answered, and the device kept the group active until the periodic lanes.
+#[test]
+fn the_scans_after_adopting_a_root_prefer_members_with_a_good_score() {
+    let (mut net, g) = founded(5);
+    for p in 2..5 {
+        net.devs[1].node.penalize(&gid(p), 1000);
+    }
+    for i in 0..10 {
+        let e = net
+            .change(
+                0,
+                g,
+                GroupChange::Successor {
+                    add: vec![],
+                    remove: vec![],
+                    name: Some(format!("n{i}")),
+                },
+            )
+            .unwrap();
+        let root = net.devs[0].node.root(&e).unwrap();
+        let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+        net.recv_frames_m(1, 0, &[Frame::Event(blob)]);
+        assert_eq!(net.current(1, &g), Some(e));
+        let group = net.summary(1, &g).unwrap().group;
+        assert!(
+            net.devs[1].node.t.scans_out.contains(&(group, gid(0))),
+            "adoption {i}"
+        );
+        net.exchange();
+    }
+}
