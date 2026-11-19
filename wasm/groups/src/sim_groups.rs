@@ -41,7 +41,7 @@
 //! - `GROUPS_MEMBERS_SEED=<n>`: replay one seed;
 //! - `GROUPS_MEMBERS_SEEDS=<n>`: run seeds `GROUPS_MEMBERS_FIRST` (default 0) to `+ n`
 //!   (default 4, in which every scripted situation occurs);
-//! - `GROUPS_MEMBERS_HOURS=<n>`: hours of activity per run (default 11; the script takes
+//! - `GROUPS_MEMBERS_HOURS=<n>`: hours of activity per run (default 13; the script takes
 //!   about 10);
 //! - `GROUPS_MEMBERS_FINAL=<n>`: hours of the final period (default 12);
 //! - `GROUPS_MEMBERS_DEBUG=1`: on a failure, print the devices' groups.
@@ -1958,7 +1958,7 @@ fn env_u64(name: &str) -> Option<u64> {
 
 #[test]
 fn membership_simulation() {
-    let hours = env_u64("GROUPS_MEMBERS_HOURS").unwrap_or(11);
+    let hours = env_u64("GROUPS_MEMBERS_HOURS").unwrap_or(13);
     let final_hours = env_u64("GROUPS_MEMBERS_FINAL").unwrap_or(12);
     let single = env_u64("GROUPS_MEMBERS_SEED");
     let seeds: Vec<u64> = match single {
