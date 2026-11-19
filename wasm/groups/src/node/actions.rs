@@ -669,10 +669,21 @@ impl Node {
                 }
             }
         }
+        // `L` of §4.6 among the group's roots, leaving out those of owners a handover
+        // deposed (§5.9): they are never current here, and a former owner that dates a root
+        // at the end of time (D.72) would otherwise date every later root of the group there,
+        // which leaves the interim rule only the chat IDs to order them.
+        let deposed = self
+            .t
+            .group_recs
+            .get(&group)
+            .map(|g| g.deposed.clone())
+            .unwrap_or_default();
         let greatest = self
             .group_epochs(&group)
             .iter()
             .filter_map(|c| self.t.epochs.get(c))
+            .filter(|r| r.root.owner_id() == self.me || !deposed.contains(&r.root.owner_id()))
             .map(|r| r.root.created_at())
             .max();
         let created_at = next_root_created_at(cx.now, greatest).map_err(NodeError::Root)?;

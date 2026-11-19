@@ -2151,7 +2151,8 @@ fn a_former_owner_cannot_mute_or_freeze_the_new_owner() {
             },
         )
         .unwrap();
-    assert_eq!(net.devs[1].node.root(&e).unwrap().created_at(), u64::MAX);
+    // Dated by the clock: the former owner's root does not count in `L`.
+    assert!(net.devs[1].node.root(&e).unwrap().created_at() < u64::MAX);
     // Resolving the former owner's branch stays possible, explicitly.
     let r = net
         .change(
