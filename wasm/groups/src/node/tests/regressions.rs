@@ -1361,3 +1361,31 @@ fn a_late_uncorrelated_answer_still_shows_the_member_is_alive() {
     );
     assert!(net.devs[0].node.responsive(&member(1)));
 }
+
+/// Found by the network simulation's check that honest members stay responsive (code at
+/// `7a3fc31d`, seed 99): a member whose last answers were lost or delayed in transit kept
+/// querying this device, yet stayed unresponsive, since only answers, notices and events
+/// counted as signs of life.
+#[test]
+fn a_query_from_a_member_shows_it_is_alive() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    for t in 0..3 {
+        net.devs[0].node.note_timeout(&member(1), T0 + t);
+    }
+    let now = net.now;
+    net.recv_frames(
+        0,
+        member(1),
+        &[query(
+            1,
+            now,
+            MIN,
+            vec![QueryOp::Event {
+                chat_id: chat,
+                event_id: EventId::new(T0, [5; 16]),
+            }],
+        )],
+    );
+    assert!(net.devs[0].node.responsive(&member(1)));
+}
