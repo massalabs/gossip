@@ -272,6 +272,8 @@ impl Node {
             if !self.may_receive(&chat, &from, false) {
                 continue;
             }
+            // A valid entry from a member: it is responsive (§10.1).
+            self.answered(&from);
             if cx.ov.event_row(&chat, &id)?.is_some_and(|r| r.processed()) {
                 self.mark_seen(cx, chat, from, id)?;
             } else {

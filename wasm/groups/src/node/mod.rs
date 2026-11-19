@@ -969,7 +969,8 @@ impl Node {
                 Ok(retrieval::Answer::TemporarilyInvalid)
             }
             outcome => {
-                // `from` holds E in full (§10.3).
+                // `from` holds E in full (§10.3), and is responsive (§10.1).
+                self.answered(&from);
                 self.mark_seen(cx, chat, from, id)?;
                 self.supplied(&from, chat, Target::Event(id));
                 if let Outcome::Accepted(merge) = outcome {
@@ -1087,6 +1088,7 @@ impl Node {
                     penalty: 0,
                     failures: 0,
                     first_failure: 0,
+                    last_timeout_query: 0,
                     requests: timing::Bucket::full(timing::REQUEST_BURST, 0),
                     responses: timing::Bucket::full(timing::RESPONSE_BURST, 0),
                     version_notices: BTreeMap::new(),

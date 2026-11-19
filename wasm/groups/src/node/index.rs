@@ -320,6 +320,7 @@ mod tests {
             Some(&task(Some(Attempt::Sent {
                 peer: p,
                 local_deadline: 50,
+                sent_at: 0,
             }))),
             0,
         );
