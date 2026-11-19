@@ -297,10 +297,19 @@ impl Node {
                     | GroupStatus::Dissolved { at, .. } => Some(at),
                     _ => None,
                 };
-                n.group_rec_mut(g).status = GroupStatus::Active;
+                let owner = rec.root.owner_id();
+                let rejoined = kicked_at.is_some();
+                let gr = n.group_rec_mut(g);
+                gr.status = GroupStatus::Active;
+                // The user chose this root's line to come back: it is followed, unless a
+                // handover deposed its owner (§5.9).
+                if rejoined && !gr.deposed.contains(&owner) {
+                    gr.followed = Some(owner);
+                }
                 n.rebuild_epochs();
                 n.adopt(cx, rec.root, rec.from, parents, false)?;
                 let g = n.group_of(&chat);
+                n.recheck_status(cx, g);
                 if let (Some(at), Some(t)) =
                     (kicked_at, n.t.epochs.get(&chat).and_then(|r| r.line_time))
                 {
