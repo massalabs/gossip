@@ -43,13 +43,6 @@ impl EpochRecords {
         }
     }
 
-    fn pending_keys(
-        obj: &ObjectRecord,
-    ) -> impl Iterator<Item = (u64, EventId, PendingKind, SyncObjId)> + '_ {
-        obj.pending_items()
-            .map(|i| (i.due, i.event_id, i.kind, i.sync_obj_id))
-    }
-
     fn put_row(&mut self, row: EventRow) {
         if let Some(old) = self.rows.remove(&row.event_id) {
             self.unindex_row(&old);
@@ -65,13 +58,31 @@ impl EpochRecords {
     }
 
     fn put_object(&mut self, obj: ObjectRecord) {
-        if let Some(old) = self.objects.remove(&obj.sync_obj_id) {
-            for k in Self::pending_keys(&old) {
+        // Only the difference is reindexed: an object can hold many pending items.
+        let sync = obj.sync_obj_id;
+        let old = self
+            .objects
+            .remove(&sync)
+            .unwrap_or_else(|| ObjectRecord::empty(sync));
+        let key = |kind| move |(due, id): &(u64, EventId)| (*due, *id, kind, sync);
+        for (before, after, kind) in [
+            (
+                &old.pending_versions,
+                &obj.pending_versions,
+                PendingKind::Version,
+            ),
+            (
+                &old.pending_deletions,
+                &obj.pending_deletions,
+                PendingKind::Deletion,
+            ),
+        ] {
+            for k in before.difference(after).map(key(kind)) {
                 self.pending.remove(&k);
             }
+            self.pending.extend(after.difference(before).map(key(kind)));
         }
-        self.pending.extend(Self::pending_keys(&obj));
-        self.objects.insert(obj.sync_obj_id, obj);
+        self.objects.insert(sync, obj);
     }
 }
 
