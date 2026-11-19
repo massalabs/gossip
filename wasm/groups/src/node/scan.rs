@@ -341,8 +341,9 @@ impl Node {
                     }
                 }
             }
-            ResponseResult::Status(Status::Malformed) => {
-                // As for a lookup (§11.4): the peer fails for this scan, without a penalty.
+            ResponseResult::Status(Status::Malformed | Status::Unsupported) => {
+                // As for a lookup (§11.4): the peer fails for this scan, without a penalty
+                // (§2.2: any defined status ends the attempt without one).
                 self.answered(&peer);
                 if current {
                     self.complete_scan(cx, key, ScanEnd::Ended);

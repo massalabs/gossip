@@ -365,7 +365,11 @@ impl Node {
             }
             ResponseResult::Status(Status::Expired) => (Answer::Expired(plausible), None),
             ResponseResult::Status(Status::Busy) => (Answer::Busy, None),
-            ResponseResult::Status(Status::Malformed) => (Answer::Refused, None),
+            // Any other defined status ends the attempt, without penalty (§2.2): `restart`
+            // and `unsupported` are not lookup answers, but they are valid answers.
+            ResponseResult::Status(Status::Malformed | Status::Restart | Status::Unsupported) => {
+                (Answer::Refused, None)
+            }
             _ => (Answer::Invalid, None),
         })
     }
