@@ -1430,3 +1430,231 @@ fn migrate_from_is_a_strict_uint64_and_field_12_is_unknown() {
     let r = decode_event_blob(&event(&with), 1);
     assert!(matches!(r, Ok(EventObject::Root(ref x)) if x.migrate_from() == Some(0)));
 }
+
+// ── Golden vectors (§2.2: formats are fixed for the whole wire version) ──────────────
+
+/// The pinned values, by label: hashes and IDs as hex, small encodings as hex, and an
+/// encoding that carries keys or a signature as its length and BLAKE3 digest.
+fn golden_values() -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let digest = |b: &[u8]| {
+        format!(
+            "{} bytes, blake3 {}",
+            b.len(),
+            hex::encode(blake3::hash(b).as_bytes())
+        )
+    };
+    let alice = identity(1);
+    let bob = identity(2);
+    let carol = identity(3);
+    // A handover root and a root with several parents.
+    let parent = founding(&alice, &[&alice, &bob, &carol]);
+    let handover = crate::Root::create_handover(
+        crate::root::tests::params(&bob, &[&bob, &carol], 0x30),
+        &parent,
+        &alice.secret.dsa_signing_key,
+        [2; 32],
+    )
+    .unwrap();
+    out.push((
+        "handover root ID".into(),
+        hex::encode(handover.chat_id().as_bytes()),
+    ));
+    let multi = crate::Root::create_successor(
+        crate::root::tests::params(&alice, &[&alice, &bob], 0x20),
+        &[ChatId::from_bytes([1; 32]), ChatId::from_bytes([2; 32])],
+        &alice.secret.dsa_signing_key,
+        [1; 32],
+    )
+    .unwrap();
+    out.push((
+        "multi-parent root ID".into(),
+        hex::encode(multi.chat_id().as_bytes()),
+    ));
+    // Result projections of a forward, a reaction and a media message.
+    let chat = ChatId::from_bytes([5; 32]);
+    for (label, body) in [
+        (
+            "forward",
+            Body::Forward {
+                content_type: crate::MessageType::Text,
+                content: b"hi".to_vec(),
+            },
+        ),
+        ("reaction", Body::Reaction(vec![0xf0, 0x9f, 0x91, 0x8d])),
+        ("media", Body::Media(vec![1, 2, 3, 4])),
+    ] {
+        let p = Payload::Content(Content {
+            sync_obj_id: SyncObjId::from_bytes([7; 32]),
+            author: bob.id,
+            created_at: TS,
+            last_modified_at: TS,
+            body,
+            edited: false,
+            metadata: BTreeMap::new(),
+        });
+        out.push((
+            format!("{label} result hash"),
+            hex::encode(p.result_hash(&chat)),
+        ));
+    }
+    // Every event type, as an event blob.
+    for (label, o) in ["root", "message", "leave", "kick", "dissolve"]
+        .iter()
+        .zip(objects())
+    {
+        let blob = encode_event_blob(&o).unwrap();
+        let v = if *label == "message" {
+            hex::encode(&blob)
+        } else {
+            digest(&blob)
+        };
+        out.push((format!("{label} event blob"), v));
+    }
+    // Every frame kind, every query operation, every status, in a plaintext of its own.
+    let mut frames: Vec<(String, Frame)> = Vec::new();
+    let message = encode_event_blob(&objects().remove(1)).unwrap();
+    frames.push(("event frame".into(), Frame::Event(message.clone())));
+    for (i, op) in all_ops().into_iter().enumerate() {
+        frames.push((format!("query op {i}"), query(vec![QueryEntry::Op(op)])));
+    }
+    for s in [
+        Status::NotAvailable,
+        Status::Restart,
+        Status::Expired,
+        Status::Malformed,
+        Status::Unsupported,
+        Status::Busy,
+    ] {
+        frames.push((format!("status {s:?}"), response(ResponseResult::Status(s))));
+    }
+    frames.push((
+        "response event".into(),
+        response(ResponseResult::Event(message)),
+    ));
+    frames.push((
+        "response page".into(),
+        response(ResponseResult::Page(Page {
+            scan_id: ScanId::from_bytes([2; 32]),
+            offset: 0,
+            count: 2,
+            entries: vec![entry(1), entry(2)],
+            skipped: 0,
+        })),
+    ));
+    frames.push((
+        "response keys".into(),
+        response(ResponseResult::Keys(alice.public.to_bytes())),
+    ));
+    frames.push((
+        "notice".into(),
+        Frame::Notice(Notice {
+            entries: vec![entry(1), entry(3)],
+            skipped: 0,
+        }),
+    ));
+    let c = ChatId::from_bytes([1; 32]);
+    frames.push((
+        "neighbor request".into(),
+        Frame::NeighborRequest(NeighborRequest { chat_id: c }),
+    ));
+    frames.push((
+        "neighbor response".into(),
+        Frame::NeighborResponse(NeighborResponse {
+            chat_id: c,
+            accepted: false,
+            suggestions: vec![GossipId::from_bytes([3; 32])],
+        }),
+    ));
+    frames.push((
+        "leave request".into(),
+        Frame::LeaveRequest(LeaveRequest { chat_id: c }),
+    ));
+    for (label, f) in frames {
+        let bytes = encode_plaintext(&[f]).unwrap();
+        let v = if label == "response keys" {
+            digest(&bytes)
+        } else {
+            hex::encode(&bytes)
+        };
+        out.push((label, v));
+    }
+    out
+}
+
+#[test]
+fn golden_vectors() {
+    let expected = include_str!("golden.txt");
+    let got: String = golden_values()
+        .into_iter()
+        .map(|(k, v)| format!("{k}: {v}\n"))
+        .collect();
+    if std::env::var("GROUPS_PRINT_GOLDEN").is_ok() {
+        print!("{got}");
+    }
+    assert_eq!(got, expected);
+}
+
+/// One stored signature per signing context, which must verify (§4.1, §5.3, §5.6, §5.8): a
+/// change of a context string, of the signed ID or of the verification fails here.
+#[test]
+fn stored_signatures_verify() {
+    if std::env::var("GROUPS_PRINT_GOLDEN").is_ok() {
+        for (k, o) in ["root", "message", "leave", "kick", "dissolve"]
+            .iter()
+            .zip(objects())
+        {
+            let sig = match o {
+                EventObject::Root(r) => r.signature().as_bytes().to_vec(),
+                EventObject::Leave(l) => l.signature().as_bytes().to_vec(),
+                EventObject::Kick(k) => k.signature().as_bytes().to_vec(),
+                EventObject::Dissolve(d) => d.signature().as_bytes().to_vec(),
+                EventObject::Message(_) => continue,
+            };
+            println!("SIG {k}: {}", hex::encode(sig));
+        }
+    }
+    let stored: BTreeMap<&str, Vec<u8>> = include_str!("golden_signatures.txt")
+        .lines()
+        .filter_map(|l| l.split_once(": "))
+        .map(|(k, v)| (k, hex::decode(v).unwrap()))
+        .collect();
+    let alice = identity(1);
+    let bob = identity(2);
+    let root = founding(&alice, &[&alice, &bob]);
+    let stored_root = crate::Root::from_fields(
+        root.version(),
+        root.root_type(),
+        root.name().to_owned(),
+        root.parents(),
+        root.members(),
+        root.group_secret(),
+        root.owner_bytes().to_vec(),
+        root.epoch_challenge(),
+        root.ref_chat_id_challenge(),
+        root.created_at(),
+        root.migrate_from(),
+        &stored["root"],
+    )
+    .unwrap();
+    stored_root.verify_signature(None).unwrap();
+    crate::Leave::from_fields(root.chat_id(), bob.id, &stored["leave"])
+        .unwrap()
+        .verify(&root, &bob.public)
+        .unwrap();
+    crate::Kick::from_fields(root.chat_id(), bob.id, &stored["kick"])
+        .unwrap()
+        .verify(&root)
+        .unwrap();
+    crate::Dissolve::from_fields(root.chat_id(), true, &stored["dissolve"])
+        .unwrap()
+        .verify(&root)
+        .unwrap();
+    // Each one fails under another context.
+    assert!(
+        crate::Kick::from_fields(root.chat_id(), bob.id, &stored["leave"])
+            .unwrap()
+            .verify(&root)
+            .is_err()
+    );
+}
