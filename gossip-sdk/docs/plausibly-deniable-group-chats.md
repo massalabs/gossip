@@ -183,9 +183,25 @@ The rules of this document are therefore of two kinds.
   frames, status codes, size limits that decide validity;
 - every validity and authorization rule: what makes a root, a signed object, an event or a frame
   valid or malformed, and who may be answered;
-- the merge rules, and everything else that decides what honest devices converge to;
-- how a device answers each query, including when it stays silent, and how it reacts to each
-  frame and status it receives.
+- how a device answers each query and how it reacts to each frame and status it receives;
+- when a device stays silent, wherever the text says the choice protects deniability, for example
+  toward a peer that is not a member.
+
+The wire format is closed and final once the first release is out: no frame kind, query
+operation, status, field or enum value is ever added to wire version 1. Anything of wire version 1
+that is not valid under these rules is rejected and counts against its sender (§11.8). A plaintext
+of a higher wire version is ignored and never penalised (§13.8).
+
+**May change, case by case.**
+
+- **Merge rules.** A release may change them, for a bug fix, a better algorithm or a different
+  tradeoff between security and convergence. Devices on different releases may then settle on
+  different results for the same events. A change MUST NOT create an interaction that never
+  settles between a device on the old rule and one on the new: each must reach a stable state and
+  stop sending.
+- **Silence elsewhere.** Where staying silent does not protect deniability, a release may start or
+  stop answering, one case at a time. A requester never depends on it either way: silence is a
+  valid outcome of any request.
 
 **Local policy.** A release may change these freely, and peers MUST NOT rely on another device's
 choice:
@@ -1274,8 +1290,14 @@ a contact or the connection is **automatic**.
 group; the scans that follow an acceptance already show it (D.77).
 
 **A new contact.** Accepting a contact request is the consent for a chat with that person.
-The requester's device then creates a group of the two, which it owns, and the accepting device
-adopts that root without a prompt.
+An accepted contact counts as an earlier conversation of format version 0 with that person, even
+when it holds nothing but the request. The requester's device then creates a group of the two,
+which it owns, with `migrate_from = 0`, and the accepting device adopts that root without a prompt.
+
+**One automatic chat per pair.** Every group a device creates by itself, after a contact request
+or by migrating an earlier conversation, carries `migrate_from = 0`, and at most one such group
+exists between two people. A group a user creates deliberately never carries the field: it is
+always a new conversation, and a user may have any number of them with the same single person.
 
 **Migrating an earlier conversation.**
 
@@ -1288,16 +1310,20 @@ adopts that root without a prompt.
 - "Migrate" creates a group of two, the user and the contact of that conversation, with
   `migrate_from = 0`, and links it to the archive on this device: the two are displayed as one
   continuous conversation, the archive first.
-- `migrate_from` MAY be set only on a root that creates a group (its single parent is the random
-  placeholder of §4.5) and that has exactly two members. A root with `migrate_from` that has
-  earlier epochs behind it, or another member count, is malformed.
+- A device sets `migrate_from` only on a root that creates a group of exactly two members.
+  The field never decides validity: a device cannot tell a root that creates a group from one
+  whose parent it lacks, so a well-encoded `migrate_from` is always valid, and is simply ignored
+  wherever the conditions below do not hold.
 
 A device that receives a root with `migrate_from` treats it as a migration only when all of these
 hold:
 
 1. the group has exactly two members: the receiver itself and one other person;
 2. that other person is the owner who signed the root;
-3. the receiver itself holds an earlier conversation of that format version with that same person.
+3. the receiver itself holds an earlier conversation of that format version with that same person;
+4. the root is of type successor, has one parent, and that parent matches no epoch the receiver
+   holds; the format version is one the receiver knows; and the receiver holds no accepted group
+   already created this way with that person.
 
 It then shows the invitation inside that earlier conversation, with Accept and Decline, and on the
 conversation's row in the list; accepting links the group to the archive as above.
@@ -1306,10 +1332,10 @@ A device hides its own "Migrate" action as soon as it holds such an invitation, 
 offering "Migrate" it first processes what it has received, so that the other person's invitation
 takes precedence.
 
-**Two creations at once.** If each of two people creates the group that continues the same earlier
-conversation, or the group that follows the same contact request, the group whose owner's GossipID
-sorts first (raw bytes, ascending) is kept: both devices adopt it without a prompt, and both
-delete the other at once, as a closed chat (§14.2).
+**Two creations at once.** When a device holds two roots that each create a group of the same two
+people with the same `migrate_from`, and neither has been continued by a later root, the group
+whose owner's GossipID sorts first (raw bytes, ascending) is kept: both devices adopt it without a
+prompt, and both delete the other at once, as a closed chat (§14.2).
 
 **The invitation screen.** Every invitation uses one screen made of sections shown as they apply:
 who asks; adding that person as a contact; the group, its owner and its members; the earlier
@@ -4493,7 +4519,6 @@ afterwards.*
 *§2.1 and §5.12 are settled. These details were chosen to complete them and are not confirmed.*
 
 - A message of the earlier one-to-one format received from an unsupported client is ignored.
-- The "two creations at once" rule also covers two contact requests crossing each other.
 - The losing group of two creations at once is deleted even if messages were already written in
   it; they are lost.
 - A link made by a migration is local, like the manual links of §5.10: each device links to its
