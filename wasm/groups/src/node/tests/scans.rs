@@ -260,7 +260,7 @@ fn a_scan_from_a_non_member_is_answered_as_for_an_unknown_anchor() {
 }
 
 /// Device 0 scans member `peer`; returns the first page request.
-fn start(net: &mut Net, peer: usize) -> Sent {
+pub(crate) fn start(net: &mut Net, peer: usize) -> Sent {
     let now = net.now;
     let dev = &mut net.devs[0];
     dev.node

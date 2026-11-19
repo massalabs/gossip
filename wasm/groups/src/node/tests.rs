@@ -8,7 +8,7 @@ mod packing;
 mod queries;
 mod regressions;
 mod retrieval;
-mod scans;
+pub(crate) mod scans;
 mod storage;
 mod timeline;
 
