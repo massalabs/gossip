@@ -254,6 +254,18 @@ impl Node {
                 .map(|(p, _)| *p)
                 .filter(|p| *p != self.me)
                 .collect(),
+            // The parent of a handover root not verified yet is asked of the peer that
+            // delivered it only: the members it lists are unverified claims.
+            Target::Parent(_)
+                if self.t.held_roots.contains(&key.chat_id)
+                    && !self.t.epochs.contains(&key.chat_id) =>
+            {
+                task.candidates
+                    .iter()
+                    .filter(|(_, c)| c.trigger.is_some())
+                    .map(|(p, _)| *p)
+                    .collect()
+            }
             Target::Parent(_) => self
                 .held_root(&key.chat_id)
                 .map(|r| {

@@ -876,6 +876,18 @@ impl Node {
     /// a waiting group and its end after two weeks (§5.4), and the end of the two weeks a
     /// root is kept after "Dissolve & Delete" (§5.8).
     pub(crate) fn group_timers(&mut self, cx: &mut Cx<'_>) {
+        // Unverified handover roots expire after the retention period.
+        let old: Vec<ChatId> = self
+            .t
+            .held_roots
+            .iter()
+            .filter(|(_, h)| cx.now >= h.at.saturating_add(crate::constants::RETENTION_MS))
+            .map(|(c, _)| *c)
+            .collect();
+        for c in old {
+            self.take_held(&c);
+            self.drop_tasks_of(&[c]);
+        }
         let invitations: Vec<ChatId> = self
             .t
             .epochs
@@ -938,6 +950,9 @@ impl Node {
     pub(crate) fn group_wakeup(&self) -> Option<u64> {
         let mut at: Option<u64> = None;
         let mut add = |t: u64| at = Some(at.map_or(t, |a: u64| a.min(t)));
+        for (_, h) in self.t.held_roots.iter() {
+            add(h.at.saturating_add(crate::constants::RETENTION_MS));
+        }
         for (c, r) in self.t.epochs.iter() {
             if let EpochStatus::Invitation(inv) = &r.status
                 && inv.received_at != u64::MAX
