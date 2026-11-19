@@ -399,7 +399,15 @@ fn everything_a_removed_peer_sends_is_dropped() {
     net.give(0, 2, &e);
     assert!(!net.known(0, &e.event_id()));
     net.recv_frames(0, member(2), &[notice(chat, &[EventId::new(T0, [6; 16])])]);
-    assert_eq!(net.devs[0].node.t.tasks.len(), 0);
+    // No event is looked up; the device looks up the removal records to answer it (§5.6).
+    assert!(
+        net.devs[0]
+            .node
+            .t
+            .tasks
+            .keys()
+            .all(|k| matches!(k.target, Target::Removal(_)))
+    );
     // The same event relayed by a member that is not removed is accepted.
     net.give(0, 1, &e);
     assert!(net.held(0, &e.event_id()));

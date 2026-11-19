@@ -232,7 +232,7 @@ fn a_sync_object_lookup_returns_a_carrier_of_the_current_result() {
 }
 
 #[test]
-fn operations_of_milestone_four_are_counted_and_not_answered() {
+fn membership_queries_are_answered_and_strangers_ignored() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
     let ops = vec![
@@ -255,11 +255,38 @@ fn operations_of_milestone_four_are_counted_and_not_answered() {
             id: [1; 32],
         },
     ];
-    net.recv_frames(0, member(1), &[query(1, T0, MIN, ops)]);
+    net.recv_frames(0, member(1), &[query(1, T0, MIN, ops.clone())]);
+    let answers: Vec<(u32, ResponseResult)> = net
+        .poll_frames(0)
+        .remove(&member(1))
+        .unwrap()
+        .into_iter()
+        .filter_map(|f| match f {
+            Frame::Response(r) => Some((r.idx, r.result)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(answers.len(), 5);
+    for (idx, r) in &answers {
+        match idx {
+            // The root, to a member of it.
+            0 => assert!(matches!(r, ResponseResult::Event(_))),
+            // The shared epochs: this one.
+            2 => match r {
+                ResponseResult::Page(p) => assert_eq!(p.entries.len(), 1),
+                other => panic!("{other:?}"),
+            },
+            // No keys, no kick, no leave held.
+            _ => assert_eq!(*r, ResponseResult::Status(Status::NotAvailable)),
+        }
+    }
+    // A stranger gets nothing at all for operations without an epoch context.
+    net.recv_frames(
+        0,
+        GossipId::from_bytes([0x77; 32]),
+        &[query(2, T0, MIN, ops)],
+    );
     assert!(net.poll(0).is_empty());
-    let nh = &net.devs[0].node.stats.not_handled;
-    assert_eq!(nh.values().sum::<u64>(), 5);
-    assert_eq!(nh[&NotHandled::KeyQuery], 1);
 }
 
 #[test]
@@ -331,7 +358,7 @@ fn a_notice_with_skipped_entries_is_penalised_and_its_valid_entries_used() {
 }
 
 #[test]
-fn notices_of_other_kinds_are_counted_as_not_handled() {
+fn a_notice_of_a_held_root_or_an_unknown_leave_fetches_nothing() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
     net.recv_frames(
@@ -351,13 +378,29 @@ fn notices_of_other_kinds_are_counted_as_not_handled() {
             skipped: 0,
         })],
     );
-    let nh = &net.devs[0].node.stats.not_handled;
-    assert_eq!(nh[&NotHandled::RootNotice], 1);
-    assert_eq!(nh[&NotHandled::SignedObjectNotice], 1);
+    assert_eq!(net.devs[0].node.t.tasks.len(), 0);
+    // An unknown root is fetched from its announcer.
+    let other = ChatId::from_bytes([0x33; 32]);
+    net.recv_frames(
+        0,
+        member(1),
+        &[Frame::Notice(Notice {
+            entries: vec![Entry {
+                chat_id: other,
+                item: EntryItem::Root,
+            }],
+            skipped: 0,
+        })],
+    );
+    let sent = net.poll_frames(0);
+    let asked = sent[&member(1)].iter().any(|f| {
+        matches!(f, Frame::Query(q) if q.entries.contains(&QueryEntry::Op(QueryOp::ChatById(other))))
+    });
+    assert!(asked);
 }
 
 #[test]
-fn a_leave_request_is_not_handled_yet() {
+fn the_owner_takes_a_leave_request_from_a_member() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
     net.recv_frames(
@@ -367,9 +410,26 @@ fn a_leave_request_is_not_handled_yet() {
             chat_id: chat,
         })],
     );
+    let g = net.devs[0].node.t.group_recs.get(&chat).unwrap();
+    assert!(g.pending_removals.contains_key(&member(1)));
+    assert!(net.poll(0).is_empty());
+    // A stranger's request is ignored.
+    net.recv_frames(
+        0,
+        GossipId::from_bytes([0x77; 32]),
+        &[Frame::LeaveRequest(crate::wire::LeaveRequest {
+            chat_id: chat,
+        })],
+    );
     assert_eq!(
-        net.devs[0].node.stats.not_handled[&NotHandled::LeaveRequest],
+        net.devs[0]
+            .node
+            .t
+            .group_recs
+            .get(&chat)
+            .unwrap()
+            .pending_removals
+            .len(),
         1
     );
-    assert!(net.poll(0).is_empty());
 }

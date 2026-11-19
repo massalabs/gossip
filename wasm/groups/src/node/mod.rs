@@ -40,23 +40,27 @@
 //!
 //! # Scope
 //!
-//! Milestone 3 drives one epoch per group with a fixed member list: the group-level state
-//! (neighbors, lanes, scans) is keyed by the epoch. Roots, signed objects, chat lookups,
-//! shared-chats scans, key queries and leave requests are classified by
-//! [`NotHandled`] in [`Node::not_handled_yet`] and otherwise ignored.
+//! Groups of several epochs (§4, §5): the group-level state (neighbors, lanes, scans) is keyed
+//! by the group, roots and signed objects are received, verified, stored, applied and
+//! relayed ([`group`], [`objects`]), and the owner's and members' actions are in
+//! [`actions`]; the state the interface needs is in [`view`].
 
 pub mod records;
 pub mod timing;
 
+mod actions;
+mod group;
 mod hints;
 mod index;
 mod neighbors;
+mod objects;
 mod outbox;
 mod retrieval;
 mod scan;
 mod serve;
 #[cfg(test)]
 pub(crate) mod tests;
+mod view;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -72,11 +76,13 @@ use crate::store::overlay::Overlay;
 use crate::store::{Storage, StorageError};
 use crate::wire::{self, EventObject, Frame};
 
+pub use actions::{GroupChange, LeaveChoice, SUCCESSOR_MAX_WAIT_MS, SUCCESSOR_QUIET_MS};
 #[cfg(test)]
 pub(crate) use index::CREDIBLE;
 pub use outbox::Outgoing;
 use records::{HintKey, NodeStorage, Tables, Target, TaskKey, TriggerKind, WorkKey};
 use timing::EDGES_PER_TURN;
+pub use view::{Change, GroupSummary, InvitationSummary, MyStatus, TimelineItem, TimelineLine};
 
 /// Why an engine operation failed. Nothing was committed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -93,6 +99,21 @@ pub enum NodeError {
     /// The handle is not in flight.
     #[error("unknown handle")]
     UnknownHandle,
+    /// A root or signed object could not be built.
+    #[error(transparent)]
+    Root(#[from] Error),
+    /// The action needs the owner of the current epoch.
+    #[error("not the owner")]
+    NotOwner,
+    /// The action is not allowed in the group's state.
+    #[error("not allowed")]
+    NotAllowed,
+    /// Competing ends wait for a resolution, or there are none to resolve (§4.9).
+    #[error("fork")]
+    Fork,
+    /// The keys of the identity are not held (§4.3).
+    #[error("unknown keys")]
+    UnknownKeys,
 }
 
 impl From<NodeError> for ChangeError {
@@ -117,39 +138,6 @@ pub struct EpochConfig {
     /// Its removed peers (§10.4): members of this epoch that are not members of the
     /// device's current epoch, computed by the group layer. Empty for a current epoch.
     pub removed: BTreeSet<GossipId>,
-}
-
-/// What the engine does not handle yet (milestone 4): every such input is counted here and
-/// otherwise ignored, in one place ([`Node::not_handled_yet`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum NotHandled {
-    /// A root in an event frame or a response (§4.7).
-    RootBlob,
-    /// A leave, kick or dissolve message in an event frame or a response (§5).
-    SignedObjectBlob,
-    /// A notice entry of kind root (§4.6).
-    RootNotice,
-    /// A notice entry of kind leave, kick or dissolve.
-    SignedObjectNotice,
-    /// A chat lookup (§12.7).
-    ChatLookup,
-    /// A shared-chats scan (§4.11).
-    SharedChatsScan,
-    /// A signed-object lookup (§12.8).
-    SignedObjectLookup,
-    /// A removal lookup (§5.6).
-    RemovalLookup,
-    /// A key query (§12.9).
-    KeyQuery,
-    /// A leave request (§5.4).
-    LeaveRequest,
-    /// A page entry that is not an event of the anchor: another epoch of the group, a root
-    /// or a signed object (§12.1).
-    PageEntry,
-    /// A scan answered "not available": the anchor's root should be announced (§12.1).
-    AnchorRootNotice,
-    /// The signed objects a tip list starts with (§12.1, D.1): leaves and dissolves.
-    ScanSignedObjects,
 }
 
 /// Counters of what the engine did, in memory only (for tests and simulations).
@@ -207,8 +195,31 @@ pub struct Stats {
     pub neighbors_replaced: u64,
     /// Pending work invalidated by pruning or authorization.
     pub invalidated: u64,
-    /// Inputs that milestone 3 does not handle, by kind.
-    pub not_handled: BTreeMap<NotHandled, u64>,
+    /// Roots created by this device as owner.
+    pub roots_created: u64,
+    /// Kicks created.
+    pub kicks_created: u64,
+    /// Signed leaves and declines sent.
+    pub leaves_sent: u64,
+    /// Signed objects verified and stored.
+    pub signed_stored: u64,
+    /// Failed root announcements (§11.8).
+    pub failed_announcements: u64,
+    /// Pauses of a peer's root announcements (§11.8).
+    pub announcer_pauses: u64,
+    /// Kicks or leaves sent to removed peers (§5.6).
+    pub removal_replies: u64,
+    /// Owner-only requests processed (§5.4).
+    pub leave_requests: u64,
+    /// Successors created automatically after leaves or requests (§5.5).
+    pub auto_successors: u64,
+    /// Key answers that did not hash to the requested identity (§12.9).
+    pub wrong_keys: u64,
+    /// Edits in an older epoch sent to a member of both epochs for lack of a neighbor
+    /// (§10.4, D.8).
+    pub old_epoch_fallbacks: u64,
+    /// Root notices sent to a scan responder that did not hold the anchor (§12.1).
+    pub anchor_notices: u64,
 }
 
 /// The result of a sync-object lookup (§12.5).
@@ -230,7 +241,7 @@ pub(crate) struct Cx<'a> {
     pub(crate) edges: usize,
 }
 
-struct EpochEntry {
+pub(crate) struct EpochEntry {
     root: Root,
     accepted: bool,
     state: GroupState,
@@ -268,6 +279,10 @@ pub struct Node {
     /// The index of the tasks, derived from their records.
     tix: index::TaskIndex,
     stats: Stats,
+    /// The groups derived from the epoch records.
+    gx: group::GroupIndex,
+    /// Epochs whose message records this operation erases.
+    erase: BTreeSet<ChatId>,
 }
 
 impl core::fmt::Debug for Node {
@@ -300,6 +315,8 @@ impl Node {
             sessions: BTreeSet::new(),
             tix: index::TaskIndex::default(),
             stats: Stats::default(),
+            gx: group::GroupIndex::default(),
+            erase: BTreeSet::new(),
         };
         node.reload(store)?;
         Ok(node)
@@ -307,6 +324,9 @@ impl Node {
 
     fn reload<S: NodeStorage>(&mut self, store: &S) -> Result<(), NodeError> {
         self.t = Tables::from_records(store.load_node()?);
+        self.erase.clear();
+        self.epochs.clear();
+        self.rebuild_epochs();
         self.hint_lru.clear();
         self.hint_age.clear();
         self.hint_count.clear();
@@ -378,7 +398,7 @@ impl Node {
     pub fn is_neighbor(&self, chat_id: &ChatId, peer: &GossipId) -> bool {
         self.t
             .groups
-            .get(chat_id)
+            .get(&self.group_of(chat_id))
             .is_some_and(|g| g.neighbors.contains(peer))
     }
 
@@ -387,7 +407,7 @@ impl Node {
     pub fn neighbors(&self, chat_id: &ChatId) -> Vec<GossipId> {
         self.t
             .groups
-            .get(chat_id)
+            .get(&self.group_of(chat_id))
             .map(|g| g.neighbors.iter().copied().collect())
             .unwrap_or_default()
     }
@@ -513,8 +533,13 @@ impl Node {
         };
         let outcome = result.and_then(|(v, epochs)| {
             let node = self.t.take_changes();
+            let erase = core::mem::take(&mut self.erase);
             store
-                .commit_batch(records::Batch { epochs, node })
+                .commit_batch(records::Batch {
+                    epochs,
+                    node,
+                    erase,
+                })
                 .map_err(NodeError::from)
                 .map(|()| v)
         });
@@ -545,6 +570,12 @@ impl Node {
     /// # Errors
     ///
     /// A storage failure.
+    ///
+    /// This is the low-level path of milestone 3, kept for tests and tools: the epoch is
+    /// stored as installed in its own group (or the group it already belongs to), with the
+    /// removed peers and group state given added to what the group layer derives. Roots
+    /// received, adopted or created by the engine are installed by it, and every installed
+    /// epoch is installed again from its record by [`Node::open`].
     pub fn install_epoch<S: NodeStorage>(
         &mut self,
         store: &mut S,
@@ -554,22 +585,35 @@ impl Node {
         rng: &mut dyn Randomness,
     ) -> Result<(), NodeError> {
         let chat = config.root.chat_id();
-        self.epochs.insert(
-            chat,
-            Arc::new(EpochEntry {
-                root: config.root,
-                accepted: config.accepted,
-                state: config.group_state,
-                removed: config.removed,
-            }),
-        );
         self.run(store, now, rng, |n, cx| {
-            if n.t.groups.get(&chat).is_none() {
-                n.t.groups.insert(chat, records::GroupSync::default());
+            let group = n.group_of(&chat);
+            let previous = n.t.epochs.get(&chat).cloned();
+            n.t.epochs.insert(
+                chat,
+                records::EpochRecord {
+                    root: config.root,
+                    status: records::EpochStatus::Installed,
+                    group,
+                    parents: previous
+                        .as_ref()
+                        .map(|p| p.parents.clone())
+                        .unwrap_or_default(),
+                    line_time: previous.as_ref().and_then(|p| p.line_time),
+                    received_at: previous.as_ref().map_or(cx.now, |p| p.received_at),
+                    from: previous.as_ref().map_or(n.me, |p| p.from),
+                    removed_override: config.removed,
+                    state_override: (config.group_state != GroupState::Active || !config.accepted)
+                        .then_some(config.group_state),
+                },
+            );
+            n.group_rec_mut(group);
+            n.rebuild_epochs();
+            if n.t.groups.get(&group).is_none() {
+                n.t.groups.insert(group, records::GroupSync::default());
             }
-            n.drop_ineligible_neighbors(chat);
+            n.drop_ineligible_neighbors(group);
             if newly_adopted {
-                n.initial_scans(cx, chat);
+                n.initial_scans(cx, group);
             }
             Ok(())
         })
@@ -633,7 +677,7 @@ impl Node {
             Frame::Notice(n) => self.handle_notice(cx, from, n)?,
             Frame::NeighborRequest(r) => self.handle_neighbor_request(cx, from, r.chat_id),
             Frame::NeighborResponse(r) => self.handle_neighbor_response(cx, from, r),
-            Frame::LeaveRequest(_) => self.not_handled_yet(NotHandled::LeaveRequest),
+            Frame::LeaveRequest(r) => self.handle_leave_request(cx, from, r.chat_id),
         }
         Ok(())
     }
@@ -651,15 +695,36 @@ impl Node {
         now: u64,
         rng: &mut dyn Randomness,
     ) -> Result<(), NodeError> {
+        self.tick_with(store, None, now, rng)
+    }
+
+    /// [`Node::tick`], with the signer of this device's identity when it may sign: the
+    /// owner's automatic successor after leaves and owner-only requests (§5.5) needs it,
+    /// and waits for a tick that has it.
+    ///
+    /// # Errors
+    ///
+    /// A storage failure, or a root that could not be built; nothing was committed.
+    pub fn tick_with<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        signer: Option<&dyn crate::keys::IdentitySigner>,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<(), NodeError> {
         self.run(store, now, rng, |n, cx| {
-            let chats: Vec<ChatId> = n.epochs.keys().copied().collect();
             n.expire_requests(cx.now);
             n.task_timers(cx);
             n.scan_timers(cx);
             n.expire_frozen(cx.now);
-            for chat in &chats {
-                n.maintain_neighbors(cx, *chat);
-                n.run_lanes(cx, *chat);
+            n.group_timers(cx);
+            if let Some(signer) = signer {
+                n.remember_own_keys(cx, signer);
+                n.auto_successors(cx, signer)?;
+            }
+            for group in n.sync_groups() {
+                n.maintain_neighbors(cx, group);
+                n.run_lanes(cx, group);
             }
             n.expire_hints(cx.now);
             Ok(())
@@ -686,6 +751,9 @@ impl Node {
             }
         }
         self.timer_wakeups(now, &mut add);
+        if let Some(t) = self.group_wakeup() {
+            add(t);
+        }
         Ok(at)
     }
 
@@ -939,11 +1007,6 @@ impl Node {
             .is_some_and(|e| e.removed.contains(peer))
     }
 
-    /// Counts an input that milestone 3 does not handle; the one place they all go through.
-    pub(crate) fn not_handled_yet(&mut self, what: NotHandled) {
-        *self.stats.not_handled.entry(what).or_default() += 1;
-    }
-
     // ── Receiving events (§6.3, §10.3, §11.1) ────────────────────────────────
 
     /// Receives an event blob from `from` in an event frame (§13.2).
@@ -956,13 +1019,15 @@ impl Node {
     ) -> Result<retrieval::Answer, NodeError> {
         let event = match wire::decode_event_blob(blob, version) {
             Ok(EventObject::Message(e)) => e,
-            Ok(EventObject::Root(_)) => {
-                self.not_handled_yet(NotHandled::RootBlob);
-                return Ok(retrieval::Answer::Invalid);
+            Ok(EventObject::Root(r)) => return self.receive_root(cx, from, *r, group::Via::Direct),
+            Ok(EventObject::Leave(l)) => {
+                return self.receive_signed(cx, from, records::SignedObject::Leave(l), None);
             }
-            Ok(_) => {
-                self.not_handled_yet(NotHandled::SignedObjectBlob);
-                return Ok(retrieval::Answer::Invalid);
+            Ok(EventObject::Kick(k)) => {
+                return self.receive_signed(cx, from, records::SignedObject::Kick(k), None);
+            }
+            Ok(EventObject::Dissolve(d)) => {
+                return self.receive_signed(cx, from, records::SignedObject::Dissolve(d), None);
             }
             Err(_) => {
                 if self.shares_epoch(&from) {
@@ -995,6 +1060,9 @@ impl Node {
             id: from,
             removed: entry.removed.contains(&from),
         };
+        if entry.removed.contains(&from) {
+            self.removed_contact(cx, chat, from);
+        }
         let received = entry
             .epoch()
             .receive(cx.ov, sender, event.clone(), cx.now)?;
@@ -1025,6 +1093,8 @@ impl Node {
                     if merge != Merge::Lost && entry.epoch().serve(cx.ov, &id, cx.now)?.is_some() {
                         self.disseminate(cx, &entry, &event, Form::Notice, false)?;
                     }
+                    let group = self.group_of(&chat);
+                    self.changed(group, records::ChangeKind::Messages, cx.now);
                 }
                 Ok(retrieval::Answer::Supplied)
             }
@@ -1084,6 +1154,28 @@ impl Node {
             .collect();
         let extra = 2.min(others.len());
         let mut recipients = neighbors;
+        // §10.4, D.8 (choice A): an edit in an older epoch with no neighbor member of it
+        // also goes to one random member of both that epoch and the current one.
+        let group = self.group_of(&chat);
+        if own
+            && !deletion
+            && recipients.is_empty()
+            && let Some(cur) = self.current_epoch(&group).filter(|c| *c != chat)
+            && let Some(cur_root) = self.epochs.get(&cur).map(|e| e.root.clone())
+        {
+            let both: Vec<GossipId> = others
+                .iter()
+                .filter(|m| cur_root.is_member(m))
+                .copied()
+                .collect();
+            if !both.is_empty() {
+                let pick = both[uniform_below(cx.rng, both.len())];
+                others.retain(|m| *m != pick);
+                recipients.push(pick);
+                self.stats.old_epoch_fallbacks += 1;
+            }
+        }
+        let extra = extra.min(others.len());
         for i in 0..extra {
             let j = i + uniform_below(cx.rng, others.len() - i);
             others.swap(i, j);
@@ -1139,6 +1231,9 @@ impl Node {
                     responses: timing::Bucket::full(timing::RESPONSE_BURST, 0),
                     version_notices: BTreeMap::new(),
                     version: None,
+                    failed_announcements: Vec::new(),
+                    paused_until: 0,
+                    pause_ms: 0,
                 },
             );
         }

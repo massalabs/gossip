@@ -135,7 +135,7 @@ impl Node {
             );
             self.stats.tasks_created += 1;
         }
-        let eligible = from.is_some_and(|(p, _)| self.may_receive(&key.chat_id, &p, false));
+        let eligible = from.is_some_and(|(p, _)| self.task_candidate_ok(&key, &p));
         let now = cx.now;
         let task = self.t.tasks.get_mut(&key).expect("present");
         if let Some((peer, kind)) = from.filter(|_| eligible) {
@@ -226,6 +226,62 @@ impl Node {
         }
     }
 
+    /// Whether `peer` may be a candidate of the task `key`: a member of its epoch that may
+    /// receive anything of it; for a root, any announcer; for a parent, a member of the
+    /// held root whose parent is looked up.
+    pub(crate) fn task_candidate_ok(&self, key: &TaskKey, peer: &GossipId) -> bool {
+        if *peer == self.me {
+            return false;
+        }
+        match key.target {
+            Target::Root => true,
+            Target::Parent(_) => self
+                .held_root(&key.chat_id)
+                .is_some_and(|r| r.is_member(peer)),
+            _ => self.may_receive(&key.chat_id, peer, false),
+        }
+    }
+
+    /// The peers a task may ask (§11.2, §11.8): the members of its epoch that may receive
+    /// anything of it; for a root, the peers that announced it; for a parent, the members of
+    /// the held child root.
+    fn task_pool(&self, key: &TaskKey, task: &Task) -> Vec<GossipId> {
+        match key.target {
+            Target::Root => task
+                .candidates
+                .iter()
+                .filter(|(_, c)| c.trigger.is_some())
+                .map(|(p, _)| *p)
+                .filter(|p| *p != self.me)
+                .collect(),
+            Target::Parent(_) => self
+                .held_root(&key.chat_id)
+                .map(|r| {
+                    r.members()
+                        .iter()
+                        .filter(|m| **m != self.me)
+                        .copied()
+                        .collect()
+                })
+                .unwrap_or_default(),
+            _ => self.eligible(&key.chat_id),
+        }
+    }
+
+    /// A parent lookup ended, answered or exhausted: the invitation no longer waits for it
+    /// (§4.8).
+    fn parent_lookup_over(&mut self, key: &TaskKey, now: u64) {
+        if let Target::Parent(c) = key.target
+            && let Some(r) = self.t.epochs.get_mut(&key.chat_id)
+            && let super::records::EpochStatus::Invitation(inv) = &mut r.status
+        {
+            inv.lookups.remove(&c);
+            if self.prompt_due(&key.chat_id, now) {
+                self.changed(key.chat_id, super::records::ChangeKind::Invitation, now);
+            }
+        }
+    }
+
     /// `peer` supplied the item of `(chat, target)`: the task resolves, even if the result
     /// then loses (§11.1), and the supply raises the peer's score (§11.8).
     pub(crate) fn supplied(&mut self, peer: &GossipId, chat: ChatId, target: Target) {
@@ -263,10 +319,15 @@ impl Node {
         }
         if answer == Answer::Supplied {
             match key.target {
-                Target::Event(_) => self.supplied(&peer, key.chat_id, key.target),
                 Target::SyncObj(_) => {
                     // The event's ID is reported by the caller, which knows it.
                     self.reward(&peer);
+                }
+                // A key answer completes its task; a removal lookup may still bring a second
+                // record under the same entry, which is received on its own.
+                _ => {
+                    self.parent_lookup_over(&key, cx.now);
+                    self.supplied(&peer, key.chat_id, key.target);
                 }
             }
             return;
@@ -507,9 +568,12 @@ impl Node {
     /// said it did not have the event, or never answered, or scores below an unmeasured peer.
     /// A sync-object lookup, asked for by the user and announced by no one, is credible.
     pub(crate) fn priority(&self, key: &TaskKey) -> u64 {
+        // A sync-object lookup, asked for by the user and announced by no one, is credible,
+        // and so are the membership tasks other than a root: what they look for is bounded
+        // by the roots held (deterministic IDs), not by what a peer announces.
         let floor = match key.target {
-            Target::SyncObj(_) => CREDIBLE,
-            Target::Event(_) => 0,
+            Target::Event(_) | Target::Root => 0,
+            _ => CREDIBLE,
         };
         floor.max(self.t.tasks.get(key).map_or(0, |task| {
             task.candidates
@@ -526,7 +590,20 @@ impl Node {
     fn pause(&mut self, key: TaskKey) {
         match key.target {
             Target::SyncObj(_) => self.complete_lookup(key, LookupResult::NotFound),
-            Target::Event(_) => {
+            Target::Parent(c) => {
+                // The lookup is over for the prompt; the task stays paused and is renewed by
+                // new evidence (§4.8: it keeps running in the background).
+                if let Some(r) = self.t.epochs.get_mut(&key.chat_id)
+                    && let super::records::EpochStatus::Invitation(inv) = &mut r.status
+                {
+                    inv.lookups.remove(&c);
+                }
+                if let Some(t) = self.t.tasks.get_mut(&key) {
+                    t.run = Run::Paused;
+                    self.stats.tasks_paused += 1;
+                }
+            }
+            _ => {
                 if let Some(t) = self.t.tasks.get_mut(&key) {
                     t.run = Run::Paused;
                     self.stats.tasks_paused += 1;
@@ -558,7 +635,7 @@ impl Node {
         // Responsive candidates that cannot be asked now: outstanding or at their limit.
         let mut responsive_later: Vec<GossipId> = Vec::new();
         let mut responsive_until = u64::MAX;
-        for peer in self.eligible(&key.chat_id) {
+        for peer in self.task_pool(key, task) {
             let c = task
                 .candidates
                 .get(&peer)
@@ -722,7 +799,7 @@ impl Node {
     pub(crate) fn reconnected_tasks(&mut self, cx: &mut Cx<'_>, peer: GossipId) {
         let keys: Vec<TaskKey> = self.t.tasks.keys().copied().collect();
         for key in keys {
-            let eligible = self.may_receive(&key.chat_id, &peer, false);
+            let eligible = self.task_candidate_ok(&key, &peer);
             let task = self.t.tasks.get(&key).expect("listed").clone();
             match task.run {
                 Run::Active {

@@ -19,9 +19,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ids::{ChatId, EventId, GossipId, RequestId, ScanId, SyncObjId};
+use crate::epoch::GroupState;
+use crate::ids::{ChatId, EventId, GossipId, ParentCommitment, RequestId, ScanId, SyncObjId};
+use crate::root::Root;
+use crate::signed::{Dissolve, Kick, Leave};
 use crate::store::{Changes, Storage, StorageError};
-use crate::wire::{Entry, QueryOp, Status};
+use crate::wire::{Entry, EntryItem, QueryOp, SignedKind, Status};
 
 use super::timing::Bucket;
 
@@ -34,6 +37,26 @@ pub enum Target {
     Event(EventId),
     /// A sync-object lookup (§12.5).
     SyncObj(SyncObjId),
+    /// A root announced or listed by its ID, the task key's `chat_id` (§4.6, §11.8, §12.7).
+    Root,
+    /// The parent of a held root, the task key's `chat_id`, by one of its commitments (§4.8,
+    /// §12.7).
+    Parent(ParentCommitment),
+    /// A signed object naming the task key's epoch, by kind and ID (§11.8, §12.8).
+    Object(SignedKind, [u8; 32]),
+    /// The removal records of a member in the task key's epoch (§5.6, §12.8).
+    Removal(GossipId),
+    /// The keys of a member of the task key's epoch (§4.3, §12.9).
+    Keys(GossipId),
+}
+
+impl Target {
+    /// Whether the target is a root or a signed object, which do not expire (§11.8), or a
+    /// key: none of them has a lookup deadline.
+    #[must_use]
+    pub fn is_membership(&self) -> bool {
+        !matches!(self, Target::Event(_) | Target::SyncObj(_))
+    }
 }
 
 /// The key of a retrieval task: one per `(chat_id, eventId)` or `(chat_id, syncObjId)`.
@@ -203,7 +226,7 @@ impl Task {
                     ),
                 )
             }
-            Target::SyncObj(_) => None,
+            _ => None,
         }
     }
 }
@@ -274,9 +297,14 @@ pub struct FrozenScan {
 pub enum Purpose {
     /// A retrieval task.
     Task(TaskKey),
-    /// The scan of the group anchored at this epoch with the peer.
+    /// The scan of the group with this key with the peer, anchored at its current epoch;
+    /// [`SHARED_SCAN`] for a shared-chats scan (§4.11).
     Scan(ChatId),
 }
+
+/// The group key of a shared-chats scan (§4.11, §12.6), in the requester's scan table and in
+/// the responder's frozen lists: no epoch has an all-zero ID.
+pub const SHARED_SCAN: ChatId = ChatId::from_bytes([0; 32]);
 
 /// One entry of a sent query.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -382,6 +410,12 @@ pub struct PeerRecord {
     pub version_notices: BTreeMap<u64, u64>,
     /// The highest version it said it supports, from its version notice.
     pub version: Option<u64>,
+    /// When its recent failed root announcements happened (§11.8).
+    pub failed_announcements: Vec<u64>,
+    /// Its root notices and shared-chats pages are not acted on before this instant.
+    pub paused_until: u64,
+    /// The length of its last pause (it doubles on each repeat, up to 24 h).
+    pub pause_ms: u64,
 }
 
 // ── Hints (§10.3) ────────────────────────────────────────────────────────────
@@ -425,6 +459,23 @@ pub enum AnswerOp {
     },
     /// A status decided on receipt.
     Status(Status),
+    /// A root (§12.7), resolved on receipt.
+    Root {
+        /// The root's ID.
+        chat_id: ChatId,
+    },
+    /// A signed object (§12.8).
+    Object {
+        /// The epoch it names.
+        chat_id: ChatId,
+        /// The object.
+        item: EntryItem,
+    },
+    /// A key answer (§12.9).
+    Keys {
+        /// The subject.
+        gossip_id: GossipId,
+    },
 }
 
 /// One item of pending plaintext work for a peer.
@@ -478,6 +529,29 @@ pub enum Work {
     },
     /// The version notice of §13.8.
     VersionNotice,
+    /// A root or a signed object sent in full (§4.6, §5.3, §5.6, §5.8), decided again at
+    /// assembly from the held record.
+    Object {
+        /// The epoch it names (the root's own ID for a root).
+        chat_id: ChatId,
+        /// The object.
+        item: EntryItem,
+    },
+    /// A notice entry of a root or a signed object (§4.6, §10.2).
+    ObjectNotice {
+        /// The epoch it names.
+        chat_id: ChatId,
+        /// The object.
+        item: EntryItem,
+    },
+    /// An event blob kept as bytes: the sends that must leave after the group is closed on
+    /// this device (a signed leave or decline, a handover before leaving, §5.3, §5.7).
+    Blob(Vec<u8>),
+    /// The owner-only request (§5.4, §13.6).
+    LeaveRequest {
+        /// The requester's current epoch.
+        chat_id: ChatId,
+    },
 }
 
 /// Engine-wide counters that must survive restarts.
@@ -558,6 +632,15 @@ macro_rules! tables {
 }
 
 tables! {
+    epochs: ChatId => EpochRecord,
+    group_recs: ChatId => GroupRecord,
+    signed: SignedKey => SignedRecord,
+    keys: GossipId => Vec<u8>,
+    markers: ChatId => Marker,
+    replies: (ChatId, GossipId) => ReplyCount,
+    unverified: (ChatId, GossipId) => PendingLeave,
+    held_roots: ChatId => HeldRoot,
+    events: (ChatId, ChangeKind) => u64,
     peers: GossipId => PeerRecord,
     groups: ChatId => GroupSync,
     tasks: TaskKey => Task,
@@ -662,13 +745,17 @@ pub struct Batch {
     pub epochs: Vec<Changes>,
     /// The node records.
     pub node: NodeChanges,
+    /// Epochs whose message records (rows, edges, objects) are erased, after `epochs` is
+    /// applied: a closed group (§14.2), a group waiting for a kick (§5.4) or dissolved with
+    /// "Dissolve & Delete" (§5.8).
+    pub erase: BTreeSet<ChatId>,
 }
 
 impl Batch {
     /// Whether nothing is to be written.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.node.is_empty() && self.epochs.iter().all(Changes::is_empty)
+        self.node.is_empty() && self.epochs.iter().all(Changes::is_empty) && self.erase.is_empty()
     }
 }
 
@@ -687,4 +774,199 @@ pub trait NodeStorage: Storage {
     ///
     /// A backend failure, in which case nothing was applied.
     fn commit_batch(&mut self, batch: Batch) -> Result<(), StorageError>;
+}
+
+// ── Groups, epochs and signed objects (§4, §5, §14.1) ────────────────────────
+
+/// An invitation not answered yet (§4.8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invitation {
+    /// When the root was received: the prompt waits at most `PROMPT_DELAY` after it.
+    pub received_at: u64,
+    /// The commitments still looked up (§4.8 parent lookup).
+    pub lookups: BTreeSet<ParentCommitment>,
+    /// The members that answered "not available" to the parent lookup.
+    pub not_available: BTreeSet<GossipId>,
+    /// The epoch was closed on this device before (§14.2): the prompt warns.
+    pub closed_before: bool,
+    /// The held epoch in a kicked or dissolved group that the root continues, if any: an
+    /// invitation to rejoin (§4.8 case 4), accepted into that group (§5.10).
+    pub rejoins: Option<ChatId>,
+}
+
+/// The local status of an epoch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EpochStatus {
+    /// Installed: accepted, adopted automatically, or kept in a group waiting for a kick.
+    Installed,
+    /// An invitation not answered yet; frames for it other than its root are dropped.
+    Invitation(Invitation),
+}
+
+/// The epoch record of §14.1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpochRecord {
+    /// The root, with its version, fields and signature.
+    pub root: Root,
+    /// Installed or an invitation.
+    pub status: EpochStatus,
+    /// The key of its group: the ID of an epoch of the group (local, never sent).
+    pub group: ChatId,
+    /// The held epochs this root continues, matched and with verified authority (§4.7).
+    pub parents: Vec<ChatId>,
+    /// The time `T` of its line, computed once at adoption (§7.5).
+    pub line_time: Option<u64>,
+    /// When it was received (local).
+    pub received_at: u64,
+    /// The immediate peer that delivered it ("received from", §4.8).
+    pub from: GossipId,
+    /// Removed peers set by hand ([`super::Node::install_epoch`]), added to the derived ones.
+    pub removed_override: BTreeSet<GossipId>,
+    /// A group state set by hand ([`super::Node::install_epoch`]).
+    pub state_override: Option<GroupState>,
+}
+
+/// The state of a group (§14.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupStatus {
+    /// Normal.
+    Active,
+    /// Read-only after a kick naming the current epoch (§5.6).
+    Removed {
+        /// The epoch the kick names.
+        epoch: ChatId,
+        /// When the kick was received.
+        at: u64,
+    },
+    /// Read-only after receiving its own signed leave for the current epoch (D.2, choice A).
+    Left {
+        /// The epoch the leave names.
+        epoch: ChatId,
+        /// When it was received.
+        at: u64,
+    },
+    /// Waiting for a kick after "Ask to be kicked" (§5.4).
+    Waiting {
+        /// When the request was first sent.
+        since: u64,
+        /// When it was last sent.
+        last_request: u64,
+    },
+    /// Dissolved by its owner (§5.8).
+    Dissolved {
+        /// The dissolved epoch.
+        epoch: ChatId,
+        /// "Dissolve & Delete".
+        must_delete: bool,
+        /// When the dissolve message was received.
+        at: u64,
+    },
+}
+
+/// The group record of §14.1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupRecord {
+    /// Its state.
+    pub status: GroupStatus,
+    /// The owner whose line the device follows (§5.9): the new owner of the first handover
+    /// it adopted from the owner it followed.
+    pub followed: Option<GossipId>,
+    /// The owners that handed the group over on the followed line (§5.9).
+    pub deposed: BTreeSet<GossipId>,
+    /// Groups linked by hand (§5.10), by key.
+    pub links: BTreeSet<ChatId>,
+    /// The local name (§5.11).
+    pub local_name: Option<String>,
+    /// Owner side: members whose live leave or owner-only request is held, with when it
+    /// arrived (§5.5).
+    pub pending_removals: BTreeMap<GossipId, u64>,
+    /// Junctions after being added back (§5.10): when the kick was received, and the time
+    /// `T` of the root that added the device back.
+    pub junctions: Vec<(u64, u64)>,
+}
+
+/// The key of a signed object: the epoch it names, its kind and its ID.
+pub type SignedKey = (ChatId, SignedKind, [u8; 32]);
+
+/// A signed object (§5.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignedObject {
+    /// A signed leave.
+    Leave(Leave),
+    /// A kick.
+    Kick(Kick),
+    /// A dissolve message.
+    Dissolve(Dissolve),
+}
+
+/// A verified signed object, kept as long as the root it names (§5.3, §5.6, §14.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedRecord {
+    /// The object.
+    pub object: SignedObject,
+    /// When it was received: where its line is placed (§7.5).
+    pub received_at: u64,
+}
+
+/// A closed-chat or dissolved marker (§14.2): a chat ID only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Marker {
+    /// A closed epoch: roots that continue it are rejected (§4.8 case 3).
+    Closed,
+    /// Left by "Dissolve & Delete": every frame of the epoch is dropped (§14.2).
+    Dissolved,
+}
+
+/// The answers with a removal record sent to a removed peer in an epoch, per day (§5.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplyCount {
+    /// The start of the current day window.
+    pub since: u64,
+    /// Answers sent in it.
+    pub count: u8,
+    /// The peer contacted this device since the last answer and is still owed one.
+    pub owed: bool,
+}
+
+/// A signed leave waiting for the leaver's keys (§5.3: the keys are not carried).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingLeave {
+    /// The leave.
+    pub leave: Leave,
+    /// Who supplied it.
+    pub from: GossipId,
+    /// When.
+    pub at: u64,
+}
+
+/// A handover root whose parent the device does not hold yet (§4.7), kept while the parent
+/// is looked up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldRoot {
+    /// The root.
+    pub root: Root,
+    /// Who delivered it.
+    pub from: GossipId,
+    /// When.
+    pub at: u64,
+}
+
+/// What changed, for the caller ([`super::Node::take_changes`]): coalesced per group and
+/// kind until taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ChangeKind {
+    /// An invitation arrived or its prompt became due.
+    Invitation,
+    /// The group appeared on this device (founded, accepted, or adopted).
+    Joined,
+    /// Its member list, name or owner changed.
+    Membership,
+    /// Its messages changed.
+    Messages,
+    /// The device was removed, left, or the group was dissolved: it is read-only.
+    ReadOnly,
+    /// The owner holds competing ends to resolve (§4.9).
+    Fork,
+    /// The group was closed and erased on this device.
+    Closed,
 }

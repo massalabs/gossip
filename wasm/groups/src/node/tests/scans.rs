@@ -428,10 +428,13 @@ fn not_available_ends_the_scan_and_asks_for_the_root_notice() {
         &s,
         ResponseResult::Status(Status::NotAvailable),
     );
-    assert_eq!(
-        net.devs[0].node.stats.not_handled[&NotHandled::AnchorRootNotice],
-        1
+    // The responder is sent a root notice of the anchor.
+    assert_eq!(net.devs[0].node.stats.anchor_notices, 1);
+    let sent = net.poll_frames(0);
+    let notice = sent[&member(1)].iter().any(
+        |f| matches!(f, Frame::Notice(n) if n.entries.iter().any(|e| e.item == EntryItem::Root)),
     );
+    assert!(notice);
     // Legitimate: no penalty.
     assert_eq!(net.devs[0].node.score(&member(1)), 500_000);
 }

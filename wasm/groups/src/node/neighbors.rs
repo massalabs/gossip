@@ -31,15 +31,16 @@ impl Node {
         self.t.groups.get_mut(&chat).expect("inserted")
     }
 
-    /// The number of neighbors the group of `chat` seeks: `min(10, memberCount − 1)`,
-    /// never counting this device (its removed peers are not members of a current epoch).
+    /// The number of neighbors the group `chat` seeks: `min(10, memberCount − 1)`, where
+    /// `memberCount` is that of its current epoch, never counting this device.
     pub(crate) fn neighbor_target(&self, chat: &ChatId) -> usize {
-        MAX_NEIGHBORS.min(self.eligible(chat).len())
+        MAX_NEIGHBORS.min(self.eligible(&self.cur(chat)).len())
     }
 
-    /// Drops the neighbors that are no longer eligible members (§10.1).
+    /// Drops the neighbors that are no longer eligible members of the current epoch of the
+    /// group `chat` (§10.1).
     pub(crate) fn drop_ineligible_neighbors(&mut self, chat: ChatId) {
-        let eligible = self.eligible(&chat);
+        let eligible = self.eligible(&self.cur(&chat));
         let Some(g) = self.t.groups.get(&chat) else {
             return;
         };
@@ -58,7 +59,7 @@ impl Node {
         self.drop_ineligible_neighbors(chat);
         let now = cx.now;
         let target = self.neighbor_target(&chat);
-        let eligible = self.eligible(&chat);
+        let eligible = self.eligible(&self.cur(&chat));
         let Some(g) = self.t.groups.get(&chat).cloned() else {
             return;
         };
@@ -107,8 +108,9 @@ impl Node {
         if g != *self.t.groups.get(&chat).expect("present") {
             self.t.groups.insert(chat, g);
         }
+        let current = self.cur(&chat);
         for peer in asks {
-            self.queue_work(peer, Work::NeighborRequest { chat_id: chat });
+            self.queue_work(peer, Work::NeighborRequest { chat_id: current });
         }
     }
 
@@ -119,7 +121,7 @@ impl Node {
             return false;
         };
         g.neighbors.len() + g.asked.len() < self.neighbor_target(chat)
-            && self.eligible(chat).iter().any(|p| {
+            && self.eligible(&self.cur(chat)).iter().any(|p| {
                 !g.neighbors.contains(p) && !g.asked.contains_key(p) && !g.cooldown.contains_key(p)
             })
     }
@@ -134,7 +136,13 @@ impl Node {
         from: GossipId,
         chat: ChatId,
     ) {
-        let Some(entry) = self.epochs.get(&chat) else {
+        let r_chat = chat;
+        let Some(entry) = self.epochs.get(&chat).filter(|_| {
+            matches!(
+                self.group_status(&chat),
+                super::records::GroupStatus::Active
+            )
+        }) else {
             if self.shares_epoch(&from) {
                 self.queue_work(
                     from,
@@ -150,12 +158,27 @@ impl Node {
         if !entry.root.is_member(&from) || from == self.me {
             return;
         }
-        // A removed peer is no member of a current epoch: declined without suggestions.
+        // A removed peer is no member of a current epoch: declined without suggestions, and
+        // told of its removal (§5.6).
         if self.removed_peer(&chat, &from) {
+            self.removed_contact(cx, chat, from);
             self.queue_work(
                 from,
                 Work::NeighborResponse {
                     chat_id: chat,
+                    accepted: false,
+                    suggestions: Vec::new(),
+                },
+            );
+            return;
+        }
+        // The request names the requester's current epoch; the relation is the group's.
+        let chat = self.group_of(&chat);
+        if !self.may_receive(&self.cur(&chat), &from, false) {
+            self.queue_work(
+                from,
+                Work::NeighborResponse {
+                    chat_id: r_chat,
                     accepted: false,
                     suggestions: Vec::new(),
                 },
@@ -178,7 +201,7 @@ impl Node {
         self.queue_work(
             from,
             Work::NeighborResponse {
-                chat_id: chat,
+                chat_id: r_chat,
                 accepted,
                 suggestions,
             },
@@ -194,10 +217,11 @@ impl Node {
         from: GossipId,
         r: NeighborResponse,
     ) {
-        let chat = r.chat_id;
-        if !self.epochs.contains_key(&chat) || !self.may_receive(&chat, &from, false) {
+        let epoch = r.chat_id;
+        if !self.epochs.contains_key(&epoch) || !self.may_receive(&epoch, &from, false) {
             return;
         }
+        let chat = self.group_of(&epoch);
         if !self
             .t
             .groups
@@ -207,7 +231,7 @@ impl Node {
             return;
         }
         self.answered(&from);
-        let eligible = self.eligible(&chat);
+        let eligible = self.eligible(&self.cur(&chat));
         let now = cx.now;
         let g = self.group_mut(chat);
         g.asked.remove(&from);
@@ -239,7 +263,7 @@ impl Node {
     /// by repeated draws proportional to the score, uniform when every remaining weight is
     /// zero (§10.1).
     fn suggestions(&mut self, cx: &mut Cx<'_>, chat: ChatId, requester: GossipId) -> Vec<GossipId> {
-        let eligible = self.eligible(&chat);
+        let eligible = self.eligible(&self.cur(&chat));
         let (neighbors, others): (Vec<GossipId>, Vec<GossipId>) = eligible
             .into_iter()
             .filter(|p| *p != requester)

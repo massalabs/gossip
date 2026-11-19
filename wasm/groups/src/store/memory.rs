@@ -283,6 +283,9 @@ impl NodeStorage for MemoryStorage {
         for changes in batch.epochs {
             self.apply(changes);
         }
+        for chat in &batch.erase {
+            self.epochs.remove(chat);
+        }
         self.node.apply(batch.node);
         self.commits += 1;
         Ok(())
