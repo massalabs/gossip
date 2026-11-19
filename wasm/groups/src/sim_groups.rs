@@ -340,6 +340,9 @@ struct Sim {
     former_roots: BTreeSet<ChatId>,
     /// Dissolve & Delete in this seed.
     dissolve_delete: bool,
+    /// Roots of a new owner naming the former owner's second group: forbidden on a device
+    /// that holds that group; a valid successor with one unmatched parent elsewhere.
+    takeover_roots: BTreeSet<ChatId>,
 }
 
 fn below(rng: &mut TestRng, n: u64) -> u64 {
@@ -446,6 +449,7 @@ impl Sim {
             forged_objects: Vec::new(),
             former_roots: BTreeSet::new(),
             dissolve_delete: seed % 8 == 3,
+            takeover_roots: BTreeSet::new(),
         };
         for d in 0..n {
             sim.boot(d);
@@ -1510,7 +1514,7 @@ impl Sim {
             &b.secret.dsa_signing_key,
             bytes(&mut self.rng),
         ) {
-            self.forged.insert(r.chat_id());
+            self.takeover_roots.insert(r.chat_id());
             self.counters.takeovers += 1;
             let blob = wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap();
             for m in &members {
@@ -1677,7 +1681,22 @@ impl Sim {
             let node = self.node(d);
             // Nothing forbidden is accepted: no forged root is installed, and every installed
             // root of the group is legitimate.
+            let holds_second = self.second.is_some_and(|g2| {
+                node.tables()
+                    .epochs
+                    .get(&g2)
+                    .is_some_and(|r| r.status == EpochStatus::Installed)
+            });
             for (chat, rec) in node.tables().epochs.iter() {
+                if self.takeover_roots.contains(chat) {
+                    assert!(
+                        !(holds_second
+                            && rec.status == EpochStatus::Installed
+                            && rec.parents.len() > 1),
+                        "device {d} attached the second group to a takeover root"
+                    );
+                    continue;
+                }
                 assert!(
                     !(self.forged.contains(chat) && rec.status == EpochStatus::Installed),
                     "device {d} installed a forged root"
