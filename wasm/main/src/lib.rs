@@ -12,6 +12,10 @@
 
 use wasm_bindgen::prelude::*;
 
+mod group_chats;
+
+pub use group_chats::GroupsNode;
+
 // Set up panic hook for better error messages in the browser
 #[wasm_bindgen(start)]
 pub fn start() {
