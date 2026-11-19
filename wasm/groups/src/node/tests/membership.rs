@@ -3009,3 +3009,37 @@ fn an_unanswered_founding_root_joins_the_accepted_root_it_leads_to() {
     assert_eq!(groups.len(), 1, "{groups:?}");
     assert_eq!(groups[0].current, e2);
 }
+
+/// Regression (simulation, code at 7e8da430, `GROUPS_MEMBERS_SEED=189`): a new owner's
+/// resolution named its own epoch and a former owner's epoch that this device held without
+/// the handover that gives the authority over it. The root failed as a whole (D.69), so the
+/// device showed it as a separate conversation beside the line its owner continued directly,
+/// and followed the older end.
+#[test]
+fn a_root_continues_its_owners_epoch_beside_a_parent_it_has_no_authority_over() {
+    let mut net = MNet::new(3, true);
+    let g1 = net.create(1, &[0, 2]);
+    let g2 = net.create(0, &[1, 2]);
+    net.exchange();
+    for d in 0..3 {
+        net.accept_all(d);
+    }
+    net.run(MIN);
+    let params = crate::root::RootParams {
+        name: "next".into(),
+        members: (0..3).map(gid).collect(),
+        group_secret: crate::ids::GroupSecret::from_bytes([4; 32]),
+        owner: ident(1).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
+        created_at: net.now,
+    };
+    let r = Root::create_successor(params, &[g1, g2], &ident(1).secret.dsa_signing_key, [1; 32])
+        .unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(r.clone()))).unwrap();
+    net.recv_frames_m(2, 1, &[Frame::Event(blob)]);
+    assert_eq!(net.current(2, &g1), Some(r.chat_id()));
+    let s2 = net.summary(2, &g2).unwrap();
+    assert_eq!((s2.current, s2.owner), (g2, gid(0)));
+    assert_ne!(net.summary(2, &g1).unwrap().group, s2.group);
+}
