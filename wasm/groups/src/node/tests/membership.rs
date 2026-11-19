@@ -1488,3 +1488,45 @@ fn a_member_away_through_several_epochs_learns_its_removal() {
     net.run(5 * MIN);
     assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=40`): a
+/// member restored from a backup older than an epoch it then left is behind its own leave:
+/// the leave names a later epoch than the one it acts in, and it never learnt it had left.
+#[test]
+fn a_member_restored_behind_its_leave_learns_it() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[3].store.clone();
+    let e2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("x".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            e2,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    assert!(!net.summary(0, &g).unwrap().members.contains(&gid(3)));
+    net.devs[3].store = backup;
+    net.restart(3);
+    assert_eq!(net.current(3, &g), Some(g));
+    net.say(3, &g, "back");
+    net.run(5 * MIN);
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Left);
+}
