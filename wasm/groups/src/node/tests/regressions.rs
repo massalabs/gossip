@@ -1502,3 +1502,31 @@ fn an_expired_after_the_deadline_is_recognised_for_a_margin() {
     let r = super::retrieval::sent_lookups(&mut net, 0);
     assert_eq!(r.len(), 1, "resent");
 }
+
+/// §2.2: a valid event in a response that can no longer be correlated (past its request's
+/// deadline, or for a request this device does not know) is processed as an event frame
+/// would be; correlation only serves the retry state.
+#[test]
+fn an_uncorrelated_response_still_supplies_its_event() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let e = net.event(T0, 5, &[], 1);
+    net.recv_frames(0, member(1), &[notice(chat, &[e.event_id()])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    net.now = super::super::timing::deadline(q[0].sent_at, q[0].ttl) + 2 * HOUR;
+    net.tick(0);
+    super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Event(blob(&e)));
+    assert!(net.held(0, &e.event_id()));
+    // A response to a request never sent.
+    let f = net.event(T0, 6, &[], 2);
+    net.recv_frames(
+        0,
+        member(2),
+        &[Frame::Response(Response {
+            request_id: Some(RequestId::from_bytes([9; crate::constants::REQUEST_ID_SIZE])),
+            idx: 0,
+            result: ResponseResult::Event(blob(&f)),
+        })],
+    );
+    assert!(net.held(0, &f.event_id()));
+}
