@@ -742,7 +742,10 @@ impl Node {
     /// (`send_owed`).
     pub(crate) fn root_served_to(&self, chat: &ChatId, peer: &GossipId) -> bool {
         self.serves(chat)
-            && self.epochs.get(chat).is_some_and(|e| e.root.is_member(peer))
+            && self
+                .epochs
+                .get(chat)
+                .is_some_and(|e| e.root.is_member(peer))
             && !self.removed_peer(chat, peer)
     }
 
