@@ -81,6 +81,67 @@ impl fmt::Debug for SignatureBytes {
     }
 }
 
+/// What signs with an identity's ML-DSA-65 key (§4.1, §5.1, Appendix A).
+///
+/// The engine never holds key material: it asks a signer, which the caller supplies for the
+/// operations that sign (creating a root, a kick, a dissolve message or a leave). The signer
+/// signs exactly the 32-byte ID it is given, under the given signing context, with the given
+/// signing randomness.
+pub trait Signer {
+    /// The ML-DSA-65 signature of `id` under `context`.
+    fn sign_id(
+        &self,
+        context: &'static str,
+        id: &[u8; 32],
+        randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+    ) -> SignatureBytes;
+}
+
+impl Signer for SigningKey {
+    fn sign_id(
+        &self,
+        context: &'static str,
+        id: &[u8; 32],
+        randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+    ) -> SignatureBytes {
+        sign_id(self, context, id, randomness)
+    }
+}
+
+/// A signer that also knows the identity's public keys: what the engine needs to create a
+/// root (the owner field) or to recognise its own leave.
+pub trait IdentitySigner: Signer {
+    /// The identity's complete public keys.
+    fn public_keys(&self) -> &UserPublicKeys;
+}
+
+/// An [`IdentitySigner`] over a signing key held by the caller (tests, tools, or a caller
+/// that keeps its key in memory). Production callers may implement the trait over a key
+/// kept elsewhere.
+pub struct KeySigner<'a> {
+    /// The identity's public keys.
+    pub public: UserPublicKeys,
+    /// Its ML-DSA-65 signing key.
+    pub signing_key: &'a SigningKey,
+}
+
+impl Signer for KeySigner<'_> {
+    fn sign_id(
+        &self,
+        context: &'static str,
+        id: &[u8; 32],
+        randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+    ) -> SignatureBytes {
+        sign_id(self.signing_key, context, id, randomness)
+    }
+}
+
+impl IdentitySigner for KeySigner<'_> {
+    fn public_keys(&self) -> &UserPublicKeys {
+        &self.public
+    }
+}
+
 /// Signs a 32-byte ID under a signing context. The randomness is supplied by the caller.
 pub(crate) fn sign_id(
     signing_key: &SigningKey,
