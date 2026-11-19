@@ -2,6 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { GroupLine } from '@massalabs/gossip-sdk';
 import { lineTexts } from '../../utils/groupTimeline';
+import { useAccountStore } from '../../stores/accountStore';
 
 interface GroupTimelineLineProps {
   line: GroupLine;
@@ -14,7 +15,8 @@ const GroupTimelineLine: React.FC<GroupTimelineLineProps> = ({
   memberName,
 }) => {
   const { t } = useTranslation('groups');
-  const texts = lineTexts(line, memberName, t);
+  const me = useAccountStore(st => st.userProfile?.userId);
+  const texts = lineTexts(line, memberName, t, me);
   if (texts.length === 0) return null;
   return (
     <div className="flex justify-center my-3 px-6" data-testid="group-line">

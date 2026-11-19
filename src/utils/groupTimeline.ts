@@ -31,43 +31,82 @@ export function messageText(
   }
 }
 
-/** The texts of a timeline line, in the order they are shown. */
+/**
+ * The texts of a timeline line, in the order they are shown. `me` is this
+ * account: a line where it acts or is acted on has its own second-person
+ * string, never "You" put in a third-person sentence.
+ */
 export function lineTexts(
   line: GroupLine,
   memberName: (userId: string) => string,
-  t: (key: string, o?: Record<string, unknown>) => string
+  t: (key: string, o?: Record<string, unknown>) => string,
+  me?: string
 ): string[] {
   // Each name is isolated from the text around it (§5.11 rule 3).
   const iso = (s: string) => `\u2068${s}\u2069`;
   const name = (id: string) => iso(memberName(id));
   const names = (ids: string[]) => ids.map(name).join(', ');
+  const others = (ids: string[]) => ids.filter(id => id !== me);
+  const mine = (id: string) => me !== undefined && id === me;
   switch (line.type) {
     case 'founded':
-      return [t('timeline.founded', { owner: name(line.owner) })];
+      return [
+        mine(line.owner)
+          ? t('timeline.founded_by_you')
+          : t('timeline.founded', { owner: name(line.owner) }),
+      ];
     case 'joined':
-      return [t('timeline.joined', { owner: name(line.by) })];
+      // An owner that gets its own group back from a member.
+      return [
+        mine(line.by)
+          ? t('timeline.joined_by_you')
+          : t('timeline.joined', { owner: name(line.by) }),
+      ];
     case 'epochChange': {
       // `by` made the change: for a handover, the outgoing owner (§4.7).
+      const byMe = mine(line.by);
       const owner = name(line.by);
       const out: string[] = [];
       // A handover first, then what it changed ("Hand over and leave": the
       // outgoing owner named the next one, then left).
       if (line.newOwner) {
-        out.push(t('timeline.new_owner', { owner, name: name(line.newOwner) }));
-      }
-      if (line.added.length)
-        out.push(t('timeline.added', { owner, names: names(line.added) }));
-      if (line.removed.length) {
-        out.push(t('timeline.removed', { owner, names: names(line.removed) }));
-      }
-      if (line.left.length)
-        out.push(t('timeline.left', { names: names(line.left) }));
-      if (line.renamed !== null) {
         out.push(
-          t('timeline.renamed', {
-            owner,
-            name: iso(safeName(line.renamed) || '—'),
-          })
+          byMe
+            ? t('timeline.new_owner_by_you', { name: name(line.newOwner) })
+            : mine(line.newOwner)
+              ? t('timeline.new_owner_you', { owner })
+              : t('timeline.new_owner', { owner, name: name(line.newOwner) })
+        );
+      }
+      if (line.added.some(mine)) out.push(t('timeline.joined', { owner }));
+      const added = others(line.added);
+      if (added.length) {
+        out.push(
+          byMe
+            ? t('timeline.added_by_you', { names: names(added) })
+            : t('timeline.added', { owner, names: names(added) })
+        );
+      }
+      if (line.removed.some(mine)) {
+        out.push(t('timeline.removed_you', { owner }));
+      }
+      const removed = others(line.removed);
+      if (removed.length) {
+        out.push(
+          byMe
+            ? t('timeline.removed_by_you', { names: names(removed) })
+            : t('timeline.removed', { owner, names: names(removed) })
+        );
+      }
+      if (line.left.some(mine)) out.push(t('timeline.you_left'));
+      const left = others(line.left);
+      if (left.length) out.push(t('timeline.left', { names: names(left) }));
+      if (line.renamed !== null) {
+        const renamed = iso(safeName(line.renamed) || '—');
+        out.push(
+          byMe
+            ? t('timeline.renamed_by_you', { name: renamed })
+            : t('timeline.renamed', { owner, name: renamed })
         );
       }
       return out;
