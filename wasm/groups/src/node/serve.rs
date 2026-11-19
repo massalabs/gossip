@@ -286,6 +286,13 @@ impl Node {
             // A valid entry from a member: it is responsive (§10.1).
             self.answered(&from);
             if cx.ov.event_row(&chat, &id)?.is_some_and(|r| r.processed()) {
+                // A true announcement, the first from this member for this event (no hint
+                // yet): it counts like a supply for its score, as when the event turns up
+                // later (see `credit_announcers`), so that the "not available" an honest
+                // relay gives for what it pruned since do not make it suspect.
+                if !self.has_hint(chat, from, id, cx.now) {
+                    self.reward(&from);
+                }
                 self.mark_seen(cx, chat, from, id)?;
             } else {
                 self.want_event(cx, chat, id, Some(from), TriggerKind::Notice)?;
