@@ -11,6 +11,7 @@ use super::{Node, NodeError};
 use crate::display::{self, VisibleMessage};
 use crate::ids::{ChatId, GossipId};
 use crate::rng::Randomness;
+use crate::root::RootType;
 use crate::store::StorageRead;
 
 /// The device's status in a group.
@@ -93,8 +94,9 @@ pub enum TimelineLine {
     EpochChange {
         /// The new epoch.
         epoch: ChatId,
-        /// Its owner (who made the change).
-        owner: GossipId,
+        /// Who made the change, the signer of the root (§4.7): the owner it names for a
+        /// successor root; for a handover root, the owner of its parent.
+        by: GossipId,
         /// Members added.
         added: Vec<GossipId>,
         /// Members removed, whose leave the device does not hold (D.9).
@@ -284,21 +286,31 @@ impl Node {
                 .collect();
             let after: BTreeSet<GossipId> = root.members().iter().copied().collect();
             let gone: Vec<GossipId> = before.difference(&after).copied().collect();
+            // A handover root is signed by the owner of its parent, which a device must hold
+            // to verify it (§4.7).
+            let handover = root.root_type() == RootType::Handover;
+            let by = match parents.first() {
+                Some(p) if handover => p.owner_id(),
+                _ => root.owner_id(),
+            };
+            // An outgoing owner that leaves the member list of its own handover left ("Hand
+            // over and leave", §5.8: "Everyone knows you left and who you named").
             let (left, removed): (Vec<GossipId>, Vec<GossipId>) = gone.into_iter().partition(|m| {
-                rec.parents.iter().any(|p| {
-                    self.t.signed.contains(&(
-                        *p,
-                        crate::wire::SignedKind::Leave,
-                        *crate::hash::leave_id(p, m).as_bytes(),
-                    ))
-                })
+                (handover && *m == by)
+                    || rec.parents.iter().any(|p| {
+                        self.t.signed.contains(&(
+                            *p,
+                            crate::wire::SignedKind::Leave,
+                            *crate::hash::leave_id(p, m).as_bytes(),
+                        ))
+                    })
             });
             let first = parents.first();
             items.push(TimelineItem::Line {
                 at,
                 line: TimelineLine::EpochChange {
                     epoch: *e,
-                    owner: root.owner_id(),
+                    by,
                     added: after.difference(&before).copied().collect(),
                     removed,
                     left,

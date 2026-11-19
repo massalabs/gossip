@@ -38,7 +38,7 @@ fn a_handover_line_names_its_signer_and_the_outgoing_owner_left() {
             lines,
             vec![TimelineLine::EpochChange {
                 epoch: h,
-                owner: gid(0),
+                by: gid(0),
                 added: vec![],
                 removed: vec![],
                 left: vec![gid(0)],

@@ -643,7 +643,7 @@ record!(InvitationSummary {
 });
 variants!(TimelineLine {
     Founded { epoch, owner },
-    EpochChange { epoch, owner, added, removed, left, renamed, new_owner },
+    EpochChange { epoch, by, added, removed, left, renamed, new_owner },
     YouWereRemoved,
     YouLeft,
     Dissolved,
