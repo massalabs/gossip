@@ -41,6 +41,8 @@ export type {
   GroupInvitation,
   GroupMessage,
   GroupMessageBody,
+  GroupMessageContent,
+  GroupReaction,
   GroupLine,
   GroupTimelineItem,
   GroupChange,
@@ -58,4 +60,6 @@ export {
   GROUP_DEVICE_KEY,
   EARLIER_FORMAT_VERSION,
   GroupMessageTooLargeError,
+  GroupInvalidReactionError,
+  GROUP_MAX_EMOJI_BYTES,
 } from './services/groups.js';

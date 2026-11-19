@@ -14,7 +14,11 @@ export function toDate(ms: bigint): Date {
   return new Date(Number(ms > MAX_DATE_MS ? MAX_DATE_MS : ms));
 }
 
-/** The text a message shows (non-text bodies get a label). */
+/**
+ * The text a message shows (non-text bodies get a label). Files are not shown
+ * in this version: a media message is a neutral placeholder, its data never
+ * read.
+ */
 export function messageText(
   m: GroupMessage,
   t: (key: string) => string
@@ -24,8 +28,6 @@ export function messageText(
       return m.body.text;
     case 'media':
       return t('timeline.media');
-    case 'reaction':
-      return t('timeline.reaction');
     case 'forward':
       return t('timeline.forward');
   }
