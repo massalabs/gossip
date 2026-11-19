@@ -465,6 +465,47 @@ fn a_reply_names_the_reference_of_its_target_epoch() {
     assert_eq!(net.peers[1].core.epoch(group), "null");
 }
 
+#[test]
+fn messages_over_the_size_limits_are_refused_with_their_measure() {
+    let mut net = Net::new(2);
+    let b = net.peers[1].id();
+    let now = net.now;
+    let group = net.peers[0]
+        .core
+        .create_group("G".into(), vec![b], now)
+        .unwrap();
+    let max = groups::constants::MAX_TEXT_BYTES;
+    let core = &mut net.peers[0].core;
+    assert!(
+        core.publish_message(group, &text(&"x".repeat(max)), "[]", None, now)
+            .is_ok()
+    );
+    let e = core
+        .publish_message(group, &text(&"x".repeat(max + 1)), "[]", None, now)
+        .unwrap_err();
+    assert!(e.starts_with("groups:change: text: at most 16384"), "{e}");
+    // Metadata, measured as the engine counts it: one entry of a 1-byte key and an
+    // n-byte value is 9 + n bytes here.
+    let meta = |n: usize| format!(r#"[["m","{}"]]"#, "00".repeat(n));
+    assert_eq!(
+        super::engine::metadata_bytes(&meta(16_375)).unwrap(),
+        16_384
+    );
+    assert_eq!(super::engine::metadata_bytes("[]").unwrap(), 0);
+    assert!(super::engine::metadata_bytes("[1]").is_err());
+    assert!(
+        core.publish_message(group, &text("x"), &meta(16_375), None, now)
+            .is_ok()
+    );
+    let e = core
+        .publish_message(group, &text("x"), &meta(16_376), None, now)
+        .unwrap_err();
+    assert!(
+        e.starts_with("groups:change: metadata: at most 16384"),
+        "{e}"
+    );
+}
+
 /// A store over the SQL-table model, as the SDK's database applies batches: reads decode
 /// the tables, a commit applies the encoded batch, and a failure can be injected.
 struct DbStore {

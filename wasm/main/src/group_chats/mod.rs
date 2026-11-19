@@ -57,6 +57,36 @@ fn set(o: &js_sys::Object, k: &str, v: &JsValue) {
     let _ = js_sys::Reflect::set(o, &JsValue::from_str(k), v);
 }
 
+// ── Size limits ──────────────────────────────────────────────────────────────
+
+/// The largest group plaintext, in bytes (§13.10).
+#[wasm_bindgen]
+pub fn group_max_plaintext_bytes() -> u32 {
+    groups::constants::MAX_PLAINTEXT_BYTES as u32
+}
+
+/// The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
+/// forward of text. A longer one is refused by the engine and by every receiver.
+#[wasm_bindgen]
+pub fn group_max_text_bytes() -> u32 {
+    groups::constants::MAX_TEXT_BYTES as u32
+}
+
+/// The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
+#[wasm_bindgen]
+pub fn group_max_metadata_bytes() -> u32 {
+    groups::constants::MAX_METADATA_BYTES as u32
+}
+
+/// The size of message metadata, given as `publish_message` takes it (a list of
+/// `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
+#[wasm_bindgen]
+pub fn group_metadata_bytes(metadata: &str) -> Result<u32, JsValue> {
+    engine::metadata_bytes(metadata)
+        .map(|n| n as u32)
+        .map_err(js)
+}
+
 /// The group engine of one identity.
 #[wasm_bindgen]
 pub struct GroupsNode {
