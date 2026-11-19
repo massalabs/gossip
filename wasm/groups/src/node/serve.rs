@@ -67,6 +67,9 @@ impl Node {
             } else {
                 vec![match entry {
                     QueryEntry::Malformed(_) => AnswerOp::Status(Status::Malformed),
+                    QueryEntry::Op(
+                        QueryOp::Event { chat_id, .. } | QueryOp::SyncObj { chat_id, .. },
+                    ) if !self.serves(chat_id) => AnswerOp::Status(Status::NotAvailable),
                     QueryEntry::Op(QueryOp::Event { chat_id, event_id }) => AnswerOp::Event {
                         chat_id: *chat_id,
                         event_id: *event_id,
@@ -528,7 +531,7 @@ impl Node {
     ) -> Result<Option<Vec<AnswerOp>>, NodeError> {
         let na = AnswerOp::Status(Status::NotAvailable);
         let root_for = |n: &Self, chat: &ChatId| {
-            if n.installed(chat) && n.epochs.get(chat).is_some_and(|e| e.root.is_member(&from)) {
+            if n.root_served_to(chat, &from) {
                 AnswerOp::Root { chat_id: *chat }
             } else {
                 AnswerOp::Status(Status::NotAvailable)
@@ -540,7 +543,7 @@ impl Node {
                 let chat = self
                     .epochs
                     .iter()
-                    .find(|(_, e)| e.root.ref_chat_id() == *r)
+                    .find(|(c, e)| e.root.ref_chat_id() == *r && self.serves(c))
                     .map(|(c, _)| *c);
                 vec![chat.map_or(na, |c| root_for(self, &c))]
             }
@@ -566,15 +569,16 @@ impl Node {
             }
             QueryOp::SignedObject { chat_id, kind, id } => {
                 let key = (*chat_id, *kind, *id);
-                let served = match self.t.signed.get(&key).map(|r| &r.object) {
-                    // A leave that is not live is kept for its leaver and for removal
-                    // lookups only (§5.3).
-                    Some(SignedObject::Leave(l)) => {
-                        l.leaver() == from || self.leave_live_anywhere(chat_id, &l.leaver())
-                    }
-                    Some(_) => true,
-                    None => false,
-                };
+                let served = self.signed_served_to(&key, &from)
+                    && match self.t.signed.get(&key).map(|r| &r.object) {
+                        // A leave that is not live is kept for its leaver and for removal
+                        // lookups only (§5.3).
+                        Some(SignedObject::Leave(l)) => {
+                            l.leaver() == from || self.leave_live_anywhere(chat_id, &l.leaver())
+                        }
+                        Some(_) => true,
+                        None => false,
+                    };
                 vec![if served {
                     AnswerOp::Object {
                         chat_id: *chat_id,
@@ -583,6 +587,12 @@ impl Node {
                 } else {
                     na
                 }]
+            }
+            QueryOp::Removal { chat_id, gossip_id }
+                if !self.serves(chat_id)
+                    || (self.removed_peer(chat_id, &from) && *gossip_id != from) =>
+            {
+                vec![na]
             }
             QueryOp::Removal { chat_id, gossip_id } => {
                 let kick = (
@@ -607,7 +617,10 @@ impl Node {
                     .collect();
                 if ops.is_empty() { vec![na] } else { ops }
             }
-            QueryOp::Keys { gossip_id, .. } => vec![if self.t.keys.contains(gossip_id) {
+            QueryOp::Keys { chat_id, gossip_id } => vec![if self.t.keys.contains(gossip_id)
+                && self.serves(chat_id)
+                && !self.removed_peer(chat_id, &from)
+            {
                 AnswerOp::Keys {
                     gossip_id: *gossip_id,
                 }
@@ -676,6 +689,7 @@ impl Node {
             .filter(|(c, e)| {
                 e.root.is_member(peer)
                     && e.root.is_member(&self.me)
+                    && self.serves(c)
                     && self
                         .t
                         .epochs
@@ -717,6 +731,41 @@ impl Node {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+impl Node {
+    /// Whether the root of `chat` is served to `peer` (§12.7): this device serves the epoch,
+    /// `peer` is a member of it and not a removed peer of it (§10.4). A member removed after
+    /// missing epochs is sent the roots it needs with its removal record instead
+    /// (`send_owed`).
+    pub(crate) fn root_served_to(&self, chat: &ChatId, peer: &GossipId) -> bool {
+        self.serves(chat)
+            && self.epochs.get(chat).is_some_and(|e| e.root.is_member(peer))
+            && !self.removed_peer(chat, peer)
+    }
+
+    /// Whether the signed object `key` is served to `peer`: this device serves its epoch
+    /// (or keeps a dissolved group, for the dissolve message, §5.8), and a removed peer of
+    /// the epoch gets only its own kick or leave (§10.4, §5.6).
+    pub(crate) fn signed_served_to(&self, key: &SignedKey, peer: &GossipId) -> bool {
+        let dissolve_kept = key.1 == SignedKind::Dissolve
+            && self.installed(&key.0)
+            && matches!(
+                self.group_status(&key.0),
+                super::records::GroupStatus::Dissolved { .. }
+            );
+        if !self.serves(&key.0) && !dissolve_kept {
+            return false;
+        }
+        if !self.removed_peer(&key.0, peer) {
+            return true;
+        }
+        match self.t.signed.get(key).map(|r| &r.object) {
+            Some(SignedObject::Kick(k)) => k.removed() == *peer,
+            Some(SignedObject::Leave(l)) => l.leaver() == *peer,
+            _ => false,
         }
     }
 }

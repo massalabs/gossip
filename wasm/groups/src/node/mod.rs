@@ -1008,7 +1008,17 @@ impl Node {
 
     /// Whether `peer` is a member of an installed epoch.
     fn shares_epoch(&self, peer: &GossipId) -> bool {
-        self.epochs.values().any(|e| e.root.is_member(peer))
+        self.epochs
+            .iter()
+            .any(|(c, e)| e.root.is_member(peer) && self.serves(c))
+    }
+
+    /// Whether this device answers for the installed epoch `chat` like a member: its group
+    /// is active. A device that was kicked, left, waits for a kick or saw its group dissolved
+    /// answers "not available" for its epochs, as for an epoch it does not hold (§5.4, §5.6,
+    /// §5.8; the dissolve message itself stays served, see `serve.rs`).
+    pub(crate) fn serves(&self, chat: &ChatId) -> bool {
+        self.installed(chat) && self.group_status(chat) == records::GroupStatus::Active
     }
 
     /// Whether `peer` may receive an event of `chat` (§10.2, §10.4): a member other than
