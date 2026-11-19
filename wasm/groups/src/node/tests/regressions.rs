@@ -203,20 +203,28 @@ fn a_busy_candidate_is_asked_again_later_in_the_same_run() {
 /// a day later with long TTLs.
 #[test]
 fn an_expired_acknowledgement_of_an_old_request_is_always_resent() {
-    let mut net = Net::new(3, 1);
+    // Member 1 is the only other member, so every stage asks it.
+    let mut net = Net::new(2, 1);
     let chat = net.chat();
-    let id = EventId::new(T0, [5; 16]);
+    let id = EventId::new(T0 + 30 * DAY, [5; 16]);
     net.recv_frames(0, member(1), &[notice(chat, &[id])]);
-    let mut q = super::retrieval::sent_lookups(&mut net, 0);
     for round in 0..4 {
-        // The member was offline and sees each request two minutes later: plausibly
-        // expired (past its deadline less 5 minutes of clock skew). No tick runs, so the
-        // stage does not time out meanwhile.
-        net.now += 2 * MIN;
-        super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Status(Status::Expired));
-        q = super::retrieval::sent_lookups(&mut net, 0);
-        assert_eq!(q.len(), 1, "resend {round}");
+        let mut q = super::retrieval::sent_lookups(&mut net, 0);
+        while q.is_empty() {
+            net.now += MIN;
+            net.tick(0);
+            q = super::retrieval::sent_lookups(&mut net, 0);
+        }
         assert_eq!(q[0].to, member(1));
+        // The member was offline and acknowledges the request as expired after its
+        // deadline (less 5 minutes of clock skew): plausible. The device handles what it
+        // received before it ticks, as on any return, and resends at once.
+        net.now = super::super::timing::deadline(q[0].sent_at, q[0].ttl);
+        super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Status(Status::Expired));
+        let r = super::retrieval::sent_lookups(&mut net, 0);
+        assert_eq!(r.len(), 1, "resend {round}");
+        assert_eq!((r[0].to, r[0].ttl), (member(1), q[0].ttl));
+        net.tick(0);
     }
 }
 
@@ -231,7 +239,10 @@ fn lookups_of_discredited_announcements_leave_room_for_credible_ones() {
     let fake: Vec<EventId> = (0..40u8)
         .map(|i| EventId::new(T0, [i, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]))
         .collect();
-    // Member 3 announces 40 IDs and answers "not available" for each.
+    // Member 3 is discredited before it announces 40 IDs (so that how many of them first
+    // went to members 1 and 2 does not depend on the random spread), and answers "not
+    // available" for each.
+    net.devs[0].node.penalize(&member(3), PENALTY_MALFORMED);
     net.recv_frames(0, member(3), &[notice(chat, &fake[..20])]);
     net.recv_frames(0, member(3), &[notice(chat, &fake[20..])]);
     for _ in 0..3 {
