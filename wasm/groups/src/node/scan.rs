@@ -443,7 +443,8 @@ impl Node {
     /// device's first time online. When a lane starts, the next one in the order becomes due
     /// `floor(6 h × r)` later, even if the first is still pending; each lane waits at least
     /// 24 h after its previous completion. Only the lane at the cursor can start, so after
-    /// a long time offline one overdue round runs, not one per missed day.
+    /// a long time offline one overdue round runs, not one per missed day. A lane still
+    /// pending at its turn skips it (a departure from §12.3, see the comment inside).
     pub(crate) fn run_lanes(&mut self, cx: &mut Cx<'_>, chat: ChatId) {
         let now = cx.now;
         let Some(g) = self.t.groups.get(&chat) else {
@@ -461,10 +462,17 @@ impl Node {
         let Some(due) = lane.due else {
             return;
         };
-        if lane.active.is_some() || now < due.max(lane.earliest) {
+        if now < due.max(lane.earliest) {
             return;
         }
-        let peer = self.lane_peer(cx, chat, i, None);
+        // A lane whose previous scan is still pending (with a member that does not answer,
+        // its 20 stages last about two weeks) gives up its turn: the next lane follows at
+        // its usual offset. §12.3 would make the start wait, which stops every lane.
+        let peer = if lane.active.is_some() {
+            None
+        } else {
+            self.lane_peer(cx, chat, i, None)
+        };
         let offset = jittered(LANE_OFFSET_MS, draw_jitter(cx.rng));
         let g = self.t.groups.get_mut(&chat).expect("present");
         let next = (i + 1) % 4;
@@ -473,12 +481,13 @@ impl Node {
         let l = &mut g.lanes[usize::from(i)];
         l.due = None;
         l.moved = false;
-        match peer {
-            Some(p) => {
+        match (lane.active, peer) {
+            (Some(_), _) => {}
+            (None, Some(p)) => {
                 l.active = Some(p);
                 self.start_scan(cx, chat, p, Some(i));
             }
-            None => self.lane_done(chat, i, now),
+            (None, None) => self.lane_done(chat, i, now),
         }
     }
 
