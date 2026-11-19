@@ -1033,3 +1033,31 @@ fn a_crossing_root_arriving_after_the_switch_is_no_invitation() {
     assert_eq!(net.group_keys(l), vec![gl]);
     assert_eq!(net.superseded(l), vec![(gh, gl)]);
 }
+
+/// A chat that superseded another is itself superseded later: the history of the chat that
+/// continues it lists both, oldest first.
+#[test]
+fn a_chain_of_superseded_chats_is_listed_oldest_first() {
+    let (l, h) = sorted_pair();
+    let mut net = MNet::new(2, true);
+    let before = net.backup(h);
+    let gl = net.create_with(l, &[h], Some(0)).unwrap();
+    let gh = net.create_with(h, &[l], Some(0)).unwrap();
+    net.run(5 * MIN);
+    assert_eq!(net.summary(l, &gl).unwrap().earlier, vec![gh]);
+    net.say(h, &gl, "in the kept chat");
+    net.run(2 * MIN);
+    net.restore(h, before);
+    net.run(HOUR);
+    let gh2 = net.create_with(h, &[l], Some(0)).unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.invitation(l, &gh2).and_then(|i| i.continues), Some(gl));
+    net.accept(l, gh2);
+    assert_eq!(net.summary(l, &gh2).unwrap().earlier, vec![gh, gl]);
+    let mut superseded = net.superseded(l);
+    superseded.sort();
+    let mut expected = vec![(gh, gl), (gl, gh2)];
+    expected.sort();
+    assert_eq!(superseded, expected);
+    assert!(net.texts(l, &gl).contains(&"in the kept chat".to_owned()));
+}
