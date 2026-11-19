@@ -310,11 +310,20 @@ impl Node {
                                     SignedKind::Kick,
                                     *crate::hash::kick_id(&key.chat_id, &m).as_bytes(),
                                 )),
-                                SignedObject::Leave(_) => Some((
-                                    key.chat_id,
-                                    SignedKind::Leave,
-                                    *crate::hash::leave_id(&key.chat_id, &m).as_bytes(),
-                                )),
+                                // A leave of an earlier epoch that is live for this one
+                                // answers too (see `leave_for`).
+                                SignedObject::Leave(l)
+                                    if l.leaver() == m
+                                        && (l.chat_id() == key.chat_id
+                                            || self.leave_live_for(
+                                                &l.chat_id(),
+                                                &m,
+                                                &key.chat_id,
+                                            )) =>
+                                {
+                                    Some(obj.key())
+                                }
+                                SignedObject::Leave(_) => None,
                                 SignedObject::Dissolve(_) => None,
                             },
                             _ => None,
@@ -576,23 +585,23 @@ impl Node {
                 }]
             }
             QueryOp::Removal { chat_id, gossip_id } => {
-                let keys = [
-                    (
-                        *chat_id,
-                        SignedKind::Kick,
-                        *crate::hash::kick_id(chat_id, gossip_id).as_bytes(),
-                    ),
-                    (
-                        *chat_id,
-                        SignedKind::Leave,
-                        *crate::hash::leave_id(chat_id, gossip_id).as_bytes(),
-                    ),
-                ];
+                let kick = (
+                    *chat_id,
+                    SignedKind::Kick,
+                    *crate::hash::kick_id(chat_id, gossip_id).as_bytes(),
+                );
+                let keys: Vec<SignedKey> = self
+                    .t
+                    .signed
+                    .contains(&kick)
+                    .then_some(kick)
+                    .into_iter()
+                    .chain(self.leave_for(chat_id, gossip_id))
+                    .collect();
                 let ops: Vec<AnswerOp> = keys
                     .iter()
-                    .filter(|k| self.t.signed.contains(k))
                     .map(|k| AnswerOp::Object {
-                        chat_id: *chat_id,
+                        chat_id: k.0,
                         item: super::objects::key_item(k),
                     })
                     .collect();

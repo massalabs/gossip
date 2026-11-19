@@ -171,6 +171,11 @@ impl Node {
             return Ok(Answer::Refused);
         }
         if self.t.signed.contains(&key) {
+            if let SignedObject::Leave(l) = &obj
+                && l.leaver() == self.me
+            {
+                self.check_own_leave(cx, self.group_of(&chat));
+            }
             return Ok(Answer::Supplied);
         }
         let valid = match &obj {
@@ -296,18 +301,7 @@ impl Node {
             SignedObject::Leave(l) => {
                 let leaver = l.leaver();
                 if leaver == self.me {
-                    // D.2, choice A: a leave of this device for its current epoch, from a
-                    // copy of the account restored or used elsewhere: read-only.
-                    if current == Some(chat) && status == GroupStatus::Active {
-                        self.set_read_only(
-                            cx,
-                            group,
-                            GroupStatus::Left {
-                                epoch: chat,
-                                at: cx.now,
-                            },
-                        );
-                    }
+                    self.check_own_leave(cx, group);
                     return Ok(());
                 }
                 self.changed(group, ChangeKind::Membership, cx.now);
@@ -788,18 +782,16 @@ impl Node {
     /// Sends `peer` its kick or leave for `chat` if it is owed one and the daily count
     /// allows it. Returns whether a record was held.
     pub(crate) fn send_owed(&mut self, _cx: &mut Cx<'_>, chat: ChatId, peer: GossipId) -> bool {
-        let records: Vec<SignedKey> = [
-            (
-                chat,
-                SignedKind::Kick,
-                *crate::hash::kick_id(&chat, &peer).as_bytes(),
-            ),
-            (chat, SignedKind::Leave, *leave_id(&chat, &peer).as_bytes()),
-        ]
-        .into_iter()
-        .filter(|k| self.t.signed.contains(k))
-        .collect();
-        let Some(key) = records.first().copied() else {
+        let kick = (
+            chat,
+            SignedKind::Kick,
+            *crate::hash::kick_id(&chat, &peer).as_bytes(),
+        );
+        let key = if self.t.signed.contains(&kick) {
+            kick
+        } else if let Some(leave) = self.leave_for(&chat, &peer) {
+            leave
+        } else {
             return false;
         };
         let Some(mut r) = self.t.replies.get(&(chat, peer)).copied() else {
@@ -812,7 +804,57 @@ impl Node {
         r.count += 1;
         self.t.replies.insert((chat, peer), r);
         self.stats.removal_replies += 1;
-        self.queue_object(peer, chat, key_item(&key));
+        self.queue_object(peer, key.0, key_item(&key));
         true
+    }
+
+    /// D.2, choice A: a leave of this device, from a copy of the account restored or used
+    /// elsewhere, that applies to its current epoch makes the group read-only. "Applies" is
+    /// read as "is live for the current epoch" (§5.3): the leave may name an earlier epoch
+    /// when the leaver had missed later ones, while D.2 speaks of the current epoch only.
+    pub(crate) fn check_own_leave(&mut self, cx: &mut Cx<'_>, group: ChatId) {
+        if self.group_status(&group) != GroupStatus::Active {
+            return;
+        }
+        let Some(current) = self.current_epoch(&group) else {
+            return;
+        };
+        let mine: Vec<ChatId> = self
+            .t
+            .signed
+            .iter()
+            .filter_map(|(_, r)| match &r.object {
+                SignedObject::Leave(l) if l.leaver() == self.me => Some(l.chat_id()),
+                _ => None,
+            })
+            .filter(|c| self.group_of(c) == group)
+            .collect();
+        if let Some(epoch) = mine
+            .into_iter()
+            .find(|c| self.leave_live_for(c, &self.me, &current))
+        {
+            self.set_read_only(cx, group, GroupStatus::Left { epoch, at: cx.now });
+        }
+    }
+
+    /// The signed leave of `peer` held by this device that applies to `chat`: the one
+    /// naming `chat`, or one naming an earlier epoch from which it is live for `chat`
+    /// (§5.3). A member that missed an epoch signs its leave of an older one, and the owner
+    /// applies it with no kick (§5.6): nothing else names the epoch it was removed from.
+    pub(crate) fn leave_for(&self, chat: &ChatId, peer: &GossipId) -> Option<SignedKey> {
+        let exact = (*chat, SignedKind::Leave, *leave_id(chat, peer).as_bytes());
+        if self.t.signed.contains(&exact) {
+            return Some(exact);
+        }
+        let group = self.group_of(chat);
+        self.t
+            .signed
+            .iter()
+            .filter_map(|(k, r)| match &r.object {
+                SignedObject::Leave(l) if l.leaver() == *peer => Some((*k, l.chat_id())),
+                _ => None,
+            })
+            .find(|(_, c)| self.group_of(c) == group && self.leave_live_for(c, peer, chat))
+            .map(|(k, _)| k)
     }
 }
