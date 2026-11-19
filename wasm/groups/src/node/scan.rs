@@ -746,12 +746,11 @@ impl Node {
             Some(_) => f.live_until.saturating_add(1),
             None => f.forget_at,
         });
+        // The lane at the cursor acts at its time even while its scan is pending: it gives
+        // up its turn.
         let lanes = self.t.groups.iter().filter_map(|(_, g)| {
             let l = g.lanes[usize::from(g.cursor)];
-            match (l.due, l.active) {
-                (Some(due), None) => Some(due.max(l.earliest)),
-                _ => None,
-            }
+            l.due.map(|due| due.max(l.earliest))
         });
         ops.chain(frozen).chain(lanes).min()
     }

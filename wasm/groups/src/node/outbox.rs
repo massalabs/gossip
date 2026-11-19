@@ -874,7 +874,7 @@ impl Node {
     }
 
     /// The earliest timer of the node records (for [`Node::next_wakeup`]).
-    pub(crate) fn timer_wakeups(&self, add: &mut dyn FnMut(u64)) {
+    pub(crate) fn timer_wakeups(&self, now: u64, add: &mut dyn FnMut(u64)) {
         for t in [
             self.task_wakeup(),
             self.scan_wakeup(),
@@ -885,9 +885,18 @@ impl Node {
         {
             add(t);
         }
-        for (_, g) in self.t.groups.iter() {
+        for (chat, g) in self.t.groups.iter() {
             for at in g.asked.values() {
                 add(at.saturating_add(super::neighbors::NEIGHBOR_COOLDOWN_MS));
+            }
+            // A cooldown that ends frees a candidate.
+            for until in g.cooldown.values() {
+                add(*until);
+            }
+            // A group never run yet starts its lanes; one short of neighbors with a free
+            // candidate asks it.
+            if g.first_online.is_none() || self.neighbor_candidate_free(chat) {
+                add(now);
             }
         }
         for (_, q) in self.t.requests.iter() {
