@@ -1085,5 +1085,5 @@ fn a_plaintext_is_not_current_once_a_deletion_came_due() {
     assert_eq!(out.len(), 1);
     // The transport encrypts two minutes later, after the deletion came due.
     net.now = due + MIN;
-    assert!(!net.devs[0].node.is_current(out[0].handle));
+    assert!(!net.devs[0].node.is_current(out[0].handle, net.now));
 }
