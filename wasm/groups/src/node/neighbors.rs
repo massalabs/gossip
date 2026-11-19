@@ -1,0 +1,318 @@
+//! Neighbors (§10.1): selection and ranking, neighbor requests and responses with
+//! suggestions, and replacement of peers that keep failing to answer.
+
+use super::records::{GroupSync, Work};
+use super::timing::DAY_MS;
+use super::{Cx, Node};
+use crate::ids::{ChatId, GossipId};
+use crate::rng::{Randomness, uniform_below};
+use crate::wire::NeighborResponse;
+
+/// The most neighbors a group seeks: `min(10, memberCount − 1)`.
+pub(crate) const MAX_NEIGHBORS: usize = 10;
+/// The most suggestions in a declining response, and the most taken from non-neighbors.
+pub(crate) const MAX_SUGGESTIONS: usize = 10;
+/// See [`MAX_SUGGESTIONS`].
+pub(crate) const MAX_NON_NEIGHBOR_SUGGESTIONS: usize = 5;
+/// Consecutive unanswered timeouts after which a neighbor is replaced. §10.1 leaves the
+/// threshold to the deferred score (§17.5); provisional.
+pub(crate) const NEIGHBOR_FAILURES: u32 = 3;
+/// How long a neighbor request may stay unanswered, and how long a peer that declined,
+/// did not answer, or was replaced is not asked again. Not given by §10.1; provisional.
+pub(crate) const NEIGHBOR_COOLDOWN_MS: u64 = DAY_MS;
+
+impl Node {
+    fn group_mut(&mut self, chat: ChatId) -> &mut GroupSync {
+        if !self.t.groups.contains(&chat) {
+            self.t.groups.insert(chat, GroupSync::default());
+        }
+        self.t.groups.get_mut(&chat).expect("inserted")
+    }
+
+    /// The number of neighbors the group of `chat` seeks: `min(10, memberCount − 1)`,
+    /// never counting this device (its removed peers are not members of a current epoch).
+    pub(crate) fn neighbor_target(&self, chat: &ChatId) -> usize {
+        MAX_NEIGHBORS.min(self.eligible(chat).len())
+    }
+
+    /// Drops the neighbors that are no longer eligible members (§10.1).
+    pub(crate) fn drop_ineligible_neighbors(&mut self, chat: ChatId) {
+        let eligible = self.eligible(&chat);
+        let Some(g) = self.t.groups.get(&chat) else {
+            return;
+        };
+        if g.neighbors.iter().all(|n| eligible.contains(n)) {
+            return;
+        }
+        let g = self.group_mut(chat);
+        g.neighbors.retain(|n| eligible.contains(n));
+    }
+
+    /// Neighbor upkeep: requests unanswered for a day are abandoned, and while the group has
+    /// fewer neighbors (and pending requests) than it seeks, the best candidate is asked:
+    /// suggested members first, then members with a session (sessions are reused before new
+    /// ones are opened), then by score, ties at random.
+    pub(crate) fn maintain_neighbors(&mut self, cx: &mut Cx<'_>, chat: ChatId) {
+        self.drop_ineligible_neighbors(chat);
+        let now = cx.now;
+        self.date_cooldowns(chat, now);
+        let target = self.neighbor_target(&chat);
+        let eligible = self.eligible(&chat);
+        let Some(g) = self.t.groups.get(&chat).cloned() else {
+            return;
+        };
+        let mut g = g;
+        let stale: Vec<GossipId> = g
+            .asked
+            .iter()
+            .filter(|(_, at)| now.saturating_sub(**at) >= NEIGHBOR_COOLDOWN_MS)
+            .map(|(p, _)| *p)
+            .collect();
+        for p in &stale {
+            g.asked.remove(p);
+            g.cooldown
+                .insert(*p, now.saturating_add(NEIGHBOR_COOLDOWN_MS));
+        }
+        g.cooldown.retain(|_, until| *until > now);
+        let mut asks = Vec::new();
+        while g.neighbors.len() + g.asked.len() < target {
+            let pool: Vec<GossipId> = eligible
+                .iter()
+                .filter(|p| {
+                    !g.neighbors.contains(p)
+                        && !g.asked.contains_key(p)
+                        && !g.cooldown.contains_key(p)
+                })
+                .copied()
+                .collect();
+            if pool.is_empty() {
+                break;
+            }
+            let key = |p: &GossipId| {
+                (
+                    !g.suggested.contains(p),
+                    !self.sessions.contains(p),
+                    u64::MAX - self.score(p),
+                )
+            };
+            let best = pool.iter().map(key).min().expect("non-empty");
+            let ties: Vec<GossipId> = pool.iter().filter(|p| key(p) == best).copied().collect();
+            let peer = ties[uniform_below(cx.rng, ties.len())];
+            g.asked.insert(peer, now);
+            g.suggested.remove(&peer);
+            asks.push(peer);
+        }
+        if g != *self.t.groups.get(&chat).expect("present") {
+            self.t.groups.insert(chat, g);
+        }
+        for peer in asks {
+            self.queue_work(peer, Work::NeighborRequest { chat_id: chat });
+        }
+    }
+
+    /// A neighbor request from `from` naming its current epoch `chat` (§10.1, §13.6). A
+    /// non-member is ignored. An epoch this device does not hold is declined without
+    /// suggestions (D.6). With capacity, the request is accepted; otherwise it is declined
+    /// with suggestions.
+    pub(crate) fn handle_neighbor_request(
+        &mut self,
+        cx: &mut Cx<'_>,
+        from: GossipId,
+        chat: ChatId,
+    ) {
+        let Some(entry) = self.epochs.get(&chat) else {
+            if self.shares_epoch(&from) {
+                self.queue_work(
+                    from,
+                    Work::NeighborResponse {
+                        chat_id: chat,
+                        accepted: false,
+                        suggestions: Vec::new(),
+                    },
+                );
+            }
+            return;
+        };
+        if !entry.root.is_member(&from) || from == self.me {
+            return;
+        }
+        // A removed peer is no member of a current epoch: declined without suggestions.
+        if self.removed_peer(&chat, &from) {
+            self.queue_work(
+                from,
+                Work::NeighborResponse {
+                    chat_id: chat,
+                    accepted: false,
+                    suggestions: Vec::new(),
+                },
+            );
+            return;
+        }
+        let target = self.neighbor_target(&chat);
+        let g = self.group_mut(chat);
+        let mutual = g.asked.contains_key(&from);
+        let accepted =
+            g.neighbors.contains(&from) || mutual || g.neighbors.len() + g.asked.len() < target;
+        let suggestions = if accepted {
+            g.asked.remove(&from);
+            g.cooldown.remove(&from);
+            self.add_neighbor(cx, chat, from);
+            Vec::new()
+        } else {
+            self.suggestions(cx, chat, from)
+        };
+        self.queue_work(
+            from,
+            Work::NeighborResponse {
+                chat_id: chat,
+                accepted,
+                suggestions,
+            },
+        );
+    }
+
+    /// A neighbor response from `from` (§13.6). Only a response to a request this device
+    /// sent counts: acceptance makes `from` a neighbor; a decline puts it on cooldown and
+    /// keeps its suggestions that are eligible members as preferred candidates.
+    pub(crate) fn handle_neighbor_response(
+        &mut self,
+        cx: &mut Cx<'_>,
+        from: GossipId,
+        r: NeighborResponse,
+    ) {
+        let chat = r.chat_id;
+        if !self.epochs.contains_key(&chat) || !self.may_receive(&chat, &from, false) {
+            return;
+        }
+        if !self
+            .t
+            .groups
+            .get(&chat)
+            .is_some_and(|g| g.asked.contains_key(&from))
+        {
+            return;
+        }
+        self.answered(&from);
+        let eligible = self.eligible(&chat);
+        let now = cx.now;
+        let g = self.group_mut(chat);
+        g.asked.remove(&from);
+        if r.accepted {
+            self.add_neighbor(cx, chat, from);
+        } else {
+            g.cooldown
+                .insert(from, now.saturating_add(NEIGHBOR_COOLDOWN_MS));
+            for s in r.suggestions {
+                if eligible.contains(&s) && !g.neighbors.contains(&s) {
+                    g.suggested.insert(s);
+                }
+            }
+        }
+    }
+
+    /// Adds a neighbor, and adds it among the unvisited peers of the neighbor lanes' cycle
+    /// (§12.3).
+    fn add_neighbor(&mut self, cx: &mut Cx<'_>, chat: ChatId, peer: GossipId) {
+        let g = self.group_mut(chat);
+        if g.neighbors.insert(peer) && !g.cycle.contains(&peer) {
+            let at = uniform_below(cx.rng, g.cycle.len() + 1);
+            g.cycle.insert(at, peer);
+        }
+    }
+
+    /// Up to ten distinct members of `chat` other than this device and the requester: up to
+    /// five non-neighbors first, then neighbors for the remaining places; within each pool
+    /// by repeated draws proportional to the score, uniform when every remaining weight is
+    /// zero (§10.1).
+    fn suggestions(&mut self, cx: &mut Cx<'_>, chat: ChatId, requester: GossipId) -> Vec<GossipId> {
+        let eligible = self.eligible(&chat);
+        let (neighbors, others): (Vec<GossipId>, Vec<GossipId>) = eligible
+            .into_iter()
+            .filter(|p| *p != requester)
+            .partition(|p| self.is_neighbor(&chat, p));
+        let mut out = self.draw_by_score(cx.rng, others, MAX_NON_NEIGHBOR_SUGGESTIONS);
+        let rest = MAX_SUGGESTIONS - out.len();
+        out.extend(self.draw_by_score(cx.rng, neighbors, rest));
+        out
+    }
+
+    /// `k` draws without replacement, each proportional to the score of what remains.
+    pub(crate) fn draw_by_score(
+        &self,
+        rng: &mut dyn Randomness,
+        mut pool: Vec<GossipId>,
+        k: usize,
+    ) -> Vec<GossipId> {
+        let mut out = Vec::new();
+        while out.len() < k && !pool.is_empty() {
+            let weights: Vec<u64> = pool.iter().map(|p| self.score(p)).collect();
+            let sum: u64 = weights.iter().sum();
+            let i = if sum == 0 {
+                uniform_below(rng, pool.len())
+            } else {
+                let mut x = draw_u64(rng, sum);
+                let mut i = 0;
+                while x >= weights[i] {
+                    x -= weights[i];
+                    i += 1;
+                }
+                i
+            };
+            out.push(pool.swap_remove(i));
+        }
+        out
+    }
+
+    /// A query to `peer` timed out unanswered. After [`NEIGHBOR_FAILURES`] in a row it is
+    /// replaced in every group where it is a neighbor (§10.1); an occasional delayed answer
+    /// resets the count.
+    pub(crate) fn note_timeout(&mut self, peer: &GossipId) {
+        let r = self.peer_mut(peer);
+        r.failures = r.failures.saturating_add(1);
+        if r.failures < NEIGHBOR_FAILURES {
+            return;
+        }
+        r.failures = 0;
+        let chats: Vec<ChatId> = self
+            .t
+            .groups
+            .iter()
+            .filter(|(_, g)| g.neighbors.contains(peer))
+            .map(|(c, _)| *c)
+            .collect();
+        for chat in chats {
+            let g = self.group_mut(chat);
+            g.neighbors.remove(peer);
+            // The cooldown starts at the next upkeep, which knows the time.
+            g.cooldown.insert(*peer, u64::MAX);
+            self.stats.neighbors_replaced += 1;
+        }
+    }
+
+    /// Turns the open-ended cooldowns of replaced neighbors into a day from `now`.
+    pub(crate) fn date_cooldowns(&mut self, chat: ChatId, now: u64) {
+        if self
+            .t
+            .groups
+            .get(&chat)
+            .is_some_and(|g| g.cooldown.values().any(|u| *u == u64::MAX))
+        {
+            for until in self.group_mut(chat).cooldown.values_mut() {
+                if *until == u64::MAX {
+                    *until = now.saturating_add(NEIGHBOR_COOLDOWN_MS);
+                }
+            }
+        }
+    }
+}
+
+/// A uniform value in `0..n`, `n > 0`, without modulo bias.
+pub(crate) fn draw_u64(rng: &mut dyn Randomness, n: u64) -> u64 {
+    let zone = u64::MAX - (u64::MAX % n);
+    loop {
+        let v = u64::from_le_bytes(crate::rng::bytes::<8>(rng));
+        if v < zone {
+            return v % n;
+        }
+    }
+}
