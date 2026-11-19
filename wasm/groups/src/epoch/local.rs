@@ -756,7 +756,7 @@ mod tests {
             assert_eq!(f.row(e.event_id()).unwrap().state, RowState::Pruned);
             assert!(f.has_edges(e.event_id()));
         }
-        // The content-free pending deletion stays pending.
+        // A content-free pending deletion stays pending.
         assert_eq!(
             f.row(ds.event_id()).unwrap().role(),
             Some(Role::PendingDeletion { due: T0 + 2 * MIN })

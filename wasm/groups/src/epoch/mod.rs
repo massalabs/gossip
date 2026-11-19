@@ -84,7 +84,7 @@ pub enum Merge {
     Lost,
     /// It carries the current result and stays available beside the other carriers.
     Identical,
-    /// It is kept as a pending future version or as the pending scheduled deletion.
+    /// It is kept as a pending future version or as a pending scheduled deletion.
     Pending,
 }
 

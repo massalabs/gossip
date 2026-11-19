@@ -7,7 +7,7 @@
 //!   temporary-rejection marker (§9.6);
 //! - **parent edges** of every processed event, kept after pruning (§9.3, §14.1);
 //! - **current objects** keyed by `(chat_id, syncObjId)`: the current result, the retained
-//!   events that carry it, the pending future versions and the pending deletion (§7.1, §7.3,
+//!   events that carry it, the pending future versions and the pending deletions (§7.1, §7.3,
 //!   §7.4).
 //!
 //! A device stores an event's version and fields, never the bytes it received, and serves it
