@@ -313,6 +313,31 @@ impl Node {
         }
     }
 
+    /// The epochs among `held` (held parents named by `root`) over which the owner of
+    /// `root` has verified authority (§4.7): for a handover root, its parent, whose owner
+    /// signed it (the signature was verified against that parent on receipt); for a
+    /// successor root, the parents owned by its owner or by a previous owner in its line,
+    /// judged with all of `held`.
+    pub(crate) fn authorized_parents(&self, root: &Root, held: &[ChatId]) -> Vec<ChatId> {
+        let held: Vec<ChatId> = held
+            .iter()
+            .filter(|c| root.names_parent(c) && self.t.epochs.contains(c))
+            .copied()
+            .collect();
+        if root.root_type() == RootType::Handover {
+            return held;
+        }
+        let authority = self.line_authority(root.owner_id(), &held);
+        held.into_iter()
+            .filter(|c| {
+                self.t
+                    .epochs
+                    .get(c)
+                    .is_some_and(|r| authority.contains(&r.root.owner_id()))
+            })
+            .collect()
+    }
+
     // ── Receiving a root (§4.7, §4.8) ────────────────────────────────────────
 
     /// A root from `from` (§4.7, §4.8). Returns how a task counts it.
@@ -382,19 +407,7 @@ impl Node {
             .filter(|c| self.t.epochs.contains(c))
             .copied()
             .collect();
-        let authority = self.line_authority(root.owner_id(), &held);
-        let authorized: Vec<ChatId> = held
-            .iter()
-            .filter(|c| {
-                Some(**c) == handover_parent
-                    || self
-                        .t
-                        .epochs
-                        .get(c)
-                        .is_some_and(|r| authority.contains(&r.root.owner_id()))
-            })
-            .copied()
-            .collect();
+        let authorized = self.authorized_parents(&root, &held);
         let installed: Vec<ChatId> = authorized
             .iter()
             .filter(|c| self.installed(c))
@@ -769,16 +782,10 @@ impl Node {
                 if held.is_empty() {
                     continue;
                 }
-                let auth = self.line_authority(rec.root.owner_id(), &held);
-                let ok: Vec<ChatId> = held
+                let ok: Vec<ChatId> = self
+                    .authorized_parents(&rec.root, &held)
                     .into_iter()
-                    .filter(|c| {
-                        self.t
-                            .epochs
-                            .get(c)
-                            .is_some_and(|r| auth.contains(&r.root.owner_id()))
-                            && self.group_status(c) == GroupStatus::Active
-                    })
+                    .filter(|c| self.group_status(c) == GroupStatus::Active)
                     .collect();
                 if !ok.is_empty() {
                     next = Some((*chat, ok));
@@ -798,20 +805,22 @@ impl Node {
                 if rec.status != EpochStatus::Installed {
                     continue;
                 }
-                for c in &installed {
-                    if c == chat || rec.parents.contains(c) || !rec.root.names_parent(c) {
-                        continue;
-                    }
-                    let auth = self.line_authority(rec.root.owner_id(), &[*c]);
-                    if self
-                        .t
-                        .epochs
-                        .get(c)
-                        .is_some_and(|r| auth.contains(&r.root.owner_id()))
-                    {
-                        link = Some((*chat, *c));
-                        break;
-                    }
+                let named: Vec<ChatId> = installed
+                    .iter()
+                    .filter(|c| *c != chat && rec.root.names_parent(c))
+                    .copied()
+                    .collect();
+                if named.iter().all(|c| rec.parents.contains(c)) {
+                    continue;
+                }
+                // Authority is judged with every held parent: a resolution's link to a
+                // former owner's branch rests on the handover on its other parent.
+                if let Some(c) = self
+                    .authorized_parents(&rec.root, &named)
+                    .into_iter()
+                    .find(|c| !rec.parents.contains(c))
+                {
+                    link = Some((*chat, c));
                 }
                 if link.is_some() {
                     break;
