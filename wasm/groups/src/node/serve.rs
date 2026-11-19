@@ -134,6 +134,14 @@ impl Node {
                     },
                 );
             }
+            // The root of the last epoch that lists a removed peer goes with the kick or leave
+            // naming it (§4.11, §5.6), under the daily limit of those replies; queued after
+            // the answer, it is carried after the root.
+            if let QueryEntry::Op(QueryOp::ChatById(chat)) = entry
+                && self.removal_root(chat, &from)
+            {
+                self.removed_contact(cx, *chat, from);
+            }
         }
         if alive {
             self.answered(&from);
@@ -623,6 +631,11 @@ impl Node {
             }
         };
         Ok(Some(match op {
+            // The last epoch that lists a removed peer, which a shared-chats scan lists for it,
+            // by ID only (§4.11): the root discloses nothing that peer did not hold.
+            QueryOp::ChatById(chat) if self.removal_root(chat, &from) => {
+                vec![AnswerOp::Root { chat_id: *chat }]
+            }
             QueryOp::ChatById(chat) => vec![root_for(self, chat)],
             QueryOp::ChatByRef(r) => {
                 let chat = self
@@ -750,6 +763,11 @@ impl Node {
             let Some(list) = f.list.as_ref().filter(|_| f.live_until >= cx.now) else {
                 return AnswerOp::Status(Status::Restart);
             };
+            // A listed epoch is no longer listable: the scan starts again (§4.11).
+            if list.iter().any(|e| !self.listable(&e.chat_id, &peer)) {
+                self.t.scans_in.remove(&key);
+                return AnswerOp::Status(Status::Restart);
+            }
             if offset > list.len() as u64 {
                 return AnswerOp::Status(Status::Malformed);
             }
@@ -783,23 +801,58 @@ impl Node {
     /// The epochs a shared-chats scan of `peer` lists (§4.11), ascending.
     pub(crate) fn shared_epochs(&self, peer: &GossipId) -> Vec<ChatId> {
         self.epochs
-            .iter()
-            .filter(|(c, e)| {
-                e.root.is_member(peer)
-                    && e.root.is_member(&self.me)
-                    && self.serves(c)
-                    && self
-                        .t
-                        .epochs
-                        .get(c)
-                        .is_some_and(|r| r.status == EpochStatus::Installed)
-                    && !self.gx.children.get(c).is_some_and(|ch| {
-                        ch.iter()
-                            .any(|s| self.epochs.get(s).is_some_and(|se| se.root.is_member(peer)))
-                    })
-            })
-            .map(|(c, _)| *c)
+            .keys()
+            .filter(|c| self.listable(c, peer))
+            .copied()
             .collect()
+    }
+
+    /// Whether a shared-chats scan of `peer` lists `chat` (§4.11): an accepted epoch this
+    /// device serves (its group is active here, D.74), that lists both, and of which it holds
+    /// no successor that also lists `peer`, at any depth (a member removed and added back is
+    /// listed its later epochs only). For a peer removed from the group, by a kick or its
+    /// signed leave, that is the last epoch that lists it.
+    pub(crate) fn listable(&self, chat: &ChatId, peer: &GossipId) -> bool {
+        self.epochs.get(chat).is_some_and(|e| {
+            e.root.is_member(peer)
+                && e.root.is_member(&self.me)
+                && self.serves(chat)
+                && self
+                    .t
+                    .epochs
+                    .get(chat)
+                    .is_some_and(|r| r.status == EpochStatus::Installed)
+                && !self.later_epoch_lists(chat, peer)
+        })
+    }
+
+    /// Whether an installed epoch that continues `chat`, at any depth, lists `peer`.
+    fn later_epoch_lists(&self, chat: &ChatId, peer: &GossipId) -> bool {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut stack: Vec<ChatId> = self
+            .gx
+            .children
+            .get(chat)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        while let Some(c) = stack.pop() {
+            if !seen.insert(c) {
+                continue;
+            }
+            if self.epochs.get(&c).is_some_and(|e| e.root.is_member(peer)) {
+                return true;
+            }
+            stack.extend(self.gx.children.get(&c).into_iter().flatten().copied());
+        }
+        false
+    }
+
+    /// Whether `chat` is the epoch a scan lists for `peer`, a removed peer of it: its root is
+    /// answered to `peer`, which it lists, with the kick or leave naming it (§4.11, §5.6).
+    pub(crate) fn removal_root(&self, chat: &ChatId, peer: &GossipId) -> bool {
+        self.removed_peer(chat, peer) && self.listable(chat, peer)
     }
 
     /// A "not available" to a lookup of this milestone (§11.8): a failed announcement for a
@@ -837,7 +890,8 @@ impl Node {
     /// Whether the root of `chat` is served to `peer` (§12.7): this device serves the epoch,
     /// `peer` is a member of it and not a removed peer of it (§10.4). A member removed after
     /// missing epochs is sent the roots it needs with its removal record instead
-    /// (`send_owed`).
+    /// (`send_owed`); a chat lookup by ID for the last epoch that lists a removed peer is
+    /// answered too ([`Node::removal_root`]).
     pub(crate) fn root_served_to(&self, chat: &ChatId, peer: &GossipId) -> bool {
         // A dissolved group keeps its named root to announce the dissolve message (§5.8).
         // A dissolved group keeps its named root to announce the dissolve message (§5.8);

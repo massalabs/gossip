@@ -821,6 +821,11 @@ impl Node {
         let Some(list) = self.t.scans_in.get(key).and_then(|f| f.list.as_ref()) else {
             return ResponseResult::Status(Status::Restart);
         };
+        // A shared-chats scan never names an epoch the responder no longer lists, closed or
+        // left since the list was frozen (§4.11).
+        if key.1 == SHARED_SCAN && list.iter().any(|e| !self.listable(&e.chat_id, &key.0)) {
+            return ResponseResult::Status(Status::Restart);
+        }
         let Ok(start) = usize::try_from(offset) else {
             return ResponseResult::Status(Status::Malformed);
         };
