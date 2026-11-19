@@ -286,14 +286,13 @@ fn a_busy_peer_is_asked_again_a_minute_later_whatever_the_stage() {
     }
     assert!(q[0].to == member(1) && q[0].ttl > 5 * HOUR);
     super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Status(Status::Busy));
-    let other = super::retrieval::sent_lookups(&mut net, 0);
-    assert_ne!(other[0].to, member(1));
-    super::retrieval::answer(
-        &mut net,
-        0,
-        &other[0],
-        ResponseResult::Status(Status::NotAvailable),
-    );
+    // Every other member says it does not have the event.
+    loop {
+        let q = super::retrieval::sent_lookups(&mut net, 0);
+        let Some(s) = q.first() else { break };
+        assert_ne!(s.to, member(1));
+        super::retrieval::answer(&mut net, 0, s, ResponseResult::Status(Status::NotAvailable));
+    }
     net.now += 2 * MIN;
     net.tick(0);
     let q = super::retrieval::sent_lookups(&mut net, 0);
