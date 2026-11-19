@@ -783,6 +783,9 @@ impl Node {
             })
             .count() as u64;
         let leaving = !root.is_member(&self.me);
+        if leaving {
+            self.queued_objects_in_full(group);
+        }
         // Install, then deliver: the root to every other member, each kick to the member it
         // names, and every kick to the members in both the parent and the new root (§4.6).
         let installed_parents: Vec<ChatId> = parents
@@ -850,6 +853,38 @@ impl Node {
         }
         self.changed(self.group_of(&id), ChangeKind::Membership, cx.now);
         Ok(id)
+    }
+
+    /// Before this device closes `group` ("Hand over and leave", §5.7): the roots and signed
+    /// objects of its epochs still queued for a peer, decided at assembly from records the
+    /// close erases, are queued again in full, so that they are still delivered (the parent
+    /// of the handover root among them).
+    fn queued_objects_in_full(&mut self, group: ChatId) {
+        let queued: Vec<(super::records::WorkKey, GossipId, ChatId, EntryItem)> = self
+            .t
+            .queue
+            .iter()
+            .filter_map(|(k, w)| match w {
+                Work::Object { chat_id, item } if self.group_of(chat_id) == group => {
+                    Some((*k, k.0, *chat_id, *item))
+                }
+                _ => None,
+            })
+            .collect();
+        for (key, peer, chat, item) in queued {
+            let object = match item {
+                EntryItem::Root => self
+                    .held_root(&chat)
+                    .map(|r| EventObject::Root(Box::new(r.clone()))),
+                _ => super::objects::item_key(chat, item)
+                    .and_then(|k| self.t.signed.get(&k))
+                    .map(|r| r.object.to_event_object()),
+            };
+            self.remove_queued(&key);
+            if let Some(blob) = object.and_then(|o| encode_event_blob(&o).ok()) {
+                self.queue_work(peer, Work::Blob(blob));
+            }
+        }
     }
 
     /// Owner side (§5.5): a successor without every member whose live leave or request is
