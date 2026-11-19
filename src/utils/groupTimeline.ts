@@ -130,13 +130,15 @@ export function lineTexts(
 }
 
 /**
- * Whether a send failed because the message is too large for a group packet
- * (§13.10): the engine refuses an event that does not fit one container.
+ * Whether a send failed because the message is too large for a group: its
+ * text or metadata is over its limit (the service refuses it with
+ * `GroupMessageTooLargeError`, the engine with a size error), or the event
+ * does not fit one container (§13.10).
  */
 export function isTooLargeError(e: unknown): boolean {
   return (
     e instanceof Error &&
-    /does not fit one empty container|exceeds the container limit/.test(
+    /does not fit one empty container|exceeds the container limit|^groups:too-large:|(text|metadata): at most \d+ allowed/.test(
       e.message
     )
   );

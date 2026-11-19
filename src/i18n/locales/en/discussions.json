@@ -21,7 +21,8 @@
     "input_label": "Message input",
     "send": "Send message",
     "emoji": "Emoji",
-    "emoji_search": "Search emoji…"
+    "emoji_search": "Search emoji…",
+    "size_counter": "{{used}} / {{max}} bytes"
   },
   "message": {
     "sent": "Sent",

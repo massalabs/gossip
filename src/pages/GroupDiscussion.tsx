@@ -29,6 +29,7 @@ import { useGroupMemberName } from '../hooks/useGroupMemberName';
 import { useAccountStore } from '../stores/accountStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { groupDisplayName } from '../utils/groupName';
+import { nearByteLimit, utf8Bytes } from '../utils/textBytes';
 import { ROUTES } from '../constants/routes';
 
 /** What the input shows of a group message being replied to or edited. */
@@ -43,6 +44,64 @@ type Confirm =
   | { kind: 'deleteLocally'; message: GroupMessage }
   | { kind: 'editLocally'; message: GroupMessage; text: string }
   | null;
+
+/**
+ * The text of a local-only edit. Over `maxBytes` it says so and cannot be
+ * saved, and the text stays as typed or pasted.
+ */
+const LocalEdit: React.FC<{
+  text: string;
+  maxBytes?: number;
+  onChange: (text: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}> = ({ text, maxBytes, onChange, onSave, onCancel }) => {
+  const { t } = useTranslation('groups');
+  const bytes = utf8Bytes(text);
+  const tooLong = maxBytes !== undefined && bytes > maxBytes;
+  const near = maxBytes !== undefined && nearByteLimit(bytes, maxBytes);
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        {t('message_menu.edit_locally_body')}
+      </p>
+      <FormInput
+        id="local-edit"
+        type="textarea"
+        value={text}
+        onChange={onChange}
+        error={tooLong ? t('composer.edit_too_long') : null}
+        helperText={
+          near
+            ? t('discussions:message_input.size_counter', {
+                used: bytes,
+                max: maxBytes,
+              })
+            : undefined
+        }
+      />
+      <div className="flex gap-3">
+        <Button
+          variant="primary"
+          size="custom"
+          className="flex-1 h-11 rounded-lg font-semibold"
+          disabled={tooLong}
+          onClick={onSave}
+        >
+          {t('common:save')}
+        </Button>
+        <Button
+          variant="secondary"
+          size="custom"
+          className="flex-1 h-11 rounded-lg font-semibold"
+          onClick={onCancel}
+        >
+          {t('choices.cancel')}
+        </Button>
+      </div>
+    </div>
+  );
+};
 
 const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const { t } = useTranslation('groups');
@@ -102,8 +161,10 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
         await fn();
         refresh();
         if (ok) toast.success(ok);
-      } catch {
-        toast.error(t('message_menu.failed'));
+      } catch (e) {
+        toast.error(
+          isTooLargeError(e) ? t('composer.too_long') : t('message_menu.failed')
+        );
       }
     },
     [refresh, t]
@@ -130,6 +191,7 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const blocked = composerBlockedReason(group);
   const canWrite = blocked === null;
   const title = groupDisplayName(group, memberName, me);
+  const maxTextBytes = service?.messageLimits.textBytes;
   const target = (m: GroupMessage): InputTarget => ({
     content: messageText(m, t),
     message: m,
@@ -196,6 +258,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
       initialValue={draft?.text}
       onSend={send}
       placeholderKey="groups:composer.placeholder"
+      maxBytes={maxTextBytes}
+      onTooLong={() => toast.error(t('composer.too_long'))}
       replyingTo={replyingTo}
       onCancelReply={() => setReplyingTo(null)}
       editingMessage={editing}
@@ -351,54 +415,31 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
         title={t('message_menu.edit_locally_title')}
       >
         {confirm?.kind === 'editLocally' && (
-          <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">
-              {t('message_menu.edit_locally_body')}
-            </p>
-            <FormInput
-              id="local-edit"
-              type="textarea"
-              value={confirm.text}
-              onChange={text => setConfirm({ ...confirm, text })}
-            />
-            <div className="flex gap-3">
-              <Button
-                variant="primary"
-                size="custom"
-                className="flex-1 h-11 rounded-lg font-semibold"
-                onClick={() => {
-                  const c = confirm;
-                  setConfirm(null);
-                  if (!service) return;
-                  void run(() =>
-                    service.editMessageLocally(
-                      c.message.epochId,
-                      c.message.syncObjId,
-                      {
-                        body: { type: 'text', text: c.text },
-                      }
-                    )
-                  );
-                }}
-              >
-                {t('common:save')}
-              </Button>
-              <Button
-                variant="secondary"
-                size="custom"
-                className="flex-1 h-11 rounded-lg font-semibold"
-                onClick={() => setConfirm(null)}
-              >
-                {t('choices.cancel')}
-              </Button>
-            </div>
-          </div>
+          <LocalEdit
+            text={confirm.text}
+            maxBytes={maxTextBytes}
+            onChange={text => setConfirm({ ...confirm, text })}
+            onSave={() => {
+              const c = confirm;
+              setConfirm(null);
+              if (!service) return;
+              void run(() =>
+                service.editMessageLocally(
+                  c.message.epochId,
+                  c.message.syncObjId,
+                  {
+                    body: { type: 'text', text: c.text },
+                  }
+                )
+              );
+            }}
+            onCancel={() => setConfirm(null)}
+          />
         )}
       </BaseModal>
     </DiscussionLayout>
   );
 };
-
 /** Keyed by group, like `Discussion`, so compose state never leaks across groups. */
 const GroupDiscussion: React.FC = () => {
   const { groupId } = useParams();

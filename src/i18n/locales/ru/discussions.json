@@ -21,7 +21,8 @@
     "input_label": "Ввод сообщения",
     "send": "Отправить сообщение",
     "emoji": "Эмодзи",
-    "emoji_search": "Поиск эмодзи…"
+    "emoji_search": "Поиск эмодзи…",
+    "size_counter": "{{used}} / {{max}} байт"
   },
   "message": {
     "sent": "Отправлено",
