@@ -599,3 +599,107 @@ fn the_table_model_passes_the_engine_conformance_check() {
     groups::node::conformance::check_batch_with_erase(&mut store, &mut |s, fail| s.fail = fail)
         .unwrap();
 }
+
+/// §5.12 through the bindings: two devices migrate their earlier conversation at once, the
+/// declarations survive a reopen, both keep the group whose owner sorts first and the loser
+/// is told; a consented contact's group is adopted without a prompt; the connection
+/// queries answer from the groups held.
+#[test]
+fn crossing_migrations_consents_and_connections() {
+    let mut net = Net::new(3);
+    let ids: Vec<GossipId> = net.peers.iter().map(Peer::id).collect();
+    let now = net.now;
+    net.peers[0]
+        .core
+        .set_earlier_conversation(ids[1], 0, true, now)
+        .unwrap();
+    net.peers[1]
+        .core
+        .set_earlier_conversation(ids[0], 0, true, now)
+        .unwrap();
+    for p in &mut net.peers {
+        p.reopen();
+    }
+    assert_eq!(
+        net.peers[0].core.earlier_conversations(),
+        format!(r#"[["{}","0"]]"#, hex(ids[1].as_bytes()))
+    );
+    let a = net.peers[0]
+        .core
+        .create_group_with("a".into(), vec![ids[1]], Some(0), now)
+        .unwrap();
+    let b = net.peers[1]
+        .core
+        .create_group_with("b".into(), vec![ids[0]], Some(0), now)
+        .unwrap();
+    for p in &mut net.peers {
+        p.persist();
+    }
+    net.settle(1_000);
+    let (keep, lose, loser) = if ids[0].as_bytes() < ids[1].as_bytes() {
+        (a, b, 1)
+    } else {
+        (b, a, 0)
+    };
+    for i in 0..2 {
+        net.peers[i].reopen();
+        let groups = J::parse(&net.peers[i].core.groups()).unwrap();
+        let groups = groups.as_arr().unwrap();
+        assert_eq!(groups.len(), 1, "peer {i}");
+        assert_eq!(
+            groups[0].field("group").unwrap().as_str().unwrap(),
+            hex(keep.as_bytes())
+        );
+    }
+    let changes = net.peers[loser].core.take_changes(net.now).unwrap();
+    assert!(
+        changes.contains(&format!(
+            r#"{{"group":"{}","kind":{{"t":"Superseded","by":"{}","lost_messages":false}}}}"#,
+            hex(lose.as_bytes()),
+            hex(keep.as_bytes())
+        )),
+        "{changes}"
+    );
+    assert!(changes.contains(r#""kind":"Connections""#), "{changes}");
+    // Connections.
+    assert!(net.peers[0].core.is_co_member(ids[1]));
+    assert!(!net.peers[0].core.is_co_member(ids[2]));
+    assert_eq!(net.peers[0].core.connections_to_revoke(&ids), vec![ids[2]]);
+    // Sessions are in memory: none is reported after the reopen.
+    assert_eq!(net.peers[0].core.peers_wanting_connection(), vec![ids[1]]);
+    net.peers[0].core.set_session(ids[1], true);
+    assert!(net.peers[0].core.peers_wanting_connection().is_empty());
+    net.peers[0].core.set_session(ids[1], false);
+    assert_eq!(net.peers[0].core.peers_wanting_connection(), vec![ids[1]]);
+    net.peers[0].core.set_session(ids[1], true);
+    // A consented contact: peer 2 accepted peer 0's request, peer 0 creates.
+    let now = net.now;
+    net.peers[2]
+        .core
+        .consent_to_direct_chat(ids[0], true, now)
+        .unwrap();
+    net.peers[2].reopen();
+    assert!(
+        net.peers[2]
+            .core
+            .direct_chat_consents()
+            .contains(&hex(ids[0].as_bytes()))
+    );
+    let c = net.peers[0]
+        .core
+        .create_group("c".into(), vec![ids[2]], now)
+        .unwrap();
+    net.peers[0].persist();
+    net.settle(1_000);
+    net.peers[2].reopen();
+    assert_eq!(
+        group_json(&net.peers[2], c)
+            .field("group")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        hex(c.as_bytes())
+    );
+    assert_eq!(net.peers[2].core.invitations(net.now), "[]");
+    assert_eq!(net.peers[2].core.direct_chat_consents(), "[]");
+}
