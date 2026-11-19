@@ -1311,3 +1311,236 @@ fn scheduled_deletions_end_up_available_whatever_the_arrival_timing() {
     assert_eq!(available(&early), available(&late));
     assert_eq!(early.tips(T0 + 20_000), late.tips(T0 + 20_000));
 }
+
+// ── Reactions (§7.1, §7.6) ──────────────────────────────────────────────────
+
+/// A reaction by `author` with `emoji` to the message `target`, under its own ID.
+pub(crate) fn react(
+    target: u8,
+    author: GossipId,
+    emoji: &str,
+    action: crate::ReactionAction,
+    lma: u64,
+) -> Payload {
+    let r = crate::Reaction {
+        target: sid(target),
+        emoji: emoji.to_owned(),
+        action,
+    };
+    Payload::Content(Content {
+        sync_obj_id: r.sync_obj_id(&author),
+        author,
+        created_at: lma,
+        last_modified_at: lma,
+        body: Body::Reaction(r),
+        edited: false,
+        metadata: BTreeMap::new(),
+    })
+}
+
+/// The same payload under another sync-object ID.
+fn under(p: Payload, sync: SyncObjId) -> Payload {
+    match p {
+        Payload::Content(mut c) => {
+            c.sync_obj_id = sync;
+            Payload::Content(c)
+        }
+        Payload::Delete { scheduled_at, .. } => Payload::Delete {
+            sync_obj_id: sync,
+            scheduled_at,
+        },
+    }
+}
+
+impl Fixture {
+    fn object_of(&self, sync: SyncObjId) -> ObjectRecord {
+        self.store
+            .object(&self.root.chat_id(), &sync)
+            .unwrap()
+            .unwrap()
+    }
+
+    fn full(&self) -> (Vec<EventRow>, Vec<ObjectRecord>) {
+        let chat = self.root.chat_id();
+        (
+            self.store.event_rows(&chat).unwrap(),
+            self.store.objects(&chat).unwrap(),
+        )
+    }
+}
+
+fn action_of(obj: &ObjectRecord) -> Option<crate::ReactionAction> {
+    match &obj.current {
+        Some(StoredResult::Content(Content {
+            body: Body::Reaction(r),
+            ..
+        })) => Some(r.action),
+        _ => None,
+    }
+}
+
+fn all_orders<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
+    if items.len() <= 1 {
+        return vec![items.to_vec()];
+    }
+    let mut out = Vec::new();
+    for i in 0..items.len() {
+        let mut rest = items.to_vec();
+        let first = rest.remove(i);
+        for mut tail in all_orders(&rest) {
+            tail.insert(0, first.clone());
+            out.push(tail);
+        }
+    }
+    out
+}
+
+#[test]
+fn reaction_versions_rank_by_date_then_remove_over_add() {
+    use crate::ReactionAction::{Add, Remove};
+    let mut f = Fixture::new();
+    let bob = f.bob.id;
+    let add = f.event(T0, 1, &[], react(1, bob, "+", Add, T0));
+    let id = add.payload().sync_obj_id();
+    let remove = f.event(T0, 2, &[], react(1, bob, "+", Remove, T0 + 1));
+    let add_again = f.event(T0, 3, &[], react(1, bob, "+", Add, T0 + 2));
+    let remove_same = f.event(T0, 4, &[], react(1, bob, "+", Remove, T0 + 2));
+    assert_eq!(f.recv(&add, T0 + 10), Outcome::Accepted(Merge::Won));
+    assert_eq!(f.recv(&remove, T0 + 10), Outcome::Accepted(Merge::Won));
+    assert_eq!(f.recv(&add_again, T0 + 10), Outcome::Accepted(Merge::Won));
+    assert_eq!(action_of(&f.object_of(id)), Some(Add));
+    // On equal dates a remove wins over an add, whatever the result hashes.
+    assert_eq!(f.recv(&remove_same, T0 + 10), Outcome::Accepted(Merge::Won));
+    assert_eq!(action_of(&f.object_of(id)), Some(Remove));
+    assert_eq!(f.state(&add_again), PRUNED);
+    // An older add loses; the same remove again is identical.
+    let late_add = f.event(T0, 5, &[], react(1, bob, "+", Add, T0 + 1));
+    assert_eq!(f.recv(&late_add, T0 + 10), Outcome::Accepted(Merge::Lost));
+    let twin = f.event(T0, 6, &[], remove_same.payload().clone());
+    assert_eq!(f.recv(&twin, T0 + 10), Outcome::Accepted(Merge::Identical));
+    // Two removes of one date: the result hash decides, as for any message.
+    let mut other = react(1, bob, "+", Remove, T0 + 2);
+    if let Payload::Content(c) = &mut other {
+        c.created_at = T0 - 1;
+    }
+    let other = f.event(T0, 7, &[], other);
+    let wins = other.result_hash() > remove_same.result_hash();
+    assert_eq!(
+        f.recv(&other, T0 + 10),
+        Outcome::Accepted(if wins { Merge::Won } else { Merge::Lost })
+    );
+    // Each order of the four versions gives the same state.
+    let events = [&add, &remove, &add_again, &remove_same];
+    let mut first = None;
+    for order in all_orders(&events) {
+        let mut g = Fixture::new();
+        for e in order {
+            g.recv(e, T0 + 10);
+        }
+        assert_eq!(action_of(&g.object_of(id)), Some(Remove));
+        let state = g.full();
+        assert_eq!(*first.get_or_insert_with(|| state.clone()), state);
+    }
+}
+
+#[test]
+fn a_deletion_has_no_effect_on_a_reaction_in_any_order() {
+    use crate::ReactionAction::{Add, Remove};
+    let f = Fixture::new();
+    let bob = f.bob.id;
+    let add = f.event(T0, 1, &[], react(1, bob, "+", Add, T0 + 1));
+    let id = add.payload().sync_obj_id();
+    let remove = f.event(T0, 2, &[], react(1, bob, "+", Remove, T0 + 1));
+    let delete = f.event(T0, 3, &[], under(del(0, None), id));
+    let scheduled = f.event(T0, 4, &[], under(del(0, Some(T0 + 50)), id));
+    // A later version, scheduled: it activates after the deletions.
+    let later = f.event(T0, 5, &[], react(1, bob, "+", Add, T0 + 200));
+    let events = [&add, &remove, &delete, &scheduled, &later];
+    let mut first = None;
+    for order in all_orders(&events) {
+        for at in [T0 + 10, T0 + 100] {
+            let mut g = Fixture::new();
+            for e in &order {
+                g.recv(e, at);
+            }
+            assert_eq!(action_of(&g.object_of(id)), Some(Remove), "{at}");
+            g.tick(T0 + 1_000);
+            assert_eq!(action_of(&g.object_of(id)), Some(Add));
+            // The deletions are pruned like a superseded version, and serve nothing.
+            assert_eq!(g.state(&delete), PRUNED);
+            assert_eq!(g.state(&scheduled), PRUNED);
+            let state = g.full();
+            assert_eq!(*first.get_or_insert_with(|| state.clone()), state);
+        }
+    }
+}
+
+#[test]
+fn a_tombstone_stored_first_does_not_apply_to_a_reaction() {
+    use crate::ReactionAction::Add;
+    let mut f = Fixture::new();
+    let bob = f.bob.id;
+    let add = f.event(T0, 1, &[], react(1, bob, "+", Add, T0));
+    let id = add.payload().sync_obj_id();
+    let delete = f.event(T0, 2, &[], under(del(0, None), id));
+    assert_eq!(f.recv(&delete, T0), Outcome::Accepted(Merge::Won));
+    assert!(f.object_of(id).is_deleted());
+    assert_eq!(f.recv(&add, T0), Outcome::Accepted(Merge::Won));
+    assert_eq!(action_of(&f.object_of(id)), Some(Add));
+    assert_eq!(f.state(&delete), PRUNED);
+    // A deletion that arrives after it is pruned at once.
+    let again = f.event(T0, 3, &[], under(del(0, None), id));
+    assert_eq!(f.recv(&again, T0), Outcome::Accepted(Merge::Lost));
+    assert_eq!(f.state(&again), PRUNED);
+    // A pending version of a reaction survives a deletion that comes before its time.
+    let mut g = Fixture::new();
+    let future = g.event(T0, 4, &[], react(2, bob, "+", Add, T0 + 100));
+    let fid = future.payload().sync_obj_id();
+    assert_eq!(g.recv(&future, T0), Outcome::Accepted(Merge::Pending));
+    let d = g.event(T0, 5, &[], under(del(0, None), fid));
+    assert_eq!(g.recv(&d, T0), Outcome::Accepted(Merge::Won));
+    assert!(g.object_of(fid).is_deleted());
+    g.tick(T0 + 100);
+    assert_eq!(action_of(&g.object_of(fid)), Some(Add));
+}
+
+/// A member may put another message under a reaction's ID (a text's ID is not checked).
+/// The reaction outranks it whatever the dates and the order, and deletions still apply to
+/// it alone: every device ends with the reaction.
+#[test]
+fn a_reaction_outranks_another_type_under_its_id() {
+    use crate::ReactionAction::Remove;
+    let f = Fixture::new();
+    let bob = f.bob.id;
+    let reaction = f.event(T0, 1, &[], react(1, bob, "+", Remove, T0));
+    let id = reaction.payload().sync_obj_id();
+    let text_later = f.event(T0, 2, &[], under(text(0, bob, T0, T0 + 50, "x"), id));
+    let delete = f.event(T0, 3, &[], under(del(0, None), id));
+    let events = [&reaction, &text_later, &delete];
+    let mut first = None;
+    for order in all_orders(&events) {
+        let mut g = Fixture::new();
+        for e in order {
+            g.recv(e, T0 + 100);
+        }
+        assert_eq!(action_of(&g.object_of(id)), Some(Remove));
+        assert_eq!(g.state(&text_later), PRUNED);
+        let state = g.full();
+        assert_eq!(*first.get_or_insert_with(|| state.clone()), state);
+    }
+    // Without the reaction, the ordinary rules: the deletion absorbs the text.
+    let mut g = Fixture::new();
+    g.recv(&text_later, T0 + 100);
+    g.recv(&delete, T0 + 100);
+    assert!(g.object_of(id).is_deleted());
+    // A deleted text stays deleted: only a reaction, whose ID is the hash of its target,
+    // author and emoji, is exempt, so no message can come back under its own ID.
+    let mut g = Fixture::new();
+    let t = g.event(T0, 4, &[], text(9, bob, T0, T0, "gone"));
+    g.recv(&t, T0);
+    let d = g.event(T0, 5, &[], del(9, None));
+    g.recv(&d, T0);
+    let back = g.event(T0, 6, &[], text(9, bob, T0, T0 + 5, "back"));
+    assert_eq!(g.recv(&back, T0 + 10), Outcome::Accepted(Merge::Lost));
+    assert!(g.obj(9).is_deleted());
+}

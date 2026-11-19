@@ -1235,4 +1235,117 @@ mod tests {
         assert_eq!(f.state(&a), Some(RowState::Pruned));
         assert_eq!(f.current_text(1).as_deref(), Some("bye"));
     }
+
+    #[test]
+    fn a_reaction_is_published_under_its_id_and_toggled_with_a_later_date() {
+        use crate::ReactionAction::{Add, Remove};
+        let mut f = Fixture::new();
+        let mut rng = TestRng::new(1);
+        let target = content_of(&hello(&mut f, &mut rng, T0)).sync_obj_id;
+        let me = f.alice.id;
+        let react = |f: &mut Fixture, rng: &mut TestRng, now, action| {
+            ep(&f.root).publish_reaction(
+                &mut f.store,
+                now,
+                rng,
+                me,
+                target,
+                "\u{1f44d}".into(),
+                action,
+            )
+        };
+        let p = react(&mut f, &mut rng, T0 + 10, Add).unwrap();
+        let c = content_of(&p);
+        assert_eq!(p.merge, Merge::Won);
+        assert_eq!(
+            c.sync_obj_id,
+            crate::hash::reaction_sync_obj_id(&target, &me, "\u{1f44d}")
+        );
+        assert_eq!((c.created_at, c.last_modified_at), (T0 + 10, T0 + 10));
+        assert!(!c.edited);
+        // A toggle is a new version of the same object: max(now, previous + 1), its creation
+        // date kept.
+        let p = react(&mut f, &mut rng, T0 + 20, Remove).unwrap();
+        let c2 = content_of(&p);
+        assert_eq!(c2.sync_obj_id, c.sync_obj_id);
+        assert_eq!((c2.created_at, c2.last_modified_at), (T0 + 10, T0 + 20));
+        assert_eq!(p.merge, Merge::Won);
+        // After the clock moved back, the new version still comes after the current one.
+        let p = react(&mut f, &mut rng, T0 + 15, Add).unwrap();
+        assert_eq!(content_of(&p).last_modified_at, T0 + 21);
+        assert_eq!(p.merge, Merge::Pending);
+        check(&f, T0 + 15);
+        // The emoji is checked like a received one.
+        assert!(matches!(
+            ep(&f.root).publish_reaction(
+                &mut f.store,
+                T0 + 30,
+                &mut rng,
+                me,
+                target,
+                String::new(),
+                Add
+            ),
+            Err(ChangeError::Invalid(Error::TooFew { .. }))
+        ));
+    }
+
+    /// A reaction is never deleted and is only changed by a new version of itself.
+    #[test]
+    fn a_reaction_is_neither_deleted_nor_edited() {
+        use crate::ReactionAction::Add;
+        let mut f = Fixture::new();
+        let mut rng = TestRng::new(1);
+        let target = content_of(&hello(&mut f, &mut rng, T0)).sync_obj_id;
+        let me = f.alice.id;
+        let p = ep(&f.root)
+            .publish_reaction(&mut f.store, T0 + 1, &mut rng, me, target, "+".into(), Add)
+            .unwrap();
+        let id = content_of(&p).sync_obj_id;
+        let refused = Err(ChangeError::Invalid(Error::NotAllowed("a reaction")));
+        assert_eq!(
+            ep(&f.root).publish_deletion(&mut f.store, T0 + 2, &mut rng, id, None),
+            refused
+        );
+        assert_eq!(
+            ep(&f.root).publish_edit(
+                &mut f.store,
+                T0 + 2,
+                &mut rng,
+                id,
+                Body::Text("x".into()),
+                BTreeMap::new(),
+                None
+            ),
+            refused
+        );
+        assert_eq!(
+            ep(&f.root).local_delete(&mut f.store, T0 + 2, id),
+            refused.clone().map(|_: Published| Vec::new())
+        );
+        // A local-only edit keeps it a reaction.
+        let edit = LocalEdit {
+            body: Some(Body::Text("x".into())),
+            ..Default::default()
+        };
+        assert_eq!(
+            ep(&f.root).local_edit(&mut f.store, T0 + 2, id, edit),
+            refused.map(|_: Published| Vec::new())
+        );
+        let edit = LocalEdit {
+            created_at: Some(T0 - 5),
+            ..Default::default()
+        };
+        assert!(
+            ep(&f.root)
+                .local_edit(&mut f.store, T0 + 2, id, edit)
+                .is_ok()
+        );
+        // Retry republishes it unchanged.
+        let r = ep(&f.root)
+            .retry(&mut f.store, T0 + 3, &mut rng, id)
+            .unwrap();
+        assert_eq!(content_of(&r).sync_obj_id, id);
+        check(&f, T0 + 3);
+    }
 }
