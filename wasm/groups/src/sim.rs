@@ -206,7 +206,8 @@ impl Sim {
         let device = &mut self.devices[p.to];
         let outcome = epoch
             .receive_blob(&mut device.store, sender, &p.blob, 1, now)
-            .expect("memory storage");
+            .expect("memory storage")
+            .outcome;
         check_invariants(&device.store, &chat, now).expect("invariants after a delivery");
         match outcome {
             Outcome::Rejected(r) => panic!("an honest event was rejected: {r:?}"),
@@ -450,7 +451,8 @@ fn replay(sim: &Sim, order_seed: u64, now: u64) -> MemoryStorage {
         let out = sim
             .epoch()
             .receive_blob(&mut store, sender, blob, 1, now)
-            .unwrap();
+            .unwrap()
+            .outcome;
         assert!(
             !matches!(out, Outcome::Rejected(_) | Outcome::TemporarilyInvalid),
             "replay: {out:?}"

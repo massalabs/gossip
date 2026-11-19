@@ -76,6 +76,23 @@ impl<'s, S: StorageRead + ?Sized> Tx<'s, S> {
     pub(crate) fn into_changes(self) -> Changes {
         self.changes
     }
+
+    /// The staged changes, with the IDs this step prunes that were retained before it,
+    /// ascending (§9.3: later layers invalidate pending work that refers to them).
+    pub(crate) fn finish(self) -> Result<(Changes, Vec<EventId>), StorageError> {
+        let mut pruned = Vec::new();
+        for (id, row) in &self.changes.rows {
+            if row.state == RowState::Pruned
+                && self
+                    .store
+                    .event_row(&self.changes.chat_id, id)?
+                    .is_some_and(|r| matches!(r.state, RowState::Held { .. }))
+            {
+                pruned.push(*id);
+            }
+        }
+        Ok((self.changes, pruned))
+    }
 }
 
 impl<S: StorageRead + ?Sized> StorageRead for Tx<'_, S> {

@@ -110,6 +110,26 @@ pub enum Outcome {
     Accepted(Merge),
 }
 
+/// What receiving a message event did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Received {
+    /// The outcome for the event.
+    pub outcome: Outcome,
+    /// The events this step pruned that were retained before it, ascending: superseded
+    /// results, absorbed content, expired carriers (§9.3). Pending outgoing work that refers
+    /// to them is to be invalidated.
+    pub pruned: Vec<EventId>,
+}
+
+impl Received {
+    fn nothing(outcome: Outcome) -> Self {
+        Self {
+            outcome,
+            pruned: Vec::new(),
+        }
+    }
+}
+
 /// One epoch, as the engine sees it: its root, whether it was accepted, and the state of its
 /// group. Installation, adoption and group states are decided elsewhere.
 #[derive(Debug, Clone, Copy)]
@@ -181,18 +201,18 @@ impl<'a> Epoch<'a> {
         sender: Sender,
         event: MessageEvent,
         now: u64,
-    ) -> Result<Outcome, StorageError> {
+    ) -> Result<Received, StorageError> {
         if let Some(rejection) = self.gate(sender, &event) {
-            return Ok(Outcome::Rejected(rejection));
+            return Ok(Received::nothing(Outcome::Rejected(rejection)));
         }
         let mut tx = Tx::new(&*store, self.chat_id());
         tick(&mut tx, now)?;
         let outcome = receive_in(&mut tx, event, now)?;
         // An event received after its window is merged, then pruned at once (§8.1).
         expire(&mut tx, now)?;
-        let changes = tx.into_changes();
+        let (changes, pruned) = tx.finish()?;
         store.commit(changes)?;
-        Ok(outcome)
+        Ok(Received { outcome, pruned })
     }
 
     /// Decodes an event blob carried in a plaintext of version `plaintext_version` (§13.1)
@@ -208,27 +228,34 @@ impl<'a> Epoch<'a> {
         blob: &[u8],
         plaintext_version: u64,
         now: u64,
-    ) -> Result<Outcome, StorageError> {
+    ) -> Result<Received, StorageError> {
         match wire::decode_event_blob(blob, plaintext_version) {
             Ok(EventObject::Message(event)) => self.receive(store, sender, event, now),
-            Ok(_) => Ok(Outcome::Rejected(Rejection::NotAMessageEvent)),
-            Err(e) => Ok(Outcome::Rejected(Rejection::Invalid(e))),
+            Ok(_) => Ok(Received::nothing(Outcome::Rejected(
+                Rejection::NotAMessageEvent,
+            ))),
+            Err(e) => Ok(Received::nothing(Outcome::Rejected(Rejection::Invalid(e)))),
         }
     }
 
     /// Applies everything due at `now`: pending versions and deletions, in `(due, eventId)`
     /// order (§7.3, §7.4), then retention pruning (§8.1). Callers run it on startup and resume,
     /// from timers ([`Epoch::next_wakeup`]) and before reading the view; every other operation
-    /// runs it first.
+    /// runs it first. Returns the events it pruned that were retained before (§9.3).
     ///
     /// # Errors
     ///
     /// A storage failure; nothing was committed then.
-    pub fn tick<S: Storage + ?Sized>(&self, store: &mut S, now: u64) -> Result<(), StorageError> {
+    pub fn tick<S: Storage + ?Sized>(
+        &self,
+        store: &mut S,
+        now: u64,
+    ) -> Result<Vec<EventId>, StorageError> {
         let mut tx = Tx::new(&*store, self.chat_id());
         tick(&mut tx, now)?;
-        let changes = tx.into_changes();
-        store.commit(changes)
+        let (changes, pruned) = tx.finish()?;
+        store.commit(changes)?;
+        Ok(pruned)
     }
 
     /// When the shared apply path should next run: the earliest pending due time, with the
@@ -283,7 +310,8 @@ impl<'a> Epoch<'a> {
 
     /// Capacity eviction (§8.2): prunes up to `max` available events, oldest event timestamp
     /// first, deletion events included. Pending scheduled events are exempt; current results,
-    /// tombstones, stubs and parent links are kept. Returns the evicted IDs.
+    /// tombstones, stubs and parent links are kept. Returns every ID the operation pruned,
+    /// ascending: the evicted events and any that the tick run first pruned (§9.3).
     ///
     /// # Errors
     ///
@@ -304,12 +332,12 @@ impl<'a> Epoch<'a> {
             .filter(|r| r.available(now))
             .filter_map(|r| r.event().map(|e| (r.event_id, e.payload().sync_obj_id())))
             .collect();
-        for (id, sync) in &victims {
-            prune_carrier(&mut tx, *id, *sync)?;
+        for (id, sync) in victims {
+            prune_carrier(&mut tx, id, sync)?;
         }
-        let changes = tx.into_changes();
+        let (changes, pruned) = tx.finish()?;
         store.commit(changes)?;
-        Ok(victims.into_iter().map(|(id, _)| id).collect())
+        Ok(pruned)
     }
 
     /// Capacity eviction of temporary-rejection markers (§9.6, D.32): removes up to `max`

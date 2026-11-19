@@ -65,7 +65,8 @@ impl Fixture {
         let root = self.root.clone();
         let out = Epoch::new(&root, true, GroupState::Active)
             .receive(&mut self.store, sender, event.clone(), now)
-            .unwrap();
+            .unwrap()
+            .outcome;
         check_invariants(&self.store, &root.chat_id(), now).unwrap();
         out
     }
@@ -162,7 +163,8 @@ fn rejects_when_the_epoch_is_not_accepted() {
     let sender = f.bob_sender();
     let out = Epoch::new(&f.root, false, GroupState::Active)
         .receive(&mut f.store, sender, e.clone(), T0)
-        .unwrap();
+        .unwrap()
+        .outcome;
     assert_eq!(out, Outcome::Rejected(Rejection::NotAccepted));
     assert_eq!(f.state(&e), None);
 }
@@ -177,7 +179,10 @@ fn rejects_a_peer_that_is_not_a_member_or_is_removed() {
         removed: false,
     };
     assert_eq!(
-        epoch.receive(&mut f.store, carol, e.clone(), T0).unwrap(),
+        epoch
+            .receive(&mut f.store, carol, e.clone(), T0)
+            .unwrap()
+            .outcome,
         Outcome::Rejected(Rejection::PeerNotMember)
     );
     let removed = Sender::Peer {
@@ -187,7 +192,7 @@ fn rejects_a_peer_that_is_not_a_member_or_is_removed() {
     // Even a deletion is dropped from a removed peer (§10.4).
     let d = f.event(T0, 2, &[], del(1, None));
     assert_eq!(
-        epoch.receive(&mut f.store, removed, d, T0).unwrap(),
+        epoch.receive(&mut f.store, removed, d, T0).unwrap().outcome,
         Outcome::Rejected(Rejection::RemovedPeer)
     );
     // The peer need not be the claimed author.
@@ -206,7 +211,10 @@ fn group_states_drop_events() {
         let epoch = Epoch::new(&f.root, true, state);
         for ev in [&e, &d] {
             assert_eq!(
-                epoch.receive(&mut f.store, sender, ev.clone(), T0).unwrap(),
+                epoch
+                    .receive(&mut f.store, sender, ev.clone(), T0)
+                    .unwrap()
+                    .outcome,
                 Outcome::Rejected(Rejection::GroupState)
             );
         }
@@ -214,11 +222,11 @@ fn group_states_drop_events() {
     // A read-only archive after a kick applies deletions only.
     let epoch = Epoch::new(&f.root, true, GroupState::ReadOnlyAfterKick);
     assert_eq!(
-        epoch.receive(&mut f.store, sender, e, T0).unwrap(),
+        epoch.receive(&mut f.store, sender, e, T0).unwrap().outcome,
         Outcome::Rejected(Rejection::GroupState)
     );
     assert_eq!(
-        epoch.receive(&mut f.store, sender, d, T0).unwrap(),
+        epoch.receive(&mut f.store, sender, d, T0).unwrap().outcome,
         Outcome::Accepted(Merge::Won)
     );
 }
@@ -270,7 +278,8 @@ fn rejects_malformed_blobs_and_other_objects() {
     assert!(matches!(
         epoch
             .receive_blob(&mut f.store, sender, &blob[..blob.len() - 1], 1, T0)
-            .unwrap(),
+            .unwrap()
+            .outcome,
         Outcome::Rejected(Rejection::Invalid(_))
     ));
     // Unsorted parents.
@@ -290,7 +299,8 @@ fn rejects_malformed_blobs_and_other_objects() {
     assert_eq!(
         epoch
             .receive_blob(&mut f.store, sender, &bad, 1, T0)
-            .unwrap(),
+            .unwrap()
+            .outcome,
         Outcome::Rejected(Rejection::Invalid(Error::NotSortedDistinct("parents")))
     );
     // A payload date beyond ts + MAX_SCHEDULE is permanently malformed.
@@ -307,7 +317,8 @@ fn rejects_malformed_blobs_and_other_objects() {
     assert_eq!(
         epoch
             .receive_blob(&mut f.store, sender, &bad, 1, T0)
-            .unwrap(),
+            .unwrap()
+            .outcome,
         Outcome::Rejected(Rejection::Invalid(Error::BeyondSchedule("created_at")))
     );
     // A root is not a message event.
@@ -315,14 +326,16 @@ fn rejects_malformed_blobs_and_other_objects() {
     assert_eq!(
         epoch
             .receive_blob(&mut f.store, sender, &root_blob, 1, T0)
-            .unwrap(),
+            .unwrap()
+            .outcome,
         Outcome::Rejected(Rejection::NotAMessageEvent)
     );
     // The valid blob is accepted.
     assert_eq!(
         epoch
             .receive_blob(&mut f.store, sender, &blob, 1, T0)
-            .unwrap(),
+            .unwrap()
+            .outcome,
         Outcome::Accepted(Merge::Won)
     );
 }
@@ -405,6 +418,33 @@ fn greatest_last_modified_wins_and_prunes_the_superseded() {
     assert!(f.has_edges(older.event_id()));
     assert_eq!(f.current_text(1).as_deref(), Some("b"));
     assert_eq!(f.tips(T0 + 10), vec![b.event_id()]);
+}
+
+#[test]
+fn operations_report_the_events_they_prune() {
+    let mut f = Fixture::new();
+    let a = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "a"));
+    let b = f.event(T0 + 1, 2, &[], text(1, f.bob.id, T0, T0 + 1, "b"));
+    let older = f.event(T0 + 2, 3, &[], text(1, f.bob.id, T0, T0 - 1, "older"));
+    let root = f.root.clone();
+    let recv = |f: &mut Fixture, e: &MessageEvent, now| {
+        let sender = f.bob_sender();
+        ep(&root)
+            .receive(&mut f.store, sender, e.clone(), now)
+            .unwrap()
+    };
+    assert!(recv(&mut f, &a, T0 + 5).pruned.is_empty());
+    // The superseded event is reported; a losing arrival was never retained, so it is not.
+    assert_eq!(recv(&mut f, &b, T0 + 5).pruned, vec![a.event_id()]);
+    let lost = recv(&mut f, &older, T0 + 5);
+    assert_eq!(lost.outcome, Outcome::Accepted(Merge::Lost));
+    assert!(lost.pruned.is_empty());
+    // Retention.
+    assert!(ep(&root).tick(&mut f.store, T0 + 5).unwrap().is_empty());
+    assert_eq!(
+        ep(&root).tick(&mut f.store, T0 + 1 + RETENTION_MS).unwrap(),
+        vec![b.event_id()]
+    );
 }
 
 #[test]
