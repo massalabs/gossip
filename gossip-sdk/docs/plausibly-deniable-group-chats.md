@@ -3460,17 +3460,31 @@ The cost is a few more events that hold no content.
 - **B:** keep the current text and accept that devices may differ in which deletion events they
   hold.
 
-### D.27 "Available child" or "accepted child" in the cycle frontier (§6.1, §12.1)
+### D.27 "Available child" or "accepted child" for tips and the cycle frontier (§6.1, §12.1)
 
-*Found during implementation.*
+*Found during implementation; the recommendation was changed after review.*
 
 *Current text:* the cycle-frontier rule of §6.1 speaks of a component with "no available child"
 outside it; the tip definition of §12.1 says "no known accepted event references it".
-For a single event the two differ once a child has been pruned.
+The two differ once a child has been pruned.
 
-- **A (recommended):** "accepted" in both places, which is what the code does: parent edges are kept
-  after pruning, so the answer does not change when an event is pruned.
-- **B:** "available" in both places.
+*Context:* with "accepted", a pruned child still hides its parent from the tips, and a pruned event
+answers "not available", so its parent links cannot be learned by anyone.
+Example with honest devices only: E1 creates message 1; X1 creates message 2 with parent E1; X2
+edits message 2 with parent X1, and every device prunes X1 as superseded.
+The only tip is X2.
+A device that was offline fetches X2, asks for X1, gets "not available" everywhere and stops: it
+never learns E1, which still carries a current message.
+Every edit and every deletion of an edited message cuts discovery this way.
+With "available", E1 becomes a tip again when X1 is pruned.
+A device that pruned locally then names older events as parents, but under "accepted" it would
+name none at all, which shows as much.
+
+- **A:** "accepted" in both places (the first implementation).
+- **B (recommended):** "available" in both places: an event is a tip when no **available** event
+  references it.
+- **C:** keep "accepted" and let a pruned event answer a lookup with its parent links, which is a
+  change to the wire format.
 
 ### D.28 A local-only edit and a pending scheduled deletion (§9.3)
 
@@ -3514,4 +3528,109 @@ content", while the current object also holds the current result.
 - **A (recommended):** say that the current object **refers** to the event that carries the current
   result, and holds no copy of the content.
 - **B:** allow the copy and require both to be deleted together.
+
+### D.31 The form in which a scheduled deletion is served (§7.4, §9.3)
+
+*Found during review of the implementation; it refines D.26.*
+
+*Current text:* a scheduled deletion is served with its date until it applies, then without it.
+
+*Context:* under the first implementation the form depended on other deletions and on local state.
+After a local-only deletion, a scheduled deletion that arrived again was stored and served at once
+in its immediate form, so a device fetching it deleted the message up to two weeks early, against
+"MUST NOT absorb the message before its time".
+
+- **A (recommended):** the served form depends only on the event and the clock: a scheduled
+  deletion keeps its scheduled form until its **own** due time, whether it is pending or held
+  beside a tombstone, and is normalised then.
+  A local-only deletion keeps pending scheduled deletions, as a local-only edit does (D.28).
+- **B:** keep the form tied to the state of the message.
+
+### D.32 Limits on pending versions, pending deletions and rejection markers (§8.2, §9.6, §17.4)
+
+*Found during review of the implementation.*
+
+*Current text:* §8.2 says the storage of pending events "is reserved at admission" and gives no
+number; §9.6 expects capacity to force out temporary-rejection markers.
+
+*Context:* a member can park any number of scheduled versions or deletions for two weeks, and they
+cannot be evicted.
+A limit applied at arrival makes honest devices differ when they reach it at different moments, so
+the rule must be one every device computes the same way.
+
+- **A (recommended):** per message, a device keeps at most 16 pending versions and 16 pending
+  deletions: those with the earliest dates, ties broken by result hash; others are pruned.
+  Rejection markers are evicted oldest first under storage pressure.
+  The numbers are provisional.
+- **B:** no limit in this version.
+
+### D.33 A full event arriving under a pruned ID with other parents (§9.5)
+
+*Found during review of the implementation.*
+
+*Current text:* §9.5 compares only the payload; §7.1 says an ID "keeps its first valid
+interpretation entirely".
+
+*Context:* the first implementation restored such an event with its new parents while its tips
+were still computed from the first parents.
+
+- **A (recommended):** the event is restored only when its parents equal the stored parent links;
+  otherwise the ID stays pruned.
+- **B:** the payload alone decides.
+
+### D.34 A local-only edit dated in the future (§9.1, §7.5)
+
+*Found during review of the implementation.*
+
+*Current text:* a local-only edit may set any dates.
+
+*Context:* with a `last_modified_at` in the future, the message disappears from the user's own view
+until that date, and honest edits dated before it lose on this device.
+
+- **A (recommended):** a local-only edit MUST NOT set `last_modified_at` later than now.
+- **B:** allowed, and the text says the message is hidden until then.
+
+### D.35 "Indistinguishable from ordinary retention pruning" (§9.3)
+
+*Found during review of the implementation.*
+
+*Current text:* a stub left by a local-only change "is indistinguishable from ordinary retention
+pruning".
+
+*Context:* retention cannot prune an event inside its two-week window, and eviction takes the
+oldest first.
+A recent stub beside older events still held, or a current result with no event carrying it, can
+be told apart by someone who inspects the device.
+Peers can also see that a recent tip is missing from the device's next parent list.
+
+- **A (recommended):** weaken the claim: the stub looks like eviction under storage pressure, and
+  the text states what an inspector or a peer can still notice.
+- **B:** make eviction order not strictly oldest first, so that recent stubs are ordinary.
+
+### D.36 Two limits inherent in the merge rules (§7.1, §7.4)
+
+*Found during review of the implementation; no change is proposed.*
+
+- A device whose clock runs fast normalises a scheduled deletion early and serves its immediate
+  form, which deletes the message at once on devices that had not seen it.
+- Any member can create any number of permanent tombstones by deleting identifiers that name no
+  message.
+
+- **A (recommended):** state both in the security section.
+- **B:** bound them, by rules to be designed.
+
+### D.37 Page counts when an entry is skipped (§12.1, §13.5)
+
+*Found during implementation; it depends on D.23.*
+
+*Current text:* a page is final when `count` equals "the number of entries it carries", and the next
+offset follows the entries received.
+
+*Context:* if invalid entries are skipped (D.23), counting only the valid ones would make a final
+page look unfinished and shift the next offset.
+An entry of an unknown kind is an unknown enum value, which §1 says refuses the whole frame, so
+only an ID of the wrong length is skipped.
+
+- **A (recommended):** "entries it carries" means entries as received, skipped ones included.
+- **B:** a page with any invalid entry is refused whole (D.23, choice B).
 
