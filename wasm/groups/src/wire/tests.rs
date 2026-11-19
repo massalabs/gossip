@@ -713,24 +713,10 @@ fn neighbor_and_leave_request_frames() {
         one_frame(raw(false, vec![s(0), s(0)])),
         Err(Error::Duplicate("suggestions"))
     );
-    // Suggestions in an acceptance are ignored, not malformed (§2.2); the format limits
-    // (at most ten, 32 bytes each) still hold.
     assert_eq!(
-        one_frame(raw(true, vec![s(0), s(0)])),
-        Ok(Frame::NeighborResponse(NeighborResponse {
-            chat_id: c,
-            accepted: true,
-            suggestions: vec![],
-        }))
+        one_frame(raw(true, vec![s(0)])),
+        Err(Error::MustBeAbsent("suggestions"))
     );
-    assert!(matches!(
-        one_frame(raw(true, (0..11).map(s).collect())),
-        Err(Error::TooMany { .. })
-    ));
-    assert!(matches!(
-        one_frame(raw(true, vec![vec![1; 31]])),
-        Err(Error::BadLength { .. })
-    ));
     assert!(matches!(
         one_frame(raw(false, vec![vec![1; 31]])),
         Err(Error::BadLength { .. })

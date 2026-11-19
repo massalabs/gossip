@@ -70,23 +70,6 @@ pub(crate) struct Schema {
     pub limits: &'static [Limit],
 }
 
-/// Whether the schema of a version is closed (§13.8): an unknown field (an unknown `oneof`
-/// case included) or enum value makes the message malformed, and the frame is rejected with
-/// a penalty for its sender. The project owner is deciding whether a later wire version may
-/// open it: the decision is this constant, applied by [`unknown`] alone.
-pub(crate) const CLOSED_SCHEMA: bool = true;
-
-/// What the strict check does with something its schema does not define: rejects it as
-/// malformed while [`CLOSED_SCHEMA`] holds, skips it otherwise. Every such case goes through
-/// here.
-pub(crate) fn unknown(what: &'static str) -> Result<()> {
-    if CLOSED_SCHEMA {
-        Err(Error::Malformed(what))
-    } else {
-        Ok(())
-    }
-}
-
 const WIRE_VARINT: u64 = 0;
 const WIRE_LEN: u64 = 2;
 
@@ -247,7 +230,7 @@ fn check_at(root: &[u8], path: &mut Vec<u32>, schema: &Schema) -> Result<()> {
 /// for its wire type here; its content is checked merged, by [`check_at`].
 fn check_field(schema: &Schema, tag: u32, value: Wire<'_>) -> Result<()> {
     let Some((_, kind)) = schema.fields.iter().find(|(number, _)| *number == tag) else {
-        return unknown("unknown field");
+        return Err(Error::Malformed("unknown field"));
     };
     match (kind, value) {
         (Kind::Uint64, Wire::Varint(_)) => {}
@@ -263,7 +246,7 @@ fn check_field(schema: &Schema, tag: u32, value: Wire<'_>) -> Result<()> {
         }
         (Kind::Enum(values), Wire::Varint(v)) => {
             if !values.contains(&v) {
-                return unknown("unknown enum value");
+                return Err(Error::Malformed("unknown enum value"));
             }
         }
         (Kind::Bytes | Kind::Opaque | Kind::Msg(_), Wire::Len(_)) => {}
@@ -348,13 +331,6 @@ mod tests {
         ];
         assert_eq!(check(&buf, &TEST), Ok(()));
         assert_eq!(check(&[], &TEST), Ok(()));
-    }
-
-    /// The schema is closed in wire version 1 (§13.8), decided in one place.
-    #[test]
-    fn the_schema_is_closed_by_one_constant() {
-        assert!(CLOSED_SCHEMA);
-        assert_eq!(unknown("x"), Err(Error::Malformed("x")));
     }
 
     #[test]
