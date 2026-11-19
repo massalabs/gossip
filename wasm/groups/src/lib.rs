@@ -14,6 +14,8 @@
 //! - [`Leave`], [`Kick`], [`Dissolve`]: the signed objects (§5.3, §5.6, §5.8).
 //! - [`MessageEvent`]: the message event and its result projection (§6).
 //! - [`wire`]: the plaintext, container, frames and event blobs (§13, Appendix C).
+//! - [`Epoch`]: receiving and merging message events, scheduled versions and deletions,
+//!   and retention (§6.3, §7, §8, §9.5, §9.6).
 //! - [`store`]: the local records of §14.1 and the storage trait, with an in-memory store.
 //! - [`dag`]: tips, the cycle frontier and parent selection (§6.1, §12.1).
 
@@ -22,6 +24,7 @@
 pub mod cbor;
 pub mod constants;
 pub mod dag;
+mod epoch;
 mod error;
 mod event;
 pub mod hash;
@@ -36,6 +39,7 @@ pub mod wire;
 #[cfg(test)]
 mod test_support;
 
+pub use epoch::{Epoch, GroupState, MAX_TIMER_WAIT_MS, Merge, Outcome, Rejection, Sender};
 pub use error::{Error, Result};
 pub use event::{
     Body, Content, MessageEvent, MessageType, Payload, ReplyTarget, decode_reply_to,
