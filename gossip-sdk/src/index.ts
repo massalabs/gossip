@@ -47,5 +47,9 @@ export type {
   GroupMessageRef,
   GroupEpoch,
   GroupLocalEdit,
+  GroupMessageLimits,
 } from './services/groups.js';
-export { GROUP_MAX_SCHEDULE_MS } from './services/groups.js';
+export {
+  GROUP_MAX_SCHEDULE_MS,
+  GroupMessageTooLargeError,
+} from './services/groups.js';

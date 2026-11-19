@@ -22,7 +22,13 @@
  */
 
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
-import { GroupsNode, SessionStatus } from '../wasm/bindings.js';
+import {
+  GroupsNode,
+  SessionStatus,
+  group_max_metadata_bytes,
+  group_max_text_bytes,
+  group_metadata_bytes,
+} from '../wasm/bindings.js';
 import type { SessionModule } from '../wasm/session.js';
 import type { IMessageProtocol } from '../api/messageProtocol/types.js';
 import type { Queries, GroupBatch } from '../db/queries/index.js';
@@ -129,6 +135,32 @@ export interface GroupLocalEdit {
   createdAt?: number;
   lastModifiedAt?: number;
   edited?: boolean;
+}
+
+/**
+ * The size limits of a message version, read from the engine. A version over
+ * either is malformed for every device.
+ */
+export interface GroupMessageLimits {
+  /** Text in UTF-8 bytes: a text body, or the content of a forward of text. */
+  textBytes: number;
+  /**
+   * Metadata in bytes as encoded: every key and value with the framing of
+   * its entry (`replyTo` included).
+   */
+  metadataBytes: number;
+}
+
+/** A message or an edit over a size limit, refused before the engine is called. */
+export class GroupMessageTooLargeError extends Error {
+  constructor(
+    readonly part: 'text' | 'metadata',
+    readonly size: number,
+    readonly max: number
+  ) {
+    super(`groups:too-large: ${part} of ${size} bytes, at most ${max}`);
+    this.name = 'GroupMessageTooLargeError';
+  }
 }
 
 /** The longest a date may be set ahead of now (§7.2 `MAX_SCHEDULE`: two weeks minus five minutes). */
@@ -251,6 +283,34 @@ function bodyJson(b: GroupMessageBody): string {
     case 'media':
       return JSON.stringify({ t: 'Media', media: bytesToHex(b.media) });
   }
+}
+
+const utf8 = new TextEncoder();
+
+/** The text of a body as the text limit counts it, in UTF-8 bytes. */
+function textBytes(b: GroupMessageBody): number {
+  switch (b.type) {
+    case 'text':
+      return utf8.encode(b.text).length;
+    case 'forward':
+      return b.contentType === 'Text' ? b.content.length : 0;
+    default:
+      return 0;
+  }
+}
+
+/** Throws a `GroupMessageTooLargeError` if the text is over its limit. */
+function checkText(b: GroupMessageBody): void {
+  const size = textBytes(b);
+  const max = group_max_text_bytes();
+  if (size > max) throw new GroupMessageTooLargeError('text', size, max);
+}
+
+/** Throws a `GroupMessageTooLargeError` if the metadata (as JSON) is over its limit. */
+function checkMetadata(json: string): void {
+  const size = group_metadata_bytes(json);
+  const max = group_max_metadata_bytes();
+  if (size > max) throw new GroupMessageTooLargeError('metadata', size, max);
 }
 
 function metadataJson(m: Record<string, Uint8Array> | undefined): string {
@@ -1084,6 +1144,14 @@ export class GroupService {
 
   // ── Messages ─────────────────────────────────────────────────────────────
 
+  /** The size limits of a message version, as the engine enforces them. */
+  get messageLimits(): GroupMessageLimits {
+    return {
+      textBytes: group_max_text_bytes(),
+      metadataBytes: group_max_metadata_bytes(),
+    };
+  }
+
   private published(json: string): GroupPublished {
     const r = JSON.parse(json) as Raw;
     return {
@@ -1107,6 +1175,11 @@ export class GroupService {
       typeof message === 'string'
         ? { type: 'text' as const, text: message }
         : message;
+    try {
+      checkText(b);
+    } catch (e) {
+      return Promise.reject(e);
+    }
     return this.run(node => {
       const epoch = this.currentEpoch(node, groupId);
       const metadata = { ...(options.metadata ?? {}) };
@@ -1123,11 +1196,13 @@ export class GroupService {
         });
         metadata.replyTo = node.encode_reply_to(JSON.stringify(targets));
       }
+      const meta = metadataJson(metadata);
+      checkMetadata(meta);
       return this.published(
         node.publish_message(
           hexToBytes(epoch),
           bodyJson(b),
-          metadataJson(metadata),
+          meta,
           options.scheduledFor,
           this.now()
         )
@@ -1149,13 +1224,20 @@ export class GroupService {
       typeof message === 'string'
         ? { type: 'text' as const, text: message }
         : message;
+    const meta = metadataJson(options.metadata);
+    try {
+      checkText(b);
+      checkMetadata(meta);
+    } catch (e) {
+      return Promise.reject(e);
+    }
     return this.run(node =>
       this.published(
         node.publish_edit(
           hexToBytes(epochId),
           hexToBytes(syncObjId),
           bodyJson(b),
-          metadataJson(options.metadata),
+          meta,
           options.scheduledFor,
           this.now()
         )
@@ -1201,6 +1283,13 @@ export class GroupService {
     for (const t of [edit.createdAt, edit.lastModifiedAt]) {
       if (t !== undefined && t > limit) {
         return Promise.reject(new Error('groups:invalid: date too far ahead'));
+      }
+    }
+    if (edit.body) {
+      try {
+        checkText(edit.body);
+      } catch (e) {
+        return Promise.reject(e);
       }
     }
     const json = JSON.stringify({
