@@ -2272,3 +2272,129 @@ fn a_root_notice_from_a_stranger_gets_no_reaction() {
     );
     assert!(dev.node.tables().tasks.keys().all(|k| k.chat_id != unknown));
 }
+
+/// Finding 8 of the review of 54711780 (a): declining an invitation left the roots fetched
+/// as its parents, and their tasks, on the device.
+#[test]
+fn declining_an_invitation_removes_the_parents_fetched_for_it() {
+    let mut net = MNet::new(4, true);
+    let g = net.create(0, &[1, 2]);
+    net.exchange();
+    for d in 1..3 {
+        net.accept_all(d);
+    }
+    net.offline[3] = true;
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![gid(3)],
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    let e3 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("y".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.offline[3] = false;
+    net.dropped.clear();
+    let root = net.devs[1].node.root(&e3).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    net.recv_frames_m(3, 1, &[Frame::Event(blob)]);
+    net.run(crate::constants::PROMPT_DELAY_MS + MIN);
+    assert!(
+        net.devs[3].node.tables().epochs.len() >= 2,
+        "a parent was fetched"
+    );
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .decline_invitation(
+            &mut dev.store,
+            &s,
+            e3,
+            LeaveChoice::Silent,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    let t = net.devs[3].node.tables();
+    assert_eq!(t.epochs.len(), 0, "fetched parents left");
+    assert_eq!(t.tasks.len(), 0, "their tasks left");
+}
+
+/// Finding 8 (b): "Ask to be kicked" on an invitation made the epoch count as accepted.
+#[test]
+fn asking_to_be_kicked_on_an_invitation_accepts_nothing() {
+    let mut net = MNet::new(3, true);
+    let g = net.create(0, &[1, 2]);
+    net.exchange();
+    let now = net.now;
+    let s = signer(2);
+    let dev = &mut net.devs[2];
+    dev.node
+        .decline_invitation(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::AskToBeKicked,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    let a = answers_of(&mut net, 2, 1, vec![QueryOp::ChatById(g)]);
+    assert!(
+        a.is_empty(),
+        "answered as if it shared an accepted epoch: {a:?}"
+    );
+}
+
+/// Finding 8 (c): accepting an invitation to rejoin a group deleted meanwhile recreated a
+/// record under the old group's key.
+#[test]
+fn accepting_a_rejoin_after_deleting_the_group_starts_a_new_one() {
+    let (mut net, g) = founded(3);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    let z = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(2)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    assert_eq!(net.devs[2].node.invitations(net.now).len(), 1);
+    let now = net.now;
+    let dev = &mut net.devs[2];
+    dev.node
+        .delete_group(&mut dev.store, g, now, &mut net.rng)
+        .unwrap();
+    let joined = net.accept(2, z);
+    assert_eq!(joined, z);
+    assert!(net.devs[2].node.tables().group_recs.get(&g).is_none());
+}
