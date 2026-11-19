@@ -1248,3 +1248,42 @@ fn a_page_that_makes_progress_resets_the_restart_count() {
     super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Restart));
     assert!(next(&mut net).is_some(), "the scan ended");
 }
+
+/// Found by the network simulation's check that honest members stay credible (code at
+/// `74bd27cf`, seed 6): a member that announced an event and then said it did not have it
+/// was penalised for good, although honest members do so whenever they prune or supersede
+/// an event they announced, so honest relays of edited messages became suspect.
+#[test]
+fn not_available_is_penalised_only_if_the_item_never_turns_up() {
+    let mut net = Net::new(4, 1);
+    let chat = net.chat();
+    // Member 1 announces a real event, then no longer has it; member 2 supplies it.
+    let e = net.event(T0, 5, &[], 2);
+    net.recv_frames(0, member(1), &[notice(chat, &[e.event_id()])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(q[0].to, member(1));
+    super::retrieval::answer(
+        &mut net,
+        0,
+        &q[0],
+        ResponseResult::Status(Status::NotAvailable),
+    );
+    net.give(0, 2, &e);
+    assert!(net.devs[0].node.score(&member(1)) >= 500_000);
+    // Member 3 announces an ID that never turns up: penalised at its deadline.
+    let fake = EventId::new(T0, [9; 16]);
+    net.recv_frames(0, member(3), &[notice(chat, &[fake])]);
+    for s in super::retrieval::sent_lookups(&mut net, 0) {
+        if s.to == member(3) {
+            super::retrieval::answer(
+                &mut net,
+                0,
+                &s,
+                ResponseResult::Status(Status::NotAvailable),
+            );
+        }
+    }
+    net.now = T0 + crate::constants::RETENTION_MS + MIN;
+    net.tick(0);
+    assert!(net.devs[0].node.score(&member(3)) < 500_000);
+}
