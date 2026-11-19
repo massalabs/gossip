@@ -457,6 +457,7 @@ mod tests {
             root.epoch_challenge(),
             root.ref_chat_id_challenge(),
             root.created_at(),
+            root.migrate_from(),
             root.signature().as_bytes(),
         )
         .unwrap();

@@ -119,6 +119,8 @@ pub struct GroupRoot {
     pub created_at: u64,
     #[prost(bytes = "vec", tag = "10")]
     pub signature: Vec<u8>,
+    #[prost(uint64, optional, tag = "11")]
+    pub migrate_from: Option<u64>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -712,6 +712,7 @@ impl Codec for Root {
                 self.ref_chat_id_challenge().enc(),
             ),
             ("created_at".into(), J::Num(self.created_at())),
+            ("migrate_from".into(), self.migrate_from().enc()),
             ("signature".into(), J::Str(hex(self.signature().as_bytes()))),
         ])
     }
@@ -729,6 +730,11 @@ impl Codec for Root {
             &field::<Challenge>(j, "epoch_challenge")?,
             &field::<Challenge>(j, "ref_chat_id_challenge")?,
             j.field("created_at")?.as_u64()?,
+            // Absent from a root stored before the field existed.
+            match j.field("migrate_from") {
+                Ok(v) => Codec::dec(v)?,
+                Err(_) => None,
+            },
             &sig(j)?,
         )
         .map_err(|e| format!("root: {e}"))
