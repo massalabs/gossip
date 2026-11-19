@@ -10,7 +10,7 @@ use super::records::{EpochStatus, SHARED_SCAN, SignedKey, SignedObject};
 use super::retrieval::Answer;
 use super::timing::EXPIRED_GRACE_MS;
 use super::timing::{
-    QUERY_CLOCK_TOLERANCE_MS, QUEUED_ANSWERS_PER_PEER, REQUEST_BURST, REQUEST_REFILL_PER_MIN,
+    EXPIRED_SKEW_MS, QUEUED_ANSWERS_PER_PEER, REQUEST_BURST, REQUEST_REFILL_PER_MIN,
     VERSION_NOTICE_INTERVAL_MS, VERSION_NOTICES_PER_PEER, deadline, ignored_query, may_answer,
 };
 use super::{Cx, Node, NodeError, PENALTY_KEY_ANSWER, PENALTY_MALFORMED};
@@ -232,8 +232,8 @@ impl Node {
         };
         // An `expired` acknowledgement is plausible once the request is past its receiver
         // deadline, less the 5 minutes a receiver's clock may run ahead (§11.3).
-        let plausible = u128::from(cx.now) + u128::from(QUERY_CLOCK_TOLERANCE_MS)
-            >= u128::from(deadline(sent_at, ttl));
+        let plausible =
+            u128::from(cx.now) + u128::from(EXPIRED_SKEW_MS) >= u128::from(deadline(sent_at, ttl));
         let first = !entry.answered;
         let counts = !matches!(r.result, ResponseResult::Status(Status::Expired));
         if counts && first {

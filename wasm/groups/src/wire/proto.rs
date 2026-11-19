@@ -902,3 +902,150 @@ static FORWARD: Schema = Schema {
     oneofs: &[],
     limits: &[],
 };
+
+#[cfg(test)]
+mod pinned {
+    //! Every field number, wire kind and enum value of the strict schemas, and every enum
+    //! discriminant, by literal (§2.2: fixed for the whole wire version). An accidental
+    //! change fails here.
+
+    use super::*;
+
+    fn shape(s: &Schema) -> String {
+        let fields: Vec<String> = s
+            .fields
+            .iter()
+            .map(|(n, k)| {
+                let k = match k {
+                    Kind::Uint64 => "u64".to_owned(),
+                    Kind::Uint32 => "u32".to_owned(),
+                    Kind::Bool => "bool".to_owned(),
+                    Kind::Enum(v) => format!("enum{v:?}"),
+                    Kind::Bytes => "bytes".to_owned(),
+                    Kind::Str => "str".to_owned(),
+                    Kind::Msg(m) => format!("msg:{}", m.name),
+                    Kind::RepeatedMsg(m) => format!("rep:{}", m.name),
+                    Kind::Opaque => "opaque".to_owned(),
+                };
+                format!("{n}={k}")
+            })
+            .collect();
+        let limits: Vec<String> = s
+            .limits
+            .iter()
+            .map(|l| format!("{}<={}", l.field, l.max))
+            .collect();
+        format!(
+            "{} [{}] oneofs{:?} limits[{}]",
+            s.name,
+            fields.join(","),
+            s.oneofs,
+            limits.join(",")
+        )
+    }
+
+    #[test]
+    fn every_schema_is_pinned() {
+        let all = [
+            &CONTAINER,
+            &FRAME,
+            &QUERY,
+            &QUERY_ENTRY,
+            &CHAT_LOOKUP,
+            &TWO_IDS,
+            &SHARED_CHATS_SCAN,
+            &TIPS_SCAN,
+            &OBJECT_LOOKUP,
+            &RESPONSE,
+            &PAGE,
+            &NOTICE,
+            &ENTRY,
+            &NEIGHBOR_REQUEST,
+            &NEIGHBOR_RESPONSE,
+            &LEAVE_REQUEST,
+            &REPLY_TO,
+            &REPLY_TARGET,
+            &EVENT,
+            &GROUP_ROOT,
+            &SIGNED_OBJECT,
+            &DISSOLVE,
+            &GROUP_MESSAGE_EVENT,
+            &MESSAGE_PAYLOAD,
+            &METADATA_ENTRY,
+            &FORWARD,
+        ];
+        let got: Vec<String> = all.iter().map(|s| shape(s)).collect();
+        let expected: &[&str] = &[
+            "Container [1=opaque] oneofs[] limits[]",
+            "Frame [1=opaque,2=msg:Query,3=msg:Response,4=msg:Notice,5=msg:NeighborRequest,6=msg:NeighborResponse,7=msg:LeaveRequest] oneofs[[1, 2, 3, 4, 5, 6, 7]] limits[]",
+            "Query [1=bytes,2=u64,3=u64,4=opaque] oneofs[] limits[4<=16]",
+            "QueryEntry [1=msg:ChatLookup,2=msg:SharedChatsScan,3=msg:two-identifier message,4=msg:two-identifier message,5=msg:TipsScan,6=msg:ObjectLookup,7=msg:two-identifier message,8=msg:two-identifier message] oneofs[[1, 2, 3, 4, 5, 6, 7, 8]] limits[]",
+            "ChatLookup [1=bytes,2=bytes,3=msg:two-identifier message] oneofs[[1, 2, 3]] limits[]",
+            "two-identifier message [1=bytes,2=bytes] oneofs[] limits[]",
+            "SharedChatsScan [1=bytes,2=u64] oneofs[] limits[]",
+            "TipsScan [1=bytes,2=bytes,3=u64] oneofs[] limits[]",
+            "ObjectLookup [1=bytes,2=enum[0, 1, 2, 3, 4],3=bytes] oneofs[] limits[]",
+            "Response [1=bytes,2=u32,3=opaque,4=msg:Page,5=enum[0, 2, 3, 4, 5, 6],6=bytes] oneofs[[3, 4, 5, 6]] limits[]",
+            "Page [1=bytes,2=u64,3=u64,4=rep:Entry] oneofs[] limits[4<=128]",
+            "Notice [1=rep:Entry] oneofs[] limits[1<=128]",
+            "Entry [1=bytes,2=enum[0, 1, 2, 3, 4],3=bytes] oneofs[] limits[]",
+            "NeighborRequest [1=bytes] oneofs[] limits[]",
+            "NeighborResponse [1=bytes,2=bool,3=bytes] oneofs[] limits[3<=10]",
+            "LeaveRequest [1=bytes] oneofs[] limits[]",
+            "ReplyTo [1=rep:ReplyTarget] oneofs[] limits[1<=32]",
+            "ReplyTarget [1=bytes,2=bytes] oneofs[] limits[]",
+            "Event [1=msg:GroupRoot,2=msg:GroupMessageEvent,3=msg:Leave/Kick,4=msg:Leave/Kick,5=msg:Dissolve] oneofs[[1, 2, 3, 4, 5]] limits[]",
+            "GroupRoot [1=enum[0, 1],2=str,3=bytes,4=bytes,5=bytes,6=bytes,7=bytes,8=bytes,9=u64,10=bytes,11=u64] oneofs[] limits[3<=32,4<=512]",
+            "Leave/Kick [1=bytes,2=bytes,3=bytes] oneofs[] limits[]",
+            "Dissolve [1=bytes,2=bool,3=bytes] oneofs[] limits[]",
+            "GroupMessageEvent [1=bytes,2=bytes,3=bytes,4=bytes,5=msg:MessagePayload] oneofs[] limits[4<=16]",
+            "MessagePayload [1=bytes,2=enum[0, 1, 2, 3, 4],3=bytes,4=u64,5=u64,6=bool,7=str,8=msg:Forward,9=bytes,10=rep:MetadataEntry] oneofs[[7, 8, 9]] limits[]",
+            "MetadataEntry [1=str,2=bytes] oneofs[] limits[]",
+            "Forward [1=enum[0, 1, 2, 3, 4],2=bytes] oneofs[] limits[]",
+        ];
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn every_enum_value_is_pinned() {
+        assert_eq!(
+            (RootType::Successor as i32, RootType::Handover as i32),
+            (0, 1)
+        );
+        assert_eq!(
+            [
+                MessageType::Text as i32,
+                MessageType::Forward as i32,
+                MessageType::Reaction as i32,
+                MessageType::Media as i32,
+                MessageType::Delete as i32,
+            ],
+            [0, 1, 2, 3, 4]
+        );
+        assert_eq!(
+            [
+                ObjectKind::Event as i32,
+                ObjectKind::Root as i32,
+                ObjectKind::Leave as i32,
+                ObjectKind::Kick as i32,
+                ObjectKind::Dissolve as i32,
+            ],
+            [0, 1, 2, 3, 4]
+        );
+        assert_eq!(
+            [
+                Status::NotAvailable as i32,
+                Status::Restart as i32,
+                Status::Expired as i32,
+                Status::Malformed as i32,
+                Status::Unsupported as i32,
+                Status::Busy as i32,
+            ],
+            [0, 2, 3, 4, 5, 6]
+        );
+        assert_eq!(ROOT_TYPES, &[0, 1]);
+        assert_eq!(MESSAGE_TYPES, &[0, 1, 2, 3, 4]);
+        assert_eq!(OBJECT_KINDS, &[0, 1, 2, 3, 4]);
+        assert_eq!(STATUSES, &[0, 2, 3, 4, 5, 6]);
+    }
+}

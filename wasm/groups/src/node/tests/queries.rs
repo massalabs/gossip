@@ -3,7 +3,8 @@
 use prost::Message;
 
 use super::*;
-use crate::node::timing::{MAX_TTL_MS, REQUEST_BURST};
+use crate::constants::MAX_TTL_MS;
+use crate::node::timing::REQUEST_BURST;
 use crate::wire::proto;
 
 fn answers_to(net: &mut Net, d: usize, peer: usize) -> Vec<Response> {

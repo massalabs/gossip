@@ -24,6 +24,7 @@
 
 pub mod cbor;
 pub mod constants;
+pub use constants as fixed;
 pub mod dag;
 pub mod display;
 mod epoch;

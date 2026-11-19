@@ -1,7 +1,12 @@
-//! Query timing (§11.3, §12.2, Appendix B) and the provisional resource limits of §17.4.
+//! This device's local policy (§2.2), also reachable as [`crate::node::policy`]: its query
+//! timing (§11.3, §12.2, Appendix B), what it sends, how long it keeps things, and the
+//! provisional resource limits of §17.4. A release may change any of these; no peer relies
+//! on them. The few functions here that judge a received query ([`may_answer`],
+//! [`ignored_query`], [`deadline`]) apply fixed numbers of [`crate::fixed`] only.
 //!
 //! Every bound is computed exactly in 128 bits (§1, D.25).
 
+use crate::constants::{MAX_TTL_MS, QUERY_CLOCK_TOLERANCE_MS};
 use crate::rng::{Randomness, uniform_below};
 
 /// One minute, in milliseconds.
@@ -19,10 +24,29 @@ pub const FIRST_TTL_MS: u64 = 60_000;
 /// `expired` for it, which an honest responder sends only once that deadline has passed
 /// (§11.4, §13.4); no other answer is correlated then. Local policy.
 pub const EXPIRED_GRACE_MS: u64 = HOUR_MS;
-/// The largest nominal TTL: 24 h. A received query with a larger `ttl` is ignored.
-pub const MAX_TTL_MS: u64 = DAY_MS;
-/// The clock tolerance of a query: `sent_at ≤ now + 5 min`.
-pub const QUERY_CLOCK_TOLERANCE_MS: u64 = 5 * MINUTE_MS;
+/// The largest TTL this device's stages grow to: 24 h, within the fixed bound
+/// [`crate::fixed::MAX_TTL_MS`] a receiver applies.
+pub const TTL_CAP_MS: u64 = DAY_MS;
+/// The clock skew this device allows a responder when judging whether its `expired` is
+/// plausible (§11.4).
+pub const EXPIRED_SKEW_MS: u64 = 5 * MINUTE_MS;
+/// How long an invitation waits for its parent lookup before it is prompted anyway,
+/// `PROMPT_DELAY` (§4.8): five minutes.
+pub const PROMPT_DELAY_MS: u64 = 5 * MINUTE_MS;
+/// The entries this device puts in one page it sends, within the fixed bound
+/// [`crate::fixed::MAX_PAGE_ENTRIES`] a receiver applies.
+pub const PAGE_ENTRIES_SENT: usize = 128;
+/// The entries this device puts in one notice it sends, within
+/// [`crate::fixed::MAX_NOTICE_ENTRIES`].
+pub const NOTICE_ENTRIES_SENT: usize = 128;
+/// The bytes of entries this device puts in one notice it sends, within
+/// [`crate::fixed::MAX_NOTICE_BYTES`].
+pub const NOTICE_BYTES_SENT: usize = 16 * 1024;
+/// How long a handover root whose parent is not held is kept while it is looked up.
+pub const HELD_ROOT_KEEP_MS: u64 = 1_209_900_000;
+/// The longest a retrieval task for an event is kept after it was created (§11.6 bounds it
+/// by the ID's timestamp too).
+pub const TASK_LIFETIME_MS: u64 = 1_209_900_000;
 /// Unanswered stages of a logical query before it pauses (§11.4).
 pub const MAX_UNANSWERED_STAGES: u8 = 20;
 /// The jitter factor `r`, in millionths: uniform in `[0.95, 1.05]`.
@@ -126,7 +150,7 @@ pub const PLAINTEXTS_PER_POLL: usize = 64;
 #[must_use]
 pub fn next_ttl(current: u64) -> u64 {
     let grown = (u128::from(current) * 3142).div_ceil(1000);
-    u64::try_from(grown.min(u128::from(MAX_TTL_MS))).unwrap_or(MAX_TTL_MS)
+    u64::try_from(grown.min(u128::from(TTL_CAP_MS))).unwrap_or(TTL_CAP_MS)
 }
 
 /// The nominal TTL of stage `stage` (0-based).
@@ -247,11 +271,11 @@ mod tests {
     fn ttl_grows_by_pi_and_caps_at_a_day() {
         assert_eq!(next_ttl(60_000), 188_520);
         assert_eq!(next_ttl(188_520), 592_330); // ceil(592,329.84)
-        assert_eq!(next_ttl(80_000_000), MAX_TTL_MS);
-        assert_eq!(next_ttl(MAX_TTL_MS), MAX_TTL_MS);
+        assert_eq!(next_ttl(80_000_000), TTL_CAP_MS);
+        assert_eq!(next_ttl(TTL_CAP_MS), TTL_CAP_MS);
         assert_eq!(ttl_of_stage(0), FIRST_TTL_MS);
         assert_eq!(ttl_of_stage(1), 188_520);
-        assert_eq!(ttl_of_stage(19), MAX_TTL_MS);
+        assert_eq!(ttl_of_stage(19), TTL_CAP_MS);
     }
 
     #[test]

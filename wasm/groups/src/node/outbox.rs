@@ -13,9 +13,7 @@ use super::timing::{
     ABANDON_BACKOFF_MS, PLAINTEXTS_PER_POLL, RESPONSE_BURST, RESPONSE_REFILL_PER_MIN,
 };
 use super::{Cx, Node, NodeError};
-use crate::constants::{
-    MAX_NOTICE_BYTES, MAX_NOTICE_ENTRIES, MAX_PLAINTEXT_BYTES, MAX_QUERY_ENTRIES, PROTOCOL_VERSION,
-};
+use crate::constants::{MAX_PLAINTEXT_BYTES, MAX_QUERY_ENTRIES, PROTOCOL_VERSION};
 use crate::event::{MessageEvent, Payload};
 use crate::ids::{ChatId, EventId, GossipId, RequestId};
 use crate::rng::{Randomness, bytes};
@@ -833,8 +831,8 @@ impl Node {
         for (k, e) in notices {
             // An entry encodes to at most 80 bytes, so 128 of them stay under 16 KiB; both
             // limits are kept explicitly.
-            if notice.entries.len() >= MAX_NOTICE_ENTRIES
-                || (notice.entries.len() + 1) * 80 > MAX_NOTICE_BYTES
+            if notice.entries.len() >= super::timing::NOTICE_ENTRIES_SENT
+                || (notice.entries.len() + 1) * 80 > super::timing::NOTICE_BYTES_SENT
             {
                 flush(&mut notice, &mut notice_keys, &mut frames);
             }
