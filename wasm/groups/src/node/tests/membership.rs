@@ -4016,3 +4016,74 @@ fn a_former_owner_still_a_member_is_answered_only_about_the_handovers_parent() {
         assert_eq!(net.devs[d].node.stats().handover_replies, 0, "device {d}");
     }
 }
+
+/// Found by the membership simulation (seeds 21 and 57): an owner forks its group (a backup
+/// restored), hands over and leaves from one end, and is then restored from a backup made
+/// before the handover. Holding its other end, a competing branch of its own that does not
+/// lead to the handover, it kept believing it owned the group: members did not answer it
+/// with the handover root, and its device did not take it as a leave.
+#[test]
+fn a_former_owner_restored_on_its_other_fork_end_learns_that_it_left() {
+    let (mut net, g) = founded(3);
+    let b0 = net.devs[0].store.clone();
+    let b = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("B".into()),
+            },
+        )
+        .unwrap();
+    net.run(MIN);
+    let b1 = net.devs[0].store.clone();
+    // The owner, restored before B, founds A an hour later: the members hold both ends.
+    net.devs[0].store = b0;
+    net.restart(0);
+    net.offline[0] = true;
+    net.now += HOUR;
+    net.offline[0] = false;
+    let a = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("A".into()),
+            },
+        )
+        .unwrap();
+    let a_root = net.devs[0].node.root(&a).unwrap();
+    net.exchange();
+    // Restored again with B and without A, it hands over from B and leaves.
+    net.devs[0].store = b1.clone();
+    net.restart(0);
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: true,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    for d in 1..3 {
+        assert_eq!(net.current(d, &g), Some(h), "device {d}");
+    }
+    // Restored from before the handover, it gets A back: its current end, owned by itself.
+    net.devs[0].store = b1;
+    net.restart(0);
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(a_root))).unwrap();
+    net.recv_frames_m(0, 2, &[Frame::Event(blob)]);
+    assert_eq!(net.current(0, &g), Some(a));
+    net.run(3 * HOUR);
+    let s = net.summary(0, &g).unwrap();
+    assert_ne!(s.status, MyStatus::Member, "{s:?}");
+    let _ = b;
+}
