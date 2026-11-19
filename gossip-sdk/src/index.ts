@@ -51,5 +51,7 @@ export type {
 } from './services/groups.js';
 export {
   GROUP_MAX_SCHEDULE_MS,
+  GROUP_DEVICE_KEY,
+  EARLIER_FORMAT_VERSION,
   GroupMessageTooLargeError,
 } from './services/groups.js';

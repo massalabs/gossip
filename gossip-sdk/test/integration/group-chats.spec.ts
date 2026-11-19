@@ -396,6 +396,55 @@ describe('Group chats', { timeout: 120_000 }, () => {
     );
   });
 
+  it('keeps the metadata an edit does not name, a reply target included', async () => {
+    const groupId = await alice.groups.createGroup('Edits', [bob.userId]);
+    await deliver();
+    await bob.groups.acceptInvitation(
+      (await bob.groups.invitations())[0].epochId
+    );
+    const first = await alice.groups.sendMessage(groupId, 'question');
+    await deliver();
+    const answer = await bob.groups.sendMessage(groupId, 'answer', {
+      replyTo: [{ epochId: groupId, syncObjId: first.syncObjId }],
+      metadata: { 'x.note': new Uint8Array([1, 2]) },
+    });
+    await deliver();
+    const bobs = async (p: GossipSdk) =>
+      (await p.groups.timeline(groupId)).find(
+        i => i.kind === 'message' && i.syncObjId === answer.syncObjId
+      );
+
+    // No metadata given: everything stays.
+    await bob.groups.editMessage(groupId, answer.syncObjId, 'answer, edited');
+    await deliver();
+    for (const p of [alice, bob]) {
+      const m = await bobs(p);
+      expect(m?.kind === 'message' && m.body).toEqual({
+        type: 'text',
+        text: 'answer, edited',
+      });
+      expect(m?.kind === 'message' && m.replyTo).toEqual([
+        { epochId: groupId, syncObjId: first.syncObjId },
+      ]);
+      expect(m?.kind === 'message' && m.metadata['x.note']).toEqual(
+        new Uint8Array([1, 2])
+      );
+    }
+
+    // One entry set and one removed; the others stay.
+    clock += 1_000;
+    await bob.groups.editMessage(groupId, answer.syncObjId, 'answer, again', {
+      metadata: { 'x.other': new Uint8Array([3]) },
+      removeMetadata: ['x.note'],
+    });
+    await deliver();
+    const m = await bobs(alice);
+    expect(m?.kind === 'message' && Object.keys(m.metadata).sort()).toEqual([
+      'replyTo',
+      'x.other',
+    ]);
+  });
+
   /** A group of Alice and Bob, accepted, with one message delivered. */
   async function twoMemberGroup(): Promise<string> {
     const groupId = await alice.groups.createGroup('Pair', [bob.userId]);
