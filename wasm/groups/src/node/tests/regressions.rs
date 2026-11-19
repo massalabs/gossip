@@ -1338,3 +1338,26 @@ fn a_query_counts_once_whatever_timed_out_in_between() {
     node.note_query_timeout(&member(1), T0, T0 + 3 * MIN + 1);
     assert_eq!(node.t.peers.get(&member(1)).unwrap().failures, 2);
 }
+
+/// Found by the network simulation's check that honest members stay responsive (code at
+/// `f2681c5a`, seed 119): the answers of an online member were delayed by hours in transit
+/// and arrived after their requests' deadlines; dropped as uncorrelated, they did not count
+/// as a sign of life, so the member stayed unresponsive although it had answered.
+#[test]
+fn a_late_uncorrelated_answer_still_shows_the_member_is_alive() {
+    let mut net = Net::new(3, 1);
+    for t in 0..3 {
+        net.devs[0].node.note_timeout(&member(1), T0 + t);
+    }
+    assert!(!net.devs[0].node.responsive(&member(1)));
+    net.recv_frames(
+        0,
+        member(1),
+        &[Frame::Response(Response {
+            request_id: Some(RequestId::from_bytes([3; 16])),
+            idx: 0,
+            result: ResponseResult::Status(Status::NotAvailable),
+        })],
+    );
+    assert!(net.devs[0].node.responsive(&member(1)));
+}
