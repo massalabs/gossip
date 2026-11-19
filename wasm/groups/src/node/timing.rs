@@ -15,6 +15,10 @@ pub const DAY_MS: u64 = 24 * HOUR_MS;
 
 /// The first nominal TTL of a query: 60 s.
 pub const FIRST_TTL_MS: u64 = 60_000;
+/// How long after a request's deadline its correlation reference still recognises an
+/// `expired` for it, which an honest responder sends only once that deadline has passed
+/// (§11.4, §13.4); no other answer is correlated then. Local policy.
+pub const EXPIRED_GRACE_MS: u64 = HOUR_MS;
 /// The largest nominal TTL: 24 h. A received query with a larger `ttl` is ignored.
 pub const MAX_TTL_MS: u64 = DAY_MS;
 /// The clock tolerance of a query: `sent_at ≤ now + 5 min`.

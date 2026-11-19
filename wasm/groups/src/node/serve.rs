@@ -8,6 +8,7 @@ use super::group::Via;
 use super::records::{AnswerOp, Purpose, Target, TaskKey, TriggerKind, Work};
 use super::records::{EpochStatus, SHARED_SCAN, SignedKey, SignedObject};
 use super::retrieval::Answer;
+use super::timing::EXPIRED_GRACE_MS;
 use super::timing::{
     QUERY_CLOCK_TOLERANCE_MS, QUEUED_ANSWERS_PER_PEER, REQUEST_BURST, REQUEST_REFILL_PER_MIN,
     VERSION_NOTICE_INTERVAL_MS, VERSION_NOTICES_PER_PEER, deadline, ignored_query, may_answer,
@@ -203,16 +204,24 @@ impl Node {
         {
             self.answered(&from);
         }
-        // A reference lives until its request's deadline (§13.4), whether or not a tick has
-        // dropped it yet.
-        if self
+        // A reference serves its request until the deadline (§13.4), and an `expired` for it
+        // for [`EXPIRED_GRACE_MS`] more: an honest responder sends `expired` only once the
+        // deadline has passed. Any other answer that late is not correlated.
+        let expired = matches!(r.result, ResponseResult::Status(Status::Expired));
+        if let Some(d) = self
             .t
             .requests
             .get(&(from, request_id))
-            .is_some_and(|q| deadline(q.sent_at, q.ttl) < cx.now)
+            .map(|q| deadline(q.sent_at, q.ttl))
+            .filter(|d| *d < cx.now)
         {
-            self.t.requests.remove(&(from, request_id));
-            return Ok(());
+            if cx.now > d.saturating_add(EXPIRED_GRACE_MS) {
+                self.t.requests.remove(&(from, request_id));
+                return Ok(());
+            }
+            if !expired {
+                return Ok(());
+            }
         }
         let Some((entry, sent_at, ttl)) = self.t.requests.get(&(from, request_id)).and_then(|q| {
             q.entries
@@ -472,7 +481,7 @@ impl Node {
             .t
             .requests
             .iter()
-            .filter(|(_, q)| deadline(q.sent_at, q.ttl) < now)
+            .filter(|(_, q)| deadline(q.sent_at, q.ttl).saturating_add(EXPIRED_GRACE_MS) < now)
             .map(|(k, _)| *k)
             .collect();
         for k in old {
