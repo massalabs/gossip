@@ -40,6 +40,8 @@ pub enum GroupState {
     Waiting,
     /// Dissolved (§5.8): every event is dropped.
     Dissolved,
+    /// A superseded chat of two (§5.12): events are received, nothing local is made.
+    Superseded,
 }
 
 /// Who handed the event to this device.
@@ -180,7 +182,7 @@ impl<'a> Epoch<'a> {
         }
         match self.group_state {
             GroupState::Waiting | GroupState::Dissolved => Some(Rejection::GroupState),
-            GroupState::Active | GroupState::ReadOnlyAfterKick => None,
+            GroupState::Active | GroupState::ReadOnlyAfterKick | GroupState::Superseded => None,
         }
     }
 

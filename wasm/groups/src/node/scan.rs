@@ -592,6 +592,7 @@ impl Node {
             super::records::GroupStatus::Removed { .. }
                 | super::records::GroupStatus::Left { .. }
                 | super::records::GroupStatus::Waiting { .. }
+                | super::records::GroupStatus::Superseded { .. }
         );
         if !member {
             return Ok(Some(AnswerOp::Status(Status::NotAvailable)));

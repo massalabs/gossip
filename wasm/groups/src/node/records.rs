@@ -893,6 +893,16 @@ pub enum GroupStatus {
         /// When the dissolve message was received.
         at: u64,
     },
+    /// An automatic chat of two replaced by another chat of the same two (§5.12): kept,
+    /// readable, read-only. It still takes the message events its members send it (written
+    /// before they switched), sends nothing, and answers about its epochs as a device that
+    /// does not hold them.
+    Superseded {
+        /// The chat that continues it, by its group key.
+        by: ChatId,
+        /// When it was replaced.
+        at: u64,
+    },
 }
 
 /// The group record of §14.1.
@@ -914,6 +924,13 @@ pub struct GroupRecord {
     pub pending_removals: BTreeMap<GossipId, u64>,
     /// Junctions after being added back (§5.10).
     pub junctions: Vec<Junction>,
+    /// An automatic chat of two this device owns (§5.12): when this device first received
+    /// from the other person, inside this chat, a message event, a notice of one or a query
+    /// about its messages. A stored fact, kept for good: it is never recomputed.
+    pub took_part: Option<u64>,
+    /// An automatic chat of two (§5.12): the chats of the same two it superseded, oldest
+    /// first, theirs flattened before each. Local, never sent.
+    pub earlier: Vec<ChatId>,
 }
 
 /// A junction (§5.10): the device was read-only in a group and accepted a root that brought
@@ -1034,14 +1051,13 @@ pub enum ChangeKind {
     Fork,
     /// The group was closed and erased on this device.
     Closed,
-    /// This device's group of two was closed because `by`, the peer's group founded for the
-    /// same earlier conversation at the same time, is kept (§5.12); with `lost_messages`,
-    /// messages written in it are lost.
+    /// This device's automatic chat of two is superseded by `by`, the chat of the same two
+    /// that continues it (§5.12): it is kept, read-only.
     Superseded {
-        /// The group kept.
+        /// The chat that continues it.
         by: ChatId,
-        /// Messages were held in the closed group.
-        lost_messages: bool,
+        /// The superseded chat holds messages.
+        has_messages: bool,
     },
     /// What the connection queries answer may have changed (§5.12), keyed by
     /// [`super::DEVICE`].

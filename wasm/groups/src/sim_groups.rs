@@ -2693,7 +2693,7 @@ mod direct {
     use crate::ids::{ChatId, GossipId};
     use crate::node::records::{ChangeKind, EpochStatus};
     use crate::node::tests::membership::{ident, signer};
-    use crate::node::{GroupOptions, Node};
+    use crate::node::{GroupOptions, MyStatus, Node};
     use crate::rng::TestRng;
     use crate::root::Root;
     use crate::store::MemoryStorage;
@@ -3050,11 +3050,13 @@ mod direct {
             }
         }
 
-        /// The installed groups of device `d` with their founding root.
+        /// The installed groups of device `d` with their founding root, superseded chats of
+        /// two apart.
         fn groups(&self, d: usize) -> BTreeMap<ChatId, Root> {
             let node = &self.devs[d].node;
             node.groups()
                 .into_iter()
+                .filter(|g| !matches!(g.status, MyStatus::Superseded { .. }))
                 .filter_map(|g| node.root(&g.group).map(|r| (g.group, r)))
                 .collect()
         }

@@ -645,16 +645,27 @@ fn crossing_migrations_consents_and_connections() {
         net.peers[i].reopen();
         let groups = J::parse(&net.peers[i].core.groups()).unwrap();
         let groups = groups.as_arr().unwrap();
-        assert_eq!(groups.len(), 1, "peer {i}");
-        assert_eq!(
-            groups[0].field("group").unwrap().as_str().unwrap(),
-            hex(keep.as_bytes())
-        );
+        // The replaced chat is kept, superseded by the one both keep.
+        assert_eq!(groups.len(), 2, "peer {i}");
+        for g in groups {
+            let key = g.field("group").unwrap().as_str().unwrap();
+            let status = g.field("status").unwrap();
+            if key == hex(keep.as_bytes()) {
+                assert_eq!(status.as_str().unwrap(), "Member", "peer {i}");
+            } else {
+                assert_eq!(key, hex(lose.as_bytes()), "peer {i}");
+                assert_eq!(
+                    status.field("by").unwrap().as_str().unwrap(),
+                    hex(keep.as_bytes()),
+                    "peer {i}"
+                );
+            }
+        }
     }
     let changes = net.peers[loser].core.take_changes(net.now).unwrap();
     assert!(
         changes.contains(&format!(
-            r#"{{"group":"{}","kind":{{"t":"Superseded","by":"{}","lost_messages":false}}}}"#,
+            r#"{{"group":"{}","kind":{{"t":"Superseded","by":"{}","has_messages":false}}}}"#,
             hex(lose.as_bytes()),
             hex(keep.as_bytes())
         )),

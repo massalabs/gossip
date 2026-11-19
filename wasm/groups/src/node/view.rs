@@ -32,6 +32,12 @@ pub enum MyStatus {
         /// "Dissolve & Delete".
         deleted: bool,
     },
+    /// An automatic chat of two replaced by `by`, the chat of the same two that continues
+    /// it (§5.12): kept and readable, read-only.
+    Superseded {
+        /// The group key of the chat that continues it.
+        by: ChatId,
+    },
 }
 
 /// A group as listed (§4.8, §4.9, §5.10, §5.11).
@@ -60,6 +66,12 @@ pub struct GroupSummary {
     pub former_owner_branches: Vec<ChatId>,
     /// The groups linked by hand (§5.10).
     pub links: Vec<ChatId>,
+    /// An automatic chat of two (§5.12): the chats of the same two it superseded, oldest
+    /// first, to be shown with it as one conversation.
+    pub earlier: Vec<ChatId>,
+    /// An automatic chat of two this device owns: whether the other person has taken part
+    /// in it (§5.12). `None` for any other group.
+    pub took_part: Option<bool>,
 }
 
 /// An invitation to answer (§4.8).
@@ -215,6 +227,7 @@ impl Node {
                 GroupStatus::Dissolved { must_delete, .. } => MyStatus::Dissolved {
                     deleted: must_delete,
                 },
+                GroupStatus::Superseded { by, .. } => MyStatus::Superseded { by },
             };
             let must_resolve =
                 rec.root.owner_id() == self.me && !self.fork_to_resolve(group).is_empty();
@@ -236,6 +249,10 @@ impl Node {
                 links: g
                     .map(|g| g.links.iter().copied().collect())
                     .unwrap_or_default(),
+                earlier: g.map(|g| g.earlier.clone()).unwrap_or_default(),
+                took_part: self
+                    .own_direct_chat(group)
+                    .then(|| g.is_some_and(|g| g.took_part.is_some())),
             });
         }
         out
@@ -424,7 +441,9 @@ impl Node {
                     at,
                     line: TimelineLine::Dissolved,
                 }),
-                GroupStatus::Active | GroupStatus::Waiting { .. } => {}
+                GroupStatus::Active
+                | GroupStatus::Waiting { .. }
+                | GroupStatus::Superseded { .. } => {}
             }
             for &Junction { from, to, kind } in &junctions {
                 // The history ends with what made the group read-only (§5.10).
