@@ -1324,3 +1324,17 @@ fn true_announcements_keep_an_honest_relay_credible() {
     let score = net.devs[0].node.score(&member(1));
     assert!(score >= super::super::index::CREDIBLE, "{score}");
 }
+
+/// Found by the network simulation's check that honest members stay responsive (code at
+/// `c3e4ba7f`, seed 6): the entries of one query time out at slightly different instants
+/// (each stage has its own jitter), and a timeout of another query in between made the
+/// later entries count again, so two lost queries made an online member unresponsive.
+#[test]
+fn a_query_counts_once_whatever_timed_out_in_between() {
+    let mut net = Net::new(3, 1);
+    let node = &mut net.devs[0].node;
+    node.note_query_timeout(&member(1), T0, T0 + MIN);
+    node.note_query_timeout(&member(1), T0 + MIN, T0 + 3 * MIN);
+    node.note_query_timeout(&member(1), T0, T0 + 3 * MIN + 1);
+    assert_eq!(node.t.peers.get(&member(1)).unwrap().failures, 2);
+}
