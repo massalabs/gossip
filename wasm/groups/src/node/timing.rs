@@ -32,6 +32,11 @@ pub const JITTER_MAX_PPM: u32 = 1_050_000;
 
 // ── Scans and periodic recovery (§12.2, §12.3) ───────────────────────────────
 
+/// The longest this device keeps a frozen list without a new request of its scan, whatever
+/// the request's own bound (§12.2: the responder may drop it earlier, then answers
+/// `restart`). Local policy.
+pub const FROZEN_MAX_LIVE_MS: u64 = 10 * MINUTE_MS;
+
 /// How long the identifier-only tombstone of a dropped frozen list is kept: 24 h.
 pub const SCAN_TOMBSTONE_MS: u64 = DAY_MS;
 /// The period of each periodic recovery lane: one scan per 24 h, from its completion.

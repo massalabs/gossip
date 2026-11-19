@@ -172,20 +172,28 @@ fn unknown_or_dropped_scans_answer_restart() {
     page(ask(&mut net, 2, 5, 1, 0));
 }
 
+/// A frozen list lives at most until the deadline of its latest request, and no longer
+/// than this device's own bound, [`crate::node::timing::FROZEN_MAX_LIVE_MS`]: a requester
+/// asking with a 24-hour TTL cannot hold a slot for a day (§2.2: the responder may drop it
+/// earlier and answer `restart`).
 #[test]
-fn a_list_lives_until_the_deadline_of_its_latest_request() {
+fn a_frozen_list_lives_no_longer_than_the_responders_bound() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
-    page(ask(&mut net, 1, 1, 1, 0));
-    // A later request with a long TTL extends the life of the list.
-    net.now += 4 * MIN;
+    // A list longer than one page, so that the first page is not the final one.
+    let n = crate::constants::MAX_PAGE_ENTRIES as u8 + 2;
+    for i in 0..n {
+        let e = net.event(T0, i, &[], 1);
+        net.give(0, 1, &e);
+    }
+    net.poll(0);
     net.recv_frames(
         0,
-        member(1),
+        member(2),
         &[query(
-            2,
+            1,
             net.now,
-            HOUR,
+            DAY,
             vec![QueryOp::TipsScan {
                 anchor: chat,
                 scan_id: scan_id(1),
@@ -194,9 +202,42 @@ fn a_list_lives_until_the_deadline_of_its_latest_request() {
         )],
     );
     net.poll(0);
-    net.now += 30 * MIN;
+    let live = |net: &Net| {
+        net.devs[0]
+            .node
+            .t
+            .scans_in
+            .iter()
+            .filter(|(_, f)| f.list.is_some())
+            .count()
+    };
+    assert_eq!(live(&net), 1);
+    net.now += crate::node::timing::FROZEN_MAX_LIVE_MS + 1;
     net.tick(0);
-    page(ask(&mut net, 1, 3, 1, 0));
+    assert_eq!(live(&net), 0, "dropped at the responder's bound");
+    assert_eq!(
+        ask(&mut net, 2, 2, 1, 128),
+        ResponseResult::Status(Status::Restart)
+    );
+}
+
+/// The frozen list is released once its final page has been sent.
+#[test]
+fn a_frozen_list_is_released_after_its_final_page() {
+    let mut net = Net::new(3, 1);
+    let e = net.event(T0, 5, &[], 1);
+    net.give(0, 1, &e);
+    net.poll(0);
+    let p = page(ask(&mut net, 2, 1, 1, 0));
+    assert!(p.is_final());
+    assert!(
+        net.devs[0]
+            .node
+            .t
+            .scans_in
+            .iter()
+            .all(|(_, f)| f.list.is_none())
+    );
 }
 
 #[test]
