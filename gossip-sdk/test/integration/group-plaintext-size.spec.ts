@@ -20,6 +20,11 @@ import { getTestStorageConfig } from '../testDb';
 import { decodeUserId } from '../../src/utils/userId';
 import type { EncryptedMessage } from '../../src/api/messageProtocol/types';
 import { group_max_plaintext_bytes } from '../../src/wasm/bindings';
+import {
+  SESSION_MESSAGE_MAX_BYTES,
+  SessionMessageTooLargeError,
+  type SessionModule,
+} from '../../src/wasm/session';
 
 /** Largest payload of a mesh blob. */
 const MESH_PAYLOAD_MAX = 65_536;
@@ -199,5 +204,78 @@ describe('Group plaintext size on the wire', { timeout: 300_000 }, () => {
     expect(max - min).toBeLessThanOrEqual(OVERHEAD_SPREAD_MAX);
     // The largest plaintext the engine produces fits at the worst overhead.
     expect(groupPlaintextMax + max).toBeLessThanOrEqual(MESH_PAYLOAD_MAX);
+  });
+
+  /**
+   * §13.10: nothing is handed to a session for encryption unless it is known
+   * to fit the packet ceiling once encrypted, since encryption advances the
+   * session. The bound is the ceiling minus the largest overhead of the
+   * session layer.
+   */
+  it('refuses before encryption a session message that may not fit one packet', async () => {
+    expect(SESSION_MESSAGE_MAX_BYTES).toBe(MESH_PAYLOAD_MAX - 3_632);
+    const session = (alice as unknown as { state: { session: SessionModule } })
+      .state.session;
+    const manager = (
+      session as unknown as {
+        sessionManager: { send_message: (...a: unknown[]) => unknown };
+      }
+    ).sessionManager;
+    const encrypt = vi.spyOn(manager, 'send_message');
+    const peer = decodeUserId(bob.userId);
+
+    await expect(
+      session.sendMessage(peer, new Uint8Array(SESSION_MESSAGE_MAX_BYTES + 1))
+    ).rejects.toBeInstanceOf(SessionMessageTooLargeError);
+    expect(encrypt).not.toHaveBeenCalled();
+
+    // At the bound it is encrypted, and the ciphertext fits one packet.
+    const out = await session.sendMessage(
+      peer,
+      new Uint8Array(SESSION_MESSAGE_MAX_BYTES).fill(7)
+    );
+    expect(encrypt).toHaveBeenCalledOnce();
+    expect(out!.data.length).toBeLessThanOrEqual(MESH_PAYLOAD_MAX);
+    encrypt.mockRestore();
+    // The session did not move for the refused one: the peer reads the
+    // accepted one, then the next.
+    const bobSession = (bob as unknown as { state: { session: SessionModule } })
+      .state.session;
+    const read = bobSession.feedIncomingMessageBoardRead.bind(bobSession);
+    const reads: number[] = [];
+    vi.spyOn(bobSession, 'feedIncomingMessageBoardRead').mockImplementation(
+      async (seeker, ciphertext) => {
+        const r = await read(seeker, ciphertext);
+        if (r) reads.push(r.message.length);
+        return r;
+      }
+    );
+    await net.sendMessage({ seeker: out!.seeker, ciphertext: out!.data });
+    clock += 1_000;
+    await bob.messages.fetch();
+    expect(reads).toEqual([SESSION_MESSAGE_MAX_BYTES]);
+    await blobSize(alice, bob, 100);
+    expect(reads.length).toBe(2);
+  });
+
+  it('a group send over the bound is abandoned, never encrypted', async () => {
+    const groups = alice.groups as unknown as Internals;
+    const abandon = vi.fn();
+    const node = { ...fakeNode, abandon };
+    const real = groups.node;
+    groups.node = node;
+    const before = posted.length;
+    try {
+      const ok = await groups.sendOne(node, {
+        handle: 7,
+        to: decodeUserId(bob.userId),
+        plaintext: new Uint8Array(SESSION_MESSAGE_MAX_BYTES),
+      });
+      expect(ok).toBe(false);
+    } finally {
+      groups.node = real;
+    }
+    expect(abandon).toHaveBeenCalledWith(7);
+    expect(posted.length).toBe(before);
   });
 });

@@ -36,7 +36,10 @@ import {
 import * as schema from '../db/schema/index.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 import { Result } from '../utils/type.js';
-import { sessionStatusToString } from '../wasm/session.js';
+import {
+  sessionStatusToString,
+  SessionMessageTooLargeError,
+} from '../wasm/session.js';
 import { Logger } from '../utils/logs.js';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
@@ -1389,10 +1392,20 @@ export class MessageService {
           }
 
           /* Encrypt message*/
-          const sendOutput = await this.session.sendMessage(
-            peerId,
-            serializedContent
-          );
+          let sendOutput: Awaited<ReturnType<SessionModule['sendMessage']>>;
+          try {
+            sendOutput = await this.session.sendMessage(
+              peerId,
+              serializedContent
+            );
+          } catch (error) {
+            // Refused before encryption: it may not fit one packet (§13.10).
+            if (!(error instanceof SessionMessageTooLargeError)) throw error;
+            log.error('queued message too large to encrypt', {
+              messageId: msg.id,
+            });
+            continue;
+          }
           if (!sendOutput) {
             log.info(
               'session manager returned null for queued message; will retry later',
