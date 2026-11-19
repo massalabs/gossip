@@ -261,7 +261,11 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
             <SafeName name={title} />
           </h1>
           <p className="text-xs text-muted-foreground">
-            {t('list.members_count', { count: group.members.length })}
+            {group.status === 'member' || group.status === 'waiting'
+              ? t('list.members_count', { count: group.members.length })
+              : // Removed, left or dissolved: the member list is the one of
+                // the last epoch held, no longer the group's.
+                t(`details.status_${group.status}`)}
           </p>
         </div>
         <button
@@ -282,7 +286,10 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
       key={draft?.n ?? 0}
       initialValue={draft?.text}
       onSend={send}
-      placeholderKey="groups:composer.placeholder"
+      // A chat of two is no "group" to its users.
+      placeholderKey={
+        group.members.length === 2 ? undefined : 'groups:composer.placeholder'
+      }
       maxBytes={maxTextBytes}
       onTooLong={() => toast.error(t('composer.too_long'))}
       replyingTo={replyingTo}

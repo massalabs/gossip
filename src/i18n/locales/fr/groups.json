@@ -141,6 +141,7 @@
     "status_removed": "Retiré",
     "status_dissolved": "Dissous",
     "status_dissolved-deleted": "Dissous et supprimé",
+    "status_superseded": "Poursuivie dans une nouvelle discussion",
     "side_branches": "Branches parallèles",
     "side_branches_hint": "D'autres versions de ce groupe, toujours lisibles. Seul leur propriétaire peut les résoudre.",
     "former_branches": "Branches d'anciens propriétaires : {{count}}",
