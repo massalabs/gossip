@@ -2865,3 +2865,45 @@ fn a_root_erased_by_dissolve_and_delete_is_not_an_invitation_again() {
             .is_empty()
     );
 }
+
+/// SDK review (A): after closing its only shared group, a device kept records naming the
+/// group's members and epochs: a peer record per former member, their keys, correlation
+/// references. Only the closed markers and device-level counters may remain (§14.2).
+#[test]
+fn closing_the_only_shared_group_leaves_only_markers() {
+    let (mut net, g) = founded(3);
+    net.say(1, &g, "x");
+    net.run(MIN);
+    let now = net.now;
+    let s = signer(2);
+    let dev = &mut net.devs[2];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.now += 600_000;
+    net.tick(2);
+    net.exchange();
+    let now = net.now;
+    let dev = &mut net.devs[2];
+    dev.node
+        .take_changes(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    let t = dev.node.tables();
+    assert!(t.epochs.len() == 0 && t.group_recs.len() == 0 && t.signed.len() == 0);
+    assert_eq!(t.peers.len(), 0, "peer records of former members");
+    assert_eq!(t.keys.len(), 0, "keys of former members");
+    assert_eq!(t.requests.len(), 0, "correlation references");
+    assert_eq!(
+        t.tasks.len() + t.scans_out.len() + t.scans_in.len() + t.hints.len(),
+        0
+    );
+    assert_eq!(t.queue.len(), 0);
+    assert!(t.markers.len() >= 1);
+}
