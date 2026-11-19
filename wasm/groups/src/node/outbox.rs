@@ -1062,7 +1062,9 @@ impl Node {
             }
         }
         for (_, q) in self.t.requests.iter() {
-            add(super::timing::deadline(q.sent_at, q.ttl).saturating_add(1));
+            add(super::timing::deadline(q.sent_at, q.ttl)
+                .saturating_add(super::timing::EXPIRED_GRACE_MS)
+                .saturating_add(1));
         }
     }
 }
