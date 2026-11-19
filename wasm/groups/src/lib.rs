@@ -9,6 +9,7 @@
 //! arguments.
 //!
 //! - [`hash`]: `H(domain, ...) = BLAKE3(CBOR([domain, ...]))` and every derived ID (§1.2, §3).
+//! - [`Root`]: the signed root of an epoch, its validation and verification (§4).
 //! - [`wire`]: the plaintext, container, frames and event blobs (§13, Appendix C).
 
 #![warn(missing_docs)]
@@ -19,6 +20,7 @@ mod error;
 pub mod hash;
 mod ids;
 mod keys;
+mod root;
 pub mod wire;
 
 #[cfg(test)]
@@ -30,3 +32,4 @@ pub use ids::{
     ParentCommitment, RefChatId, RequestId, ScanId, SecretProof, SyncObjId,
 };
 pub use keys::{SignatureBytes, check_key_answer, parse_user_public_keys};
+pub use root::{ReceiveContext, Root, RootParams, RootType, next_root_created_at};
