@@ -8,7 +8,8 @@
 //!
 //! The owner founds a group and, following a script with random times, adds members,
 //! removes them, adds a removed member back, renames the group and hands it over (in some
-//! seeds to a member that is offline for hours); members leave by a signed leave or by
+//! seeds to a member that is offline for hours), and adds back the member that left by a
+//! signed leave; members leave by a signed leave or by
 //! asking to be kicked; the owner's automatic successor applies them. Some seeds end with a
 //! dissolve. A device is restored from an old backup (a rollback) after its removal or its
 //! leave, and must learn it again. In some seeds the owner restores its own backup and
@@ -35,6 +36,9 @@
 //! - **a former owner never takes the group back**: its root after the handover is never
 //!   current on a device listed in a handover root, and no group becomes active again two
 //!   weeks after "Dissolve & Delete", when the dissolved root is erased too;
+//! - **no old epoch offered again**: no honest device is shown an invitation for an epoch
+//!   it installed before (unless delivered again in full, with its "closed before" warning,
+//!   §14.2), or for an ancestor of an epoch it holds once its parent lookup is over;
 //! - **one conversation per group**, except where a device cannot verify a new owner's
 //!   authority (§5.9, D.3), and the remnants "Dissolve & Delete" leaves on a device that
 //!   received part of the erased line late (counted);
@@ -97,6 +101,7 @@ struct Counters {
     members_added: u64,
     members_removed: u64,
     members_readded: u64,
+    leavers_readded: u64,
     renames: u64,
     handovers: u64,
     handovers_to_offline: u64,
@@ -159,6 +164,7 @@ impl Counters {
             members_added,
             members_removed,
             members_readded,
+            leavers_readded,
             renames,
             handovers,
             handovers_to_offline,
@@ -211,6 +217,7 @@ impl Counters {
             ("members_added", self.members_added),
             ("members_removed", self.members_removed),
             ("members_readded", self.members_readded),
+            ("leavers_readded", self.leavers_readded),
             ("renames", self.renames),
             ("handovers", self.handovers),
             ("handovers_to_offline", self.handovers_to_offline),
@@ -282,8 +289,13 @@ struct Device {
     seen: Vec<Vec<u8>>,
     /// The roots seen, decoded (hostile devices build on the latest).
     roots: Vec<Root>,
-    /// A backup of the store, for a rollback.
-    backup: Option<MemoryStorage>,
+    /// A backup of the store, for a rollback, with the epochs it had installed then.
+    backup: Option<(MemoryStorage, BTreeSet<ChatId>)>,
+    /// Every epoch the device installed since its store was last restored from a backup
+    /// (seen after each of its polls).
+    held: BTreeSet<ChatId>,
+    /// Its store was restored from a backup once: it lost what it learnt since.
+    lost: bool,
     /// Removed (kicked) from the group by an owner, per the script.
     removed: bool,
     /// Left by its own signed leave, per the script.
@@ -306,6 +318,7 @@ enum Step {
     Remove,
     Readd,
     Leave,
+    ReaddLeaver,
     AskKick,
     Backup,
     Rollback,
@@ -344,6 +357,8 @@ struct Sim {
     /// A double handover happened: lines may differ.
     split: bool,
     dissolved: bool,
+    /// The device that dissolved the group.
+    dissolver: Option<usize>,
     /// The owner forked and must resolve.
     forked: bool,
     /// A second group of the founder, with the same members (the target of a takeover).
@@ -365,6 +380,16 @@ struct Sim {
     erased_line: BTreeSet<ChatId>,
     /// When the script first removed a device by a kick.
     removed_at: BTreeMap<usize, u64>,
+    /// Every root an honest device held, and the roots among them each one names as a
+    /// parent: the lines of the group as the script made them.
+    roots_seen: BTreeMap<ChatId, Root>,
+    parents_seen: BTreeMap<ChatId, BTreeSet<ChatId>>,
+    /// Invitations shown for an epoch of a line the device holds or closed (see
+    /// [`Sim::check_invitations`]).
+    stale_invitations: Vec<String>,
+    /// Roots an honest device signed outside its engine, given to it once it has installed
+    /// their parent: the device, the parent, the member that gives it, the plaintext.
+    own_roots: Vec<(usize, ChatId, usize, Vec<u8>)>,
 }
 
 fn below(rng: &mut TestRng, n: u64) -> u64 {
@@ -406,6 +431,8 @@ impl Sim {
                 seen: Vec::new(),
                 roots: Vec::new(),
                 backup: None,
+                held: BTreeSet::new(),
+                lost: false,
                 removed: false,
                 left: false,
                 closed: false,
@@ -443,6 +470,9 @@ impl Sim {
             script.push((at(&mut rng, 12), Step::Handover));
         }
         script.push((at(&mut rng, 11), Step::LongChain));
+        // The member that left by a signed leave is added back, by whoever owns the group
+        // then (§5.10, D.70).
+        script.push((at(&mut rng, 13), Step::ReaddLeaver));
         if seed % 4 == 3 {
             script.push((at(&mut rng, 14), Step::Dissolve));
         }
@@ -466,6 +496,7 @@ impl Sim {
             restored,
             split: false,
             dissolved: false,
+            dissolver: None,
             forked: false,
             second: None,
             forged_objects: Vec::new(),
@@ -476,6 +507,10 @@ impl Sim {
             handovers: Vec::new(),
             erased_line: BTreeSet::new(),
             removed_at: BTreeMap::new(),
+            roots_seen: BTreeMap::new(),
+            parents_seen: BTreeMap::new(),
+            stale_invitations: Vec::new(),
+            own_roots: Vec::new(),
         };
         for d in 0..n {
             sim.boot(d);
@@ -692,6 +727,19 @@ impl Sim {
             .map(|(c, _)| *c)
             .collect();
         self.legit.extend(created);
+        let (own, rest): (Vec<_>, Vec<_>) = core::mem::take(&mut self.own_roots)
+            .into_iter()
+            .partition(|(x, parent, _, _)| *x == d && self.node(d).installed(parent));
+        self.own_roots = rest;
+        for (_, _, giver, pt) in own {
+            let from = self.devs[giver].id;
+            self.op(d, |n, s, now, rng| {
+                n.handle_plaintext(s, from, &pt, now, rng)
+            })
+            .expect("receive");
+        }
+        self.see_roots(d);
+        self.check_invitations(d);
         self.answer_invitations(d);
         self.resolve_if_needed(d);
         if !self.final_phase && self.now < self.end_active {
@@ -704,16 +752,221 @@ impl Sim {
         }
     }
 
+    /// Records the roots device `d` holds, and the parents each one names among the roots
+    /// seen.
+    fn see_roots(&mut self, d: usize) {
+        let installed: Vec<ChatId> = self
+            .node(d)
+            .tables()
+            .epochs
+            .iter()
+            .filter(|(_, r)| r.status == EpochStatus::Installed)
+            .map(|(c, _)| *c)
+            .collect();
+        self.devs[d].held.extend(installed);
+        let fresh: Vec<Root> = self
+            .node(d)
+            .tables()
+            .epochs
+            .iter()
+            .filter(|(c, _)| !self.roots_seen.contains_key(c))
+            .map(|(_, r)| r.root.clone())
+            .collect();
+        for r in fresh {
+            let id = r.chat_id();
+            if self.roots_seen.contains_key(&id) {
+                continue;
+            }
+            let mut parents = BTreeSet::new();
+            for (c, other) in &self.roots_seen {
+                if r.names_parent(c) {
+                    parents.insert(*c);
+                }
+                if other.names_parent(&id) {
+                    self.parents_seen.entry(*c).or_default().insert(id);
+                }
+            }
+            self.parents_seen.entry(id).or_default().extend(parents);
+            self.roots_seen.insert(id, r);
+        }
+    }
+
+    /// Whether `x` is an ancestor of `y` among the roots seen.
+    fn ancestor_of(&self, x: &ChatId, y: &ChatId) -> bool {
+        let mut seen = BTreeSet::new();
+        let mut stack: Vec<ChatId> = vec![*y];
+        while let Some(c) = stack.pop() {
+            for p in self.parents_seen.get(&c).into_iter().flatten() {
+                if p == x {
+                    return true;
+                }
+                if seen.insert(*p) {
+                    stack.push(*p);
+                }
+            }
+        }
+        false
+    }
+
+    /// No invitation shown to device `d` is an old epoch of a line it knows, which accepted
+    /// would be a second copy of the group:
+    ///
+    /// - an epoch it installed before (and closed or erased since);
+    /// - an ancestor of an epoch it holds, once its parent lookup is over (its own and that
+    ///   of each invitation it continues): before, the device cannot tell it from another
+    ///   group (§4.8 "Parent lookup", D.69).
+    ///
+    /// Not counted: a root delivered again in full after the device closed it, which prompts
+    /// again with its warning (§14.2); an invitation to rejoin a group it holds (§4.8 case
+    /// 4), which accepted continues that conversation and makes no second copy. Nor, for the
+    /// second rule, an ancestor of the root "Dissolve & Delete" keeps for two weeks (whose
+    /// line is erased: the remnants of §5.8, counted), or any epoch on a device restored from
+    /// a backup: it lost the roots that would tell it the epoch is of its line (a member back
+    /// behind its leave is offered epochs of its old line it never held, an owner's older
+    /// side branch or the epoch its own leave names; its own leave makes it read-only again).
+    fn check_invitations(&mut self, d: usize) {
+        let node = self.node(d);
+        let invitations = node.invitations(self.now);
+        if invitations.is_empty() {
+            return;
+        }
+        let installed: Vec<ChatId> = node
+            .tables()
+            .epochs
+            .iter()
+            .filter(|(_, r)| r.status == EpochStatus::Installed)
+            .map(|(c, _)| *c)
+            .collect();
+        let short = |c: &ChatId| format!("{:02x}{:02x}", c.as_bytes()[0], c.as_bytes()[1]);
+        let who = |g: &GossipId| {
+            (0..self.devs.len())
+                .find(|x| self.devs[*x].id == *g)
+                .map_or("?".to_owned(), |x| x.to_string())
+        };
+        let dev = &self.devs[d];
+        let mut found = Vec::new();
+        for inv in &invitations {
+            // Its lookup goes on while it, or a held invitation it continues, waits for a
+            // parent.
+            let mut looking = false;
+            let mut stack = vec![inv.chat_id];
+            let mut seen = BTreeSet::new();
+            while let Some(c) = stack.pop() {
+                if !seen.insert(c) {
+                    continue;
+                }
+                if let Some(r) = node.tables().epochs.get(&c)
+                    && let EpochStatus::Invitation(i) = &r.status
+                {
+                    looking |= !i.lookups.is_empty();
+                    stack.extend(
+                        node.tables()
+                            .epochs
+                            .keys()
+                            .filter(|p| r.root.names_parent(p))
+                            .copied(),
+                    );
+                }
+            }
+            if inv.closed_before {
+                continue;
+            }
+            let why = if dev.held.contains(&inv.chat_id) {
+                "it installed before".to_owned()
+            } else if let Some(k) = installed.iter().find(|k| {
+                !looking
+                    && inv.rejoins.is_none()
+                    && !dev.lost
+                    && !self.erased_line.contains(k)
+                    && self.ancestor_of(&inv.chat_id, k)
+            }) {
+                format!("an ancestor of {} it holds", short(k))
+            } else {
+                continue;
+            };
+            found.push(format!(
+                "device {d} at minute {}: invitation {} (owner {}, from {}, rejoins {:?}, closed \
+                 before {}): {why} (removed {} left {} closed {} restored {})",
+                (self.now - START) / MINUTE,
+                short(&inv.chat_id),
+                who(&inv.owner),
+                inv.received_from.as_ref().map_or("owner".to_owned(), who),
+                inv.rejoins.as_ref().map(short),
+                inv.closed_before,
+                dev.removed,
+                dev.left,
+                dev.closed,
+                dev.restored,
+            ));
+        }
+        if !found.is_empty() && std::env::var("GROUPS_MEMBERS_TRACE").is_ok() {
+            let who = |g: &GossipId| {
+                (0..self.devs.len())
+                    .find(|x| self.devs[*x].id == *g)
+                    .map_or("?".to_owned(), |x| x.to_string())
+            };
+            for (c, r) in &self.roots_seen {
+                eprintln!(
+                    "  root {} owner {} {:?} at {} name {} members {:?} parents {:?}",
+                    short(c),
+                    who(&r.owner_id()),
+                    r.root_type(),
+                    (r.created_at().min(START + 100 * HOUR) - START) / MINUTE,
+                    r.name(),
+                    r.members().iter().map(who).collect::<Vec<_>>(),
+                    self.parents_seen
+                        .get(c)
+                        .into_iter()
+                        .flatten()
+                        .map(short)
+                        .collect::<Vec<_>>()
+                );
+            }
+            for (c, r) in node.tables().epochs.iter() {
+                eprintln!(
+                    "  held {} group {} status {:?} from {} received {} parents {:?}",
+                    short(c),
+                    short(&r.group),
+                    r.status,
+                    who(&r.from),
+                    (r.received_at - START) / MINUTE,
+                    r.parents.iter().map(short).collect::<Vec<_>>()
+                );
+            }
+            for (c, m) in node.tables().markers.iter() {
+                eprintln!("  marker {} {:?}", short(c), m);
+            }
+            for g in node.groups() {
+                eprintln!(
+                    "  group {} current {} status {:?}",
+                    short(&g.group),
+                    short(&g.current),
+                    g.status
+                );
+            }
+        }
+        self.stale_invitations.extend(found);
+    }
+
     /// The user answers its invitations: those of the group's legitimate owners are
     /// accepted, unless the user had left; the others are declined silently.
     fn answer_invitations(&mut self, d: usize) {
         let now = self.now;
         let invitations = self.node(d).invitations(now);
         for inv in invitations {
+            // A root the user signed itself outside its engine is no invitation to it: its
+            // device holds it once it holds its parent (see `own_roots`).
+            if inv.owner == self.devs[d].id && self.takeover_roots.contains(&inv.chat_id) {
+                continue;
+            }
             // A former owner's root after its handover is no invitation a user takes.
+            // Nor is a way back into a group the user dissolved itself, nor an epoch it closed
+            // before (the prompt says so, §14.2): no user here closed one by mistake.
             let legit = self.legit.contains(&inv.chat_id)
                 && !self.former_roots.contains(&inv.chat_id)
-                && !self.devs[d].closed;
+                && !self.devs[d].closed
+                && !(self.dissolver == Some(d) && inv.rejoins.is_some())
+                && !inv.closed_before;
             // Answering one invitation may settle another (the lookup of its parent
             // succeeded): an invitation that is gone is skipped.
             let r = if legit {
@@ -909,6 +1162,33 @@ impl Sim {
                         self.counters.members_removed += 1;
                     }
                 }
+                Step::ReaddLeaver => {
+                    let l = self.leaver;
+                    // Once the owner's line has dropped it (its leave applied, §5.5).
+                    let listed = self.group_of(o).is_some_and(|s| s.members.contains(&id(l)));
+                    if !self.devs[l].left || listed {
+                        if self.devs[l].left && self.now < self.end_active {
+                            self.script.push((self.now + 10 * MINUTE, step));
+                            self.script.sort_by_key(|(t, _)| *t);
+                        }
+                        continue;
+                    }
+                    if self
+                        .change(
+                            o,
+                            GroupChange::Successor {
+                                add: vec![id(l)],
+                                remove: vec![],
+                                name: None,
+                            },
+                        )
+                        .is_some()
+                    {
+                        self.devs[l].left = false;
+                        self.devs[l].closed = false;
+                        self.counters.leavers_readded += 1;
+                    }
+                }
                 Step::Readd => {
                     let v = self.victim;
                     if self
@@ -928,9 +1208,11 @@ impl Sim {
                 }
                 Step::Backup => {
                     let r = self.restored;
-                    self.devs[r].backup = Some(self.devs[r].store.clone());
+                    self.devs[r].backup =
+                        Some((self.devs[r].store.clone(), self.devs[r].held.clone()));
                     // The owner too, for a fork.
-                    self.devs[o].backup = Some(self.devs[o].store.clone());
+                    self.devs[o].backup =
+                        Some((self.devs[o].store.clone(), self.devs[o].held.clone()));
                 }
                 Step::Leave => {
                     let l = self.leaver;
@@ -986,12 +1268,14 @@ impl Sim {
                 }
                 Step::Rollback => {
                     let r = self.restored;
-                    if let Some(b) = self.devs[r].backup.take()
+                    if let Some((b, held)) = self.devs[r].backup.take()
                         && (self.devs[r].removed || self.devs[r].left)
                     {
                         self.devs[r].store = b;
+                        self.devs[r].held = held;
                         self.boot(r);
                         self.devs[r].restored = true;
+                        self.devs[r].lost = true;
                         self.devs[r].closed = false;
                         self.counters.rollbacks += 1;
                     }
@@ -1011,8 +1295,10 @@ impl Sim {
                         .is_some()
                     {
                         self.send(o);
-                        if let Some(b) = self.devs[o].backup.take() {
+                        if let Some((b, held)) = self.devs[o].backup.take() {
                             self.devs[o].store = b;
+                            self.devs[o].held = held;
+                            self.devs[o].lost = true;
                             self.boot(o);
                             if self
                                 .change(
@@ -1156,6 +1442,7 @@ impl Sim {
                     {
                         self.send(o);
                         self.devs[o].store = backup;
+                        self.devs[o].lost = true;
                         self.boot(o);
                         if self
                             .change(
@@ -1197,6 +1484,7 @@ impl Sim {
                         .is_ok()
                     {
                         self.dissolved = true;
+                        self.dissolver = Some(o);
                         self.counters.dissolves += 1;
                         self.counters.dissolve_deletes += u64::from(delete);
                     }
@@ -1572,6 +1860,12 @@ impl Sim {
                     self.transmit(heir, *m, pt);
                 }
             }
+            // The heir's device holds the root it signed, as it holds one the engine builds,
+            // once it holds the handover it continues. Otherwise the root could reach the
+            // heir only after the heir dissolved that epoch, which no other device would then
+            // follow.
+            let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+            self.own_roots.push((heir, cur, o, pt));
         }
     }
 
@@ -1723,7 +2017,30 @@ impl Sim {
 
     // ── Checks ───────────────────────────────────────────────────────────────
 
+    /// Whether conversation `c` of device `d` is a remnant of "Dissolve & Delete": it holds
+    /// an epoch of the erased line, or a root continuing one the device does not hold (see
+    /// [`Sim::check`]).
+    fn remnant(&self, d: usize, c: &crate::node::GroupSummary) -> bool {
+        let node = self.node(d);
+        node.tables()
+            .epochs
+            .iter()
+            .filter(|(_, r)| r.group == c.group && r.status == EpochStatus::Installed)
+            .any(|(e, r)| {
+                self.erased_line.contains(e)
+                    || self
+                        .erased_line
+                        .iter()
+                        .any(|x| r.root.names_parent(x) && node.root(x).is_none())
+            })
+    }
+
     fn check(&mut self) {
+        assert!(
+            self.stale_invitations.is_empty(),
+            "an old epoch offered as an invitation: {:#?}",
+            self.stale_invitations
+        );
         let honest = self.honest();
         let mut split_conversations = 0u64;
         let mut dissolve_remnants = 0u64;
@@ -1785,14 +2102,7 @@ impl Sim {
             // erased line only after every other device erased it keeps that part, active,
             // as a conversation of its own: an epoch of the erased line, or a root continuing
             // one the device never held (the link to the rest is gone with it). Counted.
-            let remnant = |c: &crate::node::GroupSummary| {
-                self.erased_line.contains(&c.current)
-                    || node.root(&c.current).is_some_and(|r| {
-                        self.erased_line
-                            .iter()
-                            .any(|e| r.names_parent(e) && node.root(e).is_none())
-                    })
-            };
+            let remnant = |c: &crate::node::GroupSummary| self.remnant(d, c);
             let remnants = conversations.iter().filter(|c| remnant(c)).count();
             dissolve_remnants += remnants as u64;
             let conversations: Vec<&crate::node::GroupSummary> =
@@ -1855,12 +2165,13 @@ impl Sim {
             }
         }
         // Convergence of the members of the current epoch.
+        // A remnant of "Dissolve & Delete" (counted above) is no line to converge on.
         let members: Vec<usize> = honest
             .iter()
             .copied()
             .filter(|d| {
                 self.group_of(*d)
-                    .is_some_and(|s| s.status == MyStatus::Member)
+                    .is_some_and(|s| s.status == MyStatus::Member && !self.remnant(*d, &s))
             })
             .collect();
         let mut lines: BTreeMap<GossipId, Vec<usize>> = BTreeMap::new();
@@ -1977,7 +2288,7 @@ impl Sim {
             for &d in &honest {
                 let dev = &self.devs[d];
                 let Some(s) = self.group_of(d) else { continue };
-                if dev.closed || dev.removed || dev.restored {
+                if dev.closed || dev.removed || dev.restored || self.remnant(d, &s) {
                     continue;
                 }
                 if self.split && !dissolved.contains(&s.current) {
