@@ -275,6 +275,10 @@ impl Core {
             .map_err(err)
     }
 
+    pub fn holds_direct_chat(&self, peer: GossipId) -> bool {
+        self.node.holds_direct_chat(&peer)
+    }
+
     pub fn is_co_member(&self, peer: GossipId) -> bool {
         self.node.is_co_member(&peer)
     }
