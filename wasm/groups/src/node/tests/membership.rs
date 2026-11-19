@@ -1845,3 +1845,148 @@ fn a_long_chain_received_newest_first_is_adopted_without_recursion() {
         .unwrap();
     worker.join().unwrap();
 }
+
+/// The answers of `d` to the query `ops` from member `from`, by entry position.
+fn answers_of(
+    net: &mut MNet,
+    d: usize,
+    from: usize,
+    ops: Vec<QueryOp>,
+) -> Vec<(u32, ResponseResult)> {
+    net.recv_frames_m(d, from, &[query(9, net.now, MIN, ops)]);
+    let now = net.now;
+    let dev = &mut net.devs[d];
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    let mut answers = Vec::new();
+    for o in out {
+        let dev = &mut net.devs[d];
+        dev.node
+            .handed_off(&mut dev.store, o.handle, now, &mut net.rng)
+            .unwrap();
+        if o.to != gid(from) {
+            continue;
+        }
+        for f in frames(&o.plaintext) {
+            if let Frame::Response(r) = f {
+                answers.push((r.idx, r.result));
+            }
+        }
+    }
+    answers.sort_by_key(|(i, _)| *i);
+    answers
+}
+
+impl MNet {
+    pub(crate) fn recv_frames_m(&mut self, d: usize, from: usize, f: &[Frame]) {
+        let pt = wire::encode_plaintext(f).unwrap();
+        let now = self.now;
+        let dev = &mut self.devs[d];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(from), &pt, now, &mut self.rng)
+            .unwrap();
+    }
+}
+
+fn not_available(r: &ResponseResult) -> bool {
+    *r == ResponseResult::Status(Status::NotAvailable)
+}
+
+/// Finding 2 of the review of 54711780: a removed peer was answered like a member for the
+/// epoch it was removed from (its root, keys, other members' records), and a device that
+/// was kicked kept answering for its epochs and listing them in shared-chats scans.
+#[test]
+fn removed_peers_and_removed_devices_answer_not_available() {
+    let (mut net, g) = founded(4);
+    let e = net.say(1, &g, "before");
+    net.run(MIN);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(3)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
+    let own_kick = *crate::hash::kick_id(&g, &gid(3)).as_bytes();
+    let a = answers_of(
+        &mut net,
+        1,
+        3,
+        vec![
+            QueryOp::ChatById(g),
+            QueryOp::Keys {
+                chat_id: g,
+                gossip_id: gid(2),
+            },
+            QueryOp::SignedObject {
+                chat_id: g,
+                kind: crate::wire::SignedKind::Kick,
+                id: own_kick,
+            },
+            QueryOp::Removal {
+                chat_id: g,
+                gossip_id: gid(3),
+            },
+            QueryOp::Removal {
+                chat_id: g,
+                gossip_id: gid(2),
+            },
+        ],
+    );
+    let by_idx = |i: u32| {
+        a.iter()
+            .filter(|(x, _)| *x == i)
+            .map(|(_, r)| r.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        by_idx(0).iter().all(not_available),
+        "root to a removed peer"
+    );
+    assert!(
+        by_idx(1).iter().all(not_available),
+        "keys to a removed peer"
+    );
+    assert!(
+        matches!(by_idx(2)[0], ResponseResult::Event(_)),
+        "its own kick"
+    );
+    assert!(
+        matches!(by_idx(3)[0], ResponseResult::Event(_)),
+        "its own removal"
+    );
+    assert!(
+        by_idx(4).iter().all(not_available),
+        "another member's records"
+    );
+    // The kicked device answers for its epochs as for an epoch it does not hold.
+    let b = answers_of(
+        &mut net,
+        3,
+        1,
+        vec![
+            QueryOp::Event {
+                chat_id: g,
+                event_id: e.event_id(),
+            },
+            QueryOp::ChatById(g),
+            QueryOp::SharedChatsScan {
+                scan_id: crate::ids::ScanId::from_bytes([3; 32]),
+                offset: 0,
+            },
+        ],
+    );
+    for (i, r) in &b {
+        match r {
+            ResponseResult::Page(p) => assert!(p.entries.is_empty(), "entry {i}"),
+            r => assert!(not_available(r), "entry {i}: {r:?}"),
+        }
+    }
+}
