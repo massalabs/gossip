@@ -210,4 +210,50 @@ describe('Group chats', { timeout: 120_000 }, () => {
     await deliver();
     expect(texts(alice.groups, groupId)).toEqual(['first', 'second']);
   });
+
+  it('replies, edits locally and retries', async () => {
+    const groupId = await alice.groups.createGroup('Notes', [bob.userId]);
+    await deliver();
+    await bob.groups.acceptInvitation(bob.groups.invitations()[0].epochId);
+    const first = await alice.groups.sendMessage(groupId, 'question');
+    await deliver();
+
+    await bob.groups.sendMessage(groupId, 'answer', {
+      replyTo: [{ epochId: groupId, syncObjId: first.syncObjId }],
+    });
+    await deliver();
+    const reply = alice.groups
+      .timeline(groupId)
+      .find(i => i.kind === 'message' && i.author === bob.userId);
+    expect(reply?.kind === 'message' && reply.replyTo).toEqual([
+      { epochId: groupId, syncObjId: first.syncObjId },
+    ]);
+
+    // A local-only edit changes Alice's copy and nothing else.
+    await alice.groups.editMessageLocally(groupId, first.syncObjId, {
+      body: { type: 'text', text: 'my own copy' },
+    });
+    await deliver();
+    expect(texts(alice.groups, groupId)).toEqual(['my own copy', 'answer']);
+    expect(texts(bob.groups, groupId)).toEqual(['question', 'answer']);
+    await expect(
+      alice.groups.editMessageLocally(groupId, first.syncObjId, {
+        createdAt: clock + 15 * 24 * 3600 * 1000,
+      })
+    ).rejects.toThrow();
+
+    // Retry synchronisation republishes the altered result.
+    await alice.groups.retryMessage(groupId, first.syncObjId);
+    await deliver();
+    expect(texts(bob.groups, groupId)).toEqual(['my own copy', 'answer']);
+
+    // A local deletion hides it here only.
+    await bob.groups.deleteMessageLocally(groupId, first.syncObjId);
+    await deliver();
+    expect(texts(bob.groups, groupId)).toEqual(['answer']);
+    expect(texts(alice.groups, groupId)).toEqual(['my own copy', 'answer']);
+    expect(alice.groups.epoch(groupId)?.members.sort()).toEqual(
+      [alice.userId, bob.userId].sort()
+    );
+  });
 });
