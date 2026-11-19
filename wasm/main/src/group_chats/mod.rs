@@ -348,7 +348,7 @@ impl GroupsNode {
     }
 
     /// `change`: `{"t":"Successor","add":[hex],"remove":[hex],"name":null|string}`,
-    /// `{"t":"Handover","new_owner":hex,"leave":bool,"remove":[hex],"name":…}` or
+    /// `{"t":"Handover","new_owner":hex,"leave":bool,"name":…}` or
     /// `{"t":"Resolve","members":[hex],"name":…}`. Returns the new epoch.
     pub fn change_group(
         &mut self,

@@ -41,15 +41,13 @@ pub enum GroupChange {
         name: Option<String>,
     },
     /// A handover root to `new_owner` (§5.7), who must be a member and whose keys this
-    /// device must hold; it may remove members (with `leave`, this device too, which then
-    /// closes the group) and rename. It never adds a member.
+    /// device must hold. It keeps every member (§4.7) but, with `leave`, this device, which
+    /// then closes the group; it may rename.
     Handover {
         /// The new owner.
         new_owner: GossipId,
         /// "Hand over and leave".
         leave: bool,
-        /// Members removed.
-        remove: Vec<GossipId>,
         /// A new name, if any.
         name: Option<String>,
     },
@@ -606,7 +604,6 @@ impl Node {
             GroupChange::Handover {
                 new_owner,
                 leave,
-                remove,
                 name,
             } => {
                 if !fork.is_empty() {
@@ -616,11 +613,6 @@ impl Node {
                     return Err(NodeError::NotAllowed);
                 }
                 let mut m: BTreeSet<GossipId> = cur_root.members().iter().copied().collect();
-                for r in remove {
-                    if r != new_owner {
-                        m.remove(r);
-                    }
-                }
                 if *leave {
                     m.remove(&self.me);
                 }

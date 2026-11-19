@@ -26,7 +26,6 @@ fn a_handover_line_names_its_signer_and_the_outgoing_owner_left() {
             GroupChange::Handover {
                 new_owner: gid(2),
                 leave: true,
-                remove: vec![],
                 name: None,
             },
         )
@@ -241,7 +240,6 @@ fn a_resolution_over_a_former_owners_branch_does_not_change_the_owner() {
             GroupChange::Handover {
                 new_owner: gid(1),
                 leave: false,
-                remove: vec![],
                 name: None,
             },
         )
