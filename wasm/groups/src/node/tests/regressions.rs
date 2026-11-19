@@ -999,3 +999,43 @@ fn a_device_sleeping_until_its_next_wakeup_misses_nothing() {
         net.now += 1;
     }
 }
+
+/// Found by review (code at `6a916f2e`): after a failed `handed_off` commit the plaintext
+/// stayed in flight and confirmable, but its work no longer counted as in flight, so the next
+/// poll assembled the same work again and both copies could be sent.
+#[test]
+fn a_failed_handoff_does_not_assemble_the_same_work_again() {
+    let root = epoch_root(3, 0x10);
+    let chat = root.chat_id();
+    let mut store = Instrumented::new(MemoryStorage::new());
+    let mut rng = TestRng::new(3);
+    let mut node = Node::open(&store, member(0)).unwrap();
+    node.install_epoch(&mut store, config(&root), false, T0, &mut rng)
+        .unwrap();
+    node.publish_message(
+        &mut store,
+        chat,
+        Body::Text("x".into()),
+        BTreeMap::new(),
+        None,
+        T0,
+        &mut rng,
+    )
+    .unwrap();
+    let out = node.poll_outbox(&mut store, T0, &mut rng).unwrap();
+    assert!(!out.is_empty());
+    store.fail_commits = true;
+    assert!(
+        node.handed_off(&mut store, out[0].handle, T0, &mut rng)
+            .is_err()
+    );
+    store.fail_commits = false;
+    let again = node.poll_outbox(&mut store, T0, &mut rng).unwrap();
+    assert!(
+        again.iter().all(|o| o.to != out[0].to),
+        "the work of {:?} was assembled twice",
+        out[0].handle
+    );
+    node.handed_off(&mut store, out[0].handle, T0, &mut rng)
+        .unwrap();
+}
