@@ -17,11 +17,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use groups::display::VisibleMessage;
 use groups::node::records::{
-    AnswerOp, Attempt, Candidate, CandidateState, ChangeKind, EpochRecord, EpochStatus, FrozenScan,
-    GroupRecord, GroupStatus, GroupSync, HeldRoot, Hint, Invitation, Junction, JunctionKind, Lane,
-    Marker, Meta, PeerRecord, PendingLeave, Purpose, RefEntry, ReplyCount, RequestRef, Run,
-    ScanAttempt, ScanOp, SignedObject, SignedRecord, Target, Task, TaskKey, Trigger, TriggerKind,
-    Work,
+    AnswerOp, Attempt, Backoff, Candidate, CandidateState, ChangeKind, EpochRecord, EpochStatus,
+    FrozenScan, GroupRecord, GroupStatus, GroupSync, HeldRoot, Hint, Invitation, Junction,
+    JunctionKind, Lane, Marker, Meta, PeerRecord, PendingLeave, Purpose, RefEntry, ReplyCount,
+    RequestRef, Run, ScanAttempt, ScanOp, SignedObject, SignedRecord, Target, Task, TaskKey,
+    Trigger, TriggerKind, Work,
 };
 use groups::node::timing::Bucket;
 use groups::node::{
@@ -475,6 +475,12 @@ record!(PeerRecord {
     pause_ms
 });
 record!(Hint { first, used });
+record!(Backoff {
+    since,
+    until,
+    wait_ms,
+    window
+});
 variants!(Status {
     NotAvailable,
     Restart,
@@ -1268,6 +1274,12 @@ mod tests {
             since: 1,
             count: 2,
             owed: true,
+        });
+        round_trip(Backoff {
+            since: 1,
+            until: 2,
+            wait_ms: 3,
+            window: 4,
         });
         // The key of an earlier conversation (§5.12): peer and format version.
         round_trip((peer, 0u64));

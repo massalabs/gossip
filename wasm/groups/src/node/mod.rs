@@ -50,6 +50,7 @@ pub mod records;
 pub mod timing;
 
 mod actions;
+mod backoff;
 mod direct;
 mod group;
 mod hints;
@@ -1364,8 +1365,9 @@ impl Node {
         decay(r);
     }
 
-    /// Any valid answer: the peer is responsive (§10.1).
+    /// Any valid answer: the peer is responsive (§10.1), and not busy any more.
     fn answered(&mut self, peer: &GossipId) {
+        self.not_busy(peer);
         if self.t.peers.get(peer).is_some_and(|r| r.failures != 0) {
             let r = self.peer_mut(peer);
             r.failures = 0;

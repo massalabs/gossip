@@ -318,7 +318,8 @@ impl Node {
         self.count_timeout(peer, sent_at, now);
     }
 
-    /// A failure of `peer` at `now` that covers no time asked (three `busy` in a row).
+    /// A failure of `peer` at `now` that covers no time asked (tests).
+    #[cfg(test)]
     pub(crate) fn note_timeout(&mut self, peer: &GossipId, now: u64) {
         self.count_timeout(peer, now, now);
     }

@@ -778,6 +778,16 @@ impl Node {
         for p in keys {
             self.t.keys.remove(&p);
         }
+        let backoff: Vec<GossipId> = self
+            .t
+            .backoff
+            .keys()
+            .filter(|p| !known.contains(p))
+            .copied()
+            .collect();
+        for p in backoff {
+            self.t.backoff.remove(&p);
+        }
     }
 
     // ── Liveness of a leave (§5.3) ───────────────────────────────────────────

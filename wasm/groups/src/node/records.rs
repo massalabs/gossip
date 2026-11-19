@@ -112,7 +112,8 @@ pub struct Candidate {
     pub outstanding_until: Option<u64>,
     /// Requests sent to it for this task.
     pub attempts: u32,
-    /// `busy` answers in a row in this run.
+    /// Kept for the stored record; `busy` is back-pressure per peer now (`node::backoff`)
+    /// and leaves it at 0.
     pub busy: u8,
     /// Penalties it got for "not available" after announcing the item: withdrawn if the
     /// item turns up.
@@ -274,7 +275,8 @@ pub struct ScanOp {
     pub restarts: u8,
     /// Resends caused by `expired` in this stage.
     pub expired_resends: u8,
-    /// `busy` answers in a row in this stage.
+    /// Kept for the stored record; `busy` is back-pressure per peer now (`node::backoff`)
+    /// and leaves it at 0.
     pub busy: u8,
     /// The periodic lanes waiting for its completion.
     pub lanes: BTreeSet<u8>,
@@ -416,6 +418,20 @@ pub struct PeerRecord {
     pub paused_until: u64,
     /// The length of its last pause (it doubles on each repeat, up to 24 h).
     pub pause_ms: u64,
+}
+
+/// The back-pressure of a peer that answered `busy` (§13.4, local policy, see
+/// `node::backoff`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Backoff {
+    /// When its current streak of `busy` started.
+    pub since: u64,
+    /// It is not asked again before this instant.
+    pub until: u64,
+    /// The current wait; 0 once a non-`busy` answer ended the streak.
+    pub wait_ms: u64,
+    /// The lookups this device keeps outstanding with it.
+    pub window: u32,
 }
 
 // ── Hints (§10.3) ────────────────────────────────────────────────────────────
@@ -653,6 +669,7 @@ tables! {
     lookup_results: (ChatId, SyncObjId) => super::LookupResult,
     earlier: (GossipId, u64) => u64,
     consents: GossipId => u64,
+    backoff: GossipId => Backoff,
 }
 
 /// A table of the in-memory copy: the records and the keys written since the last commit.
