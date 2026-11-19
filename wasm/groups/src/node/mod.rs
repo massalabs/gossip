@@ -396,8 +396,8 @@ impl Node {
 
     // ── Operations ───────────────────────────────────────────────────────────
 
-    /// Runs `f` as one operation: its writes, and those of the scheduling pass that ends
-    /// every operation, are committed together, or not at all.
+    /// Runs `f` as one operation: what is due in the epochs is applied first, then `f`, then
+    /// the scheduling pass; all their writes are committed together, or not at all.
     fn run<S: NodeStorage, T>(
         &mut self,
         store: &mut S,
@@ -414,10 +414,12 @@ impl Node {
                     rng,
                     edges: EDGES_PER_TURN,
                 };
-                f(self, &mut cx).and_then(|v| {
-                    self.schedule(&mut cx)?;
-                    Ok(v)
-                })
+                self.apply_due(&mut cx)
+                    .and_then(|()| f(self, &mut cx))
+                    .and_then(|v| {
+                        self.schedule(&mut cx)?;
+                        Ok(v)
+                    })
             };
             r.map(|v| (v, ov.into_changes()))
         };
@@ -432,6 +434,18 @@ impl Node {
             self.reload(store)?;
         }
         outcome
+    }
+
+    /// Applies what is due in every epoch, as every operation does first (§7.4: before any
+    /// message access or publication), and invalidates the work of what it pruned.
+    fn apply_due(&mut self, cx: &mut Cx<'_>) -> Result<(), NodeError> {
+        let entries: Vec<(ChatId, Arc<EpochEntry>)> =
+            self.epochs.iter().map(|(c, e)| (*c, Arc::clone(e))).collect();
+        for (chat, entry) in entries {
+            let pruned = entry.epoch().tick(cx.ov, cx.now)?;
+            self.invalidate(chat, &pruned);
+        }
+        Ok(())
     }
 
     /// Installs (or updates) an epoch. When `newly_adopted`, the device scans two members
@@ -548,11 +562,6 @@ impl Node {
     ) -> Result<(), NodeError> {
         self.run(store, now, rng, |n, cx| {
             let chats: Vec<ChatId> = n.epochs.keys().copied().collect();
-            for chat in &chats {
-                let entry = Arc::clone(&n.epochs[chat]);
-                let pruned = entry.epoch().tick(cx.ov, cx.now)?;
-                n.invalidate(*chat, &pruned);
-            }
             n.expire_requests(cx.now);
             n.task_timers(cx);
             n.scan_timers(cx);
