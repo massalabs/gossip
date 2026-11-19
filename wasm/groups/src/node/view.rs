@@ -347,7 +347,18 @@ impl Node {
                 items.push(TimelineItem::Line { at, line });
                 continue;
             }
-            let before: BTreeSet<GossipId> = parents
+            // The change is read against the parents no other parent continues: a root that
+            // adds a member back also names the last epoch that member was in (§5.10), an
+            // ancestor of the current one on a device that holds both, whose members and name
+            // are those of the past.
+            let continued = self.held_ancestors(&rec.parents);
+            let latest: Vec<&crate::root::Root> = rec
+                .parents
+                .iter()
+                .filter(|p| !continued.contains(*p))
+                .filter_map(|p| self.t.epochs.get(p).map(|r| &r.root))
+                .collect();
+            let before: BTreeSet<GossipId> = latest
                 .iter()
                 .flat_map(|p| p.members().iter().copied())
                 .collect();
@@ -365,7 +376,6 @@ impl Node {
                         ))
                     })
             });
-            let first = parents.first();
             items.push(TimelineItem::Line {
                 at,
                 line: TimelineLine::EpochChange {
@@ -374,12 +384,14 @@ impl Node {
                     added: after.difference(&before).copied().collect(),
                     removed,
                     left,
-                    renamed: first
-                        .filter(|p| p.name() != root.name())
-                        .map(|_| root.name().to_owned()),
-                    new_owner: first
-                        .filter(|p| p.owner_id() != root.owner_id())
-                        .map(|_| root.owner_id()),
+                    renamed: latest
+                        .iter()
+                        .all(|p| p.name() != root.name())
+                        .then(|| root.name().to_owned()),
+                    // Only a handover changes the owner (§4.7): a new owner's root taking a
+                    // former owner's branch as a parent (§5.9) names another owner than that
+                    // parent without changing it.
+                    new_owner: handover.then(|| root.owner_id()),
                 },
             });
         }
@@ -415,6 +427,25 @@ impl Node {
         }
         items.sort_by_key(TimelineItem::order);
         Ok(items)
+    }
+
+    /// The epochs held that the epochs `from` continue, at any depth, by the parent links
+    /// of the group (`from` excluded unless one continues another).
+    fn held_ancestors(&self, from: &[ChatId]) -> BTreeSet<ChatId> {
+        let mut seen = BTreeSet::new();
+        let mut stack: Vec<ChatId> = from
+            .iter()
+            .filter_map(|c| self.t.epochs.get(c))
+            .flat_map(|r| r.parents.iter().copied())
+            .collect();
+        while let Some(c) = stack.pop() {
+            if seen.insert(c)
+                && let Some(r) = self.t.epochs.get(&c)
+            {
+                stack.extend(r.parents.iter().copied());
+            }
+        }
+        seen
     }
 
     /// The members of `chat` whose signed leave this device holds, for any epoch.
