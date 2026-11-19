@@ -50,6 +50,7 @@ const message = (
   body: { type: 'text', text: 'question' },
   metadata: {},
   replyTo: [],
+  reactions: [],
   ...over,
 });
 
