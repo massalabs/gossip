@@ -771,16 +771,26 @@ impl Node {
     }
 
     /// Whether the signed object `key` is served to `peer`: this device serves its epoch
-    /// (or keeps a dissolved group, for the dissolve message, §5.8), and a removed peer of
-    /// the epoch gets only its own kick or leave (§10.4, §5.6).
+    /// (or keeps a dissolved group, for the dissolve message, §5.8, and in an archive for
+    /// the removed peers' own kicks and leaves), and a removed peer of the epoch gets only its
+    /// own kick or leave (§10.4, §5.6).
     pub(crate) fn signed_served_to(&self, key: &SignedKey, peer: &GossipId) -> bool {
-        let dissolve_kept = key.1 == SignedKind::Dissolve
-            && self.installed(&key.0)
-            && matches!(
-                self.group_status(&key.0),
-                super::records::GroupStatus::Dissolved { .. }
-            );
-        if !self.serves(&key.0) && !dissolve_kept {
+        let dissolved = |keep_only: bool| {
+            self.installed(&key.0)
+                && matches!(
+                    self.group_status(&key.0),
+                    super::records::GroupStatus::Dissolved { must_delete, .. }
+                        if !(keep_only && must_delete)
+                )
+        };
+        // An archive ("Dissolve & Keep archived") also tells a removed peer of its own
+        // removal (§5.6): the dissolve names an epoch that peer is not in, and nothing else
+        // would ever end its membership of the epoch it was removed from.
+        let own_removal = self.removed_peer(&key.0, peer)
+            && matches!(key.1, SignedKind::Kick | SignedKind::Leave)
+            && dissolved(true);
+        let dissolve_kept = key.1 == SignedKind::Dissolve && dissolved(false);
+        if !self.serves(&key.0) && !dissolve_kept && !own_removal {
             return false;
         }
         if !self.removed_peer(&key.0, peer) {
