@@ -1112,7 +1112,9 @@ impl Node {
         }
         let object = match item {
             EntryItem::Root => {
-                if !self.root_served_to(chat, peer) {
+                // A root decided at receipt for a removed peer (`removal_root`) is checked the
+                // same way when it is sent.
+                if !self.root_served_to(chat, peer) && !self.removal_root(chat, peer) {
                     return None;
                 }
                 EventObject::Root(Box::new(root.clone()))
