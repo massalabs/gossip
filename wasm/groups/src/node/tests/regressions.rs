@@ -219,3 +219,42 @@ fn an_expired_acknowledgement_of_an_old_request_is_always_resent() {
         assert_eq!(q[0].to, member(1));
     }
 }
+
+/// Found by the network simulation (code at `7dd64c7d`, seed 2140): lookups of IDs that a
+/// member announced and then said it did not have took every slot of the honest members
+/// for long TTLs, so a real event announced by an honest member went to a member that never
+/// answers, for a day per stage.
+#[test]
+fn lookups_of_discredited_announcements_leave_room_for_credible_ones() {
+    let mut net = Net::new(5, 1);
+    let chat = net.chat();
+    let fake: Vec<EventId> = (0..40u8)
+        .map(|i| EventId::new(T0, [i, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]))
+        .collect();
+    // Member 3 announces 40 IDs and answers "not available" for each.
+    net.recv_frames(0, member(3), &[notice(chat, &fake[..20])]);
+    net.recv_frames(0, member(3), &[notice(chat, &fake[20..])]);
+    for _ in 0..3 {
+        for s in super::retrieval::sent_lookups(&mut net, 0) {
+            if s.to == member(3) {
+                super::retrieval::answer(
+                    &mut net,
+                    0,
+                    &s,
+                    ResponseResult::Status(Status::NotAvailable),
+                );
+            }
+        }
+    }
+    // The honest members 1 and 2 are asked about them and do not answer yet. Member 1 now
+    // announces a real event: it is asked at once.
+    let real = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[real])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    let to_real: Vec<GossipId> = q
+        .iter()
+        .filter(|s| matches!(s.op, QueryOp::Event { event_id, .. } if event_id == real))
+        .map(|s| s.to)
+        .collect();
+    assert_eq!(to_real, vec![member(1)]);
+}
