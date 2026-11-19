@@ -93,6 +93,7 @@ pub struct Root {
     epoch_challenge: Challenge,
     ref_chat_id_challenge: Challenge,
     created_at: u64,
+    migrate_from: Option<u64>,
     signature: SignatureBytes,
     chat_id: ChatId,
 }
@@ -193,6 +194,26 @@ impl Root {
         root.sign_and_check(owner_signing_key, randomness, None)
     }
 
+    /// Builds and signs the successor root that founds a new group (§4.5, §4.6), naming the
+    /// single fresh random dummy ID `placeholder`, which the caller then discards. With
+    /// `migrate_from`, the group continues an earlier conversation of that format version
+    /// (§5.12): only a group of exactly two members may carry it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Root::create_successor`], plus [`Error::MigrateFrom`] for `migrate_from` on a
+    /// member list that is not of two.
+    pub fn create_founding(
+        params: RootParams,
+        placeholder: ChatId,
+        migrate_from: Option<u64>,
+        owner_signing_key: &dyn Signer,
+        randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+    ) -> Result<Self> {
+        let _ = migrate_from;
+        Self::create_successor(params, &[placeholder], owner_signing_key, randomness)
+    }
+
     /// Builds and signs a handover root (§4.7, §5.7) continuing `parent`, signed with the key
     /// of `parent`'s owner while `params.owner` names the new owner.
     ///
@@ -229,6 +250,7 @@ impl Root {
             created_at: params.created_at,
             // Placeholder of the right size; the signature is not hashed.
             signature: vec![0; SIGNATURE_SIZE],
+            migrate_from: None,
         };
         Self::from_proto(EVENT_VERSION, unsigned)
     }
@@ -344,6 +366,7 @@ impl Root {
             epoch_challenge,
             ref_chat_id_challenge,
             created_at: p.created_at,
+            migrate_from: None,
             signature,
             chat_id,
         };
@@ -370,6 +393,7 @@ impl Root {
         epoch_challenge: &Challenge,
         ref_chat_id_challenge: &Challenge,
         created_at: u64,
+        migrate_from: Option<u64>,
         signature: &[u8],
     ) -> Result<Self> {
         Self::from_proto(
@@ -385,6 +409,7 @@ impl Root {
                 ref_chat_id_challenge: ref_chat_id_challenge.as_bytes().to_vec(),
                 created_at,
                 signature: signature.to_vec(),
+                migrate_from,
             },
         )
     }
@@ -403,6 +428,7 @@ impl Root {
             ref_chat_id_challenge: self.ref_chat_id_challenge.as_bytes().to_vec(),
             created_at: self.created_at,
             signature: self.signature.as_bytes().to_vec(),
+            migrate_from: self.migrate_from,
         }
     }
 
@@ -598,6 +624,12 @@ impl Root {
         self.created_at
     }
 
+    /// The format version of the conversation this group continues (§5.12), if any.
+    #[must_use]
+    pub fn migrate_from(&self) -> Option<u64> {
+        self.migrate_from
+    }
+
     /// The signature.
     #[must_use]
     pub fn signature(&self) -> &SignatureBytes {
@@ -709,9 +741,157 @@ pub(crate) mod tests {
                 Value::Bytes(&[0x11; 32]),
                 Value::Bytes(&[0x12; 32]),
                 Value::Uint(1_700_000_000_000),
+                // `migrate_from` absent: the empty array.
+                Value::Array(vec![]),
             ],
         );
         assert_eq!(root.chat_id().as_bytes(), &expected);
+    }
+
+    /// A root founding a group of `members` that continues an earlier conversation of
+    /// format version `from` (§5.12).
+    pub(crate) fn migration(owner: &Identity, members: &[&Identity], from: u64) -> Result<Root> {
+        Root::create_founding(
+            params(owner, members, 0x10),
+            ChatId::from_bytes([0xd0; 32]),
+            Some(from),
+            &owner.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+    }
+
+    #[test]
+    fn migrate_from_projection_matches_section_4_1() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = migration(&alice, &[&alice, &bob], 0).unwrap();
+        assert_eq!(root.migrate_from(), Some(0));
+        let mut members = [alice.id, bob.id];
+        members.sort();
+        let expected = h(
+            DOMAIN_ROOT,
+            vec![
+                Value::Uint(1),
+                Value::Uint(0),
+                Value::Text("Team"),
+                Value::Array(vec![Value::Bytes(root.parents()[0].as_bytes())]),
+                Value::Array(members.iter().map(|m| Value::Bytes(m.as_bytes())).collect()),
+                Value::Bytes(&[0x10; 32]),
+                Value::Bytes(&alice.public.to_bytes()),
+                Value::Bytes(&[0x11; 32]),
+                Value::Bytes(&[0x12; 32]),
+                Value::Uint(1_700_000_000_000),
+                // `migrate_from` present: an array holding its one unsigned integer.
+                Value::Array(vec![Value::Uint(0)]),
+            ],
+        );
+        assert_eq!(root.chat_id().as_bytes(), &expected);
+        // Present with 0 and absent are different roots, and so are two versions.
+        let plain = founding(&alice, &[&alice, &bob]);
+        assert_eq!(plain.migrate_from(), None);
+        assert_ne!(plain.chat_id(), root.chat_id());
+        let other = migration(&alice, &[&alice, &bob], 1).unwrap();
+        assert_ne!(other.chat_id(), root.chat_id());
+        assert!(root.verify_signature(None).is_ok());
+    }
+
+    #[test]
+    fn migrate_from_is_carried_and_hashed() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = migration(&alice, &[&alice, &bob], 0).unwrap();
+        // The protobuf field is present, with its value 0 (Appendix C: `optional`).
+        let p = root.to_proto();
+        assert_eq!(p.migrate_from, Some(0));
+        let back = Root::from_proto(1, p).unwrap();
+        assert_eq!(back, root);
+        assert_eq!(back.migrate_from(), Some(0));
+        // Through an event blob, under the strict check.
+        let blob = wire::encode_event_blob(&wire::EventObject::Root(Box::new(root.clone()))).unwrap();
+        match wire::decode_event_blob(&blob, 1).unwrap() {
+            wire::EventObject::Root(r) => {
+                assert_eq!(r.chat_id(), root.chat_id());
+                assert_eq!(r.migrate_from(), Some(0));
+            }
+            _ => panic!("not a root"),
+        }
+        // A relayer that strips or changes it changes the ID, and the signature fails.
+        for change in [None, Some(1)] {
+            let r = modified(&root, |p| p.migrate_from = change).unwrap();
+            assert_ne!(r.chat_id(), root.chat_id());
+            assert_eq!(r.verify_signature(None), Err(Error::InvalidSignature));
+        }
+        // Rebuilt from its stored fields.
+        let stored = Root::from_fields(
+            root.version(),
+            root.root_type(),
+            root.name().to_owned(),
+            root.parents(),
+            root.members(),
+            root.group_secret(),
+            root.owner_bytes().to_vec(),
+            root.epoch_challenge(),
+            root.ref_chat_id_challenge(),
+            root.created_at(),
+            root.migrate_from(),
+            root.signature().as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(stored, root);
+    }
+
+    #[test]
+    fn migrate_from_only_on_a_root_that_creates_a_group_of_two() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let carol = identity(3);
+        let root = migration(&alice, &[&alice, &bob], 0).unwrap();
+        // Another member count, at creation and on receipt.
+        assert_eq!(
+            migration(&alice, &[&alice], 0).map(|_| ()),
+            Err(Error::MigrateFrom)
+        );
+        assert_eq!(
+            migration(&alice, &[&alice, &bob, &carol], 0).map(|_| ()),
+            Err(Error::MigrateFrom)
+        );
+        let big = founding(&alice, &[&alice, &bob, &carol]);
+        assert_eq!(
+            modified(&big, |p| p.migrate_from = Some(0)).map(|_| ()),
+            Err(Error::MigrateFrom)
+        );
+        // More than one parent: not a root that creates a group.
+        assert_eq!(
+            modified(&root, |p| p.parents = vec![vec![1; 32], vec![2; 32]]).map(|_| ()),
+            Err(Error::MigrateFrom)
+        );
+        // A handover never creates a group.
+        assert_eq!(
+            modified(&root, |p| p.r#type = 1).map(|_| ()),
+            Err(Error::MigrateFrom)
+        );
+        // The builder of a successor with several parents refuses it too.
+        assert_eq!(
+            Root::create_founding(
+                params(&alice, &[&alice, &bob, &carol], 0x10),
+                ChatId::from_bytes([0xd0; 32]),
+                Some(0),
+                &alice.secret.dsa_signing_key,
+                [0; 32],
+            )
+            .map(|_| ()),
+            Err(Error::MigrateFrom)
+        );
+        // Without it, a founding root is what it was.
+        let plain = Root::create_founding(
+            params(&alice, &[&alice, &bob, &carol], 0x10),
+            ChatId::from_bytes([0xd0; 32]),
+            None,
+            &alice.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+        .unwrap();
+        assert_eq!(plain.chat_id(), big.chat_id());
     }
 
     #[test]
@@ -724,8 +904,8 @@ pub(crate) mod tests {
         assert!(owner_len >= 256);
         let bytes32 = |b: &[u8; 32]| [&[0x58, 0x20][..], b].concat();
         let projection = [
-            // An array of 11 items, then the domain as text of 20 bytes.
-            &[0x8b, 0x74][..],
+            // An array of 12 items, then the domain as text of 20 bytes.
+            &[0x8c, 0x74][..],
             b"gossip.groups.root.1",
             // version 1, type 0 (successor), name "Team" as text.
             &[0x01, 0x00, 0x64],
@@ -746,6 +926,8 @@ pub(crate) mod tests {
             &bytes32(&[0x12; 32]),
             // created_at 1,700,000,000,000 as an eight-byte unsigned integer.
             &[0x1b, 0x00, 0x00, 0x01, 0x8b, 0xcf, 0xe5, 0x68, 0x00],
+            // migrate_from absent: the empty array.
+            &[0x80],
         ]
         .concat();
         assert_eq!(
@@ -785,6 +967,7 @@ pub(crate) mod tests {
             Box::new(|p| p.epoch_challenge[0] ^= 1),
             Box::new(|p| p.ref_chat_id_challenge[0] ^= 1),
             Box::new(|p| p.created_at += 1),
+            Box::new(|p| p.migrate_from = Some(0)),
         ];
         for change in changes {
             let r = modified(&root, |p| change(p)).unwrap();
