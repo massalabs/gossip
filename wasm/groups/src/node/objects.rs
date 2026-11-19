@@ -570,10 +570,18 @@ impl Node {
     }
 
     /// Closes a group (§14.2): its roots, secrets, messages, signed objects, tasks, hints
-    /// and links are removed; with `markers`, a closed-chat marker is kept for each end.
+    /// and links are removed; with `markers`, a closed-chat marker is kept for each of its
+    /// installed epochs.
+    ///
+    /// §14.2 keeps a marker for each end only. An older epoch would then come back: a
+    /// member's tip list for the group the device rejoins names it (§12.1 lists every epoch
+    /// of the group the requester is a member of), and a delayed delivery of its root does
+    /// too; with no marker it was fetched and offered as a fresh invitation, which accepted
+    /// was a second copy of the group, that the device then announced to the other members.
+    /// A marker is a chat ID only, and the device held each of these epochs.
     pub(crate) fn close_group(&mut self, cx: &mut Cx<'_>, group: ChatId, markers: bool) {
         let group = self.group_of(&group);
-        let ends = self.ends(&group);
+        let installed = self.group_epochs(&group);
         let epochs: Vec<ChatId> = self
             .t
             .epochs
@@ -668,7 +676,7 @@ impl Node {
         }
         self.t.group_recs.remove(&group);
         if markers {
-            for e in ends {
+            for e in installed {
                 self.t.markers.insert(e, Marker::Closed);
             }
         }
