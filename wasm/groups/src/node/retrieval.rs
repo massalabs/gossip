@@ -43,7 +43,8 @@ pub(crate) enum Answer {
     Invalid,
     /// `malformed`: failed for this pass, not penalised.
     Refused,
-    /// `busy`: refused for resource reasons; asked again later (§13.4), not penalised.
+    /// `busy`: refused for resource reasons; asked again a minute later (§13.4), not
+    /// penalised.
     Busy,
     /// `expired`: an immediate resend (§11.4); whether it is plausible (the request may have
     /// passed its receiver deadline).
@@ -261,11 +262,9 @@ impl Node {
                 }
             }
             Answer::Busy => {
-                // Retry later: skipped for one local wait of the current stage.
-                let wait = match task.run {
-                    Run::Active { ttl, jitter, .. } => jittered(ttl, jitter),
-                    Run::Paused => FIRST_TTL_MS,
-                };
+                // Retry later: skipped for one local wait of the first TTL, whatever the
+                // stage; a budget refills in seconds (§17.4), and a stage can last a day.
+                let wait = jittered(FIRST_TTL_MS, draw_jitter(cx.rng));
                 cand.outstanding_until = Some(cx.now.saturating_add(wait));
                 if current && let Run::Active { attempt, .. } = &mut task.run {
                     *attempt = None;
