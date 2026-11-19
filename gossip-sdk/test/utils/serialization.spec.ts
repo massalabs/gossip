@@ -12,8 +12,14 @@ import {
   serializeDeleteMessage,
   serializeEditMessage,
   serializeReactionMessage,
+  serializeGroupPlaintext,
   deserializeMessage,
+  isGroupMessage,
 } from '../../src/utils/messageSerialization';
+import {
+  Message as ProtoMessage,
+  MessageType as ProtoMessageType,
+} from '../../src/proto/generated/message';
 
 const messageId = new Uint8Array(MESSAGE_ID_SIZE).fill(1);
 const originalMsgId = new Uint8Array(MESSAGE_ID_SIZE).fill(2);
@@ -54,6 +60,67 @@ describe('message serialization', () => {
     const serialized = serializeKeepAliveMessage();
     const deserialized = deserializeMessage(serialized);
     expect(deserialized.type).toBe(MessageType.KEEP_ALIVE);
+  });
+
+  it('serializes a group plaintext under its own type, and nothing else', () => {
+    const plaintext = new Uint8Array([1, 2, 3]);
+    const serialized = serializeGroupPlaintext(plaintext);
+    expect(ProtoMessage.decode(serialized)).toEqual({
+      messageType: ProtoMessageType.MESSAGE_TYPE_GROUP,
+      content: '',
+      groupPlaintext: plaintext,
+    });
+    // Type 8, then the plaintext in field 7: nothing else is written.
+    expect(Array.from(serialized)).toEqual([0x08, 8, 0x3a, 3, 1, 2, 3]);
+    const deserialized = deserializeMessage(serialized);
+    expect(isGroupMessage(deserialized)).toBe(true);
+    expect(deserialized.groupPlaintext).toEqual(plaintext);
+  });
+
+  it('reads a group message without a plaintext as one without content', () => {
+    const deserialized = deserializeMessage(
+      ProtoMessage.encode({ messageType: ProtoMessageType.MESSAGE_TYPE_GROUP })
+    );
+    expect(isGroupMessage(deserialized)).toBe(true);
+    expect(deserialized.groupPlaintext).toBeUndefined();
+  });
+
+  it('ignores a group plaintext under any other type', () => {
+    const plaintext = new Uint8Array([1, 2, 3]);
+    const keepAlive = deserializeMessage(
+      ProtoMessage.encode({
+        messageType: ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE,
+        content: '',
+        groupPlaintext: plaintext,
+      })
+    );
+    expect(isGroupMessage(keepAlive)).toBe(false);
+    expect(keepAlive).toEqual({ content: '', type: MessageType.KEEP_ALIVE });
+
+    const text = deserializeMessage(
+      ProtoMessage.encode({
+        messageType: ProtoMessageType.MESSAGE_TYPE_REGULAR,
+        messageId,
+        content: 'hello',
+        groupPlaintext: plaintext,
+      })
+    );
+    expect(isGroupMessage(text)).toBe(false);
+    expect(text.type).toBe(MessageType.TEXT);
+    expect(text.content).toBe('hello');
+    expect('groupPlaintext' in text).toBe(false);
+
+    const retention = deserializeMessage(
+      ProtoMessage.encode({
+        messageType: ProtoMessageType.MESSAGE_TYPE_RETENTION_POLICY,
+        content: '60',
+        groupPlaintext: plaintext,
+      })
+    );
+    expect(retention).toEqual({
+      content: '60',
+      type: MessageType.RETENTION_POLICY,
+    });
   });
 
   it('serializes and deserializes delete messages', () => {

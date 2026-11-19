@@ -13,8 +13,6 @@ import { getTestStorageConfig } from '../testDb';
 import { SdkEventType } from '../../src/core/SdkEventEmitter';
 import type { GroupService, GroupChange } from '../../src/services/groups';
 import { GroupMessageTooLargeError } from '../../src/services/groups';
-import { deserializeMessage } from '../../src/utils/messageSerialization';
-import { serializeGroupPlaintext } from '../../src/utils/messageSerialization';
 import { MessageType } from '../../src/db';
 import type { Queries } from '../../src/db/queries';
 import { vi } from 'vitest';
@@ -99,14 +97,6 @@ describe('Group chats', { timeout: 120_000 }, () => {
 
   afterEach(async () => {
     for (const p of peers) await p.closeSession();
-  });
-
-  it('a group plaintext is a keep-alive to a client without groups', () => {
-    const bytes = serializeGroupPlaintext(new Uint8Array([1, 2, 3]));
-    const d = deserializeMessage(bytes);
-    expect(d.type).toBe(MessageType.KEEP_ALIVE);
-    expect(d.content).toBe('');
-    expect(d.groupPlaintext).toEqual(new Uint8Array([1, 2, 3]));
   });
 
   it('creates, invites, accepts, messages, edits, deletes, removes and leaves', async () => {
