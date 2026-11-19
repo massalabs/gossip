@@ -50,6 +50,7 @@ impl<S> Instrumented<S> {
 mod instrumented {
     use super::Instrumented;
     use crate::ids::{ChatId, EventId, SyncObjId};
+    use crate::node::records::{Batch, NodeRecords, NodeStorage};
     use crate::store::{
         Changes, EventRow, ObjectRecord, PendingItem, Storage, StorageError, StorageRead,
     };
@@ -109,6 +110,18 @@ mod instrumented {
                 return Err(StorageError("injected failure".into()));
             }
             self.inner.commit(changes)
+        }
+    }
+
+    impl<S: NodeStorage> NodeStorage for Instrumented<S> {
+        fn load_node(&self) -> R<NodeRecords> {
+            self.inner.load_node()
+        }
+        fn commit_batch(&mut self, batch: Batch) -> R<()> {
+            if self.fail_commits {
+                return Err(StorageError("injected failure".into()));
+            }
+            self.inner.commit_batch(batch)
         }
     }
 }

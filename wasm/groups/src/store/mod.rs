@@ -20,6 +20,7 @@
 //! one transaction: all of it or nothing. An operation that fails commits nothing.
 
 mod memory;
+pub(crate) mod overlay;
 pub(crate) mod tx;
 
 pub use memory::MemoryStorage;

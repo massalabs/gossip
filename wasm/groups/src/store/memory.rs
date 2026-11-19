@@ -8,6 +8,7 @@ use super::{
     StorageError, StorageRead,
 };
 use crate::ids::{ChatId, EventId, SyncObjId};
+use crate::node::records::{Batch, NodeRecords, NodeStorage};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct EpochRecords {
@@ -99,6 +100,7 @@ fn item((due, event_id, kind, sync_obj_id): (u64, EventId, PendingKind, SyncObjI
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemoryStorage {
     epochs: BTreeMap<ChatId, EpochRecords>,
+    node: NodeRecords,
     commits: u64,
 }
 
@@ -239,10 +241,10 @@ impl StorageRead for MemoryStorage {
     }
 }
 
-impl Storage for MemoryStorage {
-    fn commit(&mut self, changes: Changes) -> Result<(), StorageError> {
+impl MemoryStorage {
+    fn apply(&mut self, changes: Changes) {
         if changes.is_empty() {
-            return Ok(());
+            return;
         }
         let epoch = self.epochs.entry(changes.chat_id).or_default();
         for row in changes.rows.into_values() {
@@ -255,6 +257,33 @@ impl Storage for MemoryStorage {
         for obj in changes.objects.into_values() {
             epoch.put_object(obj);
         }
+    }
+}
+
+impl Storage for MemoryStorage {
+    fn commit(&mut self, changes: Changes) -> Result<(), StorageError> {
+        if changes.is_empty() {
+            return Ok(());
+        }
+        self.apply(changes);
+        self.commits += 1;
+        Ok(())
+    }
+}
+
+impl NodeStorage for MemoryStorage {
+    fn load_node(&self) -> Result<NodeRecords, StorageError> {
+        Ok(self.node.clone())
+    }
+
+    fn commit_batch(&mut self, batch: Batch) -> Result<(), StorageError> {
+        if batch.is_empty() {
+            return Ok(());
+        }
+        for changes in batch.epochs {
+            self.apply(changes);
+        }
+        self.node.apply(batch.node);
         self.commits += 1;
         Ok(())
     }
