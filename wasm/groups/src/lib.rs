@@ -43,6 +43,8 @@ pub mod wire;
 #[cfg(test)]
 mod sim;
 #[cfg(test)]
+mod sim_net;
+#[cfg(test)]
 mod test_support;
 
 pub use epoch::local::{ChangeError, LocalEdit, Published};
