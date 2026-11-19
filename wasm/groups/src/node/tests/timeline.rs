@@ -49,3 +49,94 @@ fn a_handover_line_names_its_signer_and_the_outgoing_owner_left() {
         );
     }
 }
+
+/// Issue "joiner timeline lines": the first epoch a device holds is a creation only on the
+/// device that created it. A member cannot tell a founding root from a root whose parents
+/// it does not hold (a parent commitment hides its epoch, §4.5), so whoever receives it
+/// reads that the owner added it.
+#[test]
+fn only_the_creator_reads_that_the_group_was_created() {
+    let mut net = MNet::new(4, true);
+    let g = net.create(0, &[1, 2]);
+    net.exchange();
+    for d in 1..3 {
+        net.accept_all(d);
+    }
+    net.run(MIN);
+    let e2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(3)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(MIN);
+    net.accept_all(3);
+    net.run(MIN);
+    assert_eq!(
+        net.lines(0, &g)[0],
+        TimelineLine::Founded {
+            epoch: g,
+            owner: gid(0)
+        }
+    );
+    for (d, epoch) in [(1, g), (2, g), (3, e2)] {
+        let lines = net.lines(d, &epoch);
+        assert!(
+            !matches!(lines[0], TimelineLine::Founded { .. }),
+            "device {d}: {lines:?}"
+        );
+    }
+}
+
+/// Issue "joiner timeline lines": at the junction of a member added back, "<owner> added
+/// you back" follows "You were removed from this group" and "You were not a member
+/// between…" (§5.10), in place of a line comparing the new root with the last epoch the
+/// member held, which would ascribe to the owner every change made while it was away.
+#[test]
+fn a_member_added_back_reads_who_added_it_back() {
+    let (mut net, g) = founded(3);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(MIN);
+    let e3 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(2)],
+                remove: vec![gid(1)],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(MIN);
+    assert_eq!(net.accept(2, e3), g);
+    net.run(MIN);
+    let lines = net.lines(2, &g);
+    let tail: Vec<&TimelineLine> = lines.iter().skip(1).collect();
+    // The line after the junction names who added the device back, and only that.
+    assert!(
+        matches!(
+            tail[..],
+            [
+                TimelineLine::YouWereRemoved,
+                TimelineLine::NotAMember { .. },
+                TimelineLine::EpochChange { epoch, by, added, removed, .. },
+            ] if *epoch == e3 && *by == gid(0) && *added == vec![gid(2)] && removed.is_empty()
+        ),
+        "{lines:?}"
+    );
+}
