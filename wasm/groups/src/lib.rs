@@ -18,12 +18,14 @@
 //!   retention, and local changes (§6.3, §7, §8, §9).
 //! - [`store`]: the local records of §14.1 and the storage trait, with an in-memory store.
 //! - [`dag`]: tips, the cycle frontier and parent selection (§6.1, §12.1).
+//! - [`display`]: visibility, order and the time of a root's line (§7.5).
 
 #![warn(missing_docs)]
 
 pub mod cbor;
 pub mod constants;
 pub mod dag;
+pub mod display;
 mod epoch;
 mod error;
 mod event;
