@@ -5,7 +5,8 @@ Protocol specification, wire version 1.
 This document is self-contained.
 It specifies trusted group chats for Gossip over asynchronous peer-to-peer Agraphon sessions.
 A group has one owner, who alone changes its member list; its messages are unsigned and deniable.
-Direct chats are the two-member case of the same protocol.
+Direct chats are the two-member case of the same protocol: a conversation between two people is a
+group of two, and there is no other conversation format (§2.1).
 Normative rules use **MUST**, **MUST NOT**, **SHOULD** and **MAY**.
 Short *Why* notes explain the reason for a rule in place; they are not additional requirements.
 
@@ -143,6 +144,25 @@ The owner removes members, hands the group over to another member, or dissolves 
 
 *Why:* unsigned messages keep every message deniable, while a signed root gives all members one
 verifiable member list and lets a group change its members without becoming an unrelated chat.
+
+### 2.1 Sessions are channels, conversations are groups
+
+An Agraphon session between two devices is a **communication channel** and nothing more.
+It carries group traffic between two members; it is not itself a conversation and shows nothing
+to the user.
+
+- Every conversation is a group, a conversation between two people included.
+- A client of this protocol does not send, receive or display the earlier one-to-one conversation
+  format. A device or a backup that moves to this protocol archives its earlier one-to-one
+  conversations: they stay readable on that device and are never written to again.
+- A client that has not moved to this protocol is unsupported: it cannot take part in a group, and
+  no rule here is shaped to accommodate it.
+- Each kind of thing sent in a session has **its own message type** (§13.1). A type is never
+  reused to carry something else: a keep-alive keeps a session alive and carries nothing.
+
+*Why:* one format for all conversations gives direct chats the same deniability, editing and
+deletion as groups, and a type that means one thing can be handled, limited and reasoned about on
+its own.
 
 ## 3. Identifiers and constants
 
@@ -356,8 +376,8 @@ An epoch has **at most 512 members**, the owner included.
 The limit is provisional, like those of §17.4.
 It is not set by the container: the fixed part of a root (owner keys, signature, secret,
 challenges, time and wrappers) is about 6.7 KB, and each member costs 34 encoded bytes, so about
-7,500 members would fit one empty 262,144-byte container (§13.10).
-At 512 members a root is about 24 KB.
+1,490 members would fit one empty 57,344-byte container (§13.10).
+At 512 members a root is about 24 KB (25,417 bytes with 32 parents and the longest name).
 
 *Why:* with GossipIDs only, the cost of a large group is no longer the root but the keys.
 At 512 members a new member downloads about 1.6 MB of keys, and the backend holds about 840 MB of
@@ -2168,11 +2188,24 @@ group with whom.
 
 ### 13.1 Container
 
-Each Agraphon plaintext is the protocol version followed by one protobuf `Container`:
+A group plaintext is the protocol version followed by one protobuf `Container`:
 
 ```text
 plaintext = varint(PROTOCOL_VERSION) ‖ protobuf(Container)
 ```
+
+It travels in an Agraphon session as a session message of the type reserved for group traffic,
+and of no other type.
+Session messages are typed, and each type has one meaning:
+
+| Session message type | Carries |
+| --- | --- |
+| group | one group plaintext, and nothing else |
+| keep-alive | nothing; it only keeps the session alive |
+
+A receiver MUST ignore a group plaintext found under any other type, and MUST NOT treat a
+keep-alive as carrying content.
+A sender MUST NOT place group traffic in a keep-alive or in any type other than the group type.
 
 The varint uses the protobuf unsigned varint encoding.
 The receiver reads the version **before** parsing anything else and parses the container with that
@@ -2431,8 +2464,10 @@ Each requested ID consumes one slot when issued.
 
 | Limit | Value |
 | --- | --- |
-| Group plaintext (version prefix, all protobuf frames and events) | 262,144 bytes |
-| Encrypted binary packet (provisional; verify backend, base64 and HTTP framing) | 512 KiB |
+| Group plaintext (version prefix, all protobuf frames and events) | 57,344 bytes |
+| Encrypted binary packet, as stored under a seeker | 65,536 bytes |
+| Message text (also the content of a forwarded text) | 16,384 bytes of UTF-8 |
+| Message metadata, all entries together, as encoded | 16,384 bytes |
 | Entries per query frame | 16 |
 | Entries per logical response allocation | 128 |
 | Notice | 128 entries and 16 KiB |
@@ -2448,13 +2483,30 @@ A send is rejected before encryption if either limit would be exceeded.
 Oversized items are rejected by both sender and receiver, never fragmented.
 Size checks use encoded bytes, not characters.
 
-The 262,144-byte container and the hint cache bounds are fixed.
-The encrypted packet ceiling, the notice entry and byte limits, the page byte limit, the member
+The container, the encrypted packet ceiling, the text and metadata limits and the hint cache bounds
+are fixed.
+
+- **One packet, every transport.** 65,536 bytes is the largest payload a phone relays over the
+  Bluetooth mesh. Every packet a client stores under a seeker MUST fit it, so that a session's
+  chain of seekers can never be interrupted for a peer reachable only by mesh. A client checks
+  this before encrypting, since encryption advances the session; a server MAY refuse a larger
+  packet.
+- **Why 57,344.** A full container encrypts to at most 60,978 bytes (measured, see below), which
+  leaves about 4.5 KiB under the packet ceiling for future growth of the session layer.
+- **Text and metadata** are limits on one message version, checked on creation, on reception and
+  on every edit, local-only edits included. An event over either limit is malformed.
+  Metadata is measured as the size of the metadata field in its canonical protobuf encoding,
+  computed from the decoded entries, so that every device obtains the same number.
+  A message with both at their limits, 16 parents and 32 reply targets is 33,383 bytes.
+
+The notice entry and byte limits, the page byte limit, the member
 limit, the parent limit and the limits of §17.4 other than the hint cache are provisional and must
 be profiled before release.
 
-For sizing: the session layer adds about 3.6 KB to every ciphertext (two ML-KEM-768 ciphertexts, a
-fresh ML-KEM-768 public key, a signed envelope and framing; no padding).
+For sizing: the session layer adds at most 3,634 bytes to a group plaintext (two ML-KEM-768
+ciphertexts, a fresh ML-KEM-768 public key, a signed envelope and framing; no padding), whatever
+the size of the plaintext and the state of the session.
+An implementation MUST keep a test that encrypts a full container and fails above 65,536 bytes.
 A notice with one entry is about 70 bytes of plaintext, a deletion event with one parent about 170
 bytes, and a signed object about 3.4 KB.
 
@@ -3843,7 +3895,7 @@ The limit must be one every device computes the same way, since it decides valid
 
 - **A (recommended):** an event is admitted only if it fits an empty container inside the largest
   frame that can carry it (a response frame with the longest `request_id` and `idx`). The code does
-  this: the largest event blob is 262,107 bytes, 28 fewer than before.
+  this: with the 57,344-byte container the largest event blob is 57,307 bytes.
 - **B:** keep the limit and serve such an event in a plaintext of its own with a special frame.
 
 ### D.51 A tips scan from a peer that is not a member (§12.1, §13.7)
@@ -4240,14 +4292,11 @@ what happens to side branches; it says side branches are not erased.
 *Found while binding the engine into the app. These are decisions about the app, listed here so
 they are settled with the rest.*
 
-- **Carrier.** A group plaintext travels inside the one-to-one session as a keep-alive message with
-  a new field. A new message type was avoided because older clients show an unknown type as an
-  empty text message; they drop a keep-alive silently. Sessions do not pad, so such a keep-alive
-  differs from an ordinary one by its size.
-- **Size on the mesh.** One-to-one messages are not fragmented, and a mesh payload is limited to
-  64 KiB, so a group plaintext above about 60 KiB cannot cross the mesh. Choices: a container
-  limit that depends on the transport, with a cap on media size (recommended); fragmentation below
-  groups for every message type; or large plaintexts over the internet only.
+- **Carrier. Settled:** group traffic has its own session message type; a keep-alive carries
+  nothing (§2.1, §13.1). The first implementation placed it in a keep-alive so that older clients
+  would drop it silently; older clients are unsupported, so that reason does not hold.
+- **Size on the mesh. Settled:** every packet fits one mesh payload of 65,536 bytes; the container
+  is 57,344 bytes, text and metadata 16,384 bytes each (§13.10).
 - **Session journal (§15.2).** Not built. The session state is made durable before the ciphertext
   is stored, and a ciphertext is never dropped once encrypted; a crash before that loses a
   ciphertext that never left the device. Choices: accept this and amend §15.2 (recommended, the
@@ -4316,3 +4365,34 @@ afterwards.*
 
 - **A (recommended):** state these rules. The code follows them.
 - **B:** other rules, to be given.
+
+### D.81 Direct chats as groups of two: what is still open (§2.1)
+
+*Settled in §2.1:* every conversation is a group; a client does not support the earlier one-to-one
+format; a device that moves to this protocol archives its earlier one-to-one conversations; older
+clients are unsupported.
+
+*Still open:*
+
+- **Owner of a pair.** A group has one owner, who alone changes the member list. Which of the two
+  owns a direct chat, and what happens when the other wants to add a third person.
+- **Starting one.** A group starts with an invitation prompt; a contact is made by a contact
+  request. Whether a direct chat needs both prompts, or the contact request stands for the
+  invitation.
+- **The archive.** What an archived one-to-one conversation looks like and whether it is linked
+  to the direct chat that follows it.
+
+- **A (recommended):** decide them one by one before the direct-chat change is built.
+
+### D.82 Points from applying the size limits (§13.10, §17.4)
+
+*Found while applying the limits of §13.10.*
+
+- A forwarded text counts as text and has the same 16,384-byte limit. Media and reaction bodies
+  are bounded by the container only.
+- The response budget of §17.4 (1 MiB burst, 256 KiB per minute) was written for the 262,144-byte
+  container. It is unchanged, and now equals about 18 and 4.6 full containers where it equalled 4
+  and 1.
+
+- **A (recommended):** confirm the first; scale the budget of the second with the container.
+- **B:** keep the budget as it is.
