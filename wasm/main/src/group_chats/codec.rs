@@ -519,7 +519,8 @@ variants!(GroupState {
     Active,
     ReadOnlyAfterKick,
     Waiting,
-    Dissolved
+    Dissolved,
+    Superseded
 });
 record!(Invitation {
     received_at,
@@ -546,7 +547,8 @@ variants!(GroupStatus {
     Removed { epoch, at },
     Left { epoch, at },
     Waiting { since, last_request },
-    Dissolved { epoch, must_delete, at }
+    Dissolved { epoch, must_delete, at },
+    Superseded { by, at }
 });
 record!(GroupRecord {
     status,
@@ -555,7 +557,9 @@ record!(GroupRecord {
     links,
     local_name,
     pending_removals,
-    junctions
+    junctions,
+    took_part,
+    earlier
 });
 record!(Junction { from, to, kind });
 variants!(JunctionKind {
@@ -580,7 +584,7 @@ variants!(ChangeKind {
     ReadOnly,
     Fork,
     Closed,
-    Superseded { by, lost_messages },
+    Superseded { by, has_messages },
     Connections
 });
 
@@ -664,7 +668,7 @@ variants!(Merge {
     Identical,
     Pending
 });
-variants!(MyStatus { Member, Waiting, Left, Removed, Dissolved { deleted } });
+variants!(MyStatus { Member, Waiting, Left, Removed, Dissolved { deleted }, Superseded { by } });
 record!(GroupSummary {
     group,
     current,
@@ -676,7 +680,9 @@ record!(GroupSummary {
     side_branches,
     must_resolve,
     former_owner_branches,
-    links
+    links,
+    earlier,
+    took_part
 });
 record!(InvitationSummary {
     chat_id,
@@ -900,6 +906,8 @@ mod tests {
                     kind: JunctionKind::Dissolved,
                 },
             ],
+            took_part: Some(7),
+            earlier: vec![chat],
         });
         round_trip(StoredResult::Content(Content {
             sync_obj_id: SyncObjId::from_bytes([4; 32]),
@@ -1260,6 +1268,7 @@ mod tests {
             GroupState::ReadOnlyAfterKick,
             GroupState::Waiting,
             GroupState::Dissolved,
+            GroupState::Superseded,
         ] {
             round_trip(Some(state));
         }
@@ -1293,6 +1302,7 @@ mod tests {
                 must_delete: false,
                 at: 5,
             },
+            GroupStatus::Superseded { by: chat, at: 6 },
         ] {
             round_trip(status);
         }
@@ -1325,7 +1335,7 @@ mod tests {
             ChangeKind::Closed,
             ChangeKind::Superseded {
                 by: chat,
-                lost_messages: true,
+                has_messages: true,
             },
             ChangeKind::Connections,
         ] {

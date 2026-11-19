@@ -1193,10 +1193,16 @@ impl Node {
                 self.mark_seen(cx, chat, from, id)?;
                 self.supplied(&from, chat, Target::Event(id));
                 if let Outcome::Accepted(merge) = outcome {
-                    for parent in event.parents() {
+                    // A superseded chat of two takes what its members send it, and fetches
+                    // and relays nothing (§5.12).
+                    let active = self.group_status(&chat) == records::GroupStatus::Active;
+                    for parent in event.parents().iter().filter(|_| active) {
                         self.want_event(cx, chat, *parent, Some(from), TriggerKind::Child)?;
                     }
-                    if merge != Merge::Lost && entry.epoch().serve(cx.ov, &id, cx.now)?.is_some() {
+                    if active
+                        && merge != Merge::Lost
+                        && entry.epoch().serve(cx.ov, &id, cx.now)?.is_some()
+                    {
                         self.disseminate(cx, &entry, &event, Form::Notice, false)?;
                     }
                     let group = self.group_of(&chat);

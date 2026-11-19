@@ -855,11 +855,11 @@ impl Node {
         Ok(id)
     }
 
-    /// Before this device closes `group` ("Hand over and leave", §5.7): the roots and signed
-    /// objects of its epochs still queued for a peer, decided at assembly from records the
-    /// close erases, are queued again in full, so that they are still delivered (the parent
-    /// of the handover root among them).
-    fn queued_objects_in_full(&mut self, group: ChatId) {
+    /// Before this device closes `group` ("Hand over and leave", §5.7) or supersedes it
+    /// (§5.12): the roots and signed objects of its epochs still queued for a peer, decided
+    /// at assembly from records the close erases or that are served no more, are queued again
+    /// in full, so that they are still delivered (the parent of the handover root among them).
+    pub(crate) fn queued_objects_in_full(&mut self, group: ChatId) {
         let queued: Vec<(super::records::WorkKey, GossipId, ChatId, EntryItem)> = self
             .t
             .queue

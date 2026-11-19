@@ -12,7 +12,9 @@
 //! - **Two creations at once.** Defined only from what the device holds: its own creating
 //!   root and the peer's, the same two members, the same `migrate_from`, neither continued by
 //!   a successor it holds. The group whose owner's GossipID sorts first is kept; the other is
-//!   closed (§14.2) and reported by [`ChangeKind::Superseded`]. It is judged whenever the
+//!   never erased: both devices hold it superseded ([`GroupStatus::Superseded`]), read-only,
+//!   with what was written in it, listed among the kept chat's earlier chats, and reported by
+//!   [`ChangeKind::Superseded`]. It is judged whenever the
 //!   second of the two becomes held: on receipt, on creation, and when the caller declares
 //!   what it knows.
 //! - **What the caller declares** decides the receiving side only. A **migration**
@@ -295,30 +297,84 @@ impl Node {
             self.drop_tasks_of(&[id]);
             self.drop_fetched_for(id);
         }
+        self.t.markers.remove(&id);
         if theirs.owner_id().as_bytes() < self.me.as_bytes() {
-            self.t.markers.remove(&id);
             self.adopt(cx, theirs, from, Vec::new(), false)?;
             self.changed(id, ChangeKind::Joined, cx.now);
             self.supersede(cx, mine, id)?;
+        } else {
+            // This device's group is kept; the peer's is held superseded by it, with the
+            // messages the peer wrote there before it switched. A copy delivered again is a
+            // duplicate.
+            let by = self.group_of(&mine);
+            self.group_rec_mut(id).status = GroupStatus::Superseded { by, at: cx.now };
+            self.adopt(cx, theirs, from, Vec::new(), false)?;
+            self.supersede(cx, id, mine)?;
         }
-        // Otherwise the peer's root is dropped: the peer keeps this device's group, and a
-        // copy delivered again is judged again the same way.
         Ok(())
     }
 
-    /// Closes this device's losing group `group` (§14.2) for `by`, which continues the same
-    /// conversation, and reports it with whether anything was written in it.
-    fn supersede(&mut self, cx: &mut Cx<'_>, group: ChatId, by: ChatId) -> Result<(), NodeError> {
+    /// Supersedes this device's automatic chat `group` by `by`, the chat of the same two
+    /// that continues it (§5.12): nothing is erased; it becomes read-only and sends nothing
+    /// more, `by` lists it (and what it superseded) among its earlier chats, and the change
+    /// is reported with whether it holds messages.
+    pub(crate) fn supersede(
+        &mut self,
+        cx: &mut Cx<'_>,
+        group: ChatId,
+        by: ChatId,
+    ) -> Result<(), NodeError> {
         let group = self.group_of(&group);
-        let mut lost_messages = false;
+        let by = self.group_of(&by);
+        if group == by
+            || self
+                .t
+                .group_recs
+                .get(&by)
+                .is_some_and(|g| g.earlier.contains(&group))
+        {
+            return Ok(());
+        }
+        let mut has_messages = false;
         for e in self.group_epochs(&group) {
             if !cx.ov.held_ids(&e)?.is_empty() {
-                lost_messages = true;
+                has_messages = true;
             }
         }
-        self.close_group(cx, group, true);
-        self.changed(group, ChangeKind::Superseded { by, lost_messages }, cx.now);
+        // What was queued before the switch still goes: the peer gets the chat it replaces.
+        self.queued_objects_in_full(group);
+        let before = {
+            let g = self.group_rec_mut(group);
+            g.status = GroupStatus::Superseded { by, at: cx.now };
+            g.pending_removals.clear();
+            g.earlier.clone()
+        };
+        let b = self.group_rec_mut(by);
+        for e in before.into_iter().chain([group]) {
+            if !b.earlier.contains(&e) {
+                b.earlier.push(e);
+            }
+        }
+        self.stop_sync(group);
+        self.rebuild_epochs();
+        self.changed(group, ChangeKind::Superseded { by, has_messages }, cx.now);
+        self.changed(by, ChangeKind::Membership, cx.now);
         Ok(())
+    }
+
+    /// Whether `group` is an automatic chat of two this device founded (§5.12): its first
+    /// epoch is a creating root of this device and one other, with a known `migrate_from`.
+    pub(crate) fn own_direct_chat(&self, group: &ChatId) -> bool {
+        self.t.epochs.get(group).is_some_and(|r| {
+            r.parents.is_empty()
+                && r.root.owner_id() == self.me
+                && r.root.root_type() == RootType::Successor
+                && r.root.parents().len() == 1
+                && r.root.members().len() == 2
+                && r.root
+                    .migrate_from()
+                    .is_some_and(|v| KNOWN_FORMAT_VERSIONS.contains(&v))
+        })
     }
 
     /// Settles the held invitations from `peer` that this device now acts on: a migration

@@ -113,6 +113,7 @@ impl Node {
                     }
                     Some(GroupStatus::Waiting { .. }) => GroupState::Waiting,
                     Some(GroupStatus::Dissolved { .. }) => GroupState::Dissolved,
+                    Some(GroupStatus::Superseded { .. }) => GroupState::Superseded,
                     Some(GroupStatus::Active) | None => GroupState::Active,
                 }
             });
@@ -346,6 +347,8 @@ impl Node {
                     local_name: None,
                     pending_removals: BTreeMap::new(),
                     junctions: Vec::new(),
+                    took_part: None,
+                    earlier: Vec::new(),
                 },
             );
         }
@@ -584,7 +587,9 @@ impl Node {
         // Case 4: kicked, dissolved or waiting.
         if let Some(p) = installed.first().copied() {
             match self.group_status(&p) {
-                GroupStatus::Waiting { .. } => {
+                // A superseded chat of two keeps what comes for it, without a prompt and
+                // read-only (§5.12).
+                GroupStatus::Waiting { .. } | GroupStatus::Superseded { .. } => {
                     // Kept without a prompt, so that the current epoch names the right owner
                     // (§5.4).
                     self.adopt(cx, root, from, installed, false)?;
