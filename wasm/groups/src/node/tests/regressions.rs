@@ -1196,3 +1196,44 @@ fn a_scan_answered_malformed_ends_without_a_penalty() {
             .all(|(k, _)| k.1 != member(1))
     );
 }
+
+/// Found by review (code at `6a916f2e`): the restarts of a scan were counted over its whole
+/// life, so three honest restarts spread over a long, progressing scan ended it; the count
+/// now restarts when a page makes progress.
+#[test]
+fn a_page_that_makes_progress_resets_the_restart_count() {
+    use crate::wire::Page;
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let mut s = start_scan(&mut net, 1);
+    let next = |net: &mut Net| {
+        super::retrieval::sent_queries(net, 0)
+            .into_iter()
+            .find(|s| matches!(s.op, QueryOp::TipsScan { .. }) && s.to == member(1))
+    };
+    for round in 0..2u8 {
+        // A restart, then a page of a two-entry list.
+        super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Restart));
+        s = next(&mut net).expect("restarted");
+        super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Restart));
+        s = next(&mut net).expect("restarted");
+        let QueryOp::TipsScan { scan_id, .. } = s.op else {
+            unreachable!()
+        };
+        let page = Page {
+            scan_id,
+            offset: 0,
+            count: 2,
+            entries: vec![Entry {
+                chat_id: chat,
+                item: EntryItem::Event(EventId::new(T0, [round; 16])),
+            }],
+            skipped: 0,
+        };
+        super::retrieval::answer(&mut net, 0, &s, ResponseResult::Page(page));
+        s = next(&mut net).expect("next page");
+    }
+    // Four restarts in all, never more than two since the last progress: still scanning.
+    super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Restart));
+    assert!(next(&mut net).is_some(), "the scan ended");
+}
