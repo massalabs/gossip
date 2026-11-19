@@ -611,7 +611,7 @@ variants!(Payload { Content(content), Delete { sync_obj_id, scheduled_at } });
 // What the bindings take and give.
 variants!(GroupChange {
     Successor { add, remove, name },
-    Handover { new_owner, leave, remove, name },
+    Handover { new_owner, leave, name },
     Resolve { members, name }
 });
 variants!(LeaveChoice {

@@ -1414,7 +1414,6 @@ impl Sim {
                             GroupChange::Handover {
                                 new_owner: id(heir),
                                 leave: false,
-                                remove: vec![],
                                 name: None,
                             },
                         )
@@ -1469,7 +1468,6 @@ impl Sim {
                             GroupChange::Handover {
                                 new_owner: id(heirs[0]),
                                 leave: false,
-                                remove: vec![],
                                 name: None,
                             },
                         )
@@ -1485,7 +1483,6 @@ impl Sim {
                                 GroupChange::Handover {
                                     new_owner: id(heirs[1]),
                                     leave: false,
-                                    remove: vec![],
                                     name: None,
                                 },
                             )

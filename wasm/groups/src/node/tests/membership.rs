@@ -503,7 +503,6 @@ fn a_handover_makes_the_new_owner_and_the_old_owners_roots_side_branches() {
             GroupChange::Handover {
                 new_owner: gid(1),
                 leave: false,
-                remove: vec![],
                 name: None,
             },
         )
@@ -555,7 +554,6 @@ fn hand_over_and_leave_closes_the_group_on_the_old_owner() {
             GroupChange::Handover {
                 new_owner: gid(2),
                 leave: true,
-                remove: vec![],
                 name: None,
             },
         )
@@ -1175,7 +1173,6 @@ fn a_new_owner_resolves_the_former_owners_branch() {
             GroupChange::Handover {
                 new_owner: gid(1),
                 leave: false,
-                remove: vec![],
                 name: None,
             },
         )
@@ -1258,7 +1255,6 @@ fn a_branch_arriving_after_its_resolution_is_linked_to_it() {
         GroupChange::Handover {
             new_owner: gid(1),
             leave: false,
-            remove: vec![],
             name: None,
         },
     )
@@ -1342,7 +1338,6 @@ fn a_handover_rejoining_a_removed_member_continues_its_group() {
             GroupChange::Handover {
                 new_owner: gid(1),
                 leave: false,
-                remove: vec![],
                 name: None,
             },
         )
@@ -1550,7 +1545,6 @@ fn accepting_the_other_line_after_a_dissolve_follows_it() {
         GroupChange::Handover {
             new_owner: gid(1),
             leave: false,
-            remove: vec![],
             name: None,
         },
     )
@@ -1568,7 +1562,6 @@ fn accepting_the_other_line_after_a_dissolve_follows_it() {
             GroupChange::Handover {
                 new_owner: gid(2),
                 leave: false,
-                remove: vec![],
                 name: None,
             },
         )
@@ -2013,7 +2006,6 @@ fn a_new_owner_cannot_take_over_another_group_of_the_former_owner() {
             GroupChange::Handover {
                 new_owner: gid(1),
                 leave: false,
-                remove: vec![],
                 name: None,
             },
         )
@@ -2113,7 +2105,6 @@ fn a_former_owner_cannot_mute_or_freeze_the_new_owner() {
             GroupChange::Handover {
                 new_owner: gid(1),
                 leave: false,
-                remove: vec![],
                 name: None,
             },
         )
@@ -2474,7 +2465,6 @@ fn kick_authorities_are_transitive_and_an_unverifiable_kick_is_no_penalty() {
         GroupChange::Handover {
             new_owner: gid(1),
             leave: false,
-            remove: vec![],
             name: None,
         },
     )
@@ -2497,7 +2487,6 @@ fn kick_authorities_are_transitive_and_an_unverifiable_kick_is_no_penalty() {
         GroupChange::Handover {
             new_owner: gid(2),
             leave: false,
-            remove: vec![],
             name: None,
         },
     )
@@ -2549,7 +2538,6 @@ fn hand_over_and_leave_with_an_unknown_parent_is_no_failed_announcement() {
             GroupChange::Handover {
                 new_owner: gid(1),
                 leave: true,
-                remove: vec![],
                 name: None,
             },
         )
@@ -2633,7 +2621,6 @@ fn a_former_owner_has_no_removal_due() {
         GroupChange::Handover {
             new_owner: gid(1),
             leave: false,
-            remove: vec![],
             name: None,
         },
     )
@@ -2733,7 +2720,6 @@ fn a_held_handover_always_moves_the_line_followed() {
             GroupChange::Handover {
                 new_owner: gid(1),
                 leave: false,
-                remove: vec![],
                 name: None,
             },
         )
@@ -3061,7 +3047,6 @@ fn a_former_owners_root_does_not_date_the_new_owners_roots() {
         GroupChange::Handover {
             new_owner: gid(1),
             leave: false,
-            remove: vec![],
             name: None,
         },
     )
@@ -3213,7 +3198,6 @@ fn a_former_owners_branch_left_by_dissolve_and_delete_never_reactivates_the_grou
         GroupChange::Handover {
             new_owner: gid(1),
             leave: false,
-            remove: vec![],
             name: None,
         },
     )
@@ -3440,7 +3424,6 @@ fn adding_back_names_the_last_epoch_of_the_owners_line_not_a_former_owners_branc
         GroupChange::Handover {
             new_owner: gid(1),
             leave: false,
-            remove: vec![],
             name: None,
         },
     )
