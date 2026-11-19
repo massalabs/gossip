@@ -782,6 +782,10 @@ impl Node {
         rng: &mut dyn Randomness,
     ) -> Result<Published, NodeError> {
         let me = self.me;
+        // A new message is published in the current epoch of its group (§10.4).
+        if self.current_epoch(&chat_id).is_some_and(|c| c != chat_id) {
+            return Err(NodeError::NotAllowed);
+        }
         self.publish_with(store, chat_id, now, rng, move |e, ov, now, rng| {
             e.publish_message(ov, now, rng, me, body, metadata, scheduled_for)
         })
@@ -861,6 +865,23 @@ impl Node {
         ) -> Result<Published, ChangeError>,
     ) -> Result<Published, NodeError> {
         let entry = self.entry(&chat_id)?;
+        let group = self.group_of(&chat_id);
+        // A read-only, waiting or dissolved group has its composer disabled (§5.4, §5.6,
+        // §5.8), and the owner sends nothing while competing ends wait for its resolution
+        // (§4.9).
+        if self.group_status(&group) != records::GroupStatus::Active
+            || entry.state != GroupState::Active
+        {
+            return Err(NodeError::NotAllowed);
+        }
+        if self
+            .current_epoch(&group)
+            .and_then(|c| self.epochs.get(&c))
+            .is_some_and(|e| e.root.owner_id() == self.me)
+            && !self.fork_to_resolve(&group).is_empty()
+        {
+            return Err(NodeError::Fork);
+        }
         self.run(store, now, rng, |n, cx| {
             let published = op(entry.epoch(), cx.ov, cx.now, cx.rng)?;
             n.invalidate(chat_id, &published.pruned);
