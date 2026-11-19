@@ -94,8 +94,7 @@
     "reply_to": "Reply to",
     "reply_unavailable": "Message not available",
     "empty": "No messages yet",
-    "media": "Media",
-    "reaction": "Reaction",
+    "media": "Unsupported attachment",
     "forward": "Forwarded message"
   },
   "composer": {
@@ -109,6 +108,7 @@
     "edit_too_long": "This text is too long for a group message. Shorten it to save it."
   },
   "message_menu": {
+    "react": "React",
     "reply": "Reply",
     "copy": "Copy",
     "edit": "Edit",
@@ -125,6 +125,9 @@
     "copied": "Copied",
     "failed": "The action failed",
     "retried": "Synchronisation retried"
+  },
+  "reactions": {
+    "title": "Reactions"
   },
   "details": {
     "title": "Group details",

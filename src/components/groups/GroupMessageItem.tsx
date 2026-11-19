@@ -6,6 +6,7 @@ import {
   Edit2,
   EyeOff,
   RefreshCw,
+  Smile,
   Trash2,
 } from 'react-feather';
 import type { GroupMessage } from '@massalabs/gossip-sdk';
@@ -15,6 +16,11 @@ import LinkText from '../discussions/LinkText';
 import MessageContextMenu, {
   type MessageContextMenuItem,
 } from '../ui/MessageContextMenu';
+import EmojiPickerModal from '../ui/EmojiPickerModal';
+import BaseModal from '../ui/BaseModal';
+import ReactionBar, {
+  type ReactionChipGroup,
+} from '../discussions/ReactionBar';
 import { useLongPress } from '../../hooks/useLongPress';
 import SafeName from './SafeName';
 import { messageText, toDate } from '../../utils/groupTimeline';
@@ -28,6 +34,8 @@ export interface GroupMessageActions {
   onEditLocally?: (m: GroupMessage) => void;
   onDeleteLocally?: (m: GroupMessage) => void;
   onRetry?: (m: GroupMessage) => void;
+  /** Adds this account's reaction `emoji`, or removes it if there is one. */
+  onToggleReaction?: (m: GroupMessage, emoji: string) => void;
 }
 
 interface GroupMessageItemProps extends GroupMessageActions {
@@ -37,6 +45,8 @@ interface GroupMessageItemProps extends GroupMessageActions {
   /** The text of the messages it replies to, or null when not available. */
   replyPreviews: (string | null)[];
   canWrite: boolean;
+  /** The name shown for a member, for the list of who reacted. */
+  memberName?: (userId: string) => string;
 }
 
 /**
@@ -49,6 +59,7 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   authorName,
   replyPreviews,
   canWrite,
+  memberName,
   onReply,
   onCopy,
   onEdit,
@@ -56,10 +67,27 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   onEditLocally,
   onDeleteLocally,
   onRetry,
+  onToggleReaction,
 }) => {
   const { t } = useTranslation('groups');
   const { t: td } = useTranslation('discussions');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // The emoji whose authors are listed, if any.
+  const [reactorsOf, setReactorsOf] = useState<string | null>(null);
+  // Reacting is a write: never in a read-only chat (§7.6).
+  const toggle = canWrite ? onToggleReaction : undefined;
+  const chips: ReactionChipGroup[] = useMemo(
+    () =>
+      message.reactions.map(r => ({
+        emoji: r.emoji,
+        count: r.authors.length,
+        mine: r.mine,
+      })),
+    [message.reactions]
+  );
+  const reactors =
+    message.reactions.find(r => r.emoji === reactorsOf)?.authors ?? [];
   const longPress = useLongPress({ onLongPress: () => setMenuOpen(true) });
   const text = messageText(message, t);
   const segments = useMemo(() => parseLinks(text), [text]);
@@ -84,6 +112,13 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
       items.push({ label, icon, danger, onClick: () => handler(message) });
   };
   const isText = message.body.type === 'text';
+  if (toggle) {
+    items.push({
+      label: t('message_menu.react'),
+      icon: <Smile className="w-4 h-4" />,
+      onClick: () => setPickerOpen(true),
+    });
+  }
   if (canWrite)
     add(onReply, t('message_menu.reply'), <CornerUpLeft className="w-4 h-4" />);
   if (isText) add(onCopy, t('message_menu.copy'), <Copy className="w-4 h-4" />);
@@ -173,12 +208,50 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
           {formatTime(toDate(shownTime))}
         </p>
       </div>
+      <ReactionBar
+        reactions={chips}
+        message={message}
+        isOutgoing={isOutgoing}
+        onToggleReaction={toggle ? (m, emoji) => toggle(m, emoji) : undefined}
+        onShowReactors={setReactorsOf}
+      />
       <MessageContextMenu
         items={items}
         isOpen={menuOpen}
         onClose={() => setMenuOpen(false)}
         isOutgoing={isOutgoing}
+        canReact={!!toggle}
+        reactions={chips}
+        onSelectEmoji={emoji => toggle?.(message, emoji)}
+        onOpenEmojiPicker={() => {
+          setMenuOpen(false);
+          setPickerOpen(true);
+        }}
       />
+      {toggle && (
+        <EmojiPickerModal
+          isOpen={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          title={td('message_item.add_reaction')}
+          onSelectEmoji={emoji => {
+            setPickerOpen(false);
+            toggle(message, emoji);
+          }}
+        />
+      )}
+      <BaseModal
+        isOpen={reactorsOf !== null}
+        onClose={() => setReactorsOf(null)}
+        title={`${t('reactions.title')} ${reactorsOf ?? ''}`}
+      >
+        <ul className="space-y-2" data-testid="reactors">
+          {reactors.map(a => (
+            <li key={a} className="text-sm text-foreground">
+              <SafeName name={memberName ? memberName(a) : a} />
+            </li>
+          ))}
+        </ul>
+      </BaseModal>
     </div>
   );
 };

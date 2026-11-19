@@ -14,6 +14,8 @@ export interface ReactionGroup {
   emoji: string;
   count: number;
   myReactionId?: number;
+  /** This account reacted (group messages, which have no reaction IDs). */
+  mine?: boolean;
 }
 
 interface MessageContextMenuProps {
@@ -92,7 +94,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
           <div className="flex items-center gap-1.5 px-2 py-1.5 bg-card border border-border rounded-full shadow-xl pointer-events-auto">
             {DEFAULT_EMOJIS.map(emoji => {
               const match = reactions?.find(r => r.emoji === emoji);
-              const isMine = !!match?.myReactionId;
+              const isMine = !!match?.myReactionId || !!match?.mine;
               const count = match?.count ?? 0;
               return (
                 <div
