@@ -129,6 +129,17 @@ describe('Group chats', { timeout: 120_000 }, () => {
         [alice.userId, bob.userId, carol.userId].sort()
       );
     }
+    // Alice created the group; Bob and Carol read that she added them.
+    const first = async (p: GossipSdk) =>
+      (await p.groups.timeline(groupId)).find(i => i.kind === 'line');
+    expect(await first(alice)).toMatchObject({
+      line: { type: 'founded', owner: alice.userId },
+    });
+    for (const p of [bob, carol]) {
+      expect(await first(p)).toMatchObject({
+        line: { type: 'joined', epoch: groupId, by: alice.userId },
+      });
+    }
 
     // Messages.
     const hello = await alice.groups.sendMessage(groupId, 'hello');
@@ -164,6 +175,15 @@ describe('Group chats', { timeout: 120_000 }, () => {
     expect([...(await bob.groups.get(groupId))!.members].sort()).toEqual(
       [alice.userId, bob.userId].sort()
     );
+    expect(
+      (await bob.groups.timeline(groupId)).some(
+        i =>
+          i.kind === 'line' &&
+          i.line.type === 'epochChange' &&
+          i.line.by === alice.userId &&
+          i.line.removed.includes(carol.userId)
+      )
+    ).toBe(true);
     expect((await carol.groups.get(groupId))!.status).toBe('removed');
     expect(
       (await carol.groups.timeline(groupId)).some(
