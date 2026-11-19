@@ -247,15 +247,16 @@ fn a_scan_whose_anchor_is_not_held_is_answered_not_available() {
 }
 
 #[test]
-fn a_scan_from_a_non_member_is_ignored() {
+fn a_scan_from_a_non_member_is_answered_as_for_an_unknown_anchor() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
-    net.recv_frames(
-        0,
-        GossipId::from_bytes([0x77; 32]),
-        &[scan(1, chat, 1, 0, T0)],
+    let stranger = GossipId::from_bytes([0x77; 32]);
+    net.recv_frames(0, stranger, &[scan(1, chat, 1, 0, T0)]);
+    let r = responses(&net.poll_frames(0)[&stranger]);
+    assert_eq!(
+        r.iter().map(status).collect::<Vec<_>>(),
+        vec![Some(Status::NotAvailable)]
     );
-    assert!(net.poll(0).is_empty());
 }
 
 /// Device 0 scans member `peer`; returns the first page request.
