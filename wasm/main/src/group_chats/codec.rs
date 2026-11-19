@@ -1400,6 +1400,63 @@ mod tests {
         round_trip(None::<u64>);
     }
 
+    /// A message of the timeline with its reactions and the length of its media data, and the
+    /// JSON the SDK reads: `reactions` as `[[author, emoji], …]`, `data_len` a number or
+    /// `null`, a reaction body as `{target, emoji, action}` and a media body as
+    /// `{mimetype, data}`.
+    #[test]
+    fn a_timeline_message_carries_reactions_and_the_data_length() {
+        let author = GossipId::from_bytes([2; 32]);
+        let m = VisibleMessage {
+            chat_id: ChatId::from_bytes([1; 32]),
+            content: Content {
+                sync_obj_id: SyncObjId::from_bytes([3; 32]),
+                author,
+                created_at: 1,
+                last_modified_at: 1,
+                body: Body::Media(Media {
+                    mimetype: "image/png".into(),
+                    data: vec![],
+                }),
+                edited: false,
+                metadata: BTreeMap::new(),
+            },
+            result_hash: [4; 32],
+            reactions: vec![(author, "\u{1f44d}".into())],
+            data_len: Some(1_000),
+        };
+        round_trip(m.clone());
+        round_trip(VisibleMessage {
+            reactions: vec![],
+            data_len: None,
+            ..m.clone()
+        });
+        let j = m.enc();
+        assert_eq!(
+            j.field("reactions").unwrap().to_text(),
+            format!("[[\"{}\",\"\u{1f44d}\"]]", hex(author.as_bytes()))
+        );
+        assert_eq!(j.field("data_len").unwrap().as_u64().unwrap(), 1_000);
+        let body = j.field("content").unwrap().field("body").unwrap();
+        assert_eq!(body.field("t").unwrap().as_str().unwrap(), "Media");
+        let media = body.field("media").unwrap();
+        assert_eq!(
+            media.field("mimetype").unwrap().as_str().unwrap(),
+            "image/png"
+        );
+        assert_eq!(media.field("data").unwrap().as_str().unwrap(), "");
+        let reaction = Body::Reaction(Reaction {
+            target: SyncObjId::from_bytes([3; 32]),
+            emoji: "+".into(),
+            action: ReactionAction::Remove,
+        })
+        .enc();
+        let r = reaction.field("reaction").unwrap();
+        assert_eq!(r.field("emoji").unwrap().as_str().unwrap(), "+");
+        assert_eq!(r.field("action").unwrap().as_str().unwrap(), "Remove");
+        assert_eq!(r.field("target").unwrap().as_str().unwrap(), hex(&[3; 32]));
+    }
+
     /// The SDK reads the lines by these names (`gossip-sdk/src/services/groups.ts`).
     #[test]
     fn timeline_lines_name_their_actor() {
