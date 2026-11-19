@@ -1279,6 +1279,27 @@ impl Sim {
                     self.legit.contains(c)
                 );
             }
+            for (k, r) in n.tables().signed.iter() {
+                let what = match &r.object {
+                    SignedObject::Leave(l) => format!("leave of {}", who(&l.leaver())),
+                    SignedObject::Kick(k) => format!("kick of {}", who(&k.removed())),
+                    SignedObject::Dissolve(_) => "dissolve".to_owned(),
+                };
+                eprintln!(
+                    "    signed {} {what} at {}",
+                    short(&k.0),
+                    (r.received_at - START) / MINUTE
+                );
+            }
+            for (g, r) in n.tables().group_recs.iter() {
+                eprintln!(
+                    "    group record {} followed {:?} deposed {:?} pending {:?}",
+                    short(g),
+                    r.followed.as_ref().map(who),
+                    r.deposed.iter().map(who).collect::<Vec<_>>(),
+                    r.pending_removals.keys().map(who).collect::<Vec<_>>()
+                );
+            }
         }
     }
 
