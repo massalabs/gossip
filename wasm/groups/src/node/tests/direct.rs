@@ -244,7 +244,7 @@ fn a_group_of_two_from_a_consented_contact_is_adopted_without_a_prompt() {
     net.consent(1, 0, true);
     assert_eq!(net.devs[1].node.direct_chat_consents().len(), 1);
     net.restart(1);
-    let g = net.create_with(0, &[1], None).unwrap();
+    let g = net.create_with(0, &[1], Some(0)).unwrap();
     net.exchange();
     assert!(net.devs[1].node.invitations(net.now).is_empty());
     assert_eq!(net.group_keys(1), vec![g]);
@@ -253,8 +253,9 @@ fn a_group_of_two_from_a_consented_contact_is_adopted_without_a_prompt() {
             .iter()
             .any(|c| c.group == g && c.kind == ChangeKind::Joined)
     );
-    // One-shot: a second group of two is an invitation.
-    let second = net.create_with(0, &[1], None).unwrap();
+    // One-shot: a second group of two is an invitation (and, with a direct chat already
+    // held, an ordinary one).
+    let second = net.create_with(0, &[1], Some(0)).unwrap();
     net.exchange();
     assert!(net.devs[1].node.direct_chat_consents().is_empty());
     let inv = net.devs[1]
@@ -272,9 +273,11 @@ fn a_group_of_two_from_a_consented_contact_is_adopted_without_a_prompt() {
 fn a_consent_covers_only_a_group_of_the_two_owned_by_that_peer() {
     let mut net = MNet::new(3, true);
     net.consent(1, 0, true);
-    // A group of three from that peer, and a group of two from another peer: invitations.
+    // A group of three from that peer, a group of two from another peer, and a group of
+    // two founded with "New group" (no migrate_from): invitations.
     let three = net.create_with(0, &[1, 2], None).unwrap();
-    let other = net.create_with(2, &[1], None).unwrap();
+    let other = net.create_with(2, &[1], Some(0)).unwrap();
+    let plain = net.create_with(0, &[1], None).unwrap();
     net.run(crate::constants::PROMPT_DELAY_MS);
     let inv: Vec<ChatId> = net.devs[1]
         .node
@@ -282,7 +285,7 @@ fn a_consent_covers_only_a_group_of_the_two_owned_by_that_peer() {
         .iter()
         .map(|i| i.chat_id)
         .collect();
-    assert!(inv.contains(&three) && inv.contains(&other));
+    assert!(inv.contains(&three) && inv.contains(&other) && inv.contains(&plain));
     assert!(net.group_keys(1).is_empty());
     assert_eq!(net.devs[1].node.direct_chat_consents().len(), 1);
     // Withdrawn, then given again and expired.
@@ -291,7 +294,7 @@ fn a_consent_covers_only_a_group_of_the_two_owned_by_that_peer() {
     net.consent(1, 0, true);
     net.run(CONSENT_MS);
     assert!(net.devs[1].node.direct_chat_consents().is_empty());
-    let late = net.create_with(0, &[1], None).unwrap();
+    let late = net.create_with(0, &[1], Some(0)).unwrap();
     net.exchange();
     assert!(net.group_keys(1).is_empty());
     let _ = late;
@@ -300,7 +303,7 @@ fn a_consent_covers_only_a_group_of_the_two_owned_by_that_peer() {
 #[test]
 fn a_consent_given_after_the_root_arrived_adopts_it() {
     let mut net = MNet::new(2, true);
-    let g = net.create_with(0, &[1], None).unwrap();
+    let g = net.create_with(0, &[1], Some(0)).unwrap();
     net.exchange();
     assert!(net.group_keys(1).is_empty());
     net.consent(1, 0, true);
@@ -457,23 +460,19 @@ fn a_crash_while_settling_two_creations_changes_nothing_and_the_retry_settles_th
     }
 }
 
+/// The pairing rests on the two roots alone (the owner's decision): no declaration is needed
+/// to settle two creations at once. A direct chat continued by a successor pairs with nothing,
+/// and a later creation from the peer is then an ordinary invitation.
 #[test]
-fn no_pairing_without_the_earlier_conversation_or_with_a_successor() {
-    // Device 1 did not declare the conversation: device 0's root is an ordinary invitation
-    // there, and device 1's own group stays.
+fn pairing_needs_no_declaration_and_a_successor_ends_it() {
     let mut net = MNet::new(2, true);
-    net.earlier(0, 1, 0, true);
     let a = net.create_with(0, &[1], Some(0)).unwrap();
     let b = net.create_with(1, &[0], Some(0)).unwrap();
-    net.deliver(0, 1);
-    assert_eq!(net.group_keys(1), vec![b]);
-    assert!(
-        net.devs[1]
-            .node
-            .invitations(net.now + crate::constants::PROMPT_DELAY_MS)
-            .iter()
-            .any(|i| i.chat_id == a)
-    );
+    net.run(10 * MIN);
+    let (keep, _) = sorted_pair();
+    for d in 0..2 {
+        assert_eq!(net.group_keys(d), vec![[a, b][keep]], "device {d}");
+    }
     // A group already continued by a successor (a member added) pairs with nothing.
     let mut net = MNet::new(3, true);
     net.earlier(0, 1, 0, true);
@@ -495,7 +494,63 @@ fn no_pairing_without_the_earlier_conversation_or_with_a_successor() {
     net.run(10 * MIN);
     for d in 0..2 {
         assert!(net.group_keys(d).contains(&[a, b][d]), "device {d}");
+        let inv = net.devs[d].node.invitations(net.now + DAY);
+        assert!(
+            inv.iter()
+                .any(|i| i.chat_id == [a, b][1 - d] && i.migration_of.is_none()),
+            "device {d}"
+        );
     }
+}
+
+/// Two contact requests crossing: each device consents to the other's chat and founds its
+/// own, both with migrate_from = 0; both keep the one whose owner sorts first.
+#[test]
+fn crossing_contact_requests_keep_one_chat() {
+    for first in 0..2 {
+        let mut net = MNet::new(2, true);
+        net.consent(0, 1, true);
+        net.consent(1, 0, true);
+        let a = net.create_with(0, &[1], Some(0)).unwrap();
+        let b = net.create_with(1, &[0], Some(0)).unwrap();
+        net.deliver(first, 1 - first);
+        net.deliver(1 - first, first);
+        net.run(10 * MIN);
+        let (keep, _) = sorted_pair();
+        for d in 0..2 {
+            assert_eq!(net.group_keys(d), vec![[a, b][keep]], "first {first} device {d}");
+            assert!(net.devs[d].node.invitations(net.now + DAY).is_empty());
+        }
+    }
+}
+
+/// A device that holds an accepted direct chat with a peer, grown since, takes a later
+/// creation from that peer as an ordinary invitation: no migration, no consent.
+#[test]
+fn a_held_direct_chat_makes_a_later_one_ordinary() {
+    let mut net = MNet::new(3, true);
+    net.earlier(1, 0, 0, true);
+    let g = net.create_with(0, &[1], Some(0)).unwrap();
+    net.exchange();
+    net.accept(1, g);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![gid(2)],
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(5 * MIN);
+    net.consent(1, 0, true);
+    let again = net.create_with(0, &[1], Some(0)).unwrap();
+    net.exchange();
+    assert_eq!(net.group_keys(1), vec![g]);
+    let inv = net.devs[1].node.invitations(net.now + DAY);
+    let i = inv.iter().find(|i| i.chat_id == again).unwrap();
+    assert_eq!(i.migration_of, None);
 }
 
 // ── Connections ──────────────────────────────────────────────────────────────
