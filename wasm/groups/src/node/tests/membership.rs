@@ -3105,3 +3105,60 @@ fn a_former_owners_root_does_not_date_the_new_owners_roots() {
     assert!(at(&r) < u64::MAX);
     assert!(at(&r) < at(&e) && at(&e) < u64::MAX);
 }
+
+/// Regression (simulation, code at 7e8da430, `GROUPS_MEMBERS_SEED=256` and 262): a member
+/// left an epoch while a later one listing it existed; restored from a backup that held
+/// neither, it received the later epoch as an invitation and accepted it. Its leave names
+/// the earlier epoch, which it did not hold and could never fetch as a removed peer: the
+/// members sent the leave without that root, and the device stayed in the group for ever.
+#[test]
+fn a_restored_member_that_never_held_its_left_epoch_learns_its_leave() {
+    let mut net = MNet::new(4, true);
+    let backup = net.devs[3].store.clone();
+    let g = net.create(0, &[1, 2, 3]);
+    net.exchange();
+    for d in 1..4 {
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    net.offline[3] = true;
+    let e2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("x".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.offline[3] = false;
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    assert!(!net.summary(0, &g).unwrap().members.contains(&gid(3)));
+    net.devs[3].store = backup;
+    net.restart(3);
+    let root = net.devs[0].node.root(&e2).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    net.recv_frames_m(3, 0, &[Frame::Event(blob)]);
+    net.run(6 * MIN);
+    net.accept_all(3);
+    assert_eq!(net.current(3, &e2), Some(e2));
+    net.say(3, &e2, "back");
+    net.run(10 * MIN);
+    assert_eq!(net.summary(3, &e2).unwrap().status, MyStatus::Left);
+}
