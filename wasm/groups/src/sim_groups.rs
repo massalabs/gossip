@@ -129,7 +129,9 @@ struct Counters {
     /// Devices that show the group as two conversations because they cannot verify a new
     /// owner's authority (§5.9, D.3; reported).
     split_conversations: u64,
-    /// Older epochs whose messages differ between two devices of one line (reported).
+    /// Older epochs whose messages differ between two devices of one line where the rules
+    /// make it so (another conversation on one device, or a device removed and added back
+    /// since the epoch; reported). Any other difference fails.
     older_epoch_differences: u64,
     /// Conversations left active by "Dissolve & Delete" on a device that received part of
     /// the erased line after the others erased it (§5.8, best effort; reported).
@@ -361,6 +363,8 @@ struct Sim {
     handovers: Vec<(GossipId, BTreeSet<GossipId>)>,
     /// The epochs the owner's device erased with "Dissolve & Delete".
     erased_line: BTreeSet<ChatId>,
+    /// When the script first removed a device by a kick.
+    removed_at: BTreeMap<usize, u64>,
 }
 
 fn below(rng: &mut TestRng, n: u64) -> u64 {
@@ -471,6 +475,7 @@ impl Sim {
             handover_members: BTreeSet::new(),
             handovers: Vec::new(),
             erased_line: BTreeSet::new(),
+            removed_at: BTreeMap::new(),
         };
         for d in 0..n {
             sim.boot(d);
@@ -900,6 +905,7 @@ impl Sim {
                         .is_some()
                     {
                         self.devs[v].removed = true;
+                        self.removed_at.entry(v).or_insert(self.now);
                         self.counters.members_removed += 1;
                     }
                 }
@@ -974,6 +980,7 @@ impl Sim {
                             .is_some()
                     {
                         self.devs[r].removed = true;
+                        self.removed_at.entry(r).or_insert(self.now);
                         self.counters.members_removed += 1;
                     }
                 }
@@ -1910,6 +1917,32 @@ impl Sim {
                         let a = results(&self.devs[d].store, c);
                         let b = results(&self.devs[devices[0]].store, c);
                         if a != b {
+                            // Differences the rules make, from the script:
+                            // - the epoch is in another conversation than the current one on
+                            //   one of the two devices (an allowed split, §5.9, or the archive
+                            //   of a removed or left device): a scan lists the epochs of the
+                            //   anchor's group in the responder's own grouping (§12.1), and
+                            //   edits in it reach only the members of the current epoch;
+                            // - one of the two devices was removed after the epoch was created
+                            //   and added back since: while removed it dropped every event but
+                            //   deletions (§10.4) and does not fetch them again (§11.7).
+                            let other_conversation = |x: usize| {
+                                self.node(x).current_epoch(c)
+                                    != self.node(x).current_epoch(&s.current)
+                            };
+                            let removed_since = |x: usize| {
+                                self.removed_at
+                                    .get(&x)
+                                    .is_some_and(|t| r.root.created_at() <= *t)
+                            };
+                            assert!(
+                                other_conversation(d)
+                                    || other_conversation(devices[0])
+                                    || removed_since(d)
+                                    || removed_since(devices[0]),
+                                "messages of an older epoch: device {d} against {}",
+                                devices[0]
+                            );
                             diffs += 1;
                         }
                     }
