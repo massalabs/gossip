@@ -9,6 +9,7 @@
 //! arguments.
 //!
 //! - [`hash`]: `H(domain, ...) = BLAKE3(CBOR([domain, ...]))` and every derived ID (§1.2, §3).
+//! - [`wire`]: the plaintext, container, frames and event blobs (§13, Appendix C).
 
 #![warn(missing_docs)]
 
@@ -18,6 +19,7 @@ mod error;
 pub mod hash;
 mod ids;
 mod keys;
+pub mod wire;
 
 #[cfg(test)]
 mod test_support;
