@@ -688,6 +688,67 @@ mod tests {
         check(&f, T0 + 50);
     }
 
+    /// §2.2: an edit starts from the message's current metadata, so that entries a client
+    /// does not know (and `replyTo`) survive an edit by it; the SDK passes no metadata by
+    /// default.
+    #[test]
+    fn an_edit_keeps_the_metadata_it_does_not_patch() {
+        let mut f = Fixture::new();
+        let mut rng = TestRng::new(1);
+        let author = f.alice.id;
+        let reply = crate::event::encode_reply_to(&[crate::event::ReplyTarget {
+            ref_chat_id: f.root.ref_chat_id(),
+            sync_obj_id: sid(7),
+        }])
+        .unwrap();
+        let original = BTreeMap::from([
+            ("replyTo".to_owned(), reply),
+            ("x.unknown".to_owned(), vec![2]),
+        ]);
+        let sync = content_of(
+            &ep(&f.root)
+                .publish_message(
+                    &mut f.store,
+                    T0,
+                    &mut rng,
+                    author,
+                    Body::Text("hello".into()),
+                    original.clone(),
+                    None,
+                )
+                .unwrap(),
+        )
+        .sync_obj_id;
+        let edit = |f: &mut Fixture, rng: &mut TestRng, at, metadata| {
+            content_of(
+                &ep(&f.root)
+                    .publish_edit(
+                        &mut f.store,
+                        at,
+                        rng,
+                        sync,
+                        Body::Text("edited".into()),
+                        metadata,
+                        None,
+                    )
+                    .unwrap(),
+            )
+            .metadata
+        };
+        assert_eq!(edit(&mut f, &mut rng, T0 + 1, BTreeMap::new()), original);
+        let mut expected = original.clone();
+        expected.insert("k".into(), vec![3]);
+        assert_eq!(
+            edit(
+                &mut f,
+                &mut rng,
+                T0 + 2,
+                BTreeMap::from([("k".to_owned(), vec![3])])
+            ),
+            expected
+        );
+    }
+
     #[test]
     fn an_edit_ranks_against_the_applied_result_not_a_pending_one() {
         let mut f = Fixture::new();
