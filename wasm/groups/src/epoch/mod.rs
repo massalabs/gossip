@@ -754,6 +754,35 @@ pub(crate) fn check_invariants<R: StorageRead + ?Sized>(
             }
         }
     }
+    // A retained event is served with the parents its edges record (D.33).
+    let edges_map: BTreeMap<EventId, Vec<EventId>> = store
+        .edges(chat)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect();
+    for row in rows.values() {
+        if let Some(event) = row.event()
+            && edges_map.get(&row.event_id).map(Vec::as_slice) != Some(event.parents())
+        {
+            return Err(format!("{:?} is held with other parents", row.event_id));
+        }
+    }
+    // Every available event is reachable from the tips through available events (D.27).
+    let available: BTreeSet<EventId> = rows
+        .values()
+        .filter(|r| r.available(now))
+        .map(|r| r.event_id)
+        .collect();
+    let mut reached: BTreeSet<EventId> = BTreeSet::new();
+    let mut stack = dag::tips(store, chat, now).map_err(|e| e.to_string())?;
+    while let Some(id) = stack.pop() {
+        if available.contains(&id) && reached.insert(id) {
+            stack.extend(edges_map.get(&id).into_iter().flatten().copied());
+        }
+    }
+    if reached != available {
+        return Err("an available event is unreachable from the tips".into());
+    }
     // The indexes agree with the records.
     let e = |e: StorageError| e.to_string();
     let held: Vec<EventId> = rows
