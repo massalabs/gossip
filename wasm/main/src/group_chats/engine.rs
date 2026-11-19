@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use groups::node::{GroupChange, LeaveChoice, Node, NodeError, Outgoing};
-use groups::{Body, ChatId, GossipId, KeySigner, LocalEdit, Published, SyncObjId};
+use groups::{Body, ChatId, GossipId, IdentitySigner, LocalEdit, Published, Signer, SyncObjId};
 
 use super::codec::{Codec, R, hex};
 use super::json::J;
@@ -50,12 +50,45 @@ fn published(p: &Published) -> String {
     .to_text()
 }
 
-/// The identity key as the engine's signer: it signs the 32-byte IDs of roots, kicks,
-/// dissolve messages and leaves under their signing contexts (§4.1, §5.1).
-fn signer<'a>(public: &auth::UserPublicKeys, secret: &'a auth::UserSecretKeys) -> KeySigner<'a> {
-    KeySigner {
-        public: public.clone(),
-        signing_key: &secret.dsa_signing_key,
+/// What the engine signs with: the identity's ML-DSA signing key and its public keys,
+/// nothing else of the secret keys. It signs the 32-byte IDs of roots, kicks, dissolve
+/// messages and leaves under their signing contexts (§4.1, §5.1).
+pub struct IdentityKey {
+    public: auth::UserPublicKeys,
+    key: Box<dyn Signer>,
+}
+
+/// A copy of a signing key, through its `From<[u8; N]>`: the bytes are copied on the
+/// stack into the new key (whose type zeroizes on drop); no heap buffer is left behind.
+fn copy_key<K: From<[u8; N]> + Signer + 'static, const N: usize>(
+    _: &K,
+    bytes: &[u8; N],
+) -> Box<dyn Signer> {
+    Box::new(K::from(*bytes))
+}
+
+impl IdentityKey {
+    /// Copies the signing key out of the identity's secret keys.
+    pub fn new(public: auth::UserPublicKeys, secret: &auth::UserSecretKeys) -> Self {
+        let key = copy_key(&secret.dsa_signing_key, secret.dsa_signing_key.as_bytes());
+        Self { public, key }
+    }
+}
+
+impl Signer for IdentityKey {
+    fn sign_id(
+        &self,
+        context: &'static str,
+        id: &[u8; 32],
+        randomness: [u8; 32],
+    ) -> groups::SignatureBytes {
+        self.key.sign_id(context, id, randomness)
+    }
+}
+
+impl IdentitySigner for IdentityKey {
+    fn public_keys(&self) -> &auth::UserPublicKeys {
+        &self.public
     }
 }
 
@@ -63,31 +96,25 @@ fn signer<'a>(public: &auth::UserPublicKeys, secret: &'a auth::UserSecretKeys) -
 pub struct Core {
     node: Node,
     store: Store,
-    public: auth::UserPublicKeys,
-    secret: auth::UserSecretKeys,
+    identity: IdentityKey,
     /// What opening found unusable.
     pub report: OpenReport,
 }
 
 impl Core {
     /// Opens the engine of the identity `public`/`secret` from a snapshot of its records.
-    pub fn open(
-        public: auth::UserPublicKeys,
-        secret: auth::UserSecretKeys,
-        snapshot: &BatchOut,
-    ) -> R<Self> {
+    pub fn open(identity: IdentityKey, snapshot: &BatchOut) -> R<Self> {
         let (mem, report) = decode_snapshot(snapshot)?;
         let store = Store {
             mem,
             pending: Vec::new(),
         };
-        let me = GossipId::of_keys(&public);
+        let me = GossipId::of_keys(identity.public_keys());
         let node = Node::open(&store, me).map_err(err)?;
         Ok(Self {
             node,
             store,
-            public,
-            secret,
+            identity,
             report,
         })
     }
@@ -149,9 +176,9 @@ impl Core {
     /// Runs the timers; the signer lets the owner's device create the successors it owes
     /// (§5.5) and records its own keys.
     pub fn tick(&mut self, now: u64) -> R<()> {
-        let signer = signer(&self.public, &self.secret);
+        let signer = &self.identity;
         self.node
-            .tick_with(&mut self.store, Some(&signer), now, &mut rng)
+            .tick_with(&mut self.store, Some(signer), now, &mut rng)
             .map_err(err)
     }
 
@@ -193,34 +220,34 @@ impl Core {
     // ── Group actions ────────────────────────────────────────────────────────
 
     pub fn create_group(&mut self, name: String, members: Vec<GossipId>, now: u64) -> R<ChatId> {
-        let signer = signer(&self.public, &self.secret);
+        let signer = &self.identity;
         self.node
-            .create_group(&mut self.store, &signer, name, members, now, &mut rng)
+            .create_group(&mut self.store, signer, name, members, now, &mut rng)
             .map_err(err)
     }
 
     /// `change` is a [`GroupChange`] in JSON.
     pub fn change_group(&mut self, group: ChatId, change: &str, now: u64) -> R<ChatId> {
         let change: GroupChange = parse(change)?;
-        let signer = signer(&self.public, &self.secret);
+        let signer = &self.identity;
         self.node
-            .change_group(&mut self.store, &signer, group, change, now, &mut rng)
+            .change_group(&mut self.store, signer, group, change, now, &mut rng)
             .map_err(err)
     }
 
     pub fn dissolve_group(&mut self, group: ChatId, must_delete: bool, now: u64) -> R<()> {
-        let signer = signer(&self.public, &self.secret);
+        let signer = &self.identity;
         self.node
-            .dissolve_group(&mut self.store, &signer, group, must_delete, now, &mut rng)
+            .dissolve_group(&mut self.store, signer, group, must_delete, now, &mut rng)
             .map_err(err)
     }
 
     /// `choice` is a [`LeaveChoice`] name: `Signed`, `AskToBeKicked` or `Silent`.
     pub fn leave_group(&mut self, group: ChatId, choice: &str, now: u64) -> R<()> {
         let choice: LeaveChoice = Codec::dec(&J::Str(choice.into()))?;
-        let signer = signer(&self.public, &self.secret);
+        let signer = &self.identity;
         self.node
-            .leave_group(&mut self.store, &signer, group, choice, now, &mut rng)
+            .leave_group(&mut self.store, signer, group, choice, now, &mut rng)
             .map_err(err)
     }
 
@@ -238,9 +265,9 @@ impl Core {
 
     pub fn decline_invitation(&mut self, chat: ChatId, choice: &str, now: u64) -> R<()> {
         let choice: LeaveChoice = Codec::dec(&J::Str(choice.into()))?;
-        let signer = signer(&self.public, &self.secret);
+        let signer = &self.identity;
         self.node
-            .decline_invitation(&mut self.store, &signer, chat, choice, now, &mut rng)
+            .decline_invitation(&mut self.store, signer, chat, choice, now, &mut rng)
             .map_err(err)
     }
 

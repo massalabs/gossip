@@ -24,7 +24,7 @@ pub mod store;
 
 use wasm_bindgen::prelude::*;
 
-use self::engine::{Core, id32};
+use self::engine::{Core, IdentityKey, id32};
 use self::store::BatchOut;
 use crate::{UserPublicKeys, UserSecretKeys};
 use groups::{ChatId, GossipId, SyncObjId};
@@ -67,7 +67,8 @@ pub struct GroupsNode {
 impl GroupsNode {
     /// Opens the engine of the identity from a snapshot of its stored records
     /// (`{rows, edges, objects, node}`, see `take_batches`; empty arrays for a new account).
-    /// The secret keys are copied; the copy is erased when this object is freed.
+    /// Only the ML-DSA signing key is copied out of the secret keys; the copy is erased
+    /// when this object is freed.
     pub fn open(
         public_keys: &UserPublicKeys,
         secret_keys: &UserSecretKeys,
@@ -75,18 +76,9 @@ impl GroupsNode {
     ) -> Result<GroupsNode, JsValue> {
         let snapshot: BatchOut = serde_wasm_bindgen::from_value(snapshot)
             .map_err(|e| JsValue::from_str(&format!("groups:invalid: snapshot: {e}")))?;
-        let config = bincode::config::standard();
-        let bytes = bincode::serde::encode_to_vec(&secret_keys.inner, config)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let secret: auth::UserSecretKeys = bincode::serde::decode_from_slice(&bytes, config)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?
-            .0;
-        let mut bytes = bytes;
-        for b in bytes.iter_mut() {
-            // Volatile so that the copy of the key is cleared even though it is dropped next.
-            unsafe { std::ptr::write_volatile(b, 0) };
-        }
-        let core = Core::open(public_keys.inner.clone(), secret, &snapshot).map_err(js)?;
+        // Only the signing key is copied; the other secrets stay where they are.
+        let identity = IdentityKey::new(public_keys.inner.clone(), &secret_keys.inner);
+        let core = Core::open(identity, &snapshot).map_err(js)?;
         Ok(GroupsNode { core })
     }
 
