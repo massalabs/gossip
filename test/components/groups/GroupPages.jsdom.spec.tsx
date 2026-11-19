@@ -8,6 +8,7 @@ import GroupSettings from '../../../src/pages/GroupSettings';
 import { useSdkStore } from '../../../src/stores/sdkStore';
 import { useGroupStore } from '../../../src/stores/groupStore';
 import { useAccountStore } from '../../../src/stores/accountStore';
+import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import { flush, makeFakeGroups, summary } from '../../helpers/fakeGroups';
 import { byText, click, renderAt } from './render';
 
@@ -233,6 +234,41 @@ describe('group pages', () => {
     expect(
       r.container.querySelector('[data-testid="elsewhere"]')
     ).not.toBeNull();
+  });
+
+  it('picks a contact to add by tapping its name', async () => {
+    useDiscussionStore.setState({
+      contacts: [{ userId: 'carl', name: 'Carl' }] as never,
+    });
+    fake.state.groups = [summary()];
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <GroupSettings />,
+      '/group/g1/settings',
+      '/group/:groupId/settings'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    await click(byText('details.add_members'));
+    // the name, not the box
+    await click(
+      Array.from(document.querySelectorAll('span')).find(
+        e => e.textContent === 'Carl'
+      )
+    );
+    const box = document.querySelector(
+      'input[type="checkbox"][aria-label="Carl"]'
+    ) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    const adds = Array.from(document.querySelectorAll('button')).filter(
+      b => b.textContent?.trim() === 'details.add_members'
+    );
+    await click(adds[adds.length - 1]);
+    await act(flush);
+    expect(fake.service.changeMembers).toHaveBeenCalledWith('g1', {
+      add: ['carl'],
+    });
   });
 
   it("shows former owners' branches as information and lets the owner merge them", async () => {
