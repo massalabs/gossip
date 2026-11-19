@@ -9,6 +9,7 @@ mod regressions;
 mod retrieval;
 mod scans;
 mod storage;
+mod timeline;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
