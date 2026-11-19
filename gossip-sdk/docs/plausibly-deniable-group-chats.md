@@ -190,7 +190,9 @@ The rules of this document are therefore of two kinds.
 The wire format is closed and final once the first release is out: no frame kind, query
 operation, status, field or enum value is ever added to wire version 1. Anything of wire version 1
 that is not valid under these rules is rejected and counts against its sender (§11.8). A plaintext
-of a higher wire version is ignored and never penalised (§13.8).
+of a higher wire version is not processed and never penalised; when it comes from a contact the
+user accepted, it is answered once with a notice that names the version this device speaks
+(§13.8).
 
 **May change, case by case.**
 
@@ -553,8 +555,9 @@ for the other.
 
 - it has **exactly one** parent;
 - it is signed by the owner of that **parent**, while its own `owner` field names the new owner;
-- it may remove members, the old owner included, and change the name;
-- it never adds a member.
+- its member list is exactly the parent's, except that the old owner, who signs it, may be absent
+  from it; it may change the name;
+- it never adds a member and never removes any member other than the old owner.
 
 On receiving a root, a device MUST, in order:
 
@@ -591,6 +594,11 @@ root does not continue it.
 *Why a handover root never adds members:* a new member holds no parent, so it could only check the
 signature against the root's own `owner` field, which holds the new owner's keys and not the
 signer's.
+
+*Why it removes no one but the old owner:* every member of the parent is then a member of the
+handover epoch and entitled to its root. When the new owner later removes someone, the kick names
+an epoch the new owner owns, so a kick is always signed by the owner of the epoch it names (§5.6)
+and a removed member can always check it.
 
 A root for a `chat_id` that is already installed is a duplicate and changes nothing.
 
@@ -852,7 +860,8 @@ epoch is C when all three hold:
 
 1. the device holds the root of E;
 2. E is C itself, or C descends from E through parent links;
-3. M is a member of every epoch on **at least one** path from E to C.
+3. M is a member of **every** epoch the device holds between E and C: once any epoch in between
+   left M out, the leave is used up, whatever later root lists M again.
 
 A device that holds E and C but not every root between them cannot check condition 3; the leave is
 then not live for it.
@@ -887,14 +896,16 @@ The rule covers these cases:
   M can only sign a leave for X.
   X is an ancestor of Y and M is in both, so the leave removes M from Y.
 - *Replay.* M left from X and was removed in Y; later M is added again in Z and accepts.
-  The old leave for X never expires, but Y does not contain M, so every path from X to Z or to any
-  later epoch is broken and the leave is used up for good.
+  The old leave for X never expires, but Y does not contain M, so the leave is used up for good,
+  although Z names X as an extra parent (§5.10) and M is in both.
 - *Leaving again.* Adding a member back always creates a new epoch, so a second leave names a new
   epoch and has a different `leaveId`.
   Two legitimate leaves never collide.
 - *Forks.* If M was removed in one branch but kept in another, and the resolution root keeps M, the
-  leave applies again and removes M.
-  That matches M's side: M closed the group and rejects those roots (§4.8).
+  leave is used up, since one epoch in between left M out: M stays listed until the owner removes
+  it by hand. A resolution and an add-back have the same shape, and the rule must let an add-back
+  stand. The case is rare: when merging, the owner's device already leaves out every member whose
+  leave it holds (§5.5).
 
 *Why no random field:* it is not needed to tell two legitimate leaves apart, and it would let one
 member produce any number of distinct valid leaves for one epoch, which every member would store
@@ -974,8 +985,9 @@ The leaves and requests wait and are applied by the resolution root: its member 
 members out, and in the resolution UI they are not selectable on any page.
 A leave counts there if it is live for **at least one** of the competing ends.
 
-**At a handover** (§5.7) the old owner's device applies every live leave and every request it
-holds in the handover root itself, without waiting.
+**At a handover** (§5.7) nothing is applied: a handover removes no one but the old owner. The new
+owner applies the live leaves it holds once it owns the group, and members waiting to be removed
+send their next daily request to the new owner.
 
 ### 5.6 The kick
 
@@ -994,7 +1006,18 @@ The ID of the new epoch is never shown to the removed member.
 **Creation.** When the owner's device creates a root, it creates one kick for each parent epoch and
 each member of that parent who is not in the new root, except members whose live signed leave it
 holds.
-For a handover root the signer is the old owner, who owns the parent.
+A handover root creates no kick: it removes no one but its signer.
+A kick is valid only when signed by the owner of the epoch it names; no other identity may sign
+one, whatever handovers followed.
+An owner's device never creates a kick naming an epoch it does not own.
+
+**The former owner.** A device answers the former owner of a handover it holds with that handover
+root, as it answers a removed member with its kick and under the same limits. A device restored
+from a backup made before its own handover learns from it that it is no longer the owner, and
+that it left if the root no longer lists it.
+
+*Known limit:* people who are members only of a former owner's competing branch, and whom the new
+owner drops when merging that branch, cannot be sent a kick they could check, and are not told.
 
 **Delivery.**
 
@@ -1057,8 +1080,9 @@ field names another member B.
   B is not asked, and becomes the owner as soon as a device adopts the root.
 - A signs the root while still the owner, so the outgoing owner never has to sign anything after
   leaving.
-- The handover root may remove members, A included, and may change the name.
-  "Hand over and leave" is therefore one root, after which A's device closes the group.
+- The handover root keeps the member list, except that A may be absent from it, and may change the
+  name. "Hand over and leave" is therefore one root, after which A's device closes the group.
+  Any other change of members is made before or after the handover, by a successor root.
   A may also hand over and stay as an ordinary member ("Transfer ownership").
 - It never adds a member (§4.7); B adds members afterwards with a successor root.
   The owner's device refuses to build a handover root that adds anyone.
@@ -1332,10 +1356,49 @@ A device hides its own "Migrate" action as soon as it holds such an invitation, 
 offering "Migrate" it first processes what it has received, so that the other person's invitation
 takes precedence.
 
-**Two creations at once.** When a device holds two roots that each create a group of the same two
-people with the same `migrate_from`, and neither has been continued by a later root, the group
-whose owner's GossipID sorts first (raw bytes, ascending) is kept: both devices adopt it without a
-prompt, and both delete the other at once, as a closed chat (§14.2).
+**Two automatic chats for one pair.** An *automatic chat* is a group created with `migrate_from`
+between two people. A device may come to hold two for the same pair with the same `migrate_from`,
+neither continued by a later root: its own, and one created by the other person.
+
+A device remembers, for each automatic chat it created, whether the other person has ever **taken
+part** in it: whether it received from that person, inside that chat, a notice, an event or a
+query. This is stored on the chat for good; it is not deduced from retained events.
+
+- **While the other person has never taken part in my chat,** the tie rule decides, without a
+  prompt: the chat whose owner's GossipID sorts first (raw bytes, ascending) is kept.
+- **Once the other person has taken part in my chat,** their chat is shown as an invitation to
+  continue the conversation: *"[Name] wants to continue this conversation in a new group."*
+  Accepting makes their chat the current one; declining changes nothing.
+- A second automatic chat created by the owner of the chat I already hold is an ordinary
+  invitation.
+
+**Nothing is erased.** The chat that is not kept becomes read-only history of the same
+conversation: its messages stay on each device that holds them. The kept chat records, as local
+data that is neither sent nor hashed, the ordered list of what came before it for that pair: the
+identifier of the earlier one-to-one conversation and the chats it replaced. They are displayed as
+one conversation, oldest first. This applies only to automatic chats of two people; no other
+groups are ever merged.
+
+The cases, with L the person whose GossipID sorts first, H the other, and G_L and G_H the chats
+each created. "Asked" means the invitation to continue above.
+
+| # | Situation | L's device | H's device | Continues in |
+| --- | --- | --- | --- | --- |
+| 1 | Both create at the same moment | not asked: keeps G_L | not asked: switches to G_L | G_L |
+| 2a | H creates after L accepted H's contact request; L has none yet | not asked: the contact was the consent | | G_H |
+| 2b | H migrates an earlier conversation with history; L has none yet | asked | | G_H if L accepts |
+| 3 | H creates and writes in G_H while L is offline; L had created G_L | not asked: keeps G_L, G_H is history | not asked: switches to G_L, G_H is history | G_L |
+| 4 | L ignored or declined H's invitation; later L creates G_L | not asked: keeps G_L | not asked: switches to G_L, G_H is history | G_L |
+| 5 | L took part in G_H, then sends a new G_L | | asked | G_H; G_L if H accepts |
+| 6 | H sends a new G_H; H never took part in G_L | not asked: keeps G_L | | G_L |
+| 7 | H sends a new G_H after taking part in G_L | asked | | G_L; G_H if L accepts |
+| 8 | L joined G_H, then restores an old backup and creates G_L | not asked: keeps G_L | asked | each on its own until H accepts, then G_L |
+| 9 | H restores a backup from before L took part; L sends G_L | | not asked: switches to G_L, G_H is history | G_L |
+
+*Why:* two people who start the same chat at the same moment must end on one chat without being
+asked, but a chat both have used must not be replaced by one of them without the other's consent,
+since owning the chat is what allows adding people to it. The other person's first traffic in my
+chat is the only sign I ever get that they accepted it.
 
 **The invitation screen.** Every invitation uses one screen made of sections shown as they apply:
 who asks; adding that person as a contact; the group, its owner and its members; the earlier
@@ -2559,11 +2622,28 @@ it; it is never relayed and never answered.
 
 - A plaintext whose prefix version is unsupported is rejected before any protobuf parsing.
   There is no negotiation.
-- When that version is **higher** than any version the receiver supports, it answers with one
-  plaintext at its own highest version holding one response frame, with an empty `request_id`,
-  `idx = 0` and status **unsupported**, at most once per peer and received version per 24 hours.
-  This tells the sender which version the receiver speaks; the sender decides what to do with it.
-  A plaintext with a lower unsupported version is dropped silently.
+- **The version notice.** When that version is **higher** than any version the receiver supports,
+  the receiver does not process the plaintext and does not penalise its sender. It answers with
+  one plaintext at its own highest version holding one response frame, with an empty `request_id`,
+  `idx = 0` and status **unsupported**.
+  - It is sent **only to a peer the user explicitly accepted as a contact** (§5.12), whether or
+    not they share a group. A peer whose connection is automatic, or any other peer, gets silence.
+  - The version prefix is read **before** any other check, the size check included: a later
+    version may use a larger container, and must still be answered.
+  - It is sent at most once per peer and received version per 24 hours (a default, §2.2).
+  - A plaintext with a lower unsupported version is dropped silently.
+- **What the notice is for.** It is the upgrade path of this protocol. Suppose a later wire
+  version exists, Alice's device speaks it and Bob's does not. Alice's device sends Bob an
+  invitation in the later version. Without the notice Bob's device stays silent, and Alice's
+  cannot tell "Bob has not updated" from "Bob is offline", "Bob has not answered" or "Bob ignored
+  it": all are silence. With the notice it learns at once that Bob speaks version 1, and can fall
+  back to version 1 for him or tell Alice that Bob must update.
+  A later version could do without it, by sending both versions to a peer whose version it does
+  not know; the notice saves that, and it could not be added to version 1 after its release.
+- **What the notice reveals.** That this device speaks version 1 of this protocol, to a contact its
+  user accepted. Nothing about any group, and nothing to anyone else.
+- A device that receives the notice takes no action required by this version; it MUST NOT treat it
+  as an error or penalise its sender (§2.2).
 - Events carried under a newer prefix follow the version rules of §13.1.
 - Every plaintext and every event carries its protocol version, so the schema of a version is
   closed: an unknown field, enum value (such as a message type or status) or `oneof` case (such as
@@ -3336,6 +3416,10 @@ an epoch whose root is missing is not accepted).
 
 ### D.6 A neighbor request for an epoch the receiver does not hold (§10.1, §13.6)
 
+*Settled:* a request naming an epoch the device does not hold, and a request from someone who is
+not a member of an epoch it holds, both get the same decline with no suggestions. The two cases
+cannot be told apart. A member asking a device that holds the epoch is answered as §10.1 says.
+
 *Current text:* the request is declined with no suggestions.
 
 *Context:* the receiver cannot name members of an epoch it does not hold.
@@ -3346,6 +3430,8 @@ Declining tells the requester to try another member; the root itself spreads by 
 - **C:** decline and ask the requester for the root (a chat lookup by ID).
 
 ### D.7 Constraints on a handover root (§4.7)
+
+*Settled:* a handover keeps the member list, except that the old owner may leave in it (§4.7).
 
 *Current text:* the new owner MUST differ from the parent's owner, and the members MUST be a subset
 of the parent's members.
@@ -3534,6 +3620,8 @@ an ID.
 - **C:** leave the text as it is.
 
 ### D.18 Who signs the kick when a new owner resolves a fork (§5.6, §5.9)
+
+*Settled:* a kick is valid only when signed by the owner of the epoch it names (§5.6). The case below remains a known limit, stated in §5.6.
 
 *Found during review of the implementation.*
 
@@ -4152,6 +4240,8 @@ relay may not hold those parents.
 
 ### D.59 Hand over and leave in one root (§4.7 step 5, §5.9)
 
+*Settled:* choice A; the old owner may leave in its handover (§4.7, §5.7).
+
 *Found during implementation of membership.*
 
 *Current text:* a root is accepted when its deliverer is a member of it (§4.7 step 5). A handover
@@ -4255,6 +4345,8 @@ events, because a tip list of the older epoch names none.
 
 ### D.67 Kick signer after a handover: gap in choice A (D.18)
 
+*Settled with D.18:* see §5.6.
+
 *Found during implementation; it adds to D.18.*
 
 *Context:* the code follows D.18 choice A: a kick naming epoch E is valid when signed by E's owner
@@ -4322,6 +4414,8 @@ or deleting a kicked archive, the member can never be invited again and sees not
 - **B:** a re-add root carries no extra parent; the histories are not joined.
 
 ### D.71 An old leave made live again by a re-add (§5.3 "Replay", §5.10)
+
+*Settled:* choice A; §5.3 now states it.
 
 *Found during review of the implementation.*
 
@@ -4519,8 +4613,6 @@ afterwards.*
 *§2.1 and §5.12 are settled. These details were chosen to complete them and are not confirmed.*
 
 - A message of the earlier one-to-one format received from an unsupported client is ignored.
-- The losing group of two creations at once is deleted even if messages were already written in
-  it; they are lost.
 - A link made by a migration is local, like the manual links of §5.10: each device links to its
   own archive.
 - Declining a migration invitation leaves the archive as it is, and "Migrate" is offered again.
