@@ -312,9 +312,15 @@ fn work_stays_queued_until_its_plaintext_is_handed_off() {
     let out = node.poll_outbox(&mut dev.store, now, &mut net.rng).unwrap();
     node.abandon(out[0].handle);
     // Not at once (no reassembly loop), but after a short backoff.
-    assert!(node.poll_outbox(&mut dev.store, now, &mut net.rng).unwrap().is_empty());
+    assert!(
+        node.poll_outbox(&mut dev.store, now, &mut net.rng)
+            .unwrap()
+            .is_empty()
+    );
     let later = now + crate::node::timing::ABANDON_BACKOFF_MS;
-    let out = node.poll_outbox(&mut dev.store, later, &mut net.rng).unwrap();
+    let out = node
+        .poll_outbox(&mut dev.store, later, &mut net.rng)
+        .unwrap();
     assert_eq!(full_events(&frames(&out[0].plaintext)), vec![e2.event_id()]);
     assert_eq!(
         node.handed_off(&mut dev.store, 9999, now, &mut net.rng),
