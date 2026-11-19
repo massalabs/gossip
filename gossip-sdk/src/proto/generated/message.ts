@@ -19,6 +19,7 @@ export interface Message {
   citedMsgId?: Uint8Array;
   citedContactId?: Uint8Array;
   forwardedContent?: string;
+  groupPlaintext?: Uint8Array;
 }
 
 const textEncoder = new TextEncoder();
@@ -110,6 +111,10 @@ export const Message = {
       writeString(6, message.forwardedContent, out);
     }
 
+    if (message.groupPlaintext !== undefined) {
+      writeBytes(7, message.groupPlaintext, out);
+    }
+
     return new Uint8Array(out);
   },
 
@@ -179,6 +184,16 @@ export const Message = {
           message.forwardedContent = textDecoder.decode(
             buffer.slice(lengthOffset, end)
           );
+          offset = end;
+          break;
+        }
+        case 7: {
+          const { value: length, offset: lengthOffset } = decodeVarint(
+            buffer,
+            offset
+          );
+          const end = lengthOffset + length;
+          message.groupPlaintext = buffer.slice(lengthOffset, end);
           offset = end;
           break;
         }

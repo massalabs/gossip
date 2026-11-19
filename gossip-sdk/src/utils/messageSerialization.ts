@@ -37,6 +37,8 @@ export interface DeserializedMessage {
     originalMsgId: Uint8Array;
   };
   type: MessageType;
+  /** A group plaintext, carried by a keep-alive (see `serializeGroupPlaintext`). */
+  groupPlaintext?: Uint8Array;
 }
 
 /**
@@ -47,6 +49,21 @@ export function serializeKeepAliveMessage(): Uint8Array {
   return ProtoMessage.encode({
     messageType: ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE,
     content: '',
+  });
+}
+
+/**
+ * Serialize a group plaintext for the one-to-one session of one recipient.
+ *
+ * It is a keep-alive carrying the plaintext in its own field: a client that
+ * predates groups drops it as a keep-alive, where an unknown message type would
+ * be shown as an empty text message.
+ */
+export function serializeGroupPlaintext(plaintext: Uint8Array): Uint8Array {
+  return ProtoMessage.encode({
+    messageType: ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE,
+    content: '',
+    groupPlaintext: plaintext,
   });
 }
 
@@ -245,6 +262,7 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
     return {
       content: '',
       type: MessageType.KEEP_ALIVE,
+      groupPlaintext: decoded.groupPlaintext,
     };
   }
 

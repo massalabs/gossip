@@ -20,4 +20,9 @@ message Message {
   optional bytes citedMsgId = 4;
   optional bytes citedContactId = 5;
   optional string forwardedContent = 6;
+  // A group plaintext (plausibly deniable group chats). It travels with
+  // messageType MESSAGE_TYPE_KEEP_ALIVE: a client that predates groups drops a
+  // keep-alive without reading it, where an unknown type would be shown as an
+  // empty text message.
+  optional bytes groupPlaintext = 7;
 }
