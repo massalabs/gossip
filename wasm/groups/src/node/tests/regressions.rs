@@ -348,3 +348,35 @@ fn a_task_announced_by_a_responsive_member_stays_credible_after_two_attempts() {
     };
     assert!(net.devs[0].node.priority(&key) >= crate::node::index::CREDIBLE);
 }
+
+/// Found by the network simulation (code at `32561cec`, seed 2168): a resend after a
+/// reconnection restarted the local wait of the stage, so a member that never answers but
+/// whose session reset more often than the stage's TTL held a task forever, and the members
+/// that had announced the event were never asked. §11.4: such resends do not change the
+/// stage.
+#[test]
+fn a_reconnection_resend_does_not_extend_the_stage() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(q[0].to, member(1));
+    // Member 1 never answers; its session resets every half TTL.
+    let mut asked = Vec::new();
+    for _ in 0..6 {
+        net.now += q[0].ttl / 2;
+        let now = net.now;
+        let dev = &mut net.devs[0];
+        dev.node
+            .peer_reconnected(&mut dev.store, member(1), now, &mut net.rng)
+            .unwrap();
+        net.tick(0);
+        asked.extend(
+            super::retrieval::sent_lookups(&mut net, 0)
+                .iter()
+                .map(|s| s.to),
+        );
+    }
+    assert!(asked.contains(&member(2)), "{asked:?}");
+}
