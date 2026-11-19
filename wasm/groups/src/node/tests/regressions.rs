@@ -817,3 +817,87 @@ fn a_task_waits_for_an_outstanding_responsive_member() {
     assert!(asked.contains(&member(2)), "{asked:?}");
     assert!(!asked.contains(&member(3)), "{asked:?}");
 }
+
+/// Found by review (code at `6a916f2e`): the credible threshold was the score of an
+/// unmeasured member, so one legitimate "not available" after a notice made a member that
+/// had supplied nothing yet suspect; an invalid event in an answer was penalised twice; and
+/// an ID listed in a tip page counted as announced, so "not available" for it was
+/// penalised.
+#[test]
+fn the_score_does_not_overpunish_honest_answers() {
+    use crate::wire::Page;
+    let mut net = Net::new(4, 1);
+    let chat = net.chat();
+    // One "not available" after a notice: still credible.
+    let a = EventId::new(T0, [1; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[a])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    super::retrieval::answer(
+        &mut net,
+        0,
+        &q[0],
+        ResponseResult::Status(Status::NotAvailable),
+    );
+    let b = EventId::new(T0, [2; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[b])]);
+    let key = TaskKey {
+        chat_id: chat,
+        target: Target::Event(b),
+    };
+    assert!(net.devs[0].node.priority(&key) >= super::super::index::CREDIBLE);
+    // An invalid event (failed secret proof) is penalised once.
+    let e = net.event(T0, 5, &[], 2);
+    net.recv_frames(0, member(2), &[notice(chat, &[e.event_id()])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    let s = q.iter().find(|s| s.to == member(2)).unwrap();
+    let mut bad = blob(&e);
+    let proof = e.secret_proof();
+    let at = bad.windows(32).position(|w| w == proof.as_bytes()).unwrap();
+    bad[at] ^= 1;
+    super::retrieval::answer(&mut net, 0, s, ResponseResult::Event(bad));
+    assert_eq!(
+        net.devs[0].node.t.peers.get(&member(2)).unwrap().penalty,
+        PENALTY_MALFORMED
+    );
+    // An ID listed in a page, then "not available": no penalty.
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    dev.node
+        .peer_reconnected(&mut dev.store, member(3), now, &mut net.rng)
+        .unwrap();
+    let sent = super::retrieval::sent_queries(&mut net, 0);
+    let s = sent
+        .iter()
+        .find(|s| s.to == member(3) && matches!(s.op, QueryOp::TipsScan { .. }))
+        .unwrap();
+    let QueryOp::TipsScan { scan_id, .. } = s.op else {
+        unreachable!()
+    };
+    let c = EventId::new(T0, [3; 16]);
+    let page = Page {
+        scan_id,
+        offset: 0,
+        count: 1,
+        entries: vec![Entry {
+            chat_id: chat,
+            item: EntryItem::Event(c),
+        }],
+        skipped: 0,
+    };
+    super::retrieval::answer(&mut net, 0, s, ResponseResult::Page(page));
+    for _ in 0..4 {
+        for s in super::retrieval::sent_lookups(&mut net, 0) {
+            if s.to == member(3) {
+                super::retrieval::answer(
+                    &mut net,
+                    0,
+                    &s,
+                    ResponseResult::Status(Status::NotAvailable),
+                );
+            }
+        }
+        net.now += 70_000;
+        net.tick(0);
+    }
+    assert_eq!(net.devs[0].node.score(&member(3)), 500_000);
+}
