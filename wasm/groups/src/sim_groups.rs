@@ -166,6 +166,10 @@ struct Counters {
     direct_superseded: u64,
     /// Groups of two adopted under a contact's consent.
     direct_consents: u64,
+    /// Invitations to continue a chat of two in a new one, accepted (§5.12).
+    direct_continuations: u64,
+    /// Messages written in chats of two.
+    direct_messages: u64,
     /// Migration roots replayed by a hostile member to a third party.
     direct_replays: u64,
     /// `migrate_from` forged by a hostile owner on a larger group.
@@ -242,6 +246,8 @@ impl Counters {
             direct_crossings,
             direct_superseded,
             direct_consents,
+            direct_continuations,
+            direct_messages,
             direct_replays,
             direct_forged,
             forged_member_handovers,
@@ -304,6 +310,8 @@ impl Counters {
             ("direct_crossings", self.direct_crossings),
             ("direct_superseded", self.direct_superseded),
             ("direct_consents", self.direct_consents),
+            ("direct_continuations", self.direct_continuations),
+            ("direct_messages", self.direct_messages),
             ("direct_replays", self.direct_replays),
             ("direct_forged", self.direct_forged),
             ("forged_member_handovers", self.forged_member_handovers),
@@ -2711,6 +2719,10 @@ mod direct {
         Contact { both: bool },
         /// An ordinary group of two, left as an invitation.
         Plain,
+        /// The second consents and the first founds; both write in it; an hour later the
+        /// second, which sorts first, founds a new chat to continue the conversation (one
+        /// that sorts last would get the chat it holds back from its creation).
+        Continue,
     }
 
     struct Dev {
@@ -2723,6 +2735,9 @@ mod direct {
         consented: BTreeSet<usize>,
         /// Peers it founded a migration with.
         migrated: BTreeSet<usize>,
+        /// The chats of two it holds in which the other person took part or it wrote itself,
+        /// since its last restore: never erased.
+        kept: BTreeSet<ChatId>,
     }
 
     struct Sim {
@@ -2754,6 +2769,7 @@ mod direct {
                     accepted: BTreeSet::new(),
                     consented: BTreeSet::new(),
                     migrated: BTreeSet::new(),
+                    kept: BTreeSet::new(),
                 })
                 .collect();
             for d in &mut devs {
@@ -2783,9 +2799,10 @@ mod direct {
                     } else {
                         (b, a)
                     };
-                    let kind = match (n, below(&mut sim.rng, 5)) {
+                    let kind = match (n, below(&mut sim.rng, 6)) {
                         (0, _) => Kind::Migration { both: true },
                         (1, _) => Kind::Contact { both: false },
+                        (2, _) | (_, 5) => Kind::Continue,
                         (_, 0) => Kind::Migration { both: false },
                         (_, 1) => Kind::Migration { both: true },
                         (_, 2) => Kind::Contact { both: false },
@@ -2811,6 +2828,15 @@ mod direct {
                             }
                         }
                         Kind::Plain => sim.script.push((t, x, y, kind)),
+                        Kind::Continue => {
+                            let (x, y) = if gid(x).as_bytes() < gid(y).as_bytes() {
+                                (y, x)
+                            } else {
+                                (x, y)
+                            };
+                            sim.script.push((t, x, y, Kind::Contact { both: false }));
+                            sim.script.push((t + HOUR, y, x, kind));
+                        }
                     }
                     sim.pairs.push((x, y, kind));
                 }
@@ -2917,6 +2943,25 @@ mod direct {
                     dev.created.insert(g);
                     dev.migrated.insert(peer);
                 }
+                Kind::Continue => {
+                    let dev = &mut self.devs[d];
+                    let g = dev
+                        .node
+                        .create_group_with(
+                            &mut dev.store,
+                            &s,
+                            String::new(),
+                            vec![gid(peer)],
+                            GroupOptions {
+                                migrate_from: Some(0),
+                            },
+                            now,
+                            &mut self.rng,
+                        )
+                        .unwrap();
+                    dev.created.insert(g);
+                    dev.migrated.insert(peer);
+                }
                 Kind::Plain => {
                     let dev = &mut self.devs[d];
                     let g = dev
@@ -2989,9 +3034,13 @@ mod direct {
             dev.node
                 .tick_with(&mut dev.store, Some(&s), now, &mut self.rng)
                 .unwrap();
-            // The user accepts the migrations it is shown; ordinary invitations wait.
+            // The user accepts the migrations it is shown and the invitations to continue a
+            // chat of two; ordinary invitations wait.
             for inv in dev.node.invitations(now) {
-                if inv.migration_of.is_some() && d != HOSTILE {
+                if inv.continues.is_some() && d != HOSTILE {
+                    self.counters.direct_continuations += 1;
+                }
+                if (inv.migration_of.is_some() || inv.continues.is_some()) && d != HOSTILE {
                     let g = dev
                         .node
                         .accept_invitation(&mut dev.store, inv.chat_id, now, &mut self.rng)
@@ -3007,6 +3056,38 @@ mod direct {
             {
                 if let ChangeKind::Superseded { .. } = c.kind {
                     self.counters.direct_superseded += 1;
+                }
+            }
+            // The user writes now and then in its active chats of two, and the chats in which
+            // the other person took part, or it wrote, are recorded: never to be erased.
+            let chats: Vec<crate::node::GroupSummary> = dev
+                .node
+                .groups()
+                .into_iter()
+                .filter(|g| g.members.len() == 2)
+                .collect();
+            for g in chats {
+                if g.took_part == Some(true) {
+                    self.devs[d].kept.insert(g.group);
+                }
+                if g.status == MyStatus::Member && d != HOSTILE && chance(&mut self.rng, 2) {
+                    let dev = &mut self.devs[d];
+                    if dev
+                        .node
+                        .publish_message(
+                            &mut dev.store,
+                            g.current,
+                            crate::event::Body::Text("hi".into()),
+                            BTreeMap::new(),
+                            None,
+                            now,
+                            &mut self.rng,
+                        )
+                        .is_ok()
+                    {
+                        dev.kept.insert(g.group);
+                        self.counters.direct_messages += 1;
+                    }
                 }
             }
             let dev = &mut self.devs[d];
@@ -3064,6 +3145,12 @@ mod direct {
         fn check(&self) {
             for d in 0..N {
                 let node = &self.devs[d].node;
+                // No chat of two the other person took part in, or this device wrote in, is
+                // erased: a replaced one is kept superseded.
+                let held: BTreeSet<ChatId> = node.groups().iter().map(|g| g.group).collect();
+                for g in &self.devs[d].kept {
+                    assert!(held.contains(g), "device {d} erased {g:?}");
+                }
                 // A non-member never holds, installs or links a root.
                 for (c, r) in node.tables().epochs.iter() {
                     assert!(r.root.is_member(&gid(d)), "device {d} holds {c:?}");
@@ -3138,8 +3225,9 @@ mod direct {
                         assert_eq!(a.len(), 1, "pair {x} {y}: {a:?}");
                         assert_eq!(a, b, "pair {x} {y}");
                     }
-                    Kind::Contact { .. } => {
-                        // One chat, held by both, also when the requests crossed.
+                    Kind::Contact { .. } | Kind::Continue => {
+                        // One chat, held by both, also when the requests crossed, and after a
+                        // conversation continued in a new chat.
                         let (a, b) = (migration(x, y), migration(y, x));
                         assert_eq!(a.len(), 1, "contact {x} {y}: {a:?}");
                         assert_eq!(a, b, "contact {x} {y}");
