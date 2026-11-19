@@ -1,5 +1,8 @@
 //! The message event (§6.1, §6.2, §4.2) and its result projection.
+//!
+//! `Debug` output never shows message content (text, bodies, metadata values), only sizes.
 
+use core::fmt;
 use std::collections::BTreeMap;
 
 use crate::cbor::Value;
@@ -12,6 +15,7 @@ use crate::hash::{h, secret_proof};
 use crate::ids::{
     ChatId, EventId, GossipId, RefChatId, SecretProof, SyncObjId, check_sorted_distinct,
 };
+use crate::redact;
 use crate::root::Root;
 use crate::wire::{self, proto, strict};
 
@@ -49,8 +53,8 @@ impl MessageType {
     }
 }
 
-/// The type-specific body of a non-delete result (§6.2).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The type-specific body of a non-delete result (§6.2). Its `Debug` output shows only sizes.
+#[derive(Clone, PartialEq, Eq)]
 pub enum Body {
     /// `text`: UTF-8 text.
     Text(String),
@@ -115,8 +119,8 @@ impl Body {
     }
 }
 
-/// A complete non-delete result (§6.2).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A complete non-delete result (§6.2). Its `Debug` output hides the body and the metadata.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Content {
     /// The sync object.
     pub sync_obj_id: SyncObjId,
@@ -132,6 +136,47 @@ pub struct Content {
     pub edited: bool,
     /// Text keys to byte values, preserved exactly.
     pub metadata: BTreeMap<String, Vec<u8>>,
+}
+
+impl fmt::Debug for Body {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Body::Text(t) => f
+                .debug_tuple("Text")
+                .field(&redact::Bytes(t.len()))
+                .finish(),
+            Body::Forward {
+                content_type,
+                content,
+            } => f
+                .debug_struct("Forward")
+                .field("content_type", content_type)
+                .field("content", &redact::Bytes(content.len()))
+                .finish(),
+            Body::Reaction(b) => f
+                .debug_tuple("Reaction")
+                .field(&redact::Bytes(b.len()))
+                .finish(),
+            Body::Media(b) => f
+                .debug_tuple("Media")
+                .field(&redact::Bytes(b.len()))
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Debug for Content {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Content")
+            .field("sync_obj_id", &self.sync_obj_id)
+            .field("author", &self.author)
+            .field("created_at", &self.created_at)
+            .field("last_modified_at", &self.last_modified_at)
+            .field("body", &self.body)
+            .field("edited", &self.edited)
+            .field("metadata", &redact::Entries(self.metadata.len()))
+            .finish()
+    }
 }
 
 /// The payload of a message event: a complete result or a delete tombstone (§6.2).

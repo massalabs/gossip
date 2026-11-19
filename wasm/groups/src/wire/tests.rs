@@ -1143,3 +1143,86 @@ fn a_plaintext_of_empty_frames_is_judged_frame_by_frame() {
     }
     assert_eq!(count, n);
 }
+
+// ── Debug output ─────────────────────────────────────────────────────────────
+
+#[test]
+fn debug_hides_secrets_and_content() {
+    const TEXT: &str = "the words of a message";
+    let objects = objects();
+    let EventObject::Root(root) = &objects[0] else {
+        panic!()
+    };
+    // The test root's group secret is 32 bytes of 0x10.
+    let secret_bytes = format!("{:?}", vec![0x10u8; 4]);
+    let secret_bytes = &secret_bytes[1..secret_bytes.len() - 1];
+    let shown = format!("{:?} {:?}", root.to_proto(), root);
+    assert!(shown.contains("group_secret: <32 bytes>"), "{shown}");
+    assert!(!shown.contains(secret_bytes), "{shown}");
+
+    let EventObject::Message(m) = &objects[1] else {
+        panic!()
+    };
+    let mut content = match m.payload() {
+        Payload::Content(c) => c.clone(),
+        Payload::Delete { .. } => panic!(),
+    };
+    content.body = Body::Text(TEXT.into());
+    content
+        .metadata
+        .insert("note".into(), TEXT.as_bytes().to_vec());
+    let message = MessageEvent::create(
+        root,
+        m.event_id(),
+        m.parents(),
+        Payload::Content(content.clone()),
+    )
+    .unwrap();
+    let blob = encode_event_blob(&EventObject::Message(message.clone())).unwrap();
+    let forward = Body::Forward {
+        content_type: crate::MessageType::Text,
+        content: TEXT.as_bytes().to_vec(),
+    };
+    let response = Frame::Response(Response {
+        request_id: Some(RequestId::from_bytes([1; 16])),
+        idx: 0,
+        result: ResponseResult::Event(blob.clone()),
+    });
+    let plaintext = encode_plaintext(&[Frame::Event(blob.clone()), response.clone()]).unwrap();
+    let mut forward_proto = message.to_proto();
+    forward_proto.payload.as_mut().unwrap().body = Some(proto::Body::Forward(proto::Forward {
+        content_type: 0,
+        content: TEXT.as_bytes().to_vec(),
+    }));
+    let edit = crate::LocalEdit {
+        body: Some(Body::Text(TEXT.into())),
+        metadata: Some(content.metadata.clone()),
+        ..Default::default()
+    };
+    let shown = [
+        format!("{message:?}"),
+        format!("{content:?}"),
+        format!("{forward:?}"),
+        format!("{:?}", Body::Media(TEXT.as_bytes().to_vec())),
+        format!("{:?}", message.to_proto()),
+        format!("{forward_proto:?}"),
+        format!("{:?}", Frame::Event(blob.clone())),
+        format!("{response:?}"),
+        format!(
+            "{:?}",
+            proto::Frame {
+                kind: Some(proto::FrameKind::Event(blob.clone()))
+            }
+        ),
+        format!("{:?}", decode_plaintext(&plaintext).unwrap()),
+        format!("{:?}", frames_of(&plaintext)),
+        format!("{edit:?}"),
+    ];
+    let as_numbers = format!("{:?}", &TEXT.as_bytes()[..4]);
+    let as_numbers = &as_numbers[1..as_numbers.len() - 1];
+    for s in shown {
+        assert!(!s.contains("words"), "{s}");
+        assert!(!s.contains(as_numbers), "{s}");
+        assert!(s.contains("bytes>"), "{s}");
+    }
+}

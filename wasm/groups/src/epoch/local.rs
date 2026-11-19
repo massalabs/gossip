@@ -60,8 +60,9 @@ pub struct Published {
     pub merge: Merge,
 }
 
-/// A local-only edit (§9.1): each `Some` field replaces the stored one.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// A local-only edit (§9.1): each `Some` field replaces the stored one. Its `Debug` output
+/// hides the metadata, as the body's does its content.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct LocalEdit {
     /// New body.
     pub body: Option<Body>,
@@ -75,6 +76,25 @@ pub struct LocalEdit {
     pub metadata: Option<BTreeMap<String, Vec<u8>>>,
     /// New `edited` flag. None is added automatically.
     pub edited: Option<bool>,
+}
+
+impl core::fmt::Debug for LocalEdit {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LocalEdit")
+            .field("body", &self.body)
+            .field("author", &self.author)
+            .field("created_at", &self.created_at)
+            .field("last_modified_at", &self.last_modified_at)
+            .field(
+                "metadata",
+                &self
+                    .metadata
+                    .as_ref()
+                    .map(|m| crate::redact::Entries(m.len())),
+            )
+            .field("edited", &self.edited)
+            .finish()
+    }
 }
 
 impl Epoch<'_> {
