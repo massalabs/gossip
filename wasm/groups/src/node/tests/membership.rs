@@ -3414,3 +3414,66 @@ fn a_root_whose_parent_turns_out_closed_is_no_invitation() {
         "a root of a closed line is offered: {inv:?}"
     );
 }
+
+/// Found by the membership simulation (seed 168 once a member that left is added back): a
+/// new owner added back a member and named, as the last epoch that member was in (§5.10),
+/// the former owner's root of its old epoch, dated at the end of time (D.72). The member
+/// held that root but could not verify the new owner's authority over it (no handover leads
+/// to it), so the root was an invitation that started a second conversation of the group.
+#[test]
+fn adding_back_names_the_last_epoch_of_the_owners_line_not_a_former_owners_branch() {
+    let (mut net, g) = founded(3);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(MIN);
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(MIN);
+    // The former owner continues the first epoch, which still lists device 2, at the end of
+    // time.
+    let params = crate::root::RootParams {
+        name: "back".into(),
+        members: (0..3).map(gid).collect(),
+        group_secret: crate::ids::GroupSecret::from_bytes([7; 32]),
+        owner: ident(0).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([8; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([9; 32]),
+        created_at: u64::MAX,
+    };
+    let back = Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [2; 32])
+        .unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(back.clone()))).unwrap();
+    net.recv_frames_m(1, 0, &[Frame::Event(blob)]);
+    assert!(net.devs[1].node.root(&back.chat_id()).is_some());
+    let z = net
+        .change(
+            1,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(2)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    let root = net.devs[1].node.root(&z).unwrap();
+    assert!(root.names_parent(&g), "the last epoch of the line listing it");
+    assert!(!root.names_parent(&back.chat_id()));
+}
