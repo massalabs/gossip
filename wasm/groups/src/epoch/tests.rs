@@ -1124,6 +1124,28 @@ fn work_timings() {
         tips.len(),
         start.elapsed()
     );
+    // Many events carrying one result, or many scheduled deletions of one message.
+    for deletions in [false, true] {
+        let mut store = MemoryStorage::new();
+        let start = std::time::Instant::now();
+        for i in 0..6_000u32 {
+            let mut r = [0u8; 16];
+            r[..4].copy_from_slice(&i.to_be_bytes());
+            let payload = if deletions {
+                del(1, Some(T0 + 60 * MIN + u64::from(i)))
+            } else {
+                text(1, f.bob.id, T0, T0, "same")
+            };
+            let e = MessageEvent::create(&f.root, EventId::new(T0, r), &[], payload).unwrap();
+            f.epoch()
+                .receive(&mut store, f.bob_sender(), e, T0)
+                .unwrap();
+        }
+        println!(
+            "6,000 events of one message (deletions: {deletions}): {:?}",
+            start.elapsed()
+        );
+    }
 }
 
 #[test]
