@@ -52,9 +52,11 @@ fn slot_of(task: &Task, prio: u64) -> Slot {
     }
 }
 
-/// The priority from which a task is credible: one of its untried triggering candidates
-/// scores at least as an unmeasured peer and was not asked in vain twice already.
-pub(crate) const CREDIBLE: u64 = 500_000;
+/// The priority from which a task is credible: one of its untried, responsive triggering
+/// candidates scores at least this. Strictly below the score after one failed announcement
+/// and no supply (1/3), which an honest member may give for an event pruned in between,
+/// and above the score after two (1/4).
+pub(crate) const CREDIBLE: u64 = 300_000;
 
 fn dec(map: &mut BTreeMap<GossipId, usize>, peer: &GossipId) {
     if let Some(n) = map.get_mut(peer) {
