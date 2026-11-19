@@ -326,6 +326,13 @@ impl Node {
                     }
                 }
             }
+            ResponseResult::Status(Status::Malformed) => {
+                // As for a lookup (§11.4): the peer fails for this scan, without a penalty.
+                self.answered(&peer);
+                if current {
+                    self.complete_scan(cx, key, ScanEnd::Ended);
+                }
+            }
             _ => self.scan_invalid(cx, key, current),
         }
         Ok(())
