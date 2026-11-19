@@ -1836,7 +1836,7 @@ fn a_long_chain_received_newest_first_is_adopted_without_recursion() {
 }
 
 /// The answers of `d` to the query `ops` from member `from`, by entry position.
-fn answers_of(
+pub(crate) fn answers_of(
     net: &mut MNet,
     d: usize,
     from: usize,
