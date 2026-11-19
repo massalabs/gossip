@@ -6,12 +6,12 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use super::*;
-use crate::Kick;
 use crate::keys::KeySigner;
 use crate::node::records::{EpochStatus, GroupStatus, SignedObject};
 use crate::rng::TestRng;
 use crate::store::MemoryStorage;
 use crate::test_support::{Identity, identity};
+use crate::{Kick, Leave};
 
 /// Identities 0 to 11, derived once.
 pub(crate) fn ident(i: usize) -> &'static Identity {
@@ -2518,4 +2518,199 @@ fn kick_authorities_are_transitive_and_an_unverifiable_kick_is_no_penalty() {
     let before = net.devs[3].node.score(&gid(1));
     net.recv_frames_m(3, 1, &[Frame::Event(blob)]);
     assert_eq!(net.devs[3].node.score(&gid(1)), before);
+}
+
+/// Finding 11 of the review of 54711780: a "hand over and leave" root received while its
+/// parent is not held was a failed announcement of the outgoing owner, who is no member of
+/// it; it is discarded without penalty and its parent looked up (§4.7).
+#[test]
+fn hand_over_and_leave_with_an_unknown_parent_is_no_failed_announcement() {
+    let (mut net, g) = founded(3);
+    net.offline[2] = true;
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![],
+            name: Some("x".into()),
+        },
+    )
+    .unwrap();
+    net.exchange();
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: true,
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    let dropped = core::mem::take(&mut net.dropped);
+    net.exchange();
+    let dropped: Vec<_> = dropped
+        .into_iter()
+        .chain(core::mem::take(&mut net.dropped))
+        .collect();
+    net.offline[2] = false;
+    for (from, to, pt) in dropped {
+        if from == 0 && to == 2 {
+            for f in frames(&pt) {
+                if let Frame::Event(b) = &f
+                    && matches!(wire::decode_event_blob(b, 1), Ok(EventObject::Root(r)) if r.chat_id() == h)
+                {
+                    net.recv_frames_m(2, 0, &[f.clone()]);
+                }
+            }
+        }
+    }
+    assert_eq!(net.devs[2].node.stats().failed_announcements, 0);
+    assert!(net.devs[2].node.tables().held_roots.contains(&h));
+}
+
+/// Finding 11: two signed leaves of one member pending its keys, from two relays: a forged
+/// one replaced the genuine one, which was lost once the keys arrived.
+#[test]
+fn a_forged_leave_does_not_replace_a_genuine_one_waiting_for_keys() {
+    let mut net = MNet::new(4, false);
+    let g = net.create(0, &[1, 2, 3]);
+    net.exchange();
+    for d in 1..4 {
+        net.accept_all(d);
+    }
+    let root = net.devs[0].node.root(&g).unwrap();
+    assert!(net.devs[0].node.keys(&gid(3)).is_none());
+    let genuine = Leave::sign(
+        &root,
+        &ident(3).public,
+        &ident(3).secret.dsa_signing_key,
+        [1; 32],
+    )
+    .unwrap();
+    let mut p = genuine.to_proto();
+    p.signature[0] ^= 1;
+    let forged = Leave::from_proto(&p).unwrap();
+    net.recv_frames_m(
+        0,
+        1,
+        &[Frame::Event(
+            wire::encode_event_blob(&EventObject::Leave(genuine)).unwrap(),
+        )],
+    );
+    net.recv_frames_m(
+        0,
+        2,
+        &[Frame::Event(
+            wire::encode_event_blob(&EventObject::Leave(forged)).unwrap(),
+        )],
+    );
+    assert_eq!(net.devs[0].node.tables().unverified.len(), 2);
+}
+
+/// Regression for 54711780 (finding 11): pending removals left on a device that handed the
+/// group over made its next wake-up always due.
+#[test]
+fn a_former_owner_has_no_removal_due() {
+    let (mut net, g) = founded(3);
+    net.recv_frames_m(
+        0,
+        2,
+        &[Frame::LeaveRequest(crate::wire::LeaveRequest {
+            chat_id: g,
+        })],
+    );
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.now += 10 * MIN;
+    net.tick(0);
+    let wake = net.devs[0]
+        .node
+        .next_wakeup(&net.devs[0].store, net.now)
+        .unwrap();
+    assert!(wake.is_none_or(|t| t > net.now), "due at once: {wake:?}");
+}
+
+/// Finding 11: "Dissolve & Delete" kept every root of the group for two weeks and then
+/// deleted side branches that do not lead to the dissolved epoch (§5.8 erases the named
+/// epoch and those that lead to it, and keeps the named root and the message only).
+#[test]
+fn dissolve_and_delete_keeps_side_branches_and_only_the_named_root() {
+    let (mut net, g) = founded(3);
+    let backup = net.devs[0].store.clone();
+    let a = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("A".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.say(1, &a, "on the side");
+    net.run(MIN);
+    net.devs[0].store = backup;
+    net.restart(0);
+    net.now += MIN;
+    let b = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("B".into()),
+            },
+        )
+        .unwrap();
+    net.offline[1] = true;
+    net.offline[2] = true;
+    let now = net.now;
+    let s = signer(0);
+    let dev = &mut net.devs[0];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, b, true, now, &mut net.rng)
+        .unwrap();
+    net.offline = vec![false; 3];
+    for (from, to, pt) in core::mem::take(&mut net.dropped) {
+        let now = net.now;
+        let dev = &mut net.devs[to];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(from), &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    net.exchange();
+    let d = 1;
+    assert_eq!(
+        net.summary(d, &g).unwrap().status,
+        MyStatus::Dissolved { deleted: true }
+    );
+    assert!(net.devs[d].node.root(&a).is_some());
+    assert!(
+        net.devs[d].node.root(&g).is_some(),
+        "an ancestor of a side branch stays"
+    );
+    net.now += 15 * DAY;
+    net.tick(d);
+    assert!(
+        net.devs[d].node.root(&b).is_none(),
+        "the named root is gone after two weeks"
+    );
+    assert!(net.devs[d].node.root(&a).is_some(), "the side branch stays");
+    assert!(net.texts(d, &a).contains(&"on the side".to_owned()));
 }
