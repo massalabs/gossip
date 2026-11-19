@@ -582,6 +582,11 @@ impl Sim {
                 return;
             }
             let handle = o.handle;
+            let node = self.devs[d].node.as_mut().expect("booted");
+            if !node.is_current(handle) {
+                node.abandon(handle);
+                continue;
+            }
             self.op(d, |n, s, now, rng| n.handed_off(s, handle, now, rng))
                 .expect("handoff");
             let e = self.devs[d].hours.entry(hour).or_default();
