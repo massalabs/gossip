@@ -43,7 +43,9 @@
 //!   (default 4, in which every scripted situation occurs);
 //! - `GROUPS_MEMBERS_HOURS=<n>`: hours of activity per run (default 13; the script takes
 //!   about 10);
-//! - `GROUPS_MEMBERS_FINAL=<n>`: hours of the final period (default 12);
+//! - `GROUPS_MEMBERS_FINAL=<n>`: hours of the final period (default 48: periodic recovery
+//!   scans one peer per lane and day, §12.3, and with members that never answer a device
+//!   may need two days of lanes to reach one that holds what it misses);
 //! - `GROUPS_MEMBERS_DEBUG=1`: on a failure, print the devices' groups.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1955,7 +1957,7 @@ fn env_u64(name: &str) -> Option<u64> {
 #[test]
 fn membership_simulation() {
     let hours = env_u64("GROUPS_MEMBERS_HOURS").unwrap_or(13);
-    let final_hours = env_u64("GROUPS_MEMBERS_FINAL").unwrap_or(12);
+    let final_hours = env_u64("GROUPS_MEMBERS_FINAL").unwrap_or(48);
     let single = env_u64("GROUPS_MEMBERS_SEED");
     let seeds: Vec<u64> = match single {
         Some(s) => vec![s],
@@ -1965,10 +1967,29 @@ fn membership_simulation() {
             (first..first + count).collect()
         }
     };
+    // The seeds run on as many threads as the machine offers; the results are taken in
+    // seed order, so the first failing seed is the one reported.
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(seeds.len());
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: std::sync::Mutex<BTreeMap<u64, std::thread::Result<Counters>>> =
+        std::sync::Mutex::new(BTreeMap::new());
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(&seed) = seeds.get(i) else { return };
+                    let r = std::panic::catch_unwind(|| run(seed, hours, final_hours));
+                    results.lock().unwrap().insert(seed, r);
+                }
+            });
+        }
+    });
     let mut total = Counters::default();
-    for seed in &seeds {
-        let seed = *seed;
-        match std::panic::catch_unwind(|| run(seed, hours, final_hours)) {
+    for (seed, r) in results.into_inner().unwrap() {
+        match r {
             Ok(c) => total.add(&c),
             Err(p) => {
                 eprintln!(
