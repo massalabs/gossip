@@ -13,6 +13,7 @@ import enErrors from './locales/en/errors.json';
 import enTime from './locales/en/time.json';
 import enContacts from './locales/en/contacts.json';
 import enValidation from './locales/en/validation.json';
+import enGroups from './locales/en/groups.json';
 
 // FR
 import frCommon from './locales/fr/common.json';
@@ -25,6 +26,7 @@ import frErrors from './locales/fr/errors.json';
 import frTime from './locales/fr/time.json';
 import frContacts from './locales/fr/contacts.json';
 import frValidation from './locales/fr/validation.json';
+import frGroups from './locales/fr/groups.json';
 
 // ZH-CN
 import zhCommon from './locales/zh-CN/common.json';
@@ -37,6 +39,7 @@ import zhErrors from './locales/zh-CN/errors.json';
 import zhTime from './locales/zh-CN/time.json';
 import zhContacts from './locales/zh-CN/contacts.json';
 import zhValidation from './locales/zh-CN/validation.json';
+import zhGroups from './locales/zh-CN/groups.json';
 
 // RU
 import ruCommon from './locales/ru/common.json';
@@ -49,6 +52,7 @@ import ruErrors from './locales/ru/errors.json';
 import ruTime from './locales/ru/time.json';
 import ruContacts from './locales/ru/contacts.json';
 import ruValidation from './locales/ru/validation.json';
+import ruGroups from './locales/ru/groups.json';
 
 export const SUPPORTED_LANGUAGES = ['en', 'fr', 'zh-CN', 'ru'] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
@@ -72,6 +76,7 @@ const resources = {
     time: enTime,
     contacts: enContacts,
     validation: enValidation,
+    groups: enGroups,
   },
   fr: {
     common: frCommon,
@@ -84,6 +89,7 @@ const resources = {
     time: frTime,
     contacts: frContacts,
     validation: frValidation,
+    groups: frGroups,
   },
   'zh-CN': {
     common: zhCommon,
@@ -96,6 +102,7 @@ const resources = {
     time: zhTime,
     contacts: zhContacts,
     validation: zhValidation,
+    groups: zhGroups,
   },
   ru: {
     common: ruCommon,
@@ -108,6 +115,7 @@ const resources = {
     time: ruTime,
     contacts: ruContacts,
     validation: ruValidation,
+    groups: ruGroups,
   },
 };
 
@@ -129,6 +137,7 @@ i18n
       'time',
       'contacts',
       'validation',
+      'groups',
     ],
 
     interpolation: {
