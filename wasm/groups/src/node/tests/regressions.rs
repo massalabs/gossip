@@ -87,3 +87,45 @@ fn a_due_deletion_is_applied_before_it_is_served() {
     );
     crate::epoch::check_invariants(&net.devs[0].store, &chat, net.now).unwrap();
 }
+
+/// Found by the network simulation (code at `efe4edd8`, seed 2): a periodic lane whose
+/// scan went to a member that never answers stayed pending for its 20 stages (about two
+/// weeks), and every other lane waited behind it, so periodic recovery stopped.
+#[test]
+fn a_lane_pending_with_a_silent_member_does_not_stop_the_other_lanes() {
+    use crate::wire::Page;
+    let mut net = Net::new(4, 1);
+    let chat = net.chat();
+    super::dissemination::neighbors_of(&mut net, 0, &[1, 2]);
+    // Member 3, the only non-neighbor, never answers: every random lane scans it.
+    let mut neighbor_scans = Vec::new();
+    for _ in 0..(4 * 24 * 6) {
+        net.tick(0);
+        for s in super::retrieval::sent_queries(&mut net, 0) {
+            if let QueryOp::TipsScan {
+                scan_id, offset, ..
+            } = s.op
+                && s.to != member(3)
+            {
+                if offset == 0 {
+                    neighbor_scans.push(net.now);
+                }
+                let page = Page {
+                    scan_id,
+                    offset,
+                    count: 0,
+                    entries: vec![],
+                    skipped: 0,
+                };
+                super::retrieval::answer(&mut net, 0, &s, ResponseResult::Page(page));
+            }
+        }
+        net.now += 10 * MIN;
+    }
+    let late = neighbor_scans.iter().filter(|t| **t > T0 + 2 * DAY).count();
+    assert!(
+        late >= 2,
+        "neighbor lanes after two days: {neighbor_scans:?}"
+    );
+    let _ = chat;
+}
