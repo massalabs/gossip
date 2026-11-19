@@ -2714,7 +2714,7 @@ mod direct {
             self.send(HOSTILE, third, pt);
             self.counters.direct_replays += 1;
             let mut p = root.to_proto();
-            let mut members = vec![gid(HOSTILE), gid(peer), gid(third)];
+            let mut members = [gid(HOSTILE), gid(peer), gid(third)];
             members.sort();
             p.members = members.iter().map(|m| m.as_bytes().to_vec()).collect();
             p.created_at += 1;
