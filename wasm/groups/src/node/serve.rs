@@ -147,10 +147,12 @@ impl Node {
                 }
                 QueryOp::TipsScan { .. } => from != self.me,
                 // No epoch context: a requester that shares an accepted epoch (§4.11, §12.7).
-                QueryOp::ChatById(_)
-                | QueryOp::ChatByRef(_)
-                | QueryOp::ChatByParent { .. }
-                | QueryOp::SharedChatsScan { .. } => from != self.me && self.shares_epoch(&from),
+                QueryOp::SharedChatsScan { .. } => from != self.me && self.shares_epoch(&from),
+                // Chat lookups also from a member of an archived dissolved group, whose roots
+                // stay served (see `root_served_to`).
+                QueryOp::ChatById(_) | QueryOp::ChatByRef(_) | QueryOp::ChatByParent { .. } => {
+                    from != self.me && (self.shares_epoch(&from) || self.shares_archive(&from))
+                }
                 // A member of the named epoch (§12.8).
                 QueryOp::SignedObject { chat_id, .. } | QueryOp::Removal { chat_id, .. } => {
                     member_of(self, chat_id)
@@ -750,10 +752,15 @@ impl Node {
     /// (`send_owed`).
     pub(crate) fn root_served_to(&self, chat: &ChatId, peer: &GossipId) -> bool {
         // A dissolved group keeps its named root to announce the dissolve message (§5.8).
+        // A dissolved group keeps its named root to announce the dissolve message (§5.8);
+        // "Dissolve & Keep archived" keeps the whole line served (roots only, never
+        // messages), so that a member that missed epochs reaches the dissolved one and
+        // learns the dissolve.
         let dissolved_named = self.installed(chat)
             && matches!(
                 self.group_status(chat),
-                super::records::GroupStatus::Dissolved { epoch, .. } if epoch == *chat
+                super::records::GroupStatus::Dissolved { epoch, must_delete, .. }
+                    if epoch == *chat || !must_delete
             );
         (self.serves(chat) || dissolved_named)
             && self
@@ -784,5 +791,22 @@ impl Node {
             Some(SignedObject::Leave(l)) => l.leaver() == *peer,
             _ => false,
         }
+    }
+}
+
+impl Node {
+    /// Whether `peer` is a member of an installed epoch of a group dissolved with "Dissolve
+    /// & Keep archived" (§5.8).
+    pub(crate) fn shares_archive(&self, peer: &GossipId) -> bool {
+        self.epochs.iter().any(|(c, e)| {
+            e.root.is_member(peer)
+                && matches!(
+                    self.group_status(c),
+                    super::records::GroupStatus::Dissolved {
+                        must_delete: false,
+                        ..
+                    }
+                )
+        })
     }
 }
