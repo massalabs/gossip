@@ -1062,6 +1062,9 @@ impl Node {
 
     /// Invalidates the pending work that refers to events just pruned (§9.3, §15.1).
     fn invalidate(&mut self, chat: ChatId, pruned: &[EventId]) {
+        if !pruned.is_empty() {
+            self.stale_in_flight(chat, pruned);
+        }
         for id in pruned {
             if let Some(keys) = self.work_refs.remove(&(chat, *id)) {
                 for k in keys {

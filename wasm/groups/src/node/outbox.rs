@@ -68,6 +68,8 @@ struct Pending {
     items: Vec<WorkKey>,
     queries: Vec<SentQuery>,
     full: Vec<(ChatId, EventId)>,
+    /// Every event the plaintext sends or announces: a prune of one makes it stale.
+    events: Vec<(ChatId, EventId)>,
     bytes: u64,
     lookups: u64,
     scans: u64,
@@ -83,6 +85,8 @@ pub(crate) struct InFlight {
     sent: BTreeMap<u64, Pending>,
     items: BTreeSet<WorkKey>,
     published: BTreeMap<u64, (GossipId, Vec<(ChatId, EventId)>)>,
+    /// Plaintexts in flight that refer to an event pruned since they were assembled.
+    stale: BTreeSet<u64>,
     rotation: u64,
     /// The position in the 3:1 pattern of each peer's response allocation (§13.9).
     ratio: BTreeMap<GossipId, u8>,
@@ -108,12 +112,18 @@ pub(crate) enum Category {
 
 pub(crate) struct ReadyAnswer {
     pub(crate) key: WorkKey,
+    /// The event it carries, if any.
+    pub(crate) event: Option<(ChatId, EventId)>,
     pub(crate) request_id: RequestId,
     pub(crate) idx: u32,
     pub(crate) category: Category,
     pub(crate) frame: Frame,
     pub(crate) len: usize,
 }
+
+/// An answer decided at assembly: its category (`None` for a page), its result, and the
+/// event it carries.
+type Evaluated = (Option<Category>, ResponseResult, Option<(ChatId, EventId)>);
 
 /// The size a frame of `len` encoded bytes adds to a plaintext.
 fn framed(len: usize) -> usize {
@@ -252,6 +262,7 @@ impl Node {
 
     /// Forgets an assembled plaintext that will not be sent: its work is assembled again.
     pub fn abandon(&mut self, handle: u64) {
+        self.outbox.stale.remove(&handle);
         if let Some(p) = self.outbox.sent.remove(&handle) {
             for k in p.items {
                 self.outbox.items.remove(&k);
@@ -301,6 +312,7 @@ impl Node {
             Ok(())
         })?;
         self.outbox.sent.remove(&handle);
+        self.outbox.stale.remove(&handle);
         let s = &mut self.stats;
         s.plaintexts += 1;
         s.bytes += p.bytes;
@@ -318,6 +330,28 @@ impl Node {
             }
         }
         Ok(())
+    }
+
+    /// Whether the plaintext `handle` is still current: in flight, and no event it sends or
+    /// announces was pruned since it was assembled (§15.1). The transport checks it
+    /// immediately before encryption, unless it encrypts right after [`Node::poll_outbox`]
+    /// with no other engine operation in between; a stale plaintext is abandoned
+    /// ([`Node::abandon`]) and its remaining work assembled again.
+    #[must_use]
+    pub fn is_current(&self, handle: u64) -> bool {
+        self.outbox.sent.contains_key(&handle) && !self.outbox.stale.contains(&handle)
+    }
+
+    /// Marks stale the plaintexts in flight that refer to a pruned event (§15.1).
+    pub(crate) fn stale_in_flight(&mut self, chat: ChatId, pruned: &[EventId]) {
+        for (h, p) in &self.outbox.sent {
+            if p.events
+                .iter()
+                .any(|(c, id)| *c == chat && pruned.contains(id))
+            {
+                self.outbox.stale.insert(*h);
+            }
+        }
     }
 
     /// The backend confirmed the publication of `handle`'s ciphertext: the full events it
@@ -446,7 +480,8 @@ impl Node {
                     ttl,
                     op,
                 } => {
-                    let Some((category, result)) = self.evaluate(cx, &peer, sent_at, ttl, op)?
+                    let Some((category, result, event)) =
+                        self.evaluate(cx, &peer, sent_at, ttl, op)?
                     else {
                         stale.push(key);
                         continue;
@@ -459,6 +494,7 @@ impl Node {
                     let len = frame.encode().map_or(usize::MAX, |b| b.len());
                     let ready = ReadyAnswer {
                         key,
+                        event,
                         request_id,
                         idx,
                         category: category.unwrap_or(Category::Status),
@@ -525,6 +561,7 @@ impl Node {
                 vec![a.key],
                 Pending {
                     answers: 1,
+                    events: a.event.into_iter().collect(),
                     ..Pending::default()
                 },
             ));
@@ -577,6 +614,7 @@ impl Node {
                 vec![k],
                 Pending {
                     full: vec![(chat, id)],
+                    events: vec![(chat, id)],
                     ..Pending::default()
                 },
             ));
@@ -593,6 +631,14 @@ impl Node {
                 return;
             }
             let n = notice.entries.len() as u64;
+            let events = notice
+                .entries
+                .iter()
+                .filter_map(|e| match e.item {
+                    EntryItem::Event(id) => Some((e.chat_id, id)),
+                    _ => None,
+                })
+                .collect();
             frames.push((
                 Frame::Notice(core::mem::replace(
                     notice,
@@ -604,6 +650,7 @@ impl Node {
                 core::mem::take(keys),
                 Pending {
                     notices: n,
+                    events,
                     ..Pending::default()
                 },
             ));
@@ -668,6 +715,7 @@ impl Node {
             p.items.extend(keys);
             p.queries.extend(part.queries);
             p.full.extend(part.full);
+            p.events.extend(part.events);
             p.lookups += part.lookups;
             p.scans += part.scans;
             p.notices += part.notices;
@@ -688,9 +736,9 @@ impl Node {
         sent_at: u64,
         ttl: u64,
         op: AnswerOp,
-    ) -> Result<Option<(Option<Category>, ResponseResult)>, NodeError> {
+    ) -> Result<Option<Evaluated>, NodeError> {
         let late = !super::timing::may_answer(sent_at, ttl, cx.now);
-        let status = |s| Some((Some(Category::Status), ResponseResult::Status(s)));
+        let status = |s| Some((Some(Category::Status), ResponseResult::Status(s), None));
         let member =
             |n: &Self, chat: &ChatId| n.epochs.get(chat).is_some_and(|e| e.root.is_member(peer));
         Ok(match op {
@@ -722,7 +770,7 @@ impl Node {
                 scan_id,
                 offset,
             } => match self.build_page(&(*peer, anchor, scan_id), offset) {
-                r @ ResponseResult::Page(_) => Some((None, r)),
+                r @ ResponseResult::Page(_) => Some((None, r, None)),
                 ResponseResult::Status(s) => status(s),
                 _ => None,
             },
@@ -819,7 +867,8 @@ impl Node {
     }
 }
 
-fn event_answer(e: MessageEvent) -> (Option<Category>, ResponseResult) {
+fn event_answer(e: MessageEvent) -> Evaluated {
+    let carried = Some((e.chat_id(), e.event_id()));
     let category = if matches!(e.payload(), Payload::Delete { .. }) {
         Category::Deletion
     } else {
@@ -827,5 +876,5 @@ fn event_answer(e: MessageEvent) -> (Option<Category>, ResponseResult) {
     };
     let blob =
         wire::encode_event_blob(&EventObject::Message(e)).expect("a stored event fits a container");
-    (Some(category), ResponseResult::Event(blob))
+    (Some(category), ResponseResult::Event(blob), carried)
 }
