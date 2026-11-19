@@ -1,0 +1,439 @@
+//! The storage bridge: the engine reads a synchronous in-memory copy of its records, loaded
+//! from the SDK's database when the node opens, and every committed batch is queued for the
+//! SDK to persist in one database transaction.
+//!
+//! The SDK's database is asynchronous while the engine's storage traits are synchronous, so
+//! the copy answers the reads and the database is written after each operation. The engine's
+//! crash guarantee (a batch is durable before any plaintext it produced reaches the
+//! transport) is kept by the bindings: a plaintext cannot be checked for encryption
+//! ([`super::GroupsNode::is_current`]) while a batch is waiting to be persisted.
+
+use std::collections::BTreeMap;
+
+use groups::node::records::{Batch, NodeChanges, NodeRecords, NodeStorage};
+use groups::store::{
+    Changes, EventRow, MemoryStorage, ObjectRecord, PendingItem, Role, RowState, Storage,
+    StorageError, StorageRead,
+};
+use groups::{ChatId, EventId, MessageEvent, Payload, Root, SyncObjId};
+use serde::{Deserialize, Serialize};
+
+use super::codec::{Codec, R};
+use super::json::J;
+
+/// An event row as stored: `state` is `held`, `pruned` or `marker` (a temporary rejection);
+/// `fields` holds the role and the event's fields of a held row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowOut {
+    pub chat_id: String,
+    pub event_id: String,
+    pub state: String,
+    pub fields: Option<String>,
+}
+
+/// The key of an event row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowKey {
+    pub chat_id: String,
+    pub event_id: String,
+}
+
+/// The parent edges of a processed event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EdgeOut {
+    pub chat_id: String,
+    pub event_id: String,
+    pub parents: String,
+}
+
+/// A current object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectOut {
+    pub chat_id: String,
+    pub sync_obj_id: String,
+    pub fields: String,
+}
+
+/// A node record: its table (`kind`), its key, and its fields; no fields deletes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeOut {
+    pub kind: String,
+    pub key: String,
+    pub fields: Option<String>,
+}
+
+/// One engine batch, to apply in one transaction in this order: `rows` (upserts),
+/// `removedRows`, `edges`, `objects`, `node` (upserts and deletions), then `erase`: every
+/// row, edge and object of these epochs is deleted.
+///
+/// The same shape, without deletions, is the snapshot the node opens from.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchOut {
+    pub rows: Vec<RowOut>,
+    #[serde(default)]
+    pub removed_rows: Vec<RowKey>,
+    pub edges: Vec<EdgeOut>,
+    pub objects: Vec<ObjectOut>,
+    pub node: Vec<NodeOut>,
+    #[serde(default)]
+    pub erase: Vec<String>,
+}
+
+/// Calls `$m!` with every table of the node records.
+macro_rules! node_tables {
+    ($m:ident) => {
+        $m!(
+            epochs,
+            group_recs,
+            signed,
+            keys,
+            markers,
+            replies,
+            unverified,
+            held_roots,
+            events,
+            peers,
+            groups,
+            tasks,
+            scans_out,
+            scans_in,
+            requests,
+            hints,
+            queue,
+            meta,
+            lookup_results
+        )
+    };
+}
+
+fn text<T: Codec>(v: &T) -> String {
+    v.enc().to_text()
+}
+
+fn parse<T: Codec>(s: &str) -> R<T> {
+    T::dec(&J::parse(s)?)
+}
+
+// ── Encoding ─────────────────────────────────────────────────────────────────
+
+fn held_fields(event: &MessageEvent, role: &Role) -> String {
+    J::Obj(vec![
+        ("role".into(), role.enc()),
+        ("version".into(), J::Num(event.version())),
+        ("parents".into(), event.parents().to_vec().enc()),
+        ("payload".into(), event.payload().enc()),
+    ])
+    .to_text()
+}
+
+fn encode_row(chat: &str, row: &EventRow) -> RowOut {
+    let (state, fields) = match &row.state {
+        RowState::Held { event, role } => ("held", Some(held_fields(event, role))),
+        RowState::Pruned => ("pruned", None),
+        RowState::TemporarilyInvalid => ("marker", None),
+    };
+    RowOut {
+        chat_id: chat.to_owned(),
+        event_id: text(&row.event_id),
+        state: state.into(),
+        fields,
+    }
+}
+
+fn encode_changes(c: &Changes, out: &mut BatchOut) {
+    let chat = text(&c.chat_id);
+    for row in c.rows.values() {
+        out.rows.push(encode_row(&chat, row));
+    }
+    for id in &c.removed_rows {
+        out.removed_rows.push(RowKey {
+            chat_id: chat.clone(),
+            event_id: text(id),
+        });
+    }
+    for (child, parents) in &c.edges {
+        out.edges.push(EdgeOut {
+            chat_id: chat.clone(),
+            event_id: text(child),
+            parents: text(parents),
+        });
+    }
+    for obj in c.objects.values() {
+        out.objects.push(ObjectOut {
+            chat_id: chat.clone(),
+            sync_obj_id: text(&obj.sync_obj_id),
+            fields: object_fields(obj),
+        });
+    }
+}
+
+fn object_fields(o: &ObjectRecord) -> String {
+    J::Obj(vec![
+        ("current".into(), o.current.enc()),
+        ("currentEvents".into(), o.current_events.enc()),
+        ("pendingVersions".into(), o.pending_versions.enc()),
+        ("pendingDeletions".into(), o.pending_deletions.enc()),
+    ])
+    .to_text()
+}
+
+fn encode_node(n: &NodeChanges, out: &mut BatchOut) {
+    macro_rules! each {
+        ($($t:ident),*) => {$(
+            for (k, v) in &n.$t {
+                out.node.push(NodeOut {
+                    kind: stringify!($t).into(),
+                    key: text(k),
+                    fields: v.as_ref().map(text),
+                });
+            }
+        )*};
+    }
+    node_tables!(each);
+}
+
+/// The stored form of a batch.
+pub fn encode_batch(b: &Batch) -> BatchOut {
+    let mut out = BatchOut::default();
+    for c in &b.epochs {
+        encode_changes(c, &mut out);
+    }
+    encode_node(&b.node, &mut out);
+    out.erase = b.erase.iter().map(text).collect();
+    out
+}
+
+/// The stored form of every record, as one batch of upserts.
+pub fn encode_snapshot(store: &MemoryStorage) -> Result<BatchOut, StorageError> {
+    let records = store.load_node()?;
+    let mut node = NodeChanges::default();
+    macro_rules! each {
+        ($($t:ident),*) => {$(
+            node.$t = records.$t.iter().map(|(k, v)| (k.clone(), Some(v.clone()))).collect();
+        )*};
+    }
+    node_tables!(each);
+    let mut out = BatchOut::default();
+    for chat in records.epochs.keys() {
+        let mut c = Changes::new(*chat);
+        c.rows = store
+            .event_rows(chat)?
+            .into_iter()
+            .map(|r| (r.event_id, r))
+            .collect();
+        c.edges = store.edges(chat)?.into_iter().collect();
+        c.objects = store
+            .objects(chat)?
+            .into_iter()
+            .map(|o| (o.sync_obj_id, o))
+            .collect();
+        encode_changes(&c, &mut out);
+    }
+    encode_node(&node, &mut out);
+    Ok(out)
+}
+
+// ── Decoding ─────────────────────────────────────────────────────────────────
+
+fn decode_node(nodes: &[NodeOut]) -> R<NodeRecords> {
+    let mut r = NodeRecords::default();
+    for n in nodes {
+        let Some(fields) = &n.fields else {
+            return Err(format!("a snapshot record of {} has no fields", n.kind));
+        };
+        macro_rules! each {
+            ($($t:ident),*) => {
+                match n.kind.as_str() {
+                    $(stringify!($t) => {
+                        r.$t.insert(
+                            parse(&n.key).map_err(|e| format!("{} key: {e}", n.kind))?,
+                            parse(fields).map_err(|e| format!("{} record: {e}", n.kind))?,
+                        );
+                    })*
+                    other => return Err(format!("unknown record kind {other}")),
+                }
+            };
+        }
+        node_tables!(each);
+    }
+    Ok(r)
+}
+
+fn decode_row(root: &Root, row: &RowOut) -> R<EventRow> {
+    let event_id: EventId = parse(&row.event_id)?;
+    let state = match (row.state.as_str(), &row.fields) {
+        ("pruned", _) => RowState::Pruned,
+        ("marker", _) => RowState::TemporarilyInvalid,
+        ("held", Some(f)) => {
+            let j = J::parse(f)?;
+            let version = j.field("version")?.as_u64()?;
+            if version != groups::constants::EVENT_VERSION {
+                return Err(format!("unsupported stored event version {version}"));
+            }
+            let parents: Vec<EventId> = Codec::dec(j.field("parents")?)?;
+            let payload: Payload = Codec::dec(j.field("payload")?)?;
+            let event = MessageEvent::create(root, event_id, &parents, payload)
+                .map_err(|e| e.to_string())?;
+            RowState::Held {
+                event,
+                role: Codec::dec(j.field("role")?)?,
+            }
+        }
+        (s, _) => return Err(format!("bad row state {s}")),
+    };
+    Ok(EventRow { event_id, state })
+}
+
+/// What opening from a snapshot found that it could not use.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct OpenReport {
+    /// Message records of an epoch without an epoch record: the engine never keeps them, so
+    /// they are left behind by an interrupted erase and dropped.
+    pub orphans: u32,
+}
+
+/// Loads a snapshot into a fresh in-memory store.
+pub fn decode_snapshot(s: &BatchOut) -> R<(MemoryStorage, OpenReport)> {
+    let records = decode_node(&s.node)?;
+    let mut report = OpenReport::default();
+    let mut epochs: BTreeMap<ChatId, Changes> = BTreeMap::new();
+    let slot = |chat: &str, report: &mut OpenReport| -> R<Option<(ChatId, &Root)>> {
+        let chat: ChatId = parse(chat)?;
+        match records.epochs.get(&chat) {
+            Some(rec) => Ok(Some((chat, &rec.root))),
+            None => {
+                report.orphans += 1;
+                Ok(None)
+            }
+        }
+    };
+    for row in &s.rows {
+        if let Some((chat, root)) = slot(&row.chat_id, &mut report)? {
+            let r = decode_row(root, row).map_err(|e| format!("row {}: {e}", row.event_id))?;
+            epochs
+                .entry(chat)
+                .or_insert_with(|| Changes::new(chat))
+                .rows
+                .insert(r.event_id, r);
+        }
+    }
+    for e in &s.edges {
+        if let Some((chat, _)) = slot(&e.chat_id, &mut report)? {
+            epochs
+                .entry(chat)
+                .or_insert_with(|| Changes::new(chat))
+                .edges
+                .insert(parse(&e.event_id)?, parse(&e.parents)?);
+        }
+    }
+    for o in &s.objects {
+        if let Some((chat, _)) = slot(&o.chat_id, &mut report)? {
+            let sync_obj_id: SyncObjId = parse(&o.sync_obj_id)?;
+            let j = J::parse(&o.fields)?;
+            let obj = ObjectRecord {
+                sync_obj_id,
+                current: Codec::dec(j.field("current")?)?,
+                current_events: Codec::dec(j.field("currentEvents")?)?,
+                pending_versions: Codec::dec(j.field("pendingVersions")?)?,
+                pending_deletions: Codec::dec(j.field("pendingDeletions")?)?,
+            };
+            epochs
+                .entry(chat)
+                .or_insert_with(|| Changes::new(chat))
+                .objects
+                .insert(sync_obj_id, obj);
+        }
+    }
+    let mut node = NodeChanges::default();
+    macro_rules! each {
+        ($($t:ident),*) => {$(
+            node.$t = records.$t.into_iter().map(|(k, v)| (k, Some(v))).collect();
+        )*};
+    }
+    node_tables!(each);
+    let mut mem = MemoryStorage::default();
+    mem.commit_batch(Batch {
+        epochs: epochs.into_values().collect(),
+        node,
+        erase: Default::default(),
+    })
+    .map_err(|e| e.to_string())?;
+    Ok((mem, report))
+}
+
+// ── The store the engine runs on ─────────────────────────────────────────────
+
+/// The in-memory copy with the batches committed since the SDK last took them.
+#[derive(Default)]
+pub struct Store {
+    pub mem: MemoryStorage,
+    pub pending: Vec<Batch>,
+}
+
+impl StorageRead for Store {
+    fn event_row(&self, c: &ChatId, e: &EventId) -> Result<Option<EventRow>, StorageError> {
+        self.mem.event_row(c, e)
+    }
+    fn event_rows(&self, c: &ChatId) -> Result<Vec<EventRow>, StorageError> {
+        self.mem.event_rows(c)
+    }
+    fn edges(&self, c: &ChatId) -> Result<Vec<(EventId, Vec<EventId>)>, StorageError> {
+        self.mem.edges(c)
+    }
+    fn parents(&self, c: &ChatId, e: &EventId) -> Result<Option<Vec<EventId>>, StorageError> {
+        self.mem.parents(c, e)
+    }
+    fn held_ids(&self, c: &ChatId) -> Result<Vec<EventId>, StorageError> {
+        self.mem.held_ids(c)
+    }
+    fn carriers(&self, c: &ChatId, ts: u64, limit: usize) -> Result<Vec<EventRow>, StorageError> {
+        self.mem.carriers(c, ts, limit)
+    }
+    fn markers(&self, c: &ChatId, limit: usize) -> Result<Vec<EventId>, StorageError> {
+        self.mem.markers(c, limit)
+    }
+    fn object(&self, c: &ChatId, s: &SyncObjId) -> Result<Option<ObjectRecord>, StorageError> {
+        self.mem.object(c, s)
+    }
+    fn objects(&self, c: &ChatId) -> Result<Vec<ObjectRecord>, StorageError> {
+        self.mem.objects(c)
+    }
+    fn pending_until(&self, c: &ChatId, until: u64) -> Result<Vec<PendingItem>, StorageError> {
+        self.mem.pending_until(c, until)
+    }
+    fn first_pending(&self, c: &ChatId) -> Result<Option<PendingItem>, StorageError> {
+        self.mem.first_pending(c)
+    }
+}
+
+impl Storage for Store {
+    fn commit(&mut self, changes: Changes) -> Result<(), StorageError> {
+        self.mem.commit(changes.clone())?;
+        self.pending.push(Batch {
+            epochs: vec![changes],
+            ..Batch::default()
+        });
+        Ok(())
+    }
+}
+
+impl NodeStorage for Store {
+    fn load_node(&self) -> Result<NodeRecords, StorageError> {
+        self.mem.load_node()
+    }
+
+    fn commit_batch(&mut self, batch: Batch) -> Result<(), StorageError> {
+        if batch.is_empty() {
+            return Ok(());
+        }
+        self.mem.commit_batch(batch.clone())?;
+        self.pending.push(batch);
+        Ok(())
+    }
+}

@@ -1,20 +1,5 @@
 let wasm;
 
-function addToExternrefTable0(obj) {
-    const idx = wasm.__externref_table_alloc();
-    wasm.__wbindgen_export_2.set(idx, obj);
-    return idx;
-}
-
-function handleError(f, args) {
-    try {
-        return f.apply(this, args);
-    } catch (e) {
-        const idx = addToExternrefTable0(e);
-        wasm.__wbindgen_exn_store(idx);
-    }
-}
-
 let cachedUint8ArrayMemory0 = null;
 
 function getUint8ArrayMemory0() {
@@ -43,11 +28,6 @@ function decodeText(ptr, len) {
 function getStringFromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return decodeText(ptr, len);
-}
-
-function getArrayU8FromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
 }
 
 let WASM_VECTOR_LEN = 0;
@@ -113,19 +93,118 @@ function getDataViewMemory0() {
     return cachedDataViewMemory0;
 }
 
+function addToExternrefTable0(obj) {
+    const idx = wasm.__externref_table_alloc();
+    wasm.__wbindgen_export_4.set(idx, obj);
+    return idx;
+}
+
+function handleError(f, args) {
+    try {
+        return f.apply(this, args);
+    } catch (e) {
+        const idx = addToExternrefTable0(e);
+        wasm.__wbindgen_exn_store(idx);
+    }
+}
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function debugString(val) {
+    // primitive types
+    const type = typeof val;
+    if (type == 'number' || type == 'boolean' || val == null) {
+        return  `${val}`;
+    }
+    if (type == 'string') {
+        return `"${val}"`;
+    }
+    if (type == 'symbol') {
+        const description = val.description;
+        if (description == null) {
+            return 'Symbol';
+        } else {
+            return `Symbol(${description})`;
+        }
+    }
+    if (type == 'function') {
+        const name = val.name;
+        if (typeof name == 'string' && name.length > 0) {
+            return `Function(${name})`;
+        } else {
+            return 'Function';
+        }
+    }
+    // objects
+    if (Array.isArray(val)) {
+        const length = val.length;
+        let debug = '[';
+        if (length > 0) {
+            debug += debugString(val[0]);
+        }
+        for(let i = 1; i < length; i++) {
+            debug += ', ' + debugString(val[i]);
+        }
+        debug += ']';
+        return debug;
+    }
+    // Test for built-in
+    const builtInMatches = /\[object ([^\]]+)\]/.exec(toString.call(val));
+    let className;
+    if (builtInMatches && builtInMatches.length > 1) {
+        className = builtInMatches[1];
+    } else {
+        // Failed to match the standard '[object ClassName]'
+        return toString.call(val);
+    }
+    if (className == 'Object') {
+        // we're a user defined class or Object
+        // JSON.stringify avoids problems with cycles, and is generally much
+        // easier than looping through ownProperties of `val`.
+        try {
+            return 'Object(' + JSON.stringify(val) + ')';
+        } catch (_) {
+            return 'Object';
+        }
+    }
+    // errors
+    if (val instanceof Error) {
+        return `${val.name}: ${val.message}\n${val.stack}`;
+    }
+    // TODO we could test for more things here, like `Set`s and `Map`s.
+    return className;
+}
+
+function takeFromExternrefTable0(idx) {
+    const value = wasm.__wbindgen_export_4.get(idx);
+    wasm.__externref_table_dealloc(idx);
+    return value;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
 }
 
 export function start() {
     wasm.start();
 }
 
-function takeFromExternrefTable0(idx) {
-    const value = wasm.__wbindgen_export_2.get(idx);
-    wasm.__externref_table_dealloc(idx);
-    return value;
-}
 /**
  * Generates user keys from a passphrase.
  *
@@ -144,18 +223,6 @@ export function generate_user_keys(passphrase) {
     return UserKeys.__wrap(ret[0]);
 }
 
-function _assertClass(instance, klass) {
-    if (!(instance instanceof klass)) {
-        throw new Error(`expected instance of ${klass.name}`);
-    }
-}
-
-function passArray8ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 1, 1) >>> 0;
-    getUint8ArrayMemory0().set(arg, ptr / 1);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
@@ -483,6 +550,736 @@ export class EncryptionKey {
     }
 }
 if (Symbol.dispose) EncryptionKey.prototype[Symbol.dispose] = EncryptionKey.prototype.free;
+
+const GroupsNodeFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_groupsnode_free(ptr >>> 0, 1));
+/**
+ * The group engine of one identity.
+ */
+export class GroupsNode {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(GroupsNode.prototype);
+        obj.__wbg_ptr = ptr;
+        GroupsNodeFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        GroupsNodeFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_groupsnode_free(ptr, 0);
+    }
+    /**
+     * @param {number} handle
+     * @param {number} now
+     */
+    handed_off(handle, now) {
+        const ret = wasm.groupsnode_handed_off(this.__wbg_ptr, handle, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} handle
+     * @param {number} now
+     * @returns {boolean}
+     */
+    is_current(handle, now) {
+        const ret = wasm.groupsnode_is_current(this.__wbg_ptr, handle, now);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
+     * Adds the `UserPublicKeys` bytes of a contact or a session peer to the key cache.
+     * Returns its GossipID.
+     * @param {Uint8Array} keys
+     * @param {number} now
+     * @returns {Uint8Array}
+     */
+    learn_keys(keys, now) {
+        const ptr0 = passArray8ToWasm0(keys, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_learn_keys(this.__wbg_ptr, ptr0, len0, now);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * `edit`: `{"body":…|null,"author":hex|null,"created_at":…|null,
+     * "last_modified_at":…|null,"metadata":…|null,"edited":bool|null}`.
+     * @param {Uint8Array} epoch
+     * @param {Uint8Array} sync_obj_id
+     * @param {string} edit
+     * @param {number} now
+     * @returns {string}
+     */
+    local_edit(epoch, sync_obj_id, edit, now) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(sync_obj_id, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(edit, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_local_edit(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, now);
+            var ptr4 = ret[0];
+            var len4 = ret[1];
+            if (ret[3]) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
+    }
+    /**
+     * @param {number} now
+     * @returns {string}
+     */
+    invitations(now) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.groupsnode_invitations(this.__wbg_ptr, now);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * `choice`: `Signed`, `AskToBeKicked` or `Silent`.
+     * @param {Uint8Array} group
+     * @param {string} choice
+     * @param {number} now
+     */
+    leave_group(group, choice, now) {
+        const ptr0 = passArray8ToWasm0(group, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(choice, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_leave_group(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {Uint8Array} a
+     * @param {Uint8Array} b
+     * @param {boolean} linked
+     * @param {number} now
+     */
+    link_groups(a, b, linked, now) {
+        const ptr0 = passArray8ToWasm0(a, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(b, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_link_groups(this.__wbg_ptr, ptr0, len0, ptr1, len1, linked, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * When to call `tick` next, or `undefined`.
+     * @param {number} now
+     * @returns {number | undefined}
+     */
+    next_wakeup(now) {
+        const ret = wasm.groupsnode_next_wakeup(this.__wbg_ptr, now);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        return ret[0] === 0 ? undefined : ret[1];
+    }
+    /**
+     * The plaintexts to send: an array of `{handle, to, plaintext}`.
+     * @param {number} now
+     * @returns {Array<any>}
+     */
+    poll_outbox(now) {
+        const ret = wasm.groupsnode_poll_outbox(this.__wbg_ptr, now);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Uint8Array} group
+     * @param {number} now
+     */
+    resend_root(group, now) {
+        const ptr0 = passArray8ToWasm0(group, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_resend_root(this.__wbg_ptr, ptr0, len0, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Whether a session with `peer` exists (in memory only; report it again after opening).
+     * @param {Uint8Array} peer_id
+     * @param {boolean} has_session
+     */
+    set_session(peer_id, has_session) {
+        const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_set_session(this.__wbg_ptr, ptr0, len0, has_session);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * `change`: `{"t":"Successor","add":[hex],"remove":[hex],"name":null|string}`,
+     * `{"t":"Handover","new_owner":hex,"leave":bool,"remove":[hex],"name":…}` or
+     * `{"t":"Resolve","members":[hex],"name":…}`. Returns the new epoch.
+     * @param {Uint8Array} group
+     * @param {string} change
+     * @param {number} now
+     * @returns {Uint8Array}
+     */
+    change_group(group, change, now) {
+        const ptr0 = passArray8ToWasm0(group, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(change, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_change_group(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * Founds a group; `members` is the concatenation of their 32-byte GossipIDs. Returns
+     * the group key.
+     * @param {string} name
+     * @param {Uint8Array} members
+     * @param {number} now
+     * @returns {Uint8Array}
+     */
+    create_group(name, members, now) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(members, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_create_group(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * @param {Uint8Array} group
+     * @param {number} now
+     */
+    delete_group(group, now) {
+        const ptr0 = passArray8ToWasm0(group, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_delete_group(this.__wbg_ptr, ptr0, len0, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {Uint8Array} epoch
+     * @param {Uint8Array} sync_obj_id
+     * @param {number} now
+     * @returns {string}
+     */
+    local_delete(epoch, sync_obj_id, now) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(sync_obj_id, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_local_delete(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * @param {Uint8Array} epoch
+     * @param {Uint8Array} sync_obj_id
+     * @param {string} body
+     * @param {string} metadata
+     * @param {number | null | undefined} scheduled_for
+     * @param {number} now
+     * @returns {string}
+     */
+    publish_edit(epoch, sync_obj_id, body, metadata, scheduled_for, now) {
+        let deferred6_0;
+        let deferred6_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(sync_obj_id, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(body, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ptr3 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len3 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_publish_edit(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, !isLikeNone(scheduled_for), isLikeNone(scheduled_for) ? 0 : scheduled_for, now);
+            var ptr5 = ret[0];
+            var len5 = ret[1];
+            if (ret[3]) {
+                ptr5 = 0; len5 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred6_0 = ptr5;
+            deferred6_1 = len5;
+            return getStringFromWasm0(ptr5, len5);
+        } finally {
+            wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+        }
+    }
+    /**
+     * The batches committed since the last call, oldest first: an array of
+     * `{rows, removedRows, edges, objects, node, erase}`, to apply in order.
+     * @returns {any}
+     */
+    take_batches() {
+        const ret = wasm.groupsnode_take_batches(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * The changes since the last call, in JSON: `[{group, kind}]`.
+     * @param {number} now
+     * @returns {string}
+     */
+    take_changes(now) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.groupsnode_take_changes(this.__wbg_ptr, now);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * @param {Uint8Array} group
+     * @param {boolean} must_delete
+     * @param {number} now
+     */
+    dissolve_group(group, must_delete, now) {
+        const ptr0 = passArray8ToWasm0(group, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_dissolve_group(this.__wbg_ptr, ptr0, len0, must_delete, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {Uint8Array} group
+     * @param {string | null | undefined} name
+     * @param {number} now
+     */
+    set_local_name(group, name, now) {
+        const ptr0 = passArray8ToWasm0(group, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(name) ? 0 : passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_set_local_name(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * The number of batches waiting to be taken.
+     * @returns {number}
+     */
+    pending_batches() {
+        const ret = wasm.groupsnode_pending_batches(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * `body`: `{"t":"Text","text":…}`, `{"t":"Forward","content_type":"Text","content":hex}`,
+     * `{"t":"Reaction","reaction":hex}` or `{"t":"Media","media":hex}`; `metadata`: an array
+     * of `[name, hex]`. Returns `{eventId, syncObjId, merge}` in JSON.
+     * @param {Uint8Array} epoch
+     * @param {string} body
+     * @param {string} metadata
+     * @param {number | null | undefined} scheduled_for
+     * @param {number} now
+     * @returns {string}
+     */
+    publish_message(epoch, body, metadata, scheduled_for, now) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(body, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_publish_message(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, !isLikeNone(scheduled_for), isLikeNone(scheduled_for) ? 0 : scheduled_for, now);
+            var ptr4 = ret[0];
+            var len4 = ret[1];
+            if (ret[3]) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
+    }
+    /**
+     * A group plaintext received from `from` in its one-to-one session.
+     * @param {Uint8Array} from
+     * @param {Uint8Array} bytes
+     * @param {number} now
+     */
+    handle_plaintext(from, bytes, now) {
+        const ptr0 = passArray8ToWasm0(from, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_handle_plaintext(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {Uint8Array} peer_id
+     * @param {number} now
+     */
+    peer_reconnected(peer_id, now) {
+        const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_peer_reconnected(this.__wbg_ptr, ptr0, len0, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {Uint8Array} epoch
+     * @param {Uint8Array} sync_obj_id
+     * @param {number | null | undefined} scheduled_for
+     * @param {number} now
+     * @returns {string}
+     */
+    publish_deletion(epoch, sync_obj_id, scheduled_for, now) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(sync_obj_id, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_publish_deletion(this.__wbg_ptr, ptr0, len0, ptr1, len1, !isLikeNone(scheduled_for), isLikeNone(scheduled_for) ? 0 : scheduled_for, now);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * @param {Uint8Array} epoch
+     * @param {number} now
+     * @returns {Uint8Array}
+     */
+    accept_invitation(epoch, now) {
+        const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_accept_invitation(this.__wbg_ptr, ptr0, len0, now);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * @param {Uint8Array} peer_id
+     * @param {number} now
+     */
+    scan_shared_chats(peer_id, now) {
+        const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_scan_shared_chats(this.__wbg_ptr, ptr0, len0, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {Uint8Array} epoch
+     * @param {string} choice
+     * @param {number} now
+     */
+    decline_invitation(epoch, choice, now) {
+        const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(choice, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_decline_invitation(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {Uint8Array} epoch
+     * @param {Uint8Array} sync_obj_id
+     * @param {number} now
+     */
+    lookup_sync_object(epoch, sync_obj_id, now) {
+        const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(sync_obj_id, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_lookup_sync_object(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * This identity's GossipID.
+     * @returns {Uint8Array}
+     */
+    me() {
+        const ret = wasm.groupsnode_me(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * The verified keys held for `id`, if any.
+     * @param {Uint8Array} id
+     * @returns {Uint8Array | undefined}
+     */
+    keys(id) {
+        const ptr0 = passArray8ToWasm0(id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_keys(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
+    }
+    /**
+     * Opens the engine of the identity from a snapshot of its stored records
+     * (`{rows, edges, objects, node}`, see `take_batches`; empty arrays for a new account).
+     * The secret keys are copied; the copy is erased when this object is freed.
+     * @param {UserPublicKeys} public_keys
+     * @param {UserSecretKeys} secret_keys
+     * @param {any} snapshot
+     * @returns {GroupsNode}
+     */
+    static open(public_keys, secret_keys, snapshot) {
+        _assertClass(public_keys, UserPublicKeys);
+        _assertClass(secret_keys, UserSecretKeys);
+        const ret = wasm.groupsnode_open(public_keys.__wbg_ptr, secret_keys.__wbg_ptr, snapshot);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return GroupsNode.__wrap(ret[0]);
+    }
+    /**
+     * @param {number} now
+     */
+    tick(now) {
+        const ret = wasm.groupsnode_tick(this.__wbg_ptr, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * One group by any of its epochs, in JSON (`null` when unknown).
+     * @param {Uint8Array} epoch
+     * @returns {string}
+     */
+    group(epoch) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_group(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * @param {Uint8Array} epoch
+     * @param {Uint8Array} sync_obj_id
+     * @param {number} now
+     * @returns {string}
+     */
+    retry(epoch, sync_obj_id, now) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(sync_obj_id, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_retry(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * Every group, in JSON.
+     * @returns {string}
+     */
+    groups() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.groupsnode_groups(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {number} handle
+     */
+    abandon(handle) {
+        wasm.groupsnode_abandon(this.__wbg_ptr, handle);
+    }
+    /**
+     * Message records found without their epoch when opening, and dropped.
+     * @returns {number}
+     */
+    orphans() {
+        const ret = wasm.groupsnode_orphans(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Every record as one batch of upserts.
+     * @returns {any}
+     */
+    snapshot() {
+        const ret = wasm.groupsnode_snapshot(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Uint8Array} epoch
+     * @param {number} now
+     * @returns {string}
+     */
+    timeline(epoch, now) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_timeline(this.__wbg_ptr, ptr0, len0, now);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * @param {number} handle
+     * @param {number} now
+     */
+    published(handle, now) {
+        const ret = wasm.groupsnode_published(this.__wbg_ptr, handle, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+}
+if (Symbol.dispose) GroupsNode.prototype[Symbol.dispose] = GroupsNode.prototype.free;
 
 const NonceFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
@@ -1419,6 +2216,17 @@ async function __wbg_load(module, imports) {
 function __wbg_get_imports() {
     const imports = {};
     imports.wbg = {};
+    imports.wbg.__wbg_Error_e17e777aac105295 = function(arg0, arg1) {
+        const ret = Error(getStringFromWasm0(arg0, arg1));
+        return ret;
+    };
+    imports.wbg.__wbg_String_8f0eb39a4a4c2f66 = function(arg0, arg1) {
+        const ret = String(arg1);
+        const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+        getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+    };
     imports.wbg.__wbg_call_13410aac570ffff7 = function() { return handleError(function (arg0, arg1) {
         const ret = arg0.call(arg1);
         return ret;
@@ -1429,6 +2237,10 @@ function __wbg_get_imports() {
     }, arguments) };
     imports.wbg.__wbg_crypto_574e78ad8b13b65f = function(arg0) {
         const ret = arg0.crypto;
+        return ret;
+    };
+    imports.wbg.__wbg_done_75ed0ee6dd243d9d = function(arg0) {
+        const ret = arg0.done;
         return ret;
     };
     imports.wbg.__wbg_error_7534b8e9a36f1ab4 = function(arg0, arg1) {
@@ -1445,6 +2257,50 @@ function __wbg_get_imports() {
     imports.wbg.__wbg_getRandomValues_b8f5dbd5f3995a9e = function() { return handleError(function (arg0, arg1) {
         arg0.getRandomValues(arg1);
     }, arguments) };
+    imports.wbg.__wbg_get_0da715ceaecea5c8 = function(arg0, arg1) {
+        const ret = arg0[arg1 >>> 0];
+        return ret;
+    };
+    imports.wbg.__wbg_get_458e874b43b18b25 = function() { return handleError(function (arg0, arg1) {
+        const ret = Reflect.get(arg0, arg1);
+        return ret;
+    }, arguments) };
+    imports.wbg.__wbg_getwithrefkey_1dc361bd10053bfe = function(arg0, arg1) {
+        const ret = arg0[arg1];
+        return ret;
+    };
+    imports.wbg.__wbg_instanceof_ArrayBuffer_67f3012529f6a2dd = function(arg0) {
+        let result;
+        try {
+            result = arg0 instanceof ArrayBuffer;
+        } catch (_) {
+            result = false;
+        }
+        const ret = result;
+        return ret;
+    };
+    imports.wbg.__wbg_instanceof_Uint8Array_9a8378d955933db7 = function(arg0) {
+        let result;
+        try {
+            result = arg0 instanceof Uint8Array;
+        } catch (_) {
+            result = false;
+        }
+        const ret = result;
+        return ret;
+    };
+    imports.wbg.__wbg_isArray_030cce220591fb41 = function(arg0) {
+        const ret = Array.isArray(arg0);
+        return ret;
+    };
+    imports.wbg.__wbg_iterator_f370b34483c71a1c = function() {
+        const ret = Symbol.iterator;
+        return ret;
+    };
+    imports.wbg.__wbg_length_186546c51cd61acd = function(arg0) {
+        const ret = arg0.length;
+        return ret;
+    };
     imports.wbg.__wbg_length_6bb7e81f9d7713e4 = function(arg0) {
         const ret = arg0.length;
         return ret;
@@ -1453,12 +2309,24 @@ function __wbg_get_imports() {
         const ret = arg0.msCrypto;
         return ret;
     };
+    imports.wbg.__wbg_new_19c25a3f2fa63a02 = function() {
+        const ret = new Object();
+        return ret;
+    };
     imports.wbg.__wbg_new_1f3a344cf3123716 = function() {
         const ret = new Array();
         return ret;
     };
+    imports.wbg.__wbg_new_638ebfaedbf32a5e = function(arg0) {
+        const ret = new Uint8Array(arg0);
+        return ret;
+    };
     imports.wbg.__wbg_new_8a6f238a6ece86ea = function() {
         const ret = new Error();
+        return ret;
+    };
+    imports.wbg.__wbg_newfromslice_074c56947bd43469 = function(arg0, arg1) {
+        const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
         return ret;
     };
     imports.wbg.__wbg_newnoargs_254190557c45b4ec = function(arg0, arg1) {
@@ -1469,6 +2337,14 @@ function __wbg_get_imports() {
         const ret = new Uint8Array(arg0 >>> 0);
         return ret;
     };
+    imports.wbg.__wbg_next_5b3530e612fde77d = function(arg0) {
+        const ret = arg0.next;
+        return ret;
+    };
+    imports.wbg.__wbg_next_692e82279131b03c = function() { return handleError(function (arg0) {
+        const ret = arg0.next();
+        return ret;
+    }, arguments) };
     imports.wbg.__wbg_node_905d3e251edff8a2 = function(arg0) {
         const ret = arg0.node;
         return ret;
@@ -1498,6 +2374,16 @@ function __wbg_get_imports() {
     imports.wbg.__wbg_set_1353b2a5e96bc48c = function(arg0, arg1, arg2) {
         arg0.set(getArrayU8FromWasm0(arg1, arg2));
     };
+    imports.wbg.__wbg_set_3f1d0b984ed272ed = function(arg0, arg1, arg2) {
+        arg0[arg1] = arg2;
+    };
+    imports.wbg.__wbg_set_453345bcda80b89a = function() { return handleError(function (arg0, arg1, arg2) {
+        const ret = Reflect.set(arg0, arg1, arg2);
+        return ret;
+    }, arguments) };
+    imports.wbg.__wbg_set_90f6c0f7bd8c0415 = function(arg0, arg1, arg2) {
+        arg0[arg1 >>> 0] = arg2;
+    };
     imports.wbg.__wbg_stack_0ed75d68575b0f3c = function(arg0, arg1) {
         const ret = arg1.stack;
         const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -1525,8 +2411,28 @@ function __wbg_get_imports() {
         const ret = arg0.subarray(arg1 >>> 0, arg2 >>> 0);
         return ret;
     };
+    imports.wbg.__wbg_value_dd9372230531eade = function(arg0) {
+        const ret = arg0.value;
+        return ret;
+    };
     imports.wbg.__wbg_versions_c01dfd4722a88165 = function(arg0) {
         const ret = arg0.versions;
+        return ret;
+    };
+    imports.wbg.__wbg_wbindgenbooleanget_3fe6f642c7d97746 = function(arg0) {
+        const v = arg0;
+        const ret = typeof(v) === 'boolean' ? v : undefined;
+        return isLikeNone(ret) ? 0xFFFFFF : ret ? 1 : 0;
+    };
+    imports.wbg.__wbg_wbindgendebugstring_99ef257a3ddda34d = function(arg0, arg1) {
+        const ret = debugString(arg1);
+        const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+        getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+    };
+    imports.wbg.__wbg_wbindgenin_d7a1ee10933d2d55 = function(arg0, arg1) {
+        const ret = arg0 in arg1;
         return ret;
     };
     imports.wbg.__wbg_wbindgenisfunction_8cee7dce3725ae74 = function(arg0) {
@@ -1546,6 +2452,24 @@ function __wbg_get_imports() {
         const ret = arg0 === undefined;
         return ret;
     };
+    imports.wbg.__wbg_wbindgenjsvallooseeq_9bec8c9be826bed1 = function(arg0, arg1) {
+        const ret = arg0 == arg1;
+        return ret;
+    };
+    imports.wbg.__wbg_wbindgennumberget_f74b4c7525ac05cb = function(arg0, arg1) {
+        const obj = arg1;
+        const ret = typeof(obj) === 'number' ? obj : undefined;
+        getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);
+        getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+    };
+    imports.wbg.__wbg_wbindgenstringget_0f16a6ddddef376f = function(arg0, arg1) {
+        const obj = arg1;
+        const ret = typeof(obj) === 'string' ? obj : undefined;
+        var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+        getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+    };
     imports.wbg.__wbg_wbindgenthrow_451ec1a8469d7eb6 = function(arg0, arg1) {
         throw new Error(getStringFromWasm0(arg0, arg1));
     };
@@ -1559,8 +2483,13 @@ function __wbg_get_imports() {
         const ret = getArrayU8FromWasm0(arg0, arg1);
         return ret;
     };
+    imports.wbg.__wbindgen_cast_d6cd19b81560fd6e = function(arg0) {
+        // Cast intrinsic for `F64 -> Externref`.
+        const ret = arg0;
+        return ret;
+    };
     imports.wbg.__wbindgen_init_externref_table = function() {
-        const table = wasm.__wbindgen_export_2;
+        const table = wasm.__wbindgen_export_4;
         const offset = table.grow(4);
         table.set(0, undefined);
         table.set(offset + 0, undefined);

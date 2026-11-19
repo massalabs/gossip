@@ -161,6 +161,125 @@ export class EncryptionKey {
   static from_seed(seed: string, salt: Uint8Array): EncryptionKey;
 }
 /**
+ * The group engine of one identity.
+ */
+export class GroupsNode {
+  private constructor();
+  free(): void;
+  [Symbol.dispose](): void;
+  handed_off(handle: number, now: number): void;
+  is_current(handle: number, now: number): boolean;
+  /**
+   * Adds the `UserPublicKeys` bytes of a contact or a session peer to the key cache.
+   * Returns its GossipID.
+   */
+  learn_keys(keys: Uint8Array, now: number): Uint8Array;
+  /**
+   * `edit`: `{"body":…|null,"author":hex|null,"created_at":…|null,
+   * "last_modified_at":…|null,"metadata":…|null,"edited":bool|null}`.
+   */
+  local_edit(epoch: Uint8Array, sync_obj_id: Uint8Array, edit: string, now: number): string;
+  invitations(now: number): string;
+  /**
+   * `choice`: `Signed`, `AskToBeKicked` or `Silent`.
+   */
+  leave_group(group: Uint8Array, choice: string, now: number): void;
+  link_groups(a: Uint8Array, b: Uint8Array, linked: boolean, now: number): void;
+  /**
+   * When to call `tick` next, or `undefined`.
+   */
+  next_wakeup(now: number): number | undefined;
+  /**
+   * The plaintexts to send: an array of `{handle, to, plaintext}`.
+   */
+  poll_outbox(now: number): Array<any>;
+  resend_root(group: Uint8Array, now: number): void;
+  /**
+   * Whether a session with `peer` exists (in memory only; report it again after opening).
+   */
+  set_session(peer_id: Uint8Array, has_session: boolean): void;
+  /**
+   * `change`: `{"t":"Successor","add":[hex],"remove":[hex],"name":null|string}`,
+   * `{"t":"Handover","new_owner":hex,"leave":bool,"remove":[hex],"name":…}` or
+   * `{"t":"Resolve","members":[hex],"name":…}`. Returns the new epoch.
+   */
+  change_group(group: Uint8Array, change: string, now: number): Uint8Array;
+  /**
+   * Founds a group; `members` is the concatenation of their 32-byte GossipIDs. Returns
+   * the group key.
+   */
+  create_group(name: string, members: Uint8Array, now: number): Uint8Array;
+  delete_group(group: Uint8Array, now: number): void;
+  local_delete(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): string;
+  publish_edit(epoch: Uint8Array, sync_obj_id: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, now: number): string;
+  /**
+   * The batches committed since the last call, oldest first: an array of
+   * `{rows, removedRows, edges, objects, node, erase}`, to apply in order.
+   */
+  take_batches(): any;
+  /**
+   * The changes since the last call, in JSON: `[{group, kind}]`.
+   */
+  take_changes(now: number): string;
+  dissolve_group(group: Uint8Array, must_delete: boolean, now: number): void;
+  set_local_name(group: Uint8Array, name: string | null | undefined, now: number): void;
+  /**
+   * The number of batches waiting to be taken.
+   */
+  pending_batches(): number;
+  /**
+   * `body`: `{"t":"Text","text":…}`, `{"t":"Forward","content_type":"Text","content":hex}`,
+   * `{"t":"Reaction","reaction":hex}` or `{"t":"Media","media":hex}`; `metadata`: an array
+   * of `[name, hex]`. Returns `{eventId, syncObjId, merge}` in JSON.
+   */
+  publish_message(epoch: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, now: number): string;
+  /**
+   * A group plaintext received from `from` in its one-to-one session.
+   */
+  handle_plaintext(from: Uint8Array, bytes: Uint8Array, now: number): void;
+  peer_reconnected(peer_id: Uint8Array, now: number): void;
+  publish_deletion(epoch: Uint8Array, sync_obj_id: Uint8Array, scheduled_for: number | null | undefined, now: number): string;
+  accept_invitation(epoch: Uint8Array, now: number): Uint8Array;
+  scan_shared_chats(peer_id: Uint8Array, now: number): void;
+  decline_invitation(epoch: Uint8Array, choice: string, now: number): void;
+  lookup_sync_object(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): void;
+  /**
+   * This identity's GossipID.
+   */
+  me(): Uint8Array;
+  /**
+   * The verified keys held for `id`, if any.
+   */
+  keys(id: Uint8Array): Uint8Array | undefined;
+  /**
+   * Opens the engine of the identity from a snapshot of its stored records
+   * (`{rows, edges, objects, node}`, see `take_batches`; empty arrays for a new account).
+   * The secret keys are copied; the copy is erased when this object is freed.
+   */
+  static open(public_keys: UserPublicKeys, secret_keys: UserSecretKeys, snapshot: any): GroupsNode;
+  tick(now: number): void;
+  /**
+   * One group by any of its epochs, in JSON (`null` when unknown).
+   */
+  group(epoch: Uint8Array): string;
+  retry(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): string;
+  /**
+   * Every group, in JSON.
+   */
+  groups(): string;
+  abandon(handle: number): void;
+  /**
+   * Message records found without their epoch when opening, and dropped.
+   */
+  orphans(): number;
+  /**
+   * Every record as one batch of upserts.
+   */
+  snapshot(): any;
+  timeline(epoch: Uint8Array, now: number): string;
+  published(handle: number, now: number): void;
+}
+/**
  * Nonce for AEAD operations (AES-256-SIV).
  *
  * AES-256-SIV uses a 16-byte (128-bit) nonce. The nonce should be unique
@@ -516,6 +635,48 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
+  readonly __wbg_groupsnode_free: (a: number, b: number) => void;
+  readonly groupsnode_abandon: (a: number, b: number) => void;
+  readonly groupsnode_accept_invitation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_create_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_decline_invitation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_delete_group: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_dissolve_group: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly groupsnode_group: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_groups: (a: number) => [number, number];
+  readonly groupsnode_handed_off: (a: number, b: number, c: number) => [number, number];
+  readonly groupsnode_handle_plaintext: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_invitations: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_is_current: (a: number, b: number, c: number) => [number, number, number];
+  readonly groupsnode_keys: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_learn_keys: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly groupsnode_leave_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_link_groups: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+  readonly groupsnode_local_delete: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_local_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+  readonly groupsnode_lookup_sync_object: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_me: (a: number) => [number, number];
+  readonly groupsnode_next_wakeup: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_open: (a: number, b: number, c: any) => [number, number, number];
+  readonly groupsnode_orphans: (a: number) => number;
+  readonly groupsnode_peer_reconnected: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_pending_batches: (a: number) => number;
+  readonly groupsnode_poll_outbox: (a: number, b: number) => [number, number, number];
+  readonly groupsnode_publish_deletion: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+  readonly groupsnode_publish_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
+  readonly groupsnode_publish_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+  readonly groupsnode_published: (a: number, b: number, c: number) => [number, number];
+  readonly groupsnode_resend_root: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_retry: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_scan_shared_chats: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_set_local_name: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_set_session: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_snapshot: (a: number) => [number, number, number];
+  readonly groupsnode_take_batches: (a: number) => [number, number, number];
+  readonly groupsnode_take_changes: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_tick: (a: number, b: number) => [number, number];
+  readonly groupsnode_timeline: (a: number, b: number, c: number, d: number) => [number, number, number, number];
   readonly __wbg_addressedannouncement_free: (a: number, b: number) => void;
   readonly __wbg_announcementresult_free: (a: number, b: number) => void;
   readonly __wbg_encryptionkey_free: (a: number, b: number) => void;
@@ -588,12 +749,12 @@ export interface InitOutput {
   readonly usersecretkeys_massa_secret_key: (a: number) => [number, number];
   readonly usersecretkeys_to_bytes: (a: number) => [number, number, number, number];
   readonly start: () => void;
-  readonly __wbindgen_exn_store: (a: number) => void;
-  readonly __externref_table_alloc: () => number;
-  readonly __wbindgen_export_2: WebAssembly.Table;
-  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+  readonly __wbindgen_exn_store: (a: number) => void;
+  readonly __externref_table_alloc: () => number;
+  readonly __wbindgen_export_4: WebAssembly.Table;
+  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
   readonly __wbindgen_start: () => void;
 }
