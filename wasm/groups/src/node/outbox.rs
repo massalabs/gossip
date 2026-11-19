@@ -1036,7 +1036,7 @@ impl Node {
         }
         let object = match item {
             EntryItem::Root => {
-                if !self.installed(chat) {
+                if !self.root_served_to(chat, peer) {
                     return None;
                 }
                 EventObject::Root(Box::new(root.clone()))
@@ -1044,6 +1044,9 @@ impl Node {
             EntryItem::Event(_) => return None,
             item => {
                 let key = super::objects::item_key(*chat, item)?;
+                if !self.signed_served_to(&key, peer) {
+                    return None;
+                }
                 self.t.signed.get(&key)?.object.to_event_object()
             }
         };

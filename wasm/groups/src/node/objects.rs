@@ -1,7 +1,7 @@
 //! Signed objects (§5.3, §5.6, §5.8) and keys (§4.3): verification, storage, effects,
 //! relay, replies to removed peers (§5.6, §10.4), and closing a group (§14.2).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use auth::UserPublicKeys;
 
@@ -18,6 +18,8 @@ use crate::keys::parse_user_public_keys;
 use crate::root::RootType;
 use crate::wire::{EntryItem, EventObject, SignedKind};
 
+/// Roots sent with one removal record to a member that missed epochs, at most.
+pub(crate) const ROOTS_PER_REPLY: usize = 16;
 /// Answers with a removal record to one removed peer per epoch and day (§5.6).
 pub(crate) const REPLIES_PER_DAY: u8 = 3;
 /// Leaves kept while the leaver's keys are fetched, at most.
@@ -788,14 +790,18 @@ impl Node {
             *crate::hash::kick_id(&chat, &peer).as_bytes(),
         );
         // A member that missed epochs is still at an older one, which no record of its
-        // removal names: it is told of the epoch it was removed from by a root notice (it is
-        // a member of it, and fetches it and its parents), and sent the kick of that epoch.
-        let (key, later) = if self.t.signed.contains(&kick) {
-            (kick, None)
+        // removal names: it is sent the roots of the epochs between (it is a member of
+        // each, and a removed peer is answered no lookup, §10.4) and the kick or leave of
+        // the epoch it was removed from. A leave of an earlier epoch that is live for
+        // `chat` comes with the roots between them, so that the device can tell it applies.
+        let (key, chain) = if self.t.signed.contains(&kick) {
+            (kick, Vec::new())
         } else if let Some(leave) = self.leave_for(&chat, &peer) {
-            (leave, None)
+            let chain = self.line_between(&leave.0, &chat, &peer);
+            (leave, chain)
         } else if let Some(later) = self.later_removal(&chat, &peer) {
-            (later, Some(later.0))
+            let chain = self.line_between(&chat, &later.0, &peer);
+            (later, chain)
         } else {
             return false;
         };
@@ -809,11 +815,58 @@ impl Node {
         r.count += 1;
         self.t.replies.insert((chat, peer), r);
         self.stats.removal_replies += 1;
-        if let Some(epoch) = later {
-            self.queue_object_notice(peer, epoch, EntryItem::Root);
+        for c in chain.into_iter().take(ROOTS_PER_REPLY) {
+            if let Some(root) = self.held_root(&c).cloned()
+                && let Ok(blob) = crate::wire::encode_event_blob(&EventObject::Root(Box::new(root)))
+            {
+                self.queue_work(peer, Work::Blob(blob));
+            }
         }
         self.queue_object(peer, key.0, key_item(&key));
         true
+    }
+
+    /// The installed epochs after `anc` up to `desc` on a line of epochs `peer` is a member
+    /// of, from `anc`'s side; empty when there is none.
+    fn line_between(&self, anc: &ChatId, desc: &ChatId, peer: &GossipId) -> Vec<ChatId> {
+        let member = |c: &ChatId| {
+            self.t
+                .epochs
+                .get(c)
+                .is_some_and(|r| r.status == EpochStatus::Installed && r.root.is_member(peer))
+        };
+        let mut next: BTreeMap<ChatId, ChatId> = BTreeMap::new();
+        let mut seen = BTreeSet::from([*desc]);
+        let mut stack = vec![*desc];
+        let mut found = false;
+        while let Some(c) = stack.pop() {
+            if c == *anc {
+                found = true;
+                break;
+            }
+            for p in self
+                .t
+                .epochs
+                .get(&c)
+                .map(|r| r.parents.clone())
+                .unwrap_or_default()
+            {
+                if member(&p) && seen.insert(p) {
+                    next.insert(p, c);
+                    stack.push(p);
+                }
+            }
+        }
+        if !found {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut c = *anc;
+        while let Some(n) = next.get(&c) {
+            out.push(*n);
+            c = *n;
+        }
+        out
     }
 
     /// The kick or leave of `peer` held for a later epoch of the group of `chat` that

@@ -742,7 +742,7 @@ impl Node {
         let group = listed.first().map(|c| self.group_of(c));
         let current = group.and_then(|g| self.current_epoch(&g));
         for (key, rec) in self.t.signed.iter() {
-            if !listed.contains(&key.0) {
+            if !listed.contains(&key.0) || !self.signed_served_to(key, &peer) {
                 continue;
             }
             let keep = match &rec.object {
