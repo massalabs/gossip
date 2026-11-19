@@ -811,14 +811,7 @@ fn a_forged_kick_is_refused() {
     let (mut net, g) = founded(3);
     let root = net.devs[1].node.root(&g).unwrap();
     // Member 2 signs a "kick" of member 1 with its own key.
-    let forged = Kick::sign_as(
-        &root,
-        gid(1),
-        &ident(2).secret.dsa_signing_key,
-        &ident(2).public,
-        [3; 32],
-    )
-    .unwrap();
+    let forged = forge_kick(root.chat_id(), gid(1), 2);
     let blob = wire::encode_event_blob(&EventObject::Kick(forged)).unwrap();
     let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
     let now = net.now;
@@ -2457,7 +2450,7 @@ fn unverified_handover_roots_are_bounded_per_sender_and_asked_of_their_sender() 
 /// no authority), and a kick a device could not verify, for lack of the handover root,
 /// was penalised as a malformed object from the member that relayed it.
 #[test]
-fn kick_authorities_are_transitive_and_an_unverifiable_kick_is_no_penalty() {
+fn a_kick_is_valid_only_signed_by_the_owner_of_its_epoch() {
     let (mut net, g) = founded(4);
     net.change(
         0,
@@ -2470,47 +2463,114 @@ fn kick_authorities_are_transitive_and_an_unverifiable_kick_is_no_penalty() {
     )
     .unwrap();
     net.exchange();
+    // The new owner, which holds the handover, signs a kick naming the former owner's
+    // epoch: no authority passes through a handover (§5.6). Invalid, and its relay pays.
+    let k = forge_kick(g, gid(3), 1);
+    let blob = wire::encode_event_blob(&EventObject::Kick(k)).unwrap();
+    for d in [2, 3] {
+        let before = net.devs[d].node.score(&gid(1));
+        net.recv_frames_m(d, 1, &[Frame::Event(blob.clone())]);
+        assert_eq!(net.devs[d].node.tables().signed.len(), 0, "device {d}");
+        assert!(net.devs[d].node.score(&gid(1)) < before, "device {d}");
+    }
+    // Signed by the owner of the epoch it names, the same kick is valid.
+    let k = forge_kick(g, gid(3), 0);
+    let blob = wire::encode_event_blob(&EventObject::Kick(k)).unwrap();
+    net.recv_frames_m(2, 1, &[Frame::Event(blob)]);
+    assert_eq!(net.devs[2].node.tables().signed.len(), 1);
+}
+
+/// A kick of `removed` from `chat`, signed by device `signer` whoever owns `chat`.
+pub(crate) fn forge_kick(chat: ChatId, removed: GossipId, signer: usize) -> Kick {
+    let id = crate::hash::kick_id(&chat, &removed);
+    let sig = crate::keys::Signer::sign_id(
+        &ident(signer).secret.dsa_signing_key,
+        crate::constants::CONTEXT_KICK_SIGNATURE,
+        id.as_bytes(),
+        [5; 32],
+    );
+    Kick::from_fields(chat, removed, sig.as_bytes()).unwrap()
+}
+
+/// A new owner resolving a former owner's branch signs no kick naming an epoch of the former
+/// owner (§5.6): a member it drops is kicked from the end it owns, which that member holds.
+#[test]
+fn a_new_owner_kicks_only_from_the_epochs_it_owns() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[0].store.clone();
+    let a = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("A".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.devs[0].store = backup;
+    net.restart(0);
+    net.offline[1] = true;
     net.change(
-        1,
+        0,
         g,
         GroupChange::Successor {
             add: vec![],
             remove: vec![],
-            name: Some("b".into()),
+            name: Some("B".into()),
         },
     )
     .unwrap();
-    net.exchange();
-    net.change(
-        1,
-        g,
-        GroupChange::Handover {
-            new_owner: gid(2),
-            leave: false,
-            name: None,
-        },
-    )
-    .unwrap();
-    net.exchange();
-    let auth = net.devs[3].node.kick_authorities(&g);
-    assert!(
-        auth.iter().any(|k| GossipId::of_keys(k) == gid(2)),
-        "the second new owner has authority over the first epoch"
-    );
-    // A kick signed by an identity this device cannot verify costs its relay nothing.
-    let root = net.devs[3].node.root(&g).unwrap();
-    let k = Kick::sign_as(
-        &root,
-        gid(3),
-        &ident(7).secret.dsa_signing_key,
-        &ident(7).public,
-        [5; 32],
-    )
-    .unwrap();
-    let blob = wire::encode_event_blob(&EventObject::Kick(k)).unwrap();
-    let before = net.devs[3].node.score(&gid(1));
-    net.recv_frames_m(3, 1, &[Frame::Event(blob)]);
-    assert_eq!(net.devs[3].node.score(&gid(1)), before);
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.offline[1] = false;
+    for (from, to, pt) in core::mem::take(&mut net.dropped) {
+        let now = net.now;
+        let dev = &mut net.devs[to];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(from), &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    net.run(3 * MIN);
+    assert_eq!(net.summary(1, &g).unwrap().former_owner_branches, vec![a]);
+    let r = net
+        .change(
+            1,
+            g,
+            GroupChange::Resolve {
+                members: vec![gid(0), gid(2)],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    let kicks: Vec<ChatId> = net.devs[1]
+        .node
+        .tables()
+        .signed
+        .iter()
+        .filter_map(|(_, rec)| match &rec.object {
+            SignedObject::Kick(k) => Some(k.chat_id()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kicks, vec![h], "a kick naming the handover epoch only");
+    assert_eq!(net.devs[1].node.stats().kicks_created, 1);
+    for d in [0, 1, 2] {
+        assert_eq!(net.current(d, &g), Some(r), "device {d}");
+    }
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
 }
 
 /// Finding 11 of the review of 54711780: a "hand over and leave" root received while its
