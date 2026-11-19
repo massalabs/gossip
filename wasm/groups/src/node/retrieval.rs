@@ -404,16 +404,15 @@ impl Node {
             .is_none_or(|r| r.failures < super::neighbors::NEIGHBOR_FAILURES)
     }
 
-    /// The scheduling priority of a task: the best score among its untried candidates with
-    /// a trigger that were not asked in vain twice already, so that what honest, supplying
-    /// peers announce goes first. Below [`CREDIBLE`] the task is suspect: every announcer
+    /// The scheduling priority of a task: the best score among its untried, responsive
+    /// candidates with a trigger, so that what honest, supplying peers announce goes first. Below [`CREDIBLE`] the task is suspect: every announcer
     /// said it did not have the event, or never answered, or scores below an unmeasured peer.
     pub(crate) fn priority(&self, key: &TaskKey) -> u64 {
         self.t.tasks.get(key).map_or(0, |task| {
             task.candidates
                 .iter()
-                .filter(|(_, c)| {
-                    c.trigger.is_some() && c.state == CandidateState::Untried && c.attempts < 2
+                .filter(|(p, c)| {
+                    c.trigger.is_some() && c.state == CandidateState::Untried && self.responsive(p)
                 })
                 .map(|(p, _)| self.score(p))
                 .max()
