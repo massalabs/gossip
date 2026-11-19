@@ -15,8 +15,9 @@ use super::records::{
 };
 use super::retrieval::Answer;
 use super::timing::{
-    FETCHED_PARENT_DEPTH, FETCHED_PARENTS_PER_INVITATION, INHERITED_MARKERS_PER_DEVICE,
-    INHERITED_MARKERS_PER_SENDER, INVITATIONS_PER_DEVICE, INVITATIONS_PER_SENDER,
+    FETCHED_PARENT_DEPTH, FETCHED_PARENTS_PER_INVITATION, HELD_ROOTS_PER_DEVICE,
+    HELD_ROOTS_PER_SENDER, INHERITED_MARKERS_PER_DEVICE, INHERITED_MARKERS_PER_SENDER,
+    INVITATIONS_PER_DEVICE, INVITATIONS_PER_SENDER,
 };
 use super::{Cx, EpochEntry, Node, NodeError, PENALTY_ROOT_ANNOUNCEMENT};
 use crate::constants::PROMPT_DELAY_MS;
@@ -25,8 +26,6 @@ use crate::ids::{ChatId, GossipId, ParentCommitment};
 use crate::root::{Root, RootType};
 use crate::wire::EntryItem;
 
-/// Handover roots kept while their parent is looked up, at most (§4.7). Provisional.
-pub(crate) const HELD_ROOTS: usize = 64;
 /// Members answering "not available" to a parent lookup that show the prompt early (§4.8).
 pub(crate) const PROMPT_NOT_AVAILABLE: usize = 3;
 
@@ -536,7 +535,19 @@ impl Node {
     /// Keeps a handover root whose parent is not held, and looks the parent up (§4.7).
     fn hold_handover(&mut self, cx: &mut Cx<'_>, from: GossipId, root: Root) {
         let id = root.chat_id();
-        if self.t.held_roots.len() >= HELD_ROOTS && !self.t.held_roots.contains(&id) {
+        if self.t.held_roots.contains(&id) {
+            return;
+        }
+        // Kept unverified: bounded per delivering peer and in total, the newest refused,
+        // never another peer's pushed out.
+        let mine = self
+            .t
+            .held_roots
+            .iter()
+            .filter(|(_, h)| h.from == from)
+            .count();
+        if mine >= HELD_ROOTS_PER_SENDER || self.t.held_roots.len() >= HELD_ROOTS_PER_DEVICE {
+            self.stats.capped += 1;
             return;
         }
         let commitment = root.parents()[0];
