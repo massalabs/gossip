@@ -61,6 +61,20 @@ impl J {
         }
     }
 
+    /// The JSON text for JavaScript reads, where every integer is a decimal string: a
+    /// `u64` (a claimed time, for example) does not fit a JavaScript number.
+    pub fn view_text(&self) -> String {
+        fn strings(j: &J) -> J {
+            match j {
+                J::Num(n) => J::Str(n.to_string()),
+                J::Arr(a) => J::Arr(a.iter().map(strings).collect()),
+                J::Obj(o) => J::Obj(o.iter().map(|(k, v)| (k.clone(), strings(v))).collect()),
+                other => other.clone(),
+            }
+        }
+        strings(self).to_text()
+    }
+
     /// Parses JSON text.
     pub fn parse(text: &str) -> Result<J, String> {
         let mut p = Parser {
