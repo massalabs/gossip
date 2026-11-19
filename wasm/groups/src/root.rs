@@ -276,6 +276,14 @@ impl Root {
         Self::from_proto(EVENT_VERSION, unsigned)
     }
 
+    /// Test only: `p` signed as a successor by `key`, whatever its fields (a hostile owner).
+    #[cfg(test)]
+    pub(crate) fn forge(p: proto::GroupRoot, key: &dyn Signer) -> Self {
+        let root = Self::from_proto(EVENT_VERSION, p).expect("structurally valid");
+        root.sign_and_check(key, [7; SIGNING_RANDOMNESS_SIZE], None)
+            .expect("signed by its owner")
+    }
+
     fn sign_and_check(
         mut self,
         signing_key: &dyn Signer,
@@ -747,7 +755,12 @@ pub(crate) mod tests {
         );
         // The same group continuing an earlier one-to-one conversation (§5.12).
         assert_eq!(
-            hex::encode(migration(&alice, &[&alice, &bob], 0).unwrap().chat_id().as_bytes()),
+            hex::encode(
+                migration(&alice, &[&alice, &bob], 0)
+                    .unwrap()
+                    .chat_id()
+                    .as_bytes()
+            ),
             "181ef8e3bed972b5d4fe6b12d80ba7953ef97fd91aa43b52b17373cdfcd8decb"
         );
     }
@@ -835,7 +848,8 @@ pub(crate) mod tests {
         assert_eq!(back, root);
         assert_eq!(back.migrate_from(), Some(0));
         // Through an event blob, under the strict check.
-        let blob = wire::encode_event_blob(&wire::EventObject::Root(Box::new(root.clone()))).unwrap();
+        let blob =
+            wire::encode_event_blob(&wire::EventObject::Root(Box::new(root.clone()))).unwrap();
         match wire::decode_event_blob(&blob, 1).unwrap() {
             wire::EventObject::Root(r) => {
                 assert_eq!(r.chat_id(), root.chat_id());

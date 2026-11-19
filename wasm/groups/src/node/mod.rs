@@ -50,6 +50,7 @@ pub mod records;
 pub mod timing;
 
 mod actions;
+mod direct;
 mod group;
 mod hints;
 mod index;
@@ -78,6 +79,7 @@ use crate::store::{Storage, StorageError};
 use crate::wire::{self, EventObject, Frame};
 
 pub use actions::{GroupChange, LeaveChoice, SUCCESSOR_MAX_WAIT_MS, SUCCESSOR_QUIET_MS};
+pub use direct::{CONSENT_MS, DEVICE, GroupOptions, KNOWN_FORMAT_VERSIONS};
 #[cfg(test)]
 pub(crate) use index::CREDIBLE;
 pub use outbox::Outgoing;
@@ -289,6 +291,8 @@ pub struct Node {
     erase: BTreeSet<ChatId>,
     /// Which held roots each held root names as a parent, and the reverse (derived).
     ri: group::RootIndex,
+    /// What the connection queries answered at the last commit (derived, §5.12).
+    conn_view: direct::ConnectionView,
 }
 
 impl core::fmt::Debug for Node {
@@ -324,6 +328,7 @@ impl Node {
             gx: group::GroupIndex::default(),
             erase: BTreeSet::new(),
             ri: group::RootIndex::default(),
+            conn_view: direct::ConnectionView::default(),
         };
         node.reload(store)?;
         Ok(node)
@@ -359,6 +364,7 @@ impl Node {
         for (r, k) in refs {
             self.work_refs.entry(r).or_default().insert(k);
         }
+        self.conn_view = self.connection_view();
         // The plaintexts in flight stay so: a failed operation does not change them, and a
         // fresh engine starts with none, so their work is assembled again.
         Ok(())
@@ -575,6 +581,7 @@ impl Node {
                     .and_then(|v| {
                         self.reconsider(&mut cx)?;
                         self.schedule(&mut cx)?;
+                        self.connections_changed(&mut cx);
                         Ok(v)
                     })
             };
@@ -767,6 +774,7 @@ impl Node {
             n.scan_timers(cx);
             n.expire_frozen(cx.now);
             n.group_timers(cx);
+            n.direct_timers(cx);
             if let Some(signer) = signer {
                 n.remember_own_keys(cx, signer);
                 n.auto_successors(cx, signer)?;
@@ -801,6 +809,9 @@ impl Node {
         }
         self.timer_wakeups(now, &mut add);
         if let Some(t) = self.group_wakeup() {
+            add(t);
+        }
+        if let Some(t) = self.direct_wakeup() {
             add(t);
         }
         // Roots left to adopt by the bounded worklist of the last operation.

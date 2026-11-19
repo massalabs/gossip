@@ -525,6 +525,10 @@ impl Node {
             self.invite(cx, from, root, Vec::new(), true, None, via);
             return Ok(Answer::Supplied);
         }
+        // §5.12: a direct chat the caller consented to, or two creations at once.
+        if self.receive_direct(cx, from, &root, !matched.is_empty())? {
+            return Ok(Answer::Supplied);
+        }
         // Case 2: a retained member.
         let retained: Vec<ChatId> = installed
             .iter()
@@ -560,7 +564,13 @@ impl Node {
             }
             return Ok(Answer::Supplied);
         }
-        // Case 5: no parent matched; the unmatched ones are looked up first.
+        // Case 5: no parent matched; the unmatched ones are looked up first, except for a
+        // migration this device acts on (§5.12): it continues no epoch, and a parent found
+        // would only make it an ordinary invitation.
+        if self.migration_peer(&root, false).is_some() {
+            self.invite(cx, from, root, Vec::new(), false, None, via);
+            return Ok(Answer::Supplied);
+        }
         let unmatched: Vec<ParentCommitment> = root
             .parents()
             .iter()
