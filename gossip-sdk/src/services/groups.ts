@@ -132,12 +132,19 @@ export interface GroupLocalEdit {
 /** The longest a date may be set ahead of now (§7.2 `MAX_SCHEDULE`: two weeks minus five minutes). */
 export const GROUP_MAX_SCHEDULE_MS = 1_209_600_000;
 
+/**
+ * A line of a group timeline (§5.10, §7.5). `by` is who made the change: the
+ * signer of the root (the owner it names, or for a handover the outgoing owner).
+ */
 export type GroupLine =
+  /** "<owner> created the group": only on the device that created it. */
   | { type: 'founded'; epoch: GroupId; owner: string }
+  /** "<by> added you": the first epoch held of a group created elsewhere. */
+  | { type: 'joined'; epoch: GroupId; by: string }
   | {
       type: 'epochChange';
       epoch: GroupId;
-      owner: string;
+      by: string;
       added: string[];
       removed: string[];
       left: string[];
@@ -147,7 +154,9 @@ export type GroupLine =
   | { type: 'youWereRemoved' }
   | { type: 'youLeft' }
   | { type: 'dissolved' }
-  | { type: 'notAMember'; from: bigint; to: bigint };
+  | { type: 'notAMember'; from: bigint; to: bigint }
+  /** "<by> added you back", after `notAMember` (§5.10). */
+  | { type: 'addedBack'; epoch: GroupId; by: string };
 
 export type GroupTimelineItem =
   | GroupMessage
@@ -266,11 +275,17 @@ function line(raw: unknown): GroupLine {
         epoch: r.epoch as string,
         owner: userIdOf(r.owner as string),
       };
+    case 'Joined':
+      return {
+        type: 'joined',
+        epoch: r.epoch as string,
+        by: userIdOf(r.by as string),
+      };
     case 'EpochChange':
       return {
         type: 'epochChange',
         epoch: r.epoch as string,
-        owner: userIdOf(r.owner as string),
+        by: userIdOf(r.by as string),
         added: (r.added as string[]).map(userIdOf),
         removed: (r.removed as string[]).map(userIdOf),
         left: (r.left as string[]).map(userIdOf),
@@ -283,6 +298,12 @@ function line(raw: unknown): GroupLine {
       return { type: 'youLeft' };
     case 'Dissolved':
       return { type: 'dissolved' };
+    case 'AddedBack':
+      return {
+        type: 'addedBack',
+        epoch: r.epoch as string,
+        by: userIdOf(r.by as string),
+      };
     default:
       return {
         type: 'notAMember',
@@ -1248,7 +1269,7 @@ export class GroupService {
     const epochs = new Set<string>();
     for (const i of items) {
       if (i.kind === 'message') epochs.add(i.epochId);
-      else if (i.line.type === 'founded' || i.line.type === 'epochChange') {
+      else if ('epoch' in i.line) {
         epochs.add(i.line.epoch);
       }
     }
