@@ -778,7 +778,19 @@ impl Node {
             let Some(root) = self.t.epochs.get(&cur).map(|r| r.root.clone()) else {
                 continue;
             };
-            if root.owner_id() != self.me || !self.fork_to_resolve(&group).is_empty() {
+            if root.owner_id() != self.me {
+                // The group was handed over: its requests are the new owner's (§5.4).
+                if self
+                    .t
+                    .group_recs
+                    .get(&group)
+                    .is_some_and(|g| !g.pending_removals.is_empty())
+                {
+                    self.group_rec_mut(group).pending_removals.clear();
+                }
+                continue;
+            }
+            if !self.fork_to_resolve(&group).is_empty() {
                 continue;
             }
             let pending: Vec<(GossipId, u64)> = self
@@ -927,7 +939,7 @@ impl Node {
                     .saturating_add(crate::constants::PROMPT_DELAY_MS));
             }
         }
-        for (_, g) in self.t.group_recs.iter() {
+        for (key, g) in self.t.group_recs.iter() {
             match g.status {
                 GroupStatus::Waiting {
                     since,
@@ -943,10 +955,17 @@ impl Node {
                 } => add(at.saturating_add(super::objects::DISSOLVED_KEPT_MS)),
                 _ => {}
             }
-            if let (Some(first), Some(last)) = (
-                g.pending_removals.values().min(),
-                g.pending_removals.values().max(),
-            ) {
+            // Only an owner acts on its pending removals; another device keeps none due.
+            let owns = self
+                .current_epoch(key)
+                .and_then(|c| self.t.epochs.get(&c))
+                .is_some_and(|r| r.root.owner_id() == self.me);
+            if owns
+                && let (Some(first), Some(last)) = (
+                    g.pending_removals.values().min(),
+                    g.pending_removals.values().max(),
+                )
+            {
                 add(last
                     .saturating_add(SUCCESSOR_QUIET_MS)
                     .min(first.saturating_add(SUCCESSOR_MAX_WAIT_MS)));
