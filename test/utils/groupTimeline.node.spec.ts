@@ -40,7 +40,7 @@ describe('group timeline helpers', () => {
       {
         type: 'epochChange',
         epoch: 'e',
-        owner: 'o',
+        by: 'o',
         added: ['a'],
         removed: [],
         left: ['l'],
@@ -54,5 +54,45 @@ describe('group timeline helpers', () => {
     expect(texts[0]).toContain('⁨O⁩');
     expect(texts[2]).toContain('⁨evil⁩');
     expect(texts.join('')).not.toContain('‮');
+  });
+
+  const keyOf = (key: string, o?: Record<string, unknown>) =>
+    `${key}:${String(o?.owner ?? '')}:${String(o?.name ?? o?.names ?? '')}`;
+  const plain = (s: string) => s.replace(/[\u2068\u2069]/g, '');
+
+  it('names who handed the group over, then that it left', () => {
+    const texts = lineTexts(
+      {
+        type: 'epochChange',
+        epoch: 'e',
+        by: 'alice',
+        added: [],
+        removed: [],
+        left: ['alice'],
+        renamed: null,
+        newOwner: 'bob',
+      },
+      id => id,
+      keyOf
+    ).map(plain);
+    expect(texts).toEqual([
+      'timeline.new_owner:alice:bob',
+      'timeline.left::alice',
+    ]);
+  });
+
+  it('tells a member who added it, and who added it back', () => {
+    expect(
+      lineTexts({ type: 'joined', epoch: 'e', by: 'bob' }, id => id, keyOf).map(
+        plain
+      )
+    ).toEqual(['timeline.joined:bob:']);
+    expect(
+      lineTexts(
+        { type: 'addedBack', epoch: 'e', by: 'eve' },
+        id => id,
+        keyOf
+      ).map(plain)
+    ).toEqual(['timeline.added_back:eve:']);
   });
 });

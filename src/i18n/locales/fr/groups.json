@@ -71,6 +71,7 @@
   },
   "timeline": {
     "founded": "{{owner}} a créé le groupe",
+    "joined": "{{owner}} vous a ajouté",
     "added": "{{owner}} a ajouté {{names}}",
     "removed": "{{owner}} a retiré {{names}}",
     "left": "{{names}} est parti",
@@ -80,6 +81,7 @@
     "you_left": "Vous avez quitté ce groupe",
     "dissolved": "Ce groupe a été dissous par son propriétaire",
     "not_a_member": "Vous n'étiez pas membre entre {{from}} et {{to}}",
+    "added_back": "{{owner}} vous a ajouté de nouveau",
     "edited": "Modifié",
     "reply_to": "Réponse à",
     "reply_unavailable": "Message indisponible",

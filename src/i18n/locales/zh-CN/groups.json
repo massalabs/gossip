@@ -71,6 +71,7 @@
   },
   "timeline": {
     "founded": "{{owner}} 创建了群组",
+    "joined": "{{owner}} 添加了你",
     "added": "{{owner}} 添加了 {{names}}",
     "removed": "{{owner}} 移除了 {{names}}",
     "left": "{{names}} 已退出",
@@ -80,6 +81,7 @@
     "you_left": "你已退出此群组",
     "dissolved": "此群组已被群主解散",
     "not_a_member": "你在 {{from}} 至 {{to}} 期间不是成员",
+    "added_back": "{{owner}} 重新添加了你",
     "edited": "已编辑",
     "reply_to": "回复",
     "reply_unavailable": "消息不可用",
