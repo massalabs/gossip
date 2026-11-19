@@ -790,6 +790,382 @@ mod tests {
             metadata: BTreeMap::from([("k".to_owned(), vec![0xff])]),
         }));
         round_trip(Some(3u64));
+    }
+
+    /// One value of every record kind stored in the node tables and the epochs' records,
+    /// with every variant of their enums. (Roots and signed objects, kept as the device's
+    /// own encoding, are covered by the reopen tests of `tests.rs`.)
+    #[test]
+    fn every_record_kind_round_trips() {
+        let chat = ChatId::from_bytes([1; 32]);
+        let peer = GossipId::from_bytes([2; 32]);
+        let event = EventId::from_bytes([3; groups::constants::EVENT_ID_SIZE]);
+        let sync = SyncObjId::from_bytes([4; 32]);
+        let scan = ScanId::from_bytes([5; 32]);
+        let request = RequestId::from_bytes([6; groups::constants::REQUEST_ID_SIZE]);
+        let commitment = ParentCommitment::from_bytes([7; 32]);
+        let items = [
+            EntryItem::Event(event),
+            EntryItem::Root,
+            EntryItem::Leave(LeaveId::from_bytes([8; 32])),
+            EntryItem::Kick(KickId::from_bytes([9; 32])),
+            EntryItem::Dissolve(DissolveId::from_bytes([10; 32])),
+        ];
+        for target in [
+            Target::Event(event),
+            Target::SyncObj(sync),
+            Target::Root,
+            Target::Parent(commitment),
+            Target::Object(SignedKind::Leave, [1; 32]),
+            Target::Object(SignedKind::Dissolve, [1; 32]),
+            Target::Removal(peer),
+            Target::Keys(peer),
+        ] {
+            round_trip(TaskKey {
+                chat_id: chat,
+                target,
+            });
+        }
+        for (trigger, state) in [
+            (
+                Some(Trigger {
+                    kind: TriggerKind::Notice,
+                    at: 1,
+                }),
+                CandidateState::Untried,
+            ),
+            (
+                Some(Trigger {
+                    kind: TriggerKind::Child,
+                    at: 2,
+                }),
+                CandidateState::NotAvailable,
+            ),
+            (
+                Some(Trigger {
+                    kind: TriggerKind::Page,
+                    at: 3,
+                }),
+                CandidateState::Failed,
+            ),
+            (None, CandidateState::Untried),
+        ] {
+            for run in [
+                Run::Paused,
+                Run::Active {
+                    stage: 1,
+                    ttl: 2,
+                    jitter: 3,
+                    attempt: Some(Attempt::Queued { peer }),
+                    expired_resends: 4,
+                },
+                Run::Active {
+                    stage: 0,
+                    ttl: 0,
+                    jitter: 0,
+                    attempt: None,
+                    expired_resends: 0,
+                },
+            ] {
+                round_trip(Task {
+                    run,
+                    candidates: BTreeMap::from([(
+                        peer,
+                        Candidate {
+                            trigger,
+                            state,
+                            outstanding_until: Some(9),
+                            attempts: 1,
+                            busy: 2,
+                            unavailable: 3,
+                        },
+                    )]),
+                    runs: 5,
+                    created_at: u64::MAX,
+                });
+            }
+        }
+        for attempt in [
+            ScanAttempt::Queued,
+            ScanAttempt::Sent {
+                local_deadline: 1,
+                sent_at: 2,
+            },
+            ScanAttempt::Waiting { until: 3 },
+        ] {
+            round_trip(ScanOp {
+                scan_id: scan,
+                offset: 1,
+                total: Some(2),
+                stage: 3,
+                ttl: 4,
+                jitter: 5,
+                attempt,
+                restarts: 6,
+                expired_resends: 7,
+                busy: 8,
+                lanes: BTreeSet::from([0, 3]),
+            });
+        }
+        round_trip(FrozenScan {
+            list: Some(
+                items
+                    .iter()
+                    .map(|&item| Entry {
+                        chat_id: chat,
+                        item,
+                    })
+                    .collect(),
+            ),
+            live_until: 1,
+            forget_at: 2,
+        });
+        round_trip(FrozenScan {
+            list: None,
+            live_until: 0,
+            forget_at: 0,
+        });
+        let ops = vec![
+            QueryOp::ChatById(chat),
+            QueryOp::ChatByRef(RefChatId::from_bytes([11; 32])),
+            QueryOp::ChatByParent {
+                chat_id: chat,
+                commitment,
+            },
+            QueryOp::SharedChatsScan {
+                scan_id: scan,
+                offset: 1,
+            },
+            QueryOp::Event {
+                chat_id: chat,
+                event_id: event,
+            },
+            QueryOp::SyncObj {
+                chat_id: chat,
+                sync_obj_id: sync,
+            },
+            QueryOp::SignedObject {
+                chat_id: chat,
+                kind: SignedKind::Kick,
+                id: [2; 32],
+            },
+            QueryOp::Removal {
+                chat_id: chat,
+                gossip_id: peer,
+            },
+            QueryOp::TipsScan {
+                anchor: chat,
+                scan_id: scan,
+                offset: 2,
+            },
+            QueryOp::Keys {
+                chat_id: chat,
+                gossip_id: peer,
+            },
+        ];
+        round_trip(RequestRef {
+            sent_at: 1,
+            ttl: 2,
+            entries: ops
+                .into_iter()
+                .enumerate()
+                .map(|(i, op)| RefEntry {
+                    purpose: if i % 2 == 0 {
+                        Purpose::Task(TaskKey {
+                            chat_id: chat,
+                            target: Target::Root,
+                        })
+                    } else {
+                        Purpose::Scan(chat)
+                    },
+                    op,
+                    answered: i % 3 == 0,
+                })
+                .collect(),
+        });
+        let lane = Lane {
+            earliest: 1,
+            due: Some(2),
+            active: Some(peer),
+            moved: true,
+        };
+        round_trip(GroupSync {
+            neighbors: BTreeSet::from([peer]),
+            asked: BTreeMap::from([(peer, 1)]),
+            cooldown: BTreeMap::from([(peer, 2)]),
+            suggested: BTreeSet::from([peer]),
+            lanes: [lane, Lane::default(), lane, Lane::default()],
+            cursor: 3,
+            cycle: vec![peer],
+            first_online: Some(4),
+        });
+        round_trip(PeerRecord {
+            supplied: 1,
+            penalty: 2,
+            failures: 3,
+            unanswered_ms: 4,
+            last_failure: 5,
+            last_timeout_query: 6,
+            requests: Bucket { level: 7, at: 8 },
+            responses: Bucket { level: 9, at: 10 },
+            version_notices: BTreeMap::from([(2, 3)]),
+            version: Some(1),
+            failed_announcements: vec![1, 2],
+            paused_until: 11,
+            pause_ms: 12,
+        });
+        round_trip(Hint { first: 1, used: 2 });
+        let mut works = vec![
+            Work::Full {
+                chat_id: chat,
+                event_id: event,
+            },
+            Work::Notice {
+                chat_id: chat,
+                event_id: event,
+            },
+            Work::Query {
+                purpose: Purpose::Scan(chat),
+            },
+            Work::NeighborRequest { chat_id: chat },
+            Work::NeighborResponse {
+                chat_id: chat,
+                accepted: true,
+                suggestions: vec![peer],
+            },
+            Work::VersionNotice,
+            Work::Object {
+                chat_id: chat,
+                item: EntryItem::Root,
+            },
+            Work::ObjectNotice {
+                chat_id: chat,
+                item: items[2],
+            },
+            Work::Blob(vec![1, 2]),
+            Work::LeaveRequest { chat_id: chat },
+        ];
+        for op in [
+            AnswerOp::Event {
+                chat_id: chat,
+                event_id: event,
+            },
+            AnswerOp::SyncObj {
+                chat_id: chat,
+                sync_obj_id: sync,
+            },
+            AnswerOp::Page {
+                anchor: chat,
+                scan_id: scan,
+                offset: 3,
+            },
+            AnswerOp::Status(Status::NotAvailable),
+            AnswerOp::Status(Status::Restart),
+            AnswerOp::Status(Status::Expired),
+            AnswerOp::Status(Status::Malformed),
+            AnswerOp::Status(Status::Unsupported),
+            AnswerOp::Root { chat_id: chat },
+            AnswerOp::Object {
+                chat_id: chat,
+                item: items[4],
+            },
+            AnswerOp::Keys { gossip_id: peer },
+        ] {
+            works.push(Work::Answer {
+                request_id: request,
+                idx: 1,
+                sent_at: 2,
+                ttl: 3,
+                op,
+            });
+        }
+        for w in works {
+            round_trip(w);
+        }
+        round_trip(Meta { next_seq: 7 });
+        round_trip(LookupResult::Found(event));
+        round_trip(LookupResult::NotFound);
+        for state in [
+            GroupState::Active,
+            GroupState::ReadOnlyAfterKick,
+            GroupState::Waiting,
+            GroupState::Dissolved,
+        ] {
+            round_trip(Some(state));
+        }
+        round_trip(EpochStatus::Installed);
+        round_trip(EpochStatus::Invitation(Invitation {
+            received_at: 1,
+            lookups: BTreeSet::from([commitment]),
+            not_available: BTreeSet::from([peer]),
+            closed_before: true,
+            rejoins: Some(chat),
+        }));
+        for status in [
+            GroupStatus::Active,
+            GroupStatus::Removed { epoch: chat, at: 1 },
+            GroupStatus::Left { epoch: chat, at: 2 },
+            GroupStatus::Waiting {
+                since: 3,
+                last_request: 4,
+            },
+            GroupStatus::Dissolved {
+                epoch: chat,
+                must_delete: false,
+                at: 5,
+            },
+        ] {
+            round_trip(status);
+        }
+        round_trip(Marker::Closed);
+        round_trip(Marker::Dissolved);
+        round_trip(ReplyCount {
+            since: 1,
+            count: 2,
+            owed: true,
+        });
+        for kind in [
+            ChangeKind::Invitation,
+            ChangeKind::Joined,
+            ChangeKind::Membership,
+            ChangeKind::Messages,
+            ChangeKind::ReadOnly,
+            ChangeKind::Fork,
+            ChangeKind::Closed,
+        ] {
+            round_trip((chat, kind));
+        }
+        for role in [
+            Role::Current,
+            Role::PendingVersion { due: 1 },
+            Role::PendingDeletion { due: 2 },
+        ] {
+            round_trip(role);
+        }
+        round_trip(StoredResult::Tombstone);
+        for body in [
+            Body::Text("t".into()),
+            Body::Forward {
+                content_type: MessageType::Media,
+                content: vec![1],
+            },
+            Body::Forward {
+                content_type: MessageType::Reaction,
+                content: vec![],
+            },
+            Body::Reaction(vec![2]),
+            Body::Media(vec![3]),
+        ] {
+            round_trip(body);
+        }
+        round_trip(Payload::Delete {
+            sync_obj_id: sync,
+            scheduled_at: Some(5),
+        });
+        round_trip(Payload::Delete {
+            sync_obj_id: sync,
+            scheduled_at: None,
+        });
         round_trip(None::<u64>);
     }
 }
