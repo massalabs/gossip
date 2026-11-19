@@ -8,8 +8,9 @@
  *   every batch it commits is persisted in one transaction before anything it
  *   produced is encrypted (the binding refuses `is_current` until then). If a
  *   write fails, the engine is reopened from the database.
- * - **Transport.** A group plaintext travels in the one-to-one session of each
- *   recipient, inside a keep-alive (`serializeGroupPlaintext`). Right before
+ * - **Transport.** A group plaintext travels in the session of each recipient,
+ *   as a session message of the group type (`serializeGroupPlaintext`), which
+ *   carries nothing else and is used for nothing else. Right before
  *   encryption the plaintext is checked (`is_current`); its ciphertext is stored
  *   in the group outbox together with `handed_off`, then sent; `published` once
  *   the transport took it. A ciphertext that failed is retried as stored,
