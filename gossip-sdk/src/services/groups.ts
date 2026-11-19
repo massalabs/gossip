@@ -12,7 +12,8 @@
  *   recipient, inside a keep-alive (`serializeGroupPlaintext`). Right before
  *   encryption the plaintext is checked (`is_current`); its ciphertext is stored
  *   in the group outbox together with `handed_off`, then sent; `published` once
- *   the transport took it. A ciphertext that failed is retried as stored.
+ *   the transport took it. A ciphertext that failed is retried as stored,
+ *   unless the server refused it for good.
  * - **Time.** The engine is ticked at its `next_wakeup` and after each
  *   operation.
  *
@@ -30,6 +31,7 @@ import type { SdkConfig } from '../config/sdk.js';
 import { serializeGroupPlaintext } from '../utils/messageSerialization.js';
 import { decodeUserId, encodeUserId } from '../utils/userId.js';
 import { Logger } from '../utils/logs.js';
+import { isFinalStatus } from '../api/restClient.js';
 
 const logger = new Logger('GroupService');
 
@@ -183,6 +185,18 @@ export type LeaveChoice = 'Signed' | 'AskToBeKicked' | 'Silent';
 type Raw = Record<string, unknown>;
 
 const MAX_WAKEUP_MS = 60 * 60 * 1000;
+
+/**
+ * Whether a send failed for good: the server answered a 4xx other than a
+ * timeout or rate limiting. A 409 means that it holds another value under the
+ * seeker (the same value would have been taken), so this one never arrives.
+ */
+function isFinalSendError(error: unknown): boolean {
+  const status = /HTTP (\d{3})/.exec(
+    error instanceof Error ? error.message : ''
+  );
+  return status !== null && isFinalStatus(Number(status[1]));
+}
 
 function userIdOf(hex: string): string {
   return encodeUserId(hexToBytes(hex));
@@ -810,14 +824,9 @@ export class GroupService {
           seeker: e.seeker,
           ciphertext: e.ciphertext,
         });
-      } catch {
+      } catch (error) {
         if (id !== null) {
-          await this.queries.groups
-            .rescheduleOutbox(
-              id,
-              new Date(this.now() + this.config.messages.retryDelayMs)
-            )
-            .catch(() => undefined);
+          await this.outboxFailed(id, error).catch(() => undefined);
         }
         continue;
       }
@@ -844,14 +853,29 @@ export class GroupService {
           seeker: row.seeker,
           ciphertext: row.ciphertext,
         });
-        await this.queries.groups.deleteOutbox(row.id);
-      } catch {
-        await this.queries.groups.rescheduleOutbox(
-          row.id,
-          new Date(this.now() + this.config.messages.retryDelayMs)
-        );
+      } catch (error) {
+        await this.outboxFailed(row.id, error).catch(() => undefined);
+        continue;
       }
+      await this.queries.groups.deleteOutbox(row.id).catch(() => undefined);
     }
+  }
+
+  /**
+   * A stored ciphertext that failed to send. One the server refused for good
+   * is deleted: its plaintext was handed off but is never published, so the
+   * engine records no delivery hint for it and its events stay to be
+   * synchronised. Any other failure is retried.
+   */
+  private async outboxFailed(id: number, error: unknown): Promise<void> {
+    if (isFinalSendError(error)) {
+      await this.queries.groups.deleteOutbox(id);
+      return;
+    }
+    await this.queries.groups.rescheduleOutbox(
+      id,
+      new Date(this.now() + this.config.messages.retryDelayMs)
+    );
   }
 
   /**

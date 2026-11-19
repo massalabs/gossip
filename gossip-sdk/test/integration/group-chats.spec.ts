@@ -552,4 +552,31 @@ describe('Group chats', { timeout: 120_000 }, () => {
     await bob.groups.settle();
     expect(await texts(bob.groups, groupId)).toEqual(['first', 'on time']);
   });
+  it('drops a ciphertext the server refuses for good, and sends no more of it', async () => {
+    const groupId = await twoMemberGroup();
+    const proto = internals(alice).messageProtocol;
+    const send = proto.sendMessage.bind(proto);
+    const refused = new Set<string>();
+    const spy = vi
+      .spyOn(proto, 'sendMessage')
+      .mockImplementation(async (m: unknown) => {
+        const key = bytesToHex((m as { seeker: Uint8Array }).seeker);
+        refused.add(key);
+        throw new Error('HTTP 409: Conflict');
+      });
+    await alice.groups.sendMessage(groupId, 'refused');
+    await alice.groups.settle();
+    expect(refused.size).toBeGreaterThan(0);
+    expect(
+      await queriesOf(alice).groups.dueOutbox(alice.userId, new Date(8.64e15))
+    ).toEqual([]);
+    const again: string[] = [];
+    spy.mockImplementation(async (m: unknown) => {
+      again.push(bytesToHex((m as { seeker: Uint8Array }).seeker));
+      return send(m as never);
+    });
+    clock += 600_000;
+    await deliver();
+    expect(again.filter(k => refused.has(k))).toEqual([]);
+  });
 });
