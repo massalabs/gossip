@@ -183,6 +183,10 @@ pub enum Status {
 }
 
 /// A scan page: `[scanId, offset, count, entries]` (§12.1).
+///
+/// An invalid entry is skipped on receipt and the others are kept (§13.7, D.23). The count
+/// rules of §12.1 apply to the entries as received, skipped ones included: they still hold
+/// their positions in the frozen list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Page {
     /// The scan.
@@ -191,15 +195,23 @@ pub struct Page {
     pub offset: u64,
     /// The number of entries remaining from `offset`, this page included.
     pub count: u64,
-    /// At most 128 entries and 16 KiB.
+    /// At most 128 entries and 16 KiB, the skipped ones included.
     pub entries: Vec<Entry>,
+    /// How many received entries were invalid and skipped; the sender is penalised as for one
+    /// malformed item. Always 0 in a page to send.
+    pub skipped: usize,
 }
 
 /// A notice: at most 128 entries and 16 KiB (§13.5).
+///
+/// An invalid entry is skipped on receipt and the others are kept (§13.7, D.23).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
-    /// The entries; they may mix epochs.
+    /// The valid entries; they may mix epochs.
     pub entries: Vec<Entry>,
+    /// How many received entries were invalid and skipped; the sender is penalised as for one
+    /// malformed item. Always 0 in a notice to send.
+    pub skipped: usize,
 }
 
 /// A notice or page entry: `[chat_id, kind, id]` (§13.5).
@@ -328,6 +340,26 @@ fn check_entry_list(field: &'static str, n: usize, max: usize) -> Result<()> {
     Ok(())
 }
 
+/// The valid entries of a notice or page, and how many invalid ones were skipped. An entry
+/// is invalid when an ID has the wrong length (a root entry's `id` must be empty); unknown
+/// fields or kinds were refused with the whole frame by the strict check (§1).
+fn valid_entries(entries: &[proto::Entry]) -> (Vec<Entry>, usize) {
+    let valid: Vec<Entry> = entries
+        .iter()
+        .filter_map(|e| Entry::from_proto(e).ok())
+        .collect();
+    let skipped = entries.len() - valid.len();
+    (valid, skipped)
+}
+
+fn check_not_skipped(skipped: usize) -> Result<()> {
+    if skipped == 0 {
+        Ok(())
+    } else {
+        Err(Error::NotAllowed("skipped entries"))
+    }
+}
+
 fn check_bytes(field: &'static str, len: usize, max: usize) -> Result<()> {
     if len > max {
         return Err(Error::TooMany {
@@ -346,24 +378,29 @@ impl Page {
     fn from_proto(p: &proto::Page, received_len: usize) -> Result<Self> {
         check_entry_list("page entries", p.entries.len(), MAX_PAGE_ENTRIES)?;
         check_bytes("page bytes", received_len, MAX_PAGE_BYTES)?;
+        let scan_id = ScanId::from_slice(&p.scan_id)?;
+        let (entries, skipped) = valid_entries(&p.entries);
         let page = Self {
-            scan_id: ScanId::from_slice(&p.scan_id)?,
+            scan_id,
             offset: p.offset,
             count: p.count,
-            entries: p
-                .entries
-                .iter()
-                .map(Entry::from_proto)
-                .collect::<Result<_>>()?,
+            entries,
+            skipped,
         };
         page.check_count()?;
         Ok(page)
     }
 
+    /// The number of entries the page carried, skipped ones included.
+    #[must_use]
+    pub fn received(&self) -> u64 {
+        (self.entries.len() + self.skipped) as u64
+    }
+
     /// `count` includes this page's entries; an empty page with a positive count is invalid
     /// (§12.1).
     fn check_count(&self) -> Result<()> {
-        let n = self.entries.len() as u64;
+        let n = self.received();
         if self.count < n || (n == 0 && self.count > 0) {
             return Err(Error::NotAllowed("page count"));
         }
@@ -371,6 +408,7 @@ impl Page {
     }
 
     fn to_proto(&self) -> Result<proto::Page> {
+        check_not_skipped(self.skipped)?;
         check_entry_list("page entries", self.entries.len(), MAX_PAGE_ENTRIES)?;
         self.check_count()?;
         let p = proto::Page {
@@ -383,10 +421,11 @@ impl Page {
         Ok(p)
     }
 
-    /// Whether this page ends the scan: `count` equals the number of entries (§12.1).
+    /// Whether this page ends the scan: `count` equals the number of entries it carried,
+    /// skipped ones included (§12.1).
     #[must_use]
     pub fn is_final(&self) -> bool {
-        self.count == self.entries.len() as u64
+        self.count == self.received()
     }
 }
 
@@ -395,16 +434,12 @@ impl Notice {
     fn from_proto(p: &proto::Notice, received_len: usize) -> Result<Self> {
         check_entry_list("notice entries", p.entries.len(), MAX_NOTICE_ENTRIES)?;
         check_bytes("notice bytes", received_len, MAX_NOTICE_BYTES)?;
-        Ok(Self {
-            entries: p
-                .entries
-                .iter()
-                .map(Entry::from_proto)
-                .collect::<Result<_>>()?,
-        })
+        let (entries, skipped) = valid_entries(&p.entries);
+        Ok(Self { entries, skipped })
     }
 
     fn to_proto(&self) -> Result<proto::Notice> {
+        check_not_skipped(self.skipped)?;
         check_entry_list("notice entries", self.entries.len(), MAX_NOTICE_ENTRIES)?;
         let p = proto::Notice {
             entries: self.entries.iter().map(|e| e.to_proto()).collect(),
