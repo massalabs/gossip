@@ -84,8 +84,28 @@ impl MNet {
         }
     }
 
+    /// The groups device `d` takes part in: superseded chats of two are kept apart.
     fn group_keys(&self, d: usize) -> Vec<ChatId> {
-        self.devs[d].node.groups().iter().map(|g| g.group).collect()
+        self.devs[d]
+            .node
+            .groups()
+            .iter()
+            .filter(|g| !matches!(g.status, MyStatus::Superseded { .. }))
+            .map(|g| g.group)
+            .collect()
+    }
+
+    /// The chats of two device `d` holds superseded, with the chat that continues each.
+    fn superseded(&self, d: usize) -> Vec<(ChatId, ChatId)> {
+        self.devs[d]
+            .node
+            .groups()
+            .iter()
+            .filter_map(|g| match g.status {
+                MyStatus::Superseded { by } => Some((g.group, by)),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -325,7 +345,7 @@ fn crossing(first: usize, message_in_losing: bool) -> (MNet, ChatId, ChatId) {
     let groups = [a, b];
     if message_in_losing {
         // The loser's owner writes in its own group before anything arrives.
-        net.say(lose, &groups[lose], "lost");
+        net.say(lose, &groups[lose], "written");
     }
     let second = 1 - first;
     net.deliver(first, second);
@@ -334,12 +354,29 @@ fn crossing(first: usize, message_in_losing: bool) -> (MNet, ChatId, ChatId) {
     (net, groups[keep], groups[lose])
 }
 
-fn check_crossing(net: &mut MNet, keep: ChatId, lose: ChatId, lost_messages: bool) {
+/// Both keep `keep`; neither erases `lose`, which both hold superseded by `keep`, with what
+/// was written in it, and which `keep` lists as its earlier chat.
+fn check_crossing(net: &mut MNet, keep: ChatId, lose: ChatId, has_messages: bool) {
     let (_, loser) = sorted_pair();
     for d in 0..2 {
         assert_eq!(net.group_keys(d), vec![keep], "device {d}");
+        assert_eq!(net.superseded(d), vec![(lose, keep)], "device {d}");
+        assert_eq!(
+            net.summary(d, &keep).unwrap().earlier,
+            vec![lose],
+            "device {d}"
+        );
         assert!(
             net.devs[d].node.invitations(net.now + DAY).is_empty(),
+            "device {d}"
+        );
+        assert_eq!(
+            net.texts(d, &lose),
+            if has_messages {
+                vec!["written".to_owned()]
+            } else {
+                Vec::new()
+            },
             "device {d}"
         );
     }
@@ -348,7 +385,7 @@ fn check_crossing(net: &mut MNet, keep: ChatId, lose: ChatId, lost_messages: boo
         group: lose,
         kind: ChangeKind::Superseded {
             by: keep,
-            lost_messages
+            has_messages
         }
     }));
     // Both write in the group kept.
@@ -375,10 +412,45 @@ fn crossing_migrations_keep_the_group_whose_owner_sorts_first_in_either_order() 
 }
 
 #[test]
-fn messages_written_in_the_losing_group_are_lost_and_said_so() {
+fn messages_written_in_the_losing_group_are_kept_on_both_devices() {
     for first in 0..2 {
         let (mut net, keep, lose) = crossing(first, true);
         check_crossing(&mut net, keep, lose, true);
+        // A superseded chat takes no new message, and is served to no one: a tips scan of it
+        // is answered as by a device that does not hold it.
+        for d in 0..2 {
+            let now = net.now;
+            let dev = &mut net.devs[d];
+            assert!(
+                dev.node
+                    .publish_message(
+                        &mut dev.store,
+                        lose,
+                        Body::Text("late".into()),
+                        BTreeMap::new(),
+                        None,
+                        now,
+                        &mut net.rng,
+                    )
+                    .is_err(),
+                "device {d}"
+            );
+            let answers = super::membership::answers_of(
+                &mut net,
+                d,
+                1 - d,
+                vec![QueryOp::TipsScan {
+                    anchor: lose,
+                    scan_id: crate::ids::ScanId::from_bytes([3; 32]),
+                    offset: 0,
+                }],
+            );
+            assert_eq!(
+                answers,
+                vec![(0, ResponseResult::Status(Status::NotAvailable))],
+                "device {d}"
+            );
+        }
     }
 }
 
