@@ -286,3 +286,114 @@ fn neighbors_prefer_existing_sessions() {
         assert!(asked.contains(&member(11)) && asked.contains(&member(12)));
     }
 }
+
+/// A device holding one epoch of `n` members, built like [`Net::new`] from another root.
+fn net_holding_another_epoch(n: usize) -> Net {
+    let mut net = Net::new(n, 1);
+    let root = epoch_root(n, 0x20);
+    let mut store = crate::store::MemoryStorage::new();
+    let mut node = Node::open(&store, member(0)).unwrap();
+    node.install_epoch(&mut store, config(&root), false, T0, &mut net.rng)
+        .unwrap();
+    net.devs[0] = Dev { node, store };
+    net.root = root;
+    net
+}
+
+/// The plaintexts device 0 sends `to` after each of `times` neighbor requests from it naming
+/// `chat`, one minute apart, and the peer records it keeps then.
+fn answers_to_requests(
+    net: &mut Net,
+    to: GossipId,
+    chat: ChatId,
+    times: usize,
+) -> (Vec<Vec<Vec<u8>>>, usize) {
+    let mut out = Vec::new();
+    for _ in 0..times {
+        net.recv_frames(
+            0,
+            to,
+            &[Frame::NeighborRequest(NeighborRequest { chat_id: chat })],
+        );
+        out.push(
+            net.poll(0)
+                .into_iter()
+                .filter(|(p, _)| *p == to)
+                .map(|(_, pt)| pt)
+                .collect(),
+        );
+        net.now += MIN / 60;
+    }
+    (out, net.devs[0].node.t.peers.len())
+}
+
+/// D.6: a neighbor request naming an epoch the device does not hold, and one naming an
+/// epoch it holds from a peer that is no member of it, get the same answer, byte for byte: a
+/// decline with no suggestions; also from a peer that shares nothing with the device.
+#[test]
+fn a_neighbor_request_from_a_non_member_is_answered_as_for_an_unknown_epoch() {
+    let stranger = GossipId::from_bytes([0x77; 32]);
+    let mut holds = Net::new(3, 1);
+    let chat = holds.chat();
+    let mut lacks = net_holding_another_epoch(3);
+    let (a, _) = answers_to_requests(&mut lacks, stranger, chat, 1);
+    let (b, _) = answers_to_requests(&mut holds, stranger, chat, 1);
+    assert_eq!(a, b);
+    assert_eq!(a[0].len(), 1);
+    let r = neighbor_response(&frames(&a[0][0])).unwrap();
+    assert_eq!(
+        r,
+        NeighborResponse {
+            chat_id: chat,
+            accepted: false,
+            suggestions: Vec::new(),
+        }
+    );
+    assert!(!holds.devs[0].node.is_neighbor(&chat, &stranger));
+}
+
+/// The probe of D.6 repeated: a peer sending many requests cannot tell a device that holds
+/// the epoch from one that does not, by the answers, their number (the request budget hits
+/// both the same way) or the state it leaves.
+#[test]
+fn repeated_neighbor_requests_cannot_tell_a_held_epoch_from_an_unknown_one() {
+    let stranger = GossipId::from_bytes([0x77; 32]);
+    let mut holds = Net::new(3, 1);
+    let chat = holds.chat();
+    let mut lacks = net_holding_another_epoch(3);
+    let (a, peers_a) = answers_to_requests(&mut lacks, stranger, chat, 300);
+    let (b, peers_b) = answers_to_requests(&mut holds, stranger, chat, 300);
+    assert_eq!(a, b);
+    assert_eq!(peers_a, peers_b);
+    let answered = a.iter().filter(|x| !x.is_empty()).count();
+    assert!(
+        answered > 0 && answered < 300,
+        "answered, within the request budget: {answered}"
+    );
+}
+
+/// D.6 for a member of another epoch: a held epoch it is no member of is answered as an epoch
+/// the device does not hold.
+#[test]
+fn a_member_of_another_epoch_gets_the_same_decline_for_a_held_epoch_it_is_not_in() {
+    let mut net = Net::new(3, 1);
+    let other = epoch_root(1, 0x30);
+    let dev = &mut net.devs[0];
+    dev.node
+        .install_epoch(&mut dev.store, config(&other), false, T0, &mut net.rng)
+        .unwrap();
+    let unknown = ChatId::from_bytes([9; 32]);
+    let mut got = Vec::new();
+    for chat in [other.chat_id(), unknown] {
+        net.recv_frames(
+            0,
+            member(1),
+            &[Frame::NeighborRequest(NeighborRequest { chat_id: chat })],
+        );
+        let r = neighbor_response(&net.poll_frames(0)[&member(1)]).unwrap();
+        assert_eq!(r.chat_id, chat);
+        got.push((r.accepted, r.suggestions));
+    }
+    assert_eq!(got[0], got[1]);
+    assert_eq!(got[0], (false, Vec::new()));
+}
