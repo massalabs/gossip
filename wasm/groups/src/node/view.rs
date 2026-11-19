@@ -6,7 +6,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::records::{ChangeKind, EpochStatus, GroupStatus, NodeStorage, SignedObject};
+use super::records::{
+    ChangeKind, EpochStatus, GroupStatus, Junction, JunctionKind, NodeStorage, SignedObject,
+};
 use super::{Node, NodeError};
 use crate::display::{self, VisibleMessage};
 use crate::ids::{ChatId, GossipId};
@@ -285,7 +287,7 @@ impl Node {
             .into_iter()
             .map(TimelineItem::Message)
             .collect();
-        let junctions: Vec<(u64, u64)> = self
+        let junctions: Vec<Junction> = self
             .t
             .group_recs
             .get(&group)
@@ -295,17 +297,17 @@ impl Node {
         // junction stored when the device accepted it (§5.10, §7.5), which lists the device.
         let added_back: BTreeMap<ChatId, u64> = junctions
             .iter()
-            .filter_map(|(from, to)| {
+            .filter_map(|&Junction { from, to, .. }| {
                 epochs
                     .iter()
                     .filter(|e| {
                         self.t
                             .epochs
                             .get(e)
-                            .is_some_and(|r| r.line_time == Some(*to) && r.root.is_member(&self.me))
+                            .is_some_and(|r| r.line_time == Some(to) && r.root.is_member(&self.me))
                     })
                     .min()
-                    .map(|e| (*e, (*from).max(*to)))
+                    .map(|e| (*e, from.max(to)))
             })
             .collect();
         for e in &epochs {
@@ -411,17 +413,17 @@ impl Node {
                 }),
                 GroupStatus::Active | GroupStatus::Waiting { .. } => {}
             }
-            for (from, to) in &junctions {
+            for &Junction { from, to, kind } in &junctions {
+                // The history ends with what made the group read-only (§5.10).
+                let line = match kind {
+                    JunctionKind::Removed => TimelineLine::YouWereRemoved,
+                    JunctionKind::Left => TimelineLine::YouLeft,
+                    JunctionKind::Dissolved => TimelineLine::Dissolved,
+                };
+                items.push(TimelineItem::Line { at: from, line });
                 items.push(TimelineItem::Line {
-                    at: *from,
-                    line: TimelineLine::YouWereRemoved,
-                });
-                items.push(TimelineItem::Line {
-                    at: *from,
-                    line: TimelineLine::NotAMember {
-                        from: *from,
-                        to: *to,
-                    },
+                    at: from,
+                    line: TimelineLine::NotAMember { from, to },
                 });
             }
         }

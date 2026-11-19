@@ -893,9 +893,31 @@ pub struct GroupRecord {
     /// Owner side: members whose live leave or owner-only request is held, with when it
     /// arrived (§5.5).
     pub pending_removals: BTreeMap<GossipId, u64>,
-    /// Junctions after being added back (§5.10): when the kick was received, and the time
-    /// `T` of the root that added the device back.
-    pub junctions: Vec<(u64, u64)>,
+    /// Junctions after being added back (§5.10).
+    pub junctions: Vec<Junction>,
+}
+
+/// A junction (§5.10): the device was read-only in a group and accepted a root that brought
+/// it back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Junction {
+    /// When the group became read-only: the kick, the own leave or the dissolve received.
+    pub from: u64,
+    /// The time `T` of the root that brought the device back (§7.5).
+    pub to: u64,
+    /// What made it read-only.
+    pub kind: JunctionKind,
+}
+
+/// What made a group read-only before a junction (§5.6, D.2, §5.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JunctionKind {
+    /// A kick.
+    Removed,
+    /// The device's own signed leave, sent from another copy of the account (D.2).
+    Left,
+    /// "Dissolve & Keep archived".
+    Dissolved,
 }
 
 /// The key of a signed object: the epoch it names, its kind and its ID.

@@ -18,9 +18,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use groups::display::VisibleMessage;
 use groups::node::records::{
     AnswerOp, Attempt, Candidate, CandidateState, ChangeKind, EpochRecord, EpochStatus, FrozenScan,
-    GroupRecord, GroupStatus, GroupSync, HeldRoot, Hint, Invitation, Lane, Marker, Meta,
-    PeerRecord, PendingLeave, Purpose, RefEntry, ReplyCount, RequestRef, Run, ScanAttempt, ScanOp,
-    SignedObject, SignedRecord, Target, Task, TaskKey, Trigger, TriggerKind, Work,
+    GroupRecord, GroupStatus, GroupSync, HeldRoot, Hint, Invitation, Junction, JunctionKind, Lane,
+    Marker, Meta, PeerRecord, PendingLeave, Purpose, RefEntry, ReplyCount, RequestRef, Run,
+    ScanAttempt, ScanOp, SignedObject, SignedRecord, Target, Task, TaskKey, Trigger, TriggerKind,
+    Work,
 };
 use groups::node::timing::Bucket;
 use groups::node::{
@@ -550,6 +551,12 @@ record!(GroupRecord {
     pending_removals,
     junctions
 });
+record!(Junction { from, to, kind });
+variants!(JunctionKind {
+    Removed,
+    Left,
+    Dissolved
+});
 variants!(SignedObject { Leave(leave), Kick(kick), Dissolve(dissolve) });
 record!(SignedRecord {
     object,
@@ -829,7 +836,23 @@ mod tests {
             links: BTreeSet::new(),
             local_name: Some("ü \"x\"".into()),
             pending_removals: BTreeMap::from([(peer, 4)]),
-            junctions: vec![(1, 2)],
+            junctions: vec![
+                Junction {
+                    from: 1,
+                    to: 2,
+                    kind: JunctionKind::Removed,
+                },
+                Junction {
+                    from: 3,
+                    to: 4,
+                    kind: JunctionKind::Left,
+                },
+                Junction {
+                    from: 5,
+                    to: 6,
+                    kind: JunctionKind::Dissolved,
+                },
+            ],
         });
         round_trip(StoredResult::Content(Content {
             sync_obj_id: SyncObjId::from_bytes([4; 32]),
