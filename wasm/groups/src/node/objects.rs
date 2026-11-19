@@ -1001,6 +1001,13 @@ impl Node {
     pub(crate) fn handover_owed(&self, chat: &ChatId, peer: &GossipId) -> Option<Vec<ChatId>> {
         let group = self.group_of(chat);
         let removed = self.removed_peer(chat, peer);
+        // An epoch of the former owner's own that does not lead to the handover: a competing
+        // branch it still follows.
+        let own_branch = self
+            .t
+            .epochs
+            .get(chat)
+            .is_some_and(|r| r.root.owner_id() == *peer);
         if *peer == self.me
             || !self
                 .t
@@ -1028,8 +1035,26 @@ impl Node {
                         return None;
                     }
                     vec![*h]
-                } else if removed || r.parents.first() == Some(chat) {
+                } else if r.parents.first() == Some(chat) {
                     self.line_between(chat, h, peer)
+                } else if removed || own_branch {
+                    // From `chat` when it leads to the handover (for a removed peer only: a
+                    // member edits its messages in older epochs, §10.4); otherwise, for a
+                    // competing branch of the former owner's own, from the nearest ancestor
+                    // of `chat` that leads to it, which the former owner holds.
+                    let direct = self.line_between(chat, h, peer);
+                    if !direct.is_empty() {
+                        if !removed {
+                            return None;
+                        }
+                        direct
+                    } else {
+                        self.held_ancestors_of(chat)
+                            .into_iter()
+                            .map(|x| self.line_between(&x, h, peer))
+                            .find(|c| !c.is_empty())
+                            .unwrap_or_default()
+                    }
                 } else {
                     return None;
                 };
@@ -1039,14 +1064,20 @@ impl Node {
             .map(|(_, chain)| chain)
     }
 
-    /// A valid handover root this device signed, as the owner of its held parent `parent`,
-    /// and in which it is no member: a copy of this account handed the group over and left
-    /// ("Hand over and leave", §5.7), and this device, restored from a backup made before,
-    /// still owns its line. It adopts the consequence: the group becomes read-only, "You
-    /// left". Nothing changes when the line it follows has moved on since (the group was
-    /// handed back and it was added again, for instance): the parent must be its current
-    /// epoch, or an ancestor of it through roots of its own.
-    pub(crate) fn left_by_handover(&mut self, cx: &mut Cx<'_>, parent: ChatId) {
+    /// A valid handover root `handover` this device signed, as the owner of its held parent
+    /// `parent`, and in which it is no member: a copy of this account handed the group over
+    /// and left ("Hand over and leave", §5.7), and this device, restored from a backup made
+    /// before, still owns the group, on that line or on a competing branch of its own (the
+    /// handover deposes it on every branch, §5.9). It adopts the consequence: the group
+    /// becomes read-only, "You left". Nothing changes when the group was handed back to it
+    /// since (a held handover root naming it, later than `handover`), or when its current
+    /// epoch is not its own.
+    pub(crate) fn left_by_handover(
+        &mut self,
+        cx: &mut Cx<'_>,
+        parent: ChatId,
+        handover: &crate::root::Root,
+    ) {
         let group = self.group_of(&parent);
         if self.group_status(&group) != GroupStatus::Active {
             return;
@@ -1054,18 +1085,19 @@ impl Node {
         let Some(current) = self.current_epoch(&group) else {
             return;
         };
-        let mut own_line = BTreeSet::new();
-        let mut stack = vec![current];
-        while let Some(c) = stack.pop() {
-            if let Some(r) = self.t.epochs.get(&c)
+        let owns = self
+            .t
+            .epochs
+            .get(&current)
+            .is_some_and(|r| r.root.owner_id() == self.me);
+        let handed_back = self.t.epochs.iter().any(|(_, r)| {
+            r.group == group
                 && r.status == EpochStatus::Installed
+                && r.root.root_type() == crate::root::RootType::Handover
                 && r.root.owner_id() == self.me
-                && own_line.insert(c)
-            {
-                stack.extend(r.parents.iter().copied());
-            }
-        }
-        if !own_line.contains(&parent) {
+                && r.root.created_at() > handover.created_at()
+        });
+        if !owns || handed_back {
             return;
         }
         self.stats.handovers_learnt += 1;
@@ -1077,6 +1109,28 @@ impl Node {
                 at: cx.now,
             },
         );
+    }
+
+    /// The held ancestors of `chat`, nearest first (breadth first), `chat` excluded.
+    fn held_ancestors_of(&self, chat: &ChatId) -> Vec<ChatId> {
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::from([*chat]);
+        let mut queue = std::collections::VecDeque::from([*chat]);
+        while let Some(c) = queue.pop_front() {
+            for p in self
+                .t
+                .epochs
+                .get(&c)
+                .map(|r| r.parents.clone())
+                .unwrap_or_default()
+            {
+                if seen.insert(p) {
+                    out.push(p);
+                    queue.push_back(p);
+                }
+            }
+        }
+        out
     }
 
     /// The installed epochs after `anc` up to `desc` on a line of epochs `peer` is a member
