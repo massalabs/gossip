@@ -45,6 +45,7 @@
 //! relayed ([`group`], [`objects`]), and the owner's and members' actions are in
 //! [`actions`]; the state the interface needs is in [`view`].
 
+pub mod conformance;
 pub mod records;
 pub mod timing;
 
