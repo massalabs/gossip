@@ -175,6 +175,30 @@ pub struct Task {
     pub candidates: BTreeMap<GossipId, Candidate>,
     /// Runs started so far (1 + renewals).
     pub runs: u32,
+    /// When the task was created (local time), which bounds its lookup deadline.
+    pub created_at: u64,
+}
+
+impl Task {
+    /// The lookup deadline of an event task (§11.6): `ts + RETENTION` from the ID, but no
+    /// later than a retention period after the task was created, so that an ID dated far in
+    /// the future is not looked for longer than any real event can be. None for a
+    /// sync-object lookup.
+    #[must_use]
+    pub fn deadline(&self, key: &TaskKey) -> Option<u64> {
+        match key.target {
+            Target::Event(id) => {
+                let by_id = u64::try_from(crate::store::window_end(&id)).unwrap_or(u64::MAX);
+                Some(
+                    by_id.min(
+                        self.created_at
+                            .saturating_add(crate::constants::RETENTION_MS),
+                    ),
+                )
+            }
+            Target::SyncObj(_) => None,
+        }
+    }
 }
 
 // ── Scans (§12.1, §12.2) ─────────────────────────────────────────────────────

@@ -70,12 +70,9 @@ fn fresh_run(rng: &mut dyn Randomness) -> Run {
     }
 }
 
-/// The deadline of a task: `ts + RETENTION` for an event (§11.6), none for a sync object.
-fn past_deadline(key: &TaskKey, now: u64) -> bool {
-    match key.target {
-        Target::Event(id) => !in_window(&id, now),
-        Target::SyncObj(_) => false,
-    }
+/// Whether the lookup deadline of a task has passed (see [`Task::deadline`]).
+fn past_deadline(key: &TaskKey, task: &Task, now: u64) -> bool {
+    task.deadline(key).is_some_and(|d| d <= now)
 }
 
 impl Node {
@@ -128,6 +125,7 @@ impl Node {
                     run: fresh_run(cx.rng),
                     candidates: BTreeMap::new(),
                     runs: 1,
+                    created_at: cx.now,
                 },
             );
             self.stats.tasks_created += 1;
@@ -397,7 +395,7 @@ impl Node {
             } else {
                 self.tix.load.clone()
             };
-            if past_deadline(&key, cx.now) {
+            if past_deadline(&key, self.t.tasks.get(&key).expect("ready"), cx.now) {
                 // Removed by the next timer pass; not ranked meanwhile.
                 self.tix.block(
                     key,

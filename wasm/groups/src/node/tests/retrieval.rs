@@ -142,9 +142,14 @@ fn a_member_with_a_session_comes_before_one_without() {
 fn unanswered_stages_grow_the_ttl_by_pi_with_local_jitter_then_pause_after_twenty() {
     let mut net = Net::new(5, 1);
     let chat = net.chat();
-    // Its deadline is far enough for twenty stages (about 14.6 days).
-    let id = EventId::new(T0 + 20 * DAY, [5; 16]);
-    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    // Twenty stages last about 14.6 days, longer than the deadline of any event task (one
+    // retention period): a sync-object lookup, which has no deadline, runs them all.
+    let sync = SyncObjId::from_bytes([5; 32]);
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    dev.node
+        .lookup_sync_object(&mut dev.store, chat, sync, now, &mut net.rng)
+        .unwrap();
     let mut ttl = FIRST_TTL_MS;
     let mut stages = 0;
     loop {
@@ -167,11 +172,10 @@ fn unanswered_stages_grow_the_ttl_by_pi_with_local_jitter_then_pause_after_twent
         }
     }
     assert_eq!(stages, usize::from(MAX_UNANSWERED_STAGES));
-    let key = TaskKey {
-        chat_id: chat,
-        target: Target::Event(id),
-    };
-    assert_eq!(net.devs[0].node.t.tasks.get(&key).unwrap().run, Run::Paused);
+    assert_eq!(
+        net.devs[0].node.take_lookup_results(),
+        vec![(chat, sync, LookupResult::NotFound)]
+    );
 }
 
 #[test]
