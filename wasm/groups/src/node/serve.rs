@@ -7,8 +7,8 @@
 use super::records::{AnswerOp, Purpose, Target, TaskKey, TriggerKind, Work};
 use super::retrieval::Answer;
 use super::timing::{
-    QUERY_CLOCK_TOLERANCE_MS, REQUEST_BURST, REQUEST_REFILL_PER_MIN, VERSION_NOTICE_INTERVAL_MS,
-    deadline, ignored_query, may_answer,
+    QUERY_CLOCK_TOLERANCE_MS, QUEUED_ANSWERS_PER_PEER, REQUEST_BURST, REQUEST_REFILL_PER_MIN,
+    VERSION_NOTICE_INTERVAL_MS, VERSION_NOTICES_PER_PEER, deadline, ignored_query, may_answer,
 };
 use super::{Cx, Node, NodeError, NotHandled, PENALTY_MALFORMED};
 use crate::event::{MessageEvent, Payload};
@@ -34,8 +34,19 @@ impl Node {
             return Ok(());
         }
         let live = may_answer(q.sent_at, q.ttl, cx.now);
+        let mut queued = self
+            .t
+            .queue
+            .range((from, 0)..=(from, u64::MAX))
+            .filter(|(_, w)| matches!(w, Work::Answer { .. }))
+            .count();
         for (idx, entry) in q.entries.iter().enumerate() {
             if !self.authorize(from, entry) {
+                continue;
+            }
+            if queued >= QUEUED_ANSWERS_PER_PEER {
+                // Dropped unanswered: one `busy` per entry cannot be bounded otherwise, and
+                // the wire format has no status for a whole frame.
                 continue;
             }
             let op = if !self.take_request_token(&from, cx.now) {
@@ -77,6 +88,7 @@ impl Node {
                     QueryEntry::Op(_) => continue,
                 }
             };
+            queued += 1;
             self.queue_work(
                 from,
                 Work::Answer {
@@ -270,9 +282,19 @@ impl Node {
     }
 
     /// A plaintext of a version higher than supported: one version notice per peer and
-    /// version per 24 hours (§13.8), to members of an installed epoch only.
+    /// version per 24 hours (§13.8), to members of an installed epoch only. At most one is
+    /// queued per peer at a time, and the notices are remembered for
+    /// [`VERSION_NOTICES_PER_PEER`] versions, the oldest forgotten first.
     pub(crate) fn version_notice(&mut self, cx: &mut Cx<'_>, from: GossipId, version: u64) {
         if !self.shares_epoch(&from) {
+            return;
+        }
+        let pending = self
+            .t
+            .queue
+            .range((from, 0)..=(from, u64::MAX))
+            .any(|(_, w)| matches!(w, Work::VersionNotice));
+        if pending {
             return;
         }
         let now = cx.now;
@@ -283,6 +305,15 @@ impl Node {
             .is_none_or(|last| now.saturating_sub(*last) >= VERSION_NOTICE_INTERVAL_MS);
         if due {
             r.version_notices.insert(version, now);
+            while r.version_notices.len() > VERSION_NOTICES_PER_PEER {
+                let oldest = r
+                    .version_notices
+                    .iter()
+                    .min_by_key(|(v, at)| (**at, **v))
+                    .map(|(v, _)| *v)
+                    .expect("not empty");
+                r.version_notices.remove(&oldest);
+            }
             self.queue_work(from, Work::VersionNotice);
         }
     }
