@@ -24,6 +24,10 @@ import { Logger } from '../utils/logs.js';
 import { BulletinItem } from '../api/messageProtocol/types.js';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
 import { decodeAnnouncementPayload } from '../utils/announcementPayload.js';
+import {
+  TEMPORARY_CONTACT_NAME_PREFIX,
+  isTemporaryContactName,
+} from '../utils/contacts.js';
 import { Result } from '../utils/type.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { RefreshService } from './refresh.js';
@@ -570,18 +574,22 @@ export class AnnouncementService {
   ): Promise<string> {
     const newRequestContacts = await this.queries.contacts.getNamesByPrefix(
       ownerUserId,
-      'New Request'
+      TEMPORARY_CONTACT_NAME_PREFIX
     );
 
     const numbers = newRequestContacts
-      .map(contact => {
-        const match = contact.name.match(/^New Request (\d+)$/);
-        return match ? parseInt(match[1], 10) : 0;
-      })
+      .map(contact =>
+        isTemporaryContactName(contact.name)
+          ? parseInt(
+              contact.name.slice(TEMPORARY_CONTACT_NAME_PREFIX.length),
+              10
+            )
+          : 0
+      )
       .filter(number => number > 0);
 
     const next = numbers.length ? Math.max(...numbers) + 1 : 1;
-    return `New Request ${next}`;
+    return `${TEMPORARY_CONTACT_NAME_PREFIX} ${next}`;
   }
 
   /**

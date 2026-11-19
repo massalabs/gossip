@@ -28,7 +28,7 @@
 
 import { type Contact, type Discussion, type Queries } from '../db/index.js';
 import { toDiscussion } from '../utils/discussions.js';
-import { deleteContact } from '../utils/contacts.js';
+import { deleteContact, isTemporaryContactName } from '../utils/contacts.js';
 import { decodeUserId } from '../utils/userId.js';
 import type { SessionModule } from '../wasm/session.js';
 import { SessionStatus } from '../wasm/bindings.js';
@@ -510,6 +510,17 @@ export class ConversationService {
         );
       }
       if (!contact) continue;
+      if (d && contact.connection !== 'automatic') {
+        // This member asked for a session before this device accepted the
+        // group, so it arrived as a request from someone who is no contact,
+        // and the user never accepted it. Accepting it now opens a
+        // connection (§5.12): it stays out of the contacts and the lists,
+        // and is revoked once no group needs it.
+        await this.queries.contacts.updateByOwnerAndUser(this.owner, peer, {
+          connection: 'automatic',
+          ...(isTemporaryContactName(contact.name) ? { name: '' } : {}),
+        });
+      }
       const result = d
         ? await this.discussions.createSessionForContact(
             peer,

@@ -350,4 +350,34 @@ describe('Direct chats, contacts and connections', { timeout: 300_000 }, () => {
       await bob.queries.contacts.getByOwnerAndUser(bob.userId, alice.userId)
     ).toBeDefined();
   });
+
+  it('keeps automatic a connection a member asked for before this device accepted the group', async () => {
+    const [alice, bob, carol] = await open(3);
+    await setupSession(alice, bob, 'Bob', 'Alice');
+    await setupSession(alice, carol, 'Carol', 'Alice');
+
+    const groupId = await alice.groups.createGroup('Trip', [
+      bob.userId,
+      carol.userId,
+    ]);
+    await deliver();
+    const [bobInv] = await bob.groups.invitations();
+    await bob.conversations.acceptInvitation(bobInv.epochId);
+    // Bob connects to Carol while she has only been invited: his request
+    // reaches her as a request from someone who is no contact.
+    await deliver(20, 10_000);
+    const [carolInv] = await carol.groups.invitations();
+    await carol.conversations.acceptInvitation(carolInv.epochId);
+    await deliver(20, 10_000);
+
+    expect(carol.discussions.getStatus(bob.userId)).toBe(SessionStatus.Active);
+    const c = await carol.queries.contacts.getByOwnerAndUser(
+      carol.userId,
+      bob.userId
+    );
+    // Accepting the group connected Bob as a member, not as a contact.
+    expect(c).toMatchObject({ connection: 'automatic', name: '' });
+    expect(await carol.messages.getVisibleMessages(bob.userId)).toEqual([]);
+    expect(await keys(carol)).toEqual([groupId]);
+  });
 });

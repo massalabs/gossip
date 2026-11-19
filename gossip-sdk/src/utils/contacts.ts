@@ -11,6 +11,14 @@ import type { UserPublicKeys } from '../wasm/bindings.js';
 import type { Contact } from '../db/index.js';
 import { Queries } from '../db/queries/index.js';
 
+/** The prefix of the name given to a requester who sent none. */
+export const TEMPORARY_CONTACT_NAME_PREFIX = 'New Request';
+
+/** Whether `name` is one given to a requester who sent none. */
+export function isTemporaryContactName(name: string): boolean {
+  return /^New Request \d+$/.test(name);
+}
+
 export type AddContactResult = {
   success: boolean;
   error?: string;
