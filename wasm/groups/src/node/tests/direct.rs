@@ -609,3 +609,26 @@ fn the_winner_sends_its_root_again_when_the_losing_root_reaches_it() {
         assert_eq!(net.group_keys(d), vec![groups[keep]], "device {d}");
     }
 }
+
+/// Found by the direct-chat simulation (seed 6): a device that had accepted the peer's
+/// migration and then migrated again held both groups, while the peer kept one of them.
+#[test]
+fn a_migration_founded_after_accepting_the_peers_settles_with_it() {
+    for accepter in 0..2 {
+        let mut net = MNet::new(2, true);
+        net.earlier(0, 1, 0, true);
+        net.earlier(1, 0, 0, true);
+        let creator = 1 - accepter;
+        let theirs = net.create_with(creator, &[accepter], Some(0)).unwrap();
+        net.exchange();
+        net.accept(accepter, theirs);
+        let got = net.create_with(accepter, &[creator], Some(0)).unwrap();
+        net.run(10 * MIN);
+        let (keep_dev, _) = sorted_pair();
+        let keep = if keep_dev == creator { theirs } else { got };
+        assert_eq!(got == theirs, keep_dev == creator);
+        for d in 0..2 {
+            assert_eq!(net.group_keys(d), vec![keep], "accepter {accepter} device {d}");
+        }
+    }
+}
