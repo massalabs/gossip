@@ -217,9 +217,10 @@ fn an_expired_acknowledgement_of_an_old_request_is_always_resent() {
         }
         assert_eq!(q[0].to, member(1));
         // The member was offline and acknowledges the request as expired after its
-        // deadline (less 5 minutes of clock skew): plausible. The device handles what it
-        // received before it ticks, as on any return, and resends at once.
-        net.now = super::super::timing::deadline(q[0].sent_at, q[0].ttl);
+        // deadline (less 5 minutes of clock skew): plausible. An honest responder with the
+        // same clock sends it only after the deadline. The device handles what it received
+        // before it ticks, as on any return, and resends at once.
+        net.now = super::super::timing::deadline(q[0].sent_at, q[0].ttl) + 1;
         super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Status(Status::Expired));
         let r = super::retrieval::sent_lookups(&mut net, 0);
         assert_eq!(r.len(), 1, "resend {round}");
@@ -1483,4 +1484,21 @@ fn any_defined_status_ends_the_attempt_without_penalty() {
     super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Unsupported));
     assert_eq!(net.devs[0].node.score(&member(1)), score);
     assert_eq!(net.devs[0].node.stats().invalid, 0);
+}
+
+/// An `expired` that arrives some time after the request's deadline, as one from an honest
+/// responder with the same clock always does, is still recognised; any other answer that
+/// late is not correlated.
+#[test]
+fn an_expired_after_the_deadline_is_recognised_for_a_margin() {
+    let mut net = Net::new(2, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0 + 30 * DAY, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    let deadline = super::super::timing::deadline(q[0].sent_at, q[0].ttl);
+    net.now = deadline + 10 * MIN;
+    super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Status(Status::Expired));
+    let r = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(r.len(), 1, "resent");
 }
