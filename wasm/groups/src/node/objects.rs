@@ -787,10 +787,15 @@ impl Node {
             SignedKind::Kick,
             *crate::hash::kick_id(&chat, &peer).as_bytes(),
         );
-        let key = if self.t.signed.contains(&kick) {
-            kick
+        // A member that missed epochs is still at an older one, which no record of its
+        // removal names: it is told of the epoch it was removed from by a root notice (it is
+        // a member of it, and fetches it and its parents), and sent the kick of that epoch.
+        let (key, later) = if self.t.signed.contains(&kick) {
+            (kick, None)
         } else if let Some(leave) = self.leave_for(&chat, &peer) {
-            leave
+            (leave, None)
+        } else if let Some(later) = self.later_kick(&chat, &peer) {
+            (later, Some(later.0))
         } else {
             return false;
         };
@@ -804,8 +809,30 @@ impl Node {
         r.count += 1;
         self.t.replies.insert((chat, peer), r);
         self.stats.removal_replies += 1;
+        if let Some(epoch) = later {
+            self.queue_object_notice(peer, epoch, EntryItem::Root);
+        }
         self.queue_object(peer, key.0, key_item(&key));
         true
+    }
+
+    /// The kick of `peer` held for a later epoch of the group of `chat` that descends from
+    /// `chat` through epochs `peer` is a member of: the epoch it was removed from after
+    /// missing the ones between (the latest such kick).
+    fn later_kick(&self, chat: &ChatId, peer: &GossipId) -> Option<SignedKey> {
+        let group = self.group_of(chat);
+        self.t
+            .signed
+            .iter()
+            .filter_map(|(k, r)| match &r.object {
+                SignedObject::Kick(kick) if kick.removed() == *peer && k.0 != *chat => {
+                    Some((*k, kick.chat_id()))
+                }
+                _ => None,
+            })
+            .filter(|(_, e)| self.group_of(e) == group && self.leave_live_for(chat, peer, e))
+            .max_by_key(|(_, e)| self.t.epochs.get(e).map(|r| r.root.created_at()))
+            .map(|(k, _)| k)
     }
 
     /// D.2, choice A: a leave of this device, from a copy of the account restored or used
