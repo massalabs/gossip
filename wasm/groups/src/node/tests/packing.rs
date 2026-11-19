@@ -130,7 +130,8 @@ fn plaintexts_never_exceed_the_container_limit() {
 fn the_response_budget_holds_back_answers_beyond_it() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
-    let big = "y".repeat(60_000);
+    // Each answer fills most of a container; 30 of them exceed the burst.
+    let size = 50_000;
     let mut ids = Vec::new();
     for i in 0..30u8 {
         let e = MessageEvent::create(
@@ -142,7 +143,7 @@ fn the_response_budget_holds_back_answers_beyond_it() {
                 author: member(1),
                 created_at: T0,
                 last_modified_at: T0,
-                body: Body::Text(big.clone()),
+                body: Body::Media(vec![0x79; size]),
                 edited: false,
                 metadata: BTreeMap::new(),
             }),
@@ -172,7 +173,7 @@ fn the_response_budget_holds_back_answers_beyond_it() {
         .get(&member(2))
         .map_or(0, |f| responses(f).len());
     assert!(
-        first < 30 && (first as u64) * 60_000 <= RESPONSE_BURST,
+        first < 30 && (first * size) as u64 <= RESPONSE_BURST,
         "{first}"
     );
     net.now += MIN;
@@ -180,7 +181,8 @@ fn the_response_budget_holds_back_answers_beyond_it() {
         .poll_frames(0)
         .get(&member(2))
         .map_or(0, |f| responses(f).len());
-    assert!((1..=5).contains(&second), "{second}");
+    // The refill of one minute, with what the burst left.
+    assert!((1..=6).contains(&second), "{second}");
 }
 
 #[test]
