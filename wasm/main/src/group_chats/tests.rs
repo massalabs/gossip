@@ -703,3 +703,66 @@ fn crossing_migrations_consents_and_connections() {
     assert_eq!(net.peers[2].core.invitations(net.now), "[]");
     assert_eq!(net.peers[2].core.direct_chat_consents(), "[]");
 }
+
+/// §2.2 through the bindings: an edit keeps the metadata it does not patch, `[]` keeping
+/// everything, and a patch may remove entries.
+#[test]
+fn an_edit_keeps_metadata_by_default() {
+    let mut net = Net::new(2);
+    let ids: Vec<GossipId> = net.peers.iter().map(Peer::id).collect();
+    let now = net.now;
+    let g = net.peers[0]
+        .core
+        .create_group("g".into(), vec![ids[1]], now)
+        .unwrap();
+    let published = net.peers[0]
+        .core
+        .publish_message(
+            g,
+            &text("hi"),
+            r#"[["x.unknown","0102"],["k","03"]]"#,
+            None,
+            now,
+        )
+        .unwrap();
+    let sync: groups::SyncObjId =
+        Codec::dec(J::parse(&published).unwrap().field("syncObjId").unwrap()).unwrap();
+    let metadata = |net: &Net| -> String {
+        let t = J::parse(&net.peers[0].core.timeline(g, net.now + 60_000).unwrap()).unwrap();
+        t.as_arr()
+            .unwrap()
+            .iter()
+            .find_map(|i| {
+                i.field("message").ok().map(|m| {
+                    m.field("content")
+                        .unwrap()
+                        .field("metadata")
+                        .unwrap()
+                        .to_text()
+                })
+            })
+            .unwrap()
+    };
+    net.peers[0]
+        .core
+        .publish_edit(g, sync, &text("edited"), "[]", None, now + 1)
+        .unwrap();
+    assert_eq!(metadata(&net), r#"[["k","03"],["x.unknown","0102"]]"#);
+    net.peers[0]
+        .core
+        .publish_edit(
+            g,
+            sync,
+            &text("again"),
+            r#"{"remove":["k"]}"#,
+            None,
+            now + 2,
+        )
+        .unwrap();
+    assert_eq!(metadata(&net), r#"[["x.unknown","0102"]]"#);
+    net.peers[0]
+        .core
+        .local_edit(g, sync, r#"{"body":null,"author":null,"created_at":null,"last_modified_at":null,"metadata":null,"edited":null}"#, now + 3)
+        .unwrap();
+    assert_eq!(metadata(&net), r#"[["x.unknown","0102"]]"#);
+}

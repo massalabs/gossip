@@ -32,8 +32,8 @@ use groups::store::{Role, StoredResult};
 use groups::wire::{Entry, EntryItem, QueryOp, SignedKind, Status};
 use groups::{
     Body, Challenge, ChatId, Content, Dissolve, DissolveId, EventId, GossipId, GroupSecret,
-    GroupState, Kick, KickId, Leave, LeaveId, LocalEdit, Merge, MessageType, ParentCommitment,
-    Payload, RefChatId, RequestId, Root, RootType, ScanId, SyncObjId,
+    GroupState, Kick, KickId, Leave, LeaveId, LocalEdit, Merge, MessageType, MetadataPatch,
+    ParentCommitment, Payload, RefChatId, RequestId, Root, RootType, ScanId, SyncObjId,
 };
 
 use groups::ReplyTarget;
@@ -619,6 +619,37 @@ variants!(LeaveChoice {
     AskToBeKicked,
     Silent
 });
+/// A metadata patch: `{"set": [[name, hex], …], "remove": [name, …]}` (either may be
+/// absent). `null` keeps everything, and a bare list of `[name, hex]` pairs, the earlier form,
+/// sets those entries and keeps the others: an edit never drops metadata it does not name.
+impl Codec for MetadataPatch {
+    fn enc(&self) -> J {
+        J::Obj(vec![
+            ("set".to_owned(), self.set.enc()),
+            ("remove".to_owned(), self.remove.enc()),
+        ])
+    }
+    fn dec(j: &J) -> R<Self> {
+        Ok(match j {
+            J::Null => MetadataPatch::default(),
+            J::Arr(_) => MetadataPatch {
+                set: Codec::dec(j)?,
+                remove: BTreeSet::new(),
+            },
+            _ => MetadataPatch {
+                set: match j.field("set") {
+                    Ok(v) => Codec::dec(v)?,
+                    Err(_) => BTreeMap::new(),
+                },
+                remove: match j.field("remove") {
+                    Ok(v) => Codec::dec(v)?,
+                    Err(_) => BTreeSet::new(),
+                },
+            },
+        })
+    }
+}
+
 record!(LocalEdit {
     body,
     author,
