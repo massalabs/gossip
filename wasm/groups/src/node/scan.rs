@@ -326,20 +326,18 @@ impl Node {
                 }
             }
             ResponseResult::Status(Status::Busy) => {
-                // No sign of responsiveness. Retried about a minute later whatever the
-                // stage (a budget refills in seconds, §17.4); the third in a row counts as an
-                // unanswered timeout of the stage.
-                if let Some(op) = self.t.scans_out.get_mut(&key)
-                    && current
-                {
-                    op.busy = op.busy.saturating_add(1);
-                    if op.busy >= super::retrieval::MAX_BUSY_IN_A_ROW {
-                        self.note_timeout(&peer, cx.now);
-                        self.next_scan_stage(cx, key);
-                    } else {
-                        op.attempt = ScanAttempt::Waiting {
-                            until: cx.now.saturating_add(jittered(FIRST_TTL_MS, op.jitter)),
-                        };
+                // Back-pressure (§2.2): no sign of responsiveness and no failure; the stage
+                // stays, and the page is asked again once the peer's backoff is over. A peer
+                // busy for a day ends the scan, without penalty, so that its lane moves on.
+                if current && self.t.scans_out.contains(&key) {
+                    let streak = self.busy_since(&peer);
+                    let until = self.busy_from(cx, &peer);
+                    if streak.is_some_and(|s| {
+                        cx.now.saturating_sub(s) >= super::backoff::BUSY_SCAN_GIVE_UP_MS
+                    }) {
+                        self.complete_scan(cx, key, ScanEnd::Ended);
+                    } else if let Some(op) = self.t.scans_out.get_mut(&key) {
+                        op.attempt = ScanAttempt::Waiting { until };
                     }
                 }
             }

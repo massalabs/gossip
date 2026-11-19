@@ -26,12 +26,6 @@ use crate::store::in_window;
 /// followed by a resend.
 pub(crate) const MAX_EXPIRED_RESENDS: u8 = 2;
 
-/// `busy` answers in a row from one peer, for one task in a run or one scan in a stage, that
-/// count as an unanswered timeout. `busy` asks for a retry a minute later (§13.4), which
-/// §11.4 does not count; without a bound a peer answering `busy` to everything would be
-/// asked for ever at no cost.
-pub(crate) const MAX_BUSY_IN_A_ROW: u8 = 3;
-
 /// Lookups a suspect task may have outstanding with one peer, and in total (a quarter of
 /// the limits of §17.4).
 pub(crate) const SUSPECT_LOOKUPS_PER_PEER: usize = ACTIVE_LOOKUPS_PER_PEER / 4;
@@ -49,8 +43,8 @@ pub(crate) enum Answer {
     Invalid,
     /// `malformed`: failed for this pass, not penalised.
     Refused,
-    /// `busy`: refused for resource reasons; asked again a minute later (§13.4), not
-    /// penalised, and no sign of responsiveness; the third in a row counts as a timeout.
+    /// `busy`: back-pressure (§13.4, §2.2): the peer backs off, the task moves on to other
+    /// candidates; never a failure, a timeout or a penalty, and no sign of responsiveness.
     Busy,
     /// `expired`: an immediate resend (§11.4); whether it is plausible (the request may have
     /// passed its receiver deadline).
@@ -353,7 +347,7 @@ impl Node {
         if !matches!(answer, Answer::Busy | Answer::Expired(_)) {
             cand.busy = 0;
         }
-        let mut timed_out = false;
+        let mut busy = false;
         match answer {
             Answer::Supplied => unreachable!(),
             Answer::TemporarilyInvalid => {
@@ -392,23 +386,13 @@ impl Node {
                 }
             }
             Answer::Busy => {
-                cand.busy = cand.busy.saturating_add(1);
-                if cand.busy >= MAX_BUSY_IN_A_ROW {
-                    // As an unanswered timeout: failed for this run, and the stage ends.
-                    cand.busy = 0;
-                    cand.state = CandidateState::Failed;
-                    cand.outstanding_until = None;
-                    timed_out = true;
-                } else {
-                    // Retry later: skipped for one local wait of the first TTL, whatever
-                    // the stage; a budget refills in seconds (§17.4), and a stage can last
-                    // a day.
-                    let wait = jittered(FIRST_TTL_MS, draw_jitter(cx.rng));
-                    cand.outstanding_until = Some(cx.now.saturating_add(wait));
-                    if current && let Run::Active { attempt, .. } = &mut task.run {
-                        *attempt = None;
-                    }
+                // The candidate stays untried: asked again once its backoff is over, while
+                // the next candidate is tried at once.
+                cand.outstanding_until = None;
+                if current && let Run::Active { attempt, .. } = &mut task.run {
+                    *attempt = None;
                 }
+                busy = true;
             }
             Answer::Expired(plausible) => {
                 if let Run::Active {
@@ -433,11 +417,8 @@ impl Node {
             }
         }
         self.t.tasks.insert(key, task);
-        if timed_out {
-            self.note_timeout(&peer, cx.now);
-            if current {
-                self.next_stage(cx, key);
-            }
+        if busy {
+            self.busy_from(cx, &peer);
         }
     }
 
@@ -477,7 +458,8 @@ impl Node {
     pub(crate) fn schedule(&mut self, cx: &mut Cx<'_>) -> Result<(), NodeError> {
         self.reindex_dirty();
         self.tix.wake_until(cx.now);
-        self.tix.wake_free(ACTIVE_LOOKUPS_PER_PEER);
+        let backoff = &self.t.backoff;
+        self.tix.wake_free(|p| super::backoff::window(backoff, p));
         if self.tix.total >= ACTIVE_LOOKUPS_PER_DEVICE || self.tix.none_ready() {
             return Ok(());
         }
@@ -665,14 +647,22 @@ impl Node {
                 continue;
             }
             let responsive = self.responsive(&peer);
-            if let Some(u) = c.outstanding_until.filter(|u| *u >= cx.now) {
+            // After `busy`, the peer is not asked before its backoff ends.
+            let outstanding = c
+                .outstanding_until
+                .filter(|u| *u >= cx.now)
+                .into_iter()
+                .chain(self.backed_off(&peer, cx.now))
+                .max();
+            if let Some(u) = outstanding {
                 until = until.min(u.saturating_add(1));
                 if responsive {
                     responsive_until = responsive_until.min(u.saturating_add(1));
                 }
                 continue;
             }
-            let limited = load.get(&peer).copied().unwrap_or(0) >= ACTIVE_LOOKUPS_PER_PEER;
+            let limited = load.get(&peer).copied().unwrap_or(0)
+                >= super::backoff::window(&self.t.backoff, &peer);
             if limited && responsive {
                 responsive_later.push(peer);
             }

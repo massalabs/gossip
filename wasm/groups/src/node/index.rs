@@ -252,10 +252,10 @@ impl TaskIndex {
     /// as it has free slots (highest priority first, then in the order they blocked): only
     /// that many can use them, and waking every task blocked on a busy peer at each freed
     /// slot would rank thousands of tasks for one lookup.
-    pub(crate) fn wake_free(&mut self, limit: usize) {
+    pub(crate) fn wake_free(&mut self, limit: impl Fn(&GossipId) -> usize) {
         let mut woken = Vec::new();
         for (peer, set) in &self.by_peer {
-            let free = limit.saturating_sub(self.load.get(peer).copied().unwrap_or(0));
+            let free = limit(peer).saturating_sub(self.load.get(peer).copied().unwrap_or(0));
             woken.extend(set.iter().take(free).map(|(_, k)| *k));
         }
         for key in woken {
@@ -350,7 +350,7 @@ mod tests {
         // The attempt ends: key 2 is ready again once slots are woken.
         ix.update(key(1), Some(&task(None)), 0);
         assert!(!ix.ready().any(|k| k == key(2)) && ix.ready().any(|k| k == key(1)));
-        ix.wake_free(1);
+        ix.wake_free(|_| 1);
         assert!(ix.ready().any(|k| k == key(2)));
         assert_eq!(ix.total, 0);
         ix.wake_until(99);

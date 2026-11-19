@@ -559,7 +559,7 @@ fn busy_is_back_pressure_never_a_failure() {
         net.now += 70_000;
         net.tick(0);
     }
-    assert!(busy >= 9, "{busy}");
+    assert!(busy >= 6, "{busy}");
     let node = &net.devs[0].node;
     assert!(node.responsive(&member(1)), "busy is no failure");
     assert_eq!(node.unanswered_ms(&member(1)), 0);
@@ -707,14 +707,14 @@ fn a_freed_slot_wakes_credible_tasks_first_and_rotates_the_others() {
     }
     // One slot of the peer is free.
     ix.load.insert(p, 15);
-    ix.wake_free(16);
+    ix.wake_free(|_| 16);
     assert_eq!(ix.ready().collect::<Vec<_>>(), vec![credible]);
     // Among equals, a task woken and blocked again goes behind the others.
     ix.block(credible, blocked.clone());
     ix.update(credible, None, 0);
     let mut woken = Vec::new();
     for _ in 0..3 {
-        ix.wake_free(16);
+        ix.wake_free(|_| 16);
         let k = ix.ready().next().unwrap();
         woken.push(k);
         ix.block(k, blocked.clone());
