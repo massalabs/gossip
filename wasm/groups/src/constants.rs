@@ -140,6 +140,16 @@ mod tests {
     }
 
     #[test]
+    fn a_full_container_fits_one_mesh_payload_once_encrypted() {
+        // A mesh payload is at most 65,536 bytes. Wrapping a group plaintext in a keep-alive
+        // and encrypting it in the one-to-one session adds at most 3,634 bytes, as measured
+        // by gossip-sdk/test/integration/group-plaintext-size.spec.ts.
+        const MESH_PAYLOAD_BYTES: usize = 65_536;
+        const SESSION_OVERHEAD_BYTES: usize = 3_634;
+        const { assert!(MAX_PLAINTEXT_BYTES + SESSION_OVERHEAD_BYTES <= MESH_PAYLOAD_BYTES) };
+    }
+
+    #[test]
     fn schedule_bound_is_retention_minus_five_minutes() {
         assert_eq!(MAX_SCHEDULE_MS, RETENTION_MS - 5 * 60 * 1000);
     }
