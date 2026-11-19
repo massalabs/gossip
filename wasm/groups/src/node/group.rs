@@ -135,7 +135,8 @@ impl Node {
 
     /// Moves the line followed past every held handover from it (§5.9): a group whose
     /// record follows a former owner while it holds that owner's handover (as a join of two
-    /// groups can leave it) follows the new owner, the former one deposed. Handovers are
+    /// groups can leave it) follows the new owner, the former one deposed; a group that
+    /// follows the new owner already deposes the former one. Handovers are
     /// taken in the order they were received, so that of two handovers from one owner the
     /// first adopted wins.
     fn refresh_lines(&mut self) {
@@ -164,6 +165,11 @@ impl Node {
                 let g = self.group_rec_mut(group);
                 g.deposed.insert(prev);
                 g.followed = Some(next);
+            } else if g.followed == Some(next) && prev != next && !g.deposed.contains(&prev) {
+                // A group that follows the new owner already (it accepted the handover root as
+                // an invitation, and was joined with its earlier line later) deposes the
+                // former owner too.
+                self.group_rec_mut(group).deposed.insert(prev);
             }
         }
     }
