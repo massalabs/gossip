@@ -9,6 +9,7 @@ import React, {
 import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
+import GroupListSection from '../components/groups/GroupListSection';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
@@ -279,6 +280,12 @@ const Discussions: React.FC = () => {
       )}
       {/* Swipe left/right to change filter */}
       <div className="flex-1 min-h-0" {...swipeHandlers}>
+        {filter !== 'pending' && (
+          <GroupListSection
+            searchQuery={debouncedSearchQuery}
+            unreadOnly={filter === 'unread'}
+          />
+        )}
         {scrollContainer && (
           <DiscussionListPanel
             onSelect={handleSelectDiscussion}

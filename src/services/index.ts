@@ -20,6 +20,7 @@ import { bridgeGet, bridgeSetMany } from '../sw-bridge';
 import { setActiveSeekersInPreferences } from '../utils/preferences';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
+import { useGroupStore } from '../stores/groupStore';
 
 let outputEpoch = 0;
 let activeOutputOwner: { sdk: GossipSdk; epoch: number } | null = null;
@@ -187,6 +188,27 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
 
       await withSdkOutputFence(gossip, ownerEpoch, generation, () =>
         notificationService.showDiscussionNotification(message.contactUserId)
+      );
+    } catch {
+      // Output failures are fail-closed and must not recreate diagnostics.
+    }
+  });
+
+  // Group activity: the same generic notification as a one-to-one message,
+  // without naming the group.
+  gossip.on(SdkEventType.GROUPS_CHANGED, async ({ changes }) => {
+    const { epoch: ownerEpoch, generation } = owner();
+    const current = useGroupStore.getState().currentGroupId;
+    const notify = changes.some(
+      c =>
+        (c.kind === 'Messages' && c.groupId !== current) ||
+        c.kind === 'Invitation'
+    );
+    if (!notify) return;
+    try {
+      if (await isAppInForeground()) return;
+      await withSdkOutputFence(gossip, ownerEpoch, generation, () =>
+        notificationService.showGroupNotification()
       );
     } catch {
       // Output failures are fail-closed and must not recreate diagnostics.

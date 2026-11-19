@@ -454,6 +454,36 @@ export class NotificationService {
   }
 
   /**
+   * Show a notification for group activity (a message or an invitation).
+   * Generic copy only, and no group identifier in the tag or the URL: nothing
+   * about which group is exposed outside the app.
+   */
+  async showGroupNotification(): Promise<void> {
+    if (!this.canShowNotification()) {
+      return;
+    }
+
+    try {
+      await this.sendNotification(
+        'New message',
+        'You have a new message. Open the app to read it.',
+        'gossip-group',
+        3000,
+        () => {
+          window.location.href = '/discussions';
+        },
+        false,
+        {
+          type: 'discussion',
+          url: '/discussions',
+        }
+      );
+    } catch (error) {
+      logger.error('Failed to show group notification:', error);
+    }
+  }
+
+  /**
    * Show a notification for a new discussion / session request.
    * Never includes announcement or message content — only generic copy.
    */
