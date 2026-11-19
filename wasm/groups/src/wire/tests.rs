@@ -1404,3 +1404,34 @@ fn debug_hides_secrets_and_content() {
         assert!(s.contains("bytes>"), "{s}");
     }
 }
+
+#[test]
+fn migrate_from_is_a_strict_uint64_and_field_12_is_unknown() {
+    let objects = objects();
+    let EventObject::Root(root) = &objects[0] else {
+        panic!()
+    };
+    let root_bytes = root.to_proto().encode_to_vec();
+    let event = |root: &[u8]| blob_of(&raw_field(0x0a, root));
+    // Field 11 with the length-delimited wire type.
+    let wrong = [root_bytes.clone(), raw_field(0x5a, &[0])].concat();
+    assert!(matches!(
+        decode_event_blob(&event(&wrong), 1),
+        Err(Error::Malformed(_))
+    ));
+    // Field 12, unknown in wire version 1 (§13.8).
+    let unknown = [root_bytes.clone(), vec![0x60, 0x00]].concat();
+    assert!(matches!(
+        decode_event_blob(&event(&unknown), 1),
+        Err(Error::Malformed(_))
+    ));
+    // Field 11 as a varint: decoded, then refused on a root that is not of two members
+    // only by the root's own rule.
+    let with = [root_bytes, vec![0x58, 0x00]].concat();
+    let r = decode_event_blob(&event(&with), 1);
+    if root.members().len() == 2 && root.parents().len() == 1 {
+        assert!(matches!(r, Ok(EventObject::Root(ref x)) if x.migrate_from() == Some(0)));
+    } else {
+        assert_eq!(r.map(|_| ()), Err(Error::MigrateFrom));
+    }
+}
