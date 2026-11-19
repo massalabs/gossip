@@ -569,7 +569,7 @@ impl Node {
         // Case 5: no parent matched; the unmatched ones are looked up first, except for a
         // migration this device acts on (§5.12): it continues no epoch, and a parent found
         // would only make it an ordinary invitation.
-        if self.migration_peer(&root, false).is_some() {
+        if self.direct_creation(&root, false).is_some() {
             self.invite(cx, from, root, Vec::new(), false, None, via);
             return Ok(Answer::Supplied);
         }
