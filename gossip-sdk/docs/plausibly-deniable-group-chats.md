@@ -3949,3 +3949,341 @@ relay may not hold those parents.
 
 - **A (recommended):** check with a test when several epochs are in place, then decide.
 - **B:** mark only the delivered event.
+
+### D.59 Hand over and leave in one root (§4.7 step 5, §5.9)
+
+*Found during implementation of membership.*
+
+*Current text:* a root is accepted when its deliverer is a member of it (§4.7 step 5). A handover
+may drop the outgoing owner from the member list.
+
+*Context:* the outgoing owner is then not a member of the root it delivers, so every receiver
+refused it.
+
+- **A (recommended):** a handover root is also accepted when delivered by the owner of its held
+  parent. The code does this.
+- **B:** hand over first, leave in a second step.
+- **C:** the new owner delivers the root.
+
+### D.60 Is an accepted root announced (§4.6, §4.8)
+
+*Found during implementation of membership.*
+
+*Current text:* §4.6 says an accepted root is announced by root notice; §4.8 says Accept "sends
+nothing" and the other members are not told.
+
+- **A (recommended):** only automatic adoptions are announced; accepting an invitation sends
+  nothing. The code does this.
+- **B:** every adoption is announced.
+
+### D.61 A leave that names an earlier epoch (§5.6, D.2, D.13)
+
+*Found by simulation of the implementation.*
+
+*Context:* a member that missed epochs signs its leave of an older one, and the owner applies it
+with no kick.
+Nothing then names the epoch the member was removed from, so a device of that member restored from
+a backup is never told.
+
+- **A (recommended):** such a leave counts as live for the epoch it names: it is sent back to the
+  leaver, accepted as an answer to a removal lookup, and D.2 reads "live for the current epoch".
+  The code does this.
+- **B:** the owner also creates a kick for the current epoch.
+
+### D.62 A member removed while several epochs behind (§5.6)
+
+*Found by simulation of the implementation.*
+
+*Context:* the member is still at an old epoch that no record names, and it cannot verify a kick
+that names a root it does not hold.
+The same holds for a device restored to before its own leave.
+
+- **A (recommended):** a retained member sends it, in full, the roots between its epoch and the
+  one it was removed from (at most 16 per reply; it is a member of each), together with the kick
+  or leave. The code does this. Roots are pushed because a removed peer can no longer look them up
+  (D.74).
+- **B:** rely on shared-chats scans after a reinstall only.
+
+### D.63 The former owner's branch after a handover (§5.9, §4.9)
+
+*Found by simulation of the implementation.*
+
+*Current text:* the new owner "may resolve" the former owner's branch.
+
+*Context:* if it never does, members that are only on that branch are left behind without notice.
+
+- **A (recommended):** it is a fork under §4.9: the new owner is prompted and sends nothing in the
+  group until it is resolved. The code does this.
+- **B:** keep "may", and state the consequence.
+
+### D.64 A root entry in tip lists (§12.1)
+
+*Found during implementation of membership.*
+
+*Context:* a member that missed a root and its notices cannot learn it while the new epoch has no
+events, because a tip list of the older epoch names none.
+
+- **A (recommended):** a tip list carries a root entry for the responder's current epoch when the
+  requester is a member of that epoch and it is not the anchor. The code does this.
+- **B:** rely on root notices and shared-chats scans.
+
+### D.65 A kick or dissolve held before its epoch is current (§5.4, §5.8)
+
+*Found during implementation of membership.*
+
+*Current text:* "a kick naming another epoch is ignored".
+
+*Context:* a device that receives the kick before it adopts the epoch would ignore it for ever.
+
+- **A (recommended):** it is kept with its root and applied when that epoch becomes current. The
+  code does this.
+- **B:** ignored, and learnt again through the replies of §5.6.
+
+### D.66 Joining conversations (§5.10)
+
+*Found by simulation of the implementation; the text is silent.*
+
+- Every invitation that is an ancestor of an accepted root is joined to it, even when its parent's
+  group is read-only.
+- A joined group stays read-only until its current epoch moves past the point it was removed at.
+- Accepting a root that rejoins a group follows that root's owner, unless a handover deposed it.
+- An invitation with no held parent is joined to a root the user accepted later only when that
+  root continues it with authority: a successor by the same owner, or a handover it signed.
+
+- **A (recommended):** state these three rules. The code does this.
+- **B:** other rules, to be given.
+
+### D.67 Kick signer after a handover: gap in choice A (D.18)
+
+*Found during implementation; it adds to D.18.*
+
+*Context:* the code follows D.18 choice A: a kick naming epoch E is valid when signed by E's owner
+or by an identity that a held handover passes ownership to, from E or an ancestor of E.
+A removed member that does not hold the handover root, and is not listed in it, can never fetch
+it, since a chat lookup answers members only. It is then never told of its removal.
+
+The code also makes the authority transitive across successors (A hands to B, B makes a
+successor, B hands to D: D may sign), which covers a handover from a later epoch of the same owner
+and is broader than "from an ancestor". A kick a device cannot verify for lack of the handover is
+not counted against the member that relayed it.
+
+- **A (recommended):** decide D.18 with this in mind; choices B or C of D.18 close the gap.
+- **B:** keep choice A and send the handover root with the kick, as an exception to the lookup
+  rule.
+
+### D.68 Details the membership code had to choose (§4.8, §5.5, §12)
+
+*Found during implementation. Listed together so they can be confirmed or changed.*
+
+- Root fetches: "4 in progress per peer" is approximated by at most 260 root tasks per peer (4 plus
+  the waiting list of 256); beyond that a shared-chats scan of that peer starts.
+- §5.5 step 1 ("first finish what is already received") is not implemented.
+- Hints and the queue of missing IDs are counted per epoch, not per group.
+- A notice entry is bounded at 80 bytes.
+- A leave that is no longer live is served only to its leaver and to removal lookups; a
+  signed-object lookup for it gets "not available".
+- "Ask to be kicked" on an invitation installs that root as a group in the waiting state.
+- The requester side of a chat lookup by reference is not built yet.
+
+- **A (recommended):** confirm them one by one.
+- **B:** leave them to implementations.
+
+### D.69 A handover gives authority over which parents (§4.7)
+
+*Found during review of the implementation. A security defect of the text.*
+
+*Current text:* a root is continuous when its signer owns each parent or is the new owner after "a
+previous owner in the root's line". Nothing ties that previous owner to the same group.
+
+*Context:* A owns two groups G1 and G2 with the same members and hands G1 to B.
+B can then sign a root naming the current epochs of both; every device adopted it without a
+prompt, G2 passed under B, and B could dissolve it with deletion.
+
+- **A (recommended):** a handover gives authority only over parents in the same group as the
+  handover's parent, judged group by group before the new root is considered; a parent the signer
+  has no authority over is unmatched, as §4.7 says for any parent, and is never joined. The code
+  does this. Refusing the whole root was tried first: it split the new owner's own line on a
+  device that held a former owner's epoch without the handover.
+- **B:** a root never joins two groups unless its signer owns the current epoch of each directly.
+
+### D.70 Adding back a member that closed the group (§4.8 case 3, §5.2, §5.10)
+
+*Found during review of the implementation. The text contradicts itself.*
+
+*Current text:* a re-add root names the member's last epoch as an extra parent (§5.10). A root
+with a closed parent is rejected silently (§4.8 case 3).
+
+*Context:* the extra parent is exactly the epoch the member closed, so after "Ignore and Delete"
+or deleting a kicked archive, the member can never be invited again and sees nothing.
+
+- **A (recommended):** the silent rejection applies only when every parent is closed; a root with
+  a parent that is neither held nor closed is an ordinary invitation. The code does this.
+  A resolution root in a closed line, with a parent the device never received, then prompts too.
+- **B:** a re-add root carries no extra parent; the histories are not joined.
+
+### D.71 An old leave made live again by a re-add (§5.3 "Replay", §5.10)
+
+*Found during review of the implementation.*
+
+*Context:* the extra parent links the epoch the member left to the new one, and the member is in
+both, so its old signed leave is live again: the owner's device removed it again by itself.
+
+- **A (recommended):** a leave is not live for a root that re-adds its leaver (a root with a parent
+  the leaver is not a member of), and is dead once a held root on the line omitted the leaver. The
+  code does this.
+- **B:** a leave carries a counter or the re-add root names the leaves it voids.
+
+### D.72 A former owner's roots after a handover (§5.9, §4.6 step 4, D.63)
+
+*Found during review of the implementation; it corrects D.63.*
+
+*Context:* with D.63 choice A, a former owner signs a new successor of an epoch it used to own
+whenever it wants, and the new owner is blocked each time until it resolves.
+With `created_at = u64::MAX` on that root, the new owner's next date `L + 1` overflowed and the
+group was frozen for good.
+Each resolution also made the new owner sign one kick per member of that branch, a list the former
+owner chooses.
+
+- **A (recommended):** a deposed owner's branch never blocks sending or automatic successors; it
+  is shown as an optional resolution. `L` leaves out the roots of deposed owners other than the
+  device's own, and `L + 1` saturates. The code does this.
+- **B:** roots signed by a deposed owner after the handover are ignored; this needs a way to date
+  them, which the protocol does not have.
+
+### D.73 A root notice from a peer that shares nothing (§4.6, §13.7, §12.7)
+
+*Found during review of the implementation.*
+
+*Current text:* a root notice for an unknown ID starts a chat lookup toward its sender.
+
+*Context:* any peer with a session that learnt a chat ID can test whether a contact holds or
+closed that epoch: silence means yes, a lookup means no.
+
+- **A (recommended):** a root notice is acted on only when its sender shares an active accepted
+  epoch with the device; otherwise nothing happens. The code does this.
+- **B:** always send the lookup, also for held IDs (cover traffic).
+
+### D.74 Removal records and removed peers (§10.4, §12.8, §5.6, §4.11)
+
+*Found during review of the implementation.*
+
+*Current text:* §12.8 answers "a member of the named epoch"; §10.4 answers a removed peer "not
+available" except for its own removal. §5.4 does not say what a waiting device answers, and §4.11
+does not say whether waiting, kicked or dissolved epochs are listed in shared-chats scans.
+
+*Context:* a removed member could fetch the kicks and leaves of the other removed members, and a
+kicked device kept serving its root and listing its epochs.
+
+- **A (recommended):** a removed peer gets only its own kick or leave; a device that is kicked,
+  left or waiting in a group answers as if it did not hold it; scans list only epochs of groups
+  where the device is an active member. The code does this. Deletion events are still served to a
+  removed peer, as §10.4 says, and a dissolved group kept as an archive still serves its roots, so
+  that a member back after the dissolve can learn of it.
+- **B:** other rules, to be given.
+
+### D.75 Limits on invitations and parent lookups (§4.8, §11.8, §17.4)
+
+*Found during review of the implementation.*
+
+*Context:* nothing bounds pending invitations, the depth of a parent chain, or roots held before
+their parent is known. A stranger sent 40 self-signed roots and created 41 epoch records and 1,281
+lookups; a chain of 60 roots received newest first crashed the first implementation.
+Members are also queried before the user answers the prompt, which weakens "Ignore and Delete
+(visible to no one)".
+
+- **A (recommended):** limits per sender and per device on pending invitations, hidden parents,
+  parent lookups and unverified handover roots, with expiry; before a root is verified, its parent
+  is looked up only from the peer that delivered it. The code does this with provisional numbers:
+  16 pending invitations per sender and 256 per device; 256 parents fetched for one invitation;
+  4 unverified handover roots per sender and 64 per device; 32 unverified leaves per sender; at
+  most 64 roots examined per operation when catching up on a chain.
+- **B:** as A, and no lookup at all before the user accepts.
+
+### D.76 Dissolve with deletion: what is kept and erased (§5.8)
+
+*Found during review of the implementation.*
+
+*Context:* the text does not say whether older roots are kept two weeks with the named one, nor
+what happens to side branches; it says side branches are not erased.
+
+- **A (recommended):** only the named root is kept, and served, for two weeks; side branches are
+  not erased; an erased epoch leaves a dissolved marker so that its root cannot come back as an
+  invitation. The code does this.
+  A group stays dissolved once its dissolved epoch is erased: the group record keeps the deposed
+  owner, so a former owner's side branch cannot make the group active again.
+  Known limit: in about 4 in 10 simulated runs with a dissolve and deletion, some device keeps a
+  stale active conversation of the dissolved group that nobody else writes in. Recognising it
+  would need the parent links of erased roots, which costs deniability; §5.8 already says the
+  deletion is best effort.
+- **B:** the whole group is erased, side branches included.
+
+### D.77 Points raised by the review with no change in the code
+
+*Recorded for the security section and for D.14.*
+
+- A link made by hand between two groups is visible to a peer that scans both (§5.10 against
+  §12.1).
+- A former owner's kick or dissolve of an epoch it owned still applies to devices that have not
+  yet received the handover (§5.6, §5.8).
+- A handover root whose parent is a closed marker cannot be verified, so the closed line breaks
+  there and the next successor prompts (§4.7 against §4.8 case 3).
+- The scans and key queries a device sends right after accepting reveal the acceptance to the
+  peers it asks, although Accept itself sends nothing.
+- Accepting a root installs its ancestors, which the user never saw; the prompt should show the
+  owner that will be followed.
+
+- **A (recommended):** state them.
+- **B:** design rules for some of them.
+
+### D.78 Carrying group traffic in the app (§13, §15.2, §14.2)
+
+*Found while binding the engine into the app. These are decisions about the app, listed here so
+they are settled with the rest.*
+
+- **Carrier.** A group plaintext travels inside the one-to-one session as a keep-alive message with
+  a new field. A new message type was avoided because older clients show an unknown type as an
+  empty text message; they drop a keep-alive silently. Sessions do not pad, so such a keep-alive
+  differs from an ordinary one by its size.
+- **Size on the mesh.** One-to-one messages are not fragmented, and a mesh payload is limited to
+  64 KiB, so a group plaintext above about 60 KiB cannot cross the mesh. Choices: a container
+  limit that depends on the transport, with a cap on media size (recommended); fragmentation below
+  groups for every message type; or large plaintexts over the internet only.
+- **Session journal (§15.2).** Not built. The session state is made durable before the ciphertext
+  is stored, and a ciphertext is never dropped once encrypted; a crash before that loses a
+  ciphertext that never left the device. Choices: accept this and amend §15.2 (recommended, the
+  one-to-one path has no journal either), or build the journal before release.
+- **Members without a session.** The app opens no session by itself, so a group is limited to
+  contacts with an active session. Choices: keep this for the first version (recommended), or let
+  the app open sessions from the keys in a root.
+- **Shared budget.** Group traffic uses the one-to-one session's lag budget and bypasses the mesh
+  keep-alive interval. Choices: a separate throttle on the mesh, or none.
+- **One account in two tabs.** In the web secure-storage mode nothing prevents it, and it already
+  endangers one-to-one sessions. Choice proposed: an exclusive lock per account.
+- **What stays after closing a group.** The closed or dissolved markers and one device counter
+  (`next_seq`), which shows only that the device once used groups. SQLite itself may keep deleted
+  rows in its files.
+- **Unread state** of a group is kept in memory only. Choices: keep, or a local field in the
+  engine erased with the group.
+
+- **A (recommended):** decide them one by one.
+
+### D.79 Points from the last membership fixes (§5.3, §10.4, §11.7, §12.3)
+
+*Found by simulation of the implementation.*
+
+- A leave sent back to its leaver is preceded by the root of the epoch it names; a device restored
+  from a backup could not verify it otherwise.
+- The two members scanned after adopting a root (§12.3, first trigger) are drawn by score, members
+  with a session first, not uniformly: two hostile members drawn together hid a dissolve.
+- A dissolved group kept as an archive still gives a removed peer its own kick or leave.
+- A member removed and added back does not fetch again what it dropped while removed (§10.4 says
+  it "is no longer a removed peer", §11.7 says an ID once processed is not looked up again). Its
+  older epochs then differ from the other members', which the junction line of §5.10 covers only
+  loosely.
+- Messages of an older epoch can also differ between two devices when that epoch sits in another
+  conversation on one of them (an allowed split, or the archive of a removed device), because a
+  scan follows the responder's own grouping (§12.1).
+
+- **A (recommended):** state the first three as rules (the code follows them) and the last two as
+  known limits.
+- **B:** for the fourth, let a member added back fetch again what it dropped.
