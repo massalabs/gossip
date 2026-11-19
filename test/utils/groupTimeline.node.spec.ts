@@ -95,4 +95,67 @@ describe('group timeline helpers', () => {
       ).map(plain)
     ).toEqual(['timeline.added_back:eve:']);
   });
+
+  describe('in the second person', () => {
+    const me = 'me';
+    // A name for "me" that must never be put in a sentence.
+    const memberName = (id: string) => (id === me ? 'YOU' : id);
+    const texts = (line: Parameters<typeof lineTexts>[0]) => {
+      const out = lineTexts(line, memberName, keyOf, me).map(plain);
+      expect(out.join(' ')).not.toContain('YOU');
+      return out;
+    };
+    const change = {
+      type: 'epochChange' as const,
+      epoch: 'e',
+      added: [] as string[],
+      removed: [] as string[],
+      left: [] as string[],
+      renamed: null,
+      newOwner: null,
+    };
+
+    it('tells the new owner the group was handed over to it', () => {
+      expect(
+        texts({ ...change, by: 'alice', left: ['alice'], newOwner: me })
+      ).toEqual(['timeline.new_owner_you:alice:', 'timeline.left::alice']);
+    });
+
+    it('says what this account did with strings of its own', () => {
+      expect(
+        texts({
+          ...change,
+          by: me,
+          added: ['bob'],
+          removed: ['carol'],
+          renamed: 'x',
+          newOwner: 'bob',
+        })
+      ).toEqual([
+        'timeline.new_owner_by_you::bob',
+        'timeline.added_by_you::bob',
+        'timeline.removed_by_you::carol',
+        'timeline.renamed_by_you::x',
+      ]);
+      expect(texts({ type: 'founded', epoch: 'e', owner: me })).toEqual([
+        'timeline.founded_by_you::',
+      ]);
+    });
+
+    it('never says that this account added itself', () => {
+      expect(texts({ type: 'joined', epoch: 'e', by: me })).toEqual([
+        'timeline.joined_by_you::',
+      ]);
+    });
+
+    it('names this account apart among the members a root changed', () => {
+      expect(
+        texts({ ...change, by: 'alice', added: [me, 'bob'], left: [me] })
+      ).toEqual([
+        'timeline.joined:alice:',
+        'timeline.added:alice:bob',
+        'timeline.you_left::',
+      ]);
+    });
+  });
 });
