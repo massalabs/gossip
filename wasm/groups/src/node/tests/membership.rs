@@ -1530,3 +1530,90 @@ fn a_member_restored_behind_its_leave_learns_it() {
     net.run(5 * MIN);
     assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Left);
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=59`):
+/// after a double handover, the owner of one line dissolved it; a member of that line then
+/// accepted an invitation of the other line's owner, which rejoined the dissolved group but
+/// left it following the dissolved line: the device showed an active group whose current
+/// epoch was dissolved.
+#[test]
+fn accepting_the_other_line_after_a_dissolve_follows_it() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[0].store.clone();
+    net.offline[2] = true;
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    let to_two = core::mem::take(&mut net.dropped);
+    net.devs[0].store = backup;
+    net.restart(0);
+    net.offline[1] = true;
+    net.offline[3] = true;
+    let h2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(2),
+                leave: false,
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.offline[2] = false;
+    net.exchange();
+    net.offline[1] = false;
+    net.offline[3] = false;
+    for (from, to, pt) in to_two.into_iter().chain(core::mem::take(&mut net.dropped)) {
+        let now = net.now;
+        let dev = &mut net.devs[to];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(from), &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    net.run(2 * MIN);
+    assert_eq!(net.summary(2, &g).unwrap().owner, gid(2));
+    assert_eq!(net.summary(1, &g).unwrap().owner, gid(1));
+    // The owner of the first line dissolves it.
+    let now = net.now;
+    let s = signer(1);
+    let dev = &mut net.devs[1];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, g, false, now, &mut net.rng)
+        .unwrap();
+    net.run(2 * MIN);
+    // The owner of the other line creates a successor of its own line.
+    let s2 = net
+        .change(
+            2,
+            h2,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("two".into()),
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    let inv: Vec<ChatId> = net.devs[1]
+        .node
+        .invitations(net.now)
+        .iter()
+        .map(|i| i.chat_id)
+        .collect();
+    assert_eq!(inv, vec![s2]);
+    net.accept(1, s2);
+    let s = net.summary(1, &g).unwrap();
+    assert_eq!(s.current, s2, "{s:?}");
+    assert_eq!(s.status, MyStatus::Member);
+}
