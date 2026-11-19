@@ -17,6 +17,7 @@ import { serializeGroupPlaintext } from '../../src/utils/messageSerialization';
 import { MessageType } from '../../src/db';
 import type { Queries } from '../../src/db/queries';
 import { vi } from 'vitest';
+import { bytesToHex } from '@noble/hashes/utils';
 
 /** One clock for every SDK, advanced by the test. */
 let clock = 1_800_000_000_000;
@@ -198,18 +199,27 @@ describe('Group chats', { timeout: 120_000 }, () => {
     expect(snap.edges).toEqual([]);
     expect(snap.objects).toEqual([]);
     expect(snap.node.some(n => (n.fields ?? '').includes('hello'))).toBe(false);
-    // Once the request references of its queries expire, no node record of
-    // Bob's names the group but the closed-chat marker of its end.
-    clock += 10 * 60_000;
-    await bob.groups.tick();
-    await bob.groups.settle();
-    const later = await queriesOf(bob).groups.loadSnapshot(bob.userId);
-    const naming = later.node
-      .filter(
-        n => n.key.includes(groupId) || (n.fields ?? '').includes(groupId)
-      )
-      .map(n => n.kind);
-    expect(naming.filter(k => k !== 'markers')).toEqual([]);
+    // Bob shared no other group: his tables hold nothing but the closed-chat
+    // marker(s), the engine's counter and his own keys (recorded again by the
+    // signer at every tick), at once.
+    const own = JSON.stringify(bytesToHex(bob.userIdBytes));
+    const kinds = new Set(
+      snap.node
+        .filter(n => !(n.kind === 'keys' && n.key === own))
+        .map(n => n.kind)
+    );
+    expect([...kinds].sort()).toEqual(['markers', 'meta']);
+
+    // Alice re-learns Carol's keys from her contact when she adds her to a new
+    // group, after the engine dropped them with the last group they shared.
+    const again = await alice.groups.createGroup('Again', [carol.userId]);
+    await deliver();
+    await carol.groups.acceptInvitation(
+      (await carol.groups.invitations()).find(i => i.epochId === again)!.epochId
+    );
+    await alice.groups.sendMessage(again, 'welcome back');
+    await deliver();
+    expect(await texts(carol.groups, again)).toEqual(['welcome back']);
   });
 
   it('reopens the groups from the database after logging in again', async () => {
@@ -452,15 +462,13 @@ describe('Group chats', { timeout: 120_000 }, () => {
     await alice.groups.sendMessage(groupId, 'nobody hears');
     await alice.groups.settle();
     expect(poll.mock.calls.length).toBeLessThanOrEqual(2);
-    // Once told that Bob has no session, the engine still assembles for him
-    // on the next send (reported for the engine): the pump stops after a
-    // round that sent nothing instead of repeating it.
     poll.mockClear();
     clock += 1_000;
     await alice.groups.tick();
     await alice.groups.settle();
+    // Told that Bob has no session, the engine holds back his work.
     const lengths = poll.mock.results.map(r => (r.value as unknown[]).length);
-    expect(lengths.length).toBeLessThanOrEqual(2);
+    expect(lengths.every(n => n === 0)).toBe(true);
     poll.mockRestore();
   });
 
