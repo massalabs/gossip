@@ -658,22 +658,37 @@ fn every_scheduled_deletion_is_kept_and_the_earliest_applies() {
     );
     f.tick(T0 + 4_999);
     assert_eq!(f.current_text(1).as_deref(), Some("c"));
-    // The earliest applies, and the others with it, all in their immediate form.
+    // The earliest deletes the message; each one is normalised at its own time (D.31).
     f.tick(T0 + 5_000);
     let o = f.obj(1);
-    assert!(o.is_deleted() && o.pending_deletions.is_empty());
+    assert!(o.is_deleted());
+    assert_eq!(o.pending_deletions.len(), 2);
+    assert_eq!(f.state(&c), PRUNED);
+    let form = |f: &Fixture, d: &MessageEvent| {
+        f.row(d.event_id())
+            .unwrap()
+            .event()
+            .unwrap()
+            .payload()
+            .clone()
+    };
+    assert_eq!(form(&f, &d5), del(1, None));
+    assert_eq!(held_role(f.state(&d5)), Some(Role::Current));
+    assert_eq!(form(&f, &d10), *d10.payload());
+    assert_eq!(
+        f.epoch().next_wakeup(&f.store, T0 + 5_000).unwrap(),
+        Some(T0 + 10_000)
+    );
+    f.tick(T0 + 20_000);
+    assert!(f.obj(1).pending_deletions.is_empty());
     for d in [&d5, &d10, &d20] {
         assert_eq!(held_role(f.state(d)), Some(Role::Current));
-        assert_eq!(
-            *f.row(d.event_id()).unwrap().event().unwrap().payload(),
-            del(1, None)
-        );
+        assert_eq!(form(&f, d), del(1, None));
     }
-    assert_eq!(f.state(&c), PRUNED);
 }
 
 #[test]
-fn an_immediate_deletion_clears_pending_work() {
+fn an_immediate_deletion_clears_pending_versions_and_keeps_scheduled_deletions() {
     let mut f = Fixture::new();
     let c = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "c"));
     let v = f.event(T0, 2, &[], text(1, f.bob.id, T0, T0 + 500, "v"));
@@ -684,28 +699,37 @@ fn an_immediate_deletion_clears_pending_work() {
     f.recv(&ds, T0);
     assert_eq!(f.recv(&di, T0 + 2), Outcome::Accepted(Merge::Won));
     let o = f.obj(1);
-    assert!(o.is_deleted() && o.pending_versions.is_empty() && o.pending_deletions.is_empty());
+    assert!(o.is_deleted() && o.pending_versions.is_empty());
     assert_eq!(f.state(&v), PRUNED);
-    // The pending deletion is applied with it, in its immediate form.
+    // The scheduled deletion keeps its scheduled form until its own time (D.31).
+    assert_eq!(
+        held_role(f.state(&ds)),
+        Some(Role::PendingDeletion { due: T0 + 1_000 })
+    );
+    assert_eq!(f.row(ds.event_id()).unwrap().event(), Some(&ds));
+    f.tick(T0 + 1_000);
     assert_eq!(held_role(f.state(&ds)), Some(Role::Current));
     assert_eq!(
         *f.row(ds.event_id()).unwrap().event().unwrap().payload(),
         del(1, None)
     );
-    assert_eq!(f.epoch().next_wakeup(&f.store, T0 + 2).unwrap(), None);
+    assert_eq!(f.epoch().next_wakeup(&f.store, T0 + 1_000).unwrap(), None);
 }
 
 #[test]
-fn a_scheduled_deletion_of_a_deleted_message_is_applied_at_once() {
+fn a_scheduled_deletion_of_a_deleted_message_waits_for_its_time() {
     let mut f = Fixture::new();
     let di = f.event(T0, 1, &[], del(1, None));
     let ds = f.event(T0, 2, &[], del(1, Some(T0 + 1_000)));
     f.recv(&di, T0);
-    assert_eq!(f.recv(&ds, T0), Outcome::Accepted(Merge::Identical));
+    assert_eq!(f.recv(&ds, T0), Outcome::Accepted(Merge::Pending));
+    assert_eq!(f.row(ds.event_id()).unwrap().event(), Some(&ds));
+    f.tick(T0 + 1_000);
     assert_eq!(
         *f.row(ds.event_id()).unwrap().event().unwrap().payload(),
         del(1, None)
     );
+    assert_eq!(f.obj(1).current_events.len(), 2);
 }
 
 /// Regression (review of c11b2163, D.31 choice A): the served form of a scheduled deletion
@@ -772,6 +796,38 @@ fn the_immediate_form_of_a_pending_deletion_does_not_apply_it_early() {
     assert_eq!(f.recv(&postponed, T0 + 1_001), Outcome::Duplicate);
     assert_eq!(
         *f.row(ds.event_id()).unwrap().event().unwrap().payload(),
+        del(1, None)
+    );
+}
+
+#[test]
+fn a_restored_scheduled_deletion_follows_the_clock() {
+    // Normalised at its time, evicted, then received again after the clock moved back: it is
+    // restored in its scheduled form, as on a first arrival (D.31).
+    let mut f = Fixture::new();
+    let di = f.event(T0, 1, &[], del(1, None));
+    let ds = f.event(T0, 2, &[], del(1, Some(T0 + 1_000)));
+    f.recv(&di, T0);
+    f.recv(&ds, T0);
+    f.tick(T0 + 1_000);
+    ep(&f.root).evict(&mut f.store, T0 + 1_000, 2).unwrap();
+    assert_eq!(f.state(&ds), PRUNED);
+    assert_eq!(f.recv(&ds, T0 + 10), Outcome::Restored);
+    assert_eq!(
+        held_role(f.state(&ds)),
+        Some(Role::PendingDeletion { due: T0 + 1_000 })
+    );
+    assert_eq!(f.row(ds.event_id()).unwrap().event(), Some(&ds));
+    // After its time it is restored in its immediate form.
+    let mut g = Fixture::new();
+    g.recv(&di, T0);
+    g.recv(&ds, T0);
+    g.tick(T0 + 1_000);
+    ep(&g.root).evict(&mut g.store, T0 + 1_000, 2).unwrap();
+    assert_eq!(g.recv(&ds, T0 + 1_001), Outcome::Restored);
+    assert_eq!(held_role(g.state(&ds)), Some(Role::Current));
+    assert_eq!(
+        *g.row(ds.event_id()).unwrap().event().unwrap().payload(),
         del(1, None)
     );
 }

@@ -346,7 +346,7 @@ fn activate_due<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, now: u64) -> Result
                 if !obj.pending_deletions.remove(&(item.due, item.event_id)) {
                     continue;
                 }
-                absorb(tx, &mut obj, Some(event), PendingFate::Normalize)?;
+                absorb(tx, &mut obj, Some(event))?;
             }
         }
         tx.put_object(obj);
@@ -429,8 +429,22 @@ fn restore<S: StorageRead + ?Sized>(
     if !identical || !in_window(&event.event_id(), now) {
         return Ok(Outcome::KeptPruned);
     }
-    obj.current_events.insert(event.event_id());
-    hold(tx, immediate_form(&event), Role::Current);
+    // The same rule as on first arrival (D.31): a scheduled deletion keeps its scheduled form
+    // until its own time, beside the tombstone.
+    match event.payload() {
+        Payload::Delete {
+            scheduled_at: Some(due),
+            ..
+        } if *due > now => {
+            let due = *due;
+            obj.pending_deletions.insert((due, event.event_id()));
+            hold(tx, event, Role::PendingDeletion { due });
+        }
+        _ => {
+            obj.current_events.insert(event.event_id());
+            hold(tx, immediate_form(&event), Role::Current);
+        }
+    }
     tx.put_object(obj);
     Ok(Outcome::Restored)
 }
@@ -470,15 +484,17 @@ pub(crate) fn apply_new<S: StorageRead + ?Sized>(
         Payload::Delete {
             scheduled_at: Some(due),
             ..
-        } if due > now && !obj.is_deleted() => {
-            // Every scheduled deletion is kept; the earliest applies, and the others are then
-            // applied with it. Pruning the later ones, as §7.4 says, makes their availability
-            // depend on whether they arrived before or after the earliest one applied.
+        } if due > now => {
+            // Every scheduled deletion is kept in its scheduled form until its own time,
+            // whatever the state of the message (D.26, D.31): the earliest one deletes the
+            // message, and each is normalised at its own time. Pruning the later ones, as
+            // §7.4 says, or normalising them with an earlier one, would make what a device
+            // serves depend on arrival timing and local state.
             obj.pending_deletions.insert((due, id));
             hold(tx, event, Role::PendingDeletion { due });
             Merge::Pending
         }
-        Payload::Delete { .. } => absorb(tx, &mut obj, Some(event), PendingFate::Normalize)?,
+        Payload::Delete { .. } => absorb(tx, &mut obj, Some(event))?,
     };
     tx.put_object(obj);
     Ok(merge)
@@ -525,25 +541,17 @@ fn merge_effective<S: StorageRead + ?Sized>(
     Ok(merge)
 }
 
-/// What happens to the pending scheduled deletions when the message is deleted otherwise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PendingFate {
-    /// They are applied with the deletion: stored and served in their immediate form, as
-    /// additional carriers of the tombstone.
-    Normalize,
-    /// They are pruned (a local-only deletion must not make this device serve a deletion
-    /// before its time, §9.3).
-    Prune,
-}
-
-/// Applies a deletion: the tombstone absorbs the message, every content event of it is
-/// pruned, and pending deletion work is cleared (§7.1, §7.4). `carrier` is the deletion
-/// event, stored in its immediate form; `None` for a local-only deletion.
+/// Applies a deletion: the tombstone absorbs the message, and every content event of it
+/// (carriers and pending versions) is pruned (§7.1, §7.4). `carrier` is the deletion event,
+/// stored in its immediate form; `None` for a local-only deletion.
+///
+/// Pending scheduled deletions are left as they are: each keeps its scheduled form until its
+/// own time and is normalised then (D.31), so that what a device serves depends only on the
+/// event and the clock.
 pub(crate) fn absorb<S: StorageRead + ?Sized>(
     tx: &mut Tx<'_, S>,
     obj: &mut ObjectRecord,
     carrier: Option<MessageEvent>,
-    fate: PendingFate,
 ) -> Result<Merge, StorageError> {
     let was_deleted = obj.is_deleted();
     if !was_deleted {
@@ -554,17 +562,6 @@ pub(crate) fn absorb<S: StorageRead + ?Sized>(
             prune(tx, old);
         }
         obj.current = Some(StoredResult::Tombstone);
-    }
-    for (_, pending) in core::mem::take(&mut obj.pending_deletions) {
-        match fate {
-            PendingFate::Normalize => {
-                if let Some(event) = tx.row(&pending)?.and_then(|r| r.event().cloned()) {
-                    obj.current_events.insert(pending);
-                    hold(tx, immediate_form(&event), Role::Current);
-                }
-            }
-            PendingFate::Prune => prune(tx, pending),
-        }
     }
     if let Some(event) = carrier {
         obj.current_events.insert(event.event_id());
@@ -665,10 +662,8 @@ pub(crate) fn check_invariants<R: StorageRead + ?Sized>(
                 return Err(format!("carrier {id:?} is past its window"));
             }
         }
-        if obj.is_deleted()
-            && (!obj.pending_versions.is_empty() || !obj.pending_deletions.is_empty())
-        {
-            return Err(format!("{s:?} is deleted but has pending work"));
+        if obj.is_deleted() && !obj.pending_versions.is_empty() {
+            return Err(format!("{s:?} is deleted but has pending versions"));
         }
         for (due, id) in &obj.pending_versions {
             claim(*id)?;
