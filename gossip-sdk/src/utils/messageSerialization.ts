@@ -2,7 +2,9 @@
  * Message Serialization Utilities
  *
  * Functions for serializing and deserializing messages for the protocol.
- * Supports regular text messages, replies, forwards, and keep-alive messages.
+ * Supports regular text messages, replies, forwards, keep-alive messages and
+ * group messages. Each session message type carries one kind of thing: a
+ * keep-alive carries nothing, a group message carries one group plaintext.
  */
 
 import { MessageType, MESSAGE_ID_SIZE } from '../db/index.js';
@@ -37,8 +39,22 @@ export interface DeserializedMessage {
     originalMsgId: Uint8Array;
   };
   type: MessageType;
-  /** A group plaintext, carried by a keep-alive (see `serializeGroupPlaintext`). */
+}
+
+/**
+ * A session message of the group type (`serializeGroupPlaintext`). It is not a
+ * one-to-one message: its plaintext goes to the group engine, and a group
+ * message without one carries nothing.
+ */
+export interface DeserializedGroupMessage {
+  type: 'group';
   groupPlaintext?: Uint8Array;
+}
+
+export function isGroupMessage(
+  message: DeserializedMessage | DeserializedGroupMessage
+): message is DeserializedGroupMessage {
+  return message.type === 'group';
 }
 
 /**
@@ -53,16 +69,12 @@ export function serializeKeepAliveMessage(): Uint8Array {
 }
 
 /**
- * Serialize a group plaintext for the one-to-one session of one recipient.
- *
- * It is a keep-alive carrying the plaintext in its own field: a client that
- * predates groups drops it as a keep-alive, where an unknown message type would
- * be shown as an empty text message.
+ * Serialize a group plaintext for the session of one recipient: a message of
+ * the group type, with the plaintext as its only field.
  */
 export function serializeGroupPlaintext(plaintext: Uint8Array): Uint8Array {
   return ProtoMessage.encode({
-    messageType: ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE,
-    content: '',
+    messageType: ProtoMessageType.MESSAGE_TYPE_GROUP,
     groupPlaintext: plaintext,
   });
 }
@@ -246,10 +258,12 @@ export function serializeRetentionPolicyMessage(
  * Deserialize a message from bytes
  *
  * @param buffer - The serialized message bytes
- * @returns Deserialized message object
+ * @returns Deserialized message object, or a group message (`isGroupMessage`)
  * @throws Error if message format is invalid
  */
-export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
+export function deserializeMessage(
+  buffer: Uint8Array
+): DeserializedMessage | DeserializedGroupMessage {
   if (buffer.length === 0) {
     throw new Error('Empty message buffer');
   }
@@ -258,11 +272,15 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
   const protoType =
     decoded.messageType ?? ProtoMessageType.MESSAGE_TYPE_REGULAR;
 
+  // The group plaintext field is read under the group type only.
+  if (protoType === ProtoMessageType.MESSAGE_TYPE_GROUP) {
+    return { type: 'group', groupPlaintext: decoded.groupPlaintext };
+  }
+
   if (protoType === ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE) {
     return {
       content: '',
       type: MessageType.KEEP_ALIVE,
-      groupPlaintext: decoded.groupPlaintext,
     };
   }
 
