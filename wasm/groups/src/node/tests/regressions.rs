@@ -793,3 +793,27 @@ fn responsiveness_counts_queries_and_any_valid_traffic() {
     };
     assert!(net.devs[0].node.priority(&key) >= super::super::index::CREDIBLE);
 }
+
+/// Found by review (code at `6a916f2e`): a task waited for a responsive member only when it
+/// was at its lookup limit, not when its request was merely outstanding, so the task went to
+/// a member that stopped answering for a whole stage.
+#[test]
+fn a_task_waits_for_an_outstanding_responsive_member() {
+    let mut net = Net::new(4, 1);
+    let chat = net.chat();
+    for t in 0..3 {
+        net.devs[0].node.note_timeout(&member(3), T0 + t);
+    }
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let mut asked = Vec::new();
+    for _ in 0..6 {
+        for s in super::retrieval::sent_lookups(&mut net, 0) {
+            asked.push(s.to);
+        }
+        net.now += 70_000;
+        net.tick(0);
+    }
+    assert!(asked.contains(&member(2)), "{asked:?}");
+    assert!(!asked.contains(&member(3)), "{asked:?}");
+}
