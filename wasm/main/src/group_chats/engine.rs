@@ -399,6 +399,25 @@ impl Core {
             .map_err(err)
     }
 
+    /// The reference of a held epoch (§4.5), which replies name.
+    pub fn ref_chat_id(&self, chat: ChatId) -> Option<groups::RefChatId> {
+        self.node.root(&chat).map(|r| r.ref_chat_id())
+    }
+
+    /// The value of the metadata key `replyTo` for these targets, given as
+    /// `[{ref_chat_id, sync_obj_id}]` in JSON (§7.6).
+    pub fn encode_reply_to(&self, targets: &str) -> R<Vec<u8>> {
+        let targets: Vec<groups::ReplyTarget> = parse(targets)?;
+        groups::encode_reply_to(&targets).map_err(|e| format!("groups:invalid: {e}"))
+    }
+
+    /// The targets of a `replyTo` value, in JSON, or an error for an invalid value.
+    pub fn decode_reply_to(&self, value: &[u8]) -> R<String> {
+        groups::decode_reply_to(value)
+            .map(|t| t.enc().to_text())
+            .map_err(|e| format!("groups:invalid: {e}"))
+    }
+
     /// The verified keys this device holds for `id`.
     pub fn keys(&self, id: GossipId) -> Option<Vec<u8>> {
         self.node.keys(&id)

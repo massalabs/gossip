@@ -730,6 +730,25 @@ export class GroupsNode {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * The reference (§4.5) of a held epoch, which reply targets name.
+     * @param {Uint8Array} epoch
+     * @returns {Uint8Array | undefined}
+     */
+    ref_chat_id(epoch) {
+        const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_ref_chat_id(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        let v2;
+        if (ret[0] !== 0) {
+            v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v2;
+    }
+    /**
      * @param {Uint8Array} group
      * @param {number} now
      */
@@ -934,6 +953,48 @@ export class GroupsNode {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * The targets of a `replyTo` value, in the JSON form `encode_reply_to` takes.
+     * @param {Uint8Array} value
+     * @returns {string}
+     */
+    decode_reply_to(value) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passArray8ToWasm0(value, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_decode_reply_to(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * The value of the metadata key `replyTo`: `targets` is
+     * `[{"ref_chat_id":hex,"sync_obj_id":hex}]`, 1 to 32 of them.
+     * @param {string} targets
+     * @returns {Uint8Array}
+     */
+    encode_reply_to(targets) {
+        const ptr0 = passStringToWasm0(targets, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_encode_reply_to(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
     }
     /**
      * The number of batches waiting to be taken.

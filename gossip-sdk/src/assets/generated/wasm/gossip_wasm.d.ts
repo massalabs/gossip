@@ -193,6 +193,10 @@ export class GroupsNode {
    * The plaintexts to send: an array of `{handle, to, plaintext}`.
    */
   poll_outbox(now: number): Array<any>;
+  /**
+   * The reference (§4.5) of a held epoch, which reply targets name.
+   */
+  ref_chat_id(epoch: Uint8Array): Uint8Array | undefined;
   resend_root(group: Uint8Array, now: number): void;
   /**
    * Whether a session with `peer` exists (in memory only; report it again after opening).
@@ -223,6 +227,15 @@ export class GroupsNode {
   take_changes(now: number): string;
   dissolve_group(group: Uint8Array, must_delete: boolean, now: number): void;
   set_local_name(group: Uint8Array, name: string | null | undefined, now: number): void;
+  /**
+   * The targets of a `replyTo` value, in the JSON form `encode_reply_to` takes.
+   */
+  decode_reply_to(value: Uint8Array): string;
+  /**
+   * The value of the metadata key `replyTo`: `targets` is
+   * `[{"ref_chat_id":hex,"sync_obj_id":hex}]`, 1 to 32 of them.
+   */
+  encode_reply_to(targets: string): Uint8Array;
   /**
    * The number of batches waiting to be taken.
    */
@@ -641,8 +654,10 @@ export interface InitOutput {
   readonly groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
   readonly groupsnode_create_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
   readonly groupsnode_decline_invitation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_decode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_delete_group: (a: number, b: number, c: number, d: number) => [number, number];
   readonly groupsnode_dissolve_group: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly groupsnode_encode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_group: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_groups: (a: number) => [number, number];
   readonly groupsnode_handed_off: (a: number, b: number, c: number) => [number, number];
@@ -667,6 +682,7 @@ export interface InitOutput {
   readonly groupsnode_publish_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
   readonly groupsnode_publish_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
   readonly groupsnode_published: (a: number, b: number, c: number) => [number, number];
+  readonly groupsnode_ref_chat_id: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_resend_root: (a: number, b: number, c: number, d: number) => [number, number];
   readonly groupsnode_retry: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
   readonly groupsnode_scan_shared_chats: (a: number, b: number, c: number, d: number) => [number, number];

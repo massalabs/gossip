@@ -35,6 +35,8 @@ use groups::{
     Root, ScanId, SyncObjId,
 };
 
+use groups::ReplyTarget;
+
 use super::json::J;
 
 pub type R<T> = Result<T, String>;
@@ -650,6 +652,10 @@ record!(VisibleMessage {
 });
 variants!(TimelineItem { Message(message), Line { at, line } });
 record!(Change { group, kind });
+record!(ReplyTarget {
+    ref_chat_id,
+    sync_obj_id
+});
 
 // ── Objects kept as the device's own encoding ────────────────────────────────
 
