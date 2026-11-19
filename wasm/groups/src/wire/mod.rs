@@ -81,8 +81,8 @@ pub fn largest_carrier_frame_len(blob_len: usize) -> usize {
 
 /// Whether an event blob of `blob_len` bytes fits one empty container (§4.6, §13.10) in any
 /// frame that can carry it: the plaintext holding it alone in a response frame with the
-/// largest `request_id` and `idx` is at most 262,144 bytes, that is the blob is at most
-/// [`MAX_EVENT_BLOB_BYTES`]. §13.10 states the bound for an event frame; an event admitted by
+/// largest `request_id` and `idx` is at most [`MAX_PLAINTEXT_BYTES`], that is the blob is at
+/// most [`MAX_EVENT_BLOB_BYTES`]. §13.10 states the bound for an event frame; an event admitted by
 /// it could not always be served in an answer.
 #[must_use]
 pub fn fits_empty_container(blob_len: usize) -> bool {
@@ -196,8 +196,8 @@ pub fn decode_event_blob(blob: &[u8], plaintext_version: u64) -> Result<EventObj
 /// A received plaintext whose prefix and container passed the checks of §13.1 and §13.8.
 ///
 /// Frames are decoded one at a time by [`Plaintext::frames`], so that nothing is built for a
-/// frame before it is judged: a plaintext of 262,144 bytes can hold about 131,000 empty
-/// frames, and decoding them all at once would allocate far more than the plaintext itself.
+/// frame before it is judged: a full plaintext of 57,344 bytes can hold 28,671 empty frames,
+/// and decoding them all at once would allocate far more than the plaintext itself.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Plaintext<'a> {
     /// The plaintext prefix version; event blobs inside are decoded against it.
@@ -267,8 +267,8 @@ pub fn decode_plaintext(bytes: &[u8]) -> Result<Plaintext<'_>> {
 /// # Errors
 ///
 /// A frame that breaks a rule of §13 or does not fit an empty container, or
-/// [`Error::PlaintextTooLarge`] if the whole plaintext exceeds 262,144 bytes. Nothing is
-/// fragmented (§13.10).
+/// [`Error::PlaintextTooLarge`] if the whole plaintext exceeds [`MAX_PLAINTEXT_BYTES`].
+/// Nothing is fragmented (§13.10).
 pub fn encode_plaintext(frames: &[Frame]) -> Result<Vec<u8>> {
     let mut container = proto::Container {
         frames: Vec::with_capacity(frames.len()),

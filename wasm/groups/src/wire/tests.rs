@@ -1137,7 +1137,7 @@ fn event_blob_counts_are_limited_before_decoding() {
 
 #[test]
 fn a_plaintext_of_empty_frames_is_judged_frame_by_frame() {
-    // 131,071 empty frames: each is rejected on its own as it is read.
+    // 28,671 empty frames: each is rejected on its own as it is read.
     let n = (MAX_PLAINTEXT_BYTES - 1) / 2;
     let mut bytes = vec![0x01];
     for _ in 0..n {

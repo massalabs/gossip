@@ -40,7 +40,7 @@ pub struct Outgoing {
     pub handle: u64,
     /// The recipient.
     pub to: GossipId,
-    /// The plaintext, at most 262,144 bytes.
+    /// The plaintext, at most [`MAX_PLAINTEXT_BYTES`] bytes.
     pub plaintext: Vec<u8>,
 }
 

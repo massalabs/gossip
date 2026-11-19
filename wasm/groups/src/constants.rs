@@ -71,12 +71,15 @@ pub const MAX_REPLY_TARGETS: usize = 32;
 pub const METADATA_KEY_REPLY_TO: &str = "replyTo";
 
 /// Maximum size of a group plaintext: version prefix, all frames and events (§13.10).
-pub const MAX_PLAINTEXT_BYTES: usize = 262_144;
+///
+/// 56 KiB, so that a full plaintext, once wrapped and encrypted in a one-to-one session (at
+/// most 3,634 bytes more), fits one 65,536-byte mesh payload.
+pub const MAX_PLAINTEXT_BYTES: usize = 57_344;
 /// Maximum size of an event blob: alone in a response frame with a full `request_id` and the
 /// longest `idx`, the largest frame that can carry it, the plaintext is at most
 /// [`MAX_PLAINTEXT_BYTES`] (§4.6, §13.10, which state the bound for an event frame: 28 bytes
 /// more). Checked against the encoding by the wire tests.
-pub const MAX_EVENT_BLOB_BYTES: usize = 262_107;
+pub const MAX_EVENT_BLOB_BYTES: usize = 57_307;
 /// Maximum number of entries in one query frame (§13.3, §13.10).
 pub const MAX_QUERY_ENTRIES: usize = 16;
 /// Maximum number of entries in a notice (§13.5, §13.10; provisional).
