@@ -750,3 +750,46 @@ fn query_floods_and_version_floods_queue_a_bounded_amount() {
         "{notices} notices, {versions} versions"
     );
 }
+
+/// Found by review (code at `6a916f2e`): the entries of one query that timed out together
+/// counted as as many timeouts, so one unanswered query of three lookups made a member
+/// unresponsive; a member that later sent a valid notice or event stayed unresponsive; and
+/// a sync-object lookup, which has no triggering candidate, always counted as suspect.
+#[test]
+fn responsiveness_counts_queries_and_any_valid_traffic() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let ids: Vec<EventId> = (0..3u8).map(|i| EventId::new(T0, [i; 16])).collect();
+    net.recv_frames(0, member(1), &[notice(chat, &ids)]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(q.len(), 3);
+    assert!(q.iter().all(|s| s.to == member(1) && s.rid == q[0].rid));
+    net.now = q[0].sent_at + 2 * MIN;
+    net.tick(0);
+    assert!(
+        net.devs[0].node.responsive(&member(1)),
+        "one unanswered query is one timeout"
+    );
+    // Unresponsive after three timeouts, responsive again after a valid notice.
+    for t in 0..3 {
+        net.devs[0].node.note_timeout(&member(2), T0 + t);
+    }
+    assert!(!net.devs[0].node.responsive(&member(2)));
+    net.recv_frames(0, member(2), &[notice(chat, &[EventId::new(T0, [7; 16])])]);
+    assert!(
+        net.devs[0].node.responsive(&member(2)),
+        "a notice is traffic"
+    );
+    // A sync-object lookup is credible.
+    let sync = SyncObjId::from_bytes([9; 32]);
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    dev.node
+        .lookup_sync_object(&mut dev.store, chat, sync, now, &mut net.rng)
+        .unwrap();
+    let key = TaskKey {
+        chat_id: chat,
+        target: Target::SyncObj(sync),
+    };
+    assert!(net.devs[0].node.priority(&key) >= super::super::index::CREDIBLE);
+}
