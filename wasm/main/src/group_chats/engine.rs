@@ -232,6 +232,71 @@ impl Core {
             .map_err(err)
     }
 
+    /// As [`Core::create_group`], continuing an earlier conversation of format `migrate_from`
+    /// with the one other member (§5.12). Returns the group kept, which is the peer's when
+    /// its migration is held and its owner sorts first.
+    pub fn create_group_with(
+        &mut self,
+        name: String,
+        members: Vec<GossipId>,
+        migrate_from: Option<u64>,
+        now: u64,
+    ) -> R<ChatId> {
+        let signer = &self.identity;
+        let options = groups::node::GroupOptions { migrate_from };
+        self.node
+            .create_group_with(
+                &mut self.store,
+                signer,
+                name,
+                members,
+                options,
+                now,
+                &mut rng,
+            )
+            .map_err(err)
+    }
+
+    pub fn set_earlier_conversation(
+        &mut self,
+        peer: GossipId,
+        version: u64,
+        held: bool,
+        now: u64,
+    ) -> R<()> {
+        self.node
+            .set_earlier_conversation(&mut self.store, peer, version, held, now, &mut rng)
+            .map_err(err)
+    }
+
+    pub fn consent_to_direct_chat(&mut self, peer: GossipId, consent: bool, now: u64) -> R<()> {
+        self.node
+            .consent_to_direct_chat(&mut self.store, peer, consent, now, &mut rng)
+            .map_err(err)
+    }
+
+    pub fn is_co_member(&self, peer: GossipId) -> bool {
+        self.node.is_co_member(&peer)
+    }
+
+    pub fn connections_to_revoke(&self, candidates: &[GossipId]) -> Vec<GossipId> {
+        self.node.connections_to_revoke(candidates)
+    }
+
+    pub fn peers_wanting_connection(&self) -> Vec<GossipId> {
+        self.node.peers_wanting_connection()
+    }
+
+    /// `[[peer hex, version], …]`.
+    pub fn earlier_conversations(&self) -> String {
+        self.node.earlier_conversations().enc().view_text()
+    }
+
+    /// `[[peer hex, expires at], …]`.
+    pub fn direct_chat_consents(&self) -> String {
+        self.node.direct_chat_consents().enc().view_text()
+    }
+
     /// `change` is a [`GroupChange`] in JSON.
     pub fn change_group(&mut self, group: ChatId, change: &str, now: u64) -> R<ChatId> {
         let change: GroupChange = parse(change)?;
@@ -440,7 +505,7 @@ impl Core {
     }
 
     /// What the root of a held epoch says, in JSON: `{epoch, name, members, owner,
-    /// created_at}`, or `null`. The resolution of competing ends shows each end's list
+    /// created_at, migrate_from}`, or `null`. The resolution of competing ends shows each end's list
     /// (§4.9).
     pub fn epoch(&self, chat: ChatId) -> String {
         match self.node.root(&chat) {
@@ -450,6 +515,7 @@ impl Core {
                 ("members".into(), r.members().to_vec().enc()),
                 ("owner".into(), r.owner_id().enc()),
                 ("created_at".into(), J::Num(r.created_at())),
+                ("migrate_from".into(), r.migrate_from().enc()),
             ])
             .view_text(),
             None => "null".into(),

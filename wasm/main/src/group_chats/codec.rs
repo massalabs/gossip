@@ -573,7 +573,9 @@ variants!(ChangeKind {
     Messages,
     ReadOnly,
     Fork,
-    Closed
+    Closed,
+    Superseded { by, lost_messages },
+    Connections
 });
 
 // Message state.
@@ -646,7 +648,9 @@ record!(InvitationSummary {
     owner,
     received_from,
     closed_before,
-    rejoins
+    rejoins,
+    migrate_from,
+    migration_of
 });
 variants!(TimelineLine {
     Founded { epoch, owner },
@@ -912,7 +916,12 @@ mod tests {
         }
         let root = make(None);
         let J::Obj(fields) = root.enc() else { panic!() };
-        let old = J::Obj(fields.into_iter().filter(|(k, _)| k != "migrate_from").collect());
+        let old = J::Obj(
+            fields
+                .into_iter()
+                .filter(|(k, _)| k != "migrate_from")
+                .collect(),
+        );
         assert_eq!(Root::dec(&old).unwrap(), root);
     }
 
@@ -1260,6 +1269,9 @@ mod tests {
             count: 2,
             owed: true,
         });
+        // The key of an earlier conversation (§5.12): peer and format version.
+        round_trip((peer, 0u64));
+        round_trip((peer, u64::MAX));
         for kind in [
             ChangeKind::Invitation,
             ChangeKind::Joined,
@@ -1268,6 +1280,11 @@ mod tests {
             ChangeKind::ReadOnly,
             ChangeKind::Fork,
             ChangeKind::Closed,
+            ChangeKind::Superseded {
+                by: chat,
+                lost_messages: true,
+            },
+            ChangeKind::Connections,
         ] {
             round_trip((chat, kind));
         }

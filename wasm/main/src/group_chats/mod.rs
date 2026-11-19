@@ -243,6 +243,103 @@ impl GroupsNode {
         Ok(g.as_bytes().to_vec())
     }
 
+    /// As `create_group`, for a group of this device and the one other member that continues
+    /// an earlier conversation of format `migrate_from` (`0`: the earlier one-to-one format,
+    /// §5.12), or `undefined` for none. Returns the group kept: the peer's own migration,
+    /// when it is held and its owner sorts first ("two creations at once").
+    pub fn create_group_with(
+        &mut self,
+        name: String,
+        members: &[u8],
+        migrate_from: Option<f64>,
+        now: f64,
+    ) -> Result<Vec<u8>, JsValue> {
+        if !members.len().is_multiple_of(32) {
+            return Err(JsValue::from_str("groups:invalid: members"));
+        }
+        let members = members
+            .chunks(32)
+            .map(peer)
+            .collect::<Result<Vec<_>, _>>()?;
+        let migrate_from = migrate_from.map(ms).transpose()?;
+        let g = self
+            .core
+            .create_group_with(name, members, migrate_from, ms(now)?)
+            .map_err(js)?;
+        Ok(g.as_bytes().to_vec())
+    }
+
+    /// Records (`held`) or clears that this device holds an earlier conversation of format
+    /// `version` with `peer` (§5.12, condition 3): stored, until cleared.
+    pub fn set_earlier_conversation(
+        &mut self,
+        peer_id: &[u8],
+        version: f64,
+        held: bool,
+        now: f64,
+    ) -> Result<(), JsValue> {
+        self.core
+            .set_earlier_conversation(peer(peer_id)?, ms(version)?, held, ms(now)?)
+            .map_err(js)
+    }
+
+    /// The earlier conversations declared, in JSON: `[["<peer hex>", "<version>"], …]` (integers as decimal strings, as every view).
+    pub fn earlier_conversations(&self) -> String {
+        self.core.earlier_conversations()
+    }
+
+    /// Gives (`consent`) or withdraws the consent to the group of two `peer` creates after
+    /// its contact request was accepted (§5.12): one-shot, for 14 days.
+    pub fn consent_to_direct_chat(
+        &mut self,
+        peer_id: &[u8],
+        consent: bool,
+        now: f64,
+    ) -> Result<(), JsValue> {
+        self.core
+            .consent_to_direct_chat(peer(peer_id)?, consent, ms(now)?)
+            .map_err(js)
+    }
+
+    /// The consents not used yet, in JSON: `[["<peer hex>", "<expires at>"], …]`.
+    pub fn direct_chat_consents(&self) -> String {
+        self.core.direct_chat_consents()
+    }
+
+    /// Whether `peer` is a member of a group this device holds and has accepted: a
+    /// connection it asks for may be opened automatically (§5.12).
+    pub fn is_co_member(&self, peer_id: &[u8]) -> Result<bool, JsValue> {
+        Ok(self.core.is_co_member(peer(peer_id)?))
+    }
+
+    /// Among `candidates` (concatenated 32-byte GossipIDs), those whose automatic connection
+    /// may be revoked: no group shared, no held epoch lists them (§5.12). Concatenated.
+    pub fn connections_to_revoke(&self, candidates: &[u8]) -> Result<Vec<u8>, JsValue> {
+        if !candidates.len().is_multiple_of(32) {
+            return Err(JsValue::from_str("groups:invalid: candidates"));
+        }
+        let c = candidates
+            .chunks(32)
+            .map(peer)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(self
+            .core
+            .connections_to_revoke(&c)
+            .iter()
+            .flat_map(|p| p.as_bytes().to_vec())
+            .collect())
+    }
+
+    /// The members of accepted groups with which no session is reported (`set_session`):
+    /// the connections to open. Concatenated 32-byte GossipIDs.
+    pub fn peers_wanting_connection(&self) -> Vec<u8> {
+        self.core
+            .peers_wanting_connection()
+            .iter()
+            .flat_map(|p| p.as_bytes().to_vec())
+            .collect()
+    }
+
     /// `change`: `{"t":"Successor","add":[hex],"remove":[hex],"name":null|string}`,
     /// `{"t":"Handover","new_owner":hex,"leave":bool,"remove":[hex],"name":…}` or
     /// `{"t":"Resolve","members":[hex],"name":…}`. Returns the new epoch.
