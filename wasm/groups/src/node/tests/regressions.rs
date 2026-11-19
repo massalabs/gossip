@@ -901,3 +901,39 @@ fn the_score_does_not_overpunish_honest_answers() {
     }
     assert_eq!(net.devs[0].node.score(&member(3)), 500_000);
 }
+
+/// Found by review (code at `6a916f2e`): a neighbor was replaced after three timeouts whose
+/// first and last were two days apart even if it had not been asked anything in between;
+/// and a replaced neighbor's count was reset, so a member that never answers counted as
+/// responsive and was taken back as a neighbor once its cooldown ended.
+#[test]
+fn neighbor_replacement_needs_two_days_of_unanswered_asks_and_sticks() {
+    let mut net = Net::new(13, 1);
+    let chat = net.chat();
+    super::dissemination::neighbors_of(&mut net, 0, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    let node = &mut net.devs[0].node;
+    // Two quick timeouts, then one two days later: not two days of asking.
+    node.note_query_timeout(&member(1), T0, T0 + MIN);
+    node.note_query_timeout(&member(1), T0 + MIN, T0 + 2 * MIN);
+    node.note_query_timeout(&member(1), T0 + 2 * DAY, T0 + 2 * DAY + MIN);
+    assert!(node.is_neighbor(&chat, &member(1)));
+    // Member 3 is asked without an answer for two days: replaced, and stays unresponsive.
+    node.note_query_timeout(&member(3), T0, T0 + DAY);
+    node.note_query_timeout(&member(3), T0 + DAY, T0 + 2 * DAY);
+    node.note_query_timeout(&member(3), T0 + 2 * DAY, T0 + 2 * DAY + HOUR);
+    assert!(!node.is_neighbor(&chat, &member(3)));
+    assert!(!node.responsive(&member(3)));
+    // After its cooldown, a responsive member takes the free place.
+    net.now = T0 + 4 * DAY;
+    net.tick(0);
+    let asked: Vec<GossipId> = net
+        .poll_frames(0)
+        .into_iter()
+        .filter(|(_, f)| f.iter().any(|f| matches!(f, Frame::NeighborRequest(_))))
+        .map(|(to, _)| to)
+        .collect();
+    assert!(
+        !asked.is_empty() && !asked.contains(&member(3)),
+        "{asked:?}"
+    );
+}
