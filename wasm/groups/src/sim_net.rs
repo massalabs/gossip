@@ -16,8 +16,9 @@
 //! some fast enough to make events temporarily invalid elsewhere. Sessions are reset.
 //!
 //! Hostile members: **silent** (never answers), **announcer** (announces real and fake IDs,
-//! again and again, and answers "not available" to every query), **liar** (answers every
-//! query with invalid data) and **flooder** (floods notices of fake IDs and never answers).
+//! again and again, and answers "not available" to every query, or "restart" to half of the
+//! page requests), **liar** (answers every query with invalid data) and **flooder** (floods
+//! notices of fake IDs and never answers).
 //!
 //! Properties checked:
 //!
@@ -773,7 +774,8 @@ impl Sim {
                     }
                     Frame::Query(q) if matches!(kind, Hostility::Liar | Hostility::Announcer) => {
                         // The liar answers invalid data; the announcer answers "not
-                        // available" to everything it announced.
+                        // available" to everything it announced, and "restart" to half of
+                        // the page requests, which the requester must bound.
                         let frames: Vec<Frame> = q
                             .entries
                             .iter()
@@ -781,6 +783,10 @@ impl Sim {
                             .map(|(i, e)| {
                                 let result = if kind == Hostility::Liar {
                                     self.lie(d, e)
+                                } else if matches!(e, QueryEntry::Op(QueryOp::TipsScan { .. }))
+                                    && chance(&mut self.rng, 50)
+                                {
+                                    ResponseResult::Status(Status::Restart)
                                 } else {
                                     ResponseResult::Status(Status::NotAvailable)
                                 };
