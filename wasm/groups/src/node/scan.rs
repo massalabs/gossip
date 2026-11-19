@@ -596,7 +596,7 @@ impl Node {
         if !member {
             return Ok(Some(AnswerOp::Status(Status::NotAvailable)));
         }
-        // A removed peer is told of its removal (§5.6).
+        // A removed peer is told of its removal, a former owner of its handover (§5.6).
         self.removed_contact(cx, anchor, peer);
         let key: FrozenKey = (peer, anchor, scan_id);
         // At most the request's bound, and no longer than this device's own (§12.2).

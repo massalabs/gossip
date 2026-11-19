@@ -3679,6 +3679,10 @@ fn a_former_owner_restored_before_its_handover_learns_the_new_owner() {
     assert_eq!(s.status, MyStatus::Member);
     assert_eq!(s.current, h);
     assert_eq!(s.owner, gid(1));
+    let replies: u64 = (1..4)
+        .map(|d| net.devs[d].node.stats().handover_replies)
+        .sum();
+    assert!(replies >= 1);
 }
 
 /// A removal lookup about a former owner that left in a handover is answered with that

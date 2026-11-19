@@ -106,7 +106,8 @@ impl Node {
                 QueryOp::Event { chat_id, .. } | QueryOp::SyncObj { chat_id, .. },
             ) = entry
             {
-                // A removed peer is told of its removal (§5.6).
+                // A removed peer is told of its removal, a former owner of its handover
+                // (§5.6).
                 self.removed_contact(cx, *chat_id, from);
             }
             for op in ops {
@@ -315,6 +316,20 @@ impl Node {
                     (Ok(EventObject::Root(r)), Target::Root) if r.chat_id() == key.chat_id => {
                         (self.receive_root(cx, from, *r, Via::Lookup)?, None)
                     }
+                    // A removal lookup about a former owner, answered with the handover
+                    // root it signed for the epoch looked up and left in (§5.6).
+                    (Ok(EventObject::Root(r)), Target::Removal(m))
+                        if r.root_type() == crate::root::RootType::Handover
+                            && !r.is_member(&m)
+                            && r.names_parent(&key.chat_id)
+                            && self
+                                .held_root(&key.chat_id)
+                                .is_some_and(|p| p.owner_id() == m) =>
+                    {
+                        let a = self.receive_root(cx, from, *r, Via::Lookup)?;
+                        self.send_owed(cx, key.chat_id, m);
+                        (a, None)
+                    }
                     (Ok(EventObject::Root(r)), Target::Parent(c))
                         if self
                             .held_root(&key.chat_id)
@@ -436,8 +451,9 @@ impl Node {
                     continue;
                 }
             };
+            // A removed peer is told of its removal, a former owner of its handover (§5.6).
+            self.removed_contact(cx, chat, from);
             if !self.may_receive(&chat, &from, false) {
-                self.removed_contact(cx, chat, from);
                 continue;
             }
             // A valid entry from a member: it is responsive (§10.1).
@@ -651,13 +667,25 @@ impl Node {
                     .into_iter()
                     .chain(self.leave_for(chat_id, gossip_id))
                     .collect();
-                let ops: Vec<AnswerOp> = keys
+                let mut ops: Vec<AnswerOp> = keys
                     .iter()
                     .map(|k| AnswerOp::Object {
                         chat_id: k.0,
                         item: super::objects::key_item(k),
                     })
                     .collect();
+                // Neither held: a former owner that left in a handover root this device
+                // holds is answered with that root, which the requester holds the parent
+                // of (§5.6).
+                if ops.is_empty()
+                    && let Some(h) = self
+                        .handover_owed(chat_id, gossip_id)
+                        .and_then(|c| c.last().copied())
+                    && self.held_root(&h).is_some_and(|r| !r.is_member(gossip_id))
+                    && self.root_served_to(&h, &from)
+                {
+                    ops.push(AnswerOp::Root { chat_id: h });
+                }
                 if ops.is_empty() { vec![na] } else { ops }
             }
             QueryOp::Keys { chat_id, gossip_id } => vec![if self.t.keys.contains(gossip_id)

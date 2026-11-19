@@ -172,6 +172,9 @@ impl Node {
             );
             return;
         }
+        // A former owner naming the parent of its handover as its current epoch is told of
+        // the handover (§5.6).
+        self.removed_contact(cx, chat, from);
         // The request names the requester's current epoch; the relation is the group's.
         let chat = self.group_of(&chat);
         if !self.may_receive(&self.cur(&chat), &from, false) {
