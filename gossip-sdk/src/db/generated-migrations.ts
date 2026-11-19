@@ -146,4 +146,18 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'CREATE TABLE `groupRecords` (\n\t`ownerUserId` text NOT NULL,\n\t`kind` text NOT NULL,\n\t`key` text NOT NULL,\n\t`fields` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `kind`, `key`)\n);',
     ],
   },
+  {
+    idx: 11,
+    tag: '0011_group_conversations',
+    when: 1795113424155,
+    digest: 'd0ba434cbb789d75849613594b707d776b09cc07d524d64c4826bf38b452cf68',
+    statements: [
+      "ALTER TABLE `contacts` ADD `connection` text DEFAULT 'accepted' NOT NULL;",
+      'ALTER TABLE `discussions` ADD `isArchive` integer DEFAULT false NOT NULL;',
+      'ALTER TABLE `discussions` ADD `archived` integer DEFAULT false NOT NULL;',
+      'ALTER TABLE `discussions` ADD `linkedGroupId` text;',
+      'ALTER TABLE `discussions` ADD `directChatOwed` integer DEFAULT false NOT NULL;',
+      "UPDATE `discussions` SET `isArchive` = 1 WHERE `contactUserId` <> '__self__';",
+    ],
+  },
 ];
