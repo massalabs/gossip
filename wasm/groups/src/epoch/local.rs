@@ -42,6 +42,10 @@ pub enum ChangeError {
     /// A scheduled time is not after `now`.
     #[error("a scheduled time must be in the future")]
     NotInFuture,
+    /// A local-only edit would set `last_modified_at` later than `now` (D.34): the message
+    /// would disappear from the view until then, and honest edits dated before it would lose.
+    #[error("a local-only edit cannot be dated later than now")]
+    ModifiedInFuture,
     /// The fresh event ID is already known (a randomness failure).
     #[error("event ID collision")]
     IdCollision,
@@ -264,8 +268,10 @@ impl Epoch<'_> {
     /// of the old result and pending versions) is pruned to a stub.
     ///
     /// A body or metadata change sets `last_modified_at = max(now, previous + 1)` unless a
-    /// date is given. Dates beyond `now + MAX_SCHEDULE` are refused, so that a Retry stays
-    /// valid; the new result must pass every rule a published one passes.
+    /// date is given. A resulting `last_modified_at` later than `now` is refused (D.34,
+    /// choice A; §9.1 allows any date), so after the clock moved back the user waits or
+    /// enters a date. A `created_at` beyond `now + MAX_SCHEDULE` is refused, so that a Retry
+    /// stays valid; the new result must pass every rule a published one passes.
     ///
     /// Returns every ID the operation pruned, ascending, so that pending outgoing work that
     /// refers to them can be invalidated (§9.3).
@@ -310,6 +316,9 @@ impl Epoch<'_> {
             None if content_edit => next_modification(now, old.last_modified_at)?,
             None => old.last_modified_at,
         };
+        if new.last_modified_at > now {
+            return Err(ChangeError::ModifiedInFuture);
+        }
         // The bound of §9.1 is the bound of §7.2 for an event created now, so validating the
         // result as such an event checks it together with every other rule.
         MessageEvent::create(
@@ -828,15 +837,26 @@ mod tests {
         let edit = |f: &mut Fixture, e: LocalEdit| {
             ep(&f.root).local_edit(&mut f.store, T0 + 10, sid(1), e)
         };
-        // previous + 1 when the clock is behind.
-        edit(
-            &mut f,
-            LocalEdit {
-                body: Some(Body::Text("b".into())),
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        // With the clock behind, previous + 1 is later than now: refused (D.34).
+        let b = LocalEdit {
+            body: Some(Body::Text("b".into())),
+            ..Default::default()
+        };
+        assert_eq!(edit(&mut f, b.clone()), Err(ChangeError::ModifiedInFuture));
+        assert_eq!(
+            edit(
+                &mut f,
+                LocalEdit {
+                    last_modified_at: Some(T0 + 11),
+                    ..Default::default()
+                }
+            ),
+            Err(ChangeError::ModifiedInFuture)
+        );
+        // max(now, previous + 1) otherwise.
+        ep(&f.root)
+            .local_edit(&mut f.store, T0 + 51, sid(1), b)
+            .unwrap();
         let cur = |f: &Fixture| match f.obj(1).current {
             Some(StoredResult::Content(c)) => c,
             _ => panic!(),
@@ -899,9 +919,7 @@ mod tests {
                     ..Default::default()
                 }
             ),
-            Err(ChangeError::Invalid(Error::BeyondSchedule(
-                "last_modified_at"
-            )))
+            Err(ChangeError::ModifiedInFuture)
         );
         let carol = f.carol.id;
         assert_eq!(
