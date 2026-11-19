@@ -14,13 +14,13 @@ export function makeFakeGroups() {
   };
   const handlers = new Map<string, Set<(p: unknown) => void>>();
   const service = {
-    list: vi.fn(() => state.groups),
+    list: vi.fn(async () => state.groups),
     get: vi.fn(
-      (id: string) => state.groups.find(g => g.groupId === id) ?? null
+      async (id: string) => state.groups.find(g => g.groupId === id) ?? null
     ),
-    invitations: vi.fn(() => state.invitations),
-    timeline: vi.fn((id: string) => state.timelines.get(id) ?? []),
-    epoch: vi.fn(() => null),
+    invitations: vi.fn(async () => state.invitations),
+    timeline: vi.fn(async (id: string) => state.timelines.get(id) ?? []),
+    epoch: vi.fn(async () => null),
     createGroup: vi.fn(async () => 'g1'),
     changeMembers: vi.fn(async () => 'e2'),
     handOver: vi.fn(async () => 'e2'),
@@ -77,4 +77,9 @@ export function summary(over: Partial<GroupSummary> = {}): GroupSummary {
     links: [],
     ...over,
   };
+}
+
+/** Lets pending promises and effects run. */
+export async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0));
 }

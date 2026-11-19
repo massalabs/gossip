@@ -61,13 +61,18 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     return () => setCurrentGroup(null);
   }, [groupId, setCurrentGroup]);
 
-  const timeline: GroupTimelineItem[] = useMemo(() => {
-    void version;
-    try {
-      return getGroupService()?.timeline(groupId) ?? [];
-    } catch {
-      return [];
-    }
+  const [timeline, setTimeline] = useState<GroupTimelineItem[]>([]);
+  useEffect(() => {
+    let alive = true;
+    getGroupService()
+      ?.timeline(groupId)
+      .then(items => {
+        if (alive) setTimeline(items);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, [groupId, version]);
 
   useEffect(() => {

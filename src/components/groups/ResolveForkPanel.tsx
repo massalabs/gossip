@@ -29,8 +29,12 @@ const ResolveForkPanel: React.FC<ResolveForkPanelProps> = ({
   const { t } = useTranslation('groups');
   const sorted = useMemo(
     () =>
-      [...ends].sort(
-        (a, b) => a.createdAt - b.createdAt || a.epoch.localeCompare(b.epoch)
+      [...ends].sort((a, b) =>
+        a.createdAt < b.createdAt
+          ? -1
+          : a.createdAt > b.createdAt
+            ? 1
+            : a.epoch.localeCompare(b.epoch)
       ),
     [ends]
   );

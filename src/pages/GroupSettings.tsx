@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
@@ -87,12 +87,28 @@ const GroupSettings: React.FC = () => {
   const [toAdd, setToAdd] = useState<Set<string>>(new Set());
   const service = getGroupService();
 
-  const ownedEnds: GroupEpoch[] = useMemo(() => {
-    if (!group?.mustResolve || !service) return [];
-    return [group.currentEpoch, ...group.sideBranches]
-      .map(e => service.epoch(e))
-      .filter((e): e is GroupEpoch => !!e && e.owner === me);
-  }, [group, service, me]);
+  const [ownedEnds, setOwnedEnds] = useState<GroupEpoch[]>([]);
+  const ends = group?.mustResolve
+    ? [group.currentEpoch, ...group.sideBranches].join(',')
+    : '';
+  useEffect(() => {
+    let alive = true;
+    if (!ends || !service) {
+      setOwnedEnds([]);
+      return;
+    }
+    Promise.all(ends.split(',').map(e => service.epoch(e)))
+      .then(list => {
+        if (!alive) return;
+        setOwnedEnds(
+          list.filter((e): e is GroupEpoch => !!e && e.owner === me)
+        );
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [ends, service, me]);
 
   const run = async (fn: () => Promise<unknown>, ok = t('details.saved')) => {
     try {

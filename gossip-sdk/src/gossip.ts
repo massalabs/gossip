@@ -734,7 +734,7 @@ class GossipSdk {
         queries,
         this.eventEmitter,
         config,
-        () => this.awaitPendingPersist()
+        () => this.persistSessionDurably()
       );
       try {
         await groups.open();
@@ -742,10 +742,11 @@ class GossipSdk {
         this._message.setGroupPlaintextHandler((from, plaintext) =>
           groups.handlePlaintext(from, plaintext)
         );
-      } catch (error) {
+      } catch {
         await groups.close();
+        // A generic error: the engine's own message may name records.
         this.eventEmitter.emit(SdkEventType.ERROR, {
-          error: error instanceof Error ? error : new Error(String(error)),
+          error: new Error('The group engine could not be opened'),
           context: 'groups.open',
         });
       }
@@ -906,6 +907,13 @@ class GossipSdk {
     this.stopPublicKeyPublication();
     this.pollingManager.stop();
 
+    // The group engine before the session state is drained or frozen: its
+    // last operation may still encrypt and persist (bounded wait), and it
+    // frees its copy of the signing key. `close` never throws.
+    this._message?.setGroupPlaintextHandler(null);
+    await this._groups?.close();
+    this._groups = null;
+
     if (forceSecureNamespacePersistence && this._conn?.isSecureStorage) {
       let persistedStableState = false;
       for (
@@ -951,12 +959,6 @@ class GossipSdk {
       // debounced writes before tearing down the session.
       await this.flushSessionPersistSync();
     }
-
-    // The group engine first: it finishes its operation and frees its copy of
-    // the identity key.
-    this._message?.setGroupPlaintextHandler(null);
-    await this._groups?.close();
-    this._groups = null;
 
     // Cleanup the manager and both identity-key wrappers deterministically.
     this.state.session.dispose();
@@ -2185,9 +2187,9 @@ class GossipSdk {
    * through `onPersist`, and reschedule another flush if more changes
    * arrived during the write.
    */
-  private async flushPersist(): Promise<void> {
-    if (this.state.status !== SdkStatus.SESSION_OPEN) return;
-    if (!this._persistDirty) return;
+  private async flushPersist(): Promise<boolean> {
+    if (this.state.status !== SdkStatus.SESSION_OPEN) return false;
+    if (!this._persistDirty) return true;
 
     this._persistInFlight = true;
     this._persistDirty = false;
@@ -2238,6 +2240,7 @@ class GossipSdk {
       // we left it at.
       this._persistBackoffMs = 0;
     }
+    const ok = !failed;
 
     // If state changed during the flush, schedule another tick.
     if (
@@ -2251,6 +2254,7 @@ class GossipSdk {
         void this.flushPersist();
       }, delay);
     }
+    return ok;
   }
 
   /**
@@ -2313,6 +2317,37 @@ class GossipSdk {
    * total tap-to-sent time stays bounded by `max(network, persist)`
    * rather than serially summed.
    */
+  /**
+   * Persists the session state as it is now, durably, or throws: a flush
+   * that started after this call is awaited and its failure is surfaced. A
+   * flush already in flight may have snapshotted an older state, so it is
+   * awaited and followed by another one when the state changed since.
+   *
+   * The group service calls it between encrypting a plaintext and storing
+   * the ciphertext, so that a crash never restarts the session from a state
+   * whose ciphertext was already stored for sending.
+   */
+  async persistSessionDurably(): Promise<void> {
+    for (let i = 0; i < GossipSdk.MAX_PERSIST_DRAIN_LOOPS; i++) {
+      if (this.state.status !== SdkStatus.SESSION_OPEN) {
+        throw new Error('The messaging session is closed');
+      }
+      if (this._persistInFlightPromise) {
+        await this._persistInFlightPromise;
+        continue;
+      }
+      if (!this._persistDirty) return;
+      if (this._persistTimer !== null) {
+        clearTimeout(this._persistTimer);
+        this._persistTimer = null;
+      }
+      if (!(await this.flushPersist())) {
+        throw new Error('The messaging session state was not persisted');
+      }
+    }
+    throw new Error('The messaging session state was not persisted');
+  }
+
   async awaitPendingPersist(): Promise<void> {
     if (this._persistInFlightPromise) {
       await this._persistInFlightPromise;
