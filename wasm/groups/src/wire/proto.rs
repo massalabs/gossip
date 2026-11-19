@@ -500,6 +500,7 @@ impl fmt::Debug for GroupRoot {
             .field("group_secret", &redact::Bytes(self.group_secret.len()))
             .field("owner", &redact::Bytes(self.owner.len()))
             .field("created_at", &self.created_at)
+            .field("migrate_from", &self.migrate_from)
             .finish_non_exhaustive()
     }
 }
@@ -820,6 +821,7 @@ static GROUP_ROOT: Schema = Schema {
         (8, Kind::Bytes),
         (9, Kind::Uint64),
         (10, Kind::Bytes),
+        (11, Kind::Uint64),
     ],
     oneofs: &[],
     limits: &[

@@ -875,6 +875,47 @@ mod tests {
         round_trip(Some(3u64));
     }
 
+    /// A root is stored with `migrate_from`, present or absent, and a root stored before the
+    /// field existed reads as one without it.
+    #[test]
+    fn roots_round_trip_with_and_without_migrate_from() {
+        let seed = auth::StaticRootSecret::from_passphrase(b"codec root");
+        let (public, secret) = auth::derive_keys_from_static_root_secret(&seed);
+        let (_, me) = groups::parse_user_public_keys(&public.to_bytes()).unwrap();
+        let other = GossipId::from_bytes([9; 32]);
+        let signer = groups::KeySigner {
+            public: public.clone(),
+            signing_key: &secret.dsa_signing_key,
+        };
+        let make = |migrate_from| {
+            Root::create_founding(
+                groups::RootParams {
+                    name: "n".into(),
+                    members: vec![me, other],
+                    group_secret: GroupSecret::from_bytes([1; 32]),
+                    owner: public.clone(),
+                    epoch_challenge: Challenge::from_bytes([2; 32]),
+                    ref_chat_id_challenge: Challenge::from_bytes([3; 32]),
+                    created_at: 4,
+                },
+                ChatId::from_bytes([5; 32]),
+                migrate_from,
+                &signer,
+                [6; 32],
+            )
+            .unwrap()
+        };
+        for m in [None, Some(0), Some(u64::MAX)] {
+            let root = make(m);
+            round_trip(root.clone());
+            assert_eq!(Root::dec(&root.enc()).unwrap().migrate_from(), m);
+        }
+        let root = make(None);
+        let J::Obj(fields) = root.enc() else { panic!() };
+        let old = J::Obj(fields.into_iter().filter(|(k, _)| k != "migrate_from").collect());
+        assert_eq!(Root::dec(&old).unwrap(), root);
+    }
+
     /// One value of every record kind stored in the node tables and the epochs' records,
     /// with every variant of their enums. (Roots and signed objects, kept as the device's
     /// own encoding, are covered by the reopen tests of `tests.rs`.)

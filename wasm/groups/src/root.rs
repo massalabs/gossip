@@ -119,8 +119,11 @@ pub fn next_root_created_at(now: u64, greatest_held: Option<u64>) -> Result<u64>
 ///
 /// ```text
 /// chat_id = H("gossip.groups.root.1", version, type, name, parents, members, group_secret,
-///             owner, epoch_challenge, ref_chat_id_challenge, created_at)
+///             owner, epoch_challenge, ref_chat_id_challenge, created_at, migrate_from)
 /// ```
+///
+/// `migrate_from` is an array holding its one unsigned integer when present, the empty array
+/// when absent.
 #[allow(clippy::too_many_arguments)]
 fn compute_chat_id(
     version: u64,
@@ -133,6 +136,7 @@ fn compute_chat_id(
     epoch_challenge: &Challenge,
     ref_chat_id_challenge: &Challenge,
     created_at: u64,
+    migrate_from: Option<u64>,
 ) -> ChatId {
     ChatId::from_bytes(h(
         DOMAIN_ROOT,
@@ -147,6 +151,7 @@ fn compute_chat_id(
             Value::Bytes(epoch_challenge.as_bytes()),
             Value::Bytes(ref_chat_id_challenge.as_bytes()),
             Value::Uint(created_at),
+            Value::Array(migrate_from.into_iter().map(Value::Uint).collect()),
         ],
     ))
 }
@@ -190,7 +195,7 @@ impl Root {
         owner_signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
     ) -> Result<Self> {
-        let root = Self::build(RootType::Successor, params, parents)?;
+        let root = Self::build(RootType::Successor, params, parents, None)?;
         root.sign_and_check(owner_signing_key, randomness, None)
     }
 
@@ -210,8 +215,8 @@ impl Root {
         owner_signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
     ) -> Result<Self> {
-        let _ = migrate_from;
-        Self::create_successor(params, &[placeholder], owner_signing_key, randomness)
+        let root = Self::build(RootType::Successor, params, &[placeholder], migrate_from)?;
+        root.sign_and_check(owner_signing_key, randomness, None)
     }
 
     /// Builds and signs a handover root (§4.7, §5.7) continuing `parent`, signed with the key
@@ -227,11 +232,16 @@ impl Root {
         parent_owner_signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
     ) -> Result<Self> {
-        let root = Self::build(RootType::Handover, params, &[parent.chat_id])?;
+        let root = Self::build(RootType::Handover, params, &[parent.chat_id], None)?;
         root.sign_and_check(parent_owner_signing_key, randomness, Some(parent))
     }
 
-    fn build(root_type: RootType, params: RootParams, parents: &[ChatId]) -> Result<Self> {
+    fn build(
+        root_type: RootType,
+        params: RootParams,
+        parents: &[ChatId],
+        migrate_from: Option<u64>,
+    ) -> Result<Self> {
         let commitments: Vec<ParentCommitment> = parents
             .iter()
             .map(|p| parent_commitment(&params.epoch_challenge, p))
@@ -250,7 +260,7 @@ impl Root {
             created_at: params.created_at,
             // Placeholder of the right size; the signature is not hashed.
             signature: vec![0; SIGNATURE_SIZE],
-            migrate_from: None,
+            migrate_from,
         };
         Self::from_proto(EVENT_VERSION, unsigned)
     }
@@ -327,6 +337,14 @@ impl Root {
         if p.owner.is_empty() {
             return Err(Error::Missing("owner"));
         }
+        // §4.1, §5.12: only on a successor root with the single parent of a new group and two
+        // members. A receiver cannot tell that single commitment from that of a successor
+        // whose parent it lacks (§4.5); one that holds the parent rejects it on receipt.
+        if p.migrate_from.is_some()
+            && (root_type != RootType::Successor || parents.len() != 1 || members.len() != 2)
+        {
+            return Err(Error::MigrateFrom);
+        }
         // §4.6: a root MUST fit one empty container.
         if !wire::fits_empty_container(wire::event_blob_len(
             version,
@@ -346,6 +364,7 @@ impl Root {
             &epoch_challenge,
             &ref_chat_id_challenge,
             p.created_at,
+            p.migrate_from,
         );
 
         let (owner_keys, owner_id) = parse_user_public_keys(&p.owner)?;
@@ -366,7 +385,7 @@ impl Root {
             epoch_challenge,
             ref_chat_id_challenge,
             created_at: p.created_at,
-            migrate_from: None,
+            migrate_from: p.migrate_from,
             signature,
             chat_id,
         };
@@ -657,6 +676,7 @@ impl fmt::Debug for Root {
             .field("members", &self.members.len())
             .field("owner", &self.owner_id)
             .field("created_at", &self.created_at)
+            .field("migrate_from", &self.migrate_from)
             .finish_non_exhaustive()
     }
 }
@@ -706,11 +726,11 @@ pub(crate) mod tests {
         );
         assert_eq!(
             hex::encode(root.chat_id().as_bytes()),
-            "a7860cd85958ddae1c4df0521022889dff605b29bad270b842636817432f67a3"
+            "748782712c59e824e4c3a08f098f1acbf26d3b8c4e3e4a1b4dfb857fd0628842"
         );
         assert_eq!(
             hex::encode(root.ref_chat_id().as_bytes()),
-            "65e2eb398ff1f6368cc7cecca3865a6df3301b92b86abc605221adfbaeb34de9"
+            "cf4bbd2ce6e05343ff77d63a4995fc3c5a1821723210dfc83eef067b18835e62"
         );
         assert_eq!(
             hex::encode(root.parents()[0].as_bytes()),
@@ -721,6 +741,11 @@ pub(crate) mod tests {
                 )
                 .as_bytes()
             )
+        );
+        // The same group continuing an earlier one-to-one conversation (§5.12).
+        assert_eq!(
+            hex::encode(migration(&alice, &[&alice, &bob], 0).unwrap().chat_id().as_bytes()),
+            "181ef8e3bed972b5d4fe6b12d80ba7953ef97fd91aa43b52b17373cdfcd8decb"
         );
     }
 
