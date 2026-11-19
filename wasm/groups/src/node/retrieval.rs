@@ -116,8 +116,13 @@ impl Node {
             if self.t.tasks.len() >= QUEUED_MISSING_PER_GROUP.min(QUEUED_MISSING_PER_DEVICE)
                 && self.tasks_full(&key.chat_id)
             {
-                self.stats.backpressure += 1;
-                return;
+                // The missing parent of an accepted event takes the place of a suspect task
+                // rather than being lost (§17.4 leaves the choice to the implementation).
+                let parent = matches!(from, Some((_, TriggerKind::Child)));
+                if !(parent && self.evict_suspect(&key.chat_id)) {
+                    self.stats.backpressure += 1;
+                    return;
+                }
             }
             self.t.tasks.insert(
                 key,
@@ -170,6 +175,26 @@ impl Node {
             .take(QUEUED_MISSING_PER_GROUP)
             .count();
         in_group >= QUEUED_MISSING_PER_GROUP
+    }
+
+    /// Removes the event task of lowest priority among the suspect ones (below
+    /// [`CREDIBLE`]), in the group of `chat` if that group is full, else anywhere. Returns
+    /// whether one was removed.
+    fn evict_suspect(&mut self, chat: &ChatId) -> bool {
+        let device_full = self.t.tasks.len() >= QUEUED_MISSING_PER_DEVICE;
+        let victim = self
+            .tix
+            .lowest_priority(|k| {
+                matches!(k.target, Target::Event(_)) && (device_full || k.chat_id == *chat)
+            })
+            .filter(|(p, _)| *p < CREDIBLE)
+            .map(|(_, k)| k);
+        let Some(victim) = victim else {
+            return false;
+        };
+        self.t.tasks.remove(&victim);
+        self.reindex(victim);
+        true
     }
 
     /// Ends a task without counting a supply (the device obtained the item itself).

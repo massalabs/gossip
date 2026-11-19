@@ -105,6 +105,19 @@ impl TaskIndex {
         self.ready.iter().map(|(_, k)| *k)
     }
 
+    /// The task of lowest priority among those `keep` selects, with its priority (ties by
+    /// key).
+    pub(crate) fn lowest_priority(
+        &self,
+        keep: impl Fn(&TaskKey) -> bool,
+    ) -> Option<(u64, TaskKey)> {
+        self.prio
+            .iter()
+            .filter(|(k, _)| keep(k))
+            .map(|(k, p)| (*p, *k))
+            .min()
+    }
+
     /// Whether no task is ready.
     pub(crate) fn none_ready(&self) -> bool {
         self.ready.is_empty()
