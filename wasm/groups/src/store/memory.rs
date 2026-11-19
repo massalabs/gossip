@@ -64,6 +64,18 @@ impl StorageRead for MemoryStorage {
             .unwrap_or_default())
     }
 
+    fn parents(
+        &self,
+        chat_id: &ChatId,
+        event_id: &EventId,
+    ) -> Result<Option<Vec<EventId>>, StorageError> {
+        Ok(self
+            .epochs
+            .get(chat_id)
+            .and_then(|e| e.edges.get(event_id))
+            .cloned())
+    }
+
     fn object(
         &self,
         chat_id: &ChatId,
@@ -163,6 +175,8 @@ mod tests {
         assert!(store.event_rows(&other).unwrap().is_empty());
         assert!(store.event_row(&other, &id(1)).unwrap().is_none());
         assert_eq!(store.edges(&chat).unwrap(), vec![(id(2), vec![id(1)])]);
+        assert_eq!(store.parents(&chat, &id(2)).unwrap(), Some(vec![id(1)]));
+        assert_eq!(store.parents(&chat, &id(1)).unwrap(), None);
         let due = store.pending_until(&chat, 25).unwrap();
         assert_eq!(due.len(), 1);
         assert_eq!((due[0].due, due[0].kind), (20, PendingKind::Deletion));

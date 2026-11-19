@@ -91,6 +91,19 @@ impl<S: StorageRead + ?Sized> StorageRead for Tx<'_, S> {
         Ok(merged.into_iter().collect())
     }
 
+    fn parents(
+        &self,
+        chat_id: &ChatId,
+        event_id: &EventId,
+    ) -> Result<Option<Vec<EventId>>, StorageError> {
+        if *chat_id == self.changes.chat_id
+            && let Some(p) = self.changes.edges.get(event_id)
+        {
+            return Ok(Some(p.clone()));
+        }
+        self.store.parents(chat_id, event_id)
+    }
+
     fn object(
         &self,
         chat_id: &ChatId,
