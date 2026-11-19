@@ -93,8 +93,7 @@
   "new_discussion": {
     "title": "Новый чат",
     "new_contact": "Новый контакт",
-    "new_group": "Новая группа (скоро)",
-    "coming_soon": "Скоро",
+    "new_group": "Новая группа",
     "contacts": "Контакты",
     "search_contacts": "Поиск контактов",
     "loading_contacts": "Загрузка контактов…",

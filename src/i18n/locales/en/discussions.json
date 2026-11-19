@@ -93,8 +93,7 @@
   "new_discussion": {
     "title": "New discussion",
     "new_contact": "New contact",
-    "new_group": "New group (coming soon)",
-    "coming_soon": "Coming soon",
+    "new_group": "New group",
     "contacts": "Contacts",
     "search_contacts": "Search contacts",
     "loading_contacts": "Loading contacts…",
