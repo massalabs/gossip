@@ -4287,3 +4287,32 @@ they are settled with the rest.*
 - **A (recommended):** state the first three as rules (the code follows them) and the last two as
   known limits.
 - **B:** for the fourth, let a member added back fetch again what it dropped.
+
+### D.80 Points from the first runs of the app (§14.2, §4.8, §5.10, §7.5)
+
+*Found by running the app on a PWA and an Android emulator, and by the simulation check added
+afterwards.*
+
+- **Closed markers.** §14.2 keeps a marker "for each of its ends". A member that left and was added
+  back was then offered the group's first epoch again as a fresh invitation: its scan listed that
+  epoch's events, it fetched the root, and no marker named it. Accepting it made a second copy of
+  the group, and the same then happened to the owner. The code now keeps a marker for every epoch
+  of a closed group, and an invitation waiting on a parent that turns out to be closed is rejected
+  with it.
+- **"Last epoch that person was a member of" (§5.10).** Chosen by date, it could be a former
+  owner's root dated at the end of time (D.72), which the member cannot verify. The code takes the
+  last such epoch in the line the new root continues, by ancestry.
+- **Who a line names.** A handover root is signed by its parent's owner, so that owner is the
+  actor of its lines, not the new owner. An outgoing owner that drops itself in its handover is
+  shown as having left.
+- **Lines for joining (§7.5 has none).** "created the group" is shown only on the device that
+  created it; every other member reads "<owner> added you", since a member cannot tell a founding
+  root from a successor whose parents it lacks. A member added back reads "<owner> added you back"
+  after "You were not a member between…".
+- **Changes shown by a root with two parents (re-add).** They are read against the parents that no
+  other parent continues; read against both, members removed long ago showed as removed again.
+- Known limit: a device restored from an old backup can be offered, as a rejoin, epochs of its old
+  line that it never held. Accepting makes no second copy.
+
+- **A (recommended):** state these rules. The code follows them.
+- **B:** other rules, to be given.
