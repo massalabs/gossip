@@ -22,6 +22,7 @@
  * records and the outbox (which names a recipient, never a group).
  */
 
+import { sha256 } from '@noble/hashes/sha2';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 import {
   GroupsNode,
@@ -126,11 +127,34 @@ export interface GroupInvitation {
   continues: GroupId | null;
 }
 
+/** A body this account can send or set: text, or a forward of text. */
 export type GroupMessageBody =
   | { type: 'text'; text: string }
-  | { type: 'forward'; contentType: string; content: Uint8Array }
-  | { type: 'reaction'; reaction: Uint8Array }
-  | { type: 'media'; media: Uint8Array };
+  | { type: 'forward'; contentType: string; content: Uint8Array };
+
+/**
+ * A body as the timeline shows it. A media message (§7.6), or a forward of
+ * one, comes with its mimetype and the length of its data, never the data.
+ * A reaction is never a body: it is listed on its target (`reactions`).
+ */
+export type GroupMessageContent =
+  | GroupMessageBody
+  | {
+      type: 'media';
+      mimetype: string;
+      dataLength: number;
+      /** A forward of a media message. */
+      forwarded?: true;
+    };
+
+/** The reactions of one emoji on a message (§7.6). */
+export interface GroupReaction {
+  emoji: string;
+  /** The user IDs of those whose reaction it is, at most once each. */
+  authors: string[];
+  /** This account is among the authors. */
+  mine: boolean;
+}
 
 export interface GroupMessage {
   kind: 'message';
@@ -142,13 +166,15 @@ export interface GroupMessage {
   lastModifiedAt: bigint;
   /** "Edited at" is shown (a claim, not a proof). */
   edited: boolean;
-  body: GroupMessageBody;
+  body: GroupMessageContent;
   metadata: Record<string, Uint8Array>;
   /**
    * The messages it replies to (§7.6). `epochId` is null when the target's
    * epoch is not one this device holds in the timeline.
    */
   replyTo: { epochId: GroupId | null; syncObjId: GroupId }[];
+  /** Its reactions, one entry per emoji, in the order the engine lists them. */
+  reactions: GroupReaction[];
 }
 
 /** A message a reply or a forward points to. */
@@ -203,6 +229,27 @@ export class GroupMessageTooLargeError extends Error {
   }
 }
 
+/** The most bytes of UTF-8 an emoji of a reaction may have (§7.6). */
+export const GROUP_MAX_EMOJI_BYTES = 64;
+
+/**
+ * An emoji the engine would refuse for a reaction (§7.6: 1 to 64 bytes of
+ * well-formed UTF-8), refused before the engine is called. `size` is its
+ * length in UTF-8 bytes (a lone surrogate counted as U+FFFD).
+ */
+export class GroupInvalidReactionError extends Error {
+  readonly max = GROUP_MAX_EMOJI_BYTES;
+  constructor(
+    readonly reason: 'empty' | 'too-long' | 'malformed',
+    readonly size: number
+  ) {
+    super(
+      `groups:invalid-reaction: ${reason}, ${size} bytes, at most ${GROUP_MAX_EMOJI_BYTES}`
+    );
+    this.name = 'GroupInvalidReactionError';
+  }
+}
+
 /** The longest a date may be set ahead of now (§7.2 `MAX_SCHEDULE`: two weeks minus five minutes). */
 export const GROUP_MAX_SCHEDULE_MS = 1_209_600_000;
 
@@ -240,7 +287,13 @@ export type GroupChangeKind =
   | 'Invitation'
   | 'Joined'
   | 'Membership'
+  /** Its messages changed (a reaction alone is `Reactions`). */
   | 'Messages'
+  /**
+   * Only reactions changed in it: its messages are as they were. Never
+   * unread or a notification by itself.
+   */
+  | 'Reactions'
   | 'ReadOnly'
   | 'Fork'
   | 'Closed'
@@ -330,22 +383,73 @@ function variant(v: unknown): [string, Raw] {
   return [r.t as string, r];
 }
 
-function body(raw: unknown): GroupMessageBody {
+/**
+ * The mimetype of a forwarded media message, from the canonical protobuf
+ * encoding of its `Media` (field 1, a string; the timeline leaves the data
+ * out). Empty when it cannot be read.
+ */
+function forwardedMimetype(content: Uint8Array): string {
+  if (content[0] !== 0x0a) return '';
+  let len = 0;
+  let i = 1;
+  for (let shift = 0; i < content.length && shift < 28; shift += 7) {
+    const b = content[i++];
+    len |= (b & 0x7f) << shift;
+    if ((b & 0x80) === 0) {
+      return i + len <= content.length
+        ? new TextDecoder().decode(content.subarray(i, i + len))
+        : '';
+    }
+  }
+  return '';
+}
+
+/** A body of the timeline; `dataLength` is the length of a media message's data. */
+function body(raw: unknown, dataLength: number): GroupMessageContent {
   const [t, r] = variant(raw);
   switch (t) {
     case 'Text':
       return { type: 'text', text: r.text as string };
-    case 'Forward':
+    case 'Forward': {
+      const contentType = variant(r.content_type)[0];
+      const content = hexToBytes(r.content as string);
+      if (contentType === 'Media') {
+        return {
+          type: 'media',
+          mimetype: forwardedMimetype(content),
+          dataLength,
+          forwarded: true,
+        };
+      }
+      return { type: 'forward', contentType, content };
+    }
+    default: {
+      // `Media`: a reaction is never a message of the timeline.
+      const media = (r.media ?? {}) as Raw;
       return {
-        type: 'forward',
-        contentType: variant(r.content_type)[0],
-        content: hexToBytes(r.content as string),
+        type: 'media',
+        mimetype: typeof media.mimetype === 'string' ? media.mimetype : '',
+        dataLength,
       };
-    case 'Reaction':
-      return { type: 'reaction', reaction: hexToBytes(r.reaction as string) };
-    default:
-      return { type: 'media', media: hexToBytes(r.media as string) };
+    }
   }
+}
+
+/** The reactions of a timeline message, `[[authorHex, emoji], …]`, by emoji. */
+function reactionsOf(raw: unknown, me: string): GroupReaction[] {
+  const out = new Map<string, GroupReaction>();
+  for (const [author, emoji] of (raw ?? []) as [string, string][]) {
+    let r = out.get(emoji);
+    if (!r) {
+      r = { emoji, authors: [], mine: false };
+      out.set(emoji, r);
+    }
+    const user = userIdOf(author);
+    if (r.authors.includes(user)) continue;
+    r.authors.push(user);
+    if (author === me) r.mine = true;
+  }
+  return [...out.values()];
 }
 
 function bodyJson(b: GroupMessageBody): string {
@@ -358,17 +462,30 @@ function bodyJson(b: GroupMessageBody): string {
         content_type: b.contentType,
         content: bytesToHex(b.content),
       });
-    case 'reaction':
-      return JSON.stringify({
-        t: 'Reaction',
-        reaction: bytesToHex(b.reaction),
-      });
-    case 'media':
-      return JSON.stringify({ t: 'Media', media: bytesToHex(b.media) });
   }
 }
 
 const utf8 = new TextEncoder();
+
+/** Throws a `GroupInvalidReactionError` if the engine would refuse `emoji`. */
+function checkEmoji(emoji: string): void {
+  const size = utf8.encode(emoji).length;
+  if (size === 0) throw new GroupInvalidReactionError('empty', 0);
+  // A lone surrogate would reach the engine as U+FFFD: another emoji.
+  for (let i = 0; i < emoji.length; i++) {
+    const c = emoji.charCodeAt(i);
+    if (c < 0xd800 || c > 0xdfff) continue;
+    const next = emoji.charCodeAt(i + 1);
+    if (c <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+      i++;
+      continue;
+    }
+    throw new GroupInvalidReactionError('malformed', size);
+  }
+  if (size > GROUP_MAX_EMOJI_BYTES) {
+    throw new GroupInvalidReactionError('too-long', size);
+  }
+}
 
 /** The text of a body as the text limit counts it, in UTF-8 bytes. */
 function textBytes(b: GroupMessageBody): number {
@@ -476,7 +593,8 @@ function line(raw: unknown): GroupLine {
   }
 }
 
-function timelineItem(raw: unknown): GroupTimelineItem {
+/** An item of the timeline; `me` is this account's user ID in hex. */
+function timelineItem(raw: unknown, me: string): GroupTimelineItem {
   const [t, r] = variant(raw);
   if (t === 'Line') {
     return { kind: 'line', at: BigInt(r.at as string), line: line(r.line) };
@@ -491,12 +609,32 @@ function timelineItem(raw: unknown): GroupTimelineItem {
     createdAt: BigInt(c.created_at as string),
     lastModifiedAt: BigInt(c.last_modified_at as string),
     edited: c.edited as boolean,
-    body: body(c.body),
+    body: body(c.body, Number(m.data_len ?? 0)),
     metadata: Object.fromEntries(
       (c.metadata as [string, string][]).map(([k, v]) => [k, hexToBytes(v)])
     ),
     replyTo: [],
+    reactions: reactionsOf(m.reactions, me),
   };
+}
+
+/**
+ * What a timeline shows of its messages, reactions left out: each message's
+ * epoch, ID and result. Two equal digests mean only reactions (or nothing)
+ * changed.
+ */
+function messagesDigest(timelineJson: string): string {
+  const parts: string[] = [];
+  for (const raw of JSON.parse(timelineJson) as unknown[]) {
+    const [t, r] = variant(raw);
+    if (t === 'Line') continue;
+    const m = r.message as Raw;
+    const c = m.content as Raw;
+    parts.push(
+      `${m.chat_id as string}${c.sync_obj_id as string}${String(m.result_hash)}`
+    );
+  }
+  return bytesToHex(sha256(utf8.encode(parts.join(','))));
 }
 
 /** The result of publishing a message, an edit or a deletion. */
@@ -535,6 +673,14 @@ export class GroupService {
   private outboxFailures = new Map<number, number>();
   /** A send is queued on the chain and has not started yet. */
   private pumpQueued = false;
+  /**
+   * Per group key, the digest of the messages its timeline shows (reactions
+   * left out), to tell a change of reactions alone from one of messages.
+   * Memory only.
+   */
+  private digests = new Map<string, string>();
+  /** Changes taken from the engine and not reported yet. */
+  private takenChanges: Raw[] = [];
   /**
    * Ciphertexts encrypted and not stored yet (their session state is not
    * durable yet, or storing failed), oldest first. Memory only: they never
@@ -619,6 +765,13 @@ export class GroupService {
         // identities it shares a group with, and asks members for the keys it
         // lacks; members added by this device are learnt from their contact.
         this.tellSessions(node);
+        // Changes left from before are reported as they are; the messages
+        // shown now are the reference for the next ones.
+        this.takenChanges.push(
+          ...(JSON.parse(node.take_changes(now)) as Raw[])
+        );
+        this.digests.clear();
+        this.lookAtMessages(node);
         // Not through `persist`, which reopens on failure.
         await this.queries.groups.applyBatches(
           this.owner,
@@ -884,8 +1037,10 @@ export class GroupService {
     if (!this.alive(node)) return;
     await this.retryOutbox();
     if (!this.alive(node)) return;
-    const changes = JSON.parse(node.take_changes(this.now())) as Raw[];
+    this.takeChanges(node);
     await this.persist();
+    const changes = this.takenChanges;
+    this.takenChanges = [];
     if (changes.length > 0) {
       this.eventEmitter.emit(SdkEventType.GROUPS_CHANGED, {
         changes: changes.map(c => {
@@ -902,6 +1057,73 @@ export class GroupService {
         }),
       });
     }
+  }
+
+  /**
+   * Takes the engine's changes into `takenChanges`, to be reported by the
+   * next send. The engine reports a change of messages and one of reactions
+   * alike (`Messages`), and only for what arrived: a `Messages` change whose
+   * group shows the same messages as when it was last looked at is reported
+   * as `Reactions`.
+   */
+  private takeChanges(node: GroupsNode): void {
+    const now = this.now();
+    const changes = JSON.parse(node.take_changes(now)) as Raw[];
+    if (changes.length === 0) return;
+    const kinds = new Map<string, string>();
+    for (const c of changes) {
+      const group = c.group as string;
+      if (variant(c.kind)[0] !== 'Messages' || kinds.has(group)) continue;
+      let digest: string | null = null;
+      try {
+        digest = messagesDigest(node.timeline(hexToBytes(group), now));
+      } catch {
+        // Not a group the engine shows: reported as it is.
+      }
+      const before = this.digests.get(group);
+      if (digest !== null) this.digests.set(group, digest);
+      kinds.set(
+        group,
+        digest !== null && before === digest ? 'Reactions' : 'Messages'
+      );
+    }
+    for (const c of changes) {
+      this.takenChanges.push(
+        variant(c.kind)[0] === 'Messages'
+          ? { ...c, kind: kinds.get(c.group as string) }
+          : c
+      );
+    }
+  }
+
+  /** What each group shows now becomes the reference (see `takeChanges`). */
+  private lookAtMessages(node: GroupsNode): void {
+    const now = this.now();
+    for (const g of JSON.parse(node.groups()) as Raw[]) {
+      const key = g.group as string;
+      try {
+        this.digests.set(
+          key,
+          messagesDigest(node.timeline(hexToBytes(key), now))
+        );
+      } catch {
+        this.digests.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Runs an operation of this account on messages, which the engine reports
+   * no change for: the changes that arrived before it are taken first, and
+   * what it changed becomes the reference.
+   */
+  private ownMessageOp<T>(f: (node: GroupsNode) => T): Promise<T> {
+    return this.run(node => {
+      this.takeChanges(node);
+      const result = f(node);
+      this.lookAtMessages(node);
+      return result;
+    });
   }
 
   /**
@@ -1406,7 +1628,7 @@ export class GroupService {
     } catch (e) {
       return Promise.reject(e);
     }
-    return this.run(node => {
+    return this.ownMessageOp(node => {
       const epoch = this.currentEpoch(node, groupId);
       const metadata = { ...(options.metadata ?? {}) };
       if (options.replyTo && options.replyTo.length > 0) {
@@ -1470,7 +1692,7 @@ export class GroupService {
     } catch (e) {
       return Promise.reject(e);
     }
-    return this.run(node =>
+    return this.ownMessageOp(node =>
       this.published(
         node.publish_edit(
           hexToBytes(epochId),
@@ -1490,7 +1712,7 @@ export class GroupService {
     syncObjId: GroupId,
     scheduledFor?: number
   ): Promise<GroupPublished> {
-    return this.run(node =>
+    return this.ownMessageOp(node =>
       this.published(
         node.publish_deletion(
           hexToBytes(epochId),
@@ -1502,9 +1724,76 @@ export class GroupService {
     );
   }
 
+  /**
+   * Adds this account's reaction `emoji` to the message `messageId` (its
+   * sync-object ID) shown in the timeline of `groupId`. It is published in the
+   * message's own epoch (§7.6). Reacting again with the same emoji is another
+   * version of the same reaction, never a second one.
+   */
+  react(
+    groupId: GroupId,
+    messageId: GroupId,
+    emoji: string
+  ): Promise<GroupPublished> {
+    return this.publishReaction(groupId, messageId, emoji, true);
+  }
+
+  /** Removes this account's reaction `emoji` from the message `messageId`. */
+  unreact(
+    groupId: GroupId,
+    messageId: GroupId,
+    emoji: string
+  ): Promise<GroupPublished> {
+    return this.publishReaction(groupId, messageId, emoji, false);
+  }
+
+  private publishReaction(
+    groupId: GroupId,
+    messageId: GroupId,
+    emoji: string,
+    add: boolean
+  ): Promise<GroupPublished> {
+    try {
+      checkEmoji(emoji);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return this.run(node => {
+      const now = this.now();
+      const g = JSON.parse(node.group(hexToBytes(groupId))) as Raw | null;
+      if (!g) throw new Error('groups:unknown-epoch: unknown group');
+      if (variant(g.status)[0] !== 'Member') {
+        throw new Error('groups:read-only: not a member of this group');
+      }
+      // The epoch the message is shown in; a deleted or hidden message is not.
+      let epoch: string | null = null;
+      for (const raw of JSON.parse(
+        node.timeline(hexToBytes(groupId), now)
+      ) as unknown[]) {
+        const [t, r] = variant(raw);
+        if (t === 'Line') continue;
+        const m = r.message as Raw;
+        if ((m.content as Raw).sync_obj_id === messageId) {
+          epoch = m.chat_id as string;
+          break;
+        }
+      }
+      if (!epoch) throw new Error('groups:unknown-message: not shown');
+      return this.published(
+        node.publish_reaction(
+          hexToBytes(epoch),
+          hexToBytes(messageId),
+          emoji,
+          add,
+          now
+        )
+      );
+    });
+  }
+
   /** Deletes a message on this device only (§9.2). */
   deleteMessageLocally(epochId: GroupId, syncObjId: GroupId): Promise<void> {
-    return this.run(node => {
+    return this.ownMessageOp(node => {
       node.local_delete(hexToBytes(epochId), hexToBytes(syncObjId), this.now());
     });
   }
@@ -1539,7 +1828,7 @@ export class GroupService {
       metadata: null,
       edited: edit.edited ?? null,
     });
-    return this.run(node => {
+    return this.ownMessageOp(node => {
       node.local_edit(
         hexToBytes(epochId),
         hexToBytes(syncObjId),
@@ -1551,7 +1840,7 @@ export class GroupService {
 
   /** Retry synchronisation of a message (§9.4): republishes its stored result. */
   retryMessage(epochId: GroupId, syncObjId: GroupId): Promise<GroupPublished> {
-    return this.run(node =>
+    return this.ownMessageOp(node =>
       this.published(
         node.retry(hexToBytes(epochId), hexToBytes(syncObjId), this.now())
       )
@@ -1632,11 +1921,12 @@ export class GroupService {
    */
   async timeline(groupId: GroupId): Promise<GroupTimelineItem[]> {
     const node = await this.readyNode();
+    const me = bytesToHex(this.session.userId);
     const items = (
       JSON.parse(
         await this.read(n => n.timeline(hexToBytes(groupId), this.now()))
       ) as unknown[]
-    ).map(timelineItem);
+    ).map(raw => timelineItem(raw, me));
     const epochs = new Set<string>();
     for (const i of items) {
       if (i.kind === 'message') epochs.add(i.epochId);
