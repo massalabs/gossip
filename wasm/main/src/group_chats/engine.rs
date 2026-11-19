@@ -41,6 +41,13 @@ fn parse<T: Codec>(s: &str) -> R<T> {
     T::dec(&J::parse(s)?)
 }
 
+/// The size of message metadata, given as a list of `[name, hex]` pairs in JSON, as the
+/// engine counts it against [`groups::constants::MAX_METADATA_BYTES`].
+pub fn metadata_bytes(metadata: &str) -> R<usize> {
+    let metadata: BTreeMap<String, Vec<u8>> = parse(metadata)?;
+    Ok(groups::wire::metadata_len(&metadata))
+}
+
 fn published(p: &Published) -> String {
     J::Obj(vec![
         ("eventId".into(), p.event.event_id().enc()),
