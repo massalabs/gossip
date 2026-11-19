@@ -373,12 +373,21 @@ impl Sim {
         }
     }
 
-    fn tick_all(&mut self) {
+    /// Ticks every device at the same instant `at`.
+    fn tick_all(&mut self, at: u64) {
         let epoch = self.epoch();
-        for i in 0..self.devices.len() {
-            let now = self.clock(i);
-            epoch.tick(&mut self.devices[i].store, now).unwrap();
+        for d in &mut self.devices {
+            epoch.tick(&mut d.store, at).unwrap();
         }
+    }
+
+    /// The latest device clock: an instant every device can be brought to, since a tick
+    /// never undoes what an earlier one applied or pruned.
+    fn latest_clock(&self) -> u64 {
+        (0..self.devices.len())
+            .map(|i| self.clock(i))
+            .max()
+            .unwrap_or(self.now)
     }
 }
 
@@ -472,17 +481,19 @@ fn assert_same(a: &Snapshot, b: &Snapshot, label: &str) {
     assert_eq!(a.available, b.available, "{label}: available events differ");
 }
 
-fn check_convergence(sim: &mut Sim, label: &str) {
-    sim.tick_all();
-    // Every device is compared at the same global instant; skews are a few minutes and
-    // nothing is due or expires within them at the checkpoints of `run`.
-    let at = sim.now;
+/// Brings every device to the latest device clock and compares them there; returns that
+/// instant. (Comparing at different clocks would count an event whose window ends between
+/// two clocks as a difference.)
+fn check_convergence(sim: &mut Sim, label: &str) -> u64 {
+    let at = sim.latest_clock();
+    sim.tick_all(at);
     let first = snapshot(&sim.devices[0].store, sim.root, at);
     for (i, d) in sim.devices.iter().enumerate() {
-        check_invariants(&d.store, &sim.chat(), sim.clock(i)).expect("invariants");
+        check_invariants(&d.store, &sim.chat(), at).expect("invariants");
         let s = snapshot(&d.store, sim.root, at);
         assert_same(&s, &first, &format!("{label}, device {i} against device 0"));
     }
+    at
 }
 
 fn run(seed: u64, steps: usize) {
@@ -494,10 +505,9 @@ fn run(seed: u64, steps: usize) {
     // Past every scheduled time (at most 3 hours ahead) and every redelivery.
     sim.now += 4 * HOUR;
     sim.drain();
-    check_convergence(&mut sim, "after delivery");
+    let now = check_convergence(&mut sim, "after delivery");
 
     // Order independence on fresh devices, at one instant: identical stores.
-    let now = sim.now;
     let a = replay(&sim, seed ^ 0xa5a5, now);
     let b = replay(&sim, seed ^ 0x5a5a, now);
     assert_eq!(
