@@ -334,8 +334,14 @@ impl Node {
     /// The epochs among `held` (held parents named by `root`) over which the owner of
     /// `root` has verified authority (§4.7): for a handover root, its parent, whose owner
     /// signed it (the signature was verified against that parent on receipt); for a
-    /// successor root, the parents owned by its owner or by a previous owner in its line,
-    /// judged with all of `held`.
+    /// successor root, every held parent, when each is owned by the root's owner or by a
+    /// previous owner in its line, and none otherwise.
+    ///
+    /// Authority from a held handover counts only within the group of that handover's
+    /// parent, as joined by the root lines this device holds (never by links made by hand):
+    /// the parents are judged group by group. A root naming one held parent it has no
+    /// authority over fails continuity as a whole: a new owner of one group of a former
+    /// owner cannot attach that owner's other groups.
     pub(crate) fn authorized_parents(&self, root: &Root, held: &[ChatId]) -> Vec<ChatId> {
         let held: Vec<ChatId> = held
             .iter()
@@ -345,15 +351,23 @@ impl Node {
         if root.root_type() == RootType::Handover {
             return held;
         }
-        let authority = self.line_authority(root.owner_id(), &held);
-        held.into_iter()
-            .filter(|c| {
+        let mut by_group: BTreeMap<ChatId, Vec<ChatId>> = BTreeMap::new();
+        for c in &held {
+            by_group.entry(self.group_of(c)).or_default().push(*c);
+        }
+        for parents in by_group.values() {
+            let authority = self.line_authority(root.owner_id(), parents);
+            let all = parents.iter().all(|c| {
                 self.t
                     .epochs
                     .get(c)
                     .is_some_and(|r| authority.contains(&r.root.owner_id()))
-            })
-            .collect()
+            });
+            if !all {
+                return Vec::new();
+            }
+        }
+        held
     }
 
     // ── Receiving a root (§4.7, §4.8) ────────────────────────────────────────
