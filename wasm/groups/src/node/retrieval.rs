@@ -33,8 +33,10 @@ pub(crate) enum Answer {
     NotAvailable,
     /// Malformed, wrong ID, failed secret proof (§11.4): penalised.
     Invalid,
-    /// `busy` or `malformed`: failed for this pass, not penalised.
+    /// `malformed`: failed for this pass, not penalised.
     Refused,
+    /// `busy`: refused for resource reasons; asked again later (§13.4), not penalised.
+    Busy,
     /// `expired`: an immediate resend (§11.4).
     Expired,
     /// The event validates but its timestamp is beyond `now + 5 min` (§9.6): the task
@@ -245,6 +247,17 @@ impl Node {
                     self.penalize(&peer, PENALTY_MALFORMED);
                 }
                 // The next candidate is tried at once, at the current stage.
+                if current && let Run::Active { attempt, .. } = &mut task.run {
+                    *attempt = None;
+                }
+            }
+            Answer::Busy => {
+                // Retry later: skipped for one local wait of the current stage.
+                let wait = match task.run {
+                    Run::Active { ttl, jitter, .. } => jittered(ttl, jitter),
+                    Run::Paused => FIRST_TTL_MS,
+                };
+                cand.outstanding_until = Some(cx.now.saturating_add(wait));
                 if current && let Run::Active { attempt, .. } = &mut task.run {
                     *attempt = None;
                 }

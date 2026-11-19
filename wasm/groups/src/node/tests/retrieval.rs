@@ -430,7 +430,7 @@ fn an_uncorrelated_response_is_dropped() {
 }
 
 #[test]
-fn busy_moves_on_without_a_penalty() {
+fn busy_moves_on_at_once_without_a_penalty() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
     let id = EventId::new(T0, [5; 16]);
