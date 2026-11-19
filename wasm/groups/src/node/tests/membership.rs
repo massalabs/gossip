@@ -2974,3 +2974,38 @@ fn no_assembly_without_a_session_and_no_loop_after_abandon() {
         .unwrap();
     assert!(!out.is_empty());
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=162`):
+/// a root with no held parent (the founding root) left as an invitation was never joined to
+/// a later root the user accepted, which it is an ancestor of: the device kept the old
+/// invitation and showed the group as two conversations.
+#[test]
+fn an_unanswered_founding_root_joins_the_accepted_root_it_leads_to() {
+    let mut net = MNet::new(3, true);
+    let g = net.create(0, &[1, 2]);
+    net.exchange();
+    net.accept_all(1);
+    let e2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("x".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.accept(2, e2);
+    net.run(2 * MIN);
+    assert!(
+        net.devs[2]
+            .node
+            .invitations(net.now + crate::constants::PROMPT_DELAY_MS)
+            .is_empty()
+    );
+    let groups = net.devs[2].node.groups();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert_eq!(groups[0].current, e2);
+}
