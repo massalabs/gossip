@@ -241,6 +241,9 @@ struct Device {
     restored: bool,
     /// The messages it published, by epoch: for later edits and deletions.
     mine: Vec<(ChatId, crate::ids::SyncObjId)>,
+    /// The engine's counters before its last restart: removal replies, failed
+    /// announcements, automatic successors.
+    engine: (u64, u64, u64),
 }
 
 /// A step of the owner's script, run at its time by whoever owns the group then.
@@ -333,6 +336,7 @@ impl Sim {
                 closed: false,
                 restored: false,
                 mine: Vec::new(),
+                engine: (0, 0, 0),
             })
             .collect();
         // The script: at hour h (with jitter), the step. Members are chosen among the
@@ -434,6 +438,12 @@ impl Sim {
 
     fn boot(&mut self, d: usize) {
         let dev = &mut self.devs[d];
+        if let Some(n) = dev.node.take() {
+            let s = n.stats();
+            dev.engine.0 += s.removal_replies;
+            dev.engine.1 += s.failed_announcements;
+            dev.engine.2 += s.auto_successors;
+        }
         dev.node = Some(Node::open(&dev.store, dev.id).expect("open"));
     }
 
@@ -738,6 +748,11 @@ impl Sim {
             }
             self.script.remove(0);
             let Some(o) = self.owner() else {
+                // Nobody owns the group right now (a new owner away, a fork): later.
+                if self.now < self.end_active {
+                    self.script.push((self.now + 10 * MINUTE, step));
+                    self.script.sort_by_key(|(t, _)| *t);
+                }
                 continue;
             };
             // The owner is online for its step.
@@ -1415,9 +1430,10 @@ impl Sim {
         }
         for &d in &honest {
             let s = self.node(d).stats().clone();
-            self.counters.removal_replies += s.removal_replies;
-            self.counters.failed_announcements += s.failed_announcements;
-            self.counters.auto_successors += s.auto_successors;
+            let e = self.devs[d].engine;
+            self.counters.removal_replies += s.removal_replies + e.0;
+            self.counters.failed_announcements += s.failed_announcements + e.1;
+            self.counters.auto_successors += s.auto_successors + e.2;
         }
     }
 }
