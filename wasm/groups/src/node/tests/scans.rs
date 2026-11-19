@@ -314,12 +314,13 @@ fn the_requester_pages_through_and_fetches_the_listed_events() {
         .find(|s| matches!(s.op, QueryOp::TipsScan { .. }))
         .unwrap();
     assert_eq!(asked(next), (sid, 128));
-    assert_eq!(
-        q.iter()
-            .filter(|s| matches!(s.op, QueryOp::Event { .. }))
-            .count(),
-        16
-    );
+    // 16 lookups to the peer that listed them (its limit), 16 to the other member.
+    let lookups: Vec<&Sent> = q
+        .iter()
+        .filter(|s| matches!(s.op, QueryOp::Event { .. }))
+        .collect();
+    assert_eq!(lookups.iter().filter(|s| s.to == member(1)).count(), 16);
+    assert_eq!(lookups.len(), 32);
     answer(
         &mut net,
         0,

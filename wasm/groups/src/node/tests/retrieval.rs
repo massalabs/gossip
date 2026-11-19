@@ -363,10 +363,11 @@ fn lookups_outstanding_are_limited_per_peer_and_per_device() {
     };
     net.recv_frames(0, member(1), &[notice(chat, &ids(1))]);
     let q = sent_queries(&mut net, 0);
-    assert_eq!(q.len(), ACTIVE_LOOKUPS_PER_PEER);
-    assert!(
-        q.iter().all(|s| s.to == member(1)),
-        "the best candidate is waited for"
+    assert_eq!(q.len(), 20);
+    let to_1 = q.iter().filter(|s| s.to == member(1)).count();
+    assert_eq!(
+        to_1, ACTIVE_LOOKUPS_PER_PEER,
+        "the rest go to other members"
     );
     for p in 2..=5u8 {
         net.recv_frames(0, member(p as usize), &[notice(chat, &ids(p))]);
