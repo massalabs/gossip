@@ -672,8 +672,104 @@ impl Node {
                 self.t.markers.insert(e, Marker::Closed);
             }
         }
+        self.forget_closed(&epochs, group);
         self.rebuild_epochs();
         self.changed(group, ChangeKind::Closed, cx.now);
+    }
+
+    /// After a group is closed (§14.2: only a minimal closed-chat marker remains): every
+    /// correlation reference, queued work and lookup result naming its epochs goes at once
+    /// (a signed leave or decline queued as bytes still leaves), and so do the peer records
+    /// and cached keys of every identity that shares no remaining group with this device
+    /// (held, invited or waiting). The caller learns the keys of its contacts again through
+    /// [`Node::learn_keys`].
+    pub(crate) fn forget_closed(&mut self, epochs: &[ChatId], group: ChatId) {
+        use super::records::{AnswerOp, Purpose};
+        let names = |c: &ChatId| epochs.contains(c) || *c == group;
+        let refs: Vec<_> = self
+            .t
+            .requests
+            .iter()
+            .filter(|(_, q)| {
+                q.entries.iter().any(|e| match e.purpose {
+                    Purpose::Task(k) => names(&k.chat_id),
+                    Purpose::Scan(g) => names(&g),
+                })
+            })
+            .map(|(k, _)| *k)
+            .collect();
+        for k in refs {
+            self.t.requests.remove(&k);
+        }
+        let work: Vec<_> = self
+            .t
+            .queue
+            .iter()
+            .filter(|(_, w)| match w {
+                Work::Full { chat_id, .. }
+                | Work::Notice { chat_id, .. }
+                | Work::Object { chat_id, .. }
+                | Work::ObjectNotice { chat_id, .. }
+                | Work::NeighborRequest { chat_id }
+                | Work::NeighborResponse { chat_id, .. }
+                | Work::LeaveRequest { chat_id } => names(chat_id),
+                Work::Query { purpose } => match purpose {
+                    Purpose::Task(k) => names(&k.chat_id),
+                    Purpose::Scan(g) => names(g),
+                },
+                Work::Answer { op, .. } => match op {
+                    AnswerOp::Event { chat_id, .. }
+                    | AnswerOp::SyncObj { chat_id, .. }
+                    | AnswerOp::Root { chat_id }
+                    | AnswerOp::Object { chat_id, .. } => names(chat_id),
+                    AnswerOp::Page { anchor, .. } => names(anchor),
+                    AnswerOp::Keys { .. } | AnswerOp::Status(_) => false,
+                },
+                Work::Blob(_) | Work::VersionNotice => false,
+            })
+            .map(|(k, _)| *k)
+            .collect();
+        for k in work {
+            self.remove_queued(&k);
+        }
+        let results: Vec<_> = self
+            .t
+            .lookup_results
+            .keys()
+            .filter(|k| names(&k.0))
+            .copied()
+            .collect();
+        for k in results {
+            self.t.lookup_results.remove(&k);
+        }
+        // The identities this device still shares a group with.
+        let mut known: BTreeSet<GossipId> = BTreeSet::from([self.me]);
+        for (_, r) in self.t.epochs.iter() {
+            known.extend(r.root.members().iter().copied());
+        }
+        for (_, h) in self.t.held_roots.iter() {
+            known.extend(h.root.members().iter().copied());
+        }
+        let peers: Vec<GossipId> = self
+            .t
+            .peers
+            .keys()
+            .filter(|p| !known.contains(p))
+            .copied()
+            .collect();
+        for p in peers {
+            self.t.peers.remove(&p);
+        }
+        let keys: Vec<GossipId> = self
+            .t
+            .keys
+            .keys()
+            .filter(|p| !known.contains(p))
+            .copied()
+            .collect();
+        for p in keys {
+            self.t.keys.remove(&p);
+        }
     }
 
     // ── Liveness of a leave (§5.3) ───────────────────────────────────────────
