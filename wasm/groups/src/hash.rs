@@ -11,8 +11,8 @@ use zeroize::Zeroize;
 
 use crate::cbor::Value;
 use crate::constants::{
-    DOMAIN_DISSOLVE, DOMAIN_KICK, DOMAIN_LEAVE, DOMAIN_PREDECESSOR, DOMAIN_REFERENCE,
-    DOMAIN_SECRET_PROOF, DOMAIN_SYNC_OBJ_NAME,
+    DOMAIN_DISSOLVE, DOMAIN_KICK, DOMAIN_LEAVE, DOMAIN_PREDECESSOR, DOMAIN_REACTION,
+    DOMAIN_REFERENCE, DOMAIN_SECRET_PROOF, DOMAIN_SYNC_OBJ_NAME,
 };
 use crate::ids::{
     Challenge, ChatId, DissolveId, EventId, GossipId, GroupSecret, KickId, LeaveId,
@@ -122,6 +122,21 @@ pub fn dissolve_id(chat_id: &ChatId, must_delete: bool) -> DissolveId {
 #[must_use]
 pub fn registered_sync_obj_id(name: &str) -> SyncObjId {
     SyncObjId::from_bytes(h(DOMAIN_SYNC_OBJ_NAME, vec![Value::Text(name)]))
+}
+
+/// `syncObjId = H("gossip.groups.reaction.1", target, author, emoji)` of a reaction (§7.6):
+/// the target's sync-object ID and the author's GossipID as byte strings, the emoji as a text
+/// string.
+#[must_use]
+pub fn reaction_sync_obj_id(target: &SyncObjId, author: &GossipId, emoji: &str) -> SyncObjId {
+    SyncObjId::from_bytes(h(
+        DOMAIN_REACTION,
+        vec![
+            Value::Bytes(target.as_bytes()),
+            Value::Bytes(author.as_bytes()),
+            Value::Text(emoji),
+        ],
+    ))
 }
 
 #[cfg(test)]

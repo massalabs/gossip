@@ -192,7 +192,9 @@ pub struct MessagePayload {
     pub last_modified_at: Option<u64>,
     #[prost(bool, tag = "6")]
     pub edited: bool,
-    #[prost(oneof = "Body", tags = "7, 8, 9")]
+    /// Field 9 held an opaque body before reactions and media were defined: it is reserved
+    /// and never reused ([`RESERVED_PAYLOAD_FIELDS`]).
+    #[prost(oneof = "Body", tags = "7, 8, 11, 12")]
     pub body: Option<Body>,
     #[prost(btree_map = "string, bytes", tag = "10")]
     pub metadata: BTreeMap<String, Vec<u8>>,
@@ -201,6 +203,11 @@ pub struct MessagePayload {
 /// The field number of `MessagePayload.metadata`, for [`super::metadata_len`].
 pub(crate) const METADATA_FIELD: u32 = 10;
 
+/// Field numbers of `MessagePayload` that are reserved: never used again in wire version 1,
+/// and refused as unknown.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const RESERVED_PAYLOAD_FIELDS: &[u32] = &[9];
+
 #[derive(Clone, PartialEq, ::prost::Oneof)]
 #[prost(skip_debug)]
 pub enum Body {
@@ -208,8 +215,37 @@ pub enum Body {
     Text(String),
     #[prost(message, tag = "8")]
     Forward(Forward),
-    #[prost(bytes = "vec", tag = "9")]
-    Content(Vec<u8>),
+    #[prost(message, tag = "11")]
+    Reaction(Reaction),
+    #[prost(message, tag = "12")]
+    Media(Media),
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+#[prost(skip_debug)]
+pub struct Reaction {
+    #[prost(bytes = "vec", tag = "1")]
+    pub target: Vec<u8>,
+    #[prost(string, tag = "2")]
+    pub emoji: String,
+    #[prost(enumeration = "ReactionAction", tag = "3")]
+    pub action: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ReactionAction {
+    Add = 0,
+    Remove = 1,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+#[prost(skip_debug)]
+pub struct Media {
+    #[prost(string, tag = "1")]
+    pub mimetype: String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub data: Vec<u8>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -556,11 +592,28 @@ impl fmt::Debug for Body {
                 .field(&redact::Bytes(t.len()))
                 .finish(),
             Body::Forward(fw) => f.debug_tuple("Forward").field(fw).finish(),
-            Body::Content(b) => f
-                .debug_tuple("Content")
-                .field(&redact::Bytes(b.len()))
-                .finish(),
+            Body::Reaction(r) => f.debug_tuple("Reaction").field(r).finish(),
+            Body::Media(m) => f.debug_tuple("Media").field(m).finish(),
         }
+    }
+}
+
+impl fmt::Debug for Reaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Reaction")
+            .field("target", &redact::Bytes(self.target.len()))
+            .field("emoji", &redact::Bytes(self.emoji.len()))
+            .field("action", &self.action)
+            .finish()
+    }
+}
+
+impl fmt::Debug for Media {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Media")
+            .field("mimetype", &redact::Bytes(self.mimetype.len()))
+            .field("data", &redact::Bytes(self.data.len()))
+            .finish()
     }
 }
 
@@ -795,6 +848,8 @@ const ROOT_TYPES: &[u64] = &[0, 1];
 
 const MESSAGE_TYPES: &[u64] = &[0, 1, 2, 3, 4];
 
+const REACTION_ACTIONS: &[u64] = &[0, 1];
+
 pub(crate) static EVENT: Schema = Schema {
     name: "Event",
     fields: &[
@@ -881,10 +936,11 @@ static MESSAGE_PAYLOAD: Schema = Schema {
         (6, Kind::Bool),
         (7, Kind::Str),
         (8, Kind::Msg(&FORWARD)),
-        (9, Kind::Bytes),
         (10, Kind::RepeatedMsg(&METADATA_ENTRY)),
+        (11, Kind::Msg(&REACTION)),
+        (12, Kind::Msg(&MEDIA)),
     ],
-    oneofs: &[&[7, 8, 9]],
+    oneofs: &[&[7, 8, 11, 12]],
     limits: &[],
 };
 
@@ -899,6 +955,25 @@ static METADATA_ENTRY: Schema = Schema {
 static FORWARD: Schema = Schema {
     name: "Forward",
     fields: &[(1, Kind::Enum(MESSAGE_TYPES)), (2, Kind::Bytes)],
+    oneofs: &[],
+    limits: &[],
+};
+
+static REACTION: Schema = Schema {
+    name: "Reaction",
+    fields: &[
+        (1, Kind::Bytes),
+        (2, Kind::Str),
+        (3, Kind::Enum(REACTION_ACTIONS)),
+    ],
+    oneofs: &[],
+    limits: &[],
+};
+
+/// Also the `content` of a forwarded media message, checked on its own.
+pub(crate) static MEDIA: Schema = Schema {
+    name: "Media",
+    fields: &[(1, Kind::Str), (2, Kind::Bytes)],
     oneofs: &[],
     limits: &[],
 };

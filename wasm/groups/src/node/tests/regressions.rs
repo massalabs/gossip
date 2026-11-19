@@ -475,7 +475,10 @@ fn largest_event(net: &Net) -> MessageEvent {
                 author: member(1),
                 created_at: T0,
                 last_modified_at: T0,
-                body: Body::Media(vec![7; n]),
+                body: Body::Media(crate::Media {
+                    mimetype: "application/octet-stream".into(),
+                    data: vec![7; n],
+                }),
                 edited: false,
                 metadata: BTreeMap::new(),
             }),

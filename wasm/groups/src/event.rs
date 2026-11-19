@@ -7,11 +7,12 @@ use std::collections::BTreeMap;
 
 use crate::cbor::Value;
 use crate::constants::{
-    DOMAIN_RESULT, EVENT_TIMESTAMP_TOLERANCE_MS, EVENT_VERSION, MAX_EVENT_PARENTS,
-    MAX_METADATA_BYTES, MAX_REPLY_TARGETS, MAX_SCHEDULE_MS, MAX_TEXT_BYTES, METADATA_KEY_REPLY_TO,
+    DOMAIN_RESULT, EVENT_TIMESTAMP_TOLERANCE_MS, EVENT_VERSION, MAX_EMOJI_BYTES, MAX_EVENT_PARENTS,
+    MAX_METADATA_BYTES, MAX_MIMETYPE_BYTES, MAX_REPLY_TARGETS, MAX_SCHEDULE_MS, MAX_TEXT_BYTES,
+    METADATA_KEY_REPLY_TO,
 };
 use crate::error::{Error, Result};
-use crate::hash::{h, secret_proof};
+use crate::hash::{h, reaction_sync_obj_id, secret_proof};
 use crate::ids::{
     ChatId, EventId, GossipId, RefChatId, SecretProof, SyncObjId, check_sorted_distinct,
 };
@@ -26,9 +27,9 @@ pub enum MessageType {
     Text = 0,
     /// A content-only copy (§7.6).
     Forward = 1,
-    /// Defined by the content specification.
+    /// A reaction to a message (§7.6).
     Reaction = 2,
-    /// Defined by the content specification.
+    /// A media message: a mimetype and opaque data (§7.6).
     Media = 3,
     /// A tombstone.
     Delete = 4,
@@ -53,22 +54,182 @@ impl MessageType {
     }
 }
 
+/// Whether a reaction is added or removed (§7.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ReactionAction {
+    /// The reaction is shown.
+    Add = 0,
+    /// The reaction is withdrawn; on equal dates it wins over an add (§7.1).
+    Remove = 1,
+}
+
+impl ReactionAction {
+    /// The value hashed and sent on the wire.
+    #[must_use]
+    pub const fn code(self) -> u64 {
+        self as u64
+    }
+
+    fn from_wire(value: i32) -> Result<Self> {
+        Ok(match proto::ReactionAction::try_from(value) {
+            Ok(proto::ReactionAction::Add) => Self::Add,
+            Ok(proto::ReactionAction::Remove) => Self::Remove,
+            Err(_) => return Err(Error::Malformed("unknown reaction action")),
+        })
+    }
+}
+
+/// The body of a reaction (§7.6). The person reacting is the result's author. Its `Debug`
+/// output shows only the size of the emoji.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Reaction {
+    /// The `syncObjId` of the message reacted to, in the same epoch.
+    pub target: SyncObjId,
+    /// UTF-8 text of 1 to [`MAX_EMOJI_BYTES`] bytes; whether it is an emoji is not checked.
+    pub emoji: String,
+    /// Added or removed.
+    pub action: ReactionAction,
+}
+
+impl Reaction {
+    /// `syncObjId = H("gossip.groups.reaction.1", target, author, emoji)`: the only sync-object
+    /// ID a reaction by `author` may have (§7.6).
+    #[must_use]
+    pub fn sync_obj_id(&self, author: &GossipId) -> SyncObjId {
+        reaction_sync_obj_id(&self.target, author, &self.emoji)
+    }
+
+    fn check(&self) -> Result<()> {
+        let n = self.emoji.len();
+        if n == 0 {
+            return Err(Error::TooFew {
+                field: "emoji",
+                min: 1,
+                got: 0,
+            });
+        }
+        if n > MAX_EMOJI_BYTES {
+            return Err(Error::TooMany {
+                field: "emoji",
+                max: MAX_EMOJI_BYTES,
+                got: n,
+            });
+        }
+        Ok(())
+    }
+
+    fn from_proto(p: proto::Reaction) -> Result<Self> {
+        Ok(Self {
+            target: SyncObjId::from_slice(&p.target)?,
+            emoji: p.emoji,
+            action: ReactionAction::from_wire(p.action)?,
+        })
+    }
+
+    fn to_proto(&self) -> proto::Reaction {
+        proto::Reaction {
+            target: self.target.as_bytes().to_vec(),
+            emoji: self.emoji.clone(),
+            action: self.action as i32,
+        }
+    }
+}
+
+/// The body of a media message (§7.6). Its `Debug` output shows only sizes.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Media {
+    /// `type/subtype`, at most [`MAX_MIMETYPE_BYTES`] bytes ([`check_mimetype`]).
+    pub mimetype: String,
+    /// Any bytes, possibly none; opaque to the protocol.
+    pub data: Vec<u8>,
+}
+
+impl Media {
+    /// The canonical protobuf encoding, the `content` of a forwarded media message
+    /// (Appendix C).
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        prost::Message::encode_to_vec(&self.to_proto())
+    }
+
+    /// Decodes the `content` of a forwarded media message: a strict decoding of a valid
+    /// `Media` whose encoding is canonical, since those bytes are hashed (§6.2, §7.6).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Malformed`] for an invalid or non-canonical encoding, otherwise the rule
+    /// broken.
+    pub fn decode(bytes: &[u8]) -> Result<Self> {
+        let p: proto::Media = strict::decode(bytes, &proto::MEDIA)?;
+        let media = Self {
+            mimetype: p.mimetype,
+            data: p.data,
+        };
+        media.check()?;
+        if media.encode() != bytes {
+            return Err(Error::Malformed("Media: not canonical"));
+        }
+        Ok(media)
+    }
+
+    fn check(&self) -> Result<()> {
+        check_mimetype(&self.mimetype)
+    }
+
+    fn to_proto(&self) -> proto::Media {
+        proto::Media {
+            mimetype: self.mimetype.clone(),
+            data: self.data.clone(),
+        }
+    }
+}
+
+/// Checks a mimetype (§7.6): `type/subtype`, at most [`MAX_MIMETYPE_BYTES`] bytes in all,
+/// where `type` and `subtype` each start with a lowercase ASCII letter or a digit and
+/// continue with lowercase letters, digits, `.`, `+` or `-`. Nothing may follow the subtype.
+///
+/// # Errors
+///
+/// [`Error::TooMany`] when it is too long, [`Error::NotAllowed`] for any other form.
+pub fn check_mimetype(mimetype: &str) -> Result<()> {
+    if mimetype.len() > MAX_MIMETYPE_BYTES {
+        return Err(Error::TooMany {
+            field: "mimetype",
+            max: MAX_MIMETYPE_BYTES,
+            got: mimetype.len(),
+        });
+    }
+    let token = |t: &str| {
+        let b = t.as_bytes();
+        let first = |c: &u8| c.is_ascii_lowercase() || c.is_ascii_digit();
+        b.first().is_some_and(first)
+            && b[1..]
+                .iter()
+                .all(|c| first(c) || matches!(c, b'.' | b'+' | b'-'))
+    };
+    match mimetype.split_once('/') {
+        Some((t, sub)) if token(t) && token(sub) => Ok(()),
+        _ => Err(Error::NotAllowed("mimetype")),
+    }
+}
+
 /// The type-specific body of a non-delete result (§6.2). Its `Debug` output shows only sizes.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Body {
     /// `text`: UTF-8 text.
     Text(String),
-    /// `forward`: `[content_type, content]`.
+    /// `forward`: `[content_type, content]`, a content-only copy (§7.6): a text, as UTF-8, or a
+    /// media message, as the canonical encoding of a [`Media`] ([`Media::encode`]).
     Forward {
-        /// The type of the copied content.
+        /// The type of the copied content: [`MessageType::Text`] or [`MessageType::Media`].
         content_type: MessageType,
         /// The copied content.
         content: Vec<u8>,
     },
-    /// `reaction`: bytes defined by the content specification.
-    Reaction(Vec<u8>),
-    /// `media`: bytes defined by the content specification.
-    Media(Vec<u8>),
+    /// `reaction`: `[target, emoji, action]` (§7.6).
+    Reaction(Reaction),
+    /// `media`: `[mimetype, data]` (§7.6).
+    Media(Media),
 }
 
 impl Body {
@@ -93,11 +254,18 @@ impl Body {
                 Value::Uint(content_type.code()),
                 Value::Bytes(content),
             ]),
-            Body::Reaction(b) | Body::Media(b) => Value::Bytes(b),
+            Body::Reaction(r) => Value::Array(vec![
+                Value::Bytes(r.target.as_bytes()),
+                Value::Text(&r.emoji),
+                Value::Uint(r.action.code()),
+            ]),
+            Body::Media(m) => Value::Array(vec![Value::Text(&m.mimetype), Value::Bytes(&m.data)]),
         }
     }
 
-    /// Forward content and the text limit ([`MAX_TEXT_BYTES`]).
+    /// The rules of each body that need no author: forward content (a text or a canonical
+    /// media message, nothing else), the reaction's emoji, the mimetype, and the text limit
+    /// ([`MAX_TEXT_BYTES`]), which does not apply to media data.
     fn check(&self) -> Result<()> {
         let text_len = match self {
             Body::Text(t) => t.len(),
@@ -111,12 +279,22 @@ impl Body {
                     }
                     content.len()
                 }
-                MessageType::Reaction | MessageType::Media => 0,
-                MessageType::Forward | MessageType::Delete => {
+                MessageType::Media => {
+                    Media::decode(content)?;
+                    0
+                }
+                MessageType::Reaction | MessageType::Forward | MessageType::Delete => {
                     return Err(Error::NotAllowed("forward content_type"));
                 }
             },
-            Body::Reaction(_) | Body::Media(_) => 0,
+            Body::Reaction(r) => {
+                r.check()?;
+                0
+            }
+            Body::Media(m) => {
+                m.check()?;
+                0
+            }
         };
         if text_len > MAX_TEXT_BYTES {
             return Err(Error::TooMany {
@@ -163,15 +341,28 @@ impl fmt::Debug for Body {
                 .field("content_type", content_type)
                 .field("content", &redact::Bytes(content.len()))
                 .finish(),
-            Body::Reaction(b) => f
-                .debug_tuple("Reaction")
-                .field(&redact::Bytes(b.len()))
-                .finish(),
-            Body::Media(b) => f
-                .debug_tuple("Media")
-                .field(&redact::Bytes(b.len()))
-                .finish(),
+            Body::Reaction(r) => f.debug_tuple("Reaction").field(r).finish(),
+            Body::Media(m) => f.debug_tuple("Media").field(m).finish(),
         }
+    }
+}
+
+impl fmt::Debug for Reaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Reaction")
+            .field("target", &self.target)
+            .field("emoji", &redact::Bytes(self.emoji.len()))
+            .field("action", &self.action)
+            .finish()
+    }
+}
+
+impl fmt::Debug for Media {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Media")
+            .field("mimetype", &redact::Bytes(self.mimetype.len()))
+            .field("data", &redact::Bytes(self.data.len()))
+            .finish()
     }
 }
 
@@ -323,8 +514,9 @@ impl Payload {
         h(DOMAIN_RESULT, vec![self.full_message(chat_id)])
     }
 
-    /// Structural rules that need only the payload and the event timestamp `ts`: forward
-    /// content, the text and metadata limits, the `replyTo` metadata, and `created_at`, `last_modified_at` (including a
+    /// Structural rules that need only the payload and the event timestamp `ts`: the body
+    /// (forward content, reaction, mimetype), the identity of a reaction (§7.6), the text and
+    /// metadata limits, the `replyTo` metadata, and `created_at`, `last_modified_at` (including a
     /// scheduled-deletion time) at most `ts + MAX_SCHEDULE` (§7.2).
     ///
     /// The bound is computed in 128 bits, so it is exact for every `ts`: a date is refused
@@ -340,6 +532,11 @@ impl Payload {
             }
             Payload::Content(c) => {
                 c.body.check()?;
+                if let Body::Reaction(r) = &c.body
+                    && r.sync_obj_id(&c.author) != c.sync_obj_id
+                {
+                    return Err(Error::IdMismatch("reaction syncObjId"));
+                }
                 let metadata_len = wire::metadata_len(&c.metadata);
                 if metadata_len > MAX_METADATA_BYTES {
                     return Err(Error::TooMany {
@@ -397,8 +594,13 @@ impl Payload {
                 content_type: MessageType::from_wire(f.content_type)?,
                 content: f.content,
             },
-            (MessageType::Reaction, Some(proto::Body::Content(b))) => Body::Reaction(b),
-            (MessageType::Media, Some(proto::Body::Content(b))) => Body::Media(b),
+            (MessageType::Reaction, Some(proto::Body::Reaction(r))) => {
+                Body::Reaction(Reaction::from_proto(r)?)
+            }
+            (MessageType::Media, Some(proto::Body::Media(m))) => Body::Media(Media {
+                mimetype: m.mimetype,
+                data: m.data,
+            }),
             (_, None) => return Err(Error::Missing("body")),
             _ => return Err(Error::NotAllowed("body for this message type")),
         };
@@ -440,7 +642,8 @@ impl Payload {
                         content_type: *content_type as i32,
                         content: content.clone(),
                     }),
-                    Body::Reaction(b) | Body::Media(b) => proto::Body::Content(b.clone()),
+                    Body::Reaction(r) => proto::Body::Reaction(r.to_proto()),
+                    Body::Media(m) => proto::Body::Media(m.to_proto()),
                 }),
                 metadata: c.metadata.clone(),
             },

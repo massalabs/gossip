@@ -25,6 +25,8 @@ pub const DOMAIN_SECRET_PROOF: &str = "gossip.groups.message.secret_proof.1";
 pub const DOMAIN_RESULT: &str = "gossip.groups.message.result.1";
 /// Sync-object ID of a registered name (§3).
 pub const DOMAIN_SYNC_OBJ_NAME: &str = "gossip.groups.sync_obj_name.1";
+/// Sync-object ID of a reaction (§7.6).
+pub const DOMAIN_REACTION: &str = "gossip.groups.reaction.1";
 
 // ── ML-DSA-65 signing contexts (Appendix A) ─────────────────────────────────
 
@@ -87,6 +89,10 @@ pub const MAX_TEXT_BYTES: usize = 16_384;
 pub const MAX_METADATA_BYTES: usize = 16_384;
 /// Metadata key that carries reply targets (§7.6, Appendix C).
 pub const METADATA_KEY_REPLY_TO: &str = "replyTo";
+/// Maximum size of the emoji of a reaction, in encoded UTF-8 bytes; at least one byte (§7.6).
+pub const MAX_EMOJI_BYTES: usize = 64;
+/// Maximum size of the mimetype of a media message, `type/subtype`, in bytes (§7.6).
+pub const MAX_MIMETYPE_BYTES: usize = 127;
 
 /// Maximum size of a group plaintext: version prefix, all frames and events (§13.10).
 ///

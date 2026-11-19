@@ -32,8 +32,9 @@ use groups::store::{Role, StoredResult};
 use groups::wire::{Entry, EntryItem, QueryOp, SignedKind, Status};
 use groups::{
     Body, Challenge, ChatId, Content, Dissolve, DissolveId, EventId, GossipId, GroupSecret,
-    GroupState, Kick, KickId, Leave, LeaveId, LocalEdit, Merge, MessageType, MetadataPatch,
-    ParentCommitment, Payload, RefChatId, RequestId, Root, RootType, ScanId, SyncObjId,
+    GroupState, Kick, KickId, Leave, LeaveId, LocalEdit, Media, Merge, MessageType, MetadataPatch,
+    ParentCommitment, Payload, Reaction, ReactionAction, RefChatId, RequestId, Root, RootType,
+    ScanId, SyncObjId,
 };
 
 use groups::ReplyTarget;
@@ -599,6 +600,13 @@ variants!(MessageType {
 variants!(Body {
     Text(text), Forward { content_type, content }, Reaction(reaction), Media(media)
 });
+variants!(ReactionAction { Add, Remove });
+record!(Reaction {
+    target,
+    emoji,
+    action
+});
+record!(Media { mimetype, data });
 record!(Content {
     sync_obj_id,
     author,

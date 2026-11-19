@@ -56,8 +56,8 @@ pub use epoch::{
 };
 pub use error::{Error, Result};
 pub use event::{
-    Body, Content, MessageEvent, MessageType, Payload, ReplyTarget, decode_reply_to,
-    encode_reply_to,
+    Body, Content, Media, MessageEvent, MessageType, Payload, Reaction, ReactionAction,
+    ReplyTarget, check_mimetype, decode_reply_to, encode_reply_to,
 };
 pub use ids::{
     Challenge, ChatId, DissolveId, EventId, GossipId, GroupSecret, KickId, LeaveId,

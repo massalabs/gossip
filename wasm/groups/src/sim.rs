@@ -603,8 +603,18 @@ impl Sim {
     fn body_and_metadata(&mut self) -> (Body, BTreeMap<String, Vec<u8>>) {
         let n = self.rng.next_u64() % 4;
         let body = match below(&mut self.rng, 10) {
-            0 => Body::Reaction(vec![0xf0, n as u8]),
-            1 => Body::Media(vec![n as u8; 3]),
+            0 => Body::Forward {
+                content_type: MessageType::Media,
+                content: crate::Media {
+                    mimetype: "image/png".into(),
+                    data: vec![n as u8; 3],
+                }
+                .encode(),
+            },
+            1 => Body::Media(crate::Media {
+                mimetype: "image/png".into(),
+                data: vec![n as u8; 3],
+            }),
             2 => Body::Forward {
                 content_type: MessageType::Text,
                 content: format!("f{n}").into_bytes(),
