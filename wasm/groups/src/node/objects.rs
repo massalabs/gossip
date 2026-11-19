@@ -992,12 +992,15 @@ impl Node {
 
     /// When `peer` is the former owner of a held handover root that `chat` leads to, the
     /// roots to send it, ending with that handover root (§5.6): `chat` is the handover's
-    /// parent, or an earlier epoch from which a line of epochs `peer` is a member of leads to
-    /// it (the roots between come first, D.62); or `chat` is the handover root itself, which
-    /// does not list `peer`. The latest such handover when there are several. `None` for any
-    /// other peer: only an owner a handover deposed here is looked for.
+    /// parent; or, for a removed peer of `chat`, an earlier epoch from which a line of epochs
+    /// `peer` is a member of leads to it (the roots between come first, D.62); or `chat` is
+    /// the handover root itself, which does not list `peer`. A former owner still a member
+    /// that acts in an earlier epoch is not answered: it edits its messages there (§10.4),
+    /// and its recovery takes it past them. The latest such handover when there are several.
+    /// `None` for any other peer: only an owner a handover deposed here is looked for.
     pub(crate) fn handover_owed(&self, chat: &ChatId, peer: &GossipId) -> Option<Vec<ChatId>> {
         let group = self.group_of(chat);
+        let removed = self.removed_peer(chat, peer);
         if *peer == self.me
             || !self
                 .t
@@ -1025,8 +1028,10 @@ impl Node {
                         return None;
                     }
                     vec![*h]
-                } else {
+                } else if removed || r.parents.first() == Some(chat) {
                     self.line_between(chat, h, peer)
+                } else {
+                    return None;
                 };
                 (!chain.is_empty()).then_some(((r.root.created_at(), *h), chain))
             })
