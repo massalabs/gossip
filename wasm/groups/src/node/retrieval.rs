@@ -517,7 +517,12 @@ impl Node {
             } else {
                 self.tix.load.clone()
             };
-            if past_deadline(&key, self.t.tasks.get(&key).expect("ready"), cx.now) {
+            let Some(task) = self.t.tasks.get(&key) else {
+                // An index entry left by a task removed elsewhere: brought up to date.
+                self.reindex(key);
+                continue;
+            };
+            if past_deadline(&key, task, cx.now) {
                 // Removed by the next timer pass; not ranked meanwhile.
                 self.tix.block(
                     key,
@@ -530,8 +535,9 @@ impl Node {
             }
             match self.select(cx, &key, &load) {
                 Selection::Peer(peer) => {
-                    let task = self.t.tasks.get_mut(&key).expect("ready");
-                    if let Run::Active { attempt, .. } = &mut task.run {
+                    if let Some(task) = self.t.tasks.get_mut(&key)
+                        && let Run::Active { attempt, .. } = &mut task.run
+                    {
                         *attempt = Some(Attempt::Queued { peer });
                     }
                     self.reindex(key);
@@ -641,7 +647,9 @@ impl Node {
         key: &TaskKey,
         load: &BTreeMap<GossipId, usize>,
     ) -> Selection {
-        let task = self.t.tasks.get(key).expect("listed");
+        let Some(task) = self.t.tasks.get(key) else {
+            return Selection::Exhausted;
+        };
         let mut ranked: Vec<(Rank, GossipId, bool)> = Vec::new();
         let mut until = u64::MAX;
         // Responsive candidates that cannot be asked now: outstanding or at their limit.
@@ -791,13 +799,15 @@ impl Node {
             if local_deadline > cx.now {
                 break;
             }
-            let task = self.t.tasks.get(&key).expect("indexed");
-            let Run::Active {
+            // A timer belongs to a sent attempt; one left by a task changed elsewhere is
+            // brought up to date rather than trusted.
+            let Some(Run::Active {
                 attempt: Some(Attempt::Sent { peer, sent_at, .. }),
                 ..
-            } = task.run
+            }) = self.t.tasks.get(&key).map(|t| t.run)
             else {
-                unreachable!("a timer belongs to a sent attempt");
+                self.reindex(key);
+                continue;
             };
             self.stats.timeouts += 1;
             self.note_query_timeout(&peer, sent_at, cx.now);
@@ -812,7 +822,9 @@ impl Node {
         let keys: Vec<TaskKey> = self.t.tasks.keys().copied().collect();
         for key in keys {
             let eligible = self.task_candidate_ok(&key, &peer);
-            let task = self.t.tasks.get(&key).expect("listed").clone();
+            let Some(task) = self.t.tasks.get(&key).cloned() else {
+                continue;
+            };
             match task.run {
                 Run::Active {
                     attempt: Some(Attempt::Sent { peer: p, .. }),
@@ -833,10 +845,9 @@ impl Node {
                         .candidates
                         .get(&peer)
                         .is_none_or(|c| c.state == CandidateState::Untried);
-                    if untried {
-                        let t = self.t.tasks.get_mut(&key).expect("listed");
+                    if untried && let Some(t) = self.t.tasks.get_mut(&key) {
                         t.run = fresh_run(cx.rng);
-                        t.runs += 1;
+                        t.runs = t.runs.saturating_add(1);
                         self.stats.tasks_renewed += 1;
                     }
                 }
