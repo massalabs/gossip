@@ -1,0 +1,695 @@
+//! The message state of one epoch: receiving events (§6.3, §9.5, §9.6), merging results
+//! (§7.1), scheduled versions and deletions (§7.3, §7.4), retention and eviction (§8), and
+//! the handling of known IDs (§9.5) and temporarily invalid events (§9.6).
+//!
+//! Every operation takes the local clock `now` (and, when it creates something, a
+//! [`Randomness`](crate::Randomness)) as an argument, first applies what is due at `now`
+//! (activations, then retention pruning), and commits all its writes in one
+//! [`Changes`](crate::store::Changes) (§15.2).
+
+#[cfg(test)]
+pub(crate) mod tests;
+
+use crate::dag;
+use crate::error::Error;
+use crate::event::{MessageEvent, Payload};
+use crate::ids::{ChatId, EventId, GossipId, SyncObjId};
+use crate::root::Root;
+use crate::store::tx::Tx;
+use crate::store::{
+    EventRow, ObjectRecord, PendingKind, Role, RowState, Storage, StorageError, StorageRead,
+    StoredResult, in_window, window_end,
+};
+use crate::wire::{self, EventObject};
+
+/// The longest wait of a scheduled-deletion timer (§7.4, Appendix B): 2 hours.
+pub const MAX_TIMER_WAIT_MS: u64 = 2 * 60 * 60 * 1000;
+
+/// The state of the group an epoch belongs to, as far as incoming events are concerned
+/// (§10.4 "Groups in a special state").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupState {
+    /// Normal.
+    Active,
+    /// A read-only archive after a kick (§5.6): deletion events are applied, every other
+    /// event is dropped.
+    ReadOnlyAfterKick,
+    /// Waiting for a kick (§5.4): every event is dropped.
+    Waiting,
+    /// Dissolved (§5.8): every event is dropped.
+    Dissolved,
+}
+
+/// Who handed the event to this device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sender {
+    /// This device created it (§9).
+    Local,
+    /// The immediate, authenticated Agraphon peer.
+    Peer {
+        /// Its GossipID.
+        id: GossipId,
+        /// Whether it is a removed peer for this epoch (§10.4), as computed by the caller from
+        /// the device's current epoch.
+        removed: bool,
+    },
+}
+
+/// Why a received message event was dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rejection {
+    /// The epoch is installed but not accepted (§4.8, §6.3).
+    NotAccepted,
+    /// The immediate peer is not a member of the epoch (§6.2, §6.3).
+    PeerNotMember,
+    /// The immediate peer is a removed peer for the epoch (§10.4).
+    RemovedPeer,
+    /// The group's state drops this event (§10.4).
+    GroupState,
+    /// The blob holds a root or a signed object, not a message event.
+    NotAMessageEvent,
+    /// The event is invalid: encoding, parents, payload, secret proof, claimed author or an
+    /// unrepresentable time (§6.1, §6.2, §4.2, §7.2, §1.1).
+    Invalid(Error),
+}
+
+/// What merging an event under a new ID did (§7.1, §7.3, §7.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Merge {
+    /// It replaced the current result (or created it, or deleted the message); the
+    /// superseded events were pruned.
+    Won,
+    /// It lost and was pruned: an older version, content after a deletion, or a later
+    /// scheduled deletion.
+    Lost,
+    /// It carries the current result and stays available beside the other carriers.
+    Identical,
+    /// It is kept as a pending future version or as the pending scheduled deletion.
+    Pending,
+}
+
+/// The outcome of receiving a message event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// Dropped; nothing about the event was stored.
+    Rejected(Rejection),
+    /// Its timestamp is beyond `now + 5 min`: the content was dropped and a
+    /// temporary-rejection marker kept (§7.2, §9.6).
+    TemporarilyInvalid,
+    /// The ID is already retained: its first valid interpretation is kept and the arrival is
+    /// ignored (§7.1).
+    Duplicate,
+    /// The ID was processed and pruned; the payload equals the current result and its window
+    /// is open, so it is available again. It was not reapplied and is not announced (§9.5).
+    Restored,
+    /// The ID was processed and pruned and stays so (§9.5).
+    KeptPruned,
+    /// Accepted under a new ID and merged.
+    Accepted(Merge),
+}
+
+/// One epoch, as the engine sees it: its root, whether it was accepted, and the state of its
+/// group. Installation, adoption and group states are decided elsewhere.
+#[derive(Debug, Clone, Copy)]
+pub struct Epoch<'a> {
+    root: &'a Root,
+    accepted: bool,
+    group_state: GroupState,
+}
+
+impl<'a> Epoch<'a> {
+    /// The epoch founded by `root`.
+    #[must_use]
+    pub fn new(root: &'a Root, accepted: bool, group_state: GroupState) -> Self {
+        Self {
+            root,
+            accepted,
+            group_state,
+        }
+    }
+
+    /// The epoch's `chat_id`.
+    #[must_use]
+    pub fn chat_id(&self) -> ChatId {
+        self.root.chat_id()
+    }
+
+    /// The root.
+    #[must_use]
+    pub fn root(&self) -> &'a Root {
+        self.root
+    }
+
+    /// The acceptance checks of §6.3 that do not depend on local state, in the order listed
+    /// there.
+    fn gate(&self, sender: Sender, event: &MessageEvent) -> Option<Rejection> {
+        if !self.accepted {
+            return Some(Rejection::NotAccepted);
+        }
+        if let Sender::Peer { id, removed } = sender {
+            if !self.root.is_member(&id) {
+                return Some(Rejection::PeerNotMember);
+            }
+            if removed {
+                return Some(Rejection::RemovedPeer);
+            }
+        }
+        let is_delete = matches!(event.payload(), Payload::Delete { .. });
+        match self.group_state {
+            GroupState::Active => {}
+            GroupState::ReadOnlyAfterKick if is_delete => {}
+            GroupState::ReadOnlyAfterKick | GroupState::Waiting | GroupState::Dissolved => {
+                return Some(Rejection::GroupState);
+            }
+        }
+        if let Err(e) = event.check_against_root(self.root) {
+            return Some(Rejection::Invalid(e));
+        }
+        if window_end(&event.event_id()).is_none() {
+            return Some(Rejection::Invalid(Error::Overflow(
+                "event timestamp + RETENTION",
+            )));
+        }
+        None
+    }
+
+    /// Receives a message event from `sender` at local time `now` (§6.3, §7, §9.5, §9.6).
+    ///
+    /// # Errors
+    ///
+    /// A storage failure; nothing was committed then.
+    pub fn receive<S: Storage + ?Sized>(
+        &self,
+        store: &mut S,
+        sender: Sender,
+        event: MessageEvent,
+        now: u64,
+    ) -> Result<Outcome, StorageError> {
+        if let Some(rejection) = self.gate(sender, &event) {
+            return Ok(Outcome::Rejected(rejection));
+        }
+        let mut tx = Tx::new(&*store, self.chat_id());
+        tick(&mut tx, now)?;
+        let outcome = receive_in(&mut tx, event, now)?;
+        // An event received after its window is merged, then pruned at once (§8.1).
+        expire(&mut tx, now)?;
+        let changes = tx.into_changes();
+        store.commit(changes)?;
+        Ok(outcome)
+    }
+
+    /// Decodes an event blob carried in a plaintext of version `plaintext_version` (§13.1)
+    /// and receives it. A malformed blob, or a root or signed object, is rejected.
+    ///
+    /// # Errors
+    ///
+    /// A storage failure.
+    pub fn receive_blob<S: Storage + ?Sized>(
+        &self,
+        store: &mut S,
+        sender: Sender,
+        blob: &[u8],
+        plaintext_version: u64,
+        now: u64,
+    ) -> Result<Outcome, StorageError> {
+        match wire::decode_event_blob(blob, plaintext_version) {
+            Ok(EventObject::Message(event)) => self.receive(store, sender, event, now),
+            Ok(_) => Ok(Outcome::Rejected(Rejection::NotAMessageEvent)),
+            Err(e) => Ok(Outcome::Rejected(Rejection::Invalid(e))),
+        }
+    }
+
+    /// Applies everything due at `now`: pending versions and deletions, in `(due, eventId)`
+    /// order (§7.3, §7.4), then retention pruning (§8.1). Callers run it on startup and resume,
+    /// from timers ([`Epoch::next_wakeup`]) and before reading the view; every other operation
+    /// runs it first.
+    ///
+    /// # Errors
+    ///
+    /// A storage failure; nothing was committed then.
+    pub fn tick<S: Storage + ?Sized>(&self, store: &mut S, now: u64) -> Result<(), StorageError> {
+        let mut tx = Tx::new(&*store, self.chat_id());
+        tick(&mut tx, now)?;
+        let changes = tx.into_changes();
+        store.commit(changes)
+    }
+
+    /// When the shared apply path should next run: the earliest pending due time, with the
+    /// wait clamped to 2 hours (§7.4). `None` when nothing is pending.
+    ///
+    /// # Errors
+    ///
+    /// A storage failure.
+    pub fn next_wakeup<R: StorageRead + ?Sized>(
+        &self,
+        store: &R,
+        now: u64,
+    ) -> Result<Option<u64>, StorageError> {
+        let first = store
+            .pending_until(&self.chat_id(), u64::MAX)?
+            .first()
+            .map(|i| i.due);
+        Ok(first.map(|due| match now.checked_add(MAX_TIMER_WAIT_MS) {
+            Some(limit) => due.min(limit),
+            None => due,
+        }))
+    }
+
+    /// The tips at `now` (§12.1), which are also the eligible parents (§6.1). Call
+    /// [`Epoch::tick`] first so that expired events are pruned.
+    ///
+    /// # Errors
+    ///
+    /// A storage failure.
+    pub fn tips<R: StorageRead + ?Sized>(
+        &self,
+        store: &R,
+        now: u64,
+    ) -> Result<Vec<EventId>, StorageError> {
+        dag::tips(store, &self.chat_id(), now)
+    }
+
+    /// The event to serve under `event_id` at `now`, under its own version (§13.1): only an
+    /// available event. A pending version past its window is retained but not served (§8.1).
+    ///
+    /// # Errors
+    ///
+    /// A storage failure.
+    pub fn serve<R: StorageRead + ?Sized>(
+        &self,
+        store: &R,
+        event_id: &EventId,
+        now: u64,
+    ) -> Result<Option<MessageEvent>, StorageError> {
+        Ok(store
+            .event_row(&self.chat_id(), event_id)?
+            .filter(|r| r.available(now))
+            .and_then(|r| r.event().cloned()))
+    }
+
+    /// Capacity eviction (§8.2): prunes up to `max` available events, oldest event timestamp
+    /// first, deletion events included. Pending scheduled events are exempt; current results,
+    /// tombstones, stubs and parent links are kept. Returns the evicted IDs.
+    ///
+    /// # Errors
+    ///
+    /// A storage failure; nothing was committed then.
+    pub fn evict<S: Storage + ?Sized>(
+        &self,
+        store: &mut S,
+        now: u64,
+        max: usize,
+    ) -> Result<Vec<EventId>, StorageError> {
+        let mut tx = Tx::new(&*store, self.chat_id());
+        tick(&mut tx, now)?;
+        let chat = tx.chat_id();
+        let victims: Vec<(EventId, SyncObjId)> = tx
+            .event_rows(&chat)?
+            .into_iter()
+            .filter(|r| r.available(now) && r.role() == Some(Role::Current))
+            .filter_map(|r| r.event().map(|e| (r.event_id, e.payload().sync_obj_id())))
+            .take(max)
+            .collect();
+        for (id, sync) in &victims {
+            prune_carrier(&mut tx, *id, *sync)?;
+        }
+        let changes = tx.into_changes();
+        store.commit(changes)?;
+        Ok(victims.into_iter().map(|(id, _)| id).collect())
+    }
+}
+
+// ── The shared apply path, on a staged transaction ──────────────────────────
+
+/// Activations, then retention pruning.
+pub(crate) fn tick<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    now: u64,
+) -> Result<(), StorageError> {
+    activate_due(tx, now)?;
+    expire(tx, now)
+}
+
+fn activate_due<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, now: u64) -> Result<(), StorageError> {
+    let chat = tx.chat_id();
+    for item in tx.pending_until(&chat, now)? {
+        let Some(mut obj) = tx.object(&item.sync_obj_id)? else {
+            continue;
+        };
+        let Some(event) = tx.row(&item.event_id)?.and_then(|r| r.event().cloned()) else {
+            continue;
+        };
+        match item.kind {
+            PendingKind::Version => {
+                // Skipped if an earlier item of this pass already pruned it.
+                if !obj.pending_versions.remove(&(item.due, item.event_id)) {
+                    continue;
+                }
+                merge_effective(tx, &mut obj, event)?;
+            }
+            PendingKind::Deletion => {
+                if obj.pending_deletion != Some((item.due, item.event_id)) {
+                    continue;
+                }
+                obj.pending_deletion = None;
+                absorb(tx, &mut obj, event)?;
+            }
+        }
+        tx.put_object(obj);
+    }
+    Ok(())
+}
+
+/// Prunes every event that carries a current result and whose window has closed (§8.1).
+/// Pending versions past their window stay, unserved, until they activate.
+pub(crate) fn expire<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    now: u64,
+) -> Result<(), StorageError> {
+    let chat = tx.chat_id();
+    let expired: Vec<(EventId, SyncObjId)> = tx
+        .event_rows(&chat)?
+        .into_iter()
+        .filter(|r| r.role() == Some(Role::Current) && !in_window(&r.event_id, now))
+        .filter_map(|r| r.event().map(|e| (r.event_id, e.payload().sync_obj_id())))
+        .collect();
+    for (id, sync) in expired {
+        prune_carrier(tx, id, sync)?;
+    }
+    Ok(())
+}
+
+/// Prunes a carrier of the current result and removes it from its object.
+fn prune_carrier<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    id: EventId,
+    sync: SyncObjId,
+) -> Result<(), StorageError> {
+    prune(tx, id);
+    if let Some(mut obj) = tx.object(&sync)? {
+        obj.current_events.remove(&id);
+        tx.put_object(obj);
+    }
+    Ok(())
+}
+
+/// Receives an event that passed the gate, after the tick.
+pub(crate) fn receive_in<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    event: MessageEvent,
+    now: u64,
+) -> Result<Outcome, StorageError> {
+    let row = tx.row(&event.event_id())?;
+    match row.map(|r| r.state) {
+        Some(RowState::Held { .. }) => Ok(Outcome::Duplicate),
+        Some(RowState::Pruned) => restore(tx, event, now),
+        Some(RowState::TemporarilyInvalid) | None => match event.timestamp_admitted(now) {
+            Ok(true) => Ok(Outcome::Accepted(apply_new(tx, event, now)?)),
+            Ok(false) => {
+                tx.put_row(EventRow {
+                    event_id: event.event_id(),
+                    state: RowState::TemporarilyInvalid,
+                });
+                Ok(Outcome::TemporarilyInvalid)
+            }
+            Err(e) => Ok(Outcome::Rejected(Rejection::Invalid(e))),
+        },
+    }
+}
+
+/// §9.5 for a processed, pruned ID.
+fn restore<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    event: MessageEvent,
+    now: u64,
+) -> Result<Outcome, StorageError> {
+    let chat = tx.chat_id();
+    let sync = event.payload().sync_obj_id();
+    let Some(mut obj) = tx.object(&sync)? else {
+        return Ok(Outcome::KeptPruned);
+    };
+    let identical = obj
+        .current
+        .as_ref()
+        .is_some_and(|cur| cur.result_hash(&chat, sync) == event.result_hash());
+    if !identical || !in_window(&event.event_id(), now) {
+        return Ok(Outcome::KeptPruned);
+    }
+    obj.current_events.insert(event.event_id());
+    hold(tx, immediate_form(&event), Role::Current);
+    tx.put_object(obj);
+    Ok(Outcome::Restored)
+}
+
+/// Merges an admitted event under a new ID (§7.1, §7.3, §7.4). Its parent links are kept
+/// whatever the result.
+pub(crate) fn apply_new<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    event: MessageEvent,
+    now: u64,
+) -> Result<Merge, StorageError> {
+    let id = event.event_id();
+    tx.put_edges(id, event.parents().to_vec());
+    let sync = event.payload().sync_obj_id();
+    let mut obj = tx
+        .object(&sync)?
+        .unwrap_or_else(|| ObjectRecord::empty(sync));
+    let merge = match event.payload().clone() {
+        Payload::Content(c) => {
+            if obj.is_deleted() {
+                prune(tx, id);
+                Merge::Lost
+            } else if c.last_modified_at > now {
+                obj.pending_versions.insert((c.last_modified_at, id));
+                hold(
+                    tx,
+                    event,
+                    Role::PendingVersion {
+                        due: c.last_modified_at,
+                    },
+                );
+                Merge::Pending
+            } else {
+                merge_effective(tx, &mut obj, event)?
+            }
+        }
+        Payload::Delete {
+            scheduled_at: Some(due),
+            ..
+        } if due > now && !obj.is_deleted() => match obj.pending_deletion {
+            // Only the earliest pending deletion is kept; ties go to the smaller event ID.
+            Some(kept) if kept < (due, id) => {
+                prune(tx, id);
+                Merge::Lost
+            }
+            replaced => {
+                if let Some((_, old)) = replaced {
+                    prune(tx, old);
+                }
+                obj.pending_deletion = Some((due, id));
+                hold(tx, event, Role::PendingDeletion { due });
+                Merge::Pending
+            }
+        },
+        Payload::Delete { .. } => absorb(tx, &mut obj, event)?,
+    };
+    tx.put_object(obj);
+    Ok(merge)
+}
+
+/// Merges an effective non-delete result into the object (§7.1).
+fn merge_effective<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    obj: &mut ObjectRecord,
+    event: MessageEvent,
+) -> Result<Merge, StorageError> {
+    let chat = tx.chat_id();
+    let id = event.event_id();
+    let Payload::Content(incoming) = event.payload().clone() else {
+        unreachable!("only non-delete results are merged here");
+    };
+    let merge = match &obj.current {
+        Some(StoredResult::Tombstone) => {
+            prune(tx, id);
+            return Ok(Merge::Lost);
+        }
+        None => Merge::Won,
+        Some(cur @ StoredResult::Content(c)) => {
+            let current_key = (c.last_modified_at, cur.result_hash(&chat, obj.sync_obj_id));
+            let incoming_key = (incoming.last_modified_at, event.result_hash());
+            match incoming_key.cmp(&current_key) {
+                core::cmp::Ordering::Greater => Merge::Won,
+                core::cmp::Ordering::Less => {
+                    prune(tx, id);
+                    return Ok(Merge::Lost);
+                }
+                core::cmp::Ordering::Equal => Merge::Identical,
+            }
+        }
+    };
+    if merge == Merge::Won {
+        for old in core::mem::take(&mut obj.current_events) {
+            prune(tx, old);
+        }
+        obj.current = Some(StoredResult::Content(incoming));
+    }
+    obj.current_events.insert(id);
+    hold(tx, event, Role::Current);
+    Ok(merge)
+}
+
+/// Applies a deletion: the tombstone absorbs the message, every content event of it is
+/// pruned, and pending deletion work is cleared (§7.1, §7.4): a pending scheduled deletion is
+/// applied with it. Deletion events are stored in their immediate form.
+pub(crate) fn absorb<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    obj: &mut ObjectRecord,
+    carrier: MessageEvent,
+) -> Result<Merge, StorageError> {
+    let was_deleted = obj.is_deleted();
+    if !was_deleted {
+        for old in core::mem::take(&mut obj.current_events) {
+            prune(tx, old);
+        }
+        for (_, old) in core::mem::take(&mut obj.pending_versions) {
+            prune(tx, old);
+        }
+        obj.current = Some(StoredResult::Tombstone);
+    }
+    if let Some((_, pending)) = obj.pending_deletion.take()
+        && let Some(event) = tx.row(&pending)?.and_then(|r| r.event().cloned())
+    {
+        obj.current_events.insert(pending);
+        hold(tx, immediate_form(&event), Role::Current);
+    }
+    obj.current_events.insert(carrier.event_id());
+    hold(tx, immediate_form(&carrier), Role::Current);
+    Ok(if was_deleted {
+        Merge::Identical
+    } else {
+        Merge::Won
+    })
+}
+
+/// The form stored and served once a deletion is applied: without `last_modified_at`, same
+/// ID, parents and version (§7.4, §13.1). Any other event is returned unchanged.
+pub(crate) fn immediate_form(event: &MessageEvent) -> MessageEvent {
+    if !matches!(
+        event.payload(),
+        Payload::Delete {
+            scheduled_at: Some(_),
+            ..
+        }
+    ) {
+        return event.clone();
+    }
+    let mut p = event.to_proto();
+    if let Some(payload) = p.payload.as_mut() {
+        payload.last_modified_at = None;
+    }
+    MessageEvent::from_proto(event.version(), p)
+        .expect("removing an optional date keeps a valid event valid")
+}
+
+pub(crate) fn hold<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, event: MessageEvent, role: Role) {
+    tx.put_row(EventRow {
+        event_id: event.event_id(),
+        state: RowState::Held { event, role },
+    });
+}
+
+/// Removes content access: only the ID stub and its parent links remain (§9.3).
+pub(crate) fn prune<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, id: EventId) {
+    tx.put_row(EventRow {
+        event_id: id,
+        state: RowState::Pruned,
+    });
+}
+
+/// Checks that the stored records of an epoch are consistent with each other. Test helper.
+#[cfg(test)]
+pub(crate) fn check_invariants<R: StorageRead + ?Sized>(
+    store: &R,
+    chat: &ChatId,
+    now: u64,
+) -> Result<(), String> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let rows: BTreeMap<EventId, EventRow> = store
+        .event_rows(chat)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|r| (r.event_id, r))
+        .collect();
+    let edges: BTreeSet<EventId> = store
+        .edges(chat)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(c, _)| c)
+        .collect();
+    let mut claimed: BTreeSet<EventId> = BTreeSet::new();
+    for obj in store.objects(chat).map_err(|e| e.to_string())? {
+        let s = obj.sync_obj_id;
+        let mut claim = |id: EventId| {
+            if !claimed.insert(id) {
+                return Err(format!("{id:?} claimed twice"));
+            }
+            Ok(())
+        };
+        for id in &obj.current_events {
+            claim(*id)?;
+            let row = rows.get(id).ok_or(format!("carrier {id:?} has no row"))?;
+            if row.role() != Some(Role::Current) {
+                return Err(format!("carrier {id:?} is {:?}", row.state));
+            }
+            let event = row.event().expect("held");
+            let cur = obj.current.as_ref().ok_or("carriers without a result")?;
+            if event.result_hash() != cur.result_hash(chat, s) {
+                return Err(format!("carrier {id:?} does not carry the current result"));
+            }
+            if matches!(
+                event.payload(),
+                Payload::Delete {
+                    scheduled_at: Some(_),
+                    ..
+                }
+            ) {
+                return Err(format!("carrier {id:?} kept its deletion date"));
+            }
+            if !in_window(id, now) {
+                return Err(format!("carrier {id:?} is past its window"));
+            }
+        }
+        if obj.is_deleted() && (!obj.pending_versions.is_empty() || obj.pending_deletion.is_some())
+        {
+            return Err(format!("{s:?} is deleted but has pending work"));
+        }
+        for (due, id) in &obj.pending_versions {
+            claim(*id)?;
+            let row = rows.get(id).ok_or("pending version without row")?;
+            if row.role() != Some(Role::PendingVersion { due: *due }) || *due <= now {
+                return Err(format!("pending version {id:?} inconsistent at {now}"));
+            }
+        }
+        if let Some((due, id)) = obj.pending_deletion {
+            claim(id)?;
+            let row = rows.get(&id).ok_or("pending deletion without row")?;
+            if row.role() != Some(Role::PendingDeletion { due }) || due <= now {
+                return Err(format!("pending deletion {id:?} inconsistent at {now}"));
+            }
+        }
+    }
+    for (id, row) in &rows {
+        if matches!(row.state, RowState::Held { .. }) && !claimed.contains(id) {
+            return Err(format!("held row {id:?} belongs to no object"));
+        }
+        if row.processed() != edges.contains(id) {
+            return Err(format!("{id:?}: processed and edges disagree"));
+        }
+        if let Some(e) = row.event()
+            && e.event_id() != *id
+        {
+            return Err(format!("{id:?} holds another event"));
+        }
+    }
+    Ok(())
+}
