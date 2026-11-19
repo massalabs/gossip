@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use crate::cbor::Value;
 use crate::constants::{
     DOMAIN_RESULT, EVENT_TIMESTAMP_TOLERANCE_MS, EVENT_VERSION, MAX_EVENT_PARENTS,
-    MAX_REPLY_TARGETS, MAX_SCHEDULE_MS, METADATA_KEY_REPLY_TO,
+    MAX_METADATA_BYTES, MAX_REPLY_TARGETS, MAX_SCHEDULE_MS, MAX_TEXT_BYTES, METADATA_KEY_REPLY_TO,
 };
 use crate::error::{Error, Result};
 use crate::hash::{h, secret_proof};
@@ -97,23 +97,33 @@ impl Body {
         }
     }
 
+    /// Forward content and the text limit ([`MAX_TEXT_BYTES`]).
     fn check(&self) -> Result<()> {
-        if let Body::Forward {
-            content_type,
-            content,
-        } = self
-        {
-            match content_type {
+        let text_len = match self {
+            Body::Text(t) => t.len(),
+            Body::Forward {
+                content_type,
+                content,
+            } => match content_type {
                 MessageType::Text => {
                     if core::str::from_utf8(content).is_err() {
                         return Err(Error::InvalidUtf8("forward content"));
                     }
+                    content.len()
                 }
-                MessageType::Reaction | MessageType::Media => {}
+                MessageType::Reaction | MessageType::Media => 0,
                 MessageType::Forward | MessageType::Delete => {
                     return Err(Error::NotAllowed("forward content_type"));
                 }
-            }
+            },
+            Body::Reaction(_) | Body::Media(_) => 0,
+        };
+        if text_len > MAX_TEXT_BYTES {
+            return Err(Error::TooMany {
+                field: "text",
+                max: MAX_TEXT_BYTES,
+                got: text_len,
+            });
         }
         Ok(())
     }
@@ -314,7 +324,7 @@ impl Payload {
     }
 
     /// Structural rules that need only the payload and the event timestamp `ts`: forward
-    /// content, the `replyTo` metadata, and `created_at`, `last_modified_at` (including a
+    /// content, the text and metadata limits, the `replyTo` metadata, and `created_at`, `last_modified_at` (including a
     /// scheduled-deletion time) at most `ts + MAX_SCHEDULE` (§7.2).
     ///
     /// The bound is computed in 128 bits, so it is exact for every `ts`: a date is refused
@@ -330,6 +340,14 @@ impl Payload {
             }
             Payload::Content(c) => {
                 c.body.check()?;
+                let metadata_len = wire::metadata_len(&c.metadata);
+                if metadata_len > MAX_METADATA_BYTES {
+                    return Err(Error::TooMany {
+                        field: "metadata",
+                        max: MAX_METADATA_BYTES,
+                        got: metadata_len,
+                    });
+                }
                 if let Some(value) = c.metadata.get(METADATA_KEY_REPLY_TO) {
                     decode_reply_to(value)?;
                 }

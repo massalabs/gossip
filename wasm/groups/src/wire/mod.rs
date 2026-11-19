@@ -33,6 +33,8 @@ pub use frames::{
     QueryEntry, QueryOp, Response, ResponseResult, SignedKind, Status,
 };
 
+use std::collections::BTreeMap;
+
 use crate::constants::{
     EVENT_VERSION, MAX_EVENT_BLOB_BYTES, MAX_PLAINTEXT_BYTES, PROTOCOL_VERSION, REQUEST_ID_SIZE,
 };
@@ -55,6 +57,19 @@ fn encode_varint(value: u64, out: &mut Vec<u8>) {
 /// Size of a length-delimited field whose key fits one byte (field numbers 1 to 15).
 fn len_field(inner: usize) -> usize {
     1 + varint_len(inner as u64) + inner
+}
+
+/// Size of message metadata as [`crate::constants::MAX_METADATA_BYTES`] counts it: the
+/// `metadata` field of `MessagePayload` (number 10) in its canonical encoding, computed from
+/// the decoded map, so the same on every device whatever encoding was received.
+#[must_use]
+pub fn metadata_len(metadata: &BTreeMap<String, Vec<u8>>) -> usize {
+    prost::encoding::btree_map::encoded_len(
+        prost::encoding::string::encoded_len,
+        prost::encoding::bytes::encoded_len,
+        proto::METADATA_FIELD,
+        metadata,
+    )
 }
 
 /// Size of an event blob whose `Event` holds one kind of `inner_len` encoded bytes.

@@ -67,6 +67,20 @@ pub const MAX_MEMBERS: usize = 512;
 pub const MAX_EVENT_PARENTS: usize = 16;
 /// Maximum number of reply targets of one message (§7.6).
 pub const MAX_REPLY_TARGETS: usize = 32;
+/// Maximum size of the text of a message version, in encoded UTF-8 bytes: the body of a
+/// `text` result, and the content of a `forward` whose `content_type` is `text` (§6.2).
+pub const MAX_TEXT_BYTES: usize = 16_384;
+/// Maximum size of the metadata of a message version (§6.2): the size of the `metadata` field
+/// (number 10 of `MessagePayload`) in its canonical protobuf encoding, computed from the
+/// decoded map. For each entry, in key order: the field key (1 byte), the varint length of
+/// the entry, then the key as field 1 and the value as field 2 (each 1 byte of field key, a
+/// varint length and the bytes), a field left out when its key or value is empty. Every
+/// device computes the same value from the decoded map, whatever encoding it received; see
+/// [`crate::wire::metadata_len`].
+///
+/// The framing is counted, so that many small entries cannot make the encoded metadata
+/// several times larger than the limit.
+pub const MAX_METADATA_BYTES: usize = 16_384;
 /// Metadata key that carries reply targets (§7.6, Appendix C).
 pub const METADATA_KEY_REPLY_TO: &str = "replyTo";
 

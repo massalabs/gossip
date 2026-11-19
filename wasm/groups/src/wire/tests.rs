@@ -954,6 +954,29 @@ fn oversized_event_blobs_are_refused() {
     assert_eq!(pt.len(), MAX_PLAINTEXT_BYTES);
 }
 
+#[test]
+fn metadata_len_is_the_encoded_metadata_field() {
+    let maps = [
+        BTreeMap::new(),
+        BTreeMap::from([(String::new(), vec![])]),
+        BTreeMap::from([("a".to_owned(), vec![])]),
+        BTreeMap::from([(String::new(), vec![1])]),
+        BTreeMap::from([
+            ("replyTo".to_owned(), vec![7; 2_048]),
+            ("\u{e9}t\u{e9}".to_owned(), vec![0; 300]),
+            ("z".to_owned(), vec![1; 20_000]),
+        ]),
+    ];
+    for metadata in maps {
+        let len = metadata_len(&metadata);
+        let p = proto::MessagePayload {
+            metadata,
+            ..Default::default()
+        };
+        assert_eq!(len, p.encoded_len());
+    }
+}
+
 // ── The largest objects ──────────────────────────────────────────────────────
 
 /// The size of `object` as an event blob, checked to fit one empty container in the largest

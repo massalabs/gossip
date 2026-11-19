@@ -196,6 +196,9 @@ pub struct MessagePayload {
     pub metadata: BTreeMap<String, Vec<u8>>,
 }
 
+/// The field number of `MessagePayload.metadata`, for [`super::metadata_len`].
+pub(crate) const METADATA_FIELD: u32 = 10;
+
 #[derive(Clone, PartialEq, ::prost::Oneof)]
 #[prost(skip_debug)]
 pub enum Body {
