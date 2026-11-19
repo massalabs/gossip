@@ -22,13 +22,18 @@ pub(crate) struct Blocked {
 enum Slot {
     /// Active without an attempt.
     Idle,
-    /// Active with an attempt to `peer`; `local` is its local deadline once sent.
-    Busy { peer: GossipId, local: Option<u64> },
+    /// Active with an attempt to `peer`; `local` is its local deadline once sent; `suspect`
+    /// when the task has no credible trigger.
+    Busy {
+        peer: GossipId,
+        local: Option<u64>,
+        suspect: bool,
+    },
     /// Paused.
     Paused,
 }
 
-fn slot_of(task: &Task) -> Slot {
+fn slot_of(task: &Task, prio: u64) -> Slot {
     match task.run {
         Run::Active { attempt: None, .. } => Slot::Idle,
         Run::Active {
@@ -39,8 +44,22 @@ fn slot_of(task: &Task) -> Slot {
                 Attempt::Sent { local_deadline, .. } => Some(local_deadline),
                 Attempt::Queued { .. } => None,
             },
+            suspect: prio < CREDIBLE,
         },
         Run::Paused => Slot::Paused,
+    }
+}
+
+/// The priority from which a task is credible: one of its untried triggering candidates
+/// scores at least as an unmeasured peer and was not asked in vain twice already.
+pub(crate) const CREDIBLE: u64 = 500_000;
+
+fn dec(map: &mut BTreeMap<GossipId, usize>, peer: &GossipId) {
+    if let Some(n) = map.get_mut(peer) {
+        *n -= 1;
+        if *n == 0 {
+            map.remove(peer);
+        }
     }
 }
 
@@ -61,6 +80,9 @@ pub(crate) struct TaskIndex {
     /// Attempts per peer, and in total.
     pub(crate) load: BTreeMap<GossipId, usize>,
     pub(crate) total: usize,
+    /// The same for the attempts of suspect tasks.
+    pub(crate) suspect_load: BTreeMap<GossipId, usize>,
+    pub(crate) suspect_total: usize,
     blocked: BTreeMap<TaskKey, Blocked>,
     by_peer: BTreeMap<GossipId, BTreeSet<TaskKey>>,
     until: BTreeSet<(u64, TaskKey)>,
@@ -99,24 +121,27 @@ impl TaskIndex {
     /// scheduling priority. An idle task becomes ready again: whatever changed may unblock
     /// it.
     pub(crate) fn update(&mut self, key: TaskKey, task: Option<&Task>, prio: u64) {
-        let new = task.map(slot_of);
+        let new = task.map(|t| slot_of(t, prio));
         let old = self.slot.remove(&key);
         self.unblock(&key);
         match old {
             Some(Slot::Idle) => {
                 self.unset_ready(&key);
             }
-            Some(Slot::Busy { peer, local }) => {
+            Some(Slot::Busy {
+                peer,
+                local,
+                suspect,
+            }) => {
                 if let Some(l) = local {
                     self.timers.remove(&(l, key));
                 }
-                if let Some(n) = self.load.get_mut(&peer) {
-                    *n -= 1;
-                    if *n == 0 {
-                        self.load.remove(&peer);
-                    }
-                }
+                dec(&mut self.load, &peer);
                 self.total -= 1;
+                if suspect {
+                    dec(&mut self.suspect_load, &peer);
+                    self.suspect_total -= 1;
+                }
             }
             Some(Slot::Paused) | None => {}
         }
@@ -138,9 +163,17 @@ impl TaskIndex {
         }
         match new {
             Slot::Idle => self.set_ready(key),
-            Slot::Busy { peer, local } => {
+            Slot::Busy {
+                peer,
+                local,
+                suspect,
+            } => {
                 *self.load.entry(peer).or_default() += 1;
                 self.total += 1;
+                if suspect {
+                    *self.suspect_load.entry(peer).or_default() += 1;
+                    self.suspect_total += 1;
+                }
                 if let Some(l) = local {
                     self.timers.insert((l, key));
                 }
