@@ -258,3 +258,45 @@ fn lookups_of_discredited_announcements_leave_room_for_credible_ones() {
         .collect();
     assert_eq!(to_real, vec![member(1)]);
 }
+
+/// Found by the network simulation (code at `9c0392a3`, seed 2008): after `busy`, the peer
+/// was skipped for one local wait of the current stage, up to a day once the TTL has grown,
+/// so the task went to a member that never answers for that long, although the busy member
+/// had room again a minute later.
+#[test]
+fn a_busy_peer_is_asked_again_a_minute_later_whatever_the_stage() {
+    let mut net = Net::new(5, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0 + 30 * DAY, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    // Stages time out until the announcer, member 1, is asked with a TTL over five hours.
+    let mut q = super::retrieval::sent_lookups(&mut net, 0);
+    for _ in 0..40 {
+        if q[0].to == member(1) && q[0].ttl > 5 * HOUR {
+            break;
+        }
+        net.now = q[0].sent_at + q[0].ttl * 106 / 100;
+        net.tick(0);
+        q = super::retrieval::sent_lookups(&mut net, 0);
+        while q.is_empty() {
+            net.now += MIN;
+            net.tick(0);
+            q = super::retrieval::sent_lookups(&mut net, 0);
+        }
+    }
+    assert!(q[0].to == member(1) && q[0].ttl > 5 * HOUR);
+    super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Status(Status::Busy));
+    let other = super::retrieval::sent_lookups(&mut net, 0);
+    assert_ne!(other[0].to, member(1));
+    super::retrieval::answer(
+        &mut net,
+        0,
+        &other[0],
+        ResponseResult::Status(Status::NotAvailable),
+    );
+    net.now += 2 * MIN;
+    net.tick(0);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(q.len(), 1);
+    assert_eq!(q[0].to, member(1));
+}
