@@ -16,6 +16,8 @@ export interface GroupLastMessage {
   author: string;
   text: string;
   at: number;
+  /** A media message, shown as a placeholder (its data is never read). */
+  media: boolean;
 }
 
 export interface GroupListEntry {
@@ -70,6 +72,7 @@ async function lastMessageOf(
       author: item.author,
       text: item.body.type === 'text' ? item.body.text : '',
       at: toDate(item.edited ? item.lastModifiedAt : item.createdAt).getTime(),
+      media: item.body.type === 'media',
     };
   }
   return null;
@@ -97,6 +100,7 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
       set({ available: false });
       return;
     }
+    // A change of reactions alone (`Reactions`) is read again, never unread.
     const onChanged = ({ changes }: { changes: GroupChange[] }) => {
       const current = get().currentGroupId;
       for (const c of changes) {

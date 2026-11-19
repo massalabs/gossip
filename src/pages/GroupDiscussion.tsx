@@ -223,6 +223,17 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     message: m,
   });
 
+  // Tapping an emoji adds this account's reaction, or removes it if it is there.
+  const toggleReaction = (m: GroupMessage, emoji: string) => {
+    if (!service) return;
+    const mine = m.reactions.some(r => r.emoji === emoji && r.mine);
+    void run(() =>
+      mine
+        ? service.unreact(group.groupId, m.syncObjId, emoji)
+        : service.react(group.groupId, m.syncObjId, emoji)
+    );
+  };
+
   const send = (text: string) => {
     if (!service) return;
     const reply = replyingTo?.message;
@@ -373,6 +384,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
                 return m ? messageText(m, t) : null;
               })}
               canWrite={canWrite}
+              memberName={memberName}
+              onToggleReaction={toggleReaction}
               onReply={m => {
                 setEditing(null);
                 setReplyingTo(target(m));

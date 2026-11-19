@@ -94,8 +94,7 @@
     "reply_to": "Réponse à",
     "reply_unavailable": "Message indisponible",
     "empty": "Aucun message pour l'instant",
-    "media": "Média",
-    "reaction": "Réaction",
+    "media": "Pièce jointe non prise en charge",
     "forward": "Message transféré"
   },
   "composer": {
@@ -109,6 +108,7 @@
     "edit_too_long": "Ce texte est trop long pour un message de groupe. Raccourcissez-le pour l'enregistrer."
   },
   "message_menu": {
+    "react": "Réagir",
     "reply": "Répondre",
     "copy": "Copier",
     "edit": "Modifier",
@@ -125,6 +125,9 @@
     "copied": "Copié",
     "failed": "L'action a échoué",
     "retried": "Synchronisation relancée"
+  },
+  "reactions": {
+    "title": "Réactions"
   },
   "details": {
     "title": "Détails du groupe",

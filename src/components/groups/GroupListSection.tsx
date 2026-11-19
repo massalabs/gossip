@@ -190,7 +190,7 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
           {shown.map(({ entry, name }) => {
             const last = entry.lastMessage;
             const preview = last
-              ? `${memberName(last.author)}: ${safeName(last.text, 80)}`
+              ? `${memberName(last.author)}: ${last.media ? t('timeline.media') : safeName(last.text, 80)}`
               : t('list.no_messages');
             return (
               <GroupRow

@@ -67,6 +67,7 @@ const EarlierChats: React.FC<EarlierChatsProps> = ({
             authorName={memberName(item.author)}
             replyPreviews={item.replyTo.map(() => null)}
             canWrite={false}
+            memberName={memberName}
             onCopy={m => {
               void navigator.clipboard
                 ?.writeText(messageText(m, t))

@@ -94,8 +94,7 @@
     "reply_to": "回复",
     "reply_unavailable": "消息不可用",
     "empty": "暂无消息",
-    "media": "媒体",
-    "reaction": "表情回应",
+    "media": "不支持的附件",
     "forward": "转发的消息"
   },
   "composer": {
@@ -109,6 +108,7 @@
     "edit_too_long": "这段文字对群组消息来说太长了。请缩短后再保存。"
   },
   "message_menu": {
+    "react": "回应",
     "reply": "回复",
     "copy": "复制",
     "edit": "编辑",
@@ -125,6 +125,9 @@
     "copied": "已复制",
     "failed": "操作失败",
     "retried": "已重试同步"
+  },
+  "reactions": {
+    "title": "表情回应"
   },
   "details": {
     "title": "群组详情",
