@@ -196,3 +196,26 @@ fn a_busy_candidate_is_asked_again_later_in_the_same_run() {
     assert_eq!(q.len(), 1, "member 1 is asked again");
     assert_eq!(q[0].to, member(1));
 }
+
+/// Found by the network simulation (code at `1ca7da19`, seed 2140): resends after `expired`
+/// were limited to two per stage, so a member that came back online after a long absence
+/// and acknowledged old requests as expired was not asked again until the stage timed out,
+/// a day later with long TTLs.
+#[test]
+fn an_expired_acknowledgement_of_an_old_request_is_always_resent() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let mut q = super::retrieval::sent_lookups(&mut net, 0);
+    for round in 0..4 {
+        // The member was offline and sees each request two minutes later: plausibly
+        // expired (past its deadline less 5 minutes of clock skew). No tick runs, so the
+        // stage does not time out meanwhile.
+        net.now += 2 * MIN;
+        super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Status(Status::Expired));
+        q = super::retrieval::sent_lookups(&mut net, 0);
+        assert_eq!(q.len(), 1, "resend {round}");
+        assert_eq!(q[0].to, member(1));
+    }
+}
