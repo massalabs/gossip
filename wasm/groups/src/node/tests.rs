@@ -198,6 +198,18 @@ impl Net {
         panic!("the devices never went quiet");
     }
 
+    /// The sync-object lookup results of device `d`, taken.
+    pub(crate) fn take_lookup_results(
+        &mut self,
+        d: usize,
+    ) -> Vec<(ChatId, SyncObjId, LookupResult)> {
+        let now = self.now;
+        let dev = &mut self.devs[d];
+        dev.node
+            .take_lookup_results(&mut dev.store, now, &mut self.rng)
+            .unwrap()
+    }
+
     pub(crate) fn publish(&mut self, d: usize, text: &str) -> MessageEvent {
         let now = self.now;
         let chat = self.chat();

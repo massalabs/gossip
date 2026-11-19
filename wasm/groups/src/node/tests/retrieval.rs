@@ -173,7 +173,7 @@ fn unanswered_stages_grow_the_ttl_by_pi_with_local_jitter_then_pause_after_twent
     }
     assert_eq!(stages, usize::from(MAX_UNANSWERED_STAGES));
     assert_eq!(
-        net.devs[0].node.take_lookup_results(),
+        net.take_lookup_results(0),
         vec![(chat, sync, LookupResult::NotFound)]
     );
 }
@@ -497,7 +497,7 @@ fn a_sync_object_lookup_completes_with_the_carrier_or_not_found() {
     answer(&mut net, 0, &q[0], ResponseResult::Event(blob(&e)));
     assert!(net.held(0, &e.event_id()));
     assert_eq!(
-        net.devs[0].node.take_lookup_results(),
+        net.take_lookup_results(0),
         vec![(
             chat,
             SyncObjId::from_bytes([5; 32]),
@@ -520,7 +520,7 @@ fn a_sync_object_lookup_completes_with_the_carrier_or_not_found() {
         answer(&mut net, 0, &q[0], na());
     }
     assert_eq!(
-        net.devs[0].node.take_lookup_results(),
+        net.take_lookup_results(0),
         vec![(chat, SyncObjId::from_bytes([7; 32]), LookupResult::NotFound)]
     );
 }

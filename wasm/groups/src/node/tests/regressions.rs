@@ -1135,7 +1135,8 @@ fn lookup_results_survive_failed_commits_and_crashes_exactly_once() {
     node.install_epoch(&mut store, config(&root), false, T0 + 2, &mut rng)
         .unwrap();
     assert_eq!(
-        node.take_lookup_results(),
+        node.take_lookup_results(&mut store, T0 + 2, &mut rng)
+            .unwrap(),
         vec![(chat, sync, LookupResult::NotFound)]
     );
 }
