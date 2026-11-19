@@ -14,7 +14,8 @@
 //! structs read and write exactly the bytes of the schema.
 //!
 //! `Debug` output never shows the group secret or message content (text, bodies, metadata
-//! values, encoded frames and event blobs): only their sizes.
+//! values, encoded frames and event blobs): only their sizes. A decoded or encoded
+//! `GroupRoot` zeroes its group secret when dropped.
 //!
 //! `prost` ignores unknown fields, truncates out-of-range `uint32` and enum values and reads
 //! any nonzero `bool` as true, while the protocol rejects all of these (§1.1, §13.8). Every
@@ -25,6 +26,8 @@
 
 use core::fmt;
 use std::collections::BTreeMap;
+
+use zeroize::Zeroize;
 
 use super::strict::{Kind, Limit, Schema};
 use crate::constants::{
@@ -493,6 +496,34 @@ impl fmt::Debug for GroupRoot {
             .field("owner", &redact::Bytes(self.owner.len()))
             .field("created_at", &self.created_at)
             .finish_non_exhaustive()
+    }
+}
+
+/// The encoded frames of a plaintext being built may hold a root, with its group secret.
+impl Drop for Container {
+    fn drop(&mut self) {
+        self.frames.zeroize();
+    }
+}
+
+/// An event blob being encoded may be a root, with its group secret. A decoded frame has its
+/// kind taken out first, so nothing is copied or zeroed then.
+impl Drop for Frame {
+    fn drop(&mut self) {
+        match &mut self.kind {
+            Some(FrameKind::Event(blob)) => blob.zeroize(),
+            Some(FrameKind::Response(Response {
+                result: Some(ResponseResult::Event(blob)),
+                ..
+            })) => blob.zeroize(),
+            _ => {}
+        }
+    }
+}
+
+impl Drop for GroupRoot {
+    fn drop(&mut self) {
+        self.group_secret.zeroize();
     }
 }
 

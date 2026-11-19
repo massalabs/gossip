@@ -123,7 +123,9 @@ pub fn encode_event_blob(object: &EventObject) -> Result<Vec<u8>> {
     let event = proto::Event {
         kind: Some(object.to_proto()),
     };
-    let mut out = Vec::new();
+    // Sized exactly, so that growing leaves no stray copy of a root's group secret.
+    let mut out =
+        Vec::with_capacity(varint_len(object.version()) + prost::Message::encoded_len(&event));
     encode_varint(object.version(), &mut out);
     prost::Message::encode(&event, &mut out).expect("a Vec grows as needed");
     if !fits_empty_container(out.len()) {
@@ -260,7 +262,10 @@ pub fn encode_plaintext(frames: &[Frame]) -> Result<Vec<u8>> {
         }
         container.frames.push(encoded);
     }
-    let mut out = Vec::new();
+    // Sized exactly, so that growing leaves no stray copy of an event blob; the encoded
+    // frames are zeroed when `container` is dropped.
+    let mut out =
+        Vec::with_capacity(varint_len(PROTOCOL_VERSION) + prost::Message::encoded_len(&container));
     encode_varint(PROTOCOL_VERSION, &mut out);
     prost::Message::encode(&container, &mut out).expect("a Vec grows as needed");
     if out.len() > MAX_PLAINTEXT_BYTES {

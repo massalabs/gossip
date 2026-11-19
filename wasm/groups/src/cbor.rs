@@ -61,6 +61,17 @@ fn write_head(out: &mut Vec<u8>, major: u8, arg: u64) {
     }
 }
 
+/// The size of a head written by [`write_head`].
+fn head_len(arg: u64) -> usize {
+    match arg {
+        0..24 => 1,
+        24..=0xff => 2,
+        0x100..=0xffff => 3,
+        0x1_0000..=0xffff_ffff => 5,
+        _ => 9,
+    }
+}
+
 fn len_arg(len: usize) -> u64 {
     // usize is at most 64 bits on every supported target.
     u64::try_from(len).expect("length fits u64")
@@ -107,10 +118,32 @@ impl Value<'_> {
         }
     }
 
-    /// Returns the deterministic encoding of this item.
+    /// The size of the deterministic encoding of this item.
+    #[must_use]
+    pub fn encoded_len(&self) -> usize {
+        match self {
+            Value::Uint(v) => head_len(*v),
+            Value::Bytes(b) => head_len(len_arg(b.len())) + b.len(),
+            Value::Text(s) => head_len(len_arg(s.len())) + s.len(),
+            Value::Array(items) => {
+                head_len(len_arg(items.len())) + items.iter().map(Value::encoded_len).sum::<usize>()
+            }
+            Value::Map(entries) => {
+                head_len(len_arg(entries.len()))
+                    + entries
+                        .iter()
+                        .map(|(k, v)| k.encoded_len() + v.encoded_len())
+                        .sum::<usize>()
+            }
+            Value::Bool(_) | Value::Null => 1,
+        }
+    }
+
+    /// Returns the deterministic encoding of this item, in a buffer of exactly its size (so
+    /// that growing it leaves no stray copy of a secret item).
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(self.encoded_len());
         self.encode_into(&mut out);
         out
     }
@@ -120,8 +153,27 @@ impl Value<'_> {
 mod tests {
     use super::*;
 
+    /// The encoding in hex; also checks that `encoded_len` is exact.
     fn hex(v: &Value<'_>) -> String {
-        hex::encode(v.encode())
+        let encoded = v.encode();
+        assert_eq!(v.encoded_len(), encoded.len());
+        hex::encode(encoded)
+    }
+
+    #[test]
+    fn encoded_len_is_exact_for_long_items() {
+        for n in [23, 24, 255, 256, 65_535, 65_536] {
+            let bytes = vec![7; n];
+            let text = "a".repeat(n);
+            let items = vec![Value::Null; n];
+            for v in [
+                Value::Bytes(&bytes),
+                Value::Text(&text),
+                Value::Array(items.clone()),
+            ] {
+                assert_eq!(v.encoded_len(), v.encode().len());
+            }
+        }
     }
 
     // Vectors from RFC 8949 Appendix A.

@@ -253,7 +253,7 @@ impl Root {
     /// # Errors
     ///
     /// The first rule broken.
-    pub(crate) fn from_proto(version: u64, p: proto::GroupRoot) -> Result<Self> {
+    pub(crate) fn from_proto(version: u64, mut p: proto::GroupRoot) -> Result<Self> {
         if version != EVENT_VERSION {
             return Err(Error::UnsupportedEventVersion(version));
         }
@@ -330,11 +330,11 @@ impl Root {
         let root = Self {
             version,
             root_type,
-            name: p.name,
+            name: core::mem::take(&mut p.name),
             parents,
             members,
             group_secret,
-            owner_bytes: p.owner,
+            owner_bytes: core::mem::take(&mut p.owner),
             owner_keys,
             owner_id,
             epoch_challenge,

@@ -7,6 +7,8 @@
 //! The domain is a CBOR text string, identifiers and secrets are byte strings, integers are
 //! unsigned integers, and the array is encoded deterministically (see [`crate::cbor`]).
 
+use zeroize::Zeroize;
+
 use crate::cbor::Value;
 use crate::constants::{
     DOMAIN_DISSOLVE, DOMAIN_KICK, DOMAIN_LEAVE, DOMAIN_PREDECESSOR, DOMAIN_REFERENCE,
@@ -27,10 +29,14 @@ pub fn projection(domain: &str, items: Vec<Value<'_>>) -> Vec<u8> {
     Value::Array(array).encode()
 }
 
-/// `H(domain, items...)`: BLAKE3 with a 32-byte output over the projection (§1.2).
+/// `H(domain, items...)`: BLAKE3 with a 32-byte output over the projection (§1.2). The
+/// projection is zeroed once hashed, since it may hold a group secret (§4.1, §4.2).
 #[must_use]
 pub fn h(domain: &str, items: Vec<Value<'_>>) -> [u8; 32] {
-    *blake3::hash(&projection(domain, items)).as_bytes()
+    let mut p = projection(domain, items);
+    let hash = *blake3::hash(&p).as_bytes();
+    p.zeroize();
+    hash
 }
 
 /// `parentCommitment = H("gossip.groups.predecessor.1", epoch_challenge, parentChatId)`

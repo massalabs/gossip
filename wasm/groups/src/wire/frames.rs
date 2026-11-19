@@ -769,28 +769,30 @@ const RESPONSE_PAGE: u32 = 4;
 impl Frame {
     /// Decodes and validates one encoded `Frame`.
     pub(crate) fn decode(bytes: &[u8]) -> Result<Self> {
-        let frame: proto::Frame = strict::decode(bytes, &proto::FRAME)?;
-        Ok(match frame.kind.ok_or(Error::Missing("frame kind"))? {
-            proto::FrameKind::Event(blob) => Frame::Event(blob),
-            proto::FrameKind::Query(q) => Frame::Query(Query::from_proto(&q)?),
-            proto::FrameKind::Response(r) => Frame::Response(Response::from_proto(
-                r,
-                strict::raw_len(bytes, &[FRAME_RESPONSE, RESPONSE_PAGE])?,
-            )?),
-            proto::FrameKind::Notice(n) => Frame::Notice(Notice::from_proto(
-                &n,
-                strict::raw_len(bytes, &[FRAME_NOTICE])?,
-            )?),
-            proto::FrameKind::NeighborRequest(n) => Frame::NeighborRequest(NeighborRequest {
-                chat_id: ChatId::from_slice(&n.chat_id)?,
-            }),
-            proto::FrameKind::NeighborResponse(n) => {
-                Frame::NeighborResponse(NeighborResponse::from_proto(&n)?)
-            }
-            proto::FrameKind::LeaveRequest(l) => Frame::LeaveRequest(LeaveRequest {
-                chat_id: ChatId::from_slice(&l.chat_id)?,
-            }),
-        })
+        let mut frame: proto::Frame = strict::decode(bytes, &proto::FRAME)?;
+        Ok(
+            match frame.kind.take().ok_or(Error::Missing("frame kind"))? {
+                proto::FrameKind::Event(blob) => Frame::Event(blob),
+                proto::FrameKind::Query(q) => Frame::Query(Query::from_proto(&q)?),
+                proto::FrameKind::Response(r) => Frame::Response(Response::from_proto(
+                    r,
+                    strict::raw_len(bytes, &[FRAME_RESPONSE, RESPONSE_PAGE])?,
+                )?),
+                proto::FrameKind::Notice(n) => Frame::Notice(Notice::from_proto(
+                    &n,
+                    strict::raw_len(bytes, &[FRAME_NOTICE])?,
+                )?),
+                proto::FrameKind::NeighborRequest(n) => Frame::NeighborRequest(NeighborRequest {
+                    chat_id: ChatId::from_slice(&n.chat_id)?,
+                }),
+                proto::FrameKind::NeighborResponse(n) => {
+                    Frame::NeighborResponse(NeighborResponse::from_proto(&n)?)
+                }
+                proto::FrameKind::LeaveRequest(l) => Frame::LeaveRequest(LeaveRequest {
+                    chat_id: ChatId::from_slice(&l.chat_id)?,
+                }),
+            },
+        )
     }
 
     /// Validates and encodes this frame.
