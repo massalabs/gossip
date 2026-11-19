@@ -1072,3 +1072,62 @@ fn joining_two_groups_keeps_the_line_after_a_handover() {
         assert!(g.deposed.contains(&gid(0)));
     }
 }
+
+/// Regression (simulation, code at afeb85d8, `GROUPS_MEMBERS_SEED=0`): a member that missed
+/// an epoch signed its leave of an older one; the owner applied it with no kick (§5.6). The
+/// member, restored from a backup and back in the epoch it missed, was answered nothing:
+/// neither a kick nor a leave names that epoch, so it never learnt that it had left.
+#[test]
+fn a_restored_member_learns_a_leave_of_an_older_epoch() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[3].store.clone();
+    // The owner renames the group while device 3 is away.
+    net.offline[3] = true;
+    let e2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("x".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.offline[3] = false;
+    net.dropped.clear();
+    // Device 3, still at the first epoch, leaves it.
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    let e3 = net.current(0, &g).unwrap();
+    assert_ne!(e3, e2);
+    assert!(!net.summary(0, &g).unwrap().members.contains(&gid(3)));
+    // Restored from its backup, device 3 receives the epoch it missed and acts in it.
+    net.devs[3].store = backup;
+    net.restart(3);
+    let root = net.devs[1].node.root(&e2).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+    let now = net.now;
+    let dev = &mut net.devs[3];
+    dev.node
+        .handle_plaintext(&mut dev.store, gid(1), &pt, now, &mut net.rng)
+        .unwrap();
+    assert_eq!(net.current(3, &g), Some(e2));
+    net.say(3, &g, "still here");
+    net.run(3 * MIN);
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Left);
+}
