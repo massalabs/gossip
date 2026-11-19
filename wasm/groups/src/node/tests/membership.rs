@@ -3457,8 +3457,8 @@ fn adding_back_names_the_last_epoch_of_the_owners_line_not_a_former_owners_branc
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([9; 32]),
         created_at: u64::MAX,
     };
-    let back = Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [2; 32])
-        .unwrap();
+    let back =
+        Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [2; 32]).unwrap();
     let blob = wire::encode_event_blob(&EventObject::Root(Box::new(back.clone()))).unwrap();
     net.recv_frames_m(1, 0, &[Frame::Event(blob)]);
     assert!(net.devs[1].node.root(&back.chat_id()).is_some());
@@ -3474,6 +3474,9 @@ fn adding_back_names_the_last_epoch_of_the_owners_line_not_a_former_owners_branc
         )
         .unwrap();
     let root = net.devs[1].node.root(&z).unwrap();
-    assert!(root.names_parent(&g), "the last epoch of the line listing it");
+    assert!(
+        root.names_parent(&g),
+        "the last epoch of the line listing it"
+    );
     assert!(!root.names_parent(&back.chat_id()));
 }
