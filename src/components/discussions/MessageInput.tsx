@@ -11,25 +11,31 @@ import { useInitialValue } from '../../hooks/useInitialValue';
 
 const isWeb = !Capacitor.isNativePlatform();
 
-interface MessageInputProps {
+/** What the input previews of a message: its text and, for a reply, its id. */
+export interface InputMessage {
+  content: string;
+  id?: number;
+}
+
+interface MessageInputProps<M extends InputMessage = Message> {
   onSend: (message: string, replyToId?: number) => void;
   disabled?: boolean;
-  replyingTo?: Message | null;
+  replyingTo?: M | null;
   onCancelReply?: () => void;
   initialValue?: string;
   onFocus?: () => void;
   forwardPreview?: string | null;
   onCancelForward?: () => void;
   forwardMode?: 'forward' | 'reply';
-  editingMessage?: Message | null;
+  editingMessage?: M | null;
   onCancelEdit?: () => void;
-  onConfirmEdit?: (newContent: string, message: Message) => void;
+  onConfirmEdit?: (newContent: string, message: M) => void;
   containerRef?: React.RefObject<HTMLDivElement | null>;
   isSelecting?: boolean;
   placeholderKey?: string;
 }
 
-const MessageInput: React.FC<MessageInputProps> = ({
+function MessageInput<M extends InputMessage = Message>({
   onSend,
   disabled = false,
   replyingTo,
@@ -45,7 +51,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   containerRef,
   isSelecting = false,
   placeholderKey,
-}) => {
+}: MessageInputProps<M>) {
   const { t } = useTranslation('discussions');
   const isRefocusingRef = useRef(false);
   // True while a pointerdown-initiated send is in flight, so the click event
@@ -279,6 +285,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
       )}
     </div>
   );
-};
+}
 
 export default MessageInput;
