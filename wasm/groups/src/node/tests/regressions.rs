@@ -1039,3 +1039,51 @@ fn a_failed_handoff_does_not_assemble_the_same_work_again() {
     node.handed_off(&mut store, out[0].handle, T0, &mut rng)
         .unwrap();
 }
+
+/// Found by review (code at `6a916f2e`): `is_current` took no clock, so a plaintext
+/// assembled just before a scheduled deletion came due still counted as current after it,
+/// and the deleted message went out.
+#[test]
+fn a_plaintext_is_not_current_once_a_deletion_came_due() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let m = net.event(T0, 5, &[], 1);
+    net.give(0, 1, &m);
+    let due = T0 + 10 * MIN;
+    let d = MessageEvent::create(
+        &net.root,
+        EventId::new(T0, [6; 16]),
+        &[],
+        Payload::Delete {
+            sync_obj_id: SyncObjId::from_bytes([5; 32]),
+            scheduled_at: Some(due),
+        },
+    )
+    .unwrap();
+    net.give(0, 1, &d);
+    net.poll(0);
+    net.now = due - MIN;
+    net.recv_frames(
+        0,
+        member(2),
+        &[query(
+            1,
+            net.now,
+            MIN,
+            vec![QueryOp::Event {
+                chat_id: chat,
+                event_id: m.event_id(),
+            }],
+        )],
+    );
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    assert_eq!(out.len(), 1);
+    // The transport encrypts two minutes later, after the deletion came due.
+    net.now = due + MIN;
+    assert!(!net.devs[0].node.is_current(out[0].handle));
+}
