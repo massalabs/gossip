@@ -2092,3 +2092,70 @@ fn a_member_that_left_can_be_added_back() {
     );
     assert_eq!(s0.current, z);
 }
+
+/// Finding 5 of the review of 54711780: after handing the group over, the former owner made
+/// a root of its own, dated at the end of time, continuing its old epoch. The new owner then
+/// had a "fork to resolve" that blocked its messages and automatic successors, and could not
+/// create any root since `created_at = L + 1` overflowed.
+#[test]
+fn a_former_owner_cannot_mute_or_freeze_the_new_owner() {
+    let (mut net, g) = founded(3);
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    let params = crate::root::RootParams {
+        name: "mine again".into(),
+        members: (0..3).map(gid).collect(),
+        group_secret: crate::ids::GroupSecret::from_bytes([4; 32]),
+        owner: ident(0).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
+        created_at: u64::MAX,
+    };
+    let a =
+        Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [1; 32]).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(a.clone()))).unwrap();
+    for d in 1..3 {
+        net.recv_frames_m(d, 0, &[Frame::Event(blob.clone())]);
+        assert_eq!(net.current(d, &g), Some(h), "device {d}");
+    }
+    let s = net.summary(1, &g).unwrap();
+    assert!(!s.must_resolve);
+    assert!(s.side_branches.contains(&a.chat_id()));
+    // The new owner still sends and changes the group.
+    net.say(1, &g, "still mine");
+    let e = net
+        .change(
+            1,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![gid(2)],
+                name: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(net.devs[1].node.root(&e).unwrap().created_at(), u64::MAX);
+    // Resolving the former owner's branch stays possible, explicitly.
+    let r = net
+        .change(
+            1,
+            g,
+            GroupChange::Resolve {
+                members: vec![gid(0)],
+                name: None,
+            },
+        )
+        .unwrap();
+    assert!(net.devs[1].node.root(&r).unwrap().parents().len() == 2);
+}
