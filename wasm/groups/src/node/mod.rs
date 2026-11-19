@@ -1049,6 +1049,7 @@ impl Node {
                     supplied: 0,
                     penalty: 0,
                     failures: 0,
+                    first_failure: 0,
                     requests: timing::Bucket::full(timing::REQUEST_BURST, 0),
                     responses: timing::Bucket::full(timing::RESPONSE_BURST, 0),
                     version_notices: BTreeMap::new(),
