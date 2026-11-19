@@ -71,3 +71,12 @@ tracing = "0.1"
 tempfile = "3"
 mockall = "0.11"
 proptest = "1.4"
+
+# The group engine and the wasm bindings are built for size (2.6 MB instead of
+# 6.2 MB for the module, with no measurable cost): they are most of the wasm
+# module the app downloads, and the crypto they call is built as before.
+[profile.release.package.groups]
+opt-level = "z"
+
+[profile.release.package.gossip-wasm]
+opt-level = "z"

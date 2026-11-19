@@ -731,6 +731,7 @@ export interface InitOutput {
   readonly sessionmanagerwrapper_send_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
   readonly sessionmanagerwrapper_set_config: (a: number, b: number) => void;
   readonly sessionmanagerwrapper_to_encrypted_blob: (a: number, b: number) => [number, number, number, number];
+  readonly start: () => void;
   readonly userkeys_evm_address: (a: number) => [number, number];
   readonly userkeys_massa_address: (a: number) => [number, number];
   readonly userkeys_public_keys: (a: number) => [number, number, number];
@@ -748,7 +749,6 @@ export interface InitOutput {
   readonly usersecretkeys_kem_secret_key: (a: number) => [number, number];
   readonly usersecretkeys_massa_secret_key: (a: number) => [number, number];
   readonly usersecretkeys_to_bytes: (a: number) => [number, number, number, number];
-  readonly start: () => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;
