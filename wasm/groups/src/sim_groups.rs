@@ -32,6 +32,12 @@
 //!   closed it;
 //! - **nothing forbidden is accepted**: no honest device installs a forged root, and every
 //!   root an honest device installed in the group was created by a legitimate owner;
+//! - **a former owner never takes the group back**: its root after the handover is never
+//!   current on a device listed in a handover root, and no group becomes active again two
+//!   weeks after "Dissolve & Delete", when the dissolved root is erased too;
+//! - **one conversation per group**, except where a device cannot verify a new owner's
+//!   authority (§5.9, D.3), and the remnants "Dissolve & Delete" leaves on a device that
+//!   received part of the erased line late (counted);
 //! - **bounded work**: plaintexts and bytes per device and simulated hour stay under
 //!   [`LIMITS`];
 //! - every generated behaviour occurred at least once over the default seeds.
@@ -125,6 +131,9 @@ struct Counters {
     split_conversations: u64,
     /// Older epochs whose messages differ between two devices of one line (reported).
     older_epoch_differences: u64,
+    /// Conversations left active by "Dissolve & Delete" on a device that received part of
+    /// the erased line after the others erased it (§5.8, best effort; reported).
+    dissolve_remnants: u64,
     forged_handovers: u64,
     forged_dissolves: u64,
     hostile_queries: u64,
@@ -179,6 +188,7 @@ impl Counters {
             crashes,
             split_conversations,
             older_epoch_differences,
+            dissolve_remnants,
             forged_handovers,
             forged_dissolves,
             hostile_queries,
@@ -345,6 +355,12 @@ struct Sim {
     /// Roots of a new owner naming its own line and the former owner's second group: a
     /// successor in its line, whose parent in the second group stays unmatched (D.69).
     takeover_roots: BTreeSet<ChatId>,
+    /// The members of the handover roots created.
+    handover_members: BTreeSet<GossipId>,
+    /// The handover roots created: the new owner and the members.
+    handovers: Vec<(GossipId, BTreeSet<GossipId>)>,
+    /// The epochs the owner's device erased with "Dissolve & Delete".
+    erased_line: BTreeSet<ChatId>,
 }
 
 fn below(rng: &mut TestRng, n: u64) -> u64 {
@@ -452,6 +468,9 @@ impl Sim {
             former_roots: BTreeSet::new(),
             dissolve_delete: seed % 8 == 3,
             takeover_roots: BTreeSet::new(),
+            handover_members: BTreeSet::new(),
+            handovers: Vec::new(),
+            erased_line: BTreeSet::new(),
         };
         for d in 0..n {
             sim.boot(d);
@@ -821,6 +840,11 @@ impl Sim {
                 self.legit.insert(id);
                 if let GroupChange::Handover { new_owner, .. } = change {
                     self.owners.insert(new_owner);
+                    if let Some(r) = self.node(d).root(&id) {
+                        self.handover_members.extend(r.members().iter().copied());
+                        self.handovers
+                            .push((new_owner, r.members().iter().copied().collect()));
+                    }
                 }
                 Some(id)
             }
@@ -1146,6 +1170,18 @@ impl Sim {
                 Step::Dissolve => {
                     let delete = self.dissolve_delete;
                     let Some(s) = self.group_of(o) else { continue };
+                    if delete {
+                        // The line the owner's device erases: the dissolved epoch and every
+                        // epoch it holds that leads to it (§5.8).
+                        let mut stack = vec![s.current];
+                        while let Some(c) = stack.pop() {
+                            if self.erased_line.insert(c)
+                                && let Some(r) = self.node(o).tables().epochs.get(&c)
+                            {
+                                stack.extend(r.parents.iter().copied());
+                            }
+                        }
+                    }
                     let sg = signer(o);
                     if self
                         .op(o, |n, st, now, rng| {
@@ -1683,6 +1719,7 @@ impl Sim {
     fn check(&mut self) {
         let honest = self.honest();
         let mut split_conversations = 0u64;
+        let mut dissolve_remnants = 0u64;
         for &d in &honest {
             let node = self.node(d);
             // Nothing forbidden is accepted: no forged root is installed, and every installed
@@ -1714,17 +1751,14 @@ impl Sim {
                     r.object.key()
                 );
             }
-            // A former owner's root after its handover is never current (§5.9).
+            // A former owner's root after its handover is never current (§5.9), unless the
+            // device is listed in no handover root: it cannot hold one and follows the line it
+            // knows (§5.9, "a device that cannot check this"), as a member that left before
+            // the handover and was restored from a backup does.
             if let Some(s) = self.group_of(d) {
-                // Unless it never got the handover (§5.9: a lagging device can be misled
-                // until it does), as when Dissolve & Delete erased it before it arrived.
-                let holds_handover = node.tables().epochs.iter().any(|(_, r)| {
-                    r.status == EpochStatus::Installed
-                        && r.root.root_type() == crate::root::RootType::Handover
-                });
-                let _ = holds_handover;
+                let listed = self.handover_members.contains(&self.devs[d].id);
                 assert!(
-                    !self.former_roots.contains(&s.current),
+                    !(self.former_roots.contains(&s.current) && listed),
                     "device {d} follows a former owner's root"
                 );
             }
@@ -1740,19 +1774,32 @@ impl Sim {
                         && Some(s.current) != self.second
                 })
                 .collect();
-            if conversations.len() > 1 {
-                let holds_handover_to = |o: &GossipId| {
-                    node.tables().epochs.iter().any(|(_, r)| {
-                        r.status == EpochStatus::Installed
-                            && r.root.root_type() == crate::root::RootType::Handover
-                            && r.root.owner_id() == *o
+            // "Dissolve & Delete" is best effort (§5.8): a device that received part of the
+            // erased line only after every other device erased it keeps that part, active,
+            // as a conversation of its own: an epoch of the erased line, or a root continuing
+            // one the device never held (the link to the rest is gone with it). Counted.
+            let remnant = |c: &crate::node::GroupSummary| {
+                self.erased_line.contains(&c.current)
+                    || node.root(&c.current).is_some_and(|r| {
+                        self.erased_line
+                            .iter()
+                            .any(|e| r.names_parent(e) && node.root(e).is_none())
                     })
-                };
-                let unverifiable = conversations
-                    .iter()
-                    .any(|c| c.owner != ident(0).id && !holds_handover_to(&c.owner));
-                // Dissolve & Delete erases roots on a best-effort basis: a member that
-                // lagged cannot fetch the epochs that would join its conversations.
+            };
+            let remnants = conversations.iter().filter(|c| remnant(c)).count();
+            dissolve_remnants += remnants as u64;
+            let conversations: Vec<&crate::node::GroupSummary> =
+                conversations.iter().filter(|c| !remnant(c)).collect();
+            if conversations.len() > 1 {
+                // From the script: the device is listed in no handover root to that owner.
+                let me = self.devs[d].id;
+                let unverifiable = conversations.iter().any(|c| {
+                    c.owner != ident(0).id
+                        && !self
+                            .handovers
+                            .iter()
+                            .any(|(o, m)| *o == c.owner && m.contains(&me))
+                });
                 assert!(
                     unverifiable,
                     "device {d} shows the group as {} conversations",
@@ -1780,6 +1827,7 @@ impl Sim {
             }
         }
         self.counters.split_conversations += split_conversations;
+        self.counters.dissolve_remnants += dissolve_remnants;
         // Removal is learnt: a device removed by a kick, or that left and was restored from
         // an older backup, is not a member any more, unless an owner added it again since
         // (an owner restored from its own backup, for instance, lists it again). A member
@@ -1902,14 +1950,35 @@ impl Sim {
                 if self.split && !dissolved.contains(&s.current) {
                     continue;
                 }
-                // Dissolve & Delete removes the handover roots a remaining side branch of a
-                // former owner was judged against: that branch may stay current on its own
-                // (reported as a limit, not checked).
-
                 assert!(
                     matches!(s.status, MyStatus::Dissolved { .. }),
                     "device {d} did not apply the dissolve: {s:?}"
                 );
+            }
+            // Two weeks later "Dissolve & Delete" has erased the dissolved root, and no group
+            // comes back to life, under a former owner's branch for instance (§5.8, §5.9).
+            if self.dissolve_delete {
+                let active = |sim: &Self, d: usize| -> BTreeSet<ChatId> {
+                    sim.node(d)
+                        .groups()
+                        .into_iter()
+                        .filter(|c| c.status == MyStatus::Member)
+                        .map(|c| c.group)
+                        .collect()
+                };
+                let before: Vec<BTreeSet<ChatId>> =
+                    honest.iter().map(|d| active(self, *d)).collect();
+                self.now += 15 * 24 * HOUR;
+                for (i, &d) in honest.iter().enumerate() {
+                    let sg = signer(d);
+                    self.op(d, |n, st, now, rng| n.tick_with(st, Some(&sg), now, rng))
+                        .expect("tick");
+                    let after = active(self, d);
+                    assert!(
+                        after.is_subset(&before[i]),
+                        "device {d}: a group became active again after Dissolve & Delete"
+                    );
+                }
             }
         }
         for &d in &honest {
