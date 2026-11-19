@@ -354,7 +354,7 @@ impl Node {
             match op.attempt {
                 ScanAttempt::Sent { local_deadline } if local_deadline <= cx.now => {
                     self.stats.timeouts += 1;
-                    self.note_timeout(&key.1);
+                    self.note_timeout(&key.1, cx.now);
                     let stage = op.stage + 1;
                     if stage >= MAX_UNANSWERED_STAGES {
                         self.complete_scan(cx, key, ScanEnd::Ended);

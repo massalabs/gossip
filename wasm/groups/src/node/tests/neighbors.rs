@@ -2,7 +2,7 @@
 
 use super::dissemination::neighbors_of;
 use super::*;
-use crate::node::neighbors::{NEIGHBOR_COOLDOWN_MS, NEIGHBOR_FAILURES};
+use crate::node::neighbors::NEIGHBOR_COOLDOWN_MS;
 use crate::wire::NeighborResponse;
 
 fn neighbor_requests(frames: &BTreeMap<GossipId, Vec<Frame>>) -> BTreeSet<GossipId> {
@@ -211,18 +211,21 @@ fn a_neighbor_that_keeps_failing_is_replaced_and_an_answer_resets_the_count() {
     let chat = net.chat();
     neighbors_of(&mut net, 0, &[1, 2]);
     let node = &mut net.devs[0].node;
-    for _ in 0..NEIGHBOR_FAILURES - 1 {
-        node.note_timeout(&member(1));
+    // Timeouts spread over less than two days are delays.
+    for i in 0..10 {
+        node.note_timeout(&member(1), T0 + i * HOUR);
     }
-    node.answered(&member(1));
-    node.note_timeout(&member(1));
     assert!(node.is_neighbor(&chat, &member(1)));
-    for _ in 0..NEIGHBOR_FAILURES - 1 {
-        node.note_timeout(&member(1));
-    }
+    // An answer resets the count; then three timeouts over two days replace it.
+    node.answered(&member(1));
+    node.note_timeout(&member(1), T0 + DAY);
+    node.note_timeout(&member(1), T0 + 2 * DAY);
+    assert!(node.is_neighbor(&chat, &member(1)));
+    node.note_timeout(&member(1), T0 + 3 * DAY);
     assert!(!node.is_neighbor(&chat, &member(1)));
     assert_eq!(node.stats.neighbors_replaced, 1);
     // A replacement is sought, not the replaced peer.
+    net.now = T0 + 3 * DAY;
     net.tick(0);
     let asked = neighbor_requests(&net.poll_frames(0));
     assert_eq!(asked, BTreeSet::from([member(3)]));

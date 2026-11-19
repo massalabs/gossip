@@ -14,9 +14,11 @@ pub(crate) const MAX_NEIGHBORS: usize = 10;
 pub(crate) const MAX_SUGGESTIONS: usize = 10;
 /// See [`MAX_SUGGESTIONS`].
 pub(crate) const MAX_NON_NEIGHBOR_SUGGESTIONS: usize = 5;
-/// Consecutive unanswered timeouts after which a neighbor is replaced. §10.1 leaves the
+/// Consecutive unanswered timeouts after which a neighbor may be replaced. §10.1 leaves the
 /// threshold to the deferred score (§17.5); provisional.
 pub(crate) const NEIGHBOR_FAILURES: u32 = 3;
+/// How long those timeouts must span without a valid answer; provisional.
+pub(crate) const NEIGHBOR_UNRESPONSIVE_MS: u64 = 2 * DAY_MS;
 /// How long a neighbor request may stay unanswered, and how long a peer that declined,
 /// did not answer, or was replaced is not asked again. Not given by §10.1; provisional.
 pub(crate) const NEIGHBOR_COOLDOWN_MS: u64 = DAY_MS;
@@ -55,7 +57,6 @@ impl Node {
     pub(crate) fn maintain_neighbors(&mut self, cx: &mut Cx<'_>, chat: ChatId) {
         self.drop_ineligible_neighbors(chat);
         let now = cx.now;
-        self.date_cooldowns(chat, now);
         let target = self.neighbor_target(&chat);
         let eligible = self.eligible(&chat);
         let Some(g) = self.t.groups.get(&chat).cloned() else {
@@ -263,13 +264,20 @@ impl Node {
         out
     }
 
-    /// A query to `peer` timed out unanswered. After [`NEIGHBOR_FAILURES`] in a row it is
-    /// replaced in every group where it is a neighbor (§10.1); an occasional delayed answer
-    /// resets the count.
-    pub(crate) fn note_timeout(&mut self, peer: &GossipId) {
+    /// A query to `peer` timed out unanswered at `now`. A peer that keeps failing, at least
+    /// [`NEIGHBOR_FAILURES`] timeouts in a row spread over [`NEIGHBOR_UNRESPONSIVE_MS`] or
+    /// more without any valid answer, is replaced in every group where it is a neighbor
+    /// (§10.1). Members are often offline for hours, so a few timeouts of the first, short
+    /// TTLs are delays, not failures; any valid answer resets the count.
+    pub(crate) fn note_timeout(&mut self, peer: &GossipId, now: u64) {
         let r = self.peer_mut(peer);
+        if r.failures == 0 {
+            r.first_failure = now;
+        }
         r.failures = r.failures.saturating_add(1);
-        if r.failures < NEIGHBOR_FAILURES {
+        if r.failures < NEIGHBOR_FAILURES
+            || now.saturating_sub(r.first_failure) < NEIGHBOR_UNRESPONSIVE_MS
+        {
             return;
         }
         r.failures = 0;
@@ -283,25 +291,9 @@ impl Node {
         for chat in chats {
             let g = self.group_mut(chat);
             g.neighbors.remove(peer);
-            // The cooldown starts at the next upkeep, which knows the time.
-            g.cooldown.insert(*peer, u64::MAX);
+            g.cooldown
+                .insert(*peer, now.saturating_add(NEIGHBOR_COOLDOWN_MS));
             self.stats.neighbors_replaced += 1;
-        }
-    }
-
-    /// Turns the open-ended cooldowns of replaced neighbors into a day from `now`.
-    pub(crate) fn date_cooldowns(&mut self, chat: ChatId, now: u64) {
-        if self
-            .t
-            .groups
-            .get(&chat)
-            .is_some_and(|g| g.cooldown.values().any(|u| *u == u64::MAX))
-        {
-            for until in self.group_mut(chat).cooldown.values_mut() {
-                if *until == u64::MAX {
-                    *until = now.saturating_add(NEIGHBOR_COOLDOWN_MS);
-                }
-            }
         }
     }
 }

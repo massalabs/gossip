@@ -522,7 +522,7 @@ impl Node {
             // An unanswered timeout: the next stage, with the next TTL and a new jitter,
             // and at once the next candidate (no extra backoff).
             self.stats.timeouts += 1;
-            self.note_timeout(&peer);
+            self.note_timeout(&peer, cx.now);
             let stage = stage + 1;
             if stage >= MAX_UNANSWERED_STAGES {
                 self.pause(key);

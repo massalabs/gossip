@@ -328,6 +328,8 @@ pub struct PeerRecord {
     pub penalty: u32,
     /// Consecutive local timeouts of queries sent to it; any valid answer resets it.
     pub failures: u32,
+    /// When the first of those timeouts happened.
+    pub first_failure: u64,
     /// Its request budget (entries it may make this device answer).
     pub requests: Bucket,
     /// Its response budget (bytes of answers sent to it).
