@@ -1165,3 +1165,34 @@ fn a_response_after_its_request_deadline_is_dropped_without_a_tick() {
         "a stale answer counted"
     );
 }
+
+/// Device 0 scans member `peer`; returns the first page request.
+fn start_scan(net: &mut Net, peer: usize) -> super::retrieval::Sent {
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    dev.node
+        .peer_reconnected(&mut dev.store, member(peer), now, &mut net.rng)
+        .unwrap();
+    super::retrieval::sent_queries(net, 0)
+        .into_iter()
+        .find(|s| matches!(s.op, QueryOp::TipsScan { .. }) && s.to == member(peer))
+        .unwrap()
+}
+
+/// Found by review (code at `6a916f2e`): a page request answered `malformed` penalised the
+/// responder, while a lookup answered `malformed` only fails the peer for the run (§11.4).
+#[test]
+fn a_scan_answered_malformed_ends_without_a_penalty() {
+    let mut net = Net::new(3, 1);
+    let s = start_scan(&mut net, 1);
+    super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Malformed));
+    assert_eq!(net.devs[0].node.score(&member(1)), 500_000);
+    assert!(
+        net.devs[0]
+            .node
+            .t
+            .scans_out
+            .iter()
+            .all(|(k, _)| k.1 != member(1))
+    );
+}
