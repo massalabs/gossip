@@ -3597,3 +3597,120 @@ fn a_leave_pending_at_a_handover_is_applied_by_the_new_owner() {
     assert_eq!(net.current(3, &g), Some(cur));
     assert_eq!(net.devs[1].node.stats().kicks_created, 0);
 }
+
+/// A former owner restored from a backup made before its "hand over and leave" still holds
+/// itself the owner of the parent epoch. When it acts there, members answer with the
+/// handover root, as they answer a removed member with its kick (§5.6), at most three times
+/// a day; its device adopts the consequence: it left.
+#[test]
+fn a_former_owner_restored_before_its_handover_learns_that_it_left() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[0].store.clone();
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: true,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.current(2, &g), Some(h));
+    net.devs[0].store = backup;
+    net.restart(0);
+    assert_eq!(net.summary(0, &g).unwrap().owner, gid(0));
+    net.say(0, &g, "still the owner?");
+    net.run(2 * MIN);
+    let s = net.summary(0, &g).unwrap();
+    assert_eq!(s.status, MyStatus::Left, "{s:?}");
+    assert!(net.lines(0, &g).contains(&TimelineLine::YouLeft));
+    assert_eq!(
+        net.change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![gid(3)],
+                name: None,
+            },
+        ),
+        Err(NodeError::NotAllowed)
+    );
+    assert_eq!(net.devs[0].node.stats().failed_announcements, 0);
+    for d in 1..4 {
+        assert!(
+            net.devs[d].node.t.replies.iter().all(|(_, r)| r.count <= 3),
+            "device {d}"
+        );
+    }
+    // The members keep the handover's line.
+    for d in 1..4 {
+        assert_eq!(net.current(d, &g), Some(h), "device {d}");
+    }
+}
+
+/// A former owner that stayed a member, restored from a backup made before its handover, is
+/// answered with the handover root too when it acts in the parent epoch, and learns that it
+/// is no longer the owner.
+#[test]
+fn a_former_owner_restored_before_its_handover_learns_the_new_owner() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[0].store.clone();
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    net.devs[0].store = backup;
+    net.restart(0);
+    net.say(0, &g, "still the owner?");
+    net.run(2 * MIN);
+    let s = net.summary(0, &g).unwrap();
+    assert_eq!(s.status, MyStatus::Member);
+    assert_eq!(s.current, h);
+    assert_eq!(s.owner, gid(1));
+}
+
+/// A removal lookup about a former owner that left in a handover is answered with that
+/// handover root when no kick or leave is held (§5.6).
+#[test]
+fn a_removal_lookup_about_a_former_owner_is_answered_with_its_handover() {
+    let (mut net, g) = founded(4);
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: true,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    let answers = answers_of(
+        &mut net,
+        2,
+        3,
+        vec![QueryOp::Removal {
+            chat_id: g,
+            gossip_id: gid(0),
+        }],
+    );
+    assert_eq!(answers.len(), 1);
+    assert!(
+        matches!(&answers[0].1, ResponseResult::Event(b)
+            if matches!(wire::decode_event_blob(b, 1), Ok(EventObject::Root(r)) if r.chat_id() == h)),
+        "{answers:?}"
+    );
+}
