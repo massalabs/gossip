@@ -166,6 +166,19 @@ describe('message serialization', () => {
   });
 });
 
+describe('unknown session message types', () => {
+  it('refuses a type this release does not know instead of reading it as text', () => {
+    for (const messageType of [9, 42, 1_000]) {
+      const bytes = ProtoMessage.encode({
+        messageType: messageType as ProtoMessageType,
+        messageId,
+        content: 'from the future',
+      });
+      expect(() => deserializeMessage(bytes)).toThrow(/unknown/);
+    }
+  });
+});
+
 describe('Deserialization Failure Handling', () => {
   it('should handle invalid message format gracefully', () => {
     const invalidData = new Uint8Array([0, 1]);

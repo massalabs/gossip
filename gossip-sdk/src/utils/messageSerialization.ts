@@ -19,6 +19,12 @@ export const MESSAGE_TYPE_EDIT = ProtoMessageType.MESSAGE_TYPE_EDIT;
 export const MESSAGE_TYPE_RETENTION_POLICY =
   ProtoMessageType.MESSAGE_TYPE_RETENTION_POLICY;
 
+const KNOWN_TYPES: ReadonlySet<number> = new Set(
+  Object.values(ProtoMessageType).filter(
+    (v): v is ProtoMessageType => typeof v === 'number'
+  )
+);
+
 export interface DeserializedMessage {
   content: string;
   messageId?: Uint8Array;
@@ -271,6 +277,12 @@ export function deserializeMessage(
   const decoded = ProtoMessage.decode(buffer);
   const protoType =
     decoded.messageType ?? ProtoMessageType.MESSAGE_TYPE_REGULAR;
+
+  // A type this release does not know is not read as anything else (§2.1:
+  // each type has one meaning): the caller ignores it.
+  if (!KNOWN_TYPES.has(protoType)) {
+    throw new Error('unknown session message type');
+  }
 
   // The group plaintext field is read under the group type only.
   if (protoType === ProtoMessageType.MESSAGE_TYPE_GROUP) {
