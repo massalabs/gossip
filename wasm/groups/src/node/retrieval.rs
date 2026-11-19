@@ -518,7 +518,10 @@ impl Node {
     /// available" or failed in this run, or whose earlier request is still outstanding, is
     /// skipped, and so is a peer that already has 16 lookups outstanding (§17.4): the next
     /// candidate is asked instead, so that a peer announcing many IDs cannot hold back the
-    /// retrieval of what others can supply.
+    /// retrieval of what others can supply. Responsive peers come before every unresponsive
+    /// one, whatever the tier, and the task waits for a responsive peer that is outstanding
+    /// or at its limit rather than ask an unresponsive one (a departure from the tier order
+    /// of §11.2).
     fn select(
         &mut self,
         cx: &mut Cx<'_>,
@@ -528,6 +531,9 @@ impl Node {
         let task = self.t.tasks.get(key).expect("listed");
         let mut ranked: Vec<(Rank, GossipId, bool)> = Vec::new();
         let mut until = u64::MAX;
+        // Responsive candidates that cannot be asked now: outstanding or at their limit.
+        let mut responsive_later: Vec<GossipId> = Vec::new();
+        let mut responsive_until = u64::MAX;
         for peer in self.eligible(&key.chat_id) {
             let c = task
                 .candidates
@@ -537,11 +543,18 @@ impl Node {
             if c.state != CandidateState::Untried {
                 continue;
             }
+            let responsive = self.responsive(&peer);
             if let Some(u) = c.outstanding_until.filter(|u| *u >= cx.now) {
                 until = until.min(u.saturating_add(1));
+                if responsive {
+                    responsive_until = responsive_until.min(u.saturating_add(1));
+                }
                 continue;
             }
             let limited = load.get(&peer).copied().unwrap_or(0) >= ACTIVE_LOOKUPS_PER_PEER;
+            if limited && responsive {
+                responsive_later.push(peer);
+            }
             let tier = if c.trigger.is_some() {
                 0
             } else if self.is_neighbor(&key.chat_id, &peer) {
@@ -554,8 +567,8 @@ impl Node {
             let at = c.trigger.map_or(0, |t| t.at);
             ranked.push((
                 (
+                    u8::from(!responsive),
                     tier,
-                    u8::from(!self.responsive(&peer)),
                     u64::MAX - self.score(&peer),
                     u64::MAX - at,
                 ),
@@ -577,24 +590,20 @@ impl Node {
                 until,
             });
         };
+        // Rather than a member that stopped answering, for a stage of up to a day, wait for
+        // a responsive one that is outstanding or at its limit: it answers or frees a slot
+        // in minutes when it is online. A free responsive member of any tier comes first.
+        if best.0 == 1 && (!responsive_later.is_empty() || responsive_until != u64::MAX) {
+            return Selection::Wait(Blocked {
+                peers: responsive_later,
+                until: responsive_until.min(until),
+            });
+        }
         let ties: Vec<GossipId> = ranked
             .iter()
             .filter(|(k, _, limited)| *k == best && !limited)
             .map(|(_, p, _)| *p)
             .collect();
-        // Rather than a member that stopped answering, for a stage of up to a day, wait for
-        // a responsive one whose slots are full: one frees in minutes when it is online.
-        let busy_responsive: Vec<GossipId> = ranked
-            .iter()
-            .filter(|(_, p, limited)| *limited && self.responsive(p))
-            .map(|(_, p, _)| *p)
-            .collect();
-        if best.1 == 1 && !busy_responsive.is_empty() {
-            return Selection::Wait(Blocked {
-                peers: busy_responsive,
-                until,
-            });
-        }
         Selection::Peer(ties[uniform_below(cx.rng, ties.len())])
     }
 
@@ -736,7 +745,7 @@ impl Node {
     }
 }
 
-/// The rank of a candidate, smaller first: tier, unresponsive, inverse score, inverse
+/// The rank of a candidate, smaller first: unresponsive, tier, inverse score, inverse
 /// receipt time of its trigger.
 type Rank = (u8, u8, u64, u64);
 
