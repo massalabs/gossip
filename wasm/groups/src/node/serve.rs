@@ -7,8 +7,8 @@
 use super::records::{AnswerOp, Purpose, Target, TaskKey, TriggerKind, Work};
 use super::retrieval::Answer;
 use super::timing::{
-    REQUEST_BURST, REQUEST_REFILL_PER_MIN, VERSION_NOTICE_INTERVAL_MS, deadline, ignored_query,
-    may_answer,
+    QUERY_CLOCK_TOLERANCE_MS, REQUEST_BURST, REQUEST_REFILL_PER_MIN, VERSION_NOTICE_INTERVAL_MS,
+    deadline, ignored_query, may_answer,
 };
 use super::{Cx, Node, NodeError, NotHandled, PENALTY_MALFORMED};
 use crate::event::{MessageEvent, Payload};
@@ -157,15 +157,17 @@ impl Node {
             }
             return Ok(());
         };
-        let Some(entry) = self
-            .t
-            .requests
-            .get(&(from, request_id))
-            .and_then(|q| q.entries.get(r.idx as usize))
-            .cloned()
-        else {
+        let Some((entry, sent_at, ttl)) = self.t.requests.get(&(from, request_id)).and_then(|q| {
+            q.entries
+                .get(r.idx as usize)
+                .map(|e| (e.clone(), q.sent_at, q.ttl))
+        }) else {
             return Ok(());
         };
+        // An `expired` acknowledgement is plausible once the request is past its receiver
+        // deadline, less the 5 minutes a receiver's clock may run ahead (§11.3).
+        let plausible = u128::from(cx.now) + u128::from(QUERY_CLOCK_TOLERANCE_MS)
+            >= u128::from(deadline(sent_at, ttl));
         let first = !entry.answered;
         let counts = !matches!(r.result, ResponseResult::Status(Status::Expired));
         if counts && first {
@@ -178,7 +180,7 @@ impl Node {
         }
         match entry.purpose {
             Purpose::Task(key) => {
-                let answer = self.lookup_answer(cx, from, version, key, &r.result)?;
+                let answer = self.lookup_answer(cx, from, version, key, &r.result, plausible)?;
                 if first {
                     self.task_answer(cx, key, from, answer.0);
                     if let (Target::SyncObj(_), Some(id)) = (key.target, answer.1) {
@@ -192,7 +194,7 @@ impl Node {
                 } = entry.op
                     && first
                 {
-                    self.scan_answer(cx, chat, from, (scan_id, offset), &r.result)?;
+                    self.scan_answer(cx, chat, from, (scan_id, offset), &r.result, plausible)?;
                 }
             }
         }
@@ -209,6 +211,7 @@ impl Node {
         version: u64,
         key: TaskKey,
         result: &ResponseResult,
+        plausible: bool,
     ) -> Result<(Answer, Option<EventId>), NodeError> {
         Ok(match result {
             ResponseResult::Event(blob) => match wire::decode_event_blob(blob, version) {
@@ -220,7 +223,7 @@ impl Node {
                 _ => (Answer::Invalid, None),
             },
             ResponseResult::Status(Status::NotAvailable) => (Answer::NotAvailable, None),
-            ResponseResult::Status(Status::Expired) => (Answer::Expired, None),
+            ResponseResult::Status(Status::Expired) => (Answer::Expired(plausible), None),
             ResponseResult::Status(Status::Busy) => (Answer::Busy, None),
             ResponseResult::Status(Status::Malformed) => (Answer::Refused, None),
             _ => (Answer::Invalid, None),

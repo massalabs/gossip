@@ -169,6 +169,7 @@ impl Node {
         peer: GossipId,
         asked: (ScanId, u64),
         result: &ResponseResult,
+        plausible: bool,
     ) -> Result<(), NodeError> {
         let key = (chat, peer);
         let (scan_id, offset) = asked;
@@ -280,7 +281,7 @@ impl Node {
                 if let Some(op) = self.t.scans_out.get_mut(&key)
                     && current
                     && matches!(op.attempt, ScanAttempt::Sent { .. })
-                    && op.expired_resends < super::retrieval::MAX_EXPIRED_RESENDS
+                    && (plausible || op.expired_resends < super::retrieval::MAX_EXPIRED_RESENDS)
                 {
                     op.expired_resends += 1;
                     self.stats.expired_resends += 1;

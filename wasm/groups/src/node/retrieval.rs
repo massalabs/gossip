@@ -19,9 +19,11 @@ use crate::ids::{ChatId, EventId, GossipId};
 use crate::rng::{Randomness, uniform_below};
 use crate::store::in_window;
 
-/// Resends caused by `expired` within one stage. §11.4 sets no bound; without one a peer
-/// that always answers `expired` would make the requester resend forever at no cost to the
-/// stage progression.
+/// Resends caused by an implausible `expired` within one stage: one that comes before the
+/// request could have passed its receiver deadline. §11.4 sets no bound; without one a peer
+/// that always answers `expired` at once would make the requester resend forever at no cost
+/// to the stage progression. A plausible `expired` (a peer back from an absence) is always
+/// followed by a resend.
 pub(crate) const MAX_EXPIRED_RESENDS: u8 = 2;
 
 /// How an answer counts for its task.
@@ -37,8 +39,9 @@ pub(crate) enum Answer {
     Refused,
     /// `busy`: refused for resource reasons; asked again later (§13.4), not penalised.
     Busy,
-    /// `expired`: an immediate resend (§11.4).
-    Expired,
+    /// `expired`: an immediate resend (§11.4); whether it is plausible (the request may have
+    /// passed its receiver deadline).
+    Expired(bool),
     /// The event validates but its timestamp is beyond `now + 5 min` (§9.6): the task
     /// pauses and keeps its identity.
     TemporarilyInvalid,
@@ -196,7 +199,7 @@ impl Node {
         peer: GossipId,
         answer: Answer,
     ) {
-        if answer != Answer::Expired {
+        if !matches!(answer, Answer::Expired(_)) {
             self.answered(&peer);
         }
         if answer == Answer::Supplied {
@@ -262,14 +265,14 @@ impl Node {
                     *attempt = None;
                 }
             }
-            Answer::Expired => {
+            Answer::Expired(plausible) => {
                 if let Run::Active {
                     attempt: attempt @ Some(Attempt::Sent { .. }),
                     expired_resends,
                     ..
                 } = &mut task.run
                     && current
-                    && *expired_resends < MAX_EXPIRED_RESENDS
+                    && (plausible || *expired_resends < MAX_EXPIRED_RESENDS)
                 {
                     *expired_resends += 1;
                     *attempt = Some(Attempt::Queued { peer });
