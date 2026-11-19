@@ -122,6 +122,9 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
 
   const query = safeName(searchQuery).toLowerCase();
   const shown = groups
+    // A group dissolved with "Delete" is only kept to relay the dissolve
+    // (§5.8); its messages are gone and it is no longer a conversation.
+    .filter(entry => entry.summary.status !== 'dissolved-deleted')
     .map(entry => ({
       entry,
       name: groupDisplayName(entry.summary, memberName, me),
