@@ -3046,3 +3046,61 @@ fn a_root_continues_its_owners_epoch_beside_a_parent_it_has_no_authority_over() 
     assert_eq!((s2.current, s2.owner), (g2, gid(0)));
     assert_ne!(net.summary(2, &g1).unwrap().group, s2.group);
 }
+
+/// Regression (simulation, code at 7e8da430, `GROUPS_MEMBERS_SEED=115`, 171 and 189): a
+/// former owner's root dated at the end of time made every later root of the new owner
+/// `u64::MAX` (`L + 1` saturates, D.72), so the interim rule and anything ordered by date had
+/// only the chat IDs left to order the group's roots.
+#[test]
+fn a_former_owners_root_does_not_date_the_new_owners_roots() {
+    let (mut net, g) = founded(3);
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    let params = crate::root::RootParams {
+        name: "mine again".into(),
+        members: (0..3).map(gid).collect(),
+        group_secret: crate::ids::GroupSecret::from_bytes([4; 32]),
+        owner: ident(0).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
+        created_at: u64::MAX,
+    };
+    let a =
+        Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [1; 32]).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(a))).unwrap();
+    net.recv_frames_m(1, 0, &[Frame::Event(blob)]);
+    let r = net
+        .change(
+            1,
+            g,
+            GroupChange::Resolve {
+                members: vec![gid(0), gid(2)],
+                name: None,
+            },
+        )
+        .unwrap();
+    let e = net
+        .change(
+            1,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("later".into()),
+            },
+        )
+        .unwrap();
+    let at = |c: &ChatId| net.devs[1].node.root(c).unwrap().created_at();
+    assert!(at(&r) < u64::MAX);
+    assert!(at(&r) < at(&e) && at(&e) < u64::MAX);
+}
