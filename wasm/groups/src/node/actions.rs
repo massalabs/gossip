@@ -92,33 +92,41 @@ impl Node {
         now: u64,
         rng: &mut dyn Randomness,
     ) -> Result<ChatId, NodeError> {
+        self.create_group_with(
+            store,
+            signer,
+            name,
+            members,
+            super::GroupOptions::default(),
+            now,
+            rng,
+        )
+    }
+
+    /// Founds a group as [`Node::create_group`] does, with `options` (§5.12): with
+    /// `migrate_from`, the group of two continues an earlier conversation with the other
+    /// member. When this device holds that member's own creation for the same conversation
+    /// and that member's GossipID sorts first, that group is adopted instead and its key
+    /// returned (two creations at once); when this device's sorts first, the other is
+    /// dropped.
+    ///
+    /// # Errors
+    ///
+    /// As [`Node::create_group`]; [`NodeError::Root`] with [`crate::Error::MigrateFrom`]
+    /// for `migrate_from` on a group that is not of two.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_group_with<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        signer: &dyn IdentitySigner,
+        name: String,
+        members: Vec<GossipId>,
+        options: super::GroupOptions,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<ChatId, NodeError> {
         self.run(store, now, rng, |n, cx| {
-            n.remember_own_keys(cx, signer);
-            let mut members: BTreeSet<GossipId> = members.into_iter().collect();
-            members.insert(n.me);
-            // A single commitment to a fresh random dummy ID, then discarded (§4.5).
-            let dummy = ChatId::from_bytes(bytes(cx.rng));
-            let params = RootParams {
-                name,
-                members: members.into_iter().collect(),
-                group_secret: GroupSecret::from_bytes(bytes(cx.rng)),
-                owner: signer.public_keys().clone(),
-                epoch_challenge: Challenge::from_bytes(bytes(cx.rng)),
-                ref_chat_id_challenge: Challenge::from_bytes(bytes(cx.rng)),
-                created_at: cx.now,
-            };
-            let root = Root::create_successor(params, &[dummy], signer, bytes(cx.rng))
-                .map_err(NodeError::Root)?;
-            let id = root.chat_id();
-            n.stats.roots_created += 1;
-            n.adopt(cx, root.clone(), n.me, Vec::new(), false)?;
-            n.changed(id, ChangeKind::Joined, cx.now);
-            for m in root.members() {
-                if *m != n.me {
-                    n.queue_object(*m, id, EntryItem::Root);
-                }
-            }
-            Ok(id)
+            n.found_group(cx, signer, name, members, options)
         })
     }
 

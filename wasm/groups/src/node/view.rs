@@ -80,6 +80,13 @@ pub struct InvitationSummary {
     /// It continues a group this device was removed from or that was dissolved (§4.8 case
     /// 4): accepting rejoins that conversation (§5.10).
     pub rejoins: Option<ChatId>,
+    /// The format version of the earlier conversation it says it continues, when it founds
+    /// a group of this device and its owner (§5.12, conditions 1 and 2).
+    pub migrate_from: Option<u64>,
+    /// The peer whose earlier conversation it continues, when this device acts on it: the
+    /// version is known and the caller declared that conversation (condition 3). Otherwise
+    /// an ordinary invitation.
+    pub migration_of: Option<GossipId>,
 }
 
 /// A line of the timeline (§5.6, §5.8, §5.10, §7.5).
@@ -257,6 +264,11 @@ impl Node {
                     received_from: (r.from != r.root.owner_id()).then_some(r.from),
                     closed_before: inv.closed_before,
                     rejoins: inv.rejoins,
+                    migrate_from: r
+                        .root
+                        .migrate_from()
+                        .filter(|_| self.direct_owner(&r.root, inv.rejoins.is_some()).is_some()),
+                    migration_of: self.migration_of(c),
                 }),
                 EpochStatus::Installed => None,
             })

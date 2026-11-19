@@ -651,6 +651,8 @@ tables! {
     queue: WorkKey => Work,
     meta: () => Meta,
     lookup_results: (ChatId, SyncObjId) => super::LookupResult,
+    earlier: (GossipId, u64) => u64,
+    consents: GossipId => u64,
 }
 
 /// A table of the in-memory copy: the records and the keys written since the last commit.
@@ -1015,4 +1017,16 @@ pub enum ChangeKind {
     Fork,
     /// The group was closed and erased on this device.
     Closed,
+    /// This device's group of two was closed because `by`, the peer's group founded for the
+    /// same earlier conversation at the same time, is kept (§5.12); with `lost_messages`,
+    /// messages written in it are lost.
+    Superseded {
+        /// The group kept.
+        by: ChatId,
+        /// Messages were held in the closed group.
+        lost_messages: bool,
+    },
+    /// What the connection queries answer may have changed (§5.12), keyed by
+    /// [`super::DEVICE`].
+    Connections,
 }
