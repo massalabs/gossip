@@ -319,6 +319,8 @@ impl Entry {
     }
 }
 
+/// On receipt the strict check has already refused too many entries before decoding (see the
+/// schemas of `proto`); this repeats it at no cost, and applies it to what is sent.
 fn check_entry_list(field: &'static str, n: usize, max: usize) -> Result<()> {
     if n > max {
         return Err(Error::TooMany { field, max, got: n });

@@ -22,7 +22,11 @@
 
 use std::collections::BTreeMap;
 
-use super::strict::{Kind, Schema};
+use super::strict::{Kind, Limit, Schema};
+use crate::constants::{
+    MAX_EVENT_PARENTS, MAX_MEMBERS, MAX_NEIGHBOR_SUGGESTIONS, MAX_NOTICE_ENTRIES, MAX_PAGE_ENTRIES,
+    MAX_QUERY_ENTRIES, MAX_REPLY_TARGETS, MAX_ROOT_PARENTS,
+};
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Container {
@@ -442,6 +446,7 @@ pub(crate) static CONTAINER: Schema = Schema {
     name: "Container",
     fields: &[(1, Kind::Opaque)],
     oneofs: &[],
+    limits: &[],
 };
 
 pub(crate) static FRAME: Schema = Schema {
@@ -456,6 +461,7 @@ pub(crate) static FRAME: Schema = Schema {
         (7, Kind::Msg(&LEAVE_REQUEST)),
     ],
     oneofs: &[&[1, 2, 3, 4, 5, 6, 7]],
+    limits: &[],
 };
 
 static QUERY: Schema = Schema {
@@ -468,6 +474,11 @@ static QUERY: Schema = Schema {
         (4, Kind::Opaque),
     ],
     oneofs: &[],
+    limits: &[Limit {
+        field: 4,
+        max: MAX_QUERY_ENTRIES,
+        name: "query entries",
+    }],
 };
 
 pub(crate) static QUERY_ENTRY: Schema = Schema {
@@ -483,12 +494,14 @@ pub(crate) static QUERY_ENTRY: Schema = Schema {
         (8, Kind::Msg(&TWO_IDS)),
     ],
     oneofs: &[&[1, 2, 3, 4, 5, 6, 7, 8]],
+    limits: &[],
 };
 
 static CHAT_LOOKUP: Schema = Schema {
     name: "ChatLookup",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes), (3, Kind::Msg(&TWO_IDS))],
     oneofs: &[&[1, 2, 3]],
+    limits: &[],
 };
 
 /// `ParentRef`, `EventLookup`, `SyncObjLookup`, `KeyQuery` and `RemovalLookup`: two `bytes`.
@@ -496,18 +509,21 @@ static TWO_IDS: Schema = Schema {
     name: "two-identifier message",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes)],
     oneofs: &[],
+    limits: &[],
 };
 
 static SHARED_CHATS_SCAN: Schema = Schema {
     name: "SharedChatsScan",
     fields: &[(1, Kind::Bytes), (2, Kind::Uint64)],
     oneofs: &[],
+    limits: &[],
 };
 
 static TIPS_SCAN: Schema = Schema {
     name: "TipsScan",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes), (3, Kind::Uint64)],
     oneofs: &[],
+    limits: &[],
 };
 
 static OBJECT_LOOKUP: Schema = Schema {
@@ -518,6 +534,7 @@ static OBJECT_LOOKUP: Schema = Schema {
         (3, Kind::Bytes),
     ],
     oneofs: &[],
+    limits: &[],
 };
 
 static RESPONSE: Schema = Schema {
@@ -531,6 +548,7 @@ static RESPONSE: Schema = Schema {
         (6, Kind::Bytes),
     ],
     oneofs: &[&[3, 4, 5, 6]],
+    limits: &[],
 };
 
 static PAGE: Schema = Schema {
@@ -542,12 +560,22 @@ static PAGE: Schema = Schema {
         (4, Kind::RepeatedMsg(&ENTRY)),
     ],
     oneofs: &[],
+    limits: &[Limit {
+        field: 4,
+        max: MAX_PAGE_ENTRIES,
+        name: "page entries",
+    }],
 };
 
 static NOTICE: Schema = Schema {
     name: "Notice",
     fields: &[(1, Kind::RepeatedMsg(&ENTRY))],
     oneofs: &[],
+    limits: &[Limit {
+        field: 1,
+        max: MAX_NOTICE_ENTRIES,
+        name: "notice entries",
+    }],
 };
 
 static ENTRY: Schema = Schema {
@@ -558,24 +586,32 @@ static ENTRY: Schema = Schema {
         (3, Kind::Bytes),
     ],
     oneofs: &[],
+    limits: &[],
 };
 
 static NEIGHBOR_REQUEST: Schema = Schema {
     name: "NeighborRequest",
     fields: &[(1, Kind::Bytes)],
     oneofs: &[],
+    limits: &[],
 };
 
 static NEIGHBOR_RESPONSE: Schema = Schema {
     name: "NeighborResponse",
     fields: &[(1, Kind::Bytes), (2, Kind::Bool), (3, Kind::Bytes)],
     oneofs: &[],
+    limits: &[Limit {
+        field: 3,
+        max: MAX_NEIGHBOR_SUGGESTIONS,
+        name: "suggestions",
+    }],
 };
 
 static LEAVE_REQUEST: Schema = Schema {
     name: "LeaveRequest",
     fields: &[(1, Kind::Bytes)],
     oneofs: &[],
+    limits: &[],
 };
 
 // Metadata values (§7.6).
@@ -584,12 +620,18 @@ pub(crate) static REPLY_TO: Schema = Schema {
     name: "ReplyTo",
     fields: &[(1, Kind::RepeatedMsg(&REPLY_TARGET))],
     oneofs: &[],
+    limits: &[Limit {
+        field: 1,
+        max: MAX_REPLY_TARGETS,
+        name: "replyTo",
+    }],
 };
 
 static REPLY_TARGET: Schema = Schema {
     name: "ReplyTarget",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes)],
     oneofs: &[],
+    limits: &[],
 };
 
 // Event blobs (§13.1).
@@ -608,6 +650,7 @@ pub(crate) static EVENT: Schema = Schema {
         (5, Kind::Msg(&DISSOLVE)),
     ],
     oneofs: &[&[1, 2, 3, 4, 5]],
+    limits: &[],
 };
 
 static GROUP_ROOT: Schema = Schema {
@@ -625,6 +668,18 @@ static GROUP_ROOT: Schema = Schema {
         (10, Kind::Bytes),
     ],
     oneofs: &[],
+    limits: &[
+        Limit {
+            field: 3,
+            max: MAX_ROOT_PARENTS,
+            name: "parents",
+        },
+        Limit {
+            field: 4,
+            max: MAX_MEMBERS,
+            name: "members",
+        },
+    ],
 };
 
 /// `Leave` and `Kick` have the same fields.
@@ -632,12 +687,14 @@ static SIGNED_OBJECT: Schema = Schema {
     name: "Leave/Kick",
     fields: &[(1, Kind::Bytes), (2, Kind::Bytes), (3, Kind::Bytes)],
     oneofs: &[],
+    limits: &[],
 };
 
 static DISSOLVE: Schema = Schema {
     name: "Dissolve",
     fields: &[(1, Kind::Bytes), (2, Kind::Bool), (3, Kind::Bytes)],
     oneofs: &[],
+    limits: &[],
 };
 
 static GROUP_MESSAGE_EVENT: Schema = Schema {
@@ -650,6 +707,11 @@ static GROUP_MESSAGE_EVENT: Schema = Schema {
         (5, Kind::Msg(&MESSAGE_PAYLOAD)),
     ],
     oneofs: &[],
+    limits: &[Limit {
+        field: 4,
+        max: MAX_EVENT_PARENTS,
+        name: "parents",
+    }],
 };
 
 static MESSAGE_PAYLOAD: Schema = Schema {
@@ -667,6 +729,7 @@ static MESSAGE_PAYLOAD: Schema = Schema {
         (10, Kind::RepeatedMsg(&METADATA_ENTRY)),
     ],
     oneofs: &[&[7, 8, 9]],
+    limits: &[],
 };
 
 /// The implicit entry message of `map<string, bytes>`.
@@ -674,10 +737,12 @@ static METADATA_ENTRY: Schema = Schema {
     name: "MetadataEntry",
     fields: &[(1, Kind::Str), (2, Kind::Bytes)],
     oneofs: &[],
+    limits: &[],
 };
 
 static FORWARD: Schema = Schema {
     name: "Forward",
     fields: &[(1, Kind::Enum(MESSAGE_TYPES)), (2, Kind::Bytes)],
     oneofs: &[],
+    limits: &[],
 };

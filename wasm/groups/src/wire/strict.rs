@@ -9,14 +9,18 @@
 //! - a `uint32` above `u32::MAX` and a `bool` other than 0 or 1, which a decoder would
 //!   otherwise convert lossily (§1.1);
 //! - text that is not UTF-8, a truncated field or a varint longer than 64 bits;
-//! - two different cases of one `oneof`: a frame holds exactly one kind (§13.1, D.24).
+//! - two different cases of one `oneof`: a frame holds exactly one kind (§13.1, D.24);
+//! - more occurrences of a repeated field than its limit (§4.1, §6.1, §7.6, §13.10).
 //!
 //! Repeated occurrences of a singular field are accepted as protobuf defines them (the last
 //! scalar wins, embedded messages merge): they are other encodings of field values, and no
 //! hash covers the encoded bytes (§13.1). The same holds for the same case of a `oneof` sent
 //! twice. Because embedded messages merge, a singular embedded message is checked as the
 //! concatenation of all its occurrences, which is what the decoder builds: its `oneof` cases
-//! are taken over every occurrence.
+//! and the counts of its repeated fields are taken over every occurrence.
+//!
+//! The check allocates nothing, so the count limits are applied before `prost` builds
+//! anything from the bytes.
 
 use crate::error::{Error, Result};
 
@@ -44,6 +48,17 @@ pub(crate) enum Kind {
     Opaque,
 }
 
+/// A repeated field whose number of occurrences is limited.
+#[derive(Debug)]
+pub(crate) struct Limit {
+    /// The field number.
+    pub field: u32,
+    /// The most occurrences allowed.
+    pub max: usize,
+    /// The name reported in [`Error::TooMany`].
+    pub name: &'static str,
+}
+
 /// The known fields of one message.
 #[derive(Debug)]
 pub(crate) struct Schema {
@@ -51,6 +66,8 @@ pub(crate) struct Schema {
     pub fields: &'static [(u32, Kind)],
     /// The field numbers of each `oneof`; at most one case of each may appear.
     pub oneofs: &'static [&'static [u32]],
+    /// Count limits on repeated fields.
+    pub limits: &'static [Limit],
 }
 
 const WIRE_VARINT: u64 = 0;
@@ -182,6 +199,22 @@ fn check_at(root: &[u8], path: &mut Vec<u32>, schema: &Schema) -> Result<()> {
             Ok(())
         })?;
     }
+    for limit in schema.limits {
+        let mut got = 0usize;
+        walk(root, path, &mut |tag, _| {
+            if tag == limit.field {
+                got += 1;
+            }
+            Ok(())
+        })?;
+        if got > limit.max {
+            return Err(Error::TooMany {
+                field: limit.name,
+                max: limit.max,
+                got,
+            });
+        }
+    }
     for (number, kind) in schema.fields {
         if let Kind::Msg(inner) = kind {
             path.push(*number);
@@ -261,6 +294,11 @@ mod tests {
         name: "Inner",
         fields: &[(1, Kind::Bytes), (2, Kind::Bytes), (3, Kind::Bytes)],
         oneofs: &[&[2, 3]],
+        limits: &[Limit {
+            field: 1,
+            max: 2,
+            name: "inner ones",
+        }],
     };
     static TEST: Schema = Schema {
         name: "Test",
@@ -277,6 +315,11 @@ mod tests {
             (10, Kind::Bytes),
         ],
         oneofs: &[&[9, 10]],
+        limits: &[Limit {
+            field: 8,
+            max: 3,
+            name: "repeated inners",
+        }],
     };
 
     #[test]
@@ -399,6 +442,42 @@ mod tests {
         assert_eq!(
             check(&[0x42, 0x04, 0x12, 0x00, 0x1a, 0x00], &TEST),
             Err(Error::Malformed("two cases of one oneof"))
+        );
+    }
+
+    #[test]
+    fn count_limits() {
+        // Three repeated inners, then four.
+        let three = [0x42, 0x00, 0x42, 0x00, 0x42, 0x00];
+        assert_eq!(check(&three, &TEST), Ok(()));
+        assert_eq!(
+            check(&[&three[..], &[0x42, 0x00]].concat(), &TEST),
+            Err(Error::TooMany {
+                field: "repeated inners",
+                max: 3,
+                got: 4
+            })
+        );
+        // Inside a singular message the count runs over every occurrence, which merge.
+        assert_eq!(check(&[0x32, 0x04, 0x0a, 0x00, 0x0a, 0x00], &TEST), Ok(()));
+        assert_eq!(
+            check(
+                &[0x32, 0x04, 0x0a, 0x00, 0x0a, 0x00, 0x32, 0x02, 0x0a, 0x00],
+                &TEST
+            ),
+            Err(Error::TooMany {
+                field: "inner ones",
+                max: 2,
+                got: 3
+            })
+        );
+        // Each repeated message has its own count.
+        assert_eq!(
+            check(
+                &[0x42, 0x04, 0x0a, 0x00, 0x0a, 0x00, 0x42, 0x02, 0x0a, 0x00],
+                &TEST
+            ),
+            Ok(())
         );
     }
 
