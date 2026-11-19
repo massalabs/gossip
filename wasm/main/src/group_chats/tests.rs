@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use super::codec::{Codec, hex};
-use super::engine::Core;
+use super::engine::{Core, IdentityKey};
 use super::json::J;
 use super::store::BatchOut;
 use groups::{ChatId, GossipId};
@@ -136,7 +136,11 @@ fn keys(seed: &str) -> (auth::UserPublicKeys, auth::UserSecretKeys) {
 impl Peer {
     fn new(seed: &str) -> Self {
         let (public, secret) = keys(seed);
-        let core = Core::open(public.clone(), secret, &BatchOut::default()).unwrap();
+        let core = Core::open(
+            IdentityKey::new(public.clone(), &secret),
+            &BatchOut::default(),
+        )
+        .unwrap();
         Self {
             core,
             db: Db::default(),
@@ -159,7 +163,11 @@ impl Peer {
     fn reopen(&mut self) {
         self.persist();
         let (_, secret) = keys(&self.secret_seed);
-        self.core = Core::open(self.public.clone(), secret, &self.db.snapshot()).unwrap();
+        self.core = Core::open(
+            IdentityKey::new(self.public.clone(), &secret),
+            &self.db.snapshot(),
+        )
+        .unwrap();
         assert_eq!(self.core.report.orphans, 0);
     }
 }
