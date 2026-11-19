@@ -610,3 +610,60 @@ fn a_full_queue_of_suspect_ids_makes_room_for_a_missing_parent() {
         "parent dropped"
     );
 }
+
+/// Found by review (code at `6a916f2e`): a freed slot of a peer woke the tasks blocked on it
+/// in key order, an order the announcer of the IDs chooses, and woke the same ones again
+/// each time they blocked again, so one credible task behind a backlog of discredited IDs
+/// waited as long as the backlog lasted.
+#[test]
+fn a_freed_slot_wakes_credible_tasks_first_and_rotates_the_others() {
+    use super::super::index::{Blocked, CREDIBLE, TaskIndex};
+    use super::super::records::{Run, Task};
+    let chat = ChatId::from_bytes([1; 32]);
+    let key = |ts: u64, n: u8| TaskKey {
+        chat_id: chat,
+        target: Target::Event(EventId::new(ts, [n; 16])),
+    };
+    let idle = Task {
+        run: Run::Active {
+            stage: 0,
+            ttl: MIN,
+            jitter: 1_000_000,
+            attempt: None,
+            expired_resends: 0,
+        },
+        candidates: BTreeMap::new(),
+        runs: 1,
+        created_at: T0,
+    };
+    let p = member(1);
+    let blocked = Blocked {
+        peers: vec![p],
+        until: u64::MAX,
+    };
+    let mut ix = TaskIndex::default();
+    // Discredited IDs dated early, so first by key; then one credible ID.
+    let suspect: Vec<TaskKey> = (0..50u8).map(|n| key(T0 - DAY, n)).collect();
+    let credible = key(T0, 99);
+    for k in suspect.iter().chain([&credible]) {
+        let prio = if *k == credible { CREDIBLE } else { 0 };
+        ix.update(*k, Some(&idle), prio);
+        ix.block(*k, blocked.clone());
+    }
+    // One slot of the peer is free.
+    ix.load.insert(p, 15);
+    ix.wake_free(16);
+    assert_eq!(ix.ready().collect::<Vec<_>>(), vec![credible]);
+    // Among equals, a task woken and blocked again goes behind the others.
+    ix.block(credible, blocked.clone());
+    ix.update(credible, None, 0);
+    let mut woken = Vec::new();
+    for _ in 0..3 {
+        ix.wake_free(16);
+        let k = ix.ready().next().unwrap();
+        woken.push(k);
+        ix.block(k, blocked.clone());
+    }
+    assert_eq!(woken.len(), 3);
+    assert!(woken[0] != woken[1] && woken[1] != woken[2], "{woken:?}");
+}
