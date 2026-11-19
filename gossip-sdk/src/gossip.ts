@@ -679,8 +679,6 @@ class GossipSdk {
       // for rationale.
       this._announcement.setPersistFlusher(() => this.awaitPendingPersist());
 
-      this._discussion.setMessageService(this._message);
-
       this._refresh = new RefreshService(
         this._message,
         this._discussion,
