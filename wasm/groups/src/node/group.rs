@@ -543,22 +543,8 @@ impl Node {
             .filter(|c| self.t.markers.get(c).is_some_and(Marker::is_closed))
             .count();
         if closed > 0 && closed == root.parents().len() {
-            // Recorded closed too, within limits per delivering peer: the markers a peer can
-            // make this device keep are bounded.
-            let mine = self
-                .t
-                .markers
-                .iter()
-                .filter(|(_, m)| **m == Marker::ClosedFrom(from))
-                .count();
-            let all = self
-                .t
-                .markers
-                .iter()
-                .filter(|(_, m)| matches!(m, Marker::ClosedFrom(_)))
-                .count();
-            if mine < INHERITED_MARKERS_PER_SENDER && all < INHERITED_MARKERS_PER_DEVICE {
-                self.t.markers.insert(id, Marker::ClosedFrom(from));
+            if self.record_closed(id, from) {
+                self.reject_continuations(id);
             }
             return Ok(Answer::Supplied);
         }
@@ -583,6 +569,67 @@ impl Node {
             .collect();
         self.invite(cx, from, root, unmatched, false, None, via);
         Ok(Answer::Supplied)
+    }
+
+    /// Records `id`, a root rejected because it continues a closed epoch, as closed too
+    /// (§4.8 case 3), within limits per delivering peer: the markers a peer can make this
+    /// device keep are bounded. Returns whether it was recorded.
+    fn record_closed(&mut self, id: ChatId, from: GossipId) -> bool {
+        let mine = self
+            .t
+            .markers
+            .iter()
+            .filter(|(_, m)| **m == Marker::ClosedFrom(from))
+            .count();
+        let all = self
+            .t
+            .markers
+            .iter()
+            .filter(|(_, m)| matches!(m, Marker::ClosedFrom(_)))
+            .count();
+        if mine < INHERITED_MARKERS_PER_SENDER && all < INHERITED_MARKERS_PER_DEVICE {
+            self.t.markers.insert(id, Marker::ClosedFrom(from));
+            return true;
+        }
+        false
+    }
+
+    /// `closed` was just recorded closed: an invitation that names it as a parent, and
+    /// whose every parent is now closed, is rejected as case 3 would have rejected it had
+    /// its parents been known on arrival, and recorded closed in turn, down the line. A
+    /// root that arrived before the epoch between it and a closed one (which its parent
+    /// lookup fetched) was otherwise offered once the lookup was over.
+    fn reject_continuations(&mut self, closed: ChatId) {
+        let mut work = vec![closed];
+        while let Some(c) = work.pop() {
+            let markers: Vec<ChatId> = self
+                .t
+                .markers
+                .iter()
+                .filter(|(_, m)| m.is_closed())
+                .map(|(k, _)| *k)
+                .collect();
+            let rejected: Vec<(ChatId, GossipId)> = self
+                .t
+                .epochs
+                .iter()
+                .filter(|(_, r)| {
+                    matches!(&r.status, EpochStatus::Invitation(i) if !i.closed_before)
+                        && r.root.names_parent(&c)
+                        && r.root.match_parents(markers.iter()).len() == r.root.parents().len()
+                })
+                .map(|(x, r)| (*x, r.from))
+                .collect();
+            for (x, from) in rejected {
+                self.take_record(&x);
+                self.t.events.remove(&(x, ChangeKind::Invitation));
+                self.drop_tasks_of(&[x]);
+                self.drop_fetched_for(x);
+                if self.record_closed(x, from) {
+                    work.push(x);
+                }
+            }
+        }
     }
 
     /// Keeps a handover root whose parent is not held, and looks the parent up (§4.7).
