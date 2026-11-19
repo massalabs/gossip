@@ -9,6 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::records::{Attempt, Run, Task, TaskKey};
 use crate::ids::GossipId;
 
+/// The order of a ready or blocked task: priority (higher first), then sequence.
+type Order = (core::cmp::Reverse<u64>, u64);
+
 /// Why a task waits: every candidate left is at its lookup limit (`peers`) or has a request
 /// outstanding until before `until`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,7 +71,13 @@ pub(crate) struct TaskIndex {
     /// The priority of each task when last updated (higher first).
     prio: BTreeMap<TaskKey, u64>,
     /// Idle tasks to rank at the next pass, highest priority first.
-    ready: BTreeSet<(core::cmp::Reverse<u64>, TaskKey)>,
+    ready: BTreeSet<(Order, TaskKey)>,
+    /// The order of each ready task.
+    ready_at: BTreeMap<TaskKey, Order>,
+    /// Incremented at each ready or blocked entry: within a priority, tasks go in the order
+    /// they became ready or blocked, which rotates them (the key order would be the one the
+    /// announcer of the IDs chose).
+    seq: u64,
     /// Attempts per peer, and in total.
     pub(crate) load: BTreeMap<GossipId, usize>,
     pub(crate) total: usize,
@@ -76,7 +85,9 @@ pub(crate) struct TaskIndex {
     pub(crate) suspect_load: BTreeMap<GossipId, usize>,
     pub(crate) suspect_total: usize,
     blocked: BTreeMap<TaskKey, Blocked>,
-    by_peer: BTreeMap<GossipId, BTreeSet<TaskKey>>,
+    by_peer: BTreeMap<GossipId, BTreeSet<(Order, TaskKey)>>,
+    /// The order of each blocked task in `by_peer`.
+    blocked_at: BTreeMap<TaskKey, Order>,
     until: BTreeSet<(u64, TaskKey)>,
     /// Local deadlines of sent attempts.
     pub(crate) timers: BTreeSet<(u64, TaskKey)>,
@@ -90,14 +101,27 @@ impl TaskIndex {
         *self = Self::default();
     }
 
+    /// A new order for `key`: by priority (higher first), then behind every task already
+    /// placed at that priority.
+    fn next_order(&mut self, key: &TaskKey) -> Order {
+        self.seq += 1;
+        let p = self.prio.get(key).copied().unwrap_or(0);
+        (core::cmp::Reverse(p), self.seq)
+    }
+
     fn set_ready(&mut self, key: TaskKey) {
-        let p = self.prio.get(&key).copied().unwrap_or(0);
-        self.ready.insert((core::cmp::Reverse(p), key));
+        if self.ready_at.contains_key(&key) {
+            return;
+        }
+        let o = self.next_order(&key);
+        self.ready_at.insert(key, o);
+        self.ready.insert((o, key));
     }
 
     fn unset_ready(&mut self, key: &TaskKey) {
-        let p = self.prio.get(key).copied().unwrap_or(0);
-        self.ready.remove(&(core::cmp::Reverse(p), *key));
+        if let Some(o) = self.ready_at.remove(key) {
+            self.ready.remove(&(o, *key));
+        }
     }
 
     /// The ready tasks, highest priority first.
@@ -192,8 +216,11 @@ impl TaskIndex {
     /// Records that `key` waits for `b`.
     pub(crate) fn block(&mut self, key: TaskKey, b: Blocked) {
         self.unset_ready(&key);
+        self.unblock(&key);
+        let o = self.next_order(&key);
+        self.blocked_at.insert(key, o);
         for p in &b.peers {
-            self.by_peer.entry(*p).or_default().insert(key);
+            self.by_peer.entry(*p).or_default().insert((o, key));
         }
         if b.until != u64::MAX {
             self.until.insert((b.until, key));
@@ -205,9 +232,10 @@ impl TaskIndex {
         let Some(b) = self.blocked.remove(key) else {
             return false;
         };
+        let o = self.blocked_at.remove(key).expect("blocked");
         for p in &b.peers {
             if let Some(set) = self.by_peer.get_mut(p) {
-                set.remove(key);
+                set.remove(&(o, *key));
                 if set.is_empty() {
                     self.by_peer.remove(p);
                 }
@@ -218,14 +246,14 @@ impl TaskIndex {
     }
 
     /// Makes ready, for each peer below `limit` lookups, as many of the tasks blocked on it
-    /// as it has free slots (oldest IDs first): only that many can use them, and waking
-    /// every task blocked on a busy peer at each freed slot would rank thousands of tasks
-    /// for one lookup.
+    /// as it has free slots (highest priority first, then in the order they blocked): only
+    /// that many can use them, and waking every task blocked on a busy peer at each freed
+    /// slot would rank thousands of tasks for one lookup.
     pub(crate) fn wake_free(&mut self, limit: usize) {
         let mut woken = Vec::new();
         for (peer, set) in &self.by_peer {
             let free = limit.saturating_sub(self.load.get(peer).copied().unwrap_or(0));
-            woken.extend(set.iter().take(free).copied());
+            woken.extend(set.iter().take(free).map(|(_, k)| *k));
         }
         for key in woken {
             if self.unblock(&key) && self.slot.get(&key) == Some(&Slot::Idle) {
