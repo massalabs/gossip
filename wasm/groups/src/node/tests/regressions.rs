@@ -1087,3 +1087,55 @@ fn a_plaintext_is_not_current_once_a_deletion_came_due() {
     net.now = due + MIN;
     assert!(!net.devs[0].node.is_current(out[0].handle, net.now));
 }
+
+/// Found by review (code at `6a916f2e`): the results of sync-object lookups were kept in
+/// memory only, so a result was reported twice when the operation that completed the lookup
+/// failed to commit and was retried, and lost when the device crashed before the caller
+/// took it.
+#[test]
+fn lookup_results_survive_failed_commits_and_crashes_exactly_once() {
+    let root = epoch_root(2, 0x10);
+    let chat = root.chat_id();
+    let mut store = Instrumented::new(MemoryStorage::new());
+    let mut rng = TestRng::new(3);
+    let mut node = Node::open(&store, member(0)).unwrap();
+    node.install_epoch(&mut store, config(&root), false, T0, &mut rng)
+        .unwrap();
+    let sync = SyncObjId::from_bytes([5; 32]);
+    node.lookup_sync_object(&mut store, chat, sync, T0, &mut rng)
+        .unwrap();
+    let out = node.poll_outbox(&mut store, T0, &mut rng).unwrap();
+    let mut rid = None;
+    for o in &out {
+        node.handed_off(&mut store, o.handle, T0, &mut rng).unwrap();
+        if o.to == member(1) {
+            for (r, _, _, ops) in queries(&frames(&o.plaintext)) {
+                if matches!(ops[0], QueryOp::SyncObj { .. }) {
+                    rid = Some(r);
+                }
+            }
+        }
+    }
+    let na = wire::encode_plaintext(&[Frame::Response(Response {
+        request_id: Some(rid.unwrap()),
+        idx: 0,
+        result: ResponseResult::Status(Status::NotAvailable),
+    })])
+    .unwrap();
+    store.fail_commits = true;
+    assert!(
+        node.handle_plaintext(&mut store, member(1), &na, T0 + 1, &mut rng)
+            .is_err()
+    );
+    store.fail_commits = false;
+    node.handle_plaintext(&mut store, member(1), &na, T0 + 1, &mut rng)
+        .unwrap();
+    // A crash before the caller takes the result.
+    let mut node = Node::open(&store, member(0)).unwrap();
+    node.install_epoch(&mut store, config(&root), false, T0 + 2, &mut rng)
+        .unwrap();
+    assert_eq!(
+        node.take_lookup_results(),
+        vec![(chat, sync, LookupResult::NotFound)]
+    );
+}
