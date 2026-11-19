@@ -15,12 +15,8 @@ import { generateEncryptionKey } from '../../src/wasm/encryption';
 import { getTestStorageConfig } from '../testDb';
 import { decodeUserId } from '../../src/utils/userId';
 import type { EncryptedMessage } from '../../src/api/messageProtocol/types';
+import { group_max_plaintext_bytes } from '../../src/wasm/bindings';
 
-/**
- * Candidate cap on a group plaintext (56 KiB). The value is under decision:
- * the test checks that it would fit, not that it is enforced.
- */
-const CANDIDATE_GROUP_PLAINTEXT_MAX = 57_344;
 /** Largest payload of a mesh blob. */
 const MESH_PAYLOAD_MAX = 65_536;
 /** Bound on the constant overhead of the wrapping and session encryption. */
@@ -35,15 +31,8 @@ const OVERHEAD_MAX = 8_192;
  */
 const OVERHEAD_SPREAD_MAX = 16;
 
-const SIZES = [
-  0,
-  1,
-  1_000,
-  16_384,
-  CANDIDATE_GROUP_PLAINTEXT_MAX - 1,
-  CANDIDATE_GROUP_PLAINTEXT_MAX,
-  60_000,
-];
+/** The engine's cap on a group plaintext (§13.10), read once wasm is loaded. */
+let groupPlaintextMax = 0;
 
 let clock = 1_800_000_000_000;
 
@@ -92,6 +81,7 @@ describe('Group plaintext size on the wire', { timeout: 300_000 }, () => {
 
   beforeAll(async () => {
     await ensureWasmInitialized();
+    groupPlaintextMax = group_max_plaintext_bytes();
   });
 
   beforeEach(async () => {
@@ -144,6 +134,18 @@ describe('Group plaintext size on the wire', { timeout: 300_000 }, () => {
   }
 
   it('adds a constant overhead, in both directions and as the session moves', async () => {
+    expect(groupPlaintextMax).toBe(57_344);
+    // The last one is over the cap: the transport would carry it, the engine
+    // never produces it.
+    const sizes = [
+      0,
+      1,
+      1_000,
+      16_384,
+      groupPlaintextMax - 1,
+      groupPlaintextMax,
+      60_000,
+    ];
     const overheads: number[] = [];
     const rows: string[] = [];
     const pairs: [GossipSdk, GossipSdk, string][] = [
@@ -156,13 +158,13 @@ describe('Group plaintext size on the wire', { timeout: 300_000 }, () => {
     // refreshes drawn one time in a few).
     for (let round = 0; round < 3; round++) {
       for (const [from, to, dir] of pairs) {
-        for (const size of SIZES) {
+        for (const size of sizes) {
           const blob = await blobSize(from, to, size);
           overheads.push(blob - size);
           rows.push(
             `round ${round} ${dir} payload ${size} blob ${blob} overhead ${blob - size}`
           );
-          if (size === CANDIDATE_GROUP_PLAINTEXT_MAX) {
+          if (size === groupPlaintextMax) {
             expect(blob).toBeLessThanOrEqual(MESH_PAYLOAD_MAX);
           }
         }
@@ -191,8 +193,7 @@ describe('Group plaintext size on the wire', { timeout: 300_000 }, () => {
 
     expect(max).toBeLessThanOrEqual(OVERHEAD_MAX);
     expect(max - min).toBeLessThanOrEqual(OVERHEAD_SPREAD_MAX);
-    expect(CANDIDATE_GROUP_PLAINTEXT_MAX + max).toBeLessThanOrEqual(
-      MESH_PAYLOAD_MAX
-    );
+    // The largest plaintext the engine produces fits at the worst overhead.
+    expect(groupPlaintextMax + max).toBeLessThanOrEqual(MESH_PAYLOAD_MAX);
   });
 });
