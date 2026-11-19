@@ -24,6 +24,8 @@ import {
   messageText,
 } from '../utils/groupTimeline';
 import GroupTimelineLine from '../components/groups/GroupTimelineLine';
+import ArchivePrefix from '../components/groups/ArchivePrefix';
+import { useDiscussionStore } from '../stores/discussionStore';
 import SafeName from '../components/groups/SafeName';
 import { useGroupMemberName } from '../hooks/useGroupMemberName';
 import { useAccountStore } from '../stores/accountStore';
@@ -113,6 +115,10 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     s.groups.find(g => g.summary.groupId === groupId)
   );
   const refresh = useGroupStore(s => s.refresh);
+  // The earlier one-to-one conversation this direct chat continues (§5.12).
+  const archivePeer = useDiscussionStore(
+    s => s.discussions.find(d => d.linkedGroupId === groupId)?.contactUserId
+  );
   const setCurrentGroup = useGroupStore(s => s.setCurrentGroup);
   const [replyingTo, setReplyingTo] = useState<InputTarget | null>(null);
   const [editing, setEditing] = useState<InputTarget | null>(null);
@@ -298,7 +304,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
         className="h-full overflow-y-auto py-3"
         data-testid="group-timeline"
       >
-        {timeline.length === 0 && (
+        {archivePeer && <ArchivePrefix contactUserId={archivePeer} />}
+        {timeline.length === 0 && !archivePeer && (
           <p className="text-center text-sm text-muted-foreground mt-8">
             {t('timeline.empty')}
           </p>

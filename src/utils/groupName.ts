@@ -127,3 +127,12 @@ export function groupDisplayName(
   const rest = others.length - names.length;
   return safeName(rest > 0 ? `${names.join(', ')} +${rest}` : names.join(', '));
 }
+
+/**
+ * A name made safe (`safeName`) placed inside a sentence: isolated from the
+ * direction of the surrounding text with first-strong isolate marks (§5.11
+ * rule 3), which `safeName` removed from the name itself.
+ */
+export function isolate(safe: string): string {
+  return `\u2068${safe}\u2069`;
+}

@@ -8,7 +8,8 @@
   "filter": {
     "all": "Все",
     "unread": "Непрочитанные",
-    "pending": "Ожидающие"
+    "pending": "Ожидающие",
+    "archived": "Архив"
   },
   "message_input": {
     "replying_to": "Ответ для",

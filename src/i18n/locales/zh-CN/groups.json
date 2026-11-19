@@ -181,5 +181,41 @@
     "send": "发送处理结果",
     "sent": "处理结果已发送",
     "identical": "所有版本的成员都相同：确认即可合并。"
+  },
+  "archive": {
+    "badge": "存档",
+    "read_only": "早先的对话，保存在本设备上，只读。",
+    "migrate": "迁移到新群组",
+    "migrate_hint": "在与 {{name}} 的新聊天中继续此对话。早先的消息保留在本设备上并显示在最前面，不会发送其中任何内容。",
+    "migrated": "已创建新聊天",
+    "migrate_failed": "无法创建新聊天",
+    "archive": "存档",
+    "unarchive": "移回列表",
+    "archived": "已移至存档列表",
+    "unarchived": "已移回列表",
+    "invitation": "{{name}} 邀请你在新聊天中继续此对话。",
+    "junction": "以上为早先的对话 · 此聊天是它的延续",
+    "waiting_contact": "正在等待 {{name}} 接受你的请求。",
+    "request_received": "{{name}} 请求成为你的联系人并与你聊天。",
+    "superseded": "你与 {{name}} 的新聊天和对方的聊天同时创建：保留对方的聊天。",
+    "superseded_lost": "你与 {{name}} 的新聊天和对方的聊天同时创建：保留对方的聊天，你在自己的聊天中写的消息已丢失。",
+    "unsent": "未发送"
+  },
+  "invite": {
+    "title": "邀请",
+    "who_asks": "请求者",
+    "asks_contact_and_chat": "{{name}} 请求成为你的联系人并与你开始聊天。",
+    "their_message": "对方的留言",
+    "add_contact": "联系人",
+    "add_contact_hint": "接受后会将 {{name}} 加入你的联系人。",
+    "group": "群组",
+    "owner": "所有者",
+    "continues": "早先的对话",
+    "continues_body": "此聊天延续你与 {{name}} 早先的对话，早先的对话只读并显示在最前面。",
+    "warnings": "警告",
+    "untrusted_names": "名称由发送者自行选择，可能冒充他人：请核对用户 ID。",
+    "choices": "你的回复",
+    "open": "打开",
+    "not_found": "此邀请已不再等待回复。"
   }
 }
