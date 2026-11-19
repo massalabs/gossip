@@ -794,7 +794,7 @@ impl Node {
             (kick, None)
         } else if let Some(leave) = self.leave_for(&chat, &peer) {
             (leave, None)
-        } else if let Some(later) = self.later_kick(&chat, &peer) {
+        } else if let Some(later) = self.later_removal(&chat, &peer) {
             (later, Some(later.0))
         } else {
             return false;
@@ -816,10 +816,10 @@ impl Node {
         true
     }
 
-    /// The kick of `peer` held for a later epoch of the group of `chat` that descends from
-    /// `chat` through epochs `peer` is a member of: the epoch it was removed from after
-    /// missing the ones between (the latest such kick).
-    fn later_kick(&self, chat: &ChatId, peer: &GossipId) -> Option<SignedKey> {
+    /// The kick or leave of `peer` held for a later epoch of the group of `chat` that
+    /// descends from `chat` through epochs `peer` is a member of: the epoch it was removed
+    /// from, or left, after the ones it is behind (the latest such record).
+    fn later_removal(&self, chat: &ChatId, peer: &GossipId) -> Option<SignedKey> {
         let group = self.group_of(chat);
         self.t
             .signed
@@ -827,6 +827,9 @@ impl Node {
             .filter_map(|(k, r)| match &r.object {
                 SignedObject::Kick(kick) if kick.removed() == *peer && k.0 != *chat => {
                     Some((*k, kick.chat_id()))
+                }
+                SignedObject::Leave(l) if l.leaver() == *peer && k.0 != *chat => {
+                    Some((*k, l.chat_id()))
                 }
                 _ => None,
             })
