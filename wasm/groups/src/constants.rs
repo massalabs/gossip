@@ -86,8 +86,8 @@ pub const METADATA_KEY_REPLY_TO: &str = "replyTo";
 
 /// Maximum size of a group plaintext: version prefix, all frames and events (§13.10).
 ///
-/// 56 KiB, so that a full plaintext, once wrapped and encrypted in a one-to-one session (at
-/// most 3,634 bytes more), fits one 65,536-byte mesh payload.
+/// 56 KiB, so that a full plaintext, once wrapped in a session message of the group type and
+/// encrypted in the session (at most 3,632 bytes more), fits one 65,536-byte mesh payload.
 pub const MAX_PLAINTEXT_BYTES: usize = 57_344;
 /// Maximum size of an event blob: alone in a response frame with a full `request_id` and the
 /// longest `idx`, the largest frame that can carry it, the plaintext is at most
@@ -158,11 +158,11 @@ mod tests {
 
     #[test]
     fn a_full_container_fits_one_mesh_payload_once_encrypted() {
-        // A mesh payload is at most 65,536 bytes. Wrapping a group plaintext in a keep-alive
-        // and encrypting it in the one-to-one session adds at most 3,634 bytes, as measured
-        // by gossip-sdk/test/integration/group-plaintext-size.spec.ts.
+        // A mesh payload is at most 65,536 bytes. Wrapping a group plaintext in a session
+        // message of the group type and encrypting it in the session adds at most 3,632 bytes,
+        // as measured by gossip-sdk/test/integration/group-plaintext-size.spec.ts.
         const MESH_PAYLOAD_BYTES: usize = 65_536;
-        const SESSION_OVERHEAD_BYTES: usize = 3_634;
+        const SESSION_OVERHEAD_BYTES: usize = 3_632;
         const { assert!(MAX_PLAINTEXT_BYTES + SESSION_OVERHEAD_BYTES <= MESH_PAYLOAD_BYTES) };
     }
 
