@@ -1726,6 +1726,11 @@ export class DatabaseConnection {
       await tx.delete(schema.announcementCursors);
       await tx.delete(schema.discardedPeers);
       await tx.delete(schema.transportCursors);
+      await tx.delete(schema.groupEventRows);
+      await tx.delete(schema.groupEdges);
+      await tx.delete(schema.groupObjects);
+      await tx.delete(schema.groupRecords);
+      await tx.delete(schema.groupOutbox);
     });
   }
 
@@ -1760,6 +1765,16 @@ export class DatabaseConnection {
       await tx
         .delete(schema.discardedPeers)
         .where(eq(schema.discardedPeers.ownerUserId, userId));
+      // Group engine records and outbox
+      for (const table of [
+        schema.groupEventRows,
+        schema.groupEdges,
+        schema.groupObjects,
+        schema.groupRecords,
+        schema.groupOutbox,
+      ]) {
+        await tx.delete(table).where(eq(table.ownerUserId, userId));
+      }
       // Session-specific tables (no user column — safe to clear for current session)
       await tx.delete(schema.pendingEncryptedMessages);
       await tx.delete(schema.pendingAnnouncements);
@@ -1772,6 +1787,11 @@ export class DatabaseConnection {
       await tx.delete(schema.messages);
       await tx.delete(schema.discussions);
       await tx.delete(schema.contacts);
+      await tx.delete(schema.groupEventRows);
+      await tx.delete(schema.groupEdges);
+      await tx.delete(schema.groupObjects);
+      await tx.delete(schema.groupRecords);
+      await tx.delete(schema.groupOutbox);
     });
   }
 }
