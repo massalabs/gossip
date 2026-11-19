@@ -859,6 +859,57 @@ impl Node {
         })
     }
 
+    /// Publishes a media message (§7.6): `data` of the type `mimetype`, any bytes the event
+    /// can hold, with `metadata` (a name or a caption, for example).
+    ///
+    /// # Errors
+    ///
+    /// [`NodeError`]; nothing was committed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_media<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        chat_id: ChatId,
+        mimetype: String,
+        data: Vec<u8>,
+        metadata: BTreeMap<String, Vec<u8>>,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<Published, NodeError> {
+        let body = Body::Media(crate::event::Media { mimetype, data });
+        self.publish_message(store, chat_id, body, metadata, None, now, rng)
+    }
+
+    /// Adds (`add`) or removes this device's reaction `emoji` to the message `target` of the
+    /// epoch `chat_id` (§7.6): a new version of the one reaction object of this device, target
+    /// and emoji, published in the target's epoch like an edit. A toggle of a reaction the
+    /// device holds is dated `max(now, previous + 1)`.
+    ///
+    /// # Errors
+    ///
+    /// [`NodeError`]; nothing was committed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_reaction<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        chat_id: ChatId,
+        target: SyncObjId,
+        emoji: String,
+        add: bool,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<Published, NodeError> {
+        let me = self.me;
+        let action = if add {
+            crate::event::ReactionAction::Add
+        } else {
+            crate::event::ReactionAction::Remove
+        };
+        self.publish_with(store, chat_id, now, rng, move |e, ov, now, rng| {
+            e.publish_reaction(ov, now, rng, me, target, emoji, action)
+        })
+    }
+
     /// Publishes an edit of a message (§7.2).
     ///
     /// # Errors

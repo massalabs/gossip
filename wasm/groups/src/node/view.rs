@@ -11,7 +11,8 @@ use super::records::{
 };
 use super::{Node, NodeError};
 use crate::display::{self, VisibleMessage};
-use crate::ids::{ChatId, GossipId};
+use crate::event::{Body, Media, MessageType};
+use crate::ids::{ChatId, GossipId, SyncObjId};
 use crate::rng::Randomness;
 use crate::root::RootType;
 use crate::store::StorageRead;
@@ -204,6 +205,25 @@ impl TimelineItem {
     }
 }
 
+/// `m` with its media data left out: the body keeps the mimetype, the length is in
+/// [`VisibleMessage::data_len`].
+fn without_media_data(mut m: VisibleMessage) -> VisibleMessage {
+    match &mut m.content.body {
+        Body::Media(media) => media.data = Vec::new(),
+        Body::Forward {
+            content_type: MessageType::Media,
+            content,
+        } => {
+            if let Ok(mut media) = Media::decode(content) {
+                media.data = Vec::new();
+                *content = media.encode();
+            }
+        }
+        _ => {}
+    }
+    m
+}
+
 /// What changed in a group since the last [`Node::take_changes`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Change {
@@ -302,6 +322,10 @@ impl Node {
     /// its roots at their time `T` and of the signed objects that made it read-only at their
     /// receipt, in one order (§7.5).
     ///
+    /// Each message lists its reactions (§7.6). A media message, or a forwarded one, comes
+    /// without its data, so that a timeline stays small: its body holds the mimetype and empty
+    /// data, [`VisibleMessage::data_len`] the length, and [`Node::media`] reads the data.
+    ///
     /// # Errors
     ///
     /// A storage failure.
@@ -319,7 +343,7 @@ impl Node {
         let epochs: Vec<ChatId> = groups.iter().flat_map(|g| self.group_epochs(g)).collect();
         let mut items: Vec<TimelineItem> = display::view(store, &epochs, now)?
             .into_iter()
-            .map(TimelineItem::Message)
+            .map(|m| TimelineItem::Message(without_media_data(m)))
             .collect();
         let junctions: Vec<Junction> = self
             .t
@@ -466,6 +490,24 @@ impl Node {
         }
         items.sort_by_key(TimelineItem::order);
         Ok(items)
+    }
+
+    /// The media message `sync_obj_id` of the epoch `chat` at `now`, with its data: its own
+    /// or the one it forwards (§7.6). `None` when that message is not visible or holds no
+    /// media.
+    ///
+    /// # Errors
+    ///
+    /// A storage failure.
+    pub fn media<S: StorageRead>(
+        &self,
+        store: &S,
+        chat: &ChatId,
+        sync_obj_id: &SyncObjId,
+        now: u64,
+    ) -> Result<Option<Media>, NodeError> {
+        Ok(display::message(store, chat, sync_obj_id, now)?
+            .and_then(|m| display::media_of(&m.content.body)))
     }
 
     /// The epochs held that the epochs `from` continue, at any depth, by the parent links

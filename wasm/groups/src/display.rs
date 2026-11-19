@@ -1,9 +1,11 @@
 //! The display rules of §7.5 that are data: which messages are visible at `now`, their
 //! order, the time they show, and the stored time `T` of a root's line. No UI.
 
+use std::collections::BTreeMap;
+
 use crate::error::{Error, Result};
-use crate::event::{Content, Payload};
-use crate::ids::{ChatId, SyncObjId};
+use crate::event::{Body, Content, Media, MessageType, Payload, ReactionAction};
+use crate::ids::{ChatId, GossipId, SyncObjId};
 use crate::store::{ObjectRecord, StorageError, StorageRead, StoredResult};
 
 /// A message of the view.
@@ -15,6 +17,11 @@ pub struct VisibleMessage {
     pub content: Content,
     /// The result hash, the second ordering key (§6.2, §7.5). Computed, not stored.
     pub result_hash: [u8; 32],
+    /// Its reactions (§7.6): `(author, emoji)` of each visible reaction to it whose current
+    /// version is an *add*, ascending. A reaction is never a message of its own.
+    pub reactions: Vec<(GossipId, String)>,
+    /// The length of the media data, for a media message or a forwarded one (§7.6).
+    pub data_len: Option<u64>,
 }
 
 impl VisibleMessage {
@@ -56,13 +63,15 @@ pub fn is_visible(content: &Content, now: u64) -> bool {
 }
 
 /// The visible messages of the epochs `chat_ids` (all the epochs and side branches of a
-/// group), in one chronological order (§7.5). Deleted messages, pending future content and
-/// results whose dates are still in the future are hidden.
+/// group), in one chronological order (§7.5), each with its reactions (§7.6). Deleted
+/// messages, pending future content and results whose dates are still in the future are
+/// hidden; a reaction is listed on its target, in the same epoch, while its current version
+/// is an *add*, and not at all when its target is not shown.
 ///
 /// The view is computed as if everything due at `now` had been applied, whether or not
 /// [`crate::Epoch::tick`] ran: a message whose earliest pending deletion is due is hidden,
-/// and a pending version that is due is merged with the current result by the rule of §7.1
-/// (the greatest `(last_modified_at, resultHash)`). Nothing is written.
+/// and a pending version that is due is merged with the current result by the rule of §7.1.
+/// Nothing is written.
 ///
 /// # Errors
 ///
@@ -74,12 +83,33 @@ pub fn view<R: StorageRead + ?Sized>(
 ) -> core::result::Result<Vec<VisibleMessage>, StorageError> {
     let mut out = Vec::new();
     for chat_id in chat_ids {
+        let mut messages = Vec::new();
+        let mut reactions: BTreeMap<SyncObjId, Vec<(GossipId, String)>> = BTreeMap::new();
         for obj in store.objects(chat_id)? {
-            if let Some(m) = effective(store, chat_id, &obj, now)?
-                && is_visible(&m.content, now)
-            {
-                out.push(m);
+            let Some(content) = effective(store, chat_id, &obj, now)? else {
+                continue;
+            };
+            if !is_visible(&content, now) {
+                continue;
             }
+            match &content.body {
+                Body::Reaction(r) => {
+                    if r.action == ReactionAction::Add {
+                        reactions
+                            .entry(r.target)
+                            .or_default()
+                            .push((content.author, r.emoji.clone()));
+                    }
+                }
+                _ => messages.push(visible(chat_id, content)),
+            }
+        }
+        for mut m in messages {
+            if let Some(mut r) = reactions.remove(&m.sync_obj_id()) {
+                r.sort();
+                m.reactions = r;
+            }
+            out.push(m);
         }
     }
     out.sort_by(|a, b| {
@@ -91,32 +121,71 @@ pub fn view<R: StorageRead + ?Sized>(
     Ok(out)
 }
 
+/// The visible message `sync_obj_id` of the epoch `chat_id` at `now`, without its reactions:
+/// `None` when it is a reaction, deleted, not held or not visible.
+///
+/// # Errors
+///
+/// A storage failure.
+pub fn message<R: StorageRead + ?Sized>(
+    store: &R,
+    chat_id: &ChatId,
+    sync_obj_id: &SyncObjId,
+    now: u64,
+) -> core::result::Result<Option<VisibleMessage>, StorageError> {
+    let Some(obj) = store.object(chat_id, sync_obj_id)? else {
+        return Ok(None);
+    };
+    Ok(effective(store, chat_id, &obj, now)?
+        .filter(|c| !c.is_reaction() && is_visible(c, now))
+        .map(|c| visible(chat_id, c)))
+}
+
+fn visible(chat_id: &ChatId, content: Content) -> VisibleMessage {
+    let result_hash = Payload::Content(content.clone()).result_hash(chat_id);
+    let data_len = media_of(&content.body).map(|m| m.data.len() as u64);
+    VisibleMessage {
+        chat_id: *chat_id,
+        content,
+        result_hash,
+        reactions: Vec::new(),
+        data_len,
+    }
+}
+
+/// The media message a body holds: its own, or the one it forwards.
+#[must_use]
+pub fn media_of(body: &Body) -> Option<Media> {
+    match body {
+        Body::Media(m) => Some(m.clone()),
+        Body::Forward {
+            content_type: MessageType::Media,
+            content,
+        } => Media::decode(content).ok(),
+        _ => None,
+    }
+}
+
 /// The non-delete result of `obj` once everything due at `now` is applied, or `None` when it
-/// is deleted by then or has no result yet.
+/// is deleted by then or has no result yet. The ranks are those of the merge (§7.1), and a
+/// deletion, applied or due, hides every result but a reaction.
 fn effective<R: StorageRead + ?Sized>(
     store: &R,
     chat_id: &ChatId,
     obj: &ObjectRecord,
     now: u64,
-) -> core::result::Result<Option<VisibleMessage>, StorageError> {
-    if obj.is_deleted()
+) -> core::result::Result<Option<Content>, StorageError> {
+    let deleted = obj.is_deleted()
         || obj
             .pending_deletions
             .first()
-            .is_some_and(|(due, _)| *due <= now)
-    {
-        return Ok(None);
-    }
-    let candidate = |content: Content| {
-        let result_hash = Payload::Content(content.clone()).result_hash(chat_id);
-        VisibleMessage {
-            chat_id: *chat_id,
-            content,
-            result_hash,
-        }
+            .is_some_and(|(due, _)| *due <= now);
+    let ranked = |c: Content| {
+        let hash = Payload::Content(c.clone()).result_hash(chat_id);
+        (c.rank(hash), c)
     };
     let mut best = match &obj.current {
-        Some(StoredResult::Content(c)) => Some(candidate(c.clone())),
+        Some(StoredResult::Content(c)) => Some(ranked(c.clone())),
         _ => None,
     };
     for (_, id) in obj
@@ -130,13 +199,12 @@ fn effective<R: StorageRead + ?Sized>(
         else {
             continue;
         };
-        let m = candidate(c);
-        let key = |m: &VisibleMessage| (m.content.last_modified_at, m.result_hash);
-        if best.as_ref().is_none_or(|b| key(&m) > key(b)) {
-            best = Some(m);
+        let candidate = ranked(c);
+        if best.as_ref().is_none_or(|b| candidate.0 > b.0) {
+            best = Some(candidate);
         }
     }
-    Ok(best)
+    Ok(best.map(|(_, c)| c).filter(|c| c.is_reaction() || !deleted))
 }
 
 /// `M` of §7.5: the greatest `created_at` among the visible messages held in the root's
