@@ -10,6 +10,7 @@
 //!
 //! - [`hash`]: `H(domain, ...) = BLAKE3(CBOR([domain, ...]))` and every derived ID (§1.2, §3).
 //! - [`Root`]: the signed root of an epoch, its validation and verification (§4).
+//! - [`Leave`], [`Kick`], [`Dissolve`]: the signed objects (§5.3, §5.6, §5.8).
 //! - [`wire`]: the plaintext, container, frames and event blobs (§13, Appendix C).
 
 #![warn(missing_docs)]
@@ -21,6 +22,7 @@ pub mod hash;
 mod ids;
 mod keys;
 mod root;
+mod signed;
 pub mod wire;
 
 #[cfg(test)]
@@ -33,3 +35,4 @@ pub use ids::{
 };
 pub use keys::{SignatureBytes, check_key_answer, parse_user_public_keys};
 pub use root::{ReceiveContext, Root, RootParams, RootType, next_root_created_at};
+pub use signed::{Dissolve, Kick, Leave};
