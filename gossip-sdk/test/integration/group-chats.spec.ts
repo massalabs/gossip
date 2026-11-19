@@ -12,6 +12,7 @@ import { generateEncryptionKey } from '../../src/wasm/encryption';
 import { getTestStorageConfig } from '../testDb';
 import { SdkEventType } from '../../src/core/SdkEventEmitter';
 import type { GroupService, GroupChange } from '../../src/services/groups';
+import { GroupMessageTooLargeError } from '../../src/services/groups';
 import { deserializeMessage } from '../../src/utils/messageSerialization';
 import { serializeGroupPlaintext } from '../../src/utils/messageSerialization';
 import { MessageType } from '../../src/db';
@@ -53,6 +54,13 @@ interface Internals {
 const internals = (sdk: GossipSdk) => sdk.groups as unknown as Internals;
 const queriesOf = (sdk: GossipSdk) =>
   (sdk as unknown as { _queries: Queries })._queries;
+
+/** The engine methods a test spies on. */
+interface GroupsNodeLike {
+  publish_message: (...args: unknown[]) => string;
+  publish_edit: (...args: unknown[]) => string;
+  local_edit: (...args: unknown[]) => void;
+}
 
 describe('Group chats', { timeout: 120_000 }, () => {
   let net: MockMessageProtocol;
@@ -267,6 +275,81 @@ describe('Group chats', { timeout: 120_000 }, () => {
     await bob.groups.sendMessage(groupId, 'second');
     await deliver();
     expect(await texts(alice.groups, groupId)).toEqual(['first', 'second']);
+  });
+
+  it('refuses text and metadata over their limits before the engine', async () => {
+    const groupId = await alice.groups.createGroup('Sizes', [bob.userId]);
+    const limits = alice.groups.messageLimits;
+    expect(limits).toEqual({ textBytes: 16_384, metadataBytes: 16_384 });
+    const node = (alice.groups as unknown as { node: GroupsNodeLike }).node;
+    const publish = vi.spyOn(node, 'publish_message');
+    const edit = vi.spyOn(node, 'publish_edit');
+    const localEdit = vi.spyOn(node, 'local_edit');
+    const tooLarge = async (
+      p: Promise<unknown>,
+      part: 'text' | 'metadata',
+      size: number
+    ) => {
+      const e = await p.then(
+        () => null,
+        (err: unknown) => err
+      );
+      expect(e).toBeInstanceOf(GroupMessageTooLargeError);
+      expect(e).toMatchObject({ part, size, max: 16_384 });
+    };
+
+    // Text is counted in UTF-8 bytes, not characters.
+    const sent = await alice.groups.sendMessage(groupId, 'x'.repeat(16_384));
+    await alice.groups.sendMessage(groupId, '\u00e9'.repeat(8_192));
+    expect(publish).toHaveBeenCalledTimes(2);
+    await tooLarge(
+      alice.groups.sendMessage(groupId, 'x'.repeat(16_385)),
+      'text',
+      16_385
+    );
+    await tooLarge(
+      alice.groups.sendMessage(groupId, '\u00e9'.repeat(8_193)),
+      'text',
+      16_386
+    );
+    // Metadata as encoded: a 1-byte key and an n-byte value are 9 + n bytes.
+    await alice.groups.sendMessage(groupId, 'meta', {
+      metadata: { m: new Uint8Array(16_375) },
+    });
+    expect(publish).toHaveBeenCalledTimes(3);
+    await tooLarge(
+      alice.groups.sendMessage(groupId, 'meta', {
+        metadata: { m: new Uint8Array(16_376) },
+      }),
+      'metadata',
+      16_385
+    );
+    expect(publish).toHaveBeenCalledTimes(3);
+
+    // Edits and local-only edits follow the same limits.
+    await tooLarge(
+      alice.groups.editMessage(groupId, sent.syncObjId, 'x'.repeat(16_385)),
+      'text',
+      16_385
+    );
+    await tooLarge(
+      alice.groups.editMessage(groupId, sent.syncObjId, 'x', {
+        metadata: { m: new Uint8Array(16_376) },
+      }),
+      'metadata',
+      16_385
+    );
+    await tooLarge(
+      alice.groups.editMessageLocally(groupId, sent.syncObjId, {
+        body: { type: 'text', text: 'x'.repeat(16_385) },
+      }),
+      'text',
+      16_385
+    );
+    expect(edit).not.toHaveBeenCalled();
+    expect(localEdit).not.toHaveBeenCalled();
+    await alice.groups.editMessage(groupId, sent.syncObjId, 'y'.repeat(16_384));
+    expect(edit).toHaveBeenCalledTimes(1);
   });
 
   it('replies, edits locally and retries', async () => {
