@@ -1684,3 +1684,74 @@ fn a_parent_lookup_goes_on_after_the_invitation_is_accepted() {
     assert_eq!(groups[0].current, e3);
     assert!(net.texts(3, &e3).contains(&"old".to_owned()));
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=42`): as
+/// above, but the epoch between arrived by itself, as an invitation to rejoin (its parent
+/// is in the group the device left), not as a fetched parent: it was not joined to the
+/// later root the user accepted.
+#[test]
+fn an_invitation_between_a_left_group_and_an_accepted_root_is_joined() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[3].store.clone();
+    net.offline[3] = true;
+    let e2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("x".into()),
+            },
+        )
+        .unwrap();
+    let e3 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("y".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.offline[3] = false;
+    net.dropped.clear();
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    net.devs[3].store = backup;
+    net.restart(3);
+    net.say(3, &g, "back");
+    net.run(2 * MIN);
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Left);
+    for c in [e2, e3] {
+        let root = net.devs[1].node.root(&c).unwrap();
+        let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+        let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+        let now = net.now;
+        let dev = &mut net.devs[3];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(1), &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    // The user accepts the later root only.
+    net.accept(3, e3);
+    net.run(2 * MIN);
+    let groups = net.devs[3].node.groups();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert_eq!(groups[0].status, MyStatus::Left);
+}
