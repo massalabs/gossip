@@ -275,6 +275,16 @@ impl Core {
             .map_err(err)
     }
 
+    pub fn set_accepted_contact(&mut self, peer: GossipId, accepted: bool, now: u64) -> R<()> {
+        self.node
+            .set_accepted_contact(&mut self.store, peer, accepted, now, &mut rng)
+            .map_err(err)
+    }
+
+    pub fn accepted_contacts(&self) -> String {
+        self.node.accepted_contacts().enc().view_text()
+    }
+
     pub fn holds_direct_chat(&self, peer: GossipId) -> bool {
         self.node.holds_direct_chat(&peer)
     }

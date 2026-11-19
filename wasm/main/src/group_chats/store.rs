@@ -110,7 +110,8 @@ macro_rules! node_tables {
             lookup_results,
             earlier,
             consents,
-            backoff
+            backoff,
+            contacts
         )
     };
 }

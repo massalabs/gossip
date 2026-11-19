@@ -670,6 +670,7 @@ tables! {
     earlier: (GossipId, u64) => u64,
     consents: GossipId => u64,
     backoff: GossipId => Backoff,
+    contacts: GossipId => u64,
 }
 
 /// A table of the in-memory copy: the records and the keys written since the last commit.

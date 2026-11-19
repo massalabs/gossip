@@ -133,6 +133,42 @@ impl Node {
         })
     }
 
+    /// Declares (`accepted`) or clears that `peer` is a contact the user accepted. Only such a
+    /// peer is answered with a version notice when it sends a plaintext of a later wire
+    /// version (§13.8): co-members whose connection is automatic and unknown peers get
+    /// silence. Kept until cleared. The caller declares a contact when the user accepts it,
+    /// clears it when the contact is removed, and declares its accepted contacts again at
+    /// open (declaring one again changes nothing).
+    ///
+    /// # Errors
+    ///
+    /// A storage failure.
+    pub fn set_accepted_contact<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        peer: GossipId,
+        accepted: bool,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<(), NodeError> {
+        self.run(store, now, rng, |n, cx| {
+            if accepted && peer != n.me {
+                if !n.t.contacts.contains(&peer) {
+                    n.t.contacts.insert(peer, cx.now);
+                }
+            } else {
+                n.t.contacts.remove(&peer);
+            }
+            Ok(())
+        })
+    }
+
+    /// The contacts the user accepted, as declared ([`Node::set_accepted_contact`]).
+    #[must_use]
+    pub fn accepted_contacts(&self) -> Vec<GossipId> {
+        self.t.contacts.keys().copied().collect()
+    }
+
     /// The consents to a direct chat not used yet, with when each expires.
     #[must_use]
     pub fn direct_chat_consents(&self) -> Vec<(GossipId, u64)> {

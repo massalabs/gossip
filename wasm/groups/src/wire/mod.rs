@@ -248,20 +248,21 @@ impl core::fmt::Debug for Plaintext<'_> {
 
 /// Decodes a received plaintext (§13.1, §13.7, §13.8, §13.10).
 ///
-/// The size limit is checked first, then the version prefix is read before any protobuf
-/// parsing. An invalid container rejects the whole plaintext; each frame is then decoded and
-/// validated on its own by [`Plaintext::frames`], and inside a query each entry is isolated.
+/// The version prefix is read first, before any other check, the size limit included: a
+/// later wire version may have a larger container, and its sender must still learn that this
+/// device speaks version 1. Only the varint prefix of a plaintext of another version is read
+/// (at most ten bytes); nothing more of it is parsed or kept. A prefix that is no valid varint
+/// is a damaged plaintext. For version 1, the size limit comes next, then the container: an
+/// invalid one rejects the whole plaintext; each frame is then decoded and validated on its
+/// own by [`Plaintext::frames`], and inside a query each entry is isolated.
 ///
 /// # Errors
 ///
-/// [`Error::PlaintextTooLarge`], [`Error::InvalidVersionPrefix`],
-/// [`Error::UnsupportedHigherVersion`] (answer with [`version_notice`], at most once per peer
-/// and version per 24 hours), [`Error::UnsupportedLowerVersion`] (drop silently), or
-/// [`Error::Malformed`] for an invalid container.
+/// [`Error::InvalidVersionPrefix`], [`Error::UnsupportedHigherVersion`] (answered with
+/// [`version_notice`] under the rules of [`crate::node`]), [`Error::UnsupportedLowerVersion`]
+/// (dropped silently), [`Error::PlaintextTooLarge`], or [`Error::Malformed`] for an invalid
+/// container.
 pub fn decode_plaintext(bytes: &[u8]) -> Result<Plaintext<'_>> {
-    if bytes.len() > MAX_PLAINTEXT_BYTES {
-        return Err(Error::PlaintextTooLarge(bytes.len()));
-    }
     let mut r = Reader::new(bytes);
     let version = r.varint().map_err(|_| Error::InvalidVersionPrefix)?;
     if version > PROTOCOL_VERSION {
@@ -269,6 +270,9 @@ pub fn decode_plaintext(bytes: &[u8]) -> Result<Plaintext<'_>> {
     }
     if version < PROTOCOL_VERSION {
         return Err(Error::UnsupportedLowerVersion(version));
+    }
+    if bytes.len() > MAX_PLAINTEXT_BYTES {
+        return Err(Error::PlaintextTooLarge(bytes.len()));
     }
     strict::check(r.rest(), &proto::CONTAINER)?;
     Ok(Plaintext {

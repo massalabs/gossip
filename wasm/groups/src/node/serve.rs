@@ -489,12 +489,29 @@ impl Node {
         Ok(())
     }
 
-    /// A plaintext of a version higher than supported: one version notice per peer and
-    /// version per 24 hours (§13.8), to members of an installed epoch only. At most one is
-    /// queued per peer at a time, and the notices are remembered for
-    /// [`VERSION_NOTICES_PER_PEER`] versions, the oldest forgotten first.
+    /// A plaintext of a version higher than any this device supports (§13.8): it is not
+    /// processed and never penalised, and may be answered with a version notice
+    /// ([`crate::wire::version_notice`]: one plaintext at version 1 holding one response
+    /// frame with an empty `request_id`, `idx = 0` and status `unsupported`).
+    ///
+    /// - **What for.** It is the only upgrade path of wire version 1: a device of a later
+    ///   version must be able to tell "this peer speaks version 1" from silence, and fall
+    ///   back to it.
+    /// - **To whom.** Only to a contact the user accepted ([`Node::set_accepted_contact`]),
+    ///   whether or not it shares a group; sharing a group is not enough (a co-member's
+    ///   connection is automatic). Everyone else gets silence.
+    /// - **Order.** The version prefix is read before any other check, the size included
+    ///   ([`crate::wire::decode_plaintext`]); a lower version is dropped silently.
+    /// - **How often.** Once per peer and version per 24 hours, at most
+    ///   [`VERSION_NOTICES_PER_PEER`] per peer in 24 hours whatever versions it cycles
+    ///   through, one queued at a time; at most that many versions are remembered per peer.
+    /// - **What it reveals.** Only that this device speaks version 1, to a peer the user
+    ///   accepted as a contact, which already has a session with it.
+    ///
+    /// A notice received is never an error: it only records the version of a peer that
+    /// shares a group (`handle_response`).
     pub(crate) fn version_notice(&mut self, cx: &mut Cx<'_>, from: GossipId, version: u64) {
-        if !self.shares_epoch(&from) {
+        if !self.t.contacts.contains(&from) {
             return;
         }
         let pending = self
@@ -507,23 +524,17 @@ impl Node {
         }
         let now = cx.now;
         let r = self.peer_mut(&from);
-        let due = r
-            .version_notices
-            .get(&version)
-            .is_none_or(|last| now.saturating_sub(*last) >= VERSION_NOTICE_INTERVAL_MS);
-        if due {
-            r.version_notices.insert(version, now);
-            while r.version_notices.len() > VERSION_NOTICES_PER_PEER {
-                let oldest = r
-                    .version_notices
-                    .iter()
-                    .min_by_key(|(v, at)| (**at, **v))
-                    .map(|(v, _)| *v)
-                    .expect("not empty");
-                r.version_notices.remove(&oldest);
-            }
-            self.queue_work(from, Work::VersionNotice);
+        // Versions whose notice is 24 hours old are forgotten; the others stay, and fill the
+        // peer's allowance for the day.
+        r.version_notices
+            .retain(|_, at| now.saturating_sub(*at) < VERSION_NOTICE_INTERVAL_MS);
+        if r.version_notices.contains_key(&version)
+            || r.version_notices.len() >= VERSION_NOTICES_PER_PEER
+        {
+            return;
         }
+        r.version_notices.insert(version, now);
+        self.queue_work(from, Work::VersionNotice);
     }
 
     /// Drops the correlation references past their deadline (§13.4).

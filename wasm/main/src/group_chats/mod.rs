@@ -307,6 +307,26 @@ impl GroupsNode {
         self.core.direct_chat_consents()
     }
 
+    /// Declares (`accepted`) or clears that `peer` is a contact the user accepted (§13.8): only
+    /// such a peer gets a version notice for a plaintext of a later wire version. Call it when
+    /// the user accepts a contact, when a contact is removed, and at open for every accepted
+    /// contact.
+    pub fn set_accepted_contact(
+        &mut self,
+        peer_id: &[u8],
+        accepted: bool,
+        now: f64,
+    ) -> Result<(), JsValue> {
+        self.core
+            .set_accepted_contact(peer(peer_id)?, accepted, ms(now)?)
+            .map_err(js)
+    }
+
+    /// The accepted contacts declared, in JSON: `["<peer hex>", …]`.
+    pub fn accepted_contacts(&self) -> String {
+        self.core.accepted_contacts()
+    }
+
     /// Whether this device holds a direct chat with `peer` (an automatic group of the two,
     /// however it grew since): a later creation from it is then an ordinary invitation.
     pub fn holds_direct_chat(&self, peer_id: &[u8]) -> Result<bool, JsValue> {
