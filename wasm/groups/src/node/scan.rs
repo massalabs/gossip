@@ -530,8 +530,8 @@ impl Node {
 
     // ── Responder (§12.1, §12.2) ─────────────────────────────────────────────
 
-    /// A tips scan request from `peer`. `None` means the request is ignored silently (the
-    /// peer is not a member of the anchor). The scan state is keyed by
+    /// A tips scan request from `peer`. A peer that is not a member of the anchor is answered
+    /// as for an anchor this device does not hold. The scan state is keyed by
     /// `(peer, anchor, scan_id)`; the first valid offset-0 request freezes the list, later
     /// pages refer to it, and every valid request moves its lifetime to that request's
     /// deadline.
@@ -545,12 +545,14 @@ impl Node {
         live_until: u64,
     ) -> Result<Option<super::records::AnswerOp>, NodeError> {
         use super::records::AnswerOp;
-        let Some(entry) = self.epochs.get(&anchor) else {
-            // Not holding the anchor is legitimate (§12.1).
+        // Not holding the anchor is legitimate (§12.1); a requester that is not a member of
+        // the held anchor gets the same answer, so it cannot tell the two apart.
+        let member = self
+            .epochs
+            .get(&anchor)
+            .is_some_and(|e| e.root.is_member(&peer) && peer != self.me);
+        if !member {
             return Ok(Some(AnswerOp::Status(Status::NotAvailable)));
-        };
-        if !entry.root.is_member(&peer) || peer == self.me {
-            return Ok(None);
         }
         let key: FrozenKey = (peer, anchor, scan_id);
         let page = AnswerOp::Page {

@@ -92,10 +92,12 @@ impl Node {
     }
 
     /// Whether an entry from `from` is answered at all (§13.7). Event and sync-object
-    /// lookups need an installed epoch of which `from` is a member; a tips scan whose anchor
-    /// this device does not hold is answered "not available" (§12.1); a malformed entry is
-    /// answered `malformed` when `from` is a member of some installed epoch. The other
-    /// operations are not handled yet.
+    /// lookups need an installed epoch of which `from` is a member; a tips scan is always
+    /// answered, "not available" when this device does not hold the anchor (§12.1) and
+    /// equally when `from` is not a member of the held anchor, so that a stranger cannot
+    /// tell which epochs the device holds (§12.1 and §13.7 would ignore it silently); a
+    /// malformed entry is answered `malformed` when `from` is a member of some installed
+    /// epoch. The other operations are not handled yet.
     fn authorize(&mut self, from: GossipId, entry: &QueryEntry) -> bool {
         let member_of = |n: &Self, chat: &ChatId| {
             from != n.me && n.epochs.get(chat).is_some_and(|e| e.root.is_member(&from))
@@ -106,9 +108,7 @@ impl Node {
                 QueryOp::Event { chat_id, .. } | QueryOp::SyncObj { chat_id, .. } => {
                     member_of(self, chat_id)
                 }
-                QueryOp::TipsScan { anchor, .. } => {
-                    !self.epochs.contains_key(anchor) || member_of(self, anchor)
-                }
+                QueryOp::TipsScan { .. } => from != self.me,
                 QueryOp::ChatById(_) | QueryOp::ChatByRef(_) | QueryOp::ChatByParent { .. } => {
                     self.not_handled_yet(NotHandled::ChatLookup);
                     false
