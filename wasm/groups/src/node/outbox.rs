@@ -288,7 +288,7 @@ impl Node {
         let Some(p) = self.outbox.sent.get(&handle).cloned() else {
             return Err(NodeError::UnknownHandle);
         };
-        self.run(store, now, rng, |n, _cx| {
+        let r = self.run(store, now, rng, |n, _cx| {
             let peer = p.peer.expect("assembled for a peer");
             for k in &p.items {
                 n.remove_work(k);
@@ -310,7 +310,13 @@ impl Node {
                 }
             }
             Ok(())
-        })?;
+        });
+        if let Err(e) = r {
+            // Nothing was committed and the plaintext stays in flight: so does its work,
+            // which the failed operation took out of the in-flight set.
+            self.outbox.items.extend(p.items.iter().copied());
+            return Err(e);
+        }
         self.outbox.sent.remove(&handle);
         self.outbox.stale.remove(&handle);
         let s = &mut self.stats;
