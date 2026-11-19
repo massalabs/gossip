@@ -70,6 +70,7 @@ impl Node {
             attempt: ScanAttempt::Queued,
             restarts: 0,
             expired_resends: 0,
+            busy: 0,
             lanes: lane.into_iter().collect(),
         };
         self.t.scans_out.insert(key, op);
@@ -244,6 +245,7 @@ impl Node {
                 op.ttl = FIRST_TTL_MS;
                 op.jitter = jitter;
                 op.expired_resends = 0;
+                op.busy = 0;
                 // Back-pressure pauses paging while the queue of missing IDs is full.
                 if full {
                     op.attempt = ScanAttempt::Waiting {
@@ -275,6 +277,7 @@ impl Node {
                 op.ttl = FIRST_TTL_MS;
                 op.jitter = jitter;
                 op.expired_resends = 0;
+                op.busy = 0;
                 self.stats.scans_started += 1;
                 self.resend_scan(key);
             }
@@ -305,18 +308,46 @@ impl Node {
                 }
             }
             ResponseResult::Status(Status::Busy) => {
-                self.answered(&peer);
+                // No sign of responsiveness. Retried about a minute later whatever the
+                // stage (a budget refills in seconds, §17.4); the third in a row counts as an
+                // unanswered timeout of the stage.
                 if let Some(op) = self.t.scans_out.get_mut(&key)
                     && current
                 {
-                    op.attempt = ScanAttempt::Waiting {
-                        until: cx.now.saturating_add(jittered(op.ttl, op.jitter)),
-                    };
+                    op.busy = op.busy.saturating_add(1);
+                    if op.busy >= super::retrieval::MAX_BUSY_IN_A_ROW {
+                        self.note_timeout(&peer, cx.now);
+                        self.next_scan_stage(cx, key);
+                    } else {
+                        op.attempt = ScanAttempt::Waiting {
+                            until: cx.now.saturating_add(jittered(FIRST_TTL_MS, op.jitter)),
+                        };
+                    }
                 }
             }
             _ => self.scan_invalid(cx, key, current),
         }
         Ok(())
+    }
+
+    /// The current stage of the scan `key` ended unanswered: the next stage with the next
+    /// TTL and a new jitter, resent at once; after twenty, the scan ends.
+    fn next_scan_stage(&mut self, cx: &mut Cx<'_>, key: ScanKey) {
+        let Some(stage) = self.t.scans_out.get(&key).map(|op| op.stage + 1) else {
+            return;
+        };
+        if stage >= MAX_UNANSWERED_STAGES {
+            self.complete_scan(cx, key, ScanEnd::Ended);
+            return;
+        }
+        let jitter = draw_jitter(cx.rng);
+        let op = self.t.scans_out.get_mut(&key).expect("present");
+        op.stage = stage;
+        op.ttl = next_ttl(op.ttl);
+        op.jitter = jitter;
+        op.expired_resends = 0;
+        op.busy = 0;
+        self.resend_scan(key);
     }
 
     fn scan_invalid(&mut self, cx: &mut Cx<'_>, key: ScanKey, current: bool) {
@@ -372,18 +403,7 @@ impl Node {
                 ScanAttempt::Sent { local_deadline } if local_deadline <= cx.now => {
                     self.stats.timeouts += 1;
                     self.note_timeout(&key.1, cx.now);
-                    let stage = op.stage + 1;
-                    if stage >= MAX_UNANSWERED_STAGES {
-                        self.complete_scan(cx, key, ScanEnd::Ended);
-                        continue;
-                    }
-                    let jitter = draw_jitter(cx.rng);
-                    let op = self.t.scans_out.get_mut(&key).expect("listed");
-                    op.stage = stage;
-                    op.ttl = next_ttl(op.ttl);
-                    op.jitter = jitter;
-                    op.expired_resends = 0;
-                    self.resend_scan(key);
+                    self.next_scan_stage(cx, key);
                 }
                 ScanAttempt::Waiting { until } if until <= cx.now => {
                     if self.tasks_full(&key.0) {

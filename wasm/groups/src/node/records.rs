@@ -89,6 +89,8 @@ pub struct Candidate {
     pub outstanding_until: Option<u64>,
     /// Requests sent to it for this task.
     pub attempts: u32,
+    /// `busy` answers in a row in this run.
+    pub busy: u8,
 }
 
 impl Candidate {
@@ -98,6 +100,7 @@ impl Candidate {
             state: CandidateState::Untried,
             outstanding_until: None,
             attempts: 0,
+            busy: 0,
         }
     }
 
@@ -215,6 +218,8 @@ pub struct ScanOp {
     pub restarts: u8,
     /// Resends caused by `expired` in this stage.
     pub expired_resends: u8,
+    /// `busy` answers in a row in this stage.
+    pub busy: u8,
     /// The periodic lanes waiting for its completion.
     pub lanes: BTreeSet<u8>,
 }
