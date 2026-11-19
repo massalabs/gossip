@@ -277,7 +277,8 @@ impl Node {
             n.t.epochs.remove(&chat);
             n.t.markers.remove(&chat);
             n.t.events.remove(&(chat, ChangeKind::Invitation));
-            n.drop_tasks_of(&[chat]);
+            // The parent lookup keeps running: when it succeeds, the conversations are
+            // joined (§4.8).
             let held: Vec<ChatId> =
                 n.gx.epochs
                     .values()
