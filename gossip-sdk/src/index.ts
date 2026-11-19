@@ -44,4 +44,8 @@ export type {
   GroupMemberStatus,
   GroupPublished,
   LeaveChoice,
+  GroupMessageRef,
+  GroupEpoch,
+  GroupLocalEdit,
 } from './services/groups.js';
+export { GROUP_MAX_SCHEDULE_MS } from './services/groups.js';

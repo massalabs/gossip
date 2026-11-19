@@ -92,7 +92,39 @@ export interface GroupMessage {
   edited: boolean;
   body: GroupMessageBody;
   metadata: Record<string, Uint8Array>;
+  /**
+   * The messages it replies to (§7.6). `epochId` is null when the target's
+   * epoch is not one this device holds in the timeline.
+   */
+  replyTo: { epochId: GroupId | null; syncObjId: GroupId }[];
 }
+
+/** A message a reply or a forward points to. */
+export interface GroupMessageRef {
+  epochId: GroupId;
+  syncObjId: GroupId;
+}
+
+/** What the root of an epoch says (for the resolution of competing ends). */
+export interface GroupEpoch {
+  epoch: GroupId;
+  name: string;
+  members: string[];
+  owner: string;
+  createdAt: number;
+}
+
+/** A local-only edit (§9.1): each given field replaces the stored one. */
+export interface GroupLocalEdit {
+  body?: GroupMessageBody;
+  author?: string;
+  createdAt?: number;
+  lastModifiedAt?: number;
+  edited?: boolean;
+}
+
+/** The longest a date may be set ahead of now (§7.2 `MAX_SCHEDULE`: two weeks minus five minutes). */
+export const GROUP_MAX_SCHEDULE_MS = 1_209_600_000;
 
 export type GroupLine =
   | { type: 'founded'; epoch: GroupId; owner: string }
@@ -272,6 +304,7 @@ function timelineItem(raw: unknown): GroupTimelineItem {
     metadata: Object.fromEntries(
       (c.metadata as [string, string][]).map(([k, v]) => [k, hexToBytes(v)])
     ),
+    replyTo: [],
   };
 }
 
@@ -705,13 +738,14 @@ export class GroupService {
     };
   }
 
-  /** Sends a message to the group's current epoch. */
+  /** Sends a message to the group's current epoch, possibly as a reply. */
   sendMessage(
     groupId: GroupId,
     message: GroupMessageBody | string,
     options: {
       metadata?: Record<string, Uint8Array>;
       scheduledFor?: number;
+      replyTo?: GroupMessageRef[];
     } = {}
   ): Promise<GroupPublished> {
     const b =
@@ -720,11 +754,25 @@ export class GroupService {
         : message;
     return this.run(node => {
       const epoch = this.currentEpoch(node, groupId);
+      const metadata = { ...(options.metadata ?? {}) };
+      if (options.replyTo && options.replyTo.length > 0) {
+        const targets = options.replyTo.map(t => {
+          const reference = node.ref_chat_id(hexToBytes(t.epochId));
+          if (!reference) {
+            throw new Error('groups:unknown-epoch: reply target');
+          }
+          return {
+            ref_chat_id: bytesToHex(reference),
+            sync_obj_id: t.syncObjId,
+          };
+        });
+        metadata.replyTo = node.encode_reply_to(JSON.stringify(targets));
+      }
       return this.published(
         node.publish_message(
           hexToBytes(epoch),
           bodyJson(b),
-          metadataJson(options.metadata),
+          metadataJson(metadata),
           options.scheduledFor,
           this.now()
         )
@@ -785,6 +833,48 @@ export class GroupService {
     });
   }
 
+  /**
+   * Changes a message on this device only (§9.1): nothing is sent, no
+   * indicator is added, and this device stops serving any version of it.
+   */
+  editMessageLocally(
+    epochId: GroupId,
+    syncObjId: GroupId,
+    edit: GroupLocalEdit
+  ): Promise<void> {
+    const limit = this.now() + GROUP_MAX_SCHEDULE_MS;
+    for (const t of [edit.createdAt, edit.lastModifiedAt]) {
+      if (t !== undefined && t > limit) {
+        return Promise.reject(new Error('groups:invalid: date too far ahead'));
+      }
+    }
+    const json = JSON.stringify({
+      body: edit.body ? JSON.parse(bodyJson(edit.body)) : null,
+      author: edit.author ? hexOfUser(edit.author) : null,
+      created_at: edit.createdAt ?? null,
+      last_modified_at: edit.lastModifiedAt ?? null,
+      metadata: null,
+      edited: edit.edited ?? null,
+    });
+    return this.run(node => {
+      node.local_edit(
+        hexToBytes(epochId),
+        hexToBytes(syncObjId),
+        json,
+        this.now()
+      );
+    });
+  }
+
+  /** Retry synchronisation of a message (§9.4): republishes its stored result. */
+  retryMessage(epochId: GroupId, syncObjId: GroupId): Promise<GroupPublished> {
+    return this.run(node =>
+      this.published(
+        node.retry(hexToBytes(epochId), hexToBytes(syncObjId), this.now())
+      )
+    );
+  }
+
   private currentEpoch(node: GroupsNode, groupId: GroupId): GroupId {
     const g = JSON.parse(node.group(hexToBytes(groupId))) as Raw | null;
     if (!g) throw new Error('groups:unknown-epoch: unknown group');
@@ -825,12 +915,56 @@ export class GroupService {
     }));
   }
 
-  /** The visible messages and lines of a group (and the groups linked to it). */
+  /** What the root of a held epoch says, or null. */
+  epoch(epochId: GroupId): GroupEpoch | null {
+    const r = JSON.parse(
+      this.requireNode().epoch(hexToBytes(epochId))
+    ) as Raw | null;
+    if (!r) return null;
+    return {
+      epoch: r.epoch as string,
+      name: r.name as string,
+      members: (r.members as string[]).map(userIdOf),
+      owner: userIdOf(r.owner as string),
+      createdAt: r.created_at as number,
+    };
+  }
+
+  /**
+   * The visible messages and lines of a group (and the groups linked to it),
+   * with the targets of replies resolved against the epochs it shows.
+   */
   timeline(groupId: GroupId): GroupTimelineItem[] {
-    return (
-      JSON.parse(
-        this.requireNode().timeline(hexToBytes(groupId), this.now())
-      ) as unknown[]
+    const node = this.requireNode();
+    const items = (
+      JSON.parse(node.timeline(hexToBytes(groupId), this.now())) as unknown[]
     ).map(timelineItem);
+    const epochs = new Set<string>();
+    for (const i of items) {
+      if (i.kind === 'message') epochs.add(i.epochId);
+      else if (i.line.type === 'founded' || i.line.type === 'epochChange') {
+        epochs.add(i.line.epoch);
+      }
+    }
+    const byReference = new Map<string, string>();
+    for (const e of epochs) {
+      const reference = node.ref_chat_id(hexToBytes(e));
+      if (reference) byReference.set(bytesToHex(reference), e);
+    }
+    for (const i of items) {
+      if (i.kind !== 'message' || !i.metadata.replyTo) continue;
+      try {
+        const targets = JSON.parse(
+          node.decode_reply_to(i.metadata.replyTo)
+        ) as { ref_chat_id: string; sync_obj_id: string }[];
+        i.replyTo = targets.map(t => ({
+          epochId: byReference.get(t.ref_chat_id) ?? null,
+          syncObjId: t.sync_obj_id,
+        }));
+      } catch {
+        // A malformed list is shown without its targets (§7.6, D.21).
+      }
+    }
+    return items;
   }
 }
