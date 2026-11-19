@@ -2038,11 +2038,14 @@ fn a_new_owner_cannot_take_over_another_group_of_the_former_owner() {
     let s2 = net.summary(2, &g2).unwrap();
     assert_eq!(s2.current, g2, "{s2:?}");
     assert_eq!(s2.owner, gid(0));
-    assert_eq!(net.summary(2, &g1).unwrap().current, h);
-    assert!(matches!(
-        net.devs[2].node.t.epochs.get(&r.chat_id()).unwrap().status,
-        EpochStatus::Invitation(_)
-    ));
+    // The root continues B's own line only; A's other group is an unmatched parent.
+    let s1 = net.summary(2, &g1).unwrap();
+    assert_eq!(s1.current, r.chat_id());
+    assert_ne!(s1.group, s2.group);
+    assert_eq!(
+        net.devs[2].node.t.epochs.get(&r.chat_id()).unwrap().parents,
+        vec![h]
+    );
 }
 
 /// Finding 4 of the review of 54711780: a member that left with a signed leave and was
