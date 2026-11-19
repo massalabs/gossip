@@ -662,7 +662,8 @@ export class GroupsNode {
     }
     /**
      * `edit`: `{"body":…|null,"author":hex|null,"created_at":…|null,
-     * "last_modified_at":…|null,"metadata":…|null,"edited":bool|null}`.
+     * "last_modified_at":…|null,"metadata":…|null,"edited":bool|null}`; `metadata` is a
+     * patch as for `publish_edit`, `null` keeping everything.
      * @param {Uint8Array} epoch
      * @param {Uint8Array} sync_obj_id
      * @param {string} edit
@@ -871,6 +872,21 @@ export class GroupsNode {
         }
     }
     /**
+     * Whether `peer` is a member of a group this device holds and has accepted: a
+     * connection it asks for may be opened automatically (§5.12).
+     * @param {Uint8Array} peer_id
+     * @returns {boolean}
+     */
+    is_co_member(peer_id) {
+        const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_is_co_member(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * @param {Uint8Array} epoch
      * @param {Uint8Array} sync_obj_id
      * @param {number} now
@@ -899,6 +915,10 @@ export class GroupsNode {
         }
     }
     /**
+     * An edit starts from the message's current metadata (§2.2: entries a client does not
+     * know, `replyTo` included, survive it). `metadata` is a patch: `[]` or `null` keeps
+     * everything, an array of `[name, hex]` sets those entries, and
+     * `{"set":[[name, hex], …],"remove":[name, …]}` also removes.
      * @param {Uint8Array} epoch
      * @param {Uint8Array} sync_obj_id
      * @param {string} body
@@ -1155,6 +1175,46 @@ export class GroupsNode {
         return v2;
     }
     /**
+     * As `create_group`, for an automatic group of this device and the one other member
+     * (§5.12): `migrate_from = 0` both for a migration of an earlier conversation and for the
+     * chat founded after an accepted contact request; `undefined` for "New group". Returns
+     * the group kept: the peer's own creation, when it is held and its owner sorts first
+     * ("two creations at once").
+     * @param {string} name
+     * @param {Uint8Array} members
+     * @param {number | null | undefined} migrate_from
+     * @param {number} now
+     * @returns {Uint8Array}
+     */
+    create_group_with(name, members, migrate_from, now) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(members, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_create_group_with(this.__wbg_ptr, ptr0, len0, ptr1, len1, !isLikeNone(migrate_from), isLikeNone(migrate_from) ? 0 : migrate_from, now);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * Whether this device holds a direct chat with `peer` (an automatic group of the two,
+     * however it grew since): a later creation from it is then an ordinary invitation.
+     * @param {Uint8Array} peer_id
+     * @returns {boolean}
+     */
+    holds_direct_chat(peer_id) {
+        const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_holds_direct_chat(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * @param {Uint8Array} peer_id
      * @param {number} now
      */
@@ -1192,6 +1252,97 @@ export class GroupsNode {
         const ptr1 = passArray8ToWasm0(sync_obj_id, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
         const ret = wasm.groupsnode_lookup_sync_object(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * The consents not used yet, in JSON: `[["<peer hex>", "<expires at>"], …]`.
+     * @returns {string}
+     */
+    direct_chat_consents() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.groupsnode_direct_chat_consents(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Among `candidates` (concatenated 32-byte GossipIDs), those whose automatic connection
+     * may be revoked: no group shared, no held epoch lists them (§5.12). Concatenated.
+     * @param {Uint8Array} candidates
+     * @returns {Uint8Array}
+     */
+    connections_to_revoke(candidates) {
+        const ptr0 = passArray8ToWasm0(candidates, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_connections_to_revoke(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * The earlier conversations declared, in JSON: `[["<peer hex>", "<version>"], …]` (integers as decimal strings, as every view).
+     * @returns {string}
+     */
+    earlier_conversations() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.groupsnode_earlier_conversations(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Gives (`consent`) or withdraws the consent to the group of two `peer` creates after
+     * its contact request was accepted (§5.12): one-shot, for 14 days.
+     * @param {Uint8Array} peer_id
+     * @param {boolean} consent
+     * @param {number} now
+     */
+    consent_to_direct_chat(peer_id, consent, now) {
+        const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_consent_to_direct_chat(this.__wbg_ptr, ptr0, len0, consent, now);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * The members of accepted groups with which no session is reported (`set_session`):
+     * the connections to open. Concatenated 32-byte GossipIDs.
+     * @returns {Uint8Array}
+     */
+    peers_wanting_connection() {
+        const ret = wasm.groupsnode_peers_wanting_connection(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Records (`held`) or clears that this device holds an earlier conversation of format
+     * `version` with `peer` (§5.12, condition 3): stored, until cleared.
+     * @param {Uint8Array} peer_id
+     * @param {number} version
+     * @param {boolean} held
+     * @param {number} now
+     */
+    set_earlier_conversation(peer_id, version, held, now) {
+        const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_set_earlier_conversation(this.__wbg_ptr, ptr0, len0, version, held, now);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }

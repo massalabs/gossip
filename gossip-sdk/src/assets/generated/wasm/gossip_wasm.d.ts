@@ -194,7 +194,8 @@ export class GroupsNode {
   learn_keys(keys: Uint8Array, now: number): Uint8Array;
   /**
    * `edit`: `{"body":…|null,"author":hex|null,"created_at":…|null,
-   * "last_modified_at":…|null,"metadata":…|null,"edited":bool|null}`.
+   * "last_modified_at":…|null,"metadata":…|null,"edited":bool|null}`; `metadata` is a
+   * patch as for `publish_edit`, `null` keeping everything.
    */
   local_edit(epoch: Uint8Array, sync_obj_id: Uint8Array, edit: string, now: number): string;
   invitations(now: number): string;
@@ -232,7 +233,18 @@ export class GroupsNode {
    */
   create_group(name: string, members: Uint8Array, now: number): Uint8Array;
   delete_group(group: Uint8Array, now: number): void;
+  /**
+   * Whether `peer` is a member of a group this device holds and has accepted: a
+   * connection it asks for may be opened automatically (§5.12).
+   */
+  is_co_member(peer_id: Uint8Array): boolean;
   local_delete(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): string;
+  /**
+   * An edit starts from the message's current metadata (§2.2: entries a client does not
+   * know, `replyTo` included, survive it). `metadata` is a patch: `[]` or `null` keeps
+   * everything, an array of `[name, hex]` sets those entries, and
+   * `{"set":[[name, hex], …],"remove":[name, …]}` also removes.
+   */
   publish_edit(epoch: Uint8Array, sync_obj_id: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, now: number): string;
   /**
    * The batches committed since the last call, oldest first: an array of
@@ -271,9 +283,50 @@ export class GroupsNode {
   peer_reconnected(peer_id: Uint8Array, now: number): void;
   publish_deletion(epoch: Uint8Array, sync_obj_id: Uint8Array, scheduled_for: number | null | undefined, now: number): string;
   accept_invitation(epoch: Uint8Array, now: number): Uint8Array;
+  /**
+   * As `create_group`, for an automatic group of this device and the one other member
+   * (§5.12): `migrate_from = 0` both for a migration of an earlier conversation and for the
+   * chat founded after an accepted contact request; `undefined` for "New group". Returns
+   * the group kept: the peer's own creation, when it is held and its owner sorts first
+   * ("two creations at once").
+   */
+  create_group_with(name: string, members: Uint8Array, migrate_from: number | null | undefined, now: number): Uint8Array;
+  /**
+   * Whether this device holds a direct chat with `peer` (an automatic group of the two,
+   * however it grew since): a later creation from it is then an ordinary invitation.
+   */
+  holds_direct_chat(peer_id: Uint8Array): boolean;
   scan_shared_chats(peer_id: Uint8Array, now: number): void;
   decline_invitation(epoch: Uint8Array, choice: string, now: number): void;
   lookup_sync_object(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): void;
+  /**
+   * The consents not used yet, in JSON: `[["<peer hex>", "<expires at>"], …]`.
+   */
+  direct_chat_consents(): string;
+  /**
+   * Among `candidates` (concatenated 32-byte GossipIDs), those whose automatic connection
+   * may be revoked: no group shared, no held epoch lists them (§5.12). Concatenated.
+   */
+  connections_to_revoke(candidates: Uint8Array): Uint8Array;
+  /**
+   * The earlier conversations declared, in JSON: `[["<peer hex>", "<version>"], …]` (integers as decimal strings, as every view).
+   */
+  earlier_conversations(): string;
+  /**
+   * Gives (`consent`) or withdraws the consent to the group of two `peer` creates after
+   * its contact request was accepted (§5.12): one-shot, for 14 days.
+   */
+  consent_to_direct_chat(peer_id: Uint8Array, consent: boolean, now: number): void;
+  /**
+   * The members of accepted groups with which no session is reported (`set_session`):
+   * the connections to open. Concatenated 32-byte GossipIDs.
+   */
+  peers_wanting_connection(): Uint8Array;
+  /**
+   * Records (`held`) or clears that this device holds an earlier conversation of format
+   * `version` with `peer` (§5.12, condition 3): stored, until cleared.
+   */
+  set_earlier_conversation(peer_id: Uint8Array, version: number, held: boolean, now: number): void;
   /**
    * This identity's GossipID.
    */
@@ -679,18 +732,25 @@ export interface InitOutput {
   readonly groupsnode_abandon: (a: number, b: number) => void;
   readonly groupsnode_accept_invitation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
   readonly groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_connections_to_revoke: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_consent_to_direct_chat: (a: number, b: number, c: number, d: number, e: number) => [number, number];
   readonly groupsnode_create_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_create_group_with: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
   readonly groupsnode_decline_invitation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
   readonly groupsnode_decode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_delete_group: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_direct_chat_consents: (a: number) => [number, number];
   readonly groupsnode_dissolve_group: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly groupsnode_earlier_conversations: (a: number) => [number, number];
   readonly groupsnode_encode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_epoch: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_group: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_groups: (a: number) => [number, number];
   readonly groupsnode_handed_off: (a: number, b: number, c: number) => [number, number];
   readonly groupsnode_handle_plaintext: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_holds_direct_chat: (a: number, b: number, c: number) => [number, number, number];
   readonly groupsnode_invitations: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_is_co_member: (a: number, b: number, c: number) => [number, number, number];
   readonly groupsnode_is_current: (a: number, b: number, c: number) => [number, number, number];
   readonly groupsnode_keys: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_learn_keys: (a: number, b: number, c: number, d: number) => [number, number, number, number];
@@ -704,6 +764,7 @@ export interface InitOutput {
   readonly groupsnode_open: (a: number, b: number, c: any) => [number, number, number];
   readonly groupsnode_orphans: (a: number) => number;
   readonly groupsnode_peer_reconnected: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_peers_wanting_connection: (a: number) => [number, number];
   readonly groupsnode_pending_batches: (a: number) => number;
   readonly groupsnode_poll_outbox: (a: number, b: number) => [number, number, number];
   readonly groupsnode_publish_deletion: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
@@ -714,6 +775,7 @@ export interface InitOutput {
   readonly groupsnode_resend_root: (a: number, b: number, c: number, d: number) => [number, number];
   readonly groupsnode_retry: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
   readonly groupsnode_scan_shared_chats: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_set_earlier_conversation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
   readonly groupsnode_set_local_name: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
   readonly groupsnode_set_session: (a: number, b: number, c: number, d: number) => [number, number];
   readonly groupsnode_snapshot: (a: number) => [number, number, number];
