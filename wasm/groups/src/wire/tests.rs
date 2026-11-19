@@ -899,7 +899,7 @@ fn event_blob_malformed() {
     );
     // Invalid UTF-8 in a text body.
     let mut p = m.to_proto();
-    p.payload.as_mut().unwrap().body = Some(proto::Body::Content(vec![0xff]));
+    p.payload.as_mut().unwrap().body = Some(proto::Body::Text("\u{1}".into()));
     let mut b = [
         vec![0x01],
         proto::Event {
@@ -908,12 +908,146 @@ fn event_blob_malformed() {
         .encode_to_vec(),
     ]
     .concat();
-    // Turn field 9 (bytes) of the payload into field 7 (string): same length, same bytes.
-    let pos = b.windows(3).position(|w| w == [0x4a, 0x01, 0xff]).unwrap();
-    b[pos] = 0x3a;
+    // Turn the one byte of field 7 into a byte that is never UTF-8.
+    let pos = b.windows(3).position(|w| w == [0x3a, 0x01, 0x01]).unwrap();
+    b[pos + 2] = 0xff;
     assert_eq!(
         decode_event_blob(&b, 1),
         Err(Error::InvalidUtf8("MessagePayload"))
+    );
+}
+
+/// The blob of a message event whose payload is `payload` once `edit` changed its encoding.
+fn message_blob_with(payload: Payload, edit: impl Fn(Vec<u8>) -> Vec<u8>) -> Vec<u8> {
+    let alice = identity(1);
+    let root = founding(&alice, &[&alice]);
+    let m = MessageEvent::create(&root, EventId::new(TS, [9; 16]), &[], payload).unwrap();
+    let mut p = m.to_proto();
+    let encoded = edit(p.payload.take().unwrap().encode_to_vec());
+    let mut event = p.encode_to_vec();
+    event.extend(raw_field(0x2a, &encoded));
+    blob_of(&raw_field(0x12, &event))
+}
+
+fn reaction_payload(author: GossipId, emoji: &str, action: crate::ReactionAction) -> Payload {
+    let r = crate::Reaction {
+        target: SyncObjId::from_bytes([7; 32]),
+        emoji: emoji.into(),
+        action,
+    };
+    Payload::Content(Content {
+        sync_obj_id: r.sync_obj_id(&author),
+        author,
+        created_at: TS,
+        last_modified_at: TS,
+        body: Body::Reaction(r),
+        edited: false,
+        metadata: BTreeMap::new(),
+    })
+}
+
+fn media_payload(author: GossipId, mimetype: &str, data: Vec<u8>) -> Payload {
+    Payload::Content(Content {
+        sync_obj_id: SyncObjId::from_bytes([8; 32]),
+        author,
+        created_at: TS,
+        last_modified_at: TS,
+        body: Body::Media(crate::Media {
+            mimetype: mimetype.into(),
+            data,
+        }),
+        edited: false,
+        metadata: BTreeMap::new(),
+    })
+}
+
+#[test]
+fn reactions_and_media_are_structured_and_strict() {
+    let alice = identity(1).id;
+    let same = |b: Vec<u8>| b;
+    // Both round-trip through an event blob.
+    for payload in [
+        reaction_payload(alice, "\u{1f44d}", crate::ReactionAction::Add),
+        reaction_payload(alice, "\u{1f44d}", crate::ReactionAction::Remove),
+        media_payload(alice, "image/png", vec![1, 2, 3]),
+        media_payload(alice, "text/vcard", vec![]),
+    ] {
+        let blob = message_blob_with(payload.clone(), same);
+        let Ok(EventObject::Message(m)) = decode_event_blob(&blob, 1) else {
+            panic!("{payload:?}")
+        };
+        assert_eq!(*m.payload(), payload);
+    }
+    let reaction = reaction_payload(alice, "\u{1f44d}", crate::ReactionAction::Add);
+    let media = media_payload(alice, "image/png", vec![1, 2, 3]);
+    // The reaction's fields: key 0x5a (11), then target 0x0a, emoji 0x12, action 0x18.
+    let find = |b: &[u8], w: &[u8]| b.windows(w.len()).position(|x| x == w).unwrap();
+    // An action other than add or remove.
+    let bad_action = message_blob_with(reaction.clone(), |mut b| {
+        b.extend([0x5a, 0x02, 0x18, 0x02]);
+        b
+    });
+    assert_eq!(
+        decode_event_blob(&bad_action, 1),
+        Err(Error::Malformed("unknown enum value"))
+    );
+    // An unknown field inside the reaction or the media message.
+    let unknown = message_blob_with(reaction.clone(), |mut b| {
+        b.extend([0x5a, 0x02, 0x20, 0x00]);
+        b
+    });
+    assert_eq!(
+        decode_event_blob(&unknown, 1),
+        Err(Error::Malformed("unknown field"))
+    );
+    let unknown = message_blob_with(media.clone(), |mut b| {
+        b.extend([0x62, 0x02, 0x18, 0x00]);
+        b
+    });
+    assert_eq!(
+        decode_event_blob(&unknown, 1),
+        Err(Error::Malformed("unknown field"))
+    );
+    // An emoji that is not UTF-8.
+    let not_utf8 = message_blob_with(reaction.clone(), |mut b| {
+        let at = find(&b, &[0x12, 0x04, 0xf0, 0x9f]);
+        b[at + 2] = 0xff;
+        b
+    });
+    assert_eq!(
+        decode_event_blob(&not_utf8, 1),
+        Err(Error::InvalidUtf8("Reaction"))
+    );
+    // A reaction body under the media type, and two bodies.
+    let swapped = message_blob_with(reaction.clone(), |mut b| {
+        // The payload starts with the 32-byte syncObjId, then the type.
+        assert_eq!(b[34..36], [0x10, 0x02]);
+        b[35] = 0x03;
+        b
+    });
+    assert_eq!(
+        decode_event_blob(&swapped, 1),
+        Err(Error::NotAllowed("body for this message type"))
+    );
+    let two = message_blob_with(reaction, |mut b| {
+        b.extend([0x62, 0x00]);
+        b
+    });
+    assert_eq!(
+        decode_event_blob(&two, 1),
+        Err(Error::Malformed("two cases of one oneof"))
+    );
+    // Field 9, the opaque body before reactions and media had their own messages, is
+    // reserved: unknown.
+    let nine = message_blob_with(media, |mut b| {
+        let at = find(&b, &[0x62, 0x10, 0x0a, 0x09]);
+        b.truncate(at);
+        b.extend([0x4a, 0x01, 0x01]);
+        b
+    });
+    assert_eq!(
+        decode_event_blob(&nine, 1),
+        Err(Error::Malformed("unknown field"))
     );
 }
 
@@ -928,7 +1062,10 @@ fn oversized_event_blobs_are_refused() {
         author: alice.id,
         created_at: TS,
         last_modified_at: TS,
-        body: Body::Media(vec![0; MAX_PLAINTEXT_BYTES]),
+        body: Body::Media(crate::Media {
+            mimetype: "application/octet-stream".into(),
+            data: vec![0; MAX_PLAINTEXT_BYTES],
+        }),
         edited: false,
         metadata: BTreeMap::new(),
     });
@@ -1179,13 +1316,13 @@ fn every_oneof_holds_one_case() {
         Err(Error::Malformed("two cases of one oneof"))
     );
 
-    // MessagePayload.body: a text and a content body.
+    // MessagePayload.body: a text and a media body.
     let EventObject::Message(m) = &objects[1] else {
         panic!()
     };
     let mut event = m.to_proto();
     let payload = event.payload.take().unwrap();
-    let payload = [payload.encode_to_vec(), raw_field(0x4a, &[1])].concat();
+    let payload = [payload.encode_to_vec(), raw_field(0x62, &[])].concat();
     let message = [event.encode_to_vec(), raw_field(0x2a, &payload)].concat();
     assert_eq!(
         decode_event_blob(&blob_of(&raw_field(0x12, &message)), 1),
@@ -1381,7 +1518,21 @@ fn debug_hides_secrets_and_content() {
         format!("{message:?}"),
         format!("{content:?}"),
         format!("{forward:?}"),
-        format!("{:?}", Body::Media(TEXT.as_bytes().to_vec())),
+        format!(
+            "{:?}",
+            Body::Media(crate::Media {
+                mimetype: "text/plain".into(),
+                data: TEXT.as_bytes().to_vec()
+            })
+        ),
+        format!(
+            "{:?}",
+            Body::Reaction(crate::Reaction {
+                target: SyncObjId::from_bytes([1; 32]),
+                emoji: TEXT.into(),
+                action: crate::ReactionAction::Add
+            })
+        ),
         format!("{:?}", message.to_proto()),
         format!("{forward_proto:?}"),
         format!("{:?}", Frame::Event(blob.clone())),
@@ -1471,21 +1622,65 @@ fn golden_values() -> Vec<(String, String)> {
         "multi-parent root ID".into(),
         hex::encode(multi.chat_id().as_bytes()),
     ));
-    // Result projections of a forward, a reaction and a media message.
+    // Result projections of a forward, a reaction added and removed, and a media message;
+    // with the reactions and the media message as event blobs.
     let chat = ChatId::from_bytes([5; 32]);
-    for (label, body) in [
+    let reaction = |action| crate::Reaction {
+        target: SyncObjId::from_bytes([7; 32]),
+        emoji: "\u{1f44d}".into(),
+        action,
+    };
+    out.push((
+        "reaction ID".into(),
+        hex::encode(
+            reaction(crate::ReactionAction::Add)
+                .sync_obj_id(&bob.id)
+                .as_bytes(),
+        ),
+    ));
+    let root = founding(&alice, &[&alice, &bob]);
+    for (label, body, sync) in [
         (
             "forward",
             Body::Forward {
                 content_type: crate::MessageType::Text,
                 content: b"hi".to_vec(),
             },
+            SyncObjId::from_bytes([7; 32]),
         ),
-        ("reaction", Body::Reaction(vec![0xf0, 0x9f, 0x91, 0x8d])),
-        ("media", Body::Media(vec![1, 2, 3, 4])),
+        (
+            "reaction add",
+            Body::Reaction(reaction(crate::ReactionAction::Add)),
+            reaction(crate::ReactionAction::Add).sync_obj_id(&bob.id),
+        ),
+        (
+            "reaction remove",
+            Body::Reaction(reaction(crate::ReactionAction::Remove)),
+            reaction(crate::ReactionAction::Add).sync_obj_id(&bob.id),
+        ),
+        (
+            "media",
+            Body::Media(crate::Media {
+                mimetype: "image/png".into(),
+                data: vec![1, 2, 3, 4],
+            }),
+            SyncObjId::from_bytes([7; 32]),
+        ),
+        (
+            "forwarded media",
+            Body::Forward {
+                content_type: crate::MessageType::Media,
+                content: crate::Media {
+                    mimetype: "image/png".into(),
+                    data: vec![1, 2, 3, 4],
+                }
+                .encode(),
+            },
+            SyncObjId::from_bytes([7; 32]),
+        ),
     ] {
         let p = Payload::Content(Content {
-            sync_obj_id: SyncObjId::from_bytes([7; 32]),
+            sync_obj_id: sync,
             author: bob.id,
             created_at: TS,
             last_modified_at: TS,
@@ -1497,6 +1692,13 @@ fn golden_values() -> Vec<(String, String)> {
             format!("{label} result hash"),
             hex::encode(p.result_hash(&chat)),
         ));
+        if label != "forward" {
+            let e = MessageEvent::create(&root, EventId::new(TS, [9; 16]), &[], p).unwrap();
+            out.push((
+                format!("{label} event blob"),
+                hex::encode(encode_event_blob(&EventObject::Message(e)).unwrap()),
+            ));
+        }
     }
     // Every event type, as an event blob.
     for (label, o) in ["root", "message", "leave", "kick", "dissolve"]

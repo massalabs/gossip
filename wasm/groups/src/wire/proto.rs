@@ -973,6 +973,8 @@ mod pinned {
             &MESSAGE_PAYLOAD,
             &METADATA_ENTRY,
             &FORWARD,
+            &REACTION,
+            &MEDIA,
         ];
         let got: Vec<String> = all.iter().map(|s| shape(s)).collect();
         let expected: &[&str] = &[
@@ -999,11 +1001,27 @@ mod pinned {
             "Leave/Kick [1=bytes,2=bytes,3=bytes] oneofs[] limits[]",
             "Dissolve [1=bytes,2=bool,3=bytes] oneofs[] limits[]",
             "GroupMessageEvent [1=bytes,2=bytes,3=bytes,4=bytes,5=msg:MessagePayload] oneofs[] limits[4<=16]",
-            "MessagePayload [1=bytes,2=enum[0, 1, 2, 3, 4],3=bytes,4=u64,5=u64,6=bool,7=str,8=msg:Forward,9=bytes,10=rep:MetadataEntry] oneofs[[7, 8, 9]] limits[]",
+            "MessagePayload [1=bytes,2=enum[0, 1, 2, 3, 4],3=bytes,4=u64,5=u64,6=bool,7=str,8=msg:Forward,10=rep:MetadataEntry,11=msg:Reaction,12=msg:Media] oneofs[[7, 8, 11, 12]] limits[]",
             "MetadataEntry [1=str,2=bytes] oneofs[] limits[]",
             "Forward [1=enum[0, 1, 2, 3, 4],2=bytes] oneofs[] limits[]",
+            "Reaction [1=bytes,2=str,3=enum[0, 1]] oneofs[] limits[]",
+            "Media [1=str,2=bytes] oneofs[] limits[]",
         ];
         assert_eq!(got, expected);
+    }
+
+    /// Field 9 of `MessagePayload` carried an opaque body before reactions and media had
+    /// their own messages: it is reserved, used by no schema and refused as unknown.
+    #[test]
+    fn reserved_fields_are_pinned_and_unused() {
+        assert_eq!(RESERVED_PAYLOAD_FIELDS, &[9]);
+        for n in RESERVED_PAYLOAD_FIELDS {
+            assert!(MESSAGE_PAYLOAD.fields.iter().all(|(f, _)| f != n));
+        }
+        assert_eq!(
+            super::super::strict::check(&[0x4a, 0x00], &MESSAGE_PAYLOAD),
+            Err(crate::error::Error::Malformed("unknown field"))
+        );
     }
 
     #[test]
@@ -1045,6 +1063,11 @@ mod pinned {
         );
         assert_eq!(ROOT_TYPES, &[0, 1]);
         assert_eq!(MESSAGE_TYPES, &[0, 1, 2, 3, 4]);
+        assert_eq!(
+            [ReactionAction::Add as i32, ReactionAction::Remove as i32],
+            [0, 1]
+        );
+        assert_eq!(REACTION_ACTIONS, &[0, 1]);
         assert_eq!(OBJECT_KINDS, &[0, 1, 2, 3, 4]);
         assert_eq!(STATUSES, &[0, 2, 3, 4, 5, 6]);
     }

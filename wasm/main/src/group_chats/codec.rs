@@ -1354,14 +1354,30 @@ mod tests {
             Body::Text("t".into()),
             Body::Forward {
                 content_type: MessageType::Media,
-                content: vec![1],
+                content: Media {
+                    mimetype: "image/png".into(),
+                    data: vec![1],
+                }
+                .encode(),
             },
-            Body::Forward {
-                content_type: MessageType::Reaction,
-                content: vec![],
-            },
-            Body::Reaction(vec![2]),
-            Body::Media(vec![3]),
+            Body::Reaction(Reaction {
+                target: sync,
+                emoji: "\u{1f44d}".into(),
+                action: ReactionAction::Add,
+            }),
+            Body::Reaction(Reaction {
+                target: sync,
+                emoji: "x".into(),
+                action: ReactionAction::Remove,
+            }),
+            Body::Media(Media {
+                mimetype: "image/png".into(),
+                data: vec![3],
+            }),
+            Body::Media(Media {
+                mimetype: "text/vcard".into(),
+                data: vec![],
+            }),
         ] {
             round_trip(body);
         }

@@ -829,8 +829,19 @@ mod tests {
             make(body(forward(MessageType::Text, 16_385))),
             too_long("text", 16_385)
         );
-        assert!(make(body(forward(MessageType::Media, 40_000))).is_ok());
-        assert!(make(body(Body::Media(vec![0; 40_000]))).is_ok());
+        // Media data is not text: no text limit applies to it, forwarded or not.
+        let media = Media {
+            mimetype: "image/png".into(),
+            data: vec![0; 40_000],
+        };
+        assert!(
+            make(body(Body::Forward {
+                content_type: MessageType::Media,
+                content: media.encode(),
+            }))
+            .is_ok()
+        );
+        assert!(make(body(Body::Media(media))).is_ok());
         // Metadata: every key and value together, as encoded. One entry of a 1-byte key and
         // an n-byte value (127 < n < 16,384) is 9 + n bytes: field key, entry length (2),
         // key field (3), value field key and length (3).
@@ -1084,11 +1095,20 @@ mod tests {
         let root = founding(&alice, &[&alice]);
         let id = EventId::new(TS, [9; 16]);
         let mut p = text(alice.id, "x");
+        let media = Media {
+            mimetype: "image/png".into(),
+            data: vec![1, 2],
+        }
+        .encode();
+        // A forward carries a text or a media message, nothing else (§7.6).
         for (content_type, bytes, ok) in [
             (MessageType::Text, b"ok".to_vec(), true),
             (MessageType::Text, vec![0xff], false),
-            (MessageType::Media, vec![0xff], true),
-            (MessageType::Reaction, vec![], true),
+            (MessageType::Media, media.clone(), true),
+            (MessageType::Media, vec![0xff], false),
+            (MessageType::Media, vec![], false),
+            (MessageType::Reaction, vec![], false),
+            (MessageType::Reaction, media, false),
             (MessageType::Forward, vec![], false),
             (MessageType::Delete, vec![], false),
         ] {
@@ -1160,6 +1180,243 @@ mod tests {
             MessageEvent::create(&root, id, &[], p),
             Err(Error::Malformed(_))
         ));
+    }
+
+    fn reaction(author: GossipId, emoji: &str, action: ReactionAction) -> Payload {
+        let r = Reaction {
+            target: SyncObjId::from_bytes([0x77; 32]),
+            emoji: emoji.into(),
+            action,
+        };
+        Payload::Content(Content {
+            sync_obj_id: r.sync_obj_id(&author),
+            author,
+            created_at: TS,
+            last_modified_at: TS,
+            body: Body::Reaction(r),
+            edited: false,
+            metadata: BTreeMap::new(),
+        })
+    }
+
+    #[test]
+    fn a_reaction_is_named_by_its_target_author_and_emoji() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = founding(&alice, &[&alice, &bob]);
+        let make = |p: Payload| MessageEvent::create(&root, EventId::new(TS, [9; 16]), &[], p);
+        for action in [ReactionAction::Add, ReactionAction::Remove] {
+            let p = reaction(bob.id, "\u{1f44d}", action);
+            let event = make(p.clone()).unwrap();
+            assert_eq!(
+                MessageEvent::from_proto(1, event.to_proto()).unwrap(),
+                event
+            );
+            assert_eq!(
+                p.sync_obj_id(),
+                crate::hash::reaction_sync_obj_id(
+                    &SyncObjId::from_bytes([0x77; 32]),
+                    &bob.id,
+                    "\u{1f44d}"
+                )
+            );
+        }
+        // Any other ID is malformed, whoever the author or whatever the emoji: the ID names
+        // the author and the emoji.
+        let mut p = reaction(bob.id, "\u{1f44d}", ReactionAction::Add);
+        content(&mut p).sync_obj_id = SyncObjId::from_bytes([1; 32]);
+        assert_eq!(make(p), Err(Error::IdMismatch("reaction syncObjId")));
+        let mut p = reaction(bob.id, "\u{1f44d}", ReactionAction::Add);
+        content(&mut p).author = alice.id;
+        assert_eq!(make(p), Err(Error::IdMismatch("reaction syncObjId")));
+        // The same on receipt.
+        let event = make(reaction(bob.id, "x", ReactionAction::Add)).unwrap();
+        let mut proto = event.to_proto();
+        proto.payload.as_mut().unwrap().author = alice.id.as_bytes().to_vec();
+        assert_eq!(
+            MessageEvent::from_proto(1, proto),
+            Err(Error::IdMismatch("reaction syncObjId"))
+        );
+        // The emoji: 1 to 64 bytes of UTF-8, encoded bytes and not characters; any text.
+        assert!(make(reaction(bob.id, &"\u{e9}".repeat(32), ReactionAction::Add)).is_ok());
+        assert!(make(reaction(bob.id, "not an emoji", ReactionAction::Add)).is_ok());
+        assert_eq!(
+            make(reaction(bob.id, &"x".repeat(65), ReactionAction::Add)),
+            Err(Error::TooMany {
+                field: "emoji",
+                max: 64,
+                got: 65
+            })
+        );
+        assert_eq!(
+            make(reaction(bob.id, "", ReactionAction::Add)),
+            Err(Error::TooFew {
+                field: "emoji",
+                min: 1,
+                got: 0
+            })
+        );
+        // The target is 32 bytes, and the action add or remove.
+        let mut proto = event.to_proto();
+        let body = |p: &mut proto::GroupMessageEvent| match &mut p.payload.as_mut().unwrap().body {
+            Some(proto::Body::Reaction(r)) => r.clone(),
+            _ => panic!(),
+        };
+        let mut r = body(&mut proto);
+        r.target.pop();
+        proto.payload.as_mut().unwrap().body = Some(proto::Body::Reaction(r));
+        assert!(matches!(
+            MessageEvent::from_proto(1, proto),
+            Err(Error::BadLength { .. })
+        ));
+        let mut proto = event.to_proto();
+        let mut r = body(&mut proto);
+        r.action = 2;
+        proto.payload.as_mut().unwrap().body = Some(proto::Body::Reaction(r));
+        assert!(matches!(
+            MessageEvent::from_proto(1, proto),
+            Err(Error::Malformed(_))
+        ));
+        // Field 9 no longer exists: an opaque body under the reaction type is refused.
+        let mut proto = event.to_proto();
+        proto.payload.as_mut().unwrap().body = Some(proto::Body::Text("x".into()));
+        assert_eq!(
+            MessageEvent::from_proto(1, proto),
+            Err(Error::NotAllowed("body for this message type"))
+        );
+    }
+
+    #[test]
+    fn mimetype_rules() {
+        for ok in [
+            "image/png",
+            "text/vcard",
+            "application/vnd.gossip.file-ref+json",
+            "0/0",
+            "a.b/c-d+e",
+            &format!("a/{}", "b".repeat(125)),
+        ] {
+            assert_eq!(check_mimetype(ok), Ok(()), "{ok}");
+        }
+        for bad in [
+            "",
+            "image",
+            "/png",
+            "image/",
+            "Image/png",
+            "image/PNG",
+            ".image/png",
+            "image/+png",
+            "image/png; charset=utf-8",
+            "image/png ",
+            " image/png",
+            "image/png/x",
+            "image/p\u{e9}g",
+            "image/p_g",
+        ] {
+            assert_eq!(
+                check_mimetype(bad),
+                Err(Error::NotAllowed("mimetype")),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            check_mimetype(&format!("a/{}", "b".repeat(126))),
+            Err(Error::TooMany {
+                field: "mimetype",
+                max: 127,
+                got: 128
+            })
+        );
+        // On a media message, sent or received, and on a forwarded one.
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let make = |b: Body| {
+            let mut p = text(alice.id, "");
+            content(&mut p).body = b;
+            MessageEvent::create(&root, EventId::new(TS, [9; 16]), &[], p)
+        };
+        let media = |m: &str| Media {
+            mimetype: m.into(),
+            data: vec![],
+        };
+        assert!(make(Body::Media(media("image/png"))).is_ok());
+        assert_eq!(
+            make(Body::Media(media("image/png;q=1"))),
+            Err(Error::NotAllowed("mimetype"))
+        );
+        assert_eq!(
+            make(Body::Forward {
+                content_type: MessageType::Media,
+                content: media("IMAGE/png").encode(),
+            }),
+            Err(Error::NotAllowed("mimetype"))
+        );
+        let event = make(Body::Media(media("image/png"))).unwrap();
+        let mut proto = event.to_proto();
+        proto.payload.as_mut().unwrap().body = Some(proto::Body::Media(proto::Media {
+            mimetype: "image".into(),
+            data: vec![1],
+        }));
+        assert_eq!(
+            MessageEvent::from_proto(1, proto),
+            Err(Error::NotAllowed("mimetype"))
+        );
+    }
+
+    #[test]
+    fn forwarded_media_is_canonical() {
+        let m = Media {
+            mimetype: "image/png".into(),
+            data: vec![1, 2, 3],
+        };
+        let canonical = m.encode();
+        assert_eq!(Media::decode(&canonical), Ok(m.clone()));
+        // Empty data is left out of the canonical encoding.
+        let empty = Media {
+            mimetype: "image/png".into(),
+            data: vec![],
+        };
+        assert_eq!(empty.encode(), [&[0x0a, 0x09][..], b"image/png"].concat());
+        assert_eq!(Media::decode(&empty.encode()), Ok(empty.clone()));
+        let not_canonical = Err(Error::Malformed("Media: not canonical"));
+        // The same values in another encoding: an empty data field written out, fields in
+        // reverse order, a field repeated, a length in a longer varint.
+        let written = [empty.encode(), vec![0x12, 0x00]].concat();
+        assert_eq!(Media::decode(&written), not_canonical);
+        let reversed = [&canonical[11..], &canonical[..11]].concat();
+        assert_eq!(Media::decode(&reversed), not_canonical);
+        let repeated = [&canonical[..], &canonical[11..]].concat();
+        assert_eq!(Media::decode(&repeated), not_canonical);
+        let long_len = [&[0x0a, 0x89, 0x00][..], b"image/png", &canonical[11..]].concat();
+        assert_eq!(Media::decode(&long_len), not_canonical);
+        // Strict: an unknown field, text that is not UTF-8.
+        assert_eq!(
+            Media::decode(&[canonical.clone(), vec![0x18, 0x00]].concat()),
+            Err(Error::Malformed("unknown field"))
+        );
+        assert_eq!(
+            Media::decode(&[0x0a, 0x01, 0xff]),
+            Err(Error::InvalidUtf8("Media"))
+        );
+        // Received in a forward, the bytes are kept as they came: they are hashed.
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let mut p = text(alice.id, "");
+        content(&mut p).body = Body::Forward {
+            content_type: MessageType::Media,
+            content: canonical.clone(),
+        };
+        let event = MessageEvent::create(&root, EventId::new(TS, [9; 16]), &[], p).unwrap();
+        let mut proto = event.to_proto();
+        proto.payload.as_mut().unwrap().body = Some(proto::Body::Forward(proto::Forward {
+            content_type: MessageType::Media as i32,
+            content: reversed,
+        }));
+        assert_eq!(
+            MessageEvent::from_proto(1, proto),
+            Err(Error::Malformed("Media: not canonical"))
+        );
     }
 
     #[test]
@@ -1249,5 +1506,39 @@ mod tests {
         // ... type 1, author, 0, 0, [3, h'09'], false, {}
         assert!(enc.ends_with(&[0x00, 0x00, 0x82, 0x03, 0x41, 0x09, 0xf4, 0xa0]));
         assert_eq!(enc[1 + 34 + 34], 0x01);
+
+        // A reaction: ... type 2, ..., [h'77..', "👍", 1], ...: a byte string, a text string
+        // and an unsigned integer.
+        let author = GossipId::from_bytes([0x22; 32]);
+        let mut removed = reaction(author, "\u{1f44d}", ReactionAction::Remove);
+        content(&mut removed).created_at = 0;
+        content(&mut removed).last_modified_at = 0;
+        let enc = removed.full_message(&chat).encode();
+        assert_eq!(enc[1 + 34 + 34], 0x02);
+        let body = [
+            &[0x00, 0x00, 0x83, 0x58, 0x20][..],
+            &[0x77; 32],
+            &[0x64, 0xf0, 0x9f, 0x91, 0x8d, 0x01, 0xf4, 0xa0],
+        ]
+        .concat();
+        assert!(enc.ends_with(&body));
+        // A media message: ... type 3, ..., ["image/png", h'0102'], ...: a text string and a
+        // byte string.
+        let mut media = text(author, "");
+        content(&mut media).created_at = 0;
+        content(&mut media).last_modified_at = 0;
+        content(&mut media).body = Body::Media(Media {
+            mimetype: "image/png".into(),
+            data: vec![1, 2],
+        });
+        let enc = media.full_message(&chat).encode();
+        assert_eq!(enc[1 + 34 + 34], 0x03);
+        let body = [
+            &[0x00, 0x00, 0x82, 0x69][..],
+            b"image/png",
+            &[0x42, 0x01, 0x02, 0xf4, 0xa0],
+        ]
+        .concat();
+        assert!(enc.ends_with(&body));
     }
 }
