@@ -324,3 +324,27 @@ fn a_task_waits_for_a_responsive_member_rather_than_asking_an_unresponsive_one()
     let q = super::retrieval::sent_lookups(&mut net, 0);
     assert!(q.iter().all(|s| s.to != member(3)), "{q:?}");
 }
+
+/// Found by the network simulation (code at `bb6f2bf2`, seed 2118): a task whose honest
+/// announcer had been asked twice while offline counted as suspect, so it queued behind
+/// thousands of IDs flooded by a hostile member for the quarter of the slots left to them.
+#[test]
+fn a_task_announced_by_a_responsive_member_stays_credible_after_two_attempts() {
+    let mut net = Net::new(4, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0 + 30 * DAY, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    for _ in 0..2 {
+        let q = super::retrieval::sent_lookups(&mut net, 0);
+        assert!(!q.is_empty());
+        net.now = q[0].sent_at + q[0].ttl * 106 / 100 + 10 * MIN;
+        net.tick(0);
+    }
+    // Member 1 answers something else: it is responsive again.
+    net.devs[0].node.answered(&member(1));
+    let key = TaskKey {
+        chat_id: chat,
+        target: Target::Event(id),
+    };
+    assert!(net.devs[0].node.priority(&key) >= crate::node::index::CREDIBLE);
+}
