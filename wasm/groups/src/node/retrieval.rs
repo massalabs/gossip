@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use super::index::Blocked;
+use super::index::{Blocked, CREDIBLE};
 use super::records::{
     Attempt, Candidate, CandidateState, Purpose, Run, Target, Task, TaskKey, Trigger, TriggerKind,
     Work,
@@ -25,6 +25,12 @@ use crate::store::in_window;
 /// to the stage progression. A plausible `expired` (a peer back from an absence) is always
 /// followed by a resend.
 pub(crate) const MAX_EXPIRED_RESENDS: u8 = 2;
+
+/// Lookups a suspect task may have outstanding with one peer, and in total (a quarter of
+/// the limits of §17.4).
+pub(crate) const SUSPECT_LOOKUPS_PER_PEER: usize = ACTIVE_LOOKUPS_PER_PEER / 4;
+/// See [`SUSPECT_LOOKUPS_PER_PEER`].
+pub(crate) const SUSPECT_LOOKUPS_PER_DEVICE: usize = ACTIVE_LOOKUPS_PER_DEVICE / 4;
 
 /// How an answer counts for its task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,10 +315,37 @@ impl Node {
         // triggering peer scores higher): a task found waiting is ranked again when what
         // held it back changes (the task itself, a slot of one of its candidates, or the
         // expiry of an outstanding request), see `index`.
-        let mut load = self.tix.load.clone();
         while self.tix.total < ACTIVE_LOOKUPS_PER_DEVICE {
             let Some(key) = self.tix.ready().next() else {
                 break;
+            };
+            // A suspect task may use a quarter of the slots, so that IDs announced by peers
+            // that then deny or ignore them cannot crowd out credible retrieval (§17.4
+            // leaves the fair use of the device-wide ceiling to the implementation).
+            let suspect = self.priority(&key) < CREDIBLE;
+            if suspect && self.tix.suspect_total >= SUSPECT_LOOKUPS_PER_DEVICE {
+                self.tix.block(
+                    key,
+                    Blocked {
+                        peers: Vec::new(),
+                        until: cx.now.saturating_add(FIRST_TTL_MS),
+                    },
+                );
+                continue;
+            }
+            let load: BTreeMap<GossipId, usize> = if suspect {
+                // A peer is full for a suspect task at its suspect share.
+                self.tix
+                    .load
+                    .iter()
+                    .map(|(p, n)| {
+                        let s = self.tix.suspect_load.get(p).copied().unwrap_or(0);
+                        let full = s >= SUSPECT_LOOKUPS_PER_PEER;
+                        (*p, if full { ACTIVE_LOOKUPS_PER_PEER } else { *n })
+                    })
+                    .collect()
+            } else {
+                self.tix.load.clone()
             };
             if past_deadline(&key, cx.now) {
                 // Removed by the next timer pass; not ranked meanwhile.
@@ -332,7 +365,6 @@ impl Node {
                         *attempt = Some(Attempt::Queued { peer });
                     }
                     self.reindex(key);
-                    *load.entry(peer).or_default() += 1;
                     self.queue_work(
                         peer,
                         Work::Query {
@@ -364,12 +396,16 @@ impl Node {
     }
 
     /// The scheduling priority of a task: the best score among its untried candidates with
-    /// a trigger, so that what honest, supplying peers announce goes first.
+    /// a trigger that were not asked in vain twice already, so that what honest, supplying
+    /// peers announce goes first. Below [`CREDIBLE`] the task is suspect: every announcer
+    /// said it did not have the event, or never answered, or scores below an unmeasured peer.
     fn priority(&self, key: &TaskKey) -> u64 {
         self.t.tasks.get(key).map_or(0, |task| {
             task.candidates
                 .iter()
-                .filter(|(_, c)| c.trigger.is_some() && c.state == CandidateState::Untried)
+                .filter(|(_, c)| {
+                    c.trigger.is_some() && c.state == CandidateState::Untried && c.attempts < 2
+                })
                 .map(|(p, _)| self.score(p))
                 .max()
                 .unwrap_or(0)
