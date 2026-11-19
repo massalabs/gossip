@@ -243,7 +243,7 @@ pub struct ScanOp {
     pub jitter: u32,
     /// The attempt.
     pub attempt: ScanAttempt,
-    /// Fresh scans started after `restart`.
+    /// Fresh scans started after `restart` since the last page that made progress.
     pub restarts: u8,
     /// Resends caused by `expired` in this stage.
     pub expired_resends: u8,

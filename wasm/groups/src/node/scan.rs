@@ -242,6 +242,8 @@ impl Node {
                 let op = self.t.scans_out.get_mut(&key).expect("current");
                 op.total = total;
                 op.offset = offset + p.received();
+                // Progress: the restarts bound counts again from here.
+                op.restarts = 0;
                 op.stage = 0;
                 op.ttl = FIRST_TTL_MS;
                 op.jitter = jitter;
