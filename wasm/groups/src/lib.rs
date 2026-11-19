@@ -60,7 +60,9 @@ pub use ids::{
     Challenge, ChatId, DissolveId, EventId, GossipId, GroupSecret, KickId, LeaveId,
     ParentCommitment, RefChatId, RequestId, ScanId, SecretProof, SyncObjId,
 };
-pub use keys::{SignatureBytes, check_key_answer, parse_user_public_keys};
+pub use keys::{
+    IdentitySigner, KeySigner, SignatureBytes, Signer, check_key_answer, parse_user_public_keys,
+};
 pub use rng::Randomness;
 pub use root::{ReceiveContext, Root, RootParams, RootType, next_root_created_at};
 pub use signed::{Dissolve, Kick, Leave};

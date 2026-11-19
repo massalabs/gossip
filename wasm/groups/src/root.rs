@@ -3,7 +3,7 @@
 use core::fmt;
 
 use auth::UserPublicKeys;
-use crypto_dsa::{SIGNATURE_SIZE, SIGNING_RANDOMNESS_SIZE, SigningKey};
+use crypto_dsa::{SIGNATURE_SIZE, SIGNING_RANDOMNESS_SIZE};
 
 use crate::cbor::Value;
 use crate::constants::{
@@ -15,7 +15,7 @@ use crate::hash::{h, parent_commitment, ref_chat_id};
 use crate::ids::{
     Challenge, ChatId, GossipId, GroupSecret, ParentCommitment, RefChatId, check_sorted_distinct,
 };
-use crate::keys::{SignatureBytes, parse_user_public_keys, sign_id, verify_id};
+use crate::keys::{SignatureBytes, Signer, parse_user_public_keys, verify_id};
 use crate::wire::{self, proto};
 
 /// The type of a root (§4.7). It is hashed into the root ID.
@@ -185,7 +185,7 @@ impl Root {
     pub fn create_successor(
         params: RootParams,
         parents: &[ChatId],
-        owner_signing_key: &SigningKey,
+        owner_signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
     ) -> Result<Self> {
         let root = Self::build(RootType::Successor, params, parents)?;
@@ -202,7 +202,7 @@ impl Root {
     pub fn create_handover(
         params: RootParams,
         parent: &Root,
-        parent_owner_signing_key: &SigningKey,
+        parent_owner_signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
     ) -> Result<Self> {
         let root = Self::build(RootType::Handover, params, &[parent.chat_id])?;
@@ -234,12 +234,11 @@ impl Root {
 
     fn sign_and_check(
         mut self,
-        signing_key: &SigningKey,
+        signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
         parent: Option<&Root>,
     ) -> Result<Self> {
-        self.signature = sign_id(
-            signing_key,
+        self.signature = signing_key.sign_id(
             CONTEXT_ROOT_SIGNATURE,
             self.chat_id.as_bytes(),
             randomness,

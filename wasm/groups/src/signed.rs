@@ -4,7 +4,7 @@
 //! ML-DSA-65 over that ID (§5.1). The signature is not hashed.
 
 use auth::UserPublicKeys;
-use crypto_dsa::{SIGNING_RANDOMNESS_SIZE, SigningKey};
+use crypto_dsa::SIGNING_RANDOMNESS_SIZE;
 
 use crate::constants::{
     CONTEXT_DISSOLVE_SIGNATURE, CONTEXT_KICK_SIGNATURE, CONTEXT_LEAVE_SIGNATURE,
@@ -12,7 +12,7 @@ use crate::constants::{
 use crate::error::{Error, Result};
 use crate::hash::{dissolve_id, kick_id, leave_id};
 use crate::ids::{ChatId, DissolveId, GossipId, KickId, LeaveId};
-use crate::keys::{SignatureBytes, sign_id, verify_id};
+use crate::keys::{SignatureBytes, Signer, verify_id};
 use crate::root::Root;
 use crate::wire::proto;
 
@@ -49,7 +49,7 @@ impl Leave {
     pub fn sign(
         root: &Root,
         leaver_keys: &UserPublicKeys,
-        signing_key: &SigningKey,
+        signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
     ) -> Result<Self> {
         let leaver = GossipId::of_keys(leaver_keys);
@@ -57,8 +57,7 @@ impl Leave {
         let leave = Self {
             chat_id: root.chat_id(),
             leaver,
-            signature: sign_id(
-                signing_key,
+            signature: signing_key.sign_id(
                 CONTEXT_LEAVE_SIGNATURE,
                 id.as_bytes(),
                 randomness,
@@ -166,15 +165,14 @@ impl Kick {
     pub fn sign(
         root: &Root,
         removed: GossipId,
-        owner_signing_key: &SigningKey,
+        owner_signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
     ) -> Result<Self> {
         let id = kick_id(&root.chat_id(), &removed);
         let kick = Self {
             chat_id: root.chat_id(),
             removed,
-            signature: sign_id(
-                owner_signing_key,
+            signature: owner_signing_key.sign_id(
                 CONTEXT_KICK_SIGNATURE,
                 id.as_bytes(),
                 randomness,
@@ -275,15 +273,14 @@ impl Dissolve {
     pub fn sign(
         root: &Root,
         must_delete: bool,
-        owner_signing_key: &SigningKey,
+        owner_signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
     ) -> Result<Self> {
         let id = dissolve_id(&root.chat_id(), must_delete);
         let dissolve = Self {
             chat_id: root.chat_id(),
             must_delete,
-            signature: sign_id(
-                owner_signing_key,
+            signature: owner_signing_key.sign_id(
                 CONTEXT_DISSOLVE_SIGNATURE,
                 id.as_bytes(),
                 randomness,
@@ -360,6 +357,7 @@ impl Dissolve {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keys::sign_id;
     use crate::root::tests::founding;
     use crate::test_support::identity;
 
