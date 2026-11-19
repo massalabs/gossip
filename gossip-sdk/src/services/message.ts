@@ -31,6 +31,7 @@ import {
   serializeReactionMessage,
   serializeRetentionPolicyMessage,
   deserializeMessage,
+  isGroupMessage,
 } from '../utils/messageSerialization.js';
 import * as schema from '../db/schema/index.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
@@ -324,8 +325,9 @@ export class MessageService {
   private persistFlusher: () => Promise<void> = async () => {};
 
   /**
-   * Receives the group plaintexts carried by keep-alives: the sender's 32-byte
-   * user ID and the plaintext. Set by `GossipSdk.openSession`.
+   * Receives the group plaintexts of the session messages of the group type:
+   * the sender's 32-byte user ID and the plaintext. Set by
+   * `GossipSdk.openSession`.
    */
   private groupPlaintextHandler:
     | ((from: Uint8Array, plaintext: Uint8Array) => Promise<void>)
@@ -648,11 +650,9 @@ export class MessageService {
             acknowledgedSeekers.add(encodeToBase64(seeker))
           );
 
-          // keep-alive messages are just useful to keep the session alive, we don't need to store them
-          if (deserialized.type === MessageType.KEEP_ALIVE) {
-            // A keep-alive may carry a group plaintext: handed to the group
-            // engine, which keeps its own records; nothing about it is stored
-            // or logged here.
+          // A group message is handed to the group engine, which keeps its
+          // own records; nothing about it is stored or logged here.
+          if (isGroupMessage(deserialized)) {
             if (deserialized.groupPlaintext && this.groupPlaintextHandler) {
               try {
                 await this.groupPlaintextHandler(
@@ -663,6 +663,11 @@ export class MessageService {
                 log.error('group plaintext not processed');
               }
             }
+            continue;
+          }
+
+          // keep-alive messages are just useful to keep the session alive, we don't need to store them
+          if (deserialized.type === MessageType.KEEP_ALIVE) {
             continue;
           }
 

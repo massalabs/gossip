@@ -10,6 +10,7 @@ export enum MessageType {
   MESSAGE_TYPE_EDIT = 5,
   MESSAGE_TYPE_REACTION = 6,
   MESSAGE_TYPE_RETENTION_POLICY = 7,
+  MESSAGE_TYPE_GROUP = 8,
 }
 
 export interface Message {
