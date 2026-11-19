@@ -7,7 +7,7 @@
 use core::fmt;
 
 use auth::UserPublicKeys;
-use crypto_dsa::SIGNATURE_SIZE;
+use crypto_dsa::{SIGNATURE_SIZE, SIGNING_RANDOMNESS_SIZE, SigningKey};
 
 use crate::error::{Error, Result};
 use crate::ids::GossipId;
@@ -81,6 +81,38 @@ impl fmt::Debug for SignatureBytes {
     }
 }
 
+/// Signs a 32-byte ID under a signing context. The randomness is supplied by the caller.
+pub(crate) fn sign_id(
+    signing_key: &SigningKey,
+    context: &str,
+    id: &[u8; 32],
+    randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+) -> SignatureBytes {
+    let signature = crypto_dsa::sign(signing_key, id, context.as_bytes(), randomness);
+    SignatureBytes(Box::new(*signature.as_bytes()))
+}
+
+/// Verifies a signature over a 32-byte ID under a signing context, with the ML-DSA-65 key of
+/// `keys`.
+pub(crate) fn verify_id(
+    keys: &UserPublicKeys,
+    context: &str,
+    id: &[u8; 32],
+    signature: &SignatureBytes,
+) -> Result<()> {
+    let signature = crypto_dsa::Signature::from(*signature.as_bytes());
+    if crypto_dsa::verify(
+        &keys.dsa_verification_key,
+        id,
+        context.as_bytes(),
+        &signature,
+    ) {
+        Ok(())
+    } else {
+        Err(Error::InvalidSignature)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +171,20 @@ mod tests {
             })
         );
         assert!(SignatureBytes::from_slice(&[]).is_err());
+    }
+
+    #[test]
+    fn verify_fails_on_wrong_context_key_or_id() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let id = [7u8; 32];
+        let sig = sign_id(&alice.secret.dsa_signing_key, "ctx.a", &id, [9; 32]);
+        assert!(verify_id(&alice.public, "ctx.a", &id, &sig).is_ok());
+        assert_eq!(
+            verify_id(&alice.public, "ctx.b", &id, &sig),
+            Err(Error::InvalidSignature)
+        );
+        assert!(verify_id(&bob.public, "ctx.a", &id, &sig).is_err());
+        assert!(verify_id(&alice.public, "ctx.a", &[8u8; 32], &sig).is_err());
     }
 }

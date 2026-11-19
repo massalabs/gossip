@@ -204,6 +204,15 @@ impl fmt::Debug for GroupSecret {
     }
 }
 
+/// Checks that `items` are strictly ascending, which means sorted and distinct (§4.1, §6.1).
+pub(crate) fn check_sorted_distinct<T: Ord>(field: &'static str, items: &[T]) -> Result<()> {
+    if items.windows(2).all(|w| w[0] < w[1]) {
+        Ok(())
+    } else {
+        Err(Error::NotSortedDistinct(field))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,6 +257,17 @@ mod tests {
         assert!(RequestId::from_slice(&[]).is_err());
         assert!(GroupSecret::from_slice(&[0; 32]).is_ok());
         assert!(GroupSecret::from_slice(&[0; 16]).is_err());
+    }
+
+    #[test]
+    fn sorted_distinct_check() {
+        assert!(check_sorted_distinct::<u8>("x", &[]).is_ok());
+        assert!(check_sorted_distinct("x", &[1, 2, 3]).is_ok());
+        assert_eq!(
+            check_sorted_distinct("x", &[1, 1]),
+            Err(Error::NotSortedDistinct("x"))
+        );
+        assert!(check_sorted_distinct("x", &[2, 1]).is_err());
     }
 
     #[test]
