@@ -1,8 +1,12 @@
 /**
  * Size of the blob posted for a group plaintext: the plaintext is wrapped in a
- * keep-alive and encrypted in the one-to-one session, and the ciphertext goes
- * to the transport as the mesh payload. Two in-process SDKs, real sessions,
- * an in-memory transport; no backend is used.
+ * session message of the group type and encrypted in the session, and the
+ * ciphertext goes to the transport as the mesh payload. Two in-process SDKs,
+ * real sessions, an in-memory transport; no backend is used.
+ *
+ * Measured: an overhead of 3,625 to 3,632 bytes, so the largest plaintext that
+ * fits 65,536 bytes at the worst overhead is 61,904 bytes (it was 3,628 to
+ * 3,634 inside a keep-alive, which also wrote an empty content field).
  */
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { vi } from 'vitest';
@@ -61,7 +65,7 @@ interface Internals {
 
 /**
  * Stands in for the group engine around one plaintext, so that the service's
- * own path runs: keep-alive wrapping, session encryption, session persist,
+ * own path runs: group-type wrapping, session encryption, session persist,
  * outbox row, transport.
  */
 const fakeNode = {
