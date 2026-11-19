@@ -345,7 +345,7 @@ impl Sim {
         let victim = 2;
         let leaver = 3;
         let asker = 4;
-        let restored = if seed % 2 == 0 { leaver } else { 5 };
+        let restored = if seed.is_multiple_of(2) { leaver } else { 5 };
         // Steps every 40 minutes, with a jitter.
         let at = |rng: &mut TestRng, h: u64| START + h * STEP + below(rng, STEP / 3);
         let mut script = vec![
@@ -364,7 +364,7 @@ impl Sim {
             1 => script.push((at(&mut rng, 10), Step::Handover)),
             _ => script.push((at(&mut rng, 10), Step::DoubleHandover)),
         }
-        if seed % 3 == 0 {
+        if seed.is_multiple_of(3) {
             script.push((at(&mut rng, 12), Step::Handover));
         }
         if seed % 4 == 3 {
