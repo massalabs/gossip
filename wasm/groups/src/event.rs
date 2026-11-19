@@ -326,6 +326,41 @@ pub struct Content {
     pub metadata: BTreeMap<String, Vec<u8>>,
 }
 
+/// The rank of a non-delete result among the results of one sync object (§7.1): greater
+/// wins. See [`Content::rank`].
+pub(crate) type Rank = (bool, u64, bool, [u8; 32]);
+
+impl Content {
+    /// Whether this result is a reaction. Its ID was checked against its target, author and
+    /// emoji (§7.6), so it is exempt from deletion (§7.1).
+    #[must_use]
+    pub fn is_reaction(&self) -> bool {
+        matches!(self.body, Body::Reaction(_))
+    }
+
+    /// The rank of this result, whose result hash is `result_hash`, among the results of its
+    /// sync object (§7.1): between versions of a reaction, the greatest `last_modified_at`,
+    /// then a *remove* over an *add*, then the greatest result hash; between other results,
+    /// the greatest `(last_modified_at, resultHash)`.
+    ///
+    /// A reaction also outranks every other type under its ID, whatever the dates. A
+    /// reaction's ID is the hash of its target, author and emoji, so another type can only
+    /// share it when a member chose that ID on purpose; ranking the type first makes every
+    /// device end with the reaction, which no deletion removes, while the ordinary rules,
+    /// deletion included, still decide between the other results.
+    pub(crate) fn rank(&self, result_hash: [u8; 32]) -> Rank {
+        match &self.body {
+            Body::Reaction(r) => (
+                true,
+                self.last_modified_at,
+                r.action == ReactionAction::Remove,
+                result_hash,
+            ),
+            _ => (false, self.last_modified_at, false, result_hash),
+        }
+    }
+}
+
 impl fmt::Debug for Body {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
