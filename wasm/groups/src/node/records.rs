@@ -362,8 +362,11 @@ pub struct PeerRecord {
     pub penalty: u32,
     /// Consecutive local timeouts of queries sent to it; any valid answer resets it.
     pub failures: u32,
-    /// When the first of those timeouts happened.
-    pub first_failure: u64,
+    /// How long those timed-out queries waited unanswered, overlaps counted once: the time
+    /// it was actually asked without answering.
+    pub unanswered_ms: u64,
+    /// The latest of those timeouts.
+    pub last_failure: u64,
     /// The `sent_at` of the last query whose timeout was counted: the entries of one query
     /// that time out together count once.
     pub last_timeout_query: u64,
