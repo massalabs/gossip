@@ -573,3 +573,40 @@ fn a_task_for_an_id_dated_far_ahead_ends_within_a_retention_period() {
     net.tick(0);
     assert_eq!(net.devs[0].node.task_count(), (0, 0));
 }
+
+/// Found by review (code at `6a916f2e`): with the queue of missing IDs full, the missing
+/// parent of an accepted event was dropped without a trace, even when the queue held only
+/// discredited IDs.
+#[test]
+fn a_full_queue_of_suspect_ids_makes_room_for_a_missing_parent() {
+    let mut net = Net::new(4, 1);
+    let chat = net.chat();
+    // Member 3 is discredited, then floods the queue.
+    net.devs[0].node.penalize(&member(3), PENALTY_MALFORMED);
+    let full = super::super::timing::QUEUED_MISSING_PER_GROUP;
+    for chunk in 0..full / 128 {
+        let ids: Vec<EventId> = (0..128u32)
+            .map(|i| {
+                let n = (chunk * 128) as u32 + i;
+                let mut r = [9u8; 16];
+                r[..4].copy_from_slice(&n.to_be_bytes());
+                EventId::new(T0, r)
+            })
+            .collect();
+        net.recv_frames(0, member(3), &[notice(chat, &ids)]);
+    }
+    assert_eq!(net.devs[0].node.task_count().0, full);
+    // Member 1 delivers an event whose parent is missing.
+    let parent = EventId::new(T0, [1; 16]);
+    let child = net.event(T0 + 1, 2, &[parent], 1);
+    net.give(0, 1, &child);
+    assert!(net.held(0, &child.event_id()));
+    let key = TaskKey {
+        chat_id: chat,
+        target: Target::Event(parent),
+    };
+    assert!(
+        net.devs[0].node.t.tasks.get(&key).is_some(),
+        "parent dropped"
+    );
+}
