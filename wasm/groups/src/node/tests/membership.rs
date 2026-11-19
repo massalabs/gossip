@@ -3718,3 +3718,126 @@ fn a_removal_lookup_about_a_former_owner_is_answered_with_its_handover() {
         "{answers:?}"
     );
 }
+
+/// A member only on a former owner's competing branch, which a new owner's resolution drops,
+/// gets no kick: none can be signed for that branch (§5.6). A known limit: it is not told,
+/// and the drop is counted. Nothing loops.
+#[test]
+fn a_member_only_on_a_former_owners_branch_is_dropped_without_a_kick() {
+    let mut net = MNet::new(5, true);
+    let g = net.create(0, &[1, 2, 3]);
+    net.exchange();
+    for d in 1..4 {
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    let backup = net.devs[0].store.clone();
+    let a = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(4)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.accept_all(4);
+    net.run(MIN);
+    net.devs[0].store = backup;
+    net.restart(0);
+    net.offline[1] = true;
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![],
+            name: Some("B".into()),
+        },
+    )
+    .unwrap();
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            name: None,
+        },
+    )
+    .unwrap();
+    net.offline[1] = false;
+    for (from, to, pt) in core::mem::take(&mut net.dropped) {
+        let now = net.now;
+        let dev = &mut net.devs[to];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(from), &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    net.run(3 * MIN);
+    assert_eq!(net.summary(1, &g).unwrap().former_owner_branches, vec![a]);
+    let r = net
+        .change(
+            1,
+            g,
+            GroupChange::Resolve {
+                members: vec![gid(0), gid(2), gid(3)],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(10 * MIN);
+    assert_eq!(net.devs[1].node.stats().kicks_created, 0);
+    assert_eq!(net.devs[1].node.stats().removed_without_kick, 1);
+    for d in 0..4 {
+        assert_eq!(net.current(d, &g), Some(r), "device {d}");
+    }
+    // Member 4 holds only the former owner's branch, and stays there.
+    assert_eq!(net.current(4, &a), Some(a));
+}
+
+/// A member added back by a new owner makes the last epoch it was in, the former owner's, a
+/// parent of the new root (§5.10). Members that epoch lists and the new root does not were
+/// removed long ago: they are no members dropped without a kick.
+#[test]
+fn adding_back_over_a_former_owners_epoch_drops_no_one_without_a_kick() {
+    let (mut net, g) = founded(4);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2), gid(3)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(MIN);
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(MIN);
+    let r = net
+        .change(
+            1,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(3)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    assert!(net.devs[1].node.root(&r).unwrap().names_parent(&g));
+    assert_eq!(net.devs[1].node.stats().removed_without_kick, 0);
+}
