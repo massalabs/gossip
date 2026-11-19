@@ -1493,10 +1493,14 @@ impl Sim {
                     });
                     let Some(heir) = heir else { continue };
                     // "Hand over and leave" in odd seeds; the former owner is restored later
-                    // from a backup made now (once per seed).
+                    // from a backup made now (once per seed). Not after the owner's own fork:
+                    // its device, already restored once, holds neither end's whole line, and
+                    // gets the other end back as a separate conversation (the unit tests
+                    // cover a former owner restored on its other fork end).
                     let leave = self.seed % 2 == 1;
-                    let backup = (self.former_backup.is_none() && !self.dissolve_delete)
-                        .then(|| (self.devs[o].store.clone(), self.devs[o].held.clone()));
+                    let backup =
+                        (self.former_backup.is_none() && !self.dissolve_delete && !self.forked)
+                            .then(|| (self.devs[o].store.clone(), self.devs[o].held.clone()));
                     // The owner's device restored from its backup does not hold the other end
                     // of its fork yet: the handover leaves that end to the former owner's line,
                     // which the members listed in no handover root keep following (§5.9).
@@ -2218,6 +2222,15 @@ impl Sim {
                     "    signed {} {what} at {}",
                     short(&k.0),
                     (r.received_at - START) / MINUTE
+                );
+            }
+            for (k, t) in n.tables().tasks.iter() {
+                eprintln!(
+                    "    task {:?} {:?} runs {} cands {}",
+                    short(&k.chat_id),
+                    k.target,
+                    t.runs,
+                    t.candidates.len()
                 );
             }
             for (g, r) in n.tables().group_recs.iter() {
