@@ -13,6 +13,9 @@
 //! A length-delimited `bytes` field and an embedded message have the same encoding, so these
 //! structs read and write exactly the bytes of the schema.
 //!
+//! `Debug` output never shows the group secret or message content (text, bodies, metadata
+//! values, encoded frames and event blobs): only their sizes.
+//!
 //! `prost` ignores unknown fields, truncates out-of-range `uint32` and enum values and reads
 //! any nonzero `bool` as true, while the protocol rejects all of these (§1.1, §13.8). Every
 //! decode therefore runs the strict check of the `strict` module first, against the schemas
@@ -20,6 +23,7 @@
 
 #![allow(missing_docs)]
 
+use core::fmt;
 use std::collections::BTreeMap;
 
 use super::strict::{Kind, Limit, Schema};
@@ -29,6 +33,7 @@ use crate::constants::{
 };
 
 #[derive(Clone, PartialEq, ::prost::Message)]
+#[prost(skip_debug)]
 pub struct Container {
     /// Each element is one encoded `Frame`.
     #[prost(bytes = "vec", repeated, tag = "1")]
@@ -42,6 +47,7 @@ pub struct Frame {
 }
 
 #[derive(Clone, PartialEq, ::prost::Oneof)]
+#[prost(skip_debug)]
 pub enum FrameKind {
     /// An event blob: `varint(eventVersion) ‖ Event`.
     #[prost(bytes = "vec", tag = "1")]
@@ -88,6 +94,7 @@ pub enum RootType {
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
+#[prost(skip_debug)]
 pub struct GroupRoot {
     #[prost(enumeration = "RootType", tag = "1")]
     pub r#type: i32,
@@ -166,6 +173,7 @@ pub enum MessageType {
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
+#[prost(skip_debug)]
 pub struct MessagePayload {
     #[prost(bytes = "vec", tag = "1")]
     pub sync_obj_id: Vec<u8>,
@@ -186,6 +194,7 @@ pub struct MessagePayload {
 }
 
 #[derive(Clone, PartialEq, ::prost::Oneof)]
+#[prost(skip_debug)]
 pub enum Body {
     #[prost(string, tag = "7")]
     Text(String),
@@ -196,6 +205,7 @@ pub enum Body {
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
+#[prost(skip_debug)]
 pub struct Forward {
     #[prost(enumeration = "MessageType", tag = "1")]
     pub content_type: i32,
@@ -361,6 +371,7 @@ pub struct Response {
 }
 
 #[derive(Clone, PartialEq, ::prost::Oneof)]
+#[prost(skip_debug)]
 pub enum ResponseResult {
     /// An event blob; its version is at most the plaintext's.
     #[prost(bytes = "vec", tag = "3")]
@@ -433,6 +444,113 @@ pub struct NeighborResponse {
 pub struct LeaveRequest {
     #[prost(bytes = "vec", tag = "1")]
     pub chat_id: Vec<u8>,
+}
+
+// ── Debug without secrets or content, and zeroing ───────────────────────────────────────
+
+use crate::redact;
+
+impl fmt::Debug for Container {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Container")
+            .field(
+                "frames",
+                &self
+                    .frames
+                    .iter()
+                    .map(|b| redact::Bytes(b.len()))
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+impl fmt::Debug for FrameKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FrameKind::Event(blob) => f
+                .debug_tuple("Event")
+                .field(&redact::Bytes(blob.len()))
+                .finish(),
+            FrameKind::Query(q) => f.debug_tuple("Query").field(q).finish(),
+            FrameKind::Response(r) => f.debug_tuple("Response").field(r).finish(),
+            FrameKind::Notice(n) => f.debug_tuple("Notice").field(n).finish(),
+            FrameKind::NeighborRequest(n) => f.debug_tuple("NeighborRequest").field(n).finish(),
+            FrameKind::NeighborResponse(n) => f.debug_tuple("NeighborResponse").field(n).finish(),
+            FrameKind::LeaveRequest(l) => f.debug_tuple("LeaveRequest").field(l).finish(),
+        }
+    }
+}
+
+impl fmt::Debug for GroupRoot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GroupRoot")
+            .field("type", &self.r#type)
+            .field("name", &self.name)
+            .field("parents", &self.parents.len())
+            .field("members", &self.members.len())
+            .field("group_secret", &redact::Bytes(self.group_secret.len()))
+            .field("owner", &redact::Bytes(self.owner.len()))
+            .field("created_at", &self.created_at)
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for MessagePayload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MessagePayload")
+            .field("sync_obj_id", &redact::Bytes(self.sync_obj_id.len()))
+            .field("type", &self.r#type)
+            .field("author", &redact::Bytes(self.author.len()))
+            .field("created_at", &self.created_at)
+            .field("last_modified_at", &self.last_modified_at)
+            .field("edited", &self.edited)
+            .field("body", &self.body)
+            .field("metadata", &redact::Entries(self.metadata.len()))
+            .finish()
+    }
+}
+
+impl fmt::Debug for Body {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Body::Text(t) => f
+                .debug_tuple("Text")
+                .field(&redact::Bytes(t.len()))
+                .finish(),
+            Body::Forward(fw) => f.debug_tuple("Forward").field(fw).finish(),
+            Body::Content(b) => f
+                .debug_tuple("Content")
+                .field(&redact::Bytes(b.len()))
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Debug for Forward {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Forward")
+            .field("content_type", &self.content_type)
+            .field("content", &redact::Bytes(self.content.len()))
+            .finish()
+    }
+}
+
+impl fmt::Debug for ResponseResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResponseResult::Event(blob) => f
+                .debug_tuple("Event")
+                .field(&redact::Bytes(blob.len()))
+                .finish(),
+            ResponseResult::Page(p) => f.debug_tuple("Page").field(p).finish(),
+            ResponseResult::Status(s) => f.debug_tuple("Status").field(s).finish(),
+            ResponseResult::Keys(k) => f
+                .debug_tuple("Keys")
+                .field(&redact::Bytes(k.len()))
+                .finish(),
+        }
+    }
 }
 
 // ── Strict schemas (field numbers, wire types and enum values of Appendix C) ─────────────────

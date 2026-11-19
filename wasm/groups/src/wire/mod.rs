@@ -178,7 +178,7 @@ pub fn decode_event_blob(blob: &[u8], plaintext_version: u64) -> Result<EventObj
 /// Frames are decoded one at a time by [`Plaintext::frames`], so that nothing is built for a
 /// frame before it is judged: a plaintext of 262,144 bytes can hold about 131,000 empty
 /// frames, and decoding them all at once would allocate far more than the plaintext itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Plaintext<'a> {
     /// The plaintext prefix version; event blobs inside are decoded against it.
     pub version: u64,
@@ -199,6 +199,15 @@ impl<'a> Plaintext<'a> {
             let frame = r.varint().and_then(|_| r.len_delimited());
             Some(frame.and_then(Frame::decode))
         })
+    }
+}
+
+impl core::fmt::Debug for Plaintext<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Plaintext")
+            .field("version", &self.version)
+            .field("container", &crate::redact::Bytes(self.container.len()))
+            .finish()
     }
 }
 

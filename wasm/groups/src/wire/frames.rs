@@ -4,6 +4,8 @@
 //! limits and the consistency rules of pages and neighbor responses. Authorization (§13.7),
 //! correlation (§13.4) and scan state need the device's state and are not decided here.
 
+use core::fmt;
+
 use prost::Message;
 
 use super::proto;
@@ -17,9 +19,11 @@ use crate::ids::{
     ChatId, DissolveId, EventId, GossipId, KickId, LeaveId, ParentCommitment, RefChatId, RequestId,
     ScanId, SyncObjId,
 };
+use crate::redact;
 
-/// One frame of a container; each holds exactly one kind (§13.1).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One frame of a container; each holds exactly one kind (§13.1). Its `Debug` output shows
+/// only the size of an event blob.
+#[derive(Clone, PartialEq, Eq)]
 pub enum Frame {
     /// An event blob, decoded separately with [`super::decode_event_blob`] against the
     /// plaintext's version, so that a bad or unsupported event is rejected on its own.
@@ -152,8 +156,9 @@ pub struct Response {
     pub result: ResponseResult,
 }
 
-/// The result of a response (§13.4).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The result of a response (§13.4). Its `Debug` output shows only the size of an event blob
+/// or a key answer.
+#[derive(Clone, PartialEq, Eq)]
 pub enum ResponseResult {
     /// An event blob, decoded separately with [`super::decode_event_blob`].
     Event(Vec<u8>),
@@ -261,6 +266,40 @@ pub struct NeighborResponse {
 pub struct LeaveRequest {
     /// The requester's current epoch.
     pub chat_id: ChatId,
+}
+
+impl fmt::Debug for Frame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Frame::Event(blob) => f
+                .debug_tuple("Event")
+                .field(&redact::Bytes(blob.len()))
+                .finish(),
+            Frame::Query(q) => f.debug_tuple("Query").field(q).finish(),
+            Frame::Response(r) => f.debug_tuple("Response").field(r).finish(),
+            Frame::Notice(n) => f.debug_tuple("Notice").field(n).finish(),
+            Frame::NeighborRequest(n) => f.debug_tuple("NeighborRequest").field(n).finish(),
+            Frame::NeighborResponse(n) => f.debug_tuple("NeighborResponse").field(n).finish(),
+            Frame::LeaveRequest(l) => f.debug_tuple("LeaveRequest").field(l).finish(),
+        }
+    }
+}
+
+impl fmt::Debug for ResponseResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResponseResult::Event(blob) => f
+                .debug_tuple("Event")
+                .field(&redact::Bytes(blob.len()))
+                .finish(),
+            ResponseResult::Page(p) => f.debug_tuple("Page").field(p).finish(),
+            ResponseResult::Status(s) => f.debug_tuple("Status").field(s).finish(),
+            ResponseResult::Keys(k) => f
+                .debug_tuple("Keys")
+                .field(&redact::Bytes(k.len()))
+                .finish(),
+        }
+    }
 }
 
 // ── Status ───────────────────────────────────────────────────────────────────
