@@ -644,16 +644,20 @@ impl Node {
                 (ends, m, name.clone(), None)
             }
         };
-        // Members whose leave or request applies are left out (§5.5, §5.7).
+        // Members whose leave or request applies are left out (§5.5), except in a handover,
+        // which keeps every member but the outgoing owner (§4.7): the new owner applies
+        // the leaves it holds once it owns the group, and the requests are sent to it again.
         let pending: Vec<GossipId> = self
             .t
             .group_recs
             .get(&group)
             .map(|g| g.pending_removals.keys().copied().collect())
             .unwrap_or_default();
-        for m in leavers.iter().chain(pending.iter()) {
-            if Some(*m) != handover && *m != self.me {
-                members.remove(m);
+        if handover.is_none() {
+            for m in leavers.iter().chain(pending.iter()) {
+                if *m != self.me {
+                    members.remove(m);
+                }
             }
         }
         // §5.10: one more parent per distinct last epoch of the members added back: among
