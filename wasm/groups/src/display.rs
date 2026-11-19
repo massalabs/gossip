@@ -219,6 +219,21 @@ mod tests {
         assert_eq!(view(&f.store, &[f.root.chat_id()], s).unwrap().len(), 1);
     }
 
+    /// Regression (review of c11b2163): a message whose scheduled deletion is due was still
+    /// shown when the caller read the view without ticking first (§7.4 "before relevant
+    /// message access").
+    #[test]
+    fn a_due_deletion_hides_the_message_without_a_tick() {
+        let mut f = Fixture::new();
+        let a = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "a"));
+        let ds = f.event(T0, 2, &[], del(1, Some(T0 + 1_000)));
+        f.recv(&a, T0);
+        f.recv(&ds, T0);
+        let chat = f.root.chat_id();
+        assert_eq!(view(&f.store, &[chat], T0 + 999).unwrap().len(), 1);
+        assert!(view(&f.store, &[chat], T0 + 1_000).unwrap().is_empty());
+    }
+
     #[test]
     fn equal_creation_times_order_by_result_hash() {
         let mut f = Fixture::new();
