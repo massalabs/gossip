@@ -277,14 +277,16 @@ impl Node {
         out
     }
 
-    /// The query sent to `peer` at `sent_at` timed out: counted by [`Node::note_timeout`]
-    /// once, however many of its entries time out.
+    /// The query sent to `peer` at `sent_at` timed out: counted once, however many of its
+    /// entries time out and whatever timed out in between; a query sent no later than one
+    /// already counted adds nothing (the entries of one query time out at slightly
+    /// different instants, each stage having its own jitter).
     pub(crate) fn note_query_timeout(&mut self, peer: &GossipId, sent_at: u64, now: u64) {
         if self
             .t
             .peers
             .get(peer)
-            .is_some_and(|r| r.last_timeout_query == sent_at && r.failures > 0)
+            .is_some_and(|r| r.failures > 0 && sent_at <= r.last_timeout_query)
         {
             return;
         }
