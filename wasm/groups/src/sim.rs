@@ -1,8 +1,10 @@
 //! Deterministic simulation of the devices of one epoch (test only).
 //!
-//! Each run is fully determined by its seed: N devices publish messages (text, forwards,
-//! reactions and media, with or without metadata), edits, deletions (immediate and scheduled
-//! up to `MAX_SCHEDULE`) and retries; every event travels as an encoded blob through a
+//! Each run is fully determined by its seed: N devices publish messages (text, forwards of
+//! text and of media, and media, with or without metadata), reactions (adds and removes of
+//! few emojis, so that versions meet, with equal and unequal dates, some scheduled), edits,
+//! deletions (immediate and scheduled up to `MAX_SCHEDULE`, some naming reactions, before or
+//! after them) and retries, and put other messages under a reaction's ID; every event travels as an encoded blob through a
 //! simulated network that delays, reorders, duplicates, loses and later redelivers it, and
 //! devices relay events they serve. During the run, device clocks jump forward and backward,
 //! commits fail by injection, some devices evict under storage pressure or make local-only
@@ -121,6 +123,17 @@ pub(crate) struct Counters {
     injected_failures: u64,
     /// Scheduled deletions arriving for a message already deleted.
     deletions_beside_tombstone: u64,
+    /// Reaction versions (§7.6): all of them, those dated like an earlier version of the same
+    /// reaction, those scheduled in the future, deletions naming a reaction (and those sent
+    /// before the device held it), and other messages put under a reaction's ID.
+    reactions: u64,
+    reaction_ties: u64,
+    scheduled_reactions: u64,
+    reaction_deletions: u64,
+    deletions_before_reaction: u64,
+    other_types_under_reaction: u64,
+    /// Media messages, sent or forwarded.
+    media: u64,
 }
 
 impl Counters {
@@ -147,7 +160,14 @@ impl Counters {
             local_deletes,
             local_edits_refused,
             injected_failures,
-            deletions_beside_tombstone
+            deletions_beside_tombstone,
+            reactions,
+            reaction_ties,
+            scheduled_reactions,
+            reaction_deletions,
+            deletions_before_reaction,
+            other_types_under_reaction,
+            media
         );
     }
 
@@ -175,6 +195,16 @@ impl Counters {
                 "deletions_beside_tombstone",
                 self.deletions_beside_tombstone,
             ),
+            ("reactions", self.reactions),
+            ("reaction_ties", self.reaction_ties),
+            ("scheduled_reactions", self.scheduled_reactions),
+            ("reaction_deletions", self.reaction_deletions),
+            ("deletions_before_reaction", self.deletions_before_reaction),
+            (
+                "other_types_under_reaction",
+                self.other_types_under_reaction,
+            ),
+            ("media", self.media),
         ];
         all.iter()
             .filter(|(_, n)| *n == 0)
@@ -238,6 +268,9 @@ struct Sim {
     max_clock: u64,
     /// The latest due time of any scheduled version or deletion.
     max_due: u64,
+    /// The latest date given to a version of each reaction, so that another version can take
+    /// the same date (§7.1: a remove wins over an add of the same date).
+    reaction_dates: BTreeMap<SyncObjId, u64>,
 }
 
 fn below(rng: &mut TestRng, n: u64) -> u64 {
@@ -319,6 +352,7 @@ impl Sim {
             counters: Counters::default(),
             max_clock: START,
             max_due: START,
+            reaction_dates: BTreeMap::new(),
         }
     }
 
@@ -625,6 +659,9 @@ impl Sim {
         if !matches!(body, Body::Text(_)) {
             self.counters.non_text_bodies += 1;
         }
+        if crate::display::media_of(&body).is_some() {
+            self.counters.media += 1;
+        }
         let mut metadata = BTreeMap::new();
         if chance(&mut self.rng, 15) {
             metadata.insert("x-sim".to_owned(), vec![n as u8]);
@@ -663,7 +700,8 @@ impl Sim {
                 }))
             }
             22..=39 => {
-                let live = self.objects_where(d, |c| matches!(c, Some(StoredResult::Content(_))));
+                // A reaction changes only by a version of its own (below).
+                let live = self.objects_where(d, is_message);
                 let at = self.schedule(now, 25);
                 let (body, metadata) = self.body_and_metadata();
                 self.pick(&live).map(|sync| {
@@ -681,7 +719,9 @@ impl Sim {
                 })
             }
             40..=48 => {
-                let alive = self.objects_where(d, |c| !matches!(c, Some(StoredResult::Tombstone)));
+                let alive = self.objects_where(d, |c| {
+                    !matches!(c, Some(StoredResult::Tombstone)) && !is_reaction(c)
+                });
                 let at = self.schedule(now, 40);
                 self.pick(&alive).map(|sync| {
                     self.publish(d, |store, rng| {
@@ -694,7 +734,8 @@ impl Sim {
                 self.pick(&any)
                     .map(|sync| self.publish(d, |store, rng| epoch.retry(store, now, rng, sync)))
             }
-            53..=60 => {
+            53..=57 => self.react(d, now),
+            58..=60 => {
                 self.relay(d, now);
                 None
             }
@@ -842,7 +883,9 @@ impl Sim {
     /// A member acting adversarially (every action is valid, so it is accepted).
     fn adversary(&mut self, d: usize, now: u64) {
         let root = self.root;
-        match below(&mut self.rng, 5) {
+        match below(&mut self.rng, 7) {
+            5 => self.delete_a_reaction(d, now),
+            6 => self.other_type_under_a_reaction(d, now),
             0 => {
                 // A cycle of 2 or 3 events naming each other.
                 let k = 2 + below(&mut self.rng, 2) as usize;
@@ -948,6 +991,120 @@ impl Sim {
         }
     }
 
+    /// A reaction to a message device `d` holds (sometimes to one it does not), by a member
+    /// it picks among few, with few emojis, so that versions of one reaction meet: published
+    /// for itself, or created as any member would, with the date of an earlier version, a
+    /// later one or one in the future.
+    fn react(&mut self, d: usize, now: u64) -> Option<Published> {
+        let (sync, reaction, author) = self.some_reaction(d);
+        let action = if chance(&mut self.rng, 50) {
+            crate::ReactionAction::Add
+        } else {
+            crate::ReactionAction::Remove
+        };
+        self.counters.reactions += 1;
+        if author == self.devices[d].id && chance(&mut self.rng, 50) {
+            let epoch = self.epoch();
+            let p = self.publish(d, |store, rng| {
+                epoch.publish_reaction(
+                    store,
+                    now,
+                    rng,
+                    author,
+                    reaction.target,
+                    reaction.emoji.clone(),
+                    action,
+                )
+            });
+            if let Payload::Content(c) = p.event.payload() {
+                self.reaction_dates.insert(sync, c.last_modified_at);
+            }
+            return Some(p);
+        }
+        let earlier = self.reaction_dates.get(&sync).copied();
+        let lma = match (below(&mut self.rng, 10), earlier) {
+            (0..=4, Some(t)) if t <= now + MAX_SCHEDULE_MS => {
+                self.counters.reaction_ties += 1;
+                t
+            }
+            (5 | 6, _) => {
+                self.counters.scheduled_reactions += 1;
+                now + 1 + below(&mut self.rng, 3 * HOUR)
+            }
+            _ => now.saturating_sub(below(&mut self.rng, HOUR)),
+        };
+        self.reaction_dates.insert(sync, lma);
+        let payload = Payload::Content(Content {
+            sync_obj_id: sync,
+            author,
+            created_at: lma,
+            last_modified_at: lma,
+            body: Body::Reaction(crate::Reaction { action, ..reaction }),
+            edited: false,
+            metadata: BTreeMap::new(),
+        });
+        let id = self.fresh_id(now);
+        let e = MessageEvent::create(self.root, id, &[], payload).expect("valid");
+        self.inject(d, &e, now);
+        None
+    }
+
+    /// The ID, body and author of a reaction to a message device `d` holds, or to an
+    /// arbitrary one.
+    fn some_reaction(&mut self, d: usize) -> (SyncObjId, crate::Reaction, GossipId) {
+        let messages = self.objects_where(d, is_message);
+        let target = match self.pick(&messages) {
+            Some(t) if chance(&mut self.rng, 90) => t,
+            _ => SyncObjId::from_bytes([below(&mut self.rng, 3) as u8; 32]),
+        };
+        let author = self.devices[below(&mut self.rng, self.devices.len() as u64) as usize].id;
+        let emoji = ["+", "\u{1f44d}"][below(&mut self.rng, 2) as usize].to_owned();
+        let reaction = crate::Reaction {
+            target,
+            emoji,
+            action: crate::ReactionAction::Add,
+        };
+        (reaction.sync_obj_id(&author), reaction, author)
+    }
+
+    /// A deletion, immediate or scheduled, naming a reaction, which may not exist yet: it has
+    /// no effect on it (§7.1).
+    fn delete_a_reaction(&mut self, d: usize, now: u64) {
+        let (sync, _, _) = self.some_reaction(d);
+        let held = self.devices[d]
+            .store
+            .object(&self.chat(), &sync)
+            .unwrap()
+            .is_some();
+        if !held {
+            self.counters.deletions_before_reaction += 1;
+        }
+        self.counters.reaction_deletions += 1;
+        let scheduled_at = self.schedule(now, 40);
+        let payload = Payload::Delete {
+            sync_obj_id: sync,
+            scheduled_at,
+        };
+        let id = self.fresh_id(now);
+        let e = MessageEvent::create(self.root, id, &[], payload).expect("valid");
+        self.inject(d, &e, now);
+    }
+
+    /// Another message put under the ID of a reaction device `d` holds: the reaction
+    /// outranks it (§7.1).
+    fn other_type_under_a_reaction(&mut self, d: usize, now: u64) {
+        let reactions = self.objects_where(d, is_reaction);
+        let Some(sync) = self.pick(&reactions) else {
+            return;
+        };
+        let at = self.schedule(now, 20).unwrap_or(now);
+        let payload = self.with_sync(d, sync, at);
+        self.counters.other_types_under_reaction += 1;
+        let id = self.fresh_id(now);
+        let e = MessageEvent::create(self.root, id, &[], payload).expect("valid");
+        self.inject(d, &e, now);
+    }
+
     fn with_sync(&mut self, d: usize, sync: SyncObjId, now: u64) -> Payload {
         match self.new_message(d, now) {
             Payload::Content(mut c) => {
@@ -964,7 +1121,7 @@ impl Sim {
             return;
         }
         let chat = self.chat();
-        let live = self.objects_where(d, |c| matches!(c, Some(StoredResult::Content(_))));
+        let live = self.objects_where(d, is_message);
         let Some(sync) = self.pick(&live) else {
             return;
         };
@@ -1091,6 +1248,16 @@ impl Sim {
             .unwrap_or(self.now);
         latest.max(self.max_clock)
     }
+}
+
+/// A current result that is a reaction.
+fn is_reaction(c: &Option<StoredResult>) -> bool {
+    matches!(c, Some(StoredResult::Content(c)) if c.is_reaction())
+}
+
+/// A current result that is a message other than a reaction.
+fn is_message(c: &Option<StoredResult>) -> bool {
+    matches!(c, Some(StoredResult::Content(c)) if !c.is_reaction())
 }
 
 type FullState = (
