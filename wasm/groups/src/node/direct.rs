@@ -4,23 +4,23 @@
 //! tells it what it holds, and the engine only acts on a root when that knowledge and what
 //! the device holds agree.
 //!
-//! - **Earlier conversations.** [`Node::set_earlier_conversation`] records that the device
-//!   holds an earlier conversation of a format version with a peer (condition 3 of §5.12).
-//!   Kept until the caller clears it.
-//! - **A migration** ([`Node::migration_of`]) is a root acted on for its `migrate_from`: a
-//!   successor root with one parent that matches nothing this device holds, of exactly two
-//!   members, this device and its owner, whose format version this release knows
-//!   ([`KNOWN_FORMAT_VERSIONS`]) and for which an earlier conversation with that owner is
-//!   declared. Any other root carrying the field is an ordinary root or invitation.
-//! - **Two creations at once.** The pairing is defined only from what the device holds: its
-//!   own migration root and the peer's, both creating a group of the same two members with
-//!   the same `migrate_from`, neither continued by a successor the device holds. The group
-//!   whose owner's GossipID sorts first is kept; the other is closed (§14.2) and reported by
-//!   [`ChangeKind::Superseded`]. It is judged whenever the second of the two becomes held:
-//!   on receipt, on creation, and when an earlier conversation is declared.
-//! - **A new contact.** [`Node::consent_to_direct_chat`] lets the first root from that peer
-//!   that founds a group of the two, owned by it, be adopted without a prompt; the consent is
-//!   one-shot and expires after [`CONSENT_MS`].
+//! - **One mechanism.** Every group of two created automatically, for a migration or after an
+//!   accepted contact request, carries `migrate_from` (`0`); a group created with "New group"
+//!   never does and is never touched here. Such a root is recognised by
+//!   a successor with one parent commitment that matches nothing held, of exactly this device
+//!   and its owner, with a format version this release knows ([`KNOWN_FORMAT_VERSIONS`]).
+//! - **Two creations at once.** Defined only from what the device holds: its own creating
+//!   root and the peer's, the same two members, the same `migrate_from`, neither continued by
+//!   a successor it holds. The group whose owner's GossipID sorts first is kept; the other is
+//!   closed (§14.2) and reported by [`ChangeKind::Superseded`]. It is judged whenever the
+//!   second of the two becomes held: on receipt, on creation, and when the caller declares
+//!   what it knows.
+//! - **What the caller declares** decides the receiving side only. A **migration**
+//!   ([`Node::migration_of`]) is shown when the caller declared an earlier conversation with
+//!   the owner at that version ([`Node::set_earlier_conversation`]); a **new contact**'s chat
+//!   is adopted without a prompt under a one-shot consent ([`Node::consent_to_direct_chat`],
+//!   expiring after [`CONSENT_MS`]). Once the device holds a direct chat with that peer
+//!   ([`Node::holds_direct_chat`]), a later creation from it is an ordinary invitation.
 //! - **Connections.** [`Node::is_co_member`], [`Node::connections_to_revoke`] and
 //!   [`Node::peers_wanting_connection`] are pure queries; [`ChangeKind::Connections`] is
 //!   reported, keyed by [`DEVICE`], when what they answer may have changed.
@@ -147,13 +147,45 @@ impl Node {
         .then_some(owner)
     }
 
-    /// The peer whose earlier conversation `root` continues, when this device acts on its
-    /// `migrate_from` (§5.12): conditions 1 and 2, a known format version, and condition 3
-    /// as declared by the caller.
-    pub(crate) fn migration_peer(&self, root: &Root, parent_held: bool) -> Option<GossipId> {
+    /// The peer and format version of a root that founds an automatic group of this device
+    /// and its owner (§5.12): conditions 1 and 2, with a `migrate_from` this release knows.
+    /// Contact chats and migrations both carry it; "New group" never does.
+    pub(crate) fn direct_creation(
+        &self,
+        root: &Root,
+        parent_held: bool,
+    ) -> Option<(GossipId, u64)> {
         let v = root.migrate_from()?;
         let peer = self.direct_owner(root, parent_held)?;
-        (KNOWN_FORMAT_VERSIONS.contains(&v) && self.t.earlier.contains(&(peer, v))).then_some(peer)
+        KNOWN_FORMAT_VERSIONS.contains(&v).then_some((peer, v))
+    }
+
+    /// Whether this device holds a direct chat with `peer`: an installed epoch, in an active
+    /// group, whose root founded an automatic group of the two (a successor with one parent
+    /// commitment, those two members, a known `migrate_from`), whoever owns it and however
+    /// the group grew since. A later creation from that peer is then an ordinary invitation.
+    #[must_use]
+    pub fn holds_direct_chat(&self, peer: &GossipId) -> bool {
+        self.t.epochs.iter().any(|(c, r)| {
+            r.status == EpochStatus::Installed
+                && r.root.root_type() == RootType::Successor
+                && r.root.parents().len() == 1
+                && r.root.members().len() == 2
+                && r.root.is_member(&self.me)
+                && r.root.is_member(peer)
+                && r.root
+                    .migrate_from()
+                    .is_some_and(|v| KNOWN_FORMAT_VERSIONS.contains(&v))
+                && self.group_status(c) == GroupStatus::Active
+        })
+    }
+
+    /// The peer whose earlier conversation `root` continues, when this device shows it as a
+    /// migration (§5.12): an automatic group of the two, condition 3 as declared by the
+    /// caller, and no direct chat with that peer held already.
+    pub(crate) fn migration_peer(&self, root: &Root, parent_held: bool) -> Option<GossipId> {
+        let (peer, v) = self.direct_creation(root, parent_held)?;
+        (self.t.earlier.contains(&(peer, v)) && !self.holds_direct_chat(&peer)).then_some(peer)
     }
 
     /// The migration the held invitation `chat` is, if this device acts on it: the peer.
@@ -222,17 +254,15 @@ impl Node {
         parent_held: bool,
         closed_before: bool,
     ) -> Result<bool, NodeError> {
-        let Some(peer) = self.direct_owner(root, parent_held) else {
+        let Some((peer, v)) = self.direct_creation(root, parent_held) else {
             return Ok(false);
         };
-        if self.migration_peer(root, parent_held).is_some()
-            && let Some(v) = root.migrate_from()
-            && let Some(mine) = self.own_migration(peer, v)
-        {
+        if let Some(mine) = self.own_migration(peer, v) {
             self.settle_pair(cx, mine, root.clone(), from)?;
             return Ok(true);
         }
         if !closed_before
+            && !self.holds_direct_chat(&peer)
             && self
                 .t
                 .consents
@@ -315,14 +345,14 @@ impl Node {
                 continue;
             }
             let parent_held = inv.rejoins.is_some();
-            if self.migration_peer(&rec.root, parent_held).is_some()
-                && let Some(v) = rec.root.migrate_from()
-                && let Some(mine) = self.own_migration(peer, v)
-            {
+            let Some((_, v)) = self.direct_creation(&rec.root, parent_held) else {
+                continue;
+            };
+            if let Some(mine) = self.own_migration(peer, v) {
                 self.settle_pair(cx, mine, rec.root, rec.from)?;
                 continue;
             }
-            if self.direct_owner(&rec.root, parent_held).is_some()
+            if !self.holds_direct_chat(&peer)
                 && self
                     .t
                     .consents
@@ -353,7 +383,7 @@ impl Node {
         let Some(peer) = created.members().iter().find(|m| **m != self.me).copied() else {
             return Ok(());
         };
-        if self.t.earlier.contains(&(peer, v)) && peer.as_bytes() > self.me.as_bytes() {
+        if KNOWN_FORMAT_VERSIONS.contains(&v) && peer.as_bytes() > self.me.as_bytes() {
             // The peer's migration accepted before: this device's own sorts first.
             for c in self.peer_migrations(peer, v) {
                 self.supersede(cx, c, created.chat_id())?;
@@ -504,10 +534,11 @@ impl Node {
                 .t
                 .epochs
                 .iter()
-                .find(|(c, r)| {
-                    r.root.migrate_from() == Some(v)
-                        && self.migration_of(c) == Some(peer)
-                        && matches!(&r.status, EpochStatus::Invitation(i) if !i.closed_before)
+                .find(|(_, r)| {
+                    matches!(&r.status, EpochStatus::Invitation(i)
+                        if !i.closed_before
+                            && self.direct_creation(&r.root, i.rejoins.is_some())
+                                == Some((peer, v)))
                 })
                 .map(|(c, r)| (*c, r.clone()));
             if let Some((c, rec)) = theirs {
@@ -519,9 +550,7 @@ impl Node {
                 return Ok(self.group_of(&c));
             }
             // The peer's migration, accepted before: that group is the conversation.
-            if self.t.earlier.contains(&(peer, v))
-                && let Some(c) = self.peer_migrations(peer, v).into_iter().min()
-            {
+            if let Some(c) = self.peer_migrations(peer, v).into_iter().min() {
                 return Ok(self.group_of(&c));
             }
         }

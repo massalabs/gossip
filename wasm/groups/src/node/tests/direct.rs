@@ -518,7 +518,11 @@ fn crossing_contact_requests_keep_one_chat() {
         net.run(10 * MIN);
         let (keep, _) = sorted_pair();
         for d in 0..2 {
-            assert_eq!(net.group_keys(d), vec![[a, b][keep]], "first {first} device {d}");
+            assert_eq!(
+                net.group_keys(d),
+                vec![[a, b][keep]],
+                "first {first} device {d}"
+            );
             assert!(net.devs[d].node.invitations(net.now + DAY).is_empty());
         }
     }
