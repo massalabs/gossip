@@ -3841,3 +3841,39 @@ fn adding_back_over_a_former_owners_epoch_drops_no_one_without_a_kick() {
     assert!(net.devs[1].node.root(&r).unwrap().names_parent(&g));
     assert_eq!(net.devs[1].node.stats().removed_without_kick, 0);
 }
+
+/// Found by the membership simulation once it used "hand over and leave": an owner that
+/// renames the group and then hands it over and leaves before its device sent the rename
+/// lost the rename's deliveries when it closed the group, and nobody could verify the
+/// handover, whose parent no member held.
+#[test]
+fn hand_over_and_leave_still_delivers_the_roots_not_sent_yet() {
+    let (mut net, g) = founded(3);
+    let e = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("Renamed".into()),
+            },
+        )
+        .unwrap();
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: true,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    for d in 1..3 {
+        assert_eq!(net.current(d, &g), Some(h), "device {d}");
+        assert!(net.devs[d].node.root(&e).is_some(), "device {d}");
+    }
+}
