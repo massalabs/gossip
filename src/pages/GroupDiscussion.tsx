@@ -210,11 +210,12 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const service = getGroupService();
   const blocked = composerBlockedReason(group);
   const canWrite = blocked === null;
+  // A chat of two the other person left still names that person.
   const title = groupDisplayName(
     group,
     memberName,
     me,
-    t('invitation.unnamed')
+    archivePeer ? memberName(archivePeer) : t('invitation.unnamed')
   );
   const maxTextBytes = service?.messageLimits.textBytes;
   const target = (m: GroupMessage): InputTarget => ({
