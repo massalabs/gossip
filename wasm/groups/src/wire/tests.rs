@@ -954,6 +954,78 @@ fn oversized_event_blobs_are_refused() {
     assert_eq!(pt.len(), MAX_PLAINTEXT_BYTES);
 }
 
+// ── The largest objects ──────────────────────────────────────────────────────
+
+/// The size of `object` as an event blob, checked to fit one empty container in the largest
+/// frame that can carry it, as encoded.
+fn fitting_blob_len(object: &EventObject) -> usize {
+    let blob = encode_event_blob(object).unwrap();
+    assert!(fits_empty_container(blob.len()), "{} bytes", blob.len());
+    let pt = encode_plaintext(&[Frame::Response(Response {
+        request_id: Some(RequestId::from_bytes([0xff; 16])),
+        idx: u32::MAX,
+        result: ResponseResult::Event(blob.clone()),
+    })])
+    .unwrap();
+    assert!(pt.len() <= MAX_PLAINTEXT_BYTES);
+    assert_eq!(decode_event_blob(&blob, 1).as_ref(), Ok(object));
+    blob.len()
+}
+
+/// The largest valid root: 512 members, 32 parents, a 256-byte name, the owner's keys and
+/// the longest `created_at`.
+fn largest_root(owner: &crate::test_support::Identity) -> crate::Root {
+    let mut members: Vec<GossipId> = (1u16..512)
+        .map(|i| {
+            let mut m = [0xff; 32];
+            m[30..].copy_from_slice(&i.to_be_bytes());
+            GossipId::from_bytes(m)
+        })
+        .collect();
+    members.push(owner.id);
+    let mut params = crate::root::tests::params(owner, &[], 0x10);
+    params.name = "\u{e9}".repeat(128);
+    params.members = members;
+    params.created_at = u64::MAX;
+    let parents: Vec<ChatId> = (0u8..32).map(|i| ChatId::from_bytes([i; 32])).collect();
+    let root =
+        crate::Root::create_successor(params, &parents, &owner.secret.dsa_signing_key, [0; 32])
+            .unwrap();
+    assert_eq!(root.name().len(), crate::constants::MAX_NAME_BYTES);
+    assert_eq!(root.members().len(), crate::constants::MAX_MEMBERS);
+    assert_eq!(root.parents().len(), crate::constants::MAX_ROOT_PARENTS);
+    root
+}
+
+#[test]
+fn the_largest_root_and_signed_objects_fit_one_container() {
+    let alice = identity(1);
+    let root = largest_root(&alice);
+    let leave = Leave::sign(&root, &alice.public, &alice.secret.dsa_signing_key, [1; 32]);
+    let kick = Kick::sign(
+        &root,
+        root.members()[0],
+        &alice.secret.dsa_signing_key,
+        [2; 32],
+    );
+    let dissolve = Dissolve::sign(&root, true, &alice.secret.dsa_signing_key, [3; 32]);
+    let sizes = [
+        ("root", fitting_blob_len(&EventObject::Root(Box::new(root)))),
+        (
+            "leave",
+            fitting_blob_len(&EventObject::Leave(leave.unwrap())),
+        ),
+        ("kick", fitting_blob_len(&EventObject::Kick(kick.unwrap()))),
+        (
+            "dissolve",
+            fitting_blob_len(&EventObject::Dissolve(dissolve.unwrap())),
+        ),
+    ];
+    println!("{sizes:?} of at most {MAX_EVENT_BLOB_BYTES}");
+    // A root of 512 members is about 24 KB (§4.4), well within the container.
+    assert!(sizes[0].1 < MAX_EVENT_BLOB_BYTES / 2, "{sizes:?}");
+}
+
 // ── Strict check: one case per `oneof`, counts before decoding ───────────────
 
 /// `key ‖ len ‖ bytes` for a length-delimited field whose key fits one byte.
