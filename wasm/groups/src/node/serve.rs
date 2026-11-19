@@ -169,6 +169,17 @@ impl Node {
             }
             return Ok(());
         };
+        // A reference lives until its request's deadline (§13.4), whether or not a tick has
+        // dropped it yet.
+        if self
+            .t
+            .requests
+            .get(&(from, request_id))
+            .is_some_and(|q| deadline(q.sent_at, q.ttl) < cx.now)
+        {
+            self.t.requests.remove(&(from, request_id));
+            return Ok(());
+        }
         let Some((entry, sent_at, ttl)) = self.t.requests.get(&(from, request_id)).and_then(|q| {
             q.entries
                 .get(r.idx as usize)
