@@ -78,6 +78,13 @@
       "when": 1795084958395,
       "tag": "0010_group_chats",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795113424155,
+      "tag": "0011_group_conversations",
+      "breakpoints": true
     }
   ]
 }
