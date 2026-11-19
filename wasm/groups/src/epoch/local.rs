@@ -66,6 +66,46 @@ pub struct Published {
     pub pruned: Vec<EventId>,
 }
 
+/// A change of a message's metadata (§6.2, §7.6): an edit starts from the current entries,
+/// removes `remove`, then sets `set`. The default changes nothing, so that entries a client
+/// does not know, `replyTo` included, survive its edits (§2.2).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MetadataPatch {
+    /// Entries set (added or replaced).
+    pub set: BTreeMap<String, Vec<u8>>,
+    /// Names removed.
+    pub remove: std::collections::BTreeSet<String>,
+}
+
+impl MetadataPatch {
+    /// The metadata after this patch is applied to `current`.
+    #[must_use]
+    pub fn apply(&self, current: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
+        let mut m = current.clone();
+        for k in &self.remove {
+            m.remove(k);
+        }
+        m.extend(self.set.iter().map(|(k, v)| (k.clone(), v.clone())));
+        m
+    }
+
+    /// Whether it changes nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.set.is_empty() && self.remove.is_empty()
+    }
+}
+
+/// Entries to set, keeping every other one.
+impl From<BTreeMap<String, Vec<u8>>> for MetadataPatch {
+    fn from(set: BTreeMap<String, Vec<u8>>) -> Self {
+        Self {
+            set,
+            remove: std::collections::BTreeSet::new(),
+        }
+    }
+}
+
 /// A local-only edit (§9.1): each `Some` field replaces the stored one. Its `Debug` output
 /// hides the metadata, as the body's does its content.
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -78,8 +118,8 @@ pub struct LocalEdit {
     pub created_at: Option<u64>,
     /// New `last_modified_at`, entered by the user; it wins over the automatic one.
     pub last_modified_at: Option<u64>,
-    /// New metadata.
-    pub metadata: Option<BTreeMap<String, Vec<u8>>>,
+    /// The change of the metadata, applied to the current entries; the default keeps them.
+    pub metadata: MetadataPatch,
     /// New `edited` flag. None is added automatically.
     pub edited: Option<bool>,
 }
@@ -93,10 +133,10 @@ impl core::fmt::Debug for LocalEdit {
             .field("last_modified_at", &self.last_modified_at)
             .field(
                 "metadata",
-                &self
-                    .metadata
-                    .as_ref()
-                    .map(|m| crate::redact::Entries(m.len())),
+                &(
+                    crate::redact::Entries(self.metadata.set.len()),
+                    self.metadata.remove.len(),
+                ),
             )
             .field("edited", &self.edited)
             .finish()
@@ -147,8 +187,9 @@ impl Epoch<'_> {
         })
     }
 
-    /// Publishes an edit of a message of this epoch (§7.2): `created_at` and the author are
-    /// kept, `edited = true`, and `last_modified_at = max(now, previous + 1)` with the
+    /// Publishes an edit of a message of this epoch (§7.2): its metadata is the current one
+    /// with `metadata` applied (a map sets those entries and keeps the others),
+    /// `created_at` and the author are kept, `edited = true`, and `last_modified_at = max(now, previous + 1)` with the
     /// previous value of the current applied result, or `S` when scheduled for `S`.
     ///
     /// # Errors
@@ -162,9 +203,10 @@ impl Epoch<'_> {
         rng: &mut dyn Randomness,
         sync_obj_id: SyncObjId,
         body: Body,
-        metadata: BTreeMap<String, Vec<u8>>,
+        metadata: impl Into<MetadataPatch>,
         scheduled_for: Option<u64>,
     ) -> Result<Published, ChangeError> {
+        let metadata: MetadataPatch = metadata.into();
         let scheduled = scheduled_time(scheduled_for, now)?;
         self.publish(store, now, rng, |tx| {
             let current = current_content(&object(tx, &sync_obj_id)?)?;
@@ -179,7 +221,7 @@ impl Epoch<'_> {
                 last_modified_at,
                 body,
                 edited: true,
-                metadata,
+                metadata: metadata.apply(&current.metadata),
             }))
         })
     }
@@ -294,13 +336,13 @@ impl Epoch<'_> {
         let mut obj = object(&tx, &sync_obj_id)?;
         let old = current_content(&obj)?;
         let content_edit = edit.body.as_ref().is_some_and(|b| *b != old.body)
-            || edit.metadata.as_ref().is_some_and(|m| *m != old.metadata);
+            || edit.metadata.apply(&old.metadata) != old.metadata;
         let mut new = old.clone();
         if let Some(body) = edit.body {
             new.body = body;
         }
-        if let Some(metadata) = edit.metadata {
-            new.metadata = metadata;
+        if !edit.metadata.is_empty() {
+            new.metadata = edit.metadata.apply(&old.metadata);
         }
         if let Some(author) = edit.author {
             new.author = author;
@@ -631,7 +673,7 @@ mod tests {
                     sync,
                     LocalEdit {
                         body: Some(body),
-                        metadata: Some(metadata),
+                        metadata: metadata.into(),
                         ..Default::default()
                     },
                 ),
@@ -719,7 +761,7 @@ mod tests {
                 .unwrap(),
         )
         .sync_obj_id;
-        let edit = |f: &mut Fixture, rng: &mut TestRng, at, metadata| {
+        let edit = |f: &mut Fixture, rng: &mut TestRng, at, metadata: MetadataPatch| {
             content_of(
                 &ep(&f.root)
                     .publish_edit(
@@ -735,7 +777,10 @@ mod tests {
             )
             .metadata
         };
-        assert_eq!(edit(&mut f, &mut rng, T0 + 1, BTreeMap::new()), original);
+        assert_eq!(
+            edit(&mut f, &mut rng, T0 + 1, BTreeMap::new().into()),
+            original
+        );
         let mut expected = original.clone();
         expected.insert("k".into(), vec![3]);
         assert_eq!(
@@ -743,10 +788,54 @@ mod tests {
                 &mut f,
                 &mut rng,
                 T0 + 2,
-                BTreeMap::from([("k".to_owned(), vec![3])])
+                BTreeMap::from([("k".to_owned(), vec![3])]).into()
             ),
             expected
         );
+        // An explicit removal.
+        let patch = MetadataPatch {
+            set: BTreeMap::new(),
+            remove: ["x.unknown".to_owned()].into(),
+        };
+        expected.remove("x.unknown");
+        assert_eq!(edit(&mut f, &mut rng, T0 + 3, patch.clone()), expected);
+        // A local edit applies a patch the same way, and keeps everything by default.
+        let cur = |f: &Fixture| match f.store.object(&f.root.chat_id(), &sync).unwrap() {
+            Some(ObjectRecord {
+                current: Some(StoredResult::Content(c)),
+                ..
+            }) => c.metadata,
+            other => panic!("{other:?}"),
+        };
+        ep(&f.root)
+            .local_edit(
+                &mut f.store,
+                T0 + 10,
+                sync,
+                LocalEdit {
+                    body: Some(Body::Text("local".into())),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(cur(&f), expected);
+        ep(&f.root)
+            .local_edit(
+                &mut f.store,
+                T0 + 11,
+                sync,
+                LocalEdit {
+                    metadata: MetadataPatch {
+                        set: BTreeMap::from([("z".to_owned(), vec![9])]),
+                        remove: ["k".to_owned()].into(),
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        expected.remove("k");
+        expected.insert("z".into(), vec![9]);
+        assert_eq!(cur(&f), expected);
     }
 
     #[test]

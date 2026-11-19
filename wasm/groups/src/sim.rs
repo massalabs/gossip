@@ -980,7 +980,7 @@ impl Sim {
             };
             let edit = LocalEdit {
                 body: Some(body),
-                metadata: Some(metadata),
+                metadata: metadata.into(),
                 last_modified_at: lma,
                 edited: Some(chance(&mut self.rng, 50)),
                 ..Default::default()

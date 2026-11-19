@@ -1388,7 +1388,7 @@ fn debug_hides_secrets_and_content() {
     }));
     let edit = crate::LocalEdit {
         body: Some(Body::Text(TEXT.into())),
-        metadata: Some(content.metadata.clone()),
+        metadata: content.metadata.clone().into(),
         ..Default::default()
     };
     let shown = [
