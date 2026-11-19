@@ -589,3 +589,23 @@ fn a_removed_member_stays_connected_while_an_epoch_lists_it() {
         kind: ChangeKind::Connections
     }));
 }
+
+#[test]
+fn the_winner_sends_its_root_again_when_the_losing_root_reaches_it() {
+    let mut net = MNet::new(2, true);
+    net.earlier(0, 1, 0, true);
+    net.earlier(1, 0, 0, true);
+    let a = net.create_with(0, &[1], Some(0)).unwrap();
+    let b = net.create_with(1, &[0], Some(0)).unwrap();
+    let (keep, lose) = sorted_pair();
+    let groups = [a, b];
+    // The winner's root is lost on the way; the loser's arrives.
+    let _ = net.outgoing(keep);
+    net.deliver(lose, keep);
+    assert_eq!(net.group_keys(keep), vec![groups[keep]]);
+    // The winner answers with its own root again: the loser adopts it.
+    net.run(10 * MIN);
+    for d in 0..2 {
+        assert_eq!(net.group_keys(d), vec![groups[keep]], "device {d}");
+    }
+}
