@@ -638,7 +638,7 @@ tables! {
     keys: GossipId => Vec<u8>,
     markers: ChatId => Marker,
     replies: (ChatId, GossipId) => ReplyCount,
-    unverified: (ChatId, GossipId) => PendingLeave,
+    unverified: (ChatId, GossipId, GossipId) => PendingLeave,
     held_roots: ChatId => HeldRoot,
     events: (ChatId, ChangeKind) => u64,
     peers: GossipId => PeerRecord,
