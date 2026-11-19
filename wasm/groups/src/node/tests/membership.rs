@@ -1046,3 +1046,29 @@ fn signed_objects_of_a_removed_member_in_storage_are_kept_with_their_root() {
             .is_some_and(|r| r.status == GroupStatus::Active)
     );
 }
+
+/// Regression (simulation, code at afeb85d8, `GROUPS_MEMBERS_SEED=0`): a device whose owner
+/// line had passed by a handover accepted a root of the former owner's branch as a separate
+/// conversation before its parents were found; when the two were joined, the joined group
+/// kept the line of the accepted one and made the former owner's branch current again
+/// (§5.9: the handover wins).
+#[test]
+fn joining_two_groups_keeps_the_line_after_a_handover() {
+    for into_main in [false, true] {
+        let store = MemoryStorage::new();
+        let mut node = Node::open(&store, gid(0)).unwrap();
+        let main = ChatId::from_bytes([if into_main { 1 } else { 2 }; 32]);
+        let other = ChatId::from_bytes([if into_main { 2 } else { 1 }; 32]);
+        {
+            let g = node.group_rec_mut(main);
+            g.followed = Some(gid(1));
+            g.deposed.insert(gid(0));
+        }
+        node.group_rec_mut(other).followed = Some(gid(0));
+        let (from, into) = (main.max(other), main.min(other));
+        node.merge_groups(from, into);
+        let g = node.t.group_recs.get(&into).unwrap();
+        assert_eq!(g.followed, Some(gid(1)), "into the main group: {into_main}");
+        assert!(g.deposed.contains(&gid(0)));
+    }
+}
