@@ -149,3 +149,138 @@ fn a_member_added_back_reads_who_added_it_back() {
         "{lines:?}"
     );
 }
+
+/// Review of the lines (§5.10, §7.5): a root that adds a member back names, beside the
+/// current epoch, the last epoch that member was in (§5.10). A member that holds both reads
+/// the change against the current epoch only: the member added back was added, and nobody
+/// removed since that older epoch is removed again, nor the name changed back.
+#[test]
+fn a_continuing_member_reads_an_addition_back_against_the_current_epoch() {
+    let (mut net, g) = founded(4);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(MIN);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(3)],
+            name: Some("x".into()),
+        },
+    )
+    .unwrap();
+    net.run(MIN);
+    let z = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(2)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(net.devs[0].node.root(&z).unwrap().parents().len(), 2);
+    net.run(MIN);
+    for d in 0..2 {
+        let line = changes(&net, d, &g)
+            .into_iter()
+            .find(|l| matches!(l, TimelineLine::EpochChange { epoch, .. } if *epoch == z));
+        assert_eq!(
+            line,
+            Some(TimelineLine::EpochChange {
+                epoch: z,
+                by: gid(0),
+                added: vec![gid(2)],
+                removed: vec![],
+                left: vec![],
+                renamed: None,
+                new_owner: None,
+            }),
+            "device {d}"
+        );
+    }
+}
+
+/// Review of the lines (§4.7, §5.9): only a handover root changes the owner. A new owner's
+/// resolution root that takes a former owner's branch as a parent names another owner than
+/// that parent, and is no handover.
+#[test]
+fn a_resolution_over_a_former_owners_branch_does_not_change_the_owner() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[0].store.clone();
+    let a = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("A".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.devs[0].store = backup;
+    net.restart(0);
+    net.offline[1] = true;
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.offline[1] = false;
+    for (from, to, pt) in core::mem::take(&mut net.dropped) {
+        let now = net.now;
+        let dev = &mut net.devs[to];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(from), &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    net.run(3 * MIN);
+    let r = net
+        .change(
+            1,
+            g,
+            GroupChange::Resolve {
+                members: vec![gid(0), gid(2), gid(3)],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    for d in 0..4 {
+        let line = changes(&net, d, &g)
+            .into_iter()
+            .find(|l| matches!(l, TimelineLine::EpochChange { epoch, .. } if *epoch == r));
+        assert!(
+            matches!(
+                line,
+                Some(TimelineLine::EpochChange {
+                    by,
+                    new_owner: None,
+                    ..
+                }) if by == gid(1)
+            ),
+            "device {d}: {line:?}"
+        );
+    }
+    let _ = (a, h);
+}
