@@ -283,6 +283,9 @@ struct Sim {
     script: Option<(u64, u64)>,
     script_done: bool,
     ops: u64,
+    /// Whether sessions are still reset during the final period (not in every third seed,
+    /// so that resends after reconnections do not mask a missed retry).
+    resets_in_final: bool,
 }
 
 fn below(rng: &mut TestRng, n: u64) -> u64 {
@@ -346,7 +349,9 @@ impl Sim {
                     online: false,
                     next: START + below(&mut rng, HOUR),
                     session_end: 0,
-                    local_changes: i > 0
+                    // Devices 0 and 1 never alter messages locally: at least two devices
+                    // are compared in full.
+                    local_changes: i > 1
                         && hostile.is_none()
                         && ((i == honest - 1 && seed % 2 == 1) || chance(&mut rng, 15)),
                     sleeper: i == 1 && seed.is_multiple_of(2),
@@ -377,6 +382,7 @@ impl Sim {
             script: None,
             script_done: false,
             ops: 0,
+            resets_in_final: seed % 3 != 2,
         };
         for d in 0..n {
             if sim.devs[d].hostile.is_none() {
@@ -547,7 +553,7 @@ impl Sim {
         {
             self.user_action(d);
         }
-        if chance(&mut self.rng, 1) {
+        if chance(&mut self.rng, 1) && (!self.final_phase || self.resets_in_final) {
             let peer = self.devs[below(&mut self.rng, self.devs.len() as u64) as usize].id;
             if peer != self.devs[d].id {
                 self.counters.session_resets += 1;
@@ -610,6 +616,7 @@ impl Sim {
                 node.abandon(handle);
                 continue;
             }
+            self.check_sent(d, &o.plaintext);
             self.op(d, |n, s, now, rng| n.handed_off(s, handle, now, rng))
                 .expect("handoff");
             let e = self.devs[d].hours.entry(hour).or_default();
@@ -756,6 +763,60 @@ impl Sim {
         .expect("edit");
         self.counters.messages += 2;
         self.counters.edits += 1;
+    }
+
+    /// Every event a plaintext about to be sent carries or announces is one device `d`
+    /// serves at this instant, what came due included: the check does not rely on
+    /// `is_current`.
+    fn check_sent(&self, d: usize, plaintext: &[u8]) {
+        let chat = self.chat();
+        let now = self.clock(d);
+        let store = &self.devs[d].store.inner;
+        let due = store
+            .first_pending(&chat)
+            .unwrap()
+            .is_some_and(|i| i.due <= now);
+        let epoch = crate::epoch::Epoch::new(&self.root, true, crate::epoch::GroupState::Active);
+        let ticked;
+        let view: &MemoryStorage = if due {
+            let mut c = store.clone();
+            epoch.tick(&mut c, now).expect("tick");
+            ticked = c;
+            &ticked
+        } else {
+            store
+        };
+        let served = |id: &EventId| epoch.serve(view, id, now).expect("serve");
+        for f in decode(plaintext) {
+            match f {
+                Frame::Event(b)
+                | Frame::Response(Response {
+                    result: ResponseResult::Event(b),
+                    ..
+                }) => {
+                    let Ok(EventObject::Message(e)) = wire::decode_event_blob(&b, 1) else {
+                        panic!("device {d} sends an undecodable event");
+                    };
+                    assert_eq!(
+                        served(&e.event_id()).as_ref(),
+                        Some(&e),
+                        "device {d} sends {:?}, which it does not serve now",
+                        e.event_id()
+                    );
+                }
+                Frame::Notice(n) => {
+                    for e in n.entries {
+                        if let EntryItem::Event(id) = e.item {
+                            assert!(
+                                served(&id).is_some(),
+                                "device {d} announces {id:?}, which it does not serve now"
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// The most times one ID was announced by the hostile members.
@@ -1001,6 +1062,13 @@ impl Sim {
         }
         self.devs[d].online = false;
         self.devs[d].next = next;
+        // Device 0 runs the script: it is online when the quiet period starts.
+        if let Some((at, _)) = self.script
+            && !self.script_done
+            && self.now < at
+        {
+            self.devs[0].next = self.devs[0].next.min(at);
+        }
     }
 
     fn run(&mut self) {
@@ -1185,6 +1253,7 @@ fn run(seed: u64, hours: u64) -> Counters {
         .copied()
         .filter(|d| !sim.devs[*d].local_changes)
         .collect();
+    assert!(clean.len() >= 2, "fewer than two devices compared");
     let reference = retained(&sim.devs[clean[0]].store, &chat);
     let reference_results = results(&sim.devs[clean[0]].store, &chat);
     for &d in &honest {
@@ -1236,6 +1305,33 @@ fn run(seed: u64, hours: u64) -> Counters {
             sim.counters.max_lookups_hour = sim.counters.max_lookups_hour.max(*l);
         }
     }
+    // Honest members, all reachable during the final period, end credible and responsive
+    // in each other's view.
+    for &d in &honest {
+        let node = sim.devs[d].node.as_ref().expect("booted");
+        for &h in &honest {
+            if h != d {
+                let id = sim.devs[h].id;
+                // A member that deletes locally answers "not available" for what it
+                // announced, as one announcing fake IDs does: for deniability the two must
+                // not be told apart, so its score is not checked.
+                assert!(
+                    sim.devs[h].local_changes || node.score(&id) >= crate::node::CREDIBLE,
+                    "device {d} scores honest device {h} (local changes {}) at {}",
+                    sim.devs[h].local_changes,
+                    node.score(&id)
+                );
+                // Transit delays answers by up to 7 hours: the last few queries before
+                // this instant may be unanswered yet, which is no lasting misjudgement.
+                assert!(
+                    node.responsive(&id) || node.unanswered_ms(&id) < HOUR,
+                    "device {d} holds honest device {h} (sleeper {}, wake-up driven {}) unresponsive",
+                    sim.devs[h].sleeper,
+                    sim.devs[h].wakeup_driven
+                );
+            }
+        }
+    }
     // (d) Hostile members rank below every honest one that supplied something.
     for &d in &honest {
         let node = sim.devs[d].node.as_ref().expect("booted");
@@ -1284,21 +1380,87 @@ fn run(seed: u64, hours: u64) -> Counters {
             .counters
             .max_task_runs
             .max(u64::from(node.max_task_runs()));
+        // Alone for 40 days, then 40 more days with every request answered at once by a
+        // peer that never supplies anything (busy, expired, restart, not available, endless
+        // pages): every task, scan, queued item and correlation reference ends either way.
         let mut t = at;
-        while t < at + 40 * DAY {
-            t += 6 * HOUR;
-            node.tick(&mut dev.store, t, &mut sim.rng).expect("tick");
-            for o in node
-                .poll_outbox(&mut dev.store, t, &mut sim.rng)
-                .expect("poll")
-            {
-                node.handed_off(&mut dev.store, o.handle, t, &mut sim.rng)
-                    .expect("handoff");
+        for answering in [false, true] {
+            let until = t + 40 * DAY;
+            let before = node.pending_ids();
+            while t < until {
+                t += 6 * HOUR;
+                let mut inbox: Vec<(GossipId, Vec<u8>)> = Vec::new();
+                node.tick(&mut dev.store, t, &mut sim.rng).expect("tick");
+                for _ in 0..8 {
+                    for (from, pt) in core::mem::take(&mut inbox) {
+                        node.handle_plaintext(&mut dev.store, from, &pt, t, &mut sim.rng)
+                            .expect("receive");
+                    }
+                    for o in node
+                        .poll_outbox(&mut dev.store, t, &mut sim.rng)
+                        .expect("poll")
+                    {
+                        node.handed_off(&mut dev.store, o.handle, t, &mut sim.rng)
+                            .expect("handoff");
+                        if answering {
+                            let frames = stubborn_answers(&mut sim.rng, &chat, &o.plaintext);
+                            for chunk in frames.chunks(16) {
+                                if let Ok(pt) = wire::encode_plaintext(chunk) {
+                                    inbox.push((o.to, pt));
+                                }
+                            }
+                        }
+                    }
+                }
             }
+            assert_eq!(node.task_count(), (0, 0), "device {d}: tasks left");
+            let left: Vec<String> = node.pending_ids().intersection(&before).cloned().collect();
+            assert!(
+                left.is_empty(),
+                "device {d}: still pending after 40 days (answering: {answering}): {left:?}"
+            );
         }
-        assert_eq!(node.task_count(), (0, 0), "device {d}: tasks left");
     }
     sim.counters
+}
+
+/// The answers of a peer that answers every request at once and never supplies anything:
+/// `busy`, `expired` or "not available" to lookups, and `busy`, `expired`, `restart` or a
+/// page of one fake ID out of a list said to be huge to page requests.
+fn stubborn_answers(rng: &mut TestRng, chat: &ChatId, plaintext: &[u8]) -> Vec<Frame> {
+    let mut out = Vec::new();
+    for f in decode(plaintext) {
+        let Frame::Query(q) = f else { continue };
+        for (i, e) in q.entries.iter().enumerate() {
+            let roll = below(rng, 4);
+            let result = match e {
+                QueryEntry::Op(QueryOp::TipsScan {
+                    scan_id, offset, ..
+                }) if roll == 3 => ResponseResult::Page(Page {
+                    scan_id: *scan_id,
+                    offset: *offset,
+                    count: 1_000_000_000 - offset,
+                    entries: vec![Entry {
+                        chat_id: *chat,
+                        item: EntryItem::Event(EventId::new(START, bytes(rng))),
+                    }],
+                    skipped: 0,
+                }),
+                QueryEntry::Op(QueryOp::TipsScan { .. }) if roll == 2 => {
+                    ResponseResult::Status(Status::Restart)
+                }
+                _ if roll == 2 => ResponseResult::Status(Status::NotAvailable),
+                _ if roll == 1 => ResponseResult::Status(Status::Expired),
+                _ => ResponseResult::Status(Status::Busy),
+            };
+            out.push(Frame::Response(Response {
+                request_id: Some(q.request_id),
+                idx: i as u32,
+                result,
+            }));
+        }
+    }
+    out
 }
 
 fn env_u64(name: &str) -> Option<u64> {

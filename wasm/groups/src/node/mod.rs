@@ -72,6 +72,8 @@ use crate::store::overlay::Overlay;
 use crate::store::{Storage, StorageError};
 use crate::wire::{self, EventObject, Frame};
 
+#[cfg(test)]
+pub(crate) use index::CREDIBLE;
 pub use outbox::Outgoing;
 use records::{HintKey, NodeStorage, Tables, Target, TaskKey, TriggerKind, WorkKey};
 use timing::EDGES_PER_TURN;
@@ -440,6 +442,28 @@ impl Node {
         }
         eprintln!("  tasks by state {by_state:?}");
         eprintln!("  queue {}", self.t.queue.len());
+    }
+
+    /// What is pending, by identity (test checks): outbound scans by scan ID, queued work
+    /// items, correlation references. Periodic lanes start new scans for ever; each of
+    /// these must end.
+    #[cfg(test)]
+    pub(crate) fn pending_ids(&self) -> BTreeSet<String> {
+        let scans = self
+            .t
+            .scans_out
+            .iter()
+            .map(|(_, op)| format!("{:?}", op.scan_id));
+        let queue = self.t.queue.keys().map(|k| format!("work {k:?}"));
+        let refs = self.t.requests.keys().map(|k| format!("ref {k:?}"));
+        scans.chain(queue).chain(refs).collect()
+    }
+
+    /// How long the queries of `peer` that timed out in a row waited unanswered (test
+    /// checks).
+    #[cfg(test)]
+    pub(crate) fn unanswered_ms(&self, peer: &GossipId) -> u64 {
+        self.t.peers.get(peer).map_or(0, |r| r.unanswered_ms)
     }
 
     /// The number of queued work items.
