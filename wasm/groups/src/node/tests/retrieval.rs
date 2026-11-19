@@ -569,3 +569,45 @@ fn a_reconnection_resends_outstanding_queries_and_renews_paused_tasks() {
         .unwrap();
     assert_eq!(net.devs[0].node.t.tasks.get(&key).unwrap().run, Run::Paused);
 }
+
+#[test]
+fn a_malformed_status_fails_the_peer_for_the_run_without_a_penalty() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let q = sent_lookups(&mut net, 0);
+    answer(
+        &mut net,
+        0,
+        &q[0],
+        ResponseResult::Status(Status::Malformed),
+    );
+    assert_eq!(net.devs[0].node.score(&member(1)), 500_000);
+    let q = sent_lookups(&mut net, 0);
+    assert_eq!(q[0].to, member(2));
+    answer(&mut net, 0, &q[0], na());
+    net.now += HOUR;
+    net.tick(0);
+    assert!(
+        sent_lookups(&mut net, 0).is_empty(),
+        "member 1 is not asked again"
+    );
+}
+
+#[test]
+fn bytes_that_do_not_decode_are_an_invalid_answer() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let q = sent_lookups(&mut net, 0);
+    answer(
+        &mut net,
+        0,
+        &q[0],
+        ResponseResult::Event(vec![1, 0x0a, 0x03, 1, 2, 3]),
+    );
+    assert!(net.devs[0].node.score(&member(1)) < 500_000);
+    assert_eq!(sent_lookups(&mut net, 0)[0].to, member(2));
+}
