@@ -502,7 +502,7 @@ impl Node {
                 .verify_signature(self.t.epochs.get(&parent).map(|r| &r.root))
                 .is_ok()
         {
-            self.left_by_handover(cx, parent);
+            self.left_by_handover(cx, parent, &root);
             return Ok(Answer::Supplied);
         }
         if !root.is_member(&self.me) || !(root.is_member(&from) || signer_left) || from == self.me {
