@@ -7,7 +7,7 @@ import NewGroup from '../../../src/pages/NewGroup';
 import { useSdkStore } from '../../../src/stores/sdkStore';
 import { useGroupStore } from '../../../src/stores/groupStore';
 import { useAccountStore } from '../../../src/stores/accountStore';
-import { makeFakeGroups, summary } from '../../helpers/fakeGroups';
+import { flush, makeFakeGroups, summary } from '../../helpers/fakeGroups';
 import { byText, click, renderAt } from './render';
 
 vi.mock('react-i18next', () => ({
@@ -42,8 +42,8 @@ const message = (
   epochId: 'g1',
   syncObjId: 's1',
   author: 'me',
-  createdAt: 1_000,
-  lastModifiedAt: 1_000,
+  createdAt: 1_000n,
+  lastModifiedAt: 1_000n,
   edited: false,
   body: { type: 'text', text: 'question' },
   metadata: {},
@@ -69,26 +69,33 @@ describe('group pages', () => {
     useSdkStore.setState({ sdk: null });
   });
 
-  function openGroup(status: 'member' | 'removed', mustResolve = false) {
+  async function openGroup(status: 'member' | 'removed', mustResolve = false) {
     fake.state.groups = [summary({ status, mustResolve })];
     fake.state.timelines.set('g1', [
       {
         kind: 'line',
-        at: 500,
+        at: 500n,
         line: { type: 'founded', epoch: 'g1', owner: 'me' },
       },
       message({}),
       message({
         syncObjId: 's2',
         author: 'bob',
-        createdAt: 2_000,
-        lastModifiedAt: 2_000,
+        createdAt: 2_000n,
+        lastModifiedAt: 2_000n,
         body: { type: 'text', text: 'answer' },
         replyTo: [{ epochId: 'g1', syncObjId: 's1' }],
       }),
     ]);
     useGroupStore.getState().init();
-    return renderAt(<GroupDiscussion />, '/group/g1', '/group/:groupId');
+    await act(flush);
+    const r = await renderAt(
+      <GroupDiscussion />,
+      '/group/g1',
+      '/group/:groupId'
+    );
+    await act(flush);
+    return r;
   }
 
   it('shows lines, messages, authors and reply previews in the timeline order', async () => {
@@ -165,6 +172,7 @@ describe('group pages', () => {
     fake.sdk.discussions.getStatus.mockImplementation(((id: string) =>
       id === 'alice' ? 0 : 2) as never);
     useGroupStore.getState().init();
+    await act(flush);
     const r = await renderAt(<NewGroup />);
     unmount = r.unmount;
     await act(async () => {});
@@ -184,6 +192,7 @@ describe('group pages', () => {
     });
     await click(boxes[0]);
     await click(byText('new_group.create'));
+    await act(flush);
     expect(fake.service.createGroup).toHaveBeenCalledWith('Trip', ['alice']);
     expect(
       r.container.querySelector('[data-testid="elsewhere"]')

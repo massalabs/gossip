@@ -17,7 +17,7 @@ import MessageContextMenu, {
 } from '../ui/MessageContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
 import SafeName from './SafeName';
-import { messageText } from '../../utils/groupTimeline';
+import { messageText, toDate } from '../../utils/groupTimeline';
 
 /** What the menu of a message can do; an absent handler hides its item. */
 export interface GroupMessageActions {
@@ -170,7 +170,7 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
           {message.edited && (
             <span className="mr-1">{t('timeline.edited')}</span>
           )}
-          {formatTime(new Date(shownTime))}
+          {formatTime(toDate(shownTime))}
         </p>
       </div>
       <MessageContextMenu

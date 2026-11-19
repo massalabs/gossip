@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SdkEventType, type GossipSdk } from '@massalabs/gossip-sdk';
 import { useSdkStore } from '../../src/stores/sdkStore';
 import { useGroupStore } from '../../src/stores/groupStore';
-import { makeFakeGroups, summary } from '../helpers/fakeGroups';
+import { flush, makeFakeGroups, summary } from '../helpers/fakeGroups';
 
 describe('groupStore', () => {
   let fake: ReturnType<typeof makeFakeGroups>;
@@ -19,8 +19,8 @@ describe('groupStore', () => {
         epochId: 'g2',
         syncObjId: 's',
         author: 'bob',
-        createdAt: 5,
-        lastModifiedAt: 5,
+        createdAt: 5n,
+        lastModifiedAt: 5n,
         edited: false,
         body: { type: 'text', text: 'hi' },
         metadata: {},
@@ -35,8 +35,9 @@ describe('groupStore', () => {
     useSdkStore.setState({ sdk: null });
   });
 
-  it('lists groups with their last message, most recent first', () => {
+  it('lists groups with their last message, most recent first', async () => {
     useGroupStore.getState().init();
+    await flush();
     const { groups, available } = useGroupStore.getState();
     expect(available).toBe(true);
     expect(groups.map(g => g.summary.groupId)).toEqual(['g2', 'g1']);
@@ -44,8 +45,9 @@ describe('groupStore', () => {
     expect(groups[1].lastMessage).toBeNull();
   });
 
-  it('marks a group unread on new messages unless it is open', () => {
+  it('marks a group unread on new messages unless it is open', async () => {
     useGroupStore.getState().init();
+    await flush();
     useGroupStore.getState().setCurrentGroup('g1');
     fake.sdk.emit(SdkEventType.GROUPS_CHANGED, {
       changes: [
@@ -53,6 +55,7 @@ describe('groupStore', () => {
         { groupId: 'g2', kind: 'Messages' },
       ],
     });
+    await flush();
     const unread = Object.fromEntries(
       useGroupStore.getState().groups.map(g => [g.summary.groupId, g.unread])
     );
@@ -61,8 +64,9 @@ describe('groupStore', () => {
     expect(useGroupStore.getState().groups.every(g => !g.unread)).toBe(true);
   });
 
-  it('reads invitations again on a change and stops listening on cleanup', () => {
+  it('reads invitations again on a change and stops listening on cleanup', async () => {
     useGroupStore.getState().init();
+    await flush();
     const before = useGroupStore.getState().version;
     fake.state.invitations = [
       {
@@ -78,6 +82,7 @@ describe('groupStore', () => {
     fake.sdk.emit(SdkEventType.GROUPS_CHANGED, {
       changes: [{ groupId: 'e', kind: 'Invitation' }],
     });
+    await flush();
     expect(useGroupStore.getState().invitations).toHaveLength(1);
     expect(useGroupStore.getState().version).toBeGreaterThan(before);
     useGroupStore.getState().cleanup();

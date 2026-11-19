@@ -9,6 +9,7 @@ import {
 } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
 import { createSelectors } from './utils/createSelectors';
+import { toDate } from '../utils/groupTimeline';
 
 /** The last visible message of a group, for the conversation list. */
 export interface GroupLastMessage {
@@ -37,7 +38,7 @@ interface GroupStoreState {
 
   init: () => void;
   cleanup: () => void;
-  refresh: () => void;
+  refresh: () => Promise<void>;
   setCurrentGroup: (groupId: string | null) => void;
   markRead: (groupId: string) => void;
 }
@@ -51,18 +52,18 @@ export function getGroupService(): GroupService | null {
   }
 }
 
-function lastMessageOf(
+async function lastMessageOf(
   groups: GroupService,
   groupId: string
-): GroupLastMessage | null {
-  const timeline = groups.timeline(groupId);
+): Promise<GroupLastMessage | null> {
+  const timeline = await groups.timeline(groupId);
   for (let i = timeline.length - 1; i >= 0; i--) {
     const item = timeline[i];
     if (item.kind !== 'message') continue;
     return {
       author: item.author,
       text: item.body.type === 'text' ? item.body.text : '',
-      at: item.edited ? item.lastModifiedAt : item.createdAt,
+      at: toDate(item.edited ? item.lastModifiedAt : item.createdAt).getTime(),
     };
   }
   return null;
@@ -97,7 +98,7 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
         }
         if (c.kind === 'Closed') unread.delete(c.groupId);
       }
-      get().refresh();
+      void get().refresh();
     };
     const sdk = getSdk();
     sdk.on(SdkEventType.GROUPS_CHANGED, onChanged);
@@ -111,7 +112,7 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
         }
       },
     });
-    get().refresh();
+    void get().refresh();
   },
 
   cleanup: () => {
@@ -126,23 +127,29 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
     });
   },
 
-  refresh: () => {
+  refresh: async () => {
     const groups = getGroupService();
     if (!groups) return;
     try {
-      const entries = groups.list().map(summary => ({
-        summary,
-        lastMessage: lastMessageOf(groups, summary.groupId),
-        unread: unread.has(summary.groupId),
-      }));
+      const summaries = await groups.list();
+      const entries: GroupListEntry[] = [];
+      for (const summary of summaries) {
+        entries.push({
+          summary,
+          lastMessage: await lastMessageOf(groups, summary.groupId),
+          unread: unread.has(summary.groupId),
+        });
+      }
       entries.sort(
         (a, b) =>
           (b.lastMessage?.at ?? 0) - (a.lastMessage?.at ?? 0) ||
           a.summary.groupId.localeCompare(b.summary.groupId)
       );
+      const invitations = await groups.invitations();
+      if (!get().available) return;
       set(state => ({
         groups: entries,
-        invitations: groups.invitations(),
+        invitations,
         version: state.version + 1,
       }));
     } catch (error) {

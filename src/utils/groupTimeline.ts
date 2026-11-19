@@ -6,6 +6,14 @@ import type {
 import { formatDateTime } from './timeUtils';
 import { safeName } from './groupName';
 
+/** The largest time a Date holds, in ms (claimed times may be any u64). */
+const MAX_DATE_MS = 8_640_000_000_000_000n;
+
+/** A claimed time as a Date, clamped to what a Date can hold. */
+export function toDate(ms: bigint): Date {
+  return new Date(Number(ms > MAX_DATE_MS ? MAX_DATE_MS : ms));
+}
+
 /** The text a message shows (non-text bodies get a label). */
 export function messageText(
   m: GroupMessage,
@@ -68,8 +76,8 @@ export function lineTexts(
     case 'notAMember':
       return [
         t('timeline.not_a_member', {
-          from: formatDateTime(new Date(line.from)),
-          to: formatDateTime(new Date(line.to)),
+          from: formatDateTime(toDate(line.from)),
+          to: formatDateTime(toDate(line.to)),
         }),
       ];
   }

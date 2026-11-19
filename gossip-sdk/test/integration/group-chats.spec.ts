@@ -15,6 +15,8 @@ import type { GroupService, GroupChange } from '../../src/services/groups';
 import { deserializeMessage } from '../../src/utils/messageSerialization';
 import { serializeGroupPlaintext } from '../../src/utils/messageSerialization';
 import { MessageType } from '../../src/db';
+import type { Queries } from '../../src/db/queries';
+import { vi } from 'vitest';
 
 /** One clock for every SDK, advanced by the test. */
 let clock = 1_800_000_000_000;
@@ -33,13 +35,23 @@ async function openPeer(net: MockMessageProtocol): Promise<GossipSdk> {
   return sdk;
 }
 
-function texts(groups: GroupService, groupId: string): string[] {
-  return groups
-    .timeline(groupId)
-    .flatMap(i =>
-      i.kind === 'message' && i.body.type === 'text' ? [i.body.text] : []
-    );
+async function texts(groups: GroupService, groupId: string): Promise<string[]> {
+  return (await groups.timeline(groupId)).flatMap(i =>
+    i.kind === 'message' && i.body.type === 'text' ? [i.body.text] : []
+  );
 }
+
+/** The group service's private parts that the failure tests reach into. */
+interface Internals {
+  queries: Queries;
+  persistSession: () => Promise<void>;
+  messageProtocol: { sendMessage: (m: unknown) => Promise<void> };
+  session: { peerSessionStatus: (p: Uint8Array) => number };
+  node: { poll_outbox: (now: number) => unknown[] } | null;
+}
+const internals = (sdk: GossipSdk) => sdk.groups as unknown as Internals;
+const queriesOf = (sdk: GossipSdk) =>
+  (sdk as unknown as { _queries: Queries })._queries;
 
 describe('Group chats', { timeout: 120_000 }, () => {
   let net: MockMessageProtocol;
@@ -54,7 +66,9 @@ describe('Group chats', { timeout: 120_000 }, () => {
       clock += 1_000;
       for (const p of peers) {
         await p.groups.tick();
+        await p.groups.settle();
         await p.messages.fetch();
+        await p.groups.settle();
       }
     }
   }
@@ -94,12 +108,12 @@ describe('Group chats', { timeout: 120_000 }, () => {
       bob.userId,
       carol.userId,
     ]);
-    expect(alice.groups.list().map(g => g.groupId)).toEqual([groupId]);
+    expect((await alice.groups.list()).map(g => g.groupId)).toEqual([groupId]);
     await deliver();
 
     // Bob and Carol are invited and accept.
     for (const p of [bob, carol]) {
-      const [inv] = p.groups.invitations();
+      const [inv] = await p.groups.invitations();
       expect(inv.epochId).toBe(groupId);
       expect(inv.name).toBe('Trip');
       expect(inv.owner).toBe(alice.userId);
@@ -108,7 +122,7 @@ describe('Group chats', { timeout: 120_000 }, () => {
     expect(changes.some(c => c.kind === 'Invitation')).toBe(true);
     await deliver();
     for (const p of peers) {
-      const g = p.groups.get(groupId)!;
+      const g = (await p.groups.get(groupId))!;
       expect(g.status).toBe('member');
       expect([...g.members].sort()).toEqual(
         [alice.userId, bob.userId, carol.userId].sort()
@@ -121,50 +135,50 @@ describe('Group chats', { timeout: 120_000 }, () => {
     await bob.groups.sendMessage(groupId, 'hi alice');
     await deliver();
     for (const p of peers) {
-      expect(texts(p.groups, groupId)).toEqual(['hello', 'hi alice']);
+      expect(await texts(p.groups, groupId)).toEqual(['hello', 'hi alice']);
     }
 
     // Alice edits her message; Bob deletes his.
     await alice.groups.editMessage(groupId, hello.syncObjId, 'hello all');
-    const bobs = bob.groups
-      .timeline(groupId)
-      .find(i => i.kind === 'message' && i.author === bob.userId);
+    const bobs = (await bob.groups.timeline(groupId)).find(
+      i => i.kind === 'message' && i.author === bob.userId
+    );
     if (bobs?.kind !== 'message') throw new Error('no message from Bob');
     await bob.groups.deleteMessage(bobs.epochId, bobs.syncObjId);
     await deliver();
     for (const p of peers) {
-      expect(texts(p.groups, groupId)).toEqual(['hello all']);
+      expect(await texts(p.groups, groupId)).toEqual(['hello all']);
     }
-    const edited = carol.groups
-      .timeline(groupId)
-      .find(i => i.kind === 'message');
+    const edited = (await carol.groups.timeline(groupId)).find(
+      i => i.kind === 'message'
+    );
     expect(edited?.kind === 'message' && edited.edited).toBe(true);
 
     // Alice removes Carol.
     await alice.groups.changeMembers(groupId, { remove: [carol.userId] });
     await deliver();
-    expect([...alice.groups.get(groupId)!.members].sort()).toEqual(
+    expect([...(await alice.groups.get(groupId))!.members].sort()).toEqual(
       [alice.userId, bob.userId].sort()
     );
-    expect([...bob.groups.get(groupId)!.members].sort()).toEqual(
+    expect([...(await bob.groups.get(groupId))!.members].sort()).toEqual(
       [alice.userId, bob.userId].sort()
     );
-    expect(carol.groups.get(groupId)!.status).toBe('removed');
+    expect((await carol.groups.get(groupId))!.status).toBe('removed');
     expect(
-      carol.groups
-        .timeline(groupId)
-        .some(i => i.kind === 'line' && i.line.type === 'youWereRemoved')
+      (await carol.groups.timeline(groupId)).some(
+        i => i.kind === 'line' && i.line.type === 'youWereRemoved'
+      )
     ).toBe(true);
 
     // Bob leaves: the group is closed and erased on his device.
     await bob.groups.leave(groupId, 'Signed');
     await deliver();
-    expect(bob.groups.get(groupId)).toBeNull();
-    expect(bob.groups.list()).toEqual([]);
+    expect(await bob.groups.get(groupId)).toBeNull();
+    expect(await bob.groups.list()).toEqual([]);
     // The owner's device removes the leaver once the leaves are quiet (§5.5).
     clock += 31_000;
     await deliver();
-    expect(alice.groups.get(groupId)!.members).toEqual([alice.userId]);
+    expect((await alice.groups.get(groupId))!.members).toEqual([alice.userId]);
     const queries = (
       bob as unknown as {
         _queries: {
@@ -184,18 +198,32 @@ describe('Group chats', { timeout: 120_000 }, () => {
     expect(snap.edges).toEqual([]);
     expect(snap.objects).toEqual([]);
     expect(snap.node.some(n => (n.fields ?? '').includes('hello'))).toBe(false);
+    // Once the request references of its queries expire, no node record of
+    // Bob's names the group but the closed-chat marker of its end.
+    clock += 10 * 60_000;
+    await bob.groups.tick();
+    await bob.groups.settle();
+    const later = await queriesOf(bob).groups.loadSnapshot(bob.userId);
+    const naming = later.node
+      .filter(
+        n => n.key.includes(groupId) || (n.fields ?? '').includes(groupId)
+      )
+      .map(n => n.kind);
+    expect(naming.filter(k => k !== 'markers')).toEqual([]);
   });
 
   it('reopens the groups from the database after logging in again', async () => {
     const groupId = await alice.groups.createGroup('Book club', [bob.userId]);
     await deliver();
-    await bob.groups.acceptInvitation(bob.groups.invitations()[0].epochId);
+    await bob.groups.acceptInvitation(
+      (await bob.groups.invitations())[0].epochId
+    );
     await alice.groups.sendMessage(groupId, 'first');
     await deliver();
 
     const before = {
-      list: bob.groups.list(),
-      texts: texts(bob.groups, groupId),
+      list: await bob.groups.list(),
+      texts: await texts(bob.groups, groupId),
     };
     const groups = bob.groups as unknown as {
       close(): Promise<void>;
@@ -203,18 +231,20 @@ describe('Group chats', { timeout: 120_000 }, () => {
     };
     await groups.close();
     await groups.open();
-    expect(bob.groups.list()).toEqual(before.list);
-    expect(texts(bob.groups, groupId)).toEqual(before.texts);
+    expect(await bob.groups.list()).toEqual(before.list);
+    expect(await texts(bob.groups, groupId)).toEqual(before.texts);
 
     await bob.groups.sendMessage(groupId, 'second');
     await deliver();
-    expect(texts(alice.groups, groupId)).toEqual(['first', 'second']);
+    expect(await texts(alice.groups, groupId)).toEqual(['first', 'second']);
   });
 
   it('replies, edits locally and retries', async () => {
     const groupId = await alice.groups.createGroup('Notes', [bob.userId]);
     await deliver();
-    await bob.groups.acceptInvitation(bob.groups.invitations()[0].epochId);
+    await bob.groups.acceptInvitation(
+      (await bob.groups.invitations())[0].epochId
+    );
     const first = await alice.groups.sendMessage(groupId, 'question');
     await deliver();
 
@@ -222,9 +252,9 @@ describe('Group chats', { timeout: 120_000 }, () => {
       replyTo: [{ epochId: groupId, syncObjId: first.syncObjId }],
     });
     await deliver();
-    const reply = alice.groups
-      .timeline(groupId)
-      .find(i => i.kind === 'message' && i.author === bob.userId);
+    const reply = (await alice.groups.timeline(groupId)).find(
+      i => i.kind === 'message' && i.author === bob.userId
+    );
     expect(reply?.kind === 'message' && reply.replyTo).toEqual([
       { epochId: groupId, syncObjId: first.syncObjId },
     ]);
@@ -234,8 +264,11 @@ describe('Group chats', { timeout: 120_000 }, () => {
       body: { type: 'text', text: 'my own copy' },
     });
     await deliver();
-    expect(texts(alice.groups, groupId)).toEqual(['my own copy', 'answer']);
-    expect(texts(bob.groups, groupId)).toEqual(['question', 'answer']);
+    expect(await texts(alice.groups, groupId)).toEqual([
+      'my own copy',
+      'answer',
+    ]);
+    expect(await texts(bob.groups, groupId)).toEqual(['question', 'answer']);
     await expect(
       alice.groups.editMessageLocally(groupId, first.syncObjId, {
         createdAt: clock + 15 * 24 * 3600 * 1000,
@@ -245,15 +278,250 @@ describe('Group chats', { timeout: 120_000 }, () => {
     // Retry synchronisation republishes the altered result.
     await alice.groups.retryMessage(groupId, first.syncObjId);
     await deliver();
-    expect(texts(bob.groups, groupId)).toEqual(['my own copy', 'answer']);
+    expect(await texts(bob.groups, groupId)).toEqual(['my own copy', 'answer']);
 
     // A local deletion hides it here only.
     await bob.groups.deleteMessageLocally(groupId, first.syncObjId);
     await deliver();
-    expect(texts(bob.groups, groupId)).toEqual(['answer']);
-    expect(texts(alice.groups, groupId)).toEqual(['my own copy', 'answer']);
-    expect(alice.groups.epoch(groupId)?.members.sort()).toEqual(
+    expect(await texts(bob.groups, groupId)).toEqual(['answer']);
+    expect(await texts(alice.groups, groupId)).toEqual([
+      'my own copy',
+      'answer',
+    ]);
+    expect((await alice.groups.epoch(groupId))?.members.sort()).toEqual(
       [alice.userId, bob.userId].sort()
     );
+  });
+
+  /** A group of Alice and Bob, accepted, with one message delivered. */
+  async function twoMemberGroup(): Promise<string> {
+    const groupId = await alice.groups.createGroup('Pair', [bob.userId]);
+    await deliver();
+    await bob.groups.acceptInvitation(
+      (await bob.groups.invitations())[0].epochId
+    );
+    await alice.groups.sendMessage(groupId, 'first');
+    await deliver();
+    expect(await texts(bob.groups, groupId)).toEqual(['first']);
+    return groupId;
+  }
+
+  it('ignores arbitrary bytes as a group plaintext', async () => {
+    const groupId = await twoMemberGroup();
+    const before = await bob.groups.list();
+    let seed = 7;
+    for (let i = 0; i < 50; i++) {
+      const bytes = new Uint8Array(1 + ((i * 37) % 300)).map(() => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed & 0xff;
+      });
+      await bob.groups.handlePlaintext(alice.userIdBytes, bytes);
+    }
+    // Also through the message path, as a keep-alive from Alice.
+    await alice.messages.send({
+      ownerUserId: alice.userId,
+      contactUserId: bob.userId,
+      content: '',
+      type: MessageType.KEEP_ALIVE,
+      direction: 1 as never,
+      status: 0 as never,
+      timestamp: new Date(),
+    } as never);
+    await deliver();
+    expect(await bob.groups.list()).toEqual(before);
+    expect(await texts(bob.groups, groupId)).toEqual(['first']);
+  });
+
+  it('reopens from the database after a failed write, without the lost operation', async () => {
+    const groupId = await twoMemberGroup();
+    const groups = queriesOf(alice).groups;
+    const apply = groups.applyBatches.bind(groups);
+    const spy = vi
+      .spyOn(groups, 'applyBatches')
+      .mockImplementationOnce(async () => {
+        throw new Error('disk full');
+      });
+    await expect(alice.groups.sendMessage(groupId, 'lost')).rejects.toThrow(
+      'disk full'
+    );
+    spy.mockImplementation(apply);
+    await alice.groups.settle();
+    // The engine was reopened from what is durable: the message is not there.
+    expect(await texts(alice.groups, groupId)).toEqual(['first']);
+    await alice.groups.sendMessage(groupId, 'kept');
+    await deliver();
+    expect(await texts(bob.groups, groupId)).toEqual(['first', 'kept']);
+  });
+
+  it('retries a failed send from the outbox, as stored', async () => {
+    const groupId = await twoMemberGroup();
+    const proto = internals(alice).messageProtocol;
+    const send = proto.sendMessage.bind(proto);
+    const spy = vi.spyOn(proto, 'sendMessage').mockImplementation(async () => {
+      throw new Error('offline');
+    });
+    await alice.groups.sendMessage(groupId, 'later');
+    await alice.groups.settle();
+    const stored = await queriesOf(alice).groups.dueOutbox(
+      alice.userId,
+      new Date(8.64e15)
+    );
+    expect(stored.length).toBeGreaterThan(0);
+    const ciphertexts = stored.map(r => Array.from(r.ciphertext).join(','));
+    const sent: string[] = [];
+    spy.mockImplementation(async (m: unknown) => {
+      const c = (m as { ciphertext: Uint8Array }).ciphertext;
+      sent.push(Array.from(c).join(','));
+      return send(m as never);
+    });
+    clock += 60_000;
+    await deliver();
+    for (const c of ciphertexts) expect(sent).toContain(c);
+    expect(await texts(bob.groups, groupId)).toEqual(['first', 'later']);
+    expect(
+      await queriesOf(alice).groups.dueOutbox(alice.userId, new Date(8.64e15))
+    ).toEqual([]);
+  });
+
+  it('keeps a ciphertext until its session state is durable, then sends it', async () => {
+    const groupId = await twoMemberGroup();
+    const i = internals(alice);
+    const persist = i.persistSession;
+    i.persistSession = async () => {
+      throw new Error('the session state cannot be written');
+    };
+    await alice.groups.sendMessage(groupId, 'after crash');
+    await alice.groups.settle();
+    // Nothing is stored or sent while the session state is not durable.
+    expect(
+      await queriesOf(alice).groups.dueOutbox(alice.userId, new Date(8.64e15))
+    ).toEqual([]);
+    await deliver();
+    expect(await texts(bob.groups, groupId)).toEqual(['first']);
+    i.persistSession = persist;
+    await deliver();
+    expect(await texts(bob.groups, groupId)).toEqual(['first', 'after crash']);
+    // The one-to-one session still works both ways afterwards.
+    await alice.groups.sendMessage(groupId, 'and more');
+    await bob.groups.sendMessage(groupId, 'reply');
+    await deliver();
+    expect((await texts(alice.groups, groupId)).sort()).toEqual(
+      ['after crash', 'and more', 'first', 'reply'].sort()
+    );
+  });
+
+  it('survives a failed outbox write after encryption', async () => {
+    const groupId = await twoMemberGroup();
+    const groups = queriesOf(alice).groups;
+    const insert = groups.insertOutbox.bind(groups);
+    const spy = vi
+      .spyOn(groups, 'insertOutbox')
+      .mockImplementationOnce(async () => {
+        throw new Error('crash while storing the ciphertext');
+      });
+    await alice.groups.sendMessage(groupId, 'stored or not');
+    await alice.groups.settle();
+    spy.mockImplementation(insert);
+    await deliver();
+    expect(await texts(bob.groups, groupId)).toEqual([
+      'first',
+      'stored or not',
+    ]);
+    await bob.groups.sendMessage(groupId, 'still talking');
+    await deliver();
+    expect(await texts(alice.groups, groupId)).toEqual([
+      'first',
+      'stored or not',
+      'still talking',
+    ]);
+  });
+
+  it('assembles nothing again and again for a member without an active session', async () => {
+    const groupId = await twoMemberGroup();
+    const i = internals(alice);
+    const status = i.session.peerSessionStatus.bind(i.session);
+    const bobBytes = bob.userIdBytes;
+    vi.spyOn(i.session, 'peerSessionStatus').mockImplementation(p =>
+      p.every((b, k) => b === bobBytes[k]) ? 2 : status(p)
+    );
+    const node = i.node!;
+    const poll = vi.spyOn(
+      Object.getPrototypeOf(node) as { poll_outbox: (n: number) => unknown[] },
+      'poll_outbox'
+    );
+    await alice.groups.sendMessage(groupId, 'nobody hears');
+    await alice.groups.settle();
+    expect(poll.mock.calls.length).toBeLessThanOrEqual(2);
+    // Once told that Bob has no session, the engine still assembles for him
+    // on the next send (reported for the engine): the pump stops after a
+    // round that sent nothing instead of repeating it.
+    poll.mockClear();
+    clock += 1_000;
+    await alice.groups.tick();
+    await alice.groups.settle();
+    const lengths = poll.mock.results.map(r => (r.value as unknown[]).length);
+    expect(lengths.length).toBeLessThanOrEqual(2);
+    poll.mockRestore();
+  });
+
+  it('logs out within a few seconds while a send hangs', async () => {
+    const groupId = await twoMemberGroup();
+    vi.spyOn(
+      internals(alice).messageProtocol,
+      'sendMessage'
+    ).mockImplementation(() => new Promise(() => {}));
+    await alice.groups.sendMessage(groupId, 'stuck');
+    const started = Date.now();
+    await alice.closeSession();
+    expect(Date.now() - started).toBeLessThan(8_000);
+    peers = [bob, carol];
+  });
+
+  it('keeps the groups of two accounts in one database apart', async () => {
+    const groupId = await alice.groups.createGroup('Mine', [bob.userId]);
+    await alice.groups.settle();
+    await alice.closeSession();
+    // Another account opened by the same SDK, on the same database.
+    await alice.openSession({
+      mnemonic: generateMnemonic(),
+      encryptionKey: await generateEncryptionKey(),
+      onPersist: async () => {},
+      autoStartPolling: false,
+      publishPublicKey: false,
+    });
+    expect(await alice.groups.list()).toEqual([]);
+    const own = await alice.groups.createGroup('Theirs', [bob.userId]);
+    expect(own).not.toBe(groupId);
+    expect((await alice.groups.list()).map(g => g.groupId)).toEqual([own]);
+  });
+
+  it('retries the outbox on its timer', async () => {
+    const groupId = await twoMemberGroup();
+    const proto = internals(alice).messageProtocol;
+    const send = proto.sendMessage.bind(proto);
+    const spy = vi.spyOn(proto, 'sendMessage').mockImplementation(async () => {
+      throw new Error('offline');
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await alice.groups.sendMessage(groupId, 'on time');
+      await alice.groups.settle();
+      expect(
+        await queriesOf(alice).groups.dueOutbox(alice.userId, new Date(8.64e15))
+      ).not.toEqual([]);
+      spy.mockImplementation(send);
+      clock += 10_000;
+      // No tick and no call: the timer armed for the outbox retry sends it.
+      await vi.advanceTimersByTimeAsync(10_000);
+      await (alice.groups as unknown as { chain: Promise<unknown> }).chain;
+      expect(
+        await queriesOf(alice).groups.dueOutbox(alice.userId, new Date(8.64e15))
+      ).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+    await bob.messages.fetch();
+    await bob.groups.settle();
+    expect(await texts(bob.groups, groupId)).toEqual(['first', 'on time']);
   });
 });

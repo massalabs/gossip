@@ -86,8 +86,9 @@ export interface GroupMessage {
   epochId: GroupId;
   syncObjId: GroupId;
   author: string;
-  createdAt: number;
-  lastModifiedAt: number;
+  /** Milliseconds since the epoch, as claimed by the author (any u64). */
+  createdAt: bigint;
+  lastModifiedAt: bigint;
   /** "Edited at" is shown (a claim, not a proof). */
   edited: boolean;
   body: GroupMessageBody;
@@ -111,7 +112,7 @@ export interface GroupEpoch {
   name: string;
   members: string[];
   owner: string;
-  createdAt: number;
+  createdAt: bigint;
 }
 
 /** A local-only edit (§9.1): each given field replaces the stored one. */
@@ -141,11 +142,11 @@ export type GroupLine =
   | { type: 'youWereRemoved' }
   | { type: 'youLeft' }
   | { type: 'dissolved' }
-  | { type: 'notAMember'; from: number; to: number };
+  | { type: 'notAMember'; from: bigint; to: bigint };
 
 export type GroupTimelineItem =
   | GroupMessage
-  | { kind: 'line'; at: number; line: GroupLine };
+  | { kind: 'line'; at: bigint; line: GroupLine };
 
 export type GroupChangeKind =
   | 'Invitation'
@@ -279,8 +280,8 @@ function line(raw: unknown): GroupLine {
     default:
       return {
         type: 'notAMember',
-        from: r.from as number,
-        to: r.to as number,
+        from: BigInt(r.from as string),
+        to: BigInt(r.to as string),
       };
   }
 }
@@ -288,7 +289,7 @@ function line(raw: unknown): GroupLine {
 function timelineItem(raw: unknown): GroupTimelineItem {
   const [t, r] = variant(raw);
   if (t === 'Line') {
-    return { kind: 'line', at: r.at as number, line: line(r.line) };
+    return { kind: 'line', at: BigInt(r.at as string), line: line(r.line) };
   }
   const m = r.message as Raw;
   const c = m.content as Raw;
@@ -297,8 +298,8 @@ function timelineItem(raw: unknown): GroupTimelineItem {
     epochId: m.chat_id as string,
     syncObjId: c.sync_obj_id as string,
     author: userIdOf(c.author as string),
-    createdAt: c.created_at as number,
-    lastModifiedAt: c.last_modified_at as number,
+    createdAt: BigInt(c.created_at as string),
+    lastModifiedAt: BigInt(c.last_modified_at as string),
     edited: c.edited as boolean,
     body: body(c.body),
     metadata: Object.fromEntries(
@@ -316,22 +317,62 @@ export interface GroupPublished {
   merge: string;
 }
 
+/** How long logout waits for the operation in progress (sending is cut short). */
+const CLOSE_WAIT_MS = 5_000;
+/** First and longest delay before opening the engine again after a failure. */
+const REOPEN_BASE_MS = 1_000;
+const REOPEN_MAX_MS = 5 * 60_000;
+
+/** Whether an error comes from a trapped wasm instance, which must not be called again. */
+function isWasmTrap(error: unknown): boolean {
+  return (
+    typeof WebAssembly !== 'undefined' &&
+    error instanceof WebAssembly.RuntimeError
+  );
+}
+
 export class GroupService {
   private node: GroupsNode | null = null;
   /** Serializes the engine's operations with the writes they need. */
   private chain: Promise<unknown> = Promise.resolve();
+  /** Settles when an open or reopen in progress ends; reads wait for it. */
+  private opening: Promise<void> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private reopenTimer: ReturnType<typeof setTimeout> | null = null;
+  private reopenDelay = 0;
   private closed = false;
+  /** A send is queued on the chain and has not started yet. */
+  private pumpQueued = false;
+  /**
+   * Ciphertexts encrypted and not stored yet (their session state is not
+   * durable yet, or storing failed), oldest first. Memory only: they never
+   * left the device.
+   */
+  private encrypted: {
+    node: GroupsNode;
+    handle: number | null;
+    to: Uint8Array;
+    seeker: Uint8Array;
+    ciphertext: Uint8Array;
+  }[] = [];
   private readonly onSessionStatus = (p: {
     contactUserId: string;
     status: SessionStatus;
   }) => {
-    void this.run(async node => {
-      const peer = decodeUserId(p.contactUserId);
-      const active = p.status === SessionStatus.Active;
-      node.set_session(peer, active);
-      if (active) node.peer_reconnected(peer, this.now());
+    // Only the session state: a renewal is reported by SESSION_RENEWED.
+    void this.run(node => {
+      node.set_session(
+        decodeUserId(p.contactUserId),
+        p.status === SessionStatus.Active
+      );
     }).catch(() => logger.error('session status not applied'));
+  };
+  private readonly onSessionRenewed = (d: { contactUserId: string }) => {
+    void this.run(node => {
+      const peer = decodeUserId(d.contactUserId);
+      node.set_session(peer, true);
+      node.peer_reconnected(peer, this.now());
+    }).catch(() => logger.error('session renewal not applied'));
   };
 
   constructor(
@@ -340,7 +381,11 @@ export class GroupService {
     private queries: Queries,
     private eventEmitter: SdkEventEmitter,
     private config: SdkConfig,
-    private persistFlusher: () => Promise<void>,
+    /**
+     * Persists the session state durably as it is now, or throws
+     * (`GossipSdk.persistSessionDurably`).
+     */
+    private persistSession: () => Promise<void>,
     /** The clock (milliseconds); replaceable in tests. */
     private now: () => number = () => Date.now()
   ) {}
@@ -356,7 +401,8 @@ export class GroupService {
 
   /**
    * Opens the engine from the account's records, adds the keys of the
-   * contacts and the sessions known, and starts its timer.
+   * contacts, tells it which peers have an active session, and starts its
+   * timer.
    */
   async open(): Promise<void> {
     this.closed = false;
@@ -365,76 +411,211 @@ export class GroupService {
       SdkEventType.SESSION_STATUS_CHANGED,
       this.onSessionStatus
     );
-    await this.run(async () => undefined);
+    this.eventEmitter.on(SdkEventType.SESSION_RENEWED, this.onSessionRenewed);
+    this.kick();
   }
 
-  private async reopen(): Promise<void> {
-    this.node?.free();
-    this.node = null;
-    const snapshot = await this.queries.groups.loadSnapshot(this.owner);
-    const node = GroupsNode.open(
-      this.session.ourPk,
-      this.session.ourSk,
-      snapshot
-    );
-    const now = this.now();
-    node.learn_keys(this.session.ourPk.to_bytes(), now);
-    for (const contact of await this.queries.contacts.getByOwner(this.owner)) {
+  /** Opens the engine again from the database (after a failure). */
+  private reopen(): Promise<void> {
+    const opening = (async () => {
+      this.dropNode(true);
+      const snapshot = await this.queries.groups.loadSnapshot(this.owner);
+      const node = GroupsNode.open(
+        this.session.ourPk,
+        this.session.ourSk,
+        snapshot
+      );
       try {
-        node.learn_keys(contact.publicKeys, now);
-      } catch {
-        // Keys that are not canonical are not cached.
+        const now = this.now();
+        node.learn_keys(this.session.ourPk.to_bytes(), now);
+        for (const contact of await this.queries.contacts.getByOwner(
+          this.owner
+        )) {
+          try {
+            node.learn_keys(contact.publicKeys, now);
+          } catch {
+            // Keys that are not canonical are not cached.
+          }
+        }
+        this.tellSessions(node);
+        // Not through `persist`, which reopens on failure.
+        await this.queries.groups.applyBatches(
+          this.owner,
+          node.take_batches() as GroupBatch[]
+        );
+      } catch (error) {
+        try {
+          node.free();
+        } catch {
+          // A trapped instance cannot be freed; it is dropped.
+        }
+        throw error;
       }
-    }
+      if (this.closed) {
+        node.free();
+        return;
+      }
+      this.node = node;
+      this.reopenDelay = 0;
+    })();
+    this.opening = opening.finally(() => {
+      if (this.opening === guarded) this.opening = null;
+    });
+    const guarded = this.opening;
+    return opening;
+  }
+
+  /**
+   * Tells the engine which peers have an active session: every peer of the
+   * session manager, and every member of a group (a member without a
+   * discussion has none), so that it assembles nothing for the others.
+   */
+  private tellSessions(node: GroupsNode): void {
+    const told = new Set<string>();
     for (const peer of this.session.peerList()) {
+      told.add(bytesToHex(peer));
       node.set_session(
         peer,
         this.session.peerSessionStatus(peer) === SessionStatus.Active
       );
     }
-    this.node = node;
-    // Not through `persist`, which reopens on failure.
-    await this.queries.groups.applyBatches(
-      this.owner,
-      node.take_batches() as GroupBatch[]
-    );
+    const me = bytesToHex(this.session.userId);
+    for (const g of JSON.parse(node.groups()) as Raw[]) {
+      for (const m of g.members as string[]) {
+        if (m !== me && !told.has(m)) {
+          told.add(m);
+          node.set_session(hexToBytes(m), false);
+        }
+      }
+    }
   }
 
-  /** Waits for the operation in progress, stops the timer and frees the engine. */
+  /** Forgets the engine, freeing it unless it trapped. */
+  private dropNode(free: boolean): void {
+    const node = this.node;
+    this.node = null;
+    if (node && free) {
+      try {
+        node.free();
+      } catch {
+        // Nothing more can be done with it.
+      }
+    }
+  }
+
+  /**
+   * After a failure: the engine is dropped (a trapped one without calling into
+   * it again) and reopened from the database, with a growing delay while that
+   * fails.
+   */
+  private recover(error: unknown): void {
+    this.dropNode(!isWasmTrap(error));
+    if (this.closed || this.reopenTimer) return;
+    const attempt = () => {
+      this.reopenTimer = null;
+      if (this.closed || this.node) return;
+      this.reopen()
+        .then(() => this.kick())
+        .catch(() => {
+          logger.error('group engine not reopened');
+          this.reopenDelay = Math.min(
+            this.reopenDelay === 0 ? REOPEN_BASE_MS : this.reopenDelay * 2,
+            REOPEN_MAX_MS
+          );
+          this.reopenTimer = setTimeout(attempt, this.reopenDelay);
+          (this.reopenTimer as { unref?: () => void }).unref?.();
+        });
+    };
+    if (this.reopenDelay === 0) {
+      attempt();
+    } else {
+      this.reopenTimer = setTimeout(attempt, this.reopenDelay);
+      (this.reopenTimer as { unref?: () => void }).unref?.();
+    }
+  }
+
+  /**
+   * Waits for the operation in progress (at most a few seconds: sending is
+   * cut short), stops the timers and frees the engine. Never throws.
+   */
   async close(): Promise<void> {
     this.closed = true;
     this.eventEmitter.off(
       SdkEventType.SESSION_STATUS_CHANGED,
       this.onSessionStatus
     );
-    await this.chain;
+    this.eventEmitter.off(SdkEventType.SESSION_RENEWED, this.onSessionRenewed);
     if (this.timer) clearTimeout(this.timer);
+    if (this.reopenTimer) clearTimeout(this.reopenTimer);
     this.timer = null;
-    this.node?.free();
-    this.node = null;
+    this.reopenTimer = null;
+    // A last try to store what was encrypted: the session state is persisted
+    // at logout, and a ciphertext left behind would block its chain.
+    this.chain = this.chain
+      .then(() => this.storeEncrypted())
+      .catch(() => undefined);
+    let waited: ReturnType<typeof setTimeout> | null = null;
+    await Promise.race([
+      this.chain,
+      this.opening?.catch(() => undefined),
+      new Promise<void>(resolve => {
+        waited = setTimeout(resolve, CLOSE_WAIT_MS);
+      }),
+    ]);
+    if (waited) clearTimeout(waited);
+    this.dropNode(true);
+  }
+
+  /** Waits for an open in progress, then gives the engine. */
+  private async readyNode(): Promise<GroupsNode> {
+    if (this.opening) await this.opening.catch(() => undefined);
+    if (!this.node) throw new Error('Groups are not open');
+    return this.node;
   }
 
   // ── Operation plumbing ───────────────────────────────────────────────────
 
   /**
-   * Runs `op` on the engine, then persists what it committed, sends what is
-   * due and reports the changes; one operation at a time.
+   * Runs `op` on the engine and persists what it committed; resolves once
+   * that is durable. Sending what it produced continues in the background on
+   * the same serialized chain, and its failures never reach the caller.
    */
   private run<T>(op: (node: GroupsNode) => Promise<T> | T): Promise<T> {
     const next = this.chain.then(async () => {
-      const node = this.node;
-      if (!node) throw new Error('Groups are not open');
+      const node = await this.readyNode();
       let result: T;
       try {
         result = await op(node);
-      } finally {
+      } catch (error) {
+        if (isWasmTrap(error)) {
+          this.recover(error);
+          throw error;
+        }
         await this.persist();
+        throw error;
       }
-      await this.pump();
+      await this.persist();
       return result;
     });
     this.chain = next.catch(() => undefined);
+    this.kick();
     return next;
+  }
+
+  /** Queues a send of what the outbox holds, unless one is already queued. */
+  private kick(): void {
+    if (this.closed || this.pumpQueued) return;
+    this.pumpQueued = true;
+    this.chain = this.chain
+      .then(async () => {
+        this.pumpQueued = false;
+        await this.pump();
+      })
+      .catch(error => {
+        logger.error('group send failed');
+        if (isWasmTrap(error)) this.recover(error);
+      })
+      .finally(() => this.schedule());
   }
 
   /** Persists the pending batches; on failure the engine is reopened. */
@@ -443,24 +624,35 @@ export class GroupService {
   ): Promise<void> {
     const node = this.node;
     if (!node) return;
-    const batches = node.take_batches() as GroupBatch[];
+    let batches: GroupBatch[];
+    try {
+      batches = node.take_batches() as GroupBatch[];
+    } catch (error) {
+      this.recover(error);
+      throw error;
+    }
     try {
       await this.queries.groups.applyBatches(this.owner, batches, extra);
     } catch (error) {
       // The engine is ahead of the database: start again from the database.
-      await this.reopen();
+      this.recover(error);
       throw error;
     }
   }
 
+  /** Whether `node` is still the open engine (after an await). */
+  private alive(node: GroupsNode): boolean {
+    return !this.closed && this.node === node;
+  }
+
   /** Sends what the outbox holds and reports the changes. */
   private async pump(): Promise<void> {
+    await this.storeEncrypted();
     const node = this.node;
-    if (!node) return;
-    const now = this.now();
-    node.tick(now);
+    if (!node || this.closed) return;
+    node.tick(this.now());
     await this.persist();
-    for (let round = 0; round < 64; round++) {
+    for (let round = 0; round < 64 && this.alive(node); round++) {
       const out = node.poll_outbox(this.now()) as {
         handle: number;
         to: Uint8Array;
@@ -468,9 +660,25 @@ export class GroupService {
       }[];
       await this.persist();
       if (out.length === 0) break;
-      for (const o of out) await this.sendOne(node, o);
+      let sent = 0;
+      let i = 0;
+      try {
+        for (; i < out.length; i++) {
+          if (!this.alive(node)) break;
+          if (await this.sendOne(node, out[i])) sent++;
+        }
+      } finally {
+        // Whatever was not sent is assembled again later.
+        if (this.node === node) {
+          for (let j = i; j < out.length; j++) node.abandon(out[j].handle);
+        }
+      }
+      // A round that sent nothing would only repeat itself.
+      if (sent === 0) break;
     }
+    if (!this.alive(node)) return;
     await this.retryOutbox();
+    if (!this.alive(node)) return;
     const changes = JSON.parse(node.take_changes(this.now())) as Raw[];
     await this.persist();
     if (changes.length > 0) {
@@ -481,55 +689,121 @@ export class GroupService {
         })),
       });
     }
-    this.schedule();
   }
 
+  /**
+   * Encrypts one plaintext, then stores and sends its ciphertext. Returns
+   * whether it was encrypted; otherwise it is abandoned and its work
+   * assembled again later.
+   */
   private async sendOne(
     node: GroupsNode,
     o: { handle: number; to: Uint8Array; plaintext: Uint8Array }
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (this.session.peerSessionStatus(o.to) !== SessionStatus.Active) {
       node.abandon(o.handle);
       node.set_session(o.to, false);
-      return;
+      return false;
     }
     if (!node.is_current(o.handle, this.now())) {
       node.abandon(o.handle);
-      return;
+      return false;
     }
     const sent = await this.session.sendMessage(
       o.to,
       serializeGroupPlaintext(o.plaintext)
     );
+    if (!this.alive(node)) return false;
     if (!sent) {
+      // No session to encrypt with (or the peer lags too far behind).
       node.abandon(o.handle);
+      node.set_session(o.to, false);
+      return false;
+    }
+    this.encrypted.push({
+      node,
+      handle: o.handle,
+      to: o.to,
+      seeker: sent.seeker,
+      ciphertext: sent.data,
+    });
+    await this.storeEncrypted();
+    return true;
+  }
+
+  /**
+   * Stores and sends the ciphertexts encrypted so far, in order.
+   *
+   * The session state that produced a ciphertext is made durable first: a
+   * crash before that loses a ciphertext that never left the device, and the
+   * session restarts from a state that produced nothing visible. A ciphertext
+   * is never dropped once encrypted, because the recipient reads its
+   * session's messages in order and a missing one would block the chain: it
+   * waits in memory until its state is durable and it is stored, and is
+   * tried again on every send.
+   */
+  private async storeEncrypted(): Promise<void> {
+    if (this.encrypted.length === 0) return;
+    try {
+      await this.persistSession();
+    } catch {
       return;
     }
-    const seeker = sent.seeker;
-    const ciphertext = sent.data;
-    // The ciphertext and the engine's hand-off are stored together.
-    node.handed_off(o.handle, this.now());
-    let id = 0;
-    await this.persist(async tx => {
-      id = await this.queries.groups.insertOutbox(tx, {
-        ownerUserId: this.owner,
-        contactUserId: encodeUserId(o.to),
-        seeker,
-        ciphertext,
-        whenToSend: new Date(this.now()),
-      });
-    });
-    await this.persistFlusher();
-    try {
-      await this.messageProtocol.sendMessage({ seeker, ciphertext });
-      await this.queries.groups.deleteOutbox(id);
-      node.published(o.handle, this.now());
-      await this.persist();
-    } catch {
-      await this.queries.groups.rescheduleOutbox(
-        id,
-        new Date(this.now() + this.config.messages.retryDelayMs)
-      );
+    while (this.encrypted.length > 0) {
+      const e = this.encrypted[0];
+      const node = this.node;
+      // The hand-off goes with the ciphertext, if the engine that assembled
+      // it is still the open one; otherwise its work is assembled again.
+      const handOff = e.handle !== null && node !== null && e.node === node;
+      if (handOff) node!.handed_off(e.handle!, this.now());
+      let id: number | null = null;
+      const store = async (
+        tx: Parameters<Queries['groups']['insertOutbox']>[0]
+      ) => {
+        id = await this.queries.groups.insertOutbox(tx, {
+          ownerUserId: this.owner,
+          contactUserId: encodeUserId(e.to),
+          seeker: e.seeker,
+          ciphertext: e.ciphertext,
+          whenToSend: new Date(this.now()),
+        });
+      };
+      try {
+        if (handOff) {
+          await this.persist(store);
+        } else {
+          await this.queries.groups.applyBatches(this.owner, [], store);
+        }
+      } catch {
+        // The engine was reopened (its hand-off is lost and its work will be
+        // assembled again); the ciphertext itself stays to be stored.
+        e.handle = null;
+        return;
+      }
+      this.encrypted.shift();
+      try {
+        await this.messageProtocol.sendMessage({
+          seeker: e.seeker,
+          ciphertext: e.ciphertext,
+        });
+      } catch {
+        if (id !== null) {
+          await this.queries.groups
+            .rescheduleOutbox(
+              id,
+              new Date(this.now() + this.config.messages.retryDelayMs)
+            )
+            .catch(() => undefined);
+        }
+        continue;
+      }
+      if (id !== null) {
+        await this.queries.groups.deleteOutbox(id).catch(() => undefined);
+      }
+      if (handOff && this.alive(e.node)) {
+        e.node.published(e.handle!, this.now());
+        await this.persist();
+      }
     }
   }
 
@@ -540,6 +814,7 @@ export class GroupService {
       new Date(this.now())
     );
     for (const row of due) {
+      if (this.closed) return;
       try {
         await this.messageProtocol.sendMessage({
           seeker: row.seeker,
@@ -555,25 +830,44 @@ export class GroupService {
     }
   }
 
+  /**
+   * Arms the timer at the engine's next wake-up or the next outbox retry,
+   * whichever comes first (always re-armed, also after a failure).
+   */
   private schedule(): void {
-    if (this.closed || !this.node) return;
+    if (this.closed) return;
     if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
     const now = this.now();
-    const at = this.node.next_wakeup(now);
-    const delay = Math.min(
-      MAX_WAKEUP_MS,
-      Math.max(1000, (at ?? now + MAX_WAKEUP_MS) - now)
-    );
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      void this.tick().catch(() => logger.error('group timer failed'));
-    }, delay);
-    (this.timer as { unref?: () => void }).unref?.();
+    let at = now + MAX_WAKEUP_MS;
+    try {
+      const wake = this.node?.next_wakeup(now);
+      if (wake !== undefined && wake !== null) at = Math.min(at, wake);
+    } catch (error) {
+      if (isWasmTrap(error)) this.recover(error);
+    }
+    void this.queries.groups
+      .nextOutboxRetry(this.owner)
+      .catch(() => null)
+      .then(retry => {
+        if (this.closed) return;
+        const when = retry ? Math.min(at, retry.getTime()) : at;
+        const delay = Math.min(MAX_WAKEUP_MS, Math.max(1000, when - now));
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          this.kick();
+        }, delay);
+        (this.timer as { unref?: () => void }).unref?.();
+      });
   }
 
   // ── Transport ────────────────────────────────────────────────────────────
 
-  /** A group plaintext received from `from` (32-byte user ID). */
+  /**
+   * A group plaintext received from `from` (32-byte user ID). Resolves once
+   * what it changed is durable; replies are sent in the background.
+   */
   handlePlaintext(from: Uint8Array, plaintext: Uint8Array): Promise<void> {
     return this.run(async node => {
       if (!node.keys(from)) {
@@ -593,9 +887,18 @@ export class GroupService {
     });
   }
 
-  /** Runs the engine's timers and sends what is due. */
-  tick(): Promise<void> {
-    return this.run(() => undefined);
+  /** Runs the engine's timers; sending follows in the background. */
+  async tick(): Promise<void> {
+    await this.run(() => undefined);
+  }
+
+  /**
+   * Resolves once everything queued so far, sending included, has run (for
+   * tests and for callers that need the outbox drained).
+   */
+  async settle(): Promise<void> {
+    this.kick();
+    await this.chain;
   }
 
   /** Adds the keys of a contact (when a contact or session is added). */
@@ -883,25 +1186,34 @@ export class GroupService {
 
   // ── Reads ────────────────────────────────────────────────────────────────
 
-  private requireNode(): GroupsNode {
-    if (!this.node) throw new Error('Groups are not open');
-    return this.node;
+  /**
+   * Runs a read on the engine, waiting for an open or reopen in progress; a
+   * trapped engine is dropped and reopened.
+   */
+  private async read<T>(f: (node: GroupsNode) => T): Promise<T> {
+    const node = await this.readyNode();
+    try {
+      return f(node);
+    } catch (error) {
+      if (isWasmTrap(error)) this.recover(error);
+      throw error;
+    }
   }
 
-  list(): GroupSummary[] {
-    return (JSON.parse(this.requireNode().groups()) as Raw[]).map(summary);
+  async list(): Promise<GroupSummary[]> {
+    return (JSON.parse(await this.read(n => n.groups())) as Raw[]).map(summary);
   }
 
-  get(groupId: GroupId): GroupSummary | null {
+  async get(groupId: GroupId): Promise<GroupSummary | null> {
     const g = JSON.parse(
-      this.requireNode().group(hexToBytes(groupId))
+      await this.read(n => n.group(hexToBytes(groupId)))
     ) as Raw | null;
     return g ? summary(g) : null;
   }
 
-  invitations(): GroupInvitation[] {
+  async invitations(): Promise<GroupInvitation[]> {
     return (
-      JSON.parse(this.requireNode().invitations(this.now())) as Raw[]
+      JSON.parse(await this.read(n => n.invitations(this.now()))) as Raw[]
     ).map(r => ({
       epochId: r.chat_id as string,
       name: r.name as string,
@@ -916,9 +1228,9 @@ export class GroupService {
   }
 
   /** What the root of a held epoch says, or null. */
-  epoch(epochId: GroupId): GroupEpoch | null {
+  async epoch(epochId: GroupId): Promise<GroupEpoch | null> {
     const r = JSON.parse(
-      this.requireNode().epoch(hexToBytes(epochId))
+      await this.read(n => n.epoch(hexToBytes(epochId)))
     ) as Raw | null;
     if (!r) return null;
     return {
@@ -926,7 +1238,7 @@ export class GroupService {
       name: r.name as string,
       members: (r.members as string[]).map(userIdOf),
       owner: userIdOf(r.owner as string),
-      createdAt: r.created_at as number,
+      createdAt: BigInt(r.created_at as string),
     };
   }
 
@@ -934,10 +1246,12 @@ export class GroupService {
    * The visible messages and lines of a group (and the groups linked to it),
    * with the targets of replies resolved against the epochs it shows.
    */
-  timeline(groupId: GroupId): GroupTimelineItem[] {
-    const node = this.requireNode();
+  async timeline(groupId: GroupId): Promise<GroupTimelineItem[]> {
+    const node = await this.readyNode();
     const items = (
-      JSON.parse(node.timeline(hexToBytes(groupId), this.now())) as unknown[]
+      JSON.parse(
+        await this.read(n => n.timeline(hexToBytes(groupId), this.now()))
+      ) as unknown[]
     ).map(timelineItem);
     const epochs = new Set<string>();
     for (const i of items) {
