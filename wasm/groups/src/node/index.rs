@@ -6,9 +6,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::records::{Attempt, Run, Target, Task, TaskKey};
+use super::records::{Attempt, Run, Task, TaskKey};
 use crate::ids::GossipId;
-use crate::store::window_end;
 
 /// Why a task waits: every candidate left is at its lookup limit (`peers`) or has a request
 /// outstanding until before `until`.
@@ -63,13 +62,6 @@ fn dec(map: &mut BTreeMap<GossipId, usize>, peer: &GossipId) {
     }
 }
 
-fn deadline_of(key: &TaskKey) -> Option<u64> {
-    match key.target {
-        Target::Event(id) => Some(u64::try_from(window_end(&id)).unwrap_or(u64::MAX)),
-        Target::SyncObj(_) => None,
-    }
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct TaskIndex {
     slot: BTreeMap<TaskKey, Slot>,
@@ -88,8 +80,9 @@ pub(crate) struct TaskIndex {
     until: BTreeSet<(u64, TaskKey)>,
     /// Local deadlines of sent attempts.
     pub(crate) timers: BTreeSet<(u64, TaskKey)>,
-    /// Lookup deadlines of event tasks.
+    /// Lookup deadlines of event tasks, and by task.
     pub(crate) deadlines: BTreeSet<(u64, TaskKey)>,
+    deadline_of: BTreeMap<TaskKey, u64>,
 }
 
 impl TaskIndex {
@@ -145,9 +138,8 @@ impl TaskIndex {
             }
             Some(Slot::Paused) | None => {}
         }
-        if old.is_some()
-            && new.is_none()
-            && let Some(d) = deadline_of(&key)
+        if new.is_none()
+            && let Some(d) = self.deadline_of.remove(&key)
         {
             self.deadlines.remove(&(d, key));
         }
@@ -156,9 +148,10 @@ impl TaskIndex {
             return;
         };
         self.prio.insert(key, prio);
-        if old.is_none()
-            && let Some(d) = deadline_of(&key)
+        if !self.deadline_of.contains_key(&key)
+            && let Some(d) = task.and_then(|t| t.deadline(&key))
         {
+            self.deadline_of.insert(key, d);
             self.deadlines.insert((d, key));
         }
         match new {
@@ -253,6 +246,7 @@ mod tests {
 
     use super::*;
     use crate::ids::{ChatId, EventId};
+    use crate::node::records::Target;
 
     fn key(n: u8) -> TaskKey {
         TaskKey {
@@ -272,6 +266,7 @@ mod tests {
             },
             candidates: BTreeMap::new(),
             runs: 1,
+            created_at: 0,
         }
     }
 
