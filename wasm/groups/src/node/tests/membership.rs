@@ -1212,3 +1212,143 @@ fn a_new_owner_resolves_the_former_owners_branch() {
     }
     let _ = b;
 }
+
+/// Regression (simulation, code at afeb85d8, `GROUPS_MEMBERS_SEED=0`): a resolution root by
+/// a new owner was installed before the former owner's branch it continues; when that
+/// branch arrived, its link to the resolution was checked for authority against the branch
+/// alone, without the handover root on the resolution's other parent, and the branch stayed
+/// an end beside the resolution.
+#[test]
+fn a_branch_arriving_after_its_resolution_is_linked_to_it() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[0].store.clone();
+    net.offline[3] = true;
+    let a = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("A".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    let held_a = core::mem::take(&mut net.dropped);
+    net.devs[0].store = backup;
+    net.restart(0);
+    net.offline[1] = true;
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![],
+            name: Some("B".into()),
+        },
+    )
+    .unwrap();
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.offline[1] = false;
+    for (from, to, pt) in core::mem::take(&mut net.dropped) {
+        if to == 1 {
+            let now = net.now;
+            let dev = &mut net.devs[to];
+            dev.node
+                .handle_plaintext(&mut dev.store, gid(from), &pt, now, &mut net.rng)
+                .unwrap();
+        }
+    }
+    net.run(3 * MIN);
+    let r = net
+        .change(
+            1,
+            g,
+            GroupChange::Resolve {
+                members: vec![gid(0), gid(2), gid(3)],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    // Device 3 was away: it gets everything but the first branch, then that branch.
+    net.offline[3] = false;
+    net.dropped.clear();
+    let root = |n: &MNet, c: &ChatId| n.devs[1].node.root(c).unwrap();
+    let mut order: Vec<ChatId> = Vec::new();
+    for c in net.devs[1].node.tables().epochs.keys() {
+        if *c != a && *c != g {
+            order.push(*c);
+        }
+    }
+    order.sort_by_key(|c| root(&net, c).created_at());
+    order.push(a);
+    let _ = held_a;
+    for c in order {
+        let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root(&net, &c)))).unwrap();
+        let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+        let now = net.now;
+        let dev = &mut net.devs[3];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(1), &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    let s = net.summary(3, &g).unwrap();
+    assert_eq!(s.current, r);
+    assert!(s.side_branches.is_empty(), "{s:?}");
+}
+
+/// Regression (simulation, code at afeb85d8, `GROUPS_MEMBERS_SEED=0`): an invitation to
+/// rejoin by a handover root (its single parent in a group the device was removed from) was
+/// accepted as a separate group: authority over the parent was checked by the owners of the
+/// root's line, which never include the signer of a handover, the owner of its parent.
+#[test]
+fn a_handover_rejoining_a_removed_member_continues_its_group() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[0].store.clone();
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(3)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
+    // The owner, restored from its backup, hands the first epoch over: member 3 is in it.
+    net.devs[0].store = backup;
+    net.restart(0);
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    let inv = net.devs[3].node.invitations(net.now);
+    assert_eq!(inv.iter().map(|i| i.chat_id).collect::<Vec<_>>(), vec![h]);
+    assert_eq!(net.accept(3, h), g);
+    let s = net.summary(3, &g).unwrap();
+    assert_eq!(s.current, h);
+    assert_eq!(s.status, MyStatus::Member);
+}
