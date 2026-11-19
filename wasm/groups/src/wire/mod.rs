@@ -33,7 +33,9 @@ pub use frames::{
     QueryEntry, QueryOp, Response, ResponseResult, SignedKind, Status,
 };
 
-use crate::constants::{EVENT_VERSION, MAX_PLAINTEXT_BYTES, PROTOCOL_VERSION};
+use crate::constants::{
+    EVENT_VERSION, MAX_EVENT_BLOB_BYTES, MAX_PLAINTEXT_BYTES, PROTOCOL_VERSION, REQUEST_ID_SIZE,
+};
 use crate::error::{Error, Result};
 use crate::event::MessageEvent;
 use crate::root::Root;
@@ -67,11 +69,24 @@ pub fn single_frame_plaintext_len(frame_len: usize) -> usize {
     varint_len(PROTOCOL_VERSION) + len_field(frame_len)
 }
 
-/// Whether an event blob of `blob_len` bytes fits one empty container (§4.6, §13.10): the
-/// plaintext holding it alone in one event frame is at most 262,144 bytes.
+/// Size of the largest frame that can carry an event blob of `blob_len` bytes: a response
+/// frame with a full `request_id` and the longest `idx` encoding (a `u32`), which is larger
+/// than an event frame.
+#[must_use]
+pub fn largest_carrier_frame_len(blob_len: usize) -> usize {
+    let response =
+        len_field(REQUEST_ID_SIZE) + 1 + varint_len(u64::from(u32::MAX)) + len_field(blob_len);
+    len_field(response).max(len_field(blob_len))
+}
+
+/// Whether an event blob of `blob_len` bytes fits one empty container (§4.6, §13.10) in any
+/// frame that can carry it: the plaintext holding it alone in a response frame with the
+/// largest `request_id` and `idx` is at most 262,144 bytes, that is the blob is at most
+/// [`MAX_EVENT_BLOB_BYTES`]. §13.10 states the bound for an event frame; an event admitted by
+/// it could not always be served in an answer.
 #[must_use]
 pub fn fits_empty_container(blob_len: usize) -> bool {
-    single_frame_plaintext_len(len_field(blob_len)) <= MAX_PLAINTEXT_BYTES
+    blob_len <= MAX_EVENT_BLOB_BYTES
 }
 
 /// A root, a signed object or a message event: the content of an event blob (§13.1).
