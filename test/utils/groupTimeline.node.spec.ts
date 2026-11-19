@@ -16,6 +16,7 @@ describe('group timeline helpers', () => {
     status: 'member',
     sideBranches: [],
     mustResolve: false,
+    formerOwnerBranches: [],
     links: [],
   };
 

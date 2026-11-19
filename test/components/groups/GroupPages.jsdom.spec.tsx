@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import type { GossipSdk, GroupTimelineItem } from '@massalabs/gossip-sdk';
 import GroupDiscussion from '../../../src/pages/GroupDiscussion';
 import NewGroup from '../../../src/pages/NewGroup';
+import GroupSettings from '../../../src/pages/GroupSettings';
 import { useSdkStore } from '../../../src/stores/sdkStore';
 import { useGroupStore } from '../../../src/stores/groupStore';
 import { useAccountStore } from '../../../src/stores/accountStore';
@@ -196,6 +197,40 @@ describe('group pages', () => {
     expect(fake.service.createGroup).toHaveBeenCalledWith('Trip', ['alice']);
     expect(
       r.container.querySelector('[data-testid="elsewhere"]')
+    ).not.toBeNull();
+  });
+
+  it("shows former owners' branches as information and lets the owner merge them", async () => {
+    fake.state.groups = [
+      summary({ members: ['me', 'bob', 'old'], formerOwnerBranches: ['f1'] }),
+    ];
+    fake.service.epoch.mockImplementation((async (e: string) => ({
+      epoch: e,
+      name: '',
+      members: e === 'f1' ? ['old', 'bob'] : ['me', 'bob'],
+      owner: e === 'f1' ? 'old' : 'me',
+      createdAt: e === 'f1' ? 1n : 2n,
+    })) as never);
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <GroupSettings />,
+      '/group/g1/settings',
+      '/group/:groupId/settings'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    const section = r.container.querySelector(
+      '[data-testid="former-owner-branches"]'
+    );
+    expect(section?.textContent).toContain('details.former_branches_hint');
+    // Nothing is blocked: no resolution is required of the owner.
+    expect(
+      r.container.querySelector('[data-testid="resolve-fork"]')
+    ).toBeNull();
+    await click(byText('details.former_branches_resolve'));
+    expect(
+      r.container.querySelector('[data-testid="resolve-fork"]')
     ).not.toBeNull();
   });
 });

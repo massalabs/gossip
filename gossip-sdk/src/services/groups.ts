@@ -58,6 +58,11 @@ export interface GroupSummary {
   sideBranches: GroupId[];
   /** This device owns competing ends and must resolve them before sending. */
   mustResolve: boolean;
+  /**
+   * Ends of former owners in the current owner's line (§5.9): they block
+   * nothing; on the current owner's device, resolving them is offered.
+   */
+  formerOwnerBranches: GroupId[];
   links: GroupId[];
 }
 
@@ -247,6 +252,7 @@ function summary(r: Raw): GroupSummary {
         : (status.toLowerCase() as GroupMemberStatus),
     sideBranches: r.side_branches as string[],
     mustResolve: r.must_resolve as boolean,
+    formerOwnerBranches: r.former_owner_branches as string[],
     links: r.links as string[],
   };
 }

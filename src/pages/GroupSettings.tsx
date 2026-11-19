@@ -110,6 +110,30 @@ const GroupSettings: React.FC = () => {
     };
   }, [ends, service, me]);
 
+  // Ends of former owners (§5.9): shown for information; the current owner may
+  // merge them, which blocks nothing meanwhile.
+  const [formerEnds, setFormerEnds] = useState<GroupEpoch[]>([]);
+  const [mergingFormer, setMergingFormer] = useState(false);
+  const former =
+    group && group.formerOwnerBranches.length > 0
+      ? [group.currentEpoch, ...group.formerOwnerBranches].join(',')
+      : '';
+  useEffect(() => {
+    let alive = true;
+    if (!former || !service) {
+      setFormerEnds([]);
+      return;
+    }
+    Promise.all(former.split(',').map(e => service.epoch(e)))
+      .then(list => {
+        if (alive) setFormerEnds(list.filter((e): e is GroupEpoch => !!e));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [former, service]);
+
   const run = async (fn: () => Promise<unknown>, ok = t('details.saved')) => {
     try {
       await fn();
@@ -277,6 +301,52 @@ const GroupSettings: React.FC = () => {
           <p className="text-xs text-muted-foreground mt-1">
             {t('details.side_branches_hint')}
           </p>
+        </div>
+      )}
+
+      {group.formerOwnerBranches.length > 0 && (
+        <div
+          className="bg-card rounded-xl border border-border p-4 space-y-3"
+          data-testid="former-owner-branches"
+        >
+          <div>
+            <p className="text-sm text-foreground">
+              {t('details.former_branches', {
+                count: group.formerOwnerBranches.length,
+              })}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {t('details.former_branches_hint')}
+            </p>
+          </div>
+          {isOwner && active && formerEnds.length > 1 && (
+            <>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() => setMergingFormer(m => !m)}
+              >
+                {t('details.former_branches_resolve')}
+              </Button>
+              {mergingFormer && (
+                <ResolveForkPanel
+                  ends={formerEnds}
+                  me={me}
+                  memberName={memberName}
+                  onSend={async members => {
+                    if (
+                      await run(
+                        () => service.resolveFork(groupId, members),
+                        t('resolve.sent')
+                      )
+                    ) {
+                      setMergingFormer(false);
+                    }
+                  }}
+                />
+              )}
+            </>
+          )}
         </div>
       )}
 
