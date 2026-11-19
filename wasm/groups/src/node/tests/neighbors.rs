@@ -216,12 +216,13 @@ fn a_neighbor_that_keeps_failing_is_replaced_and_an_answer_resets_the_count() {
         node.note_timeout(&member(1), T0 + i * HOUR);
     }
     assert!(node.is_neighbor(&chat, &member(1)));
-    // An answer resets the count; then three timeouts over two days replace it.
+    // An answer resets the count; then three queries left unanswered for two days in all
+    // replace it.
     node.answered(&member(1));
-    node.note_timeout(&member(1), T0 + DAY);
-    node.note_timeout(&member(1), T0 + 2 * DAY);
+    node.note_query_timeout(&member(1), T0, T0 + DAY);
+    node.note_query_timeout(&member(1), T0 + DAY, T0 + 2 * DAY);
     assert!(node.is_neighbor(&chat, &member(1)));
-    node.note_timeout(&member(1), T0 + 3 * DAY);
+    node.note_query_timeout(&member(1), T0 + 2 * DAY, T0 + 3 * DAY);
     assert!(!node.is_neighbor(&chat, &member(1)));
     assert_eq!(node.stats.neighbors_replaced, 1);
     // A replacement is sought, not the replaced peer.

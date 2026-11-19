@@ -52,7 +52,7 @@ impl Node {
 
     /// Neighbor upkeep: requests unanswered for a day are abandoned, and while the group has
     /// fewer neighbors (and pending requests) than it seeks, the best candidate is asked:
-    /// suggested members first, then members with a session (sessions are reused before new
+    /// responsive members first, then suggested members, then members with a session (sessions are reused before new
     /// ones are opened), then by score, ties at random.
     pub(crate) fn maintain_neighbors(&mut self, cx: &mut Cx<'_>, chat: ChatId) {
         self.drop_ineligible_neighbors(chat);
@@ -91,6 +91,7 @@ impl Node {
             }
             let key = |p: &GossipId| {
                 (
+                    !self.responsive(p),
                     !g.suggested.contains(p),
                     !self.sessions.contains(p),
                     u64::MAX - self.score(p),
@@ -276,23 +277,28 @@ impl Node {
             return;
         }
         self.peer_mut(peer).last_timeout_query = sent_at;
-        self.note_timeout(peer, now);
+        self.count_timeout(peer, sent_at, now);
     }
 
-    /// A query to `peer` timed out unanswered at `now`. A peer that keeps failing, at least
-    /// [`NEIGHBOR_FAILURES`] timeouts in a row spread over [`NEIGHBOR_UNRESPONSIVE_MS`] or
-    /// more without any valid answer, is replaced in every group where it is a neighbor
-    /// (§10.1). Members are often offline for hours, so a few timeouts of the first, short
-    /// TTLs are delays, not failures; any valid answer resets the count.
+    /// A failure of `peer` at `now` that covers no time asked (three `busy` in a row).
     pub(crate) fn note_timeout(&mut self, peer: &GossipId, now: u64) {
+        self.count_timeout(peer, now, now);
+    }
+
+    /// A query to `peer` sent at `sent_at` timed out unanswered at `now`. A peer that keeps
+    /// failing, at least [`NEIGHBOR_FAILURES`] timeouts in a row whose queries waited
+    /// [`NEIGHBOR_UNRESPONSIVE_MS`] or more in all without any valid answer, is replaced in
+    /// every group where it is a neighbor (§10.1). Members are often offline for hours, so a
+    /// few timeouts of the first, short TTLs are delays, not failures, and timeouts far
+    /// apart say nothing of the time between; any valid answer resets the count. A replaced
+    /// neighbor keeps its count, so it stays unresponsive until it answers.
+    fn count_timeout(&mut self, peer: &GossipId, sent_at: u64, now: u64) {
         let r = self.peer_mut(peer);
-        if r.failures == 0 {
-            r.first_failure = now;
-        }
+        let from = sent_at.max(r.last_failure);
+        r.unanswered_ms = r.unanswered_ms.saturating_add(now.saturating_sub(from));
+        r.last_failure = r.last_failure.max(now);
         r.failures = r.failures.saturating_add(1);
-        if r.failures < NEIGHBOR_FAILURES
-            || now.saturating_sub(r.first_failure) < NEIGHBOR_UNRESPONSIVE_MS
-        {
+        if r.failures < NEIGHBOR_FAILURES || r.unanswered_ms < NEIGHBOR_UNRESPONSIVE_MS {
             return;
         }
         let chats: Vec<ChatId> = self
@@ -302,11 +308,6 @@ impl Node {
             .filter(|(_, g)| g.neighbors.contains(peer))
             .map(|(c, _)| *c)
             .collect();
-        if !chats.is_empty() {
-            // The count restarts for a replaced neighbor; for others it keeps them
-            // unresponsive until they answer.
-            self.peer_mut(peer).failures = 0;
-        }
         for chat in chats {
             let g = self.group_mut(chat);
             g.neighbors.remove(peer);

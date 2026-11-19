@@ -1089,7 +1089,8 @@ impl Node {
                     supplied: 0,
                     penalty: 0,
                     failures: 0,
-                    first_failure: 0,
+                    unanswered_ms: 0,
+                    last_failure: 0,
                     last_timeout_query: 0,
                     requests: timing::Bucket::full(timing::REQUEST_BURST, 0),
                     responses: timing::Bucket::full(timing::RESPONSE_BURST, 0),
@@ -1125,13 +1126,16 @@ impl Node {
         let r = self.peer_mut(peer);
         r.supplied = r.supplied.saturating_add(1);
         r.failures = 0;
+        r.unanswered_ms = 0;
         decay(r);
     }
 
     /// Any valid answer: the peer is responsive (§10.1).
     fn answered(&mut self, peer: &GossipId) {
         if self.t.peers.get(peer).is_some_and(|r| r.failures != 0) {
-            self.peer_mut(peer).failures = 0;
+            let r = self.peer_mut(peer);
+            r.failures = 0;
+            r.unanswered_ms = 0;
         }
     }
 }
