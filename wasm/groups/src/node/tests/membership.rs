@@ -2819,3 +2819,49 @@ fn a_member_back_after_a_dissolve_learns_it() {
     assert_eq!(groups.len(), 1, "{groups:?}");
     assert_eq!(groups[0].status, MyStatus::Dissolved { deleted: false });
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=19`):
+/// after "Dissolve & Delete" the roots of the erased epochs were deleted with no marker, so
+/// the same roots relayed again by a lagging member came back as invitations, and accepted,
+/// as separate conversations of the dissolved group.
+#[test]
+fn a_root_erased_by_dissolve_and_delete_is_not_an_invitation_again() {
+    let (mut net, g) = founded(3);
+    let e2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("x".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    let old = net.devs[0].node.root(&g).unwrap();
+    let now = net.now;
+    let s = signer(0);
+    let dev = &mut net.devs[0];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, e2, true, now, &mut net.rng)
+        .unwrap();
+    net.exchange();
+    assert!(
+        net.devs[1].node.root(&g).is_none(),
+        "the erased epoch's root is deleted"
+    );
+    net.recv_frames_m(
+        1,
+        2,
+        &[Frame::Event(
+            wire::encode_event_blob(&EventObject::Root(Box::new(old))).unwrap(),
+        )],
+    );
+    assert!(
+        net.devs[1]
+            .node
+            .invitations(net.now + crate::constants::PROMPT_DELAY_MS)
+            .is_empty()
+    );
+}
