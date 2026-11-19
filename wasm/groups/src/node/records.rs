@@ -104,14 +104,15 @@ impl Candidate {
         }
     }
 
-    /// Whether it announced the item (notice or page), which makes a later "not available"
-    /// a failed announcement (§11.8, penalty 3).
+    /// Whether it announced the item in a notice, which makes a later "not available" a
+    /// failed announcement (§11.8, penalty 3). A tip page lists what the peer held when the
+    /// scan froze its list, which it may have pruned since: not an announcement.
     #[must_use]
     pub fn announced(&self) -> bool {
         matches!(
             self.trigger,
             Some(Trigger {
-                kind: TriggerKind::Notice | TriggerKind::Page,
+                kind: TriggerKind::Notice,
                 ..
             })
         )

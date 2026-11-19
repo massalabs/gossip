@@ -960,10 +960,12 @@ impl Node {
             Outcome::Rejected(Rejection::Invalid(_)) => {
                 self.stats.invalid += 1;
                 self.penalize(&from, PENALTY_MALFORMED);
-                Ok(retrieval::Answer::Invalid)
+                // Penalised here once; for its task the peer only fails for the run.
+                Ok(retrieval::Answer::Refused)
             }
-            // Silently dropped: not a member, removed, not accepted, a group state.
-            Outcome::Rejected(_) => Ok(retrieval::Answer::Invalid),
+            // Silently dropped: not a member, removed, not accepted, a group state. Nothing
+            // the sender did wrong: the peer fails for the run, without a penalty.
+            Outcome::Rejected(_) => Ok(retrieval::Answer::Refused),
             Outcome::TemporarilyInvalid => {
                 self.stats.temporarily_invalid += 1;
                 Ok(retrieval::Answer::TemporarilyInvalid)
