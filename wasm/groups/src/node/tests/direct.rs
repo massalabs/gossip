@@ -902,10 +902,12 @@ fn a_new_chat_after_taking_part_is_an_invitation_to_continue() {
     }
 }
 
-/// Case 6: the other person founds a new chat. If it never took part in the owner's, the
-/// tie rule decides with no prompt; if it took part, it is an invitation to continue.
+/// Cases 6 and 7: the other person, whose GossipID sorts last, founds a new chat. The device
+/// that sorts first keeps its own chat whether or not that person took part in it: the new
+/// chat is settled as history, with no prompt, and the other device switches back to the
+/// kept chat by itself.
 #[test]
-fn a_new_chat_from_the_peer_that_sorts_last_follows_whether_it_took_part() {
+fn a_new_chat_from_the_peer_that_sorts_last_is_history_whether_it_took_part() {
     let (l, h) = sorted_pair();
     // Never took part: the chat of the device that sorts first is kept, no prompt.
     let mut net = MNet::new(2, true);
@@ -917,20 +919,76 @@ fn a_new_chat_from_the_peer_that_sorts_last_follows_whether_it_took_part() {
     assert_eq!(net.group_keys(l), vec![gl]);
     assert_eq!(net.superseded(l), vec![(gh, gl)]);
     // Took part, then restored from a backup made before it held the chat: its new chat is
-    // an invitation to continue.
+    // still history on the device that keeps its own, never an invitation.
     let mut net = MNet::new(2, true);
     let before = net.backup(h);
     let gl = net.chat_taken_part_in(l, h);
+    assert_eq!(net.took_part(l, &gl), Some(true));
     net.restore(h, before);
     net.run(HOUR);
     let gh = net.create_with(h, &[l], Some(0)).unwrap();
-    net.run(2 * MIN);
-    assert_eq!(net.invitation(l, &gh).and_then(|i| i.continues), Some(gl));
+    net.say(h, &gh, "written in the new chat");
+    net.run(5 * MIN);
+    assert!(net.invitation(l, &gh).is_none());
     assert_eq!(net.group_keys(l), vec![gl]);
-    // Accepted: the chain of earlier chats follows.
-    net.accept(l, gh);
-    assert_eq!(net.superseded(l), vec![(gl, gh)]);
-    assert_eq!(net.summary(l, &gh).unwrap().earlier, vec![gl]);
+    assert_eq!(net.superseded(l), vec![(gh, gl)]);
+    assert_eq!(net.summary(l, &gl).unwrap().earlier, vec![gh]);
+    assert!(
+        net.texts(l, &gh)
+            .contains(&"written in the new chat".to_owned())
+    );
+    // The other device switches back to the kept chat by itself.
+    net.run(HOUR);
+    assert!(net.invitation(h, &gl).is_none());
+    assert_eq!(net.group_keys(h), vec![gl]);
+    assert_eq!(net.superseded(h), vec![(gh, gl)]);
+}
+
+/// Whether the other person took part is a plain fact, compared with no date: a chat founded
+/// by that person with a creation time earlier than its first participation is still an
+/// invitation to continue when it wins the tie.
+#[test]
+fn taking_part_is_compared_with_no_date() {
+    let (l, h) = sorted_pair();
+    let mut net = MNet::new(2, true);
+    let founded_at = net.now;
+    let gh = net.chat_taken_part_in(h, l);
+    net.run(HOUR);
+    // The other device's clock is behind: its new chat is dated before it took part.
+    let params = crate::root::RootParams {
+        name: "Direct".into(),
+        members: {
+            let mut m = vec![gid(l), gid(h)];
+            m.sort();
+            m
+        },
+        group_secret: crate::ids::GroupSecret::from_bytes([9; 32]),
+        owner: ident(l).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([8; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([7; 32]),
+        created_at: founded_at,
+    };
+    let gl = Root::create_founding(
+        params,
+        ChatId::from_bytes([3; 32]),
+        Some(0),
+        &ident(l).secret.dsa_signing_key,
+        [1; 32],
+    )
+    .unwrap();
+    let pt = root_plaintext(&gl);
+    let now = net.now;
+    let dev = &mut net.devs[h];
+    dev.node
+        .handle_plaintext(&mut dev.store, gid(l), &pt, now, &mut net.rng)
+        .unwrap();
+    net.run(crate::node::timing::PROMPT_DELAY_MS);
+    assert_eq!(
+        net.invitation(h, &gl.chat_id()).and_then(|i| i.continues),
+        Some(gh)
+    );
+    assert_eq!(net.group_keys(h), vec![gh]);
+    assert!(net.superseded(h).is_empty());
 }
 
 /// Case 4: the device that sorts first ignored or declined the other's chat, then founds
@@ -1034,10 +1092,10 @@ fn a_crossing_root_arriving_after_the_switch_is_no_invitation() {
     assert_eq!(net.superseded(l), vec![(gh, gl)]);
 }
 
-/// A chat that superseded another is itself superseded later: the history of the chat that
-/// continues it lists both, oldest first.
+/// The device that keeps its chat settles every later chat of the other person as history:
+/// the kept chat lists them all, oldest first, and nothing written in them is erased.
 #[test]
-fn a_chain_of_superseded_chats_is_listed_oldest_first() {
+fn the_chats_a_kept_chat_replaced_are_listed_oldest_first() {
     let (l, h) = sorted_pair();
     let mut net = MNet::new(2, true);
     let before = net.backup(h);
@@ -1050,14 +1108,98 @@ fn a_chain_of_superseded_chats_is_listed_oldest_first() {
     net.restore(h, before);
     net.run(HOUR);
     let gh2 = net.create_with(h, &[l], Some(0)).unwrap();
-    net.run(2 * MIN);
-    assert_eq!(net.invitation(l, &gh2).and_then(|i| i.continues), Some(gl));
-    net.accept(l, gh2);
-    assert_eq!(net.summary(l, &gh2).unwrap().earlier, vec![gh, gl]);
+    net.say(h, &gh2, "in the second chat");
+    net.run(5 * MIN);
+    assert!(net.invitation(l, &gh2).is_none());
+    assert_eq!(net.group_keys(l), vec![gl]);
+    assert_eq!(net.summary(l, &gl).unwrap().earlier, vec![gh, gh2]);
     let mut superseded = net.superseded(l);
     superseded.sort();
-    let mut expected = vec![(gh, gl), (gl, gh2)];
+    let mut expected = vec![(gh, gl), (gh2, gl)];
     expected.sort();
     assert_eq!(superseded, expected);
     assert!(net.texts(l, &gl).contains(&"in the kept chat".to_owned()));
+    assert!(
+        net.texts(l, &gh2)
+            .contains(&"in the second chat".to_owned())
+    );
+    assert_eq!(net.group_keys(h), vec![gl]);
+}
+
+/// The issue of the field run: the device that sorts last migrates, the other declines with
+/// a signed leave (the chat shrinks to its owner alone), then migrates in turn. The device
+/// that sorts last ends with one conversation, continuing in the other's chat, its own kept
+/// as history: never an ordinary invitation beside a chat of one.
+#[test]
+fn a_migration_after_a_signed_decline_continues_the_conversation() {
+    let (l, h) = sorted_pair();
+    let mut net = MNet::new(2, true);
+    net.earlier(l, h, 0, true);
+    net.earlier(h, l, 0, true);
+    let gh = net.create_with(h, &[l], Some(0)).unwrap();
+    net.say(h, &gh, "before the decline");
+    net.run(2 * MIN);
+    assert_eq!(net.devs[l].node.migration_of(&gh), Some(gid(h)));
+    let s = signer(l);
+    let now = net.now;
+    let dev = &mut net.devs[l];
+    dev.node
+        .decline_invitation(
+            &mut dev.store,
+            &s,
+            gh,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(HOUR);
+    assert_eq!(net.summary(h, &gh).unwrap().members, vec![gid(h)]);
+    let gl = net.create_with(l, &[h], Some(0)).unwrap();
+    net.run(5 * MIN);
+    assert!(net.invitation(h, &gl).is_none());
+    assert_eq!(net.group_keys(h), vec![gl]);
+    assert_eq!(net.superseded(h), vec![(gh, gl)]);
+    assert_eq!(net.summary(h, &gl).unwrap().earlier, vec![gh]);
+    assert!(net.texts(h, &gh).contains(&"before the decline".to_owned()));
+    net.say(h, &gl, "continued");
+    net.run(2 * MIN);
+    assert!(net.texts(l, &gl).contains(&"continued".to_owned()));
+    assert_eq!(net.group_keys(l), vec![gl]);
+}
+
+/// The mirror: the device that sorts first migrates, the other declines with a signed leave
+/// and migrates in turn. A chat the other person left cannot be kept with it: the device
+/// that sorts first switches to the new chat by itself, its own kept as history.
+#[test]
+fn a_kept_chat_the_other_person_left_gives_way_to_its_new_chat() {
+    let (l, h) = sorted_pair();
+    let mut net = MNet::new(2, true);
+    net.earlier(l, h, 0, true);
+    net.earlier(h, l, 0, true);
+    let gl = net.create_with(l, &[h], Some(0)).unwrap();
+    net.run(2 * MIN);
+    let s = signer(h);
+    let now = net.now;
+    let dev = &mut net.devs[h];
+    dev.node
+        .decline_invitation(
+            &mut dev.store,
+            &s,
+            gl,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(HOUR);
+    assert_eq!(net.summary(l, &gl).unwrap().members, vec![gid(l)]);
+    let gh = net.create_with(h, &[l], Some(0)).unwrap();
+    net.run(5 * MIN);
+    assert!(net.invitation(l, &gh).is_none());
+    assert_eq!(net.group_keys(l), vec![gh]);
+    assert_eq!(net.superseded(l), vec![(gl, gh)]);
+    net.say(l, &gh, "continued");
+    net.run(2 * MIN);
+    assert!(net.texts(h, &gh).contains(&"continued".to_owned()));
 }
