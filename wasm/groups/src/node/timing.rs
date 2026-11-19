@@ -106,6 +106,9 @@ pub const HELD_ROOTS_PER_DEVICE: usize = 64;
 /// Signed leaves kept while their leaver's keys are fetched, per delivering peer
 /// (provisional).
 pub const UNVERIFIED_LEAVES_PER_SENDER: usize = 32;
+/// How long a peer's work waits after a plaintext for it was abandoned before it is
+/// assembled again, unless a session or a reconnection is reported first (provisional).
+pub const ABANDON_BACKOFF_MS: u64 = MINUTE_MS;
 /// The device-wide ceiling of plaintexts assembled per call, rotated fairly across peers.
 /// §17.4 leaves its value to profiling; this one is provisional.
 pub const PLAINTEXTS_PER_POLL: usize = 64;
@@ -206,6 +209,15 @@ impl Bucket {
         } else {
             false
         }
+    }
+
+    /// Gives back `n` tokens taken for something that was not sent, up to the burst.
+    pub fn refund(&mut self, n: u64, burst: u64) {
+        let cap = burst.saturating_mul(MINUTE_MS);
+        self.level = self
+            .level
+            .saturating_add(n.saturating_mul(MINUTE_MS))
+            .min(cap);
     }
 
     /// The tokens available at `now`, rounded down.

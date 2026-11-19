@@ -508,12 +508,16 @@ impl Node {
 
     /// Reports whether a session with `peer` exists, which candidates prefer (§10.1, §11.2,
     /// §12.3). In memory only: the transport reports it again after a restart.
+    ///
+    /// No plaintext is assembled for a peer reported without a session: its work stays
+    /// queued (bounded and expiring as usual) until a session is reported again.
     pub fn set_session(&mut self, peer: GossipId, has_session: bool) {
         if has_session {
             self.sessions.insert(peer);
         } else {
             self.sessions.remove(&peer);
         }
+        self.session_changed(peer, has_session);
     }
 
     // ── Operations ───────────────────────────────────────────────────────────
@@ -995,6 +999,7 @@ impl Node {
         now: u64,
         rng: &mut dyn Randomness,
     ) -> Result<(), NodeError> {
+        self.session_changed(peer, true);
         self.run(store, now, rng, |n, cx| {
             n.reconnected(cx, peer);
             Ok(())
