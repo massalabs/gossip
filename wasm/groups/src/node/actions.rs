@@ -9,7 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::records::{
-    ChangeKind, EpochRecord, EpochStatus, GroupStatus, Marker, SignedObject, SignedRecord, Work,
+    ChangeKind, EpochRecord, EpochStatus, GroupStatus, Junction, JunctionKind, Marker,
+    SignedObject, SignedRecord, Work,
 };
 use super::{Cx, Node, NodeError};
 use crate::constants::MAX_ROOT_PARENTS;
@@ -302,9 +303,9 @@ impl Node {
             if let Some(g) = rejoins.or_else(|| parents.first().map(|p| n.group_of(p))) {
                 // Back in a group it had left by a kick or a dissolve (§5.10): the junction.
                 let kicked_at = match n.group_status(&g) {
-                    GroupStatus::Removed { at, .. }
-                    | GroupStatus::Left { at, .. }
-                    | GroupStatus::Dissolved { at, .. } => Some(at),
+                    GroupStatus::Removed { at, .. } => Some((at, JunctionKind::Removed)),
+                    GroupStatus::Left { at, .. } => Some((at, JunctionKind::Left)),
+                    GroupStatus::Dissolved { at, .. } => Some((at, JunctionKind::Dissolved)),
                     _ => None,
                 };
                 let owner = rec.root.owner_id();
@@ -320,10 +321,12 @@ impl Node {
                 n.adopt(cx, rec.root, rec.from, parents, false)?;
                 let g = n.group_of(&chat);
                 n.recheck_status(cx, g);
-                if let (Some(at), Some(t)) =
+                if let (Some((from, kind)), Some(to)) =
                     (kicked_at, n.t.epochs.get(&chat).and_then(|r| r.line_time))
                 {
-                    n.group_rec_mut(g).junctions.push((at, t));
+                    n.group_rec_mut(g)
+                        .junctions
+                        .push(Junction { from, to, kind });
                 }
                 n.changed(g, ChangeKind::Joined, cx.now);
                 Ok(g)
