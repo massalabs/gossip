@@ -387,8 +387,13 @@ impl Node {
             let id = match e.item {
                 EntryItem::Event(id) => id,
                 EntryItem::Root => {
-                    // Acted on although the epoch is unknown (§4.6, §13.7).
-                    self.root_announced(cx, from, chat, TriggerKind::Notice);
+                    // Acted on although the epoch is unknown (§4.6, §13.7), but only from a
+                    // peer that shares an active accepted epoch with this device: otherwise
+                    // whether a lookup comes back would tell a stranger which epochs this
+                    // device holds or closed.
+                    if self.shares_epoch(&from) {
+                        self.root_announced(cx, from, chat, TriggerKind::Notice);
+                    }
                     continue;
                 }
                 item @ (EntryItem::Leave(_) | EntryItem::Kick(_) | EntryItem::Dissolve(_)) => {
