@@ -389,7 +389,7 @@ fn a_plaintext_in_flight_becomes_stale_when_its_event_is_pruned() {
         .node
         .poll_outbox(&mut dev.store, now, &mut net.rng)
         .unwrap();
-    assert!(dev.node.is_current(out[0].handle));
+    assert!(dev.node.is_current(out[0].handle, now));
     dev.node
         .local_edit(
             &mut dev.store,
@@ -403,7 +403,7 @@ fn a_plaintext_in_flight_becomes_stale_when_its_event_is_pruned() {
             &mut net.rng,
         )
         .unwrap();
-    assert!(!dev.node.is_current(out[0].handle));
+    assert!(!dev.node.is_current(out[0].handle, now));
     // Abandoned, it is not assembled again: its work was invalidated with the prune.
     dev.node.abandon(out[0].handle);
     let again = dev

@@ -75,6 +75,10 @@ struct Pending {
     scans: u64,
     notices: u64,
     answers: u64,
+    /// The plaintext is current only before this instant: the first due item of an epoch
+    /// (a deletion or activation that may change what it carries) or the end of the window
+    /// of an event it carries, whichever comes first.
+    valid_until: u64,
 }
 
 /// The plaintexts assembled and not confirmed yet, in memory only: after a restart their
@@ -227,6 +231,13 @@ impl Node {
             if peers.is_empty() {
                 return Ok(Vec::new());
             }
+            let mut due = u64::MAX;
+            let chats: Vec<ChatId> = n.epochs.keys().copied().collect();
+            for chat in chats {
+                if let Some(item) = cx.ov.first_pending(&chat)? {
+                    due = due.min(item.due);
+                }
+            }
             let start = (n.outbox.rotation % peers.len() as u64) as usize;
             n.outbox.rotation = n.outbox.rotation.wrapping_add(1);
             peers.rotate_left(start);
@@ -236,7 +247,15 @@ impl Node {
                     break;
                 }
                 let room = PLAINTEXTS_PER_POLL - out.len();
-                for (plaintext, pending) in n.assemble(cx, peer, room)? {
+                for (plaintext, mut pending) in n.assemble(cx, peer, room)? {
+                    pending.valid_until = pending
+                        .events
+                        .iter()
+                        .map(|(_, id)| {
+                            u64::try_from(crate::store::window_end(id)).unwrap_or(u64::MAX)
+                        })
+                        .fold(due, u64::min)
+                        .max(cx.now.saturating_add(1));
                     let handle = n.outbox.next;
                     n.outbox.next += 1;
                     n.outbox.items.extend(pending.items.iter().copied());
@@ -338,14 +357,19 @@ impl Node {
         Ok(())
     }
 
-    /// Whether the plaintext `handle` is still current: in flight, and no event it sends or
-    /// announces was pruned since it was assembled (§15.1). The transport checks it
-    /// immediately before encryption, unless it encrypts right after [`Node::poll_outbox`]
-    /// with no other engine operation in between; a stale plaintext is abandoned
-    /// ([`Node::abandon`]) and its remaining work assembled again.
+    /// Whether the plaintext `handle` is still current at `now`: in flight, no event it
+    /// sends or announces was pruned since it was assembled, and nothing that could change
+    /// it came due since (a scheduled deletion or activation of its epoch, the end of an
+    /// event's window) (§15.1). The transport checks it immediately before encryption; a
+    /// stale plaintext is abandoned ([`Node::abandon`]) and its remaining work assembled
+    /// again.
     #[must_use]
-    pub fn is_current(&self, handle: u64) -> bool {
-        self.outbox.sent.contains_key(&handle) && !self.outbox.stale.contains(&handle)
+    pub fn is_current(&self, handle: u64, now: u64) -> bool {
+        self.outbox
+            .sent
+            .get(&handle)
+            .is_some_and(|p| now < p.valid_until)
+            && !self.outbox.stale.contains(&handle)
     }
 
     /// Marks stale the plaintexts in flight that refer to a pruned event (§15.1).

@@ -606,8 +606,9 @@ impl Sim {
                 return;
             }
             let handle = o.handle;
+            let clock = self.clock(d);
             let node = self.devs[d].node.as_mut().expect("booted");
-            if !node.is_current(handle) {
+            if !node.is_current(handle, clock) {
                 node.abandon(handle);
                 continue;
             }
