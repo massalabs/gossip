@@ -937,12 +937,21 @@ fn oversized_event_blobs_are_refused() {
         Err(Error::DoesNotFitContainer)
     );
     // The bound is exact.
-    let mut n = MAX_PLAINTEXT_BYTES;
-    while !fits_empty_container(n) {
-        n -= 1;
-    }
-    let frame = len_field(n);
-    assert_eq!(single_frame_plaintext_len(frame), MAX_PLAINTEXT_BYTES);
+    let n = MAX_EVENT_BLOB_BYTES;
+    assert!(fits_empty_container(n) && !fits_empty_container(n + 1));
+    assert_eq!(
+        single_frame_plaintext_len(largest_carrier_frame_len(n)),
+        MAX_PLAINTEXT_BYTES
+    );
+    assert!(single_frame_plaintext_len(largest_carrier_frame_len(n + 1)) > MAX_PLAINTEXT_BYTES);
+    // A response frame carrying it with the longest fields fits, as encoded.
+    let pt = encode_plaintext(&[Frame::Response(Response {
+        request_id: Some(RequestId::from_bytes([0xff; 16])),
+        idx: u32::MAX,
+        result: ResponseResult::Event(vec![0; n]),
+    })])
+    .unwrap();
+    assert_eq!(pt.len(), MAX_PLAINTEXT_BYTES);
 }
 
 // ── Strict check: one case per `oneof`, counts before decoding ───────────────
