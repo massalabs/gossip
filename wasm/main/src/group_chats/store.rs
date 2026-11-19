@@ -107,7 +107,9 @@ macro_rules! node_tables {
             hints,
             queue,
             meta,
-            lookup_results
+            lookup_results,
+            earlier,
+            consents
         )
     };
 }
