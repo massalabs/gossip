@@ -520,13 +520,15 @@ impl Node {
             .filter(|c| self.installed(c))
             .copied()
             .collect();
+        // §5.12: two creations at once (whatever this device closed: the losing group of a
+        // pair is closed, and a copy delivered again is judged again), or a direct chat the
+        // caller consented to.
+        if self.receive_direct(cx, from, &root, !matched.is_empty(), closed_before)? {
+            return Ok(Answer::Supplied);
+        }
         // Case 1, closed by the user: a full root delivered directly prompts again.
         if closed_before {
             self.invite(cx, from, root, Vec::new(), true, None, via);
-            return Ok(Answer::Supplied);
-        }
-        // §5.12: a direct chat the caller consented to, or two creations at once.
-        if self.receive_direct(cx, from, &root, !matched.is_empty())? {
             return Ok(Answer::Supplied);
         }
         // Case 2: a retained member.

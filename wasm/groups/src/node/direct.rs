@@ -190,6 +190,25 @@ impl Node {
             .min()
     }
 
+    /// The peer's migration groups with this device at format `version` that this device
+    /// installed (accepted or adopted): founded by the peer's root, continued by no
+    /// successor it holds, in an active group.
+    fn peer_migrations(&self, peer: GossipId, version: u64) -> Vec<ChatId> {
+        self.t
+            .epochs
+            .iter()
+            .filter(|(c, r)| {
+                r.status == EpochStatus::Installed
+                    && r.parents.is_empty()
+                    && r.root.migrate_from() == Some(version)
+                    && self.direct_owner(&r.root, false) == Some(peer)
+                    && self.gx.children.get(c).is_none_or(BTreeSet::is_empty)
+                    && self.group_status(c) == GroupStatus::Active
+            })
+            .map(|(c, _)| *c)
+            .collect()
+    }
+
     // ── Acting on a received root ────────────────────────────────────────────
 
     /// What receiving the valid root `root` from `from` does under §5.12, before the cases
@@ -201,6 +220,7 @@ impl Node {
         from: GossipId,
         root: &Root,
         parent_held: bool,
+        closed_before: bool,
     ) -> Result<bool, NodeError> {
         let Some(peer) = self.direct_owner(root, parent_held) else {
             return Ok(false);
@@ -212,11 +232,12 @@ impl Node {
             self.settle_pair(cx, mine, root.clone(), from)?;
             return Ok(true);
         }
-        if self
-            .t
-            .consents
-            .get(&peer)
-            .is_some_and(|until| *until > cx.now)
+        if !closed_before
+            && self
+                .t
+                .consents
+                .get(&peer)
+                .is_some_and(|until| *until > cx.now)
         {
             self.t.consents.remove(&peer);
             self.adopt(cx, root.clone(), from, Vec::new(), false)?;
@@ -245,6 +266,7 @@ impl Node {
             self.drop_fetched_for(id);
         }
         if theirs.owner_id().as_bytes() < self.me.as_bytes() {
+            self.t.markers.remove(&id);
             self.adopt(cx, theirs, from, Vec::new(), false)?;
             self.changed(id, ChangeKind::Joined, cx.now);
             self.supersede(cx, mine, id)?;
@@ -325,12 +347,18 @@ impl Node {
         cx: &mut Cx<'_>,
         created: &Root,
     ) -> Result<(), NodeError> {
-        if created.migrate_from().is_none() {
+        let Some(v) = created.migrate_from() else {
             return Ok(());
-        }
+        };
         let Some(peer) = created.members().iter().find(|m| **m != self.me).copied() else {
             return Ok(());
         };
+        if self.t.earlier.contains(&(peer, v)) && peer.as_bytes() > self.me.as_bytes() {
+            // The peer's migration accepted before: this device's own sorts first.
+            for c in self.peer_migrations(peer, v) {
+                self.supersede(cx, c, created.chat_id())?;
+            }
+        }
         self.settle_invitations_of(cx, peer)
     }
 
@@ -488,6 +516,12 @@ impl Node {
                 self.drop_tasks_of(&[c]);
                 self.adopt(cx, rec.root, rec.from, Vec::new(), false)?;
                 self.changed(c, ChangeKind::Joined, cx.now);
+                return Ok(self.group_of(&c));
+            }
+            // The peer's migration, accepted before: that group is the conversation.
+            if self.t.earlier.contains(&(peer, v))
+                && let Some(c) = self.peer_migrations(peer, v).into_iter().min()
+            {
                 return Ok(self.group_of(&c));
             }
         }

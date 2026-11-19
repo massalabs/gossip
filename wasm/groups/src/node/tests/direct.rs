@@ -628,7 +628,37 @@ fn a_migration_founded_after_accepting_the_peers_settles_with_it() {
         let keep = if keep_dev == creator { theirs } else { got };
         assert_eq!(got == theirs, keep_dev == creator);
         for d in 0..2 {
-            assert_eq!(net.group_keys(d), vec![keep], "accepter {accepter} device {d}");
+            assert_eq!(
+                net.group_keys(d),
+                vec![keep],
+                "accepter {accepter} device {d}"
+            );
         }
     }
+}
+
+/// Found by the direct-chat simulation (seed 14): the losing root, closed on a device that
+/// had accepted it, came back in full and was prompted again as "closed before".
+#[test]
+fn a_losing_root_delivered_again_is_never_prompted() {
+    let (keep_dev, lose_dev) = sorted_pair();
+    let mut net = MNet::new(2, true);
+    net.earlier(0, 1, 0, true);
+    net.earlier(1, 0, 0, true);
+    // The device that sorts last migrates; the other accepts, then migrates too, which
+    // closes the accepted group.
+    let losing = net.create_with(lose_dev, &[keep_dev], Some(0)).unwrap();
+    let root = net.devs[lose_dev].node.root(&losing).unwrap();
+    net.exchange();
+    net.accept(keep_dev, losing);
+    let kept = net.create_with(keep_dev, &[lose_dev], Some(0)).unwrap();
+    assert_eq!(net.group_keys(keep_dev), vec![kept]);
+    let pt = root_plaintext(&root);
+    let now = net.now;
+    let dev = &mut net.devs[keep_dev];
+    dev.node
+        .handle_plaintext(&mut dev.store, gid(lose_dev), &pt, now, &mut net.rng)
+        .unwrap();
+    assert!(net.devs[keep_dev].node.invitations(now + DAY).is_empty());
+    assert_eq!(net.group_keys(keep_dev), vec![kept]);
 }
