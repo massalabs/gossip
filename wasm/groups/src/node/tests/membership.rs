@@ -1990,3 +1990,54 @@ fn removed_peers_and_removed_devices_answer_not_available() {
         }
     }
 }
+
+/// Finding 3 of the review of 54711780: after a handover from A to B in one group, a root of
+/// B naming the current epochs of that group and of another group of A was adopted, and
+/// merged A's other group under B: the handover gave B authority over every epoch of A.
+#[test]
+fn a_new_owner_cannot_take_over_another_group_of_the_former_owner() {
+    let (mut net, g1) = founded(3);
+    let g2 = net.create(0, &[1, 2]);
+    net.exchange();
+    for d in 1..3 {
+        net.accept_all(d);
+    }
+    net.run(MIN);
+    let h = net
+        .change(
+            0,
+            g1,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    assert_eq!(net.summary(2, &g1).unwrap().owner, gid(1));
+    // B builds a root continuing both A's handed-over line and A's other group.
+    let members: Vec<GossipId> = (0..3).map(gid).collect();
+    let params = crate::root::RootParams {
+        name: "mine".into(),
+        members,
+        group_secret: crate::ids::GroupSecret::from_bytes([4; 32]),
+        owner: ident(1).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
+        created_at: net.now,
+    };
+    let r = Root::create_successor(params, &[h, g2], &ident(1).secret.dsa_signing_key, [1; 32])
+        .unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(r.clone()))).unwrap();
+    net.recv_frames_m(2, 1, &[Frame::Event(blob)]);
+    let s2 = net.summary(2, &g2).unwrap();
+    assert_eq!(s2.current, g2, "{s2:?}");
+    assert_eq!(s2.owner, gid(0));
+    assert_eq!(net.summary(2, &g1).unwrap().current, h);
+    assert!(matches!(
+        net.devs[2].node.t.epochs.get(&r.chat_id()).unwrap().status,
+        EpochStatus::Invitation(_)
+    ));
+}
