@@ -341,6 +341,60 @@ fn rejects_malformed_blobs_and_other_objects() {
 }
 
 #[test]
+fn a_blob_is_classified_by_its_sender_before_it_is_decoded() {
+    let mut f = Fixture::new();
+    let garbage = [0xffu8; 7];
+    let carol = Sender::Peer {
+        id: f.carol.id,
+        removed: false,
+    };
+    let removed = Sender::Peer {
+        id: f.bob.id,
+        removed: true,
+    };
+    let cases = [
+        (
+            false,
+            GroupState::Active,
+            f.bob_sender(),
+            Rejection::NotAccepted,
+        ),
+        (true, GroupState::Active, carol, Rejection::PeerNotMember),
+        (true, GroupState::Active, removed, Rejection::RemovedPeer),
+        (
+            true,
+            GroupState::Dissolved,
+            f.bob_sender(),
+            Rejection::GroupState,
+        ),
+        (
+            true,
+            GroupState::Waiting,
+            f.bob_sender(),
+            Rejection::GroupState,
+        ),
+    ];
+    for (accepted, state, sender, rejection) in cases {
+        assert_eq!(
+            Epoch::new(&f.root, accepted, state)
+                .receive_blob(&mut f.store, sender, &garbage, 1, T0)
+                .unwrap()
+                .outcome,
+            Outcome::Rejected(rejection)
+        );
+    }
+    // From a member, the same bytes are malformed.
+    let bob = f.bob_sender();
+    assert!(matches!(
+        ep(&f.root)
+            .receive_blob(&mut f.store, bob, &garbage, 1, T0)
+            .unwrap()
+            .outcome,
+        Outcome::Rejected(Rejection::Invalid(_))
+    ));
+}
+
+#[test]
 fn time_bounds_near_the_top_of_the_range_are_exact() {
     // ts + RETENTION and now + 5 min are beyond u64::MAX: the bounds are computed as with
     // unbounded integers (§1, D.25), so the event is admitted and its window never closes.
