@@ -119,17 +119,17 @@ impl EventRow {
     }
 }
 
-/// The end of an event's availability window, `ts + RETENTION` (§8.1), or `None` if it does
-/// not fit a u64 (such an event is rejected on receipt).
+/// The end of an event's availability window, `ts + RETENTION` (§8.1), in 128 bits so that
+/// it is exact for every `ts` (§1, D.25).
 #[must_use]
-pub fn window_end(event_id: &EventId) -> Option<u64> {
-    event_id.timestamp().checked_add(RETENTION_MS)
+pub fn window_end(event_id: &EventId) -> u128 {
+    u128::from(event_id.timestamp()) + u128::from(RETENTION_MS)
 }
 
 /// Whether `now` is inside the availability window of `event_id`: `now < ts + RETENTION`.
 #[must_use]
 pub fn in_window(event_id: &EventId, now: u64) -> bool {
-    window_end(event_id).is_some_and(|end| now < end)
+    u128::from(now) < window_end(event_id)
 }
 
 /// The stored current result of a sync object (§7.1).

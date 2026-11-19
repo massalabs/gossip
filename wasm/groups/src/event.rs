@@ -271,13 +271,15 @@ impl Payload {
     /// Structural rules that need only the payload and the event timestamp `ts`: forward
     /// content, the `replyTo` metadata, and `created_at`, `last_modified_at` (including a
     /// scheduled-deletion time) at most `ts + MAX_SCHEDULE` (§7.2).
+    ///
+    /// The bound is computed in 128 bits, so it is exact for every `ts`: a date is refused
+    /// only when it really is beyond it (§1, D.25).
     fn check(&self, ts: u64) -> Result<()> {
-        let bound = ts
-            .checked_add(MAX_SCHEDULE_MS)
-            .ok_or(Error::Overflow("event timestamp + MAX_SCHEDULE"))?;
+        let bound = u128::from(ts) + u128::from(MAX_SCHEDULE_MS);
+        let beyond = |t: u64| u128::from(t) > bound;
         match self {
             Payload::Delete { scheduled_at, .. } => {
-                if scheduled_at.is_some_and(|t| t > bound) {
+                if scheduled_at.is_some_and(beyond) {
                     return Err(Error::BeyondSchedule("last_modified_at"));
                 }
             }
@@ -286,10 +288,10 @@ impl Payload {
                 if let Some(value) = c.metadata.get(METADATA_KEY_REPLY_TO) {
                     decode_reply_to(value)?;
                 }
-                if c.created_at > bound {
+                if beyond(c.created_at) {
                     return Err(Error::BeyondSchedule("created_at"));
                 }
-                if c.last_modified_at > bound {
+                if beyond(c.last_modified_at) {
                     return Err(Error::BeyondSchedule("last_modified_at"));
                 }
             }
@@ -527,16 +529,12 @@ impl MessageEvent {
     }
 
     /// Whether the event timestamp passes admission at local time `now`: `ts ≤ now + 5 min`
-    /// (§7.2). A received event that fails is not malformed but temporarily invalid (§9.6).
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Overflow`] if `now + 5 min` does not fit a u64.
-    pub fn timestamp_admitted(&self, now: u64) -> Result<bool> {
-        let limit = now
-            .checked_add(EVENT_TIMESTAMP_TOLERANCE_MS)
-            .ok_or(Error::Overflow("now + 5 min"))?;
-        Ok(self.event_id.timestamp() <= limit)
+    /// (§7.2), computed in 128 bits so that it is exact for every `now` (§1, D.25). A received
+    /// event that fails is not malformed but temporarily invalid (§9.6).
+    #[must_use]
+    pub fn timestamp_admitted(&self, now: u64) -> bool {
+        u128::from(self.event_id.timestamp())
+            <= u128::from(now) + u128::from(EVENT_TIMESTAMP_TOLERANCE_MS)
     }
 
     /// The result hash of the payload in this event's epoch (§6.2).
@@ -878,15 +876,27 @@ mod tests {
         content(&mut p).created_at = 0;
         content(&mut p).last_modified_at = 0;
         assert!(MessageEvent::create(&root, id, &[], p).is_ok());
-        // ts + MAX_SCHEDULE that overflows is rejected.
+        // Near the top of the range the bound is exact: ts + MAX_SCHEDULE beyond u64::MAX
+        // admits every date, as unbounded integers would.
+        for ts in [u64::MAX - MAX_SCHEDULE_MS + 1, u64::MAX] {
+            let id = EventId::new(ts, [0; 16]);
+            let mut p = text(alice.id, "x");
+            content(&mut p).created_at = u64::MAX;
+            content(&mut p).last_modified_at = u64::MAX;
+            assert!(MessageEvent::create(&root, id, &[], p).is_ok());
+            let d = Payload::Delete {
+                sync_obj_id: SyncObjId::from_bytes([1; 32]),
+                scheduled_at: Some(u64::MAX),
+            };
+            assert!(MessageEvent::create(&root, id, &[], d).is_ok());
+        }
+        // Just below, the bound is u64::MAX - 1.
+        let ts = u64::MAX - MAX_SCHEDULE_MS - 1;
+        let mut p = text(alice.id, "x");
+        content(&mut p).last_modified_at = u64::MAX;
         assert_eq!(
-            MessageEvent::create(
-                &root,
-                EventId::new(u64::MAX, [0; 16]),
-                &[],
-                text(alice.id, "x")
-            ),
-            Err(Error::Overflow("event timestamp + MAX_SCHEDULE"))
+            MessageEvent::create(&root, EventId::new(ts, [0; 16]), &[], p),
+            Err(Error::BeyondSchedule("last_modified_at"))
         );
     }
 
@@ -897,10 +907,20 @@ mod tests {
         let event =
             MessageEvent::create(&root, EventId::new(TS, [9; 16]), &[], text(alice.id, "x"))
                 .unwrap();
-        assert_eq!(event.timestamp_admitted(TS - 300_000), Ok(true));
-        assert_eq!(event.timestamp_admitted(TS - 300_001), Ok(false));
-        assert_eq!(event.timestamp_admitted(0), Ok(false));
-        assert!(event.timestamp_admitted(u64::MAX).is_err());
+        assert!(event.timestamp_admitted(TS - 300_000));
+        assert!(!event.timestamp_admitted(TS - 300_001));
+        assert!(!event.timestamp_admitted(0));
+        // now + 5 min beyond u64::MAX admits every timestamp.
+        assert!(event.timestamp_admitted(u64::MAX));
+        let last = MessageEvent::create(
+            &root,
+            EventId::new(u64::MAX, [9; 16]),
+            &[],
+            text(alice.id, "x"),
+        )
+        .unwrap();
+        assert!(last.timestamp_admitted(u64::MAX - 300_000));
+        assert!(!last.timestamp_admitted(u64::MAX - 300_001));
     }
 
     #[test]

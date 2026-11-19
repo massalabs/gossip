@@ -19,7 +19,7 @@ use crate::root::Root;
 use crate::store::tx::Tx;
 use crate::store::{
     EventRow, ObjectRecord, PendingKind, Role, RowState, Storage, StorageError, StorageRead,
-    StoredResult, in_window, window_end,
+    StoredResult, in_window,
 };
 use crate::wire::{self, EventObject};
 
@@ -69,8 +69,8 @@ pub enum Rejection {
     GroupState,
     /// The blob holds a root or a signed object, not a message event.
     NotAMessageEvent,
-    /// The event is invalid: encoding, parents, payload, secret proof, claimed author or an
-    /// unrepresentable time (§6.1, §6.2, §4.2, §7.2, §1.1).
+    /// The event is invalid: encoding, parents, payload, secret proof or claimed author
+    /// (§6.1, §6.2, §4.2, §7.2, §1.1).
     Invalid(Error),
 }
 
@@ -164,11 +164,6 @@ impl<'a> Epoch<'a> {
         }
         if let Err(e) = event.check_against_root(self.root) {
             return Some(Rejection::Invalid(e));
-        }
-        if window_end(&event.event_id()).is_none() {
-            return Some(Rejection::Invalid(Error::Overflow(
-                "event timestamp + RETENTION",
-            )));
         }
         None
     }
@@ -402,17 +397,17 @@ pub(crate) fn receive_in<S: StorageRead + ?Sized>(
     match row.map(|r| r.state) {
         Some(RowState::Held { .. }) => Ok(Outcome::Duplicate),
         Some(RowState::Pruned) => restore(tx, event, now),
-        Some(RowState::TemporarilyInvalid) | None => match event.timestamp_admitted(now) {
-            Ok(true) => Ok(Outcome::Accepted(apply_new(tx, event, now)?)),
-            Ok(false) => {
+        Some(RowState::TemporarilyInvalid) | None => {
+            if event.timestamp_admitted(now) {
+                Ok(Outcome::Accepted(apply_new(tx, event, now)?))
+            } else {
                 tx.put_row(EventRow {
                     event_id: event.event_id(),
                     state: RowState::TemporarilyInvalid,
                 });
                 Ok(Outcome::TemporarilyInvalid)
             }
-            Err(e) => Ok(Outcome::Rejected(Rejection::Invalid(e))),
-        },
+        }
     }
 }
 

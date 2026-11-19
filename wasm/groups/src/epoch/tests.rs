@@ -328,16 +328,20 @@ fn rejects_malformed_blobs_and_other_objects() {
 }
 
 #[test]
-fn rejects_an_unrepresentable_window_end() {
+fn time_bounds_near_the_top_of_the_range_are_exact() {
+    // ts + RETENTION and now + 5 min are beyond u64::MAX: the bounds are computed as with
+    // unbounded integers (§1, D.25), so the event is admitted and its window never closes.
     let mut f = Fixture::new();
     let ts = u64::MAX - MAX_SCHEDULE_MS;
-    let e = f.event(ts, 1, &[], text(1, f.bob.id, 0, 0, "x"));
-    assert_eq!(
-        f.recv(&e, ts),
-        Outcome::Rejected(Rejection::Invalid(Error::Overflow(
-            "event timestamp + RETENTION"
-        )))
-    );
+    let e = f.event(ts, 1, &[], text(1, f.bob.id, u64::MAX, u64::MAX, "x"));
+    assert_eq!(f.recv(&e, ts - 5 * MIN - 1), Outcome::TemporarilyInvalid);
+    assert_eq!(f.recv(&e, u64::MAX), Outcome::Accepted(Merge::Won));
+    assert!(crate::store::in_window(&e.event_id(), u64::MAX));
+    assert!(!crate::store::in_window(
+        &f.event(T0, 2, &[], text(2, f.bob.id, T0, T0, "y"))
+            .event_id(),
+        u64::MAX
+    ));
 }
 
 // ── Temporarily invalid events (§7.2, §9.6) ─────────────────────────────────
