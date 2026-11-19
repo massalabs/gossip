@@ -161,6 +161,112 @@ mod tests {
         );
     }
 
+    /// `bytes` of 32 copies of `b`, with its CBOR head `0x58 0x20`.
+    fn b32(b: u8) -> Vec<u8> {
+        [&[0x58, 0x20][..], &[b; 32]].concat()
+    }
+
+    /// Asserts that `id` is BLAKE3 over `projection`, written byte by byte in each test so that
+    /// a swapped argument or another CBOR type is caught.
+    fn assert_hashes(id: &[u8; 32], projection: &[&[u8]]) {
+        assert_eq!(id, blake3::hash(&projection.concat()).as_bytes());
+    }
+
+    #[test]
+    fn projections_written_by_hand() {
+        // ["gossip.groups.predecessor.1", h'33..', h'11..']: challenge, then parent.
+        assert_hashes(
+            parent_commitment(&challenge(), &chat()).as_bytes(),
+            &[
+                &[0x83, 0x78, 0x1b],
+                b"gossip.groups.predecessor.1",
+                &b32(0x33),
+                &b32(0x11),
+            ],
+        );
+        // ["gossip.groups.reference.1", h'33..', h'11..']: challenge, then chat_id.
+        assert_hashes(
+            ref_chat_id(&challenge(), &chat()).as_bytes(),
+            &[
+                &[0x83, 0x78, 0x19],
+                b"gossip.groups.reference.1",
+                &b32(0x33),
+                &b32(0x11),
+            ],
+        );
+        // ["gossip.groups.message.secret_proof.1", h'11..', h'44..', h'<eventId>']: chat_id,
+        // group secret, then the 24-byte event ID (ts 1,700,000,000,000 big-endian, 16 × 0x55).
+        let event_id: &[u8] = &[
+            0x58, 0x18, 0x00, 0x00, 0x01, 0x8b, 0xcf, 0xe5, 0x68, 0x00, 0x55, 0x55, 0x55, 0x55,
+            0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
+        ];
+        assert_hashes(
+            secret_proof(
+                &chat(),
+                &GroupSecret::from_bytes([0x44; 32]),
+                &EventId::new(1_700_000_000_000, [0x55; 16]),
+            )
+            .as_bytes(),
+            &[
+                &[0x84, 0x78, 0x24],
+                b"gossip.groups.message.secret_proof.1",
+                &b32(0x11),
+                &b32(0x44),
+                event_id,
+            ],
+        );
+        // ["gossip.groups.leave.1", h'11..', h'22..'].
+        assert_hashes(
+            leave_id(&chat(), &gid()).as_bytes(),
+            &[
+                &[0x83, 0x75],
+                b"gossip.groups.leave.1",
+                &b32(0x11),
+                &b32(0x22),
+            ],
+        );
+        // ["gossip.groups.kick.1", h'11..', h'22..']: chat_id, then the removed member.
+        assert_hashes(
+            kick_id(&chat(), &gid()).as_bytes(),
+            &[
+                &[0x83, 0x74],
+                b"gossip.groups.kick.1",
+                &b32(0x11),
+                &b32(0x22),
+            ],
+        );
+        // ["gossip.groups.dissolve.1", h'11..', false / true]: a CBOR boolean, not an integer.
+        assert_hashes(
+            dissolve_id(&chat(), false).as_bytes(),
+            &[
+                &[0x83, 0x78, 0x18],
+                b"gossip.groups.dissolve.1",
+                &b32(0x11),
+                &[0xf4],
+            ],
+        );
+        assert_hashes(
+            dissolve_id(&chat(), true).as_bytes(),
+            &[
+                &[0x83, 0x78, 0x18],
+                b"gossip.groups.dissolve.1",
+                &b32(0x11),
+                &[0xf5],
+            ],
+        );
+        // ["gossip.groups.sync_obj_name.1", "gossip.groups.message.picture"]: the name is
+        // text, not bytes.
+        assert_hashes(
+            registered_sync_obj_id("gossip.groups.message.picture").as_bytes(),
+            &[
+                &[0x82, 0x78, 0x1d],
+                b"gossip.groups.sync_obj_name.1",
+                &[0x78, 0x1d],
+                b"gossip.groups.message.picture",
+            ],
+        );
+    }
+
     // Fixed test vectors: computed once with this implementation and pinned.
     #[test]
     fn vectors() {
