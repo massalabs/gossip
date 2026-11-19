@@ -284,3 +284,100 @@ fn a_resolution_over_a_former_owners_branch_does_not_change_the_owner() {
     }
     let _ = (a, h);
 }
+
+/// The lines of a junction (§5.10) after a member left: the history ends with "You left this
+/// group" (D.2), not with "You were removed".
+#[test]
+fn a_member_added_back_after_its_leave_reads_that_it_left() {
+    let (mut net, g) = founded(3);
+    let backup = net.devs[2].store.clone();
+    let now = net.now;
+    let s = super::membership::signer(2);
+    let dev = &mut net.devs[2];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    // Restored from a backup, it learns its leave again (D.2) and is read-only.
+    net.devs[2].store = backup;
+    net.restart(2);
+    net.say(2, &g, "I am back");
+    net.run(2 * MIN);
+    assert_eq!(net.summary(2, &g).unwrap().status, MyStatus::Left);
+    let z = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(2)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(MIN);
+    assert_eq!(net.accept(2, z), g);
+    net.run(MIN);
+    let lines = net.lines(2, &g);
+    let at = lines
+        .iter()
+        .position(|l| matches!(l, TimelineLine::NotAMember { .. }))
+        .expect("the junction");
+    assert_eq!(lines[at - 1], TimelineLine::YouLeft, "{lines:?}");
+    assert!(!lines.contains(&TimelineLine::YouWereRemoved), "{lines:?}");
+}
+
+/// The lines of a junction (§5.10) after "Dissolve & Keep archived" (§5.8): the history ends
+/// with "This group was dissolved by its owner", not with "You were removed".
+#[test]
+fn a_member_back_after_a_dissolve_reads_that_it_was_dissolved() {
+    let (mut net, g) = founded(3);
+    let now = net.now;
+    let s = super::membership::signer(0);
+    let dev = &mut net.devs[0];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, g, false, now, &mut net.rng)
+        .unwrap();
+    net.run(MIN);
+    assert_eq!(
+        net.summary(1, &g).unwrap().status,
+        MyStatus::Dissolved { deleted: false }
+    );
+    // The owner continues the dissolved epoch with a root of its own.
+    let params = crate::root::RootParams {
+        name: "again".into(),
+        members: (0..3).map(gid).collect(),
+        group_secret: crate::ids::GroupSecret::from_bytes([3; 32]),
+        owner: super::membership::ident(0).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([4; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([5; 32]),
+        created_at: net.now,
+    };
+    let z = Root::create_successor(
+        params,
+        &[g],
+        &super::membership::ident(0).secret.dsa_signing_key,
+        [6; 32],
+    )
+    .unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(z.clone()))).unwrap();
+    net.recv_frames_m(1, 0, &[Frame::Event(blob)]);
+    let inv = net.devs[1].node.invitations(net.now);
+    assert_eq!(inv.len(), 1, "{inv:?}");
+    assert_eq!(net.accept(1, z.chat_id()), g);
+    net.run(MIN);
+    let lines = net.lines(1, &g);
+    let at = lines
+        .iter()
+        .position(|l| matches!(l, TimelineLine::NotAMember { .. }))
+        .expect("the junction");
+    assert_eq!(lines[at - 1], TimelineLine::Dissolved, "{lines:?}");
+    assert!(!lines.contains(&TimelineLine::YouWereRemoved), "{lines:?}");
+}
