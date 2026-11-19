@@ -287,10 +287,9 @@ impl Node {
                     .copied()
                     .collect();
             let parents = n.authorized_parents(&rec.root, &held);
-            if let Some(g) = inv
-                .rejoins
-                .or_else(|| parents.first().map(|p| n.group_of(p)))
-            {
+            // A group deleted since the invitation arrived is not recreated.
+            let rejoins = inv.rejoins.filter(|g| n.t.group_recs.contains(g));
+            if let Some(g) = rejoins.or_else(|| parents.first().map(|p| n.group_of(p))) {
                 // Back in a group it had left by a kick or a dissolve (§5.10): the junction.
                 let kicked_at = match n.group_status(&g) {
                     GroupStatus::Removed { at, .. }
@@ -354,6 +353,7 @@ impl Node {
             n.take_record(&chat);
             n.t.events.remove(&(chat, ChangeKind::Invitation));
             n.drop_tasks_of(&[chat]);
+            n.drop_fetched_for(chat);
             match choice {
                 LeaveChoice::Signed => {
                     n.send_leave(cx, signer, &rec.root)?;
