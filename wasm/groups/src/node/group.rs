@@ -593,6 +593,7 @@ impl Node {
             self.initial_scans(cx, group);
             if before != self.current_epoch(&group) {
                 self.current_changed(cx, group);
+                self.recheck_status(cx, group);
             }
             // §4.9: a device that is not the owner tells the owner of each competing end.
             let fork = self.fork_to_resolve(&group);
@@ -611,6 +612,59 @@ impl Node {
         }
         self.reconsider(cx)?;
         Ok(())
+    }
+
+    /// Judges the state of `group` again after it was joined with another one or its
+    /// current epoch changed. A read-only state whose epoch is no longer the current one
+    /// ends: the device accepted a later root (§5.10). Then its own leave, a kick of it or
+    /// a dissolve message naming the current epoch, held from before that epoch became
+    /// current, apply (§5.6, §5.8, D.2).
+    pub(crate) fn recheck_status(&mut self, cx: &mut Cx<'_>, group: ChatId) {
+        let Some(cur) = self.current_epoch(&group) else {
+            return;
+        };
+        match self.group_status(&group) {
+            GroupStatus::Removed { epoch, .. }
+            | GroupStatus::Left { epoch, .. }
+            | GroupStatus::Dissolved { epoch, .. }
+                if epoch != cur =>
+            {
+                self.group_rec_mut(group).status = GroupStatus::Active;
+                self.rebuild_epochs();
+            }
+            _ => {}
+        }
+        if self.group_status(&group) != GroupStatus::Active {
+            return;
+        }
+        let kick = (
+            cur,
+            crate::wire::SignedKind::Kick,
+            *crate::hash::kick_id(&cur, &self.me).as_bytes(),
+        );
+        if self.t.signed.contains(&kick) {
+            self.set_read_only(
+                cx,
+                group,
+                GroupStatus::Removed {
+                    epoch: cur,
+                    at: cx.now,
+                },
+            );
+            return;
+        }
+        let dissolve = [true, false].into_iter().find(|d| {
+            self.t.signed.contains(&(
+                cur,
+                crate::wire::SignedKind::Dissolve,
+                *crate::hash::dissolve_id(&cur, *d).as_bytes(),
+            ))
+        });
+        if let Some(must_delete) = dissolve {
+            self.apply_dissolve(cx, group, cur, must_delete);
+            return;
+        }
+        self.check_own_leave(cx, group);
     }
 
     /// The current epoch of `group` changed: neighbors that are not members of it are
@@ -657,10 +711,10 @@ impl Node {
             for (m, at) in old.pending_removals {
                 g.pending_removals.entry(m).or_insert(at);
             }
-            // A conversation the user accepted makes the joined group active again (as on
-            // accepting an invitation to rejoin, §5.10).
-            if old.status == GroupStatus::Active {
-                g.status = GroupStatus::Active;
+            // A read-only state is kept; `recheck_status` judges it again once the joined
+            // group's current epoch is known.
+            if g.status == GroupStatus::Active {
+                g.status = old.status;
             }
         }
         self.t.groups.remove(&from);
@@ -850,8 +904,7 @@ impl Node {
                 let into = gc.min(gp);
                 self.merge_groups(gc.max(gp), into);
                 self.rebuild_epochs();
-                // Its own leave may apply to the joined line (D.2).
-                self.check_own_leave(cx, into);
+                self.recheck_status(cx, into);
                 self.changed(into, ChangeKind::Membership, cx.now);
                 continue;
             }
