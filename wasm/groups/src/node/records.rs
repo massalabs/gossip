@@ -760,6 +760,16 @@ impl Batch {
 }
 
 /// A store of the epochs' records and of the node records (§14.1).
+///
+/// # Atomicity of a batch, `erase` included
+///
+/// [`NodeStorage::commit_batch`] MUST apply the whole [`Batch`] in one transaction: the
+/// epochs' [`Changes`], then the erasure of every epoch in [`Batch::erase`] (all its rows,
+/// edges and objects, whatever the same batch wrote to it), then the node records, all of it
+/// or nothing. A batch that erases a closed group's messages and removes its records must
+/// never be half applied: a crash in between would leave messages of a group the device
+/// shows as closed. [`super::conformance::check_batch_with_erase`] checks this for a
+/// backend.
 pub trait NodeStorage: Storage {
     /// Every node record.
     ///
