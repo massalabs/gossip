@@ -432,6 +432,12 @@ impl GroupsNode {
         self.core.take_changes(ms(now)?).map_err(js)
     }
 
+    /// The root of a held epoch in JSON: `{epoch, name, members, owner, created_at}`, or
+    /// `null`.
+    pub fn epoch(&self, epoch: &[u8]) -> Result<String, JsValue> {
+        Ok(self.core.epoch(chat(epoch)?))
+    }
+
     /// The reference (§4.5) of a held epoch, which reply targets name.
     pub fn ref_chat_id(&self, epoch: &[u8]) -> Result<Option<Vec<u8>>, JsValue> {
         Ok(self

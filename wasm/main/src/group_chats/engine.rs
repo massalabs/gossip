@@ -399,6 +399,23 @@ impl Core {
             .map_err(err)
     }
 
+    /// What the root of a held epoch says, in JSON: `{epoch, name, members, owner,
+    /// created_at}`, or `null`. The resolution of competing ends shows each end's list
+    /// (§4.9).
+    pub fn epoch(&self, chat: ChatId) -> String {
+        match self.node.root(&chat) {
+            Some(r) => J::Obj(vec![
+                ("epoch".into(), chat.enc()),
+                ("name".into(), J::Str(r.name().to_owned())),
+                ("members".into(), r.members().to_vec().enc()),
+                ("owner".into(), r.owner_id().enc()),
+                ("created_at".into(), J::Num(r.created_at())),
+            ])
+            .to_text(),
+            None => "null".into(),
+        }
+    }
+
     /// The reference of a held epoch (§4.5), which replies name.
     pub fn ref_chat_id(&self, chat: ChatId) -> Option<groups::RefChatId> {
         self.node.root(&chat).map(|r| r.ref_chat_id())

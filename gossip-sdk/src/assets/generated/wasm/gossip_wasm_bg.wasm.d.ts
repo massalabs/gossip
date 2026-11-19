@@ -11,6 +11,7 @@ export const groupsnode_decode_reply_to: (a: number, b: number, c: number) => [n
 export const groupsnode_delete_group: (a: number, b: number, c: number, d: number) => [number, number];
 export const groupsnode_dissolve_group: (a: number, b: number, c: number, d: number, e: number) => [number, number];
 export const groupsnode_encode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
+export const groupsnode_epoch: (a: number, b: number, c: number) => [number, number, number, number];
 export const groupsnode_group: (a: number, b: number, c: number) => [number, number, number, number];
 export const groupsnode_groups: (a: number) => [number, number];
 export const groupsnode_handed_off: (a: number, b: number, c: number) => [number, number];

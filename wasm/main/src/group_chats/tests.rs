@@ -437,4 +437,8 @@ fn a_reply_names_the_reference_of_its_target_epoch() {
     assert!(net.peers[0].core.encode_reply_to("[]").is_err());
     assert!(net.peers[0].core.decode_reply_to(&[0xff]).is_err());
     assert!(net.peers[1].core.ref_chat_id(group).is_none());
+    let e = J::parse(&net.peers[0].core.epoch(group)).unwrap();
+    assert_eq!(e.field("name").unwrap(), &J::Str("G".into()));
+    assert_eq!(e.field("members").unwrap().as_arr().unwrap().len(), 2);
+    assert_eq!(net.peers[1].core.epoch(group), "null");
 }
