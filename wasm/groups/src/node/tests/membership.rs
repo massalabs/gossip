@@ -2762,3 +2762,60 @@ fn a_held_handover_always_moves_the_line_followed() {
     );
     assert_eq!(net.current(2, &g), Some(h));
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=15`): a
+/// member away through several epochs came back after the group was dissolved; dissolved
+/// devices answered "not available" for every epoch, so it could not fetch the epochs it
+/// missed, never joined them nor learnt the dissolve, and showed the group as several
+/// conversations.
+#[test]
+fn a_member_back_after_a_dissolve_learns_it() {
+    let (mut net, g) = founded(3);
+    net.offline[2] = true;
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![],
+            name: Some("x".into()),
+        },
+    )
+    .unwrap();
+    let e3 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("y".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    let now = net.now;
+    let s = signer(0);
+    let dev = &mut net.devs[0];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, g, false, now, &mut net.rng)
+        .unwrap();
+    net.exchange();
+    net.dropped.clear();
+    net.offline[2] = false;
+    // It gets the last root only.
+    let root = net.devs[1].node.root(&e3).unwrap();
+    net.recv_frames_m(
+        2,
+        1,
+        &[Frame::Event(
+            wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap(),
+        )],
+    );
+    net.run(crate::constants::PROMPT_DELAY_MS + MIN);
+    net.accept_all(2);
+    net.run(30 * MIN);
+    let groups = net.devs[2].node.groups();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert_eq!(groups[0].status, MyStatus::Dissolved { deleted: false });
+}
