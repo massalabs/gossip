@@ -72,6 +72,13 @@ pub struct ReceiveContext<'a> {
 ///
 /// Holding a `Root` does not mean its signature was checked: see [`Root::verify_signature`]
 /// and [`Root::verify_received`].
+///
+/// # Identity
+///
+/// The object's identity is its ID, [`Root::chat_id`]: the signature is not hashed, and ML-DSA
+/// signing is randomized, so two valid copies of one object may carry different signatures.
+/// `==` compares the signature too and tells such copies apart; storage and relaying MUST
+/// deduplicate by ID, never by `==`.
 #[derive(Clone)]
 pub struct Root {
     version: u64,
@@ -564,7 +571,7 @@ impl Root {
 
 impl PartialEq for Root {
     /// Two roots are equal when they have the same ID, which covers every field but the
-    /// signature, and the same signature.
+    /// signature, and the same signature. Deduplicate by [`Root::chat_id`], not by this.
     fn eq(&self, other: &Self) -> bool {
         self.chat_id == other.chat_id && self.signature == other.signature
     }
