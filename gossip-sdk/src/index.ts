@@ -30,3 +30,18 @@ export * from './db/db.js';
 export * from './db/queries/index.js';
 export * from './db/sqlite.js';
 export { SELF_CONTACT_ID } from './services/selfMessage.js';
+export { GroupService } from './services/groups.js';
+export type {
+  GroupId,
+  GroupSummary,
+  GroupInvitation,
+  GroupMessage,
+  GroupMessageBody,
+  GroupLine,
+  GroupTimelineItem,
+  GroupChange,
+  GroupChangeKind,
+  GroupMemberStatus,
+  GroupPublished,
+  LeaveChoice,
+} from './services/groups.js';

@@ -65,6 +65,7 @@ import {
 } from './services/auth.js';
 import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
+import { GroupService } from './services/groups.js';
 import {
   SelfMessageService,
   reencryptSelfMessages,
@@ -271,6 +272,7 @@ class GossipSdk {
     null;
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
+  private _groups: GroupService | null = null;
 
   private createProfileService(queries: Queries): ProfileService {
     return new ProfileService(queries, async userId => {
@@ -724,6 +726,30 @@ class GossipSdk {
       this._message.setQueueManager(this.messageQueues);
       this._discussion.setAuthService(this._auth!);
 
+      // Group chats: the engine opens from the account's group records. A
+      // failure leaves groups unavailable without failing the login.
+      const groups = new GroupService(
+        session,
+        messageProtocol,
+        queries,
+        this.eventEmitter,
+        config,
+        () => this.awaitPendingPersist()
+      );
+      try {
+        await groups.open();
+        this._groups = groups;
+        this._message.setGroupPlaintextHandler((from, plaintext) =>
+          groups.handlePlaintext(from, plaintext)
+        );
+      } catch (error) {
+        await groups.close();
+        this.eventEmitter.emit(SdkEventType.ERROR, {
+          error: error instanceof Error ? error : new Error(String(error)),
+          context: 'groups.open',
+        });
+      }
+
       // Auto-start polling if enabled in config AND the caller didn't opt
       // out via `autoStartPolling: false`. The opt-out is used by the app
       // during multi-account onboarding, where we open each account's
@@ -752,6 +778,8 @@ class GossipSdk {
         this._refresh = null;
         this._contact = null;
         this._selfMessage = null;
+        await this._groups?.close();
+        this._groups = null;
         this.messageQueues.clear();
         if (this._persistTimer !== null) {
           clearTimeout(this._persistTimer);
@@ -923,6 +951,12 @@ class GossipSdk {
       // debounced writes before tearing down the session.
       await this.flushSessionPersistSync();
     }
+
+    // The group engine first: it finishes its operation and frees its copy of
+    // the identity key.
+    this._message?.setGroupPlaintextHandler(null);
+    await this._groups?.close();
+    this._groups = null;
 
     // Cleanup the manager and both identity-key wrappers deterministically.
     this.state.session.dispose();
@@ -1963,6 +1997,15 @@ class GossipSdk {
   }
 
   /** Contact management */
+  /** Group chats. Throws when the group engine could not be opened. */
+  get groups(): GroupService {
+    this.requireSession();
+    if (!this._groups) {
+      throw new Error('Group service not initialized');
+    }
+    return this._groups;
+  }
+
   get contacts(): ContactService {
     this.requireSession();
     if (!this._contact) {
