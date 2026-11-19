@@ -374,9 +374,21 @@ impl Node {
         let Some(p) = self.outbox.sent.get(&handle).cloned() else {
             return Err(NodeError::UnknownHandle);
         };
-        let r = self.run(store, now, rng, |n, _cx| {
+        let r = self.run(store, now, rng, |n, cx| {
             let peer = p.peer.expect("assembled for a peer");
             for k in &p.items {
+                if let Some(Work::Answer {
+                    op:
+                        super::records::AnswerOp::Page {
+                            anchor,
+                            scan_id,
+                            offset,
+                        },
+                    ..
+                }) = n.t.queue.get(k).cloned()
+                {
+                    n.page_sent((peer, anchor, scan_id), offset, cx.now);
+                }
                 n.remove_work(k);
             }
             for q in &p.queries {

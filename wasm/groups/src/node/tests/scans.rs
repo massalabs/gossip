@@ -139,9 +139,22 @@ fn an_empty_list_is_one_empty_final_page() {
     let p = page(ask(&mut net, 1, 1, 1, 0));
     assert_eq!((p.count, p.entries.len()), (0, 0));
     assert!(p.is_final());
-    // The end offset is in range: an empty end page.
-    let p = page(ask(&mut net, 1, 2, 1, 0));
-    assert_eq!(p.count, 0);
+    // The final page sent releases the list: asked again, `restart`.
+    assert_eq!(
+        ask(&mut net, 1, 2, 1, 0),
+        ResponseResult::Status(Status::Restart)
+    );
+}
+
+/// More events than one page holds, given to device 0 by member 1.
+fn longer_than_a_page(net: &mut Net) -> usize {
+    let n = crate::constants::MAX_PAGE_ENTRIES + 2;
+    for i in 0..n {
+        let e = net.event(T0, i as u8, &[], 1);
+        net.give(0, 1, &e);
+    }
+    net.poll(0);
+    n
 }
 
 #[test]
@@ -243,28 +256,27 @@ fn a_frozen_list_is_released_after_its_final_page() {
 #[test]
 fn new_scans_beyond_four_per_peer_are_busy() {
     let mut net = Net::new(3, 1);
+    longer_than_a_page(&mut net);
     for i in 0..LIVE_SCANS_PER_PEER as u8 {
-        page(ask(&mut net, 1, i, i, 0));
+        assert!(!page(ask(&mut net, 2, i, i, 0)).is_final());
     }
     assert_eq!(
-        ask(&mut net, 1, 9, 9, 0),
+        ask(&mut net, 2, 9, 9, 0),
         ResponseResult::Status(Status::Busy)
     );
     // Another peer still gets its scan; a live scan still pages.
-    page(ask(&mut net, 2, 10, 10, 0));
-    page(ask(&mut net, 1, 11, 0, 0));
+    page(ask(&mut net, 1, 10, 10, 0));
+    page(ask(&mut net, 2, 11, 0, 0));
 }
 
 #[test]
 fn an_offset_beyond_the_list_is_malformed() {
     let mut net = Net::new(3, 1);
-    let e = net.event(T0, 5, &[], 1);
-    net.give(0, 1, &e);
-    net.poll(0);
-    page(ask(&mut net, 2, 1, 1, 0));
-    assert_eq!(page(ask(&mut net, 2, 2, 1, 1)).count, 0);
+    let n = longer_than_a_page(&mut net) as u64;
+    let first = page(ask(&mut net, 2, 1, 1, 0));
+    assert!(first.count >= n);
     assert_eq!(
-        ask(&mut net, 2, 3, 1, 2),
+        ask(&mut net, 2, 3, 1, first.count + 1),
         ResponseResult::Status(Status::Malformed)
     );
 }

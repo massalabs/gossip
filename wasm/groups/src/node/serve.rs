@@ -682,6 +682,7 @@ impl Node {
         live_until: u64,
     ) -> AnswerOp {
         let key = (peer, SHARED_SCAN, scan_id);
+        let live_until = live_until.min(cx.now.saturating_add(super::timing::FROZEN_MAX_LIVE_MS));
         let page = AnswerOp::Page {
             anchor: SHARED_SCAN,
             scan_id,
