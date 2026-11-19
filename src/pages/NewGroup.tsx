@@ -17,6 +17,7 @@ import { useDiscussionStore } from '../stores/discussionStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { ROUTES } from '../constants/routes';
 import { safeName } from '../utils/groupName';
+import { isAcceptedContact } from '../utils/conversations';
 
 /** The largest group name, in UTF-8 bytes (§5.11). */
 export const GROUP_NAME_MAX_BYTES = 256;
@@ -54,7 +55,10 @@ const NewGroup: React.FC = () => {
     () =>
       contacts
         .filter(
-          c => gossip.discussions.getStatus(c.userId) === SessionStatus.Active
+          c =>
+            // Contacts the user accepted, with an active session.
+            isAcceptedContact(c) &&
+            gossip.discussions.getStatus(c.userId) === SessionStatus.Active
         )
         .sort((a, b) => a.name.localeCompare(b.name)),
     [contacts, gossip]

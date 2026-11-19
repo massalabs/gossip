@@ -14,6 +14,7 @@ import {
   type GroupListEntry,
 } from '../../stores/groupStore';
 import { ROUTES } from '../../constants/routes';
+import { getSdk } from '../../stores/sdkStore';
 import GroupInvitationCard from './GroupInvitationCard';
 import SafeName from './SafeName';
 
@@ -94,7 +95,9 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
   useMinuteTick();
   const available = useGroupStore(s => s.available);
   const groups = useGroupStore(s => s.groups);
-  const invitations = useGroupStore(s => s.invitations);
+  // A migration is shown on its archive's row and inside it (§5.12).
+  const allInvitations = useGroupStore(s => s.invitations);
+  const invitations = allInvitations.filter(i => !i.migrationOf);
   const refresh = useGroupStore(s => s.refresh);
   const me = useAccountStore(s => s.userProfile?.userId);
   const memberName = useGroupMemberName();
@@ -103,7 +106,7 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
     async (epochId: string) => {
       const service = getGroupService();
       if (!service) return;
-      const groupId = await service.acceptInvitation(epochId);
+      const groupId = await getSdk().conversations.acceptInvitation(epochId);
       refresh();
       navigate(ROUTES.group({ groupId }));
     },
@@ -112,7 +115,7 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
 
   const decline = useCallback(
     async (epochId: string, choice: LeaveChoice) => {
-      await getGroupService()?.declineInvitation(epochId, choice);
+      await getSdk().conversations.declineInvitation(epochId, choice);
       refresh();
     },
     [refresh]
@@ -148,6 +151,9 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
               memberName={memberName}
               onAccept={accept}
               onDecline={decline}
+              onOpen={() =>
+                navigate(ROUTES.invitation({ kind: 'group', id: inv.epochId }))
+              }
             />
           ))}
         </>

@@ -7,7 +7,8 @@ import { createDiscussionEventHandlers } from './discussionStore.events';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 
-export type DiscussionFilter = 'all' | 'unread' | 'pending';
+/** `archived`: the archives the user moved out of the list (§5.12). */
+export type DiscussionFilter = 'all' | 'unread' | 'pending' | 'archived';
 
 interface DiscussionStoreState {
   discussions: Discussion[];

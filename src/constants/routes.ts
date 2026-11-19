@@ -60,6 +60,7 @@ export enum AppRoute {
   selfDiscussion = 'self-discussion',
   group = 'group',
   newGroup = 'new-group',
+  invitation = 'invitation',
 }
 
 export const ROUTES = {
@@ -107,6 +108,8 @@ export const ROUTES = {
 
   // `groupId` is the group key (hex)
   group: route(`/${AppRoute.group}/:groupId`),
+  /** The invitation screen: `kind` is `group` (an epoch) or `contact`. */
+  invitation: route(`/${AppRoute.invitation}/:kind/:id`),
   groupSettings: route(`/${AppRoute.group}/:groupId/${AppRoute.settings}`),
 
   // Default

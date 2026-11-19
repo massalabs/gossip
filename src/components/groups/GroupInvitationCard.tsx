@@ -15,6 +15,8 @@ interface GroupInvitationCardProps {
     epochId: string,
     choice: Extract<LeaveAction, { type: 'decline' }>['choice']
   ) => Promise<void>;
+  /** Opens the invitation screen, with every section (§5.12). */
+  onOpen?: () => void;
 }
 
 /**
@@ -27,6 +29,7 @@ const GroupInvitationCard: React.FC<GroupInvitationCardProps> = ({
   memberName,
   onAccept,
   onDecline,
+  onOpen,
 }) => {
   const { t } = useTranslation('groups');
   const [declining, setDeclining] = useState(false);
@@ -113,6 +116,16 @@ const GroupInvitationCard: React.FC<GroupInvitationCardProps> = ({
         >
           {t('invitation.decline')}
         </Button>
+        {onOpen && (
+          <Button
+            onClick={onOpen}
+            variant="link"
+            size="custom"
+            className="ml-auto px-2.5 py-1 text-xs font-medium"
+          >
+            {t('invite.open')}
+          </Button>
+        )}
       </div>
       <LeaveGroupSheet
         isOpen={declining}

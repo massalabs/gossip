@@ -13,6 +13,8 @@ import UserIdDisplay from '../components/ui/UserIdDisplay';
 import PageHeader from '../components/ui/PageHeader';
 import PageLayout from '../components/ui/Layout/PageLayout';
 import { ROUTES } from '../constants/routes';
+import { useOpenChat } from '../hooks/useOpenChat';
+import { isAcceptedContact } from '../utils/conversations';
 import SearchBar from '../components/ui/SearchBar';
 import ConnectionBanner from '../components/ui/ConnectionBanner';
 
@@ -24,6 +26,7 @@ const NewDiscussion: React.FC = () => {
   const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
   const navigate = useNavigate();
+  const openChat = useOpenChat();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,9 +40,12 @@ const NewDiscussion: React.FC = () => {
       try {
         setIsLoading(true);
         const list = userProfile?.userId
-          ? await gossip.contacts
-              .list()
-              .then(arr => arr.sort((a, b) => a.name.localeCompare(b.name)))
+          ? await gossip.contacts.list().then(arr =>
+              arr
+                // Automatic connections are no contacts (§5.12).
+                .filter(isAcceptedContact)
+                .sort((a, b) => a.name.localeCompare(b.name))
+            )
           : [];
         if (isMounted) setContacts(list);
       } finally {
@@ -68,12 +74,11 @@ const NewDiscussion: React.FC = () => {
   const onSelectContact = async (contact: Contact) => {
     if (!userProfile?.userId) return;
     try {
-      const discussion = await gossip.discussions.get(contact.userId);
+      // Its direct chat, founded if there is none (§5.12).
       if (
-        discussion &&
         gossip.discussions.getStatus(contact.userId) === SessionStatus.Active
       ) {
-        navigate(ROUTES.discussion({ userId: contact.userId }));
+        await openChat(contact.userId);
       } else {
         toast.error(t('contacts:connection_pending'));
       }
