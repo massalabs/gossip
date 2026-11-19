@@ -217,10 +217,10 @@ impl Node {
         {
             if cx.now > d.saturating_add(EXPIRED_GRACE_MS) {
                 self.t.requests.remove(&(from, request_id));
-                return Ok(());
+                return self.uncorrelated(cx, from, version, &r.result);
             }
             if !expired {
-                return Ok(());
+                return self.uncorrelated(cx, from, version, &r.result);
             }
         }
         let Some((entry, sent_at, ttl)) = self.t.requests.get(&(from, request_id)).and_then(|q| {
@@ -228,7 +228,7 @@ impl Node {
                 .get(r.idx as usize)
                 .map(|e| (e.clone(), q.sent_at, q.ttl))
         }) else {
-            return Ok(());
+            return self.uncorrelated(cx, from, version, &r.result);
         };
         // An `expired` acknowledgement is plausible once the request is past its receiver
         // deadline, less the 5 minutes a receiver's clock may run ahead (§11.3).
@@ -264,6 +264,22 @@ impl Node {
                     self.scan_answer(cx, chat, from, (scan_id, offset), &r.result, plausible)?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// A response that can no longer be correlated with a request (past its deadline, or
+    /// unknown): a valid event blob in it is processed as an event frame would be (§2.2:
+    /// correlation only serves the retry state); anything else is dropped.
+    fn uncorrelated(
+        &mut self,
+        cx: &mut Cx<'_>,
+        from: GossipId,
+        version: u64,
+        result: &ResponseResult,
+    ) -> Result<(), NodeError> {
+        if let ResponseResult::Event(blob) = result {
+            self.receive_blob(cx, from, blob, version)?;
         }
         Ok(())
     }

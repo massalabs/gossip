@@ -418,22 +418,6 @@ fn a_late_answer_after_a_local_timeout_is_still_processed() {
 }
 
 #[test]
-fn an_uncorrelated_response_is_dropped() {
-    let mut net = Net::new(3, 1);
-    let e = net.event(T0, 5, &[], 1);
-    net.recv_frames(
-        0,
-        member(1),
-        &[Frame::Response(Response {
-            request_id: Some(RequestId::from_bytes([9; 16])),
-            idx: 0,
-            result: ResponseResult::Event(blob(&e)),
-        })],
-    );
-    assert!(!net.known(0, &e.event_id()));
-}
-
-#[test]
 fn busy_moves_on_at_once_without_a_penalty() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
