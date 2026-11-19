@@ -112,6 +112,18 @@ impl Node {
         }
     }
 
+    /// Whether the group of `chat` seeks more neighbors and has a candidate it may ask now
+    /// (what [`Node::maintain_neighbors`] would ask).
+    pub(crate) fn neighbor_candidate_free(&self, chat: &ChatId) -> bool {
+        let Some(g) = self.t.groups.get(chat) else {
+            return false;
+        };
+        g.neighbors.len() + g.asked.len() < self.neighbor_target(chat)
+            && self.eligible(chat).iter().any(|p| {
+                !g.neighbors.contains(p) && !g.asked.contains_key(p) && !g.cooldown.contains_key(p)
+            })
+    }
+
     /// A neighbor request from `from` naming its current epoch `chat` (§10.1, §13.6). A
     /// non-member is ignored. An epoch this device does not hold is declined without
     /// suggestions (D.6). With capacity, the request is accepted; otherwise it is declined

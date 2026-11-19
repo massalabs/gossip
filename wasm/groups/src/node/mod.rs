@@ -642,7 +642,7 @@ impl Node {
                 add(t);
             }
         }
-        self.timer_wakeups(&mut add);
+        self.timer_wakeups(now, &mut add);
         Ok(at)
     }
 
