@@ -115,6 +115,34 @@ export class GroupQueries {
       .all();
   }
 
+  /** When the next stored ciphertext is due to be sent again, if any. */
+  async nextOutboxRetry(ownerUserId: string): Promise<Date | null> {
+    const row = await this.conn.db
+      .select({ at: schema.groupOutbox.whenToSend })
+      .from(schema.groupOutbox)
+      .where(eq(schema.groupOutbox.ownerUserId, ownerUserId))
+      .orderBy(asc(schema.groupOutbox.whenToSend))
+      .limit(1)
+      .get();
+    return row?.at ?? null;
+  }
+
+  /** Deletes the ciphertexts waiting for a contact (when it is deleted). */
+  async deleteOutboxByContact(
+    ownerUserId: string,
+    contactUserId: string,
+    tx?: DbContext
+  ): Promise<void> {
+    await (tx ?? this.conn.db)
+      .delete(schema.groupOutbox)
+      .where(
+        and(
+          eq(schema.groupOutbox.ownerUserId, ownerUserId),
+          eq(schema.groupOutbox.contactUserId, contactUserId)
+        )
+      );
+  }
+
   async deleteOutbox(id: number): Promise<void> {
     await this.conn.db
       .delete(schema.groupOutbox)

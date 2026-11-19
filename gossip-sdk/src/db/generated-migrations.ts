@@ -135,13 +135,13 @@ export const MIGRATIONS: EmbeddedMigration[] = [
   {
     idx: 10,
     tag: '0010_group_chats',
-    when: 1795082504514,
-    digest: '5ab80c6256f0b62a26910c85b88085180ef147e6849705a8a8a3198c5b8b9068',
+    when: 1795084958395,
+    digest: 'cb4c77c4bf42852b2641ef68a46ed73c523e3b4efec2e39b563d4b3e5cd851f9',
     statements: [
       'CREATE TABLE `groupEdges` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`eventId` text NOT NULL,\n\t`parents` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `eventId`)\n);',
       'CREATE TABLE `groupEventRows` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`eventId` text NOT NULL,\n\t`state` text NOT NULL,\n\t`fields` text,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `eventId`)\n);',
       'CREATE TABLE `groupObjects` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`syncObjId` text NOT NULL,\n\t`fields` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `syncObjId`)\n);',
-      'CREATE TABLE `groupOutbox` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`seeker` blob NOT NULL,\n\t`ciphertext` blob NOT NULL,\n\t`whenToSend` integer NOT NULL\n);',
+      'CREATE TABLE `groupOutbox` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`seeker` blob NOT NULL,\n\t`ciphertext` blob NOT NULL,\n\t`whenToSend` integer NOT NULL\n);',
       'CREATE INDEX `group_outbox_owner_idx` ON `groupOutbox` (`ownerUserId`);',
       'CREATE TABLE `groupRecords` (\n\t`ownerUserId` text NOT NULL,\n\t`kind` text NOT NULL,\n\t`key` text NOT NULL,\n\t`fields` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `kind`, `key`)\n);',
     ],
