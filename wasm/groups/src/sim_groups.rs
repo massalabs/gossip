@@ -118,6 +118,9 @@ struct Counters {
     lost: u64,
     duplicated: u64,
     crashes: u64,
+    /// Devices that show the group as two conversations because they cannot verify a new
+    /// owner's authority (§5.9, D.3; reported).
+    split_conversations: u64,
     /// Older epochs whose messages differ between two devices of one line (reported).
     older_epoch_differences: u64,
     forged_handovers: u64,
@@ -172,6 +175,7 @@ impl Counters {
             lost,
             duplicated,
             crashes,
+            split_conversations,
             older_epoch_differences,
             forged_handovers,
             forged_dissolves,
@@ -1665,6 +1669,7 @@ impl Sim {
 
     fn check(&mut self) {
         let honest = self.honest();
+        let mut split_conversations = 0u64;
         for &d in &honest {
             let node = self.node(d);
             // Nothing forbidden is accepted: no forged root is installed, and every installed
@@ -1696,8 +1701,10 @@ impl Sim {
                     "device {d} follows a former owner's root"
                 );
             }
-            // One logical group is one conversation.
-            let conversations = node
+            // One logical group is one conversation, except where §5.9 and D.3 make it two:
+            // the newer one is owned by an identity whose authority over the older line
+            // rests on a handover root this device does not hold (it was no member of it).
+            let conversations: Vec<crate::node::GroupSummary> = node
                 .groups()
                 .into_iter()
                 .filter(|s| {
@@ -1705,11 +1712,25 @@ impl Sim {
                         && self.legit.contains(&s.current)
                         && Some(s.current) != self.second
                 })
-                .count();
-            assert!(
-                conversations <= 1,
-                "device {d} shows the group as {conversations} conversations"
-            );
+                .collect();
+            if conversations.len() > 1 {
+                let holds_handover_to = |o: &GossipId| {
+                    node.tables().epochs.iter().any(|(_, r)| {
+                        r.status == EpochStatus::Installed
+                            && r.root.root_type() == crate::root::RootType::Handover
+                            && r.root.owner_id() == *o
+                    })
+                };
+                let unverifiable = conversations
+                    .iter()
+                    .any(|c| c.owner != ident(0).id && !holds_handover_to(&c.owner));
+                assert!(
+                    unverifiable,
+                    "device {d} shows the group as {} conversations",
+                    conversations.len()
+                );
+                split_conversations += 1;
+            }
             // The second group stays the founder's.
             if let Some(g2) = self.second
                 && let Some(s2) = node.group(&g2)
@@ -1729,6 +1750,7 @@ impl Sim {
                 }
             }
         }
+        self.counters.split_conversations += split_conversations;
         // Removal is learnt: a device removed by a kick, or that left and was restored from
         // an older backup, is not a member any more, unless an owner added it again since
         // (an owner restored from its own backup, for instance, lists it again). A member
