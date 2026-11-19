@@ -129,3 +129,25 @@ fn a_lane_pending_with_a_silent_member_does_not_stop_the_other_lanes() {
     );
     let _ = chat;
 }
+
+/// Found by the network simulation (code at `91539263`, seed 2): when the best candidate of
+/// a task already had 16 lookups outstanding the task waited for it, so a member announcing
+/// many IDs it never serves held back every task it announced, real events included, while
+/// other members could have supplied them.
+#[test]
+fn a_task_does_not_wait_for_a_candidate_at_its_lookup_limit() {
+    let mut net = Net::new(4, 1);
+    let chat = net.chat();
+    let fake: Vec<EventId> = (0..16u8)
+        .map(|i| EventId::new(T0, [i, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9]))
+        .collect();
+    net.recv_frames(0, member(1), &[notice(chat, &fake)]);
+    assert_eq!(super::retrieval::sent_lookups(&mut net, 0).len(), 16);
+    let real = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(2), &[notice(chat, &[real])]);
+    net.now += 1;
+    net.recv_frames(0, member(1), &[notice(chat, &[real])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(q.len(), 1);
+    assert_eq!(q[0].to, member(2));
+}
