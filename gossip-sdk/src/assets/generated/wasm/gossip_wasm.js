@@ -1186,7 +1186,8 @@ export class GroupsNode {
     /**
      * Opens the engine of the identity from a snapshot of its stored records
      * (`{rows, edges, objects, node}`, see `take_batches`; empty arrays for a new account).
-     * The secret keys are copied; the copy is erased when this object is freed.
+     * Only the ML-DSA signing key is copied out of the secret keys; the copy is erased
+     * when this object is freed.
      * @param {UserPublicKeys} public_keys
      * @param {UserSecretKeys} secret_keys
      * @param {any} snapshot

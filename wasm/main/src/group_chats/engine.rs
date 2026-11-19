@@ -407,21 +407,21 @@ impl Core {
     // ── Reads, in JSON ───────────────────────────────────────────────────────
 
     pub fn groups(&self) -> String {
-        self.node.groups().enc().to_text()
+        self.node.groups().enc().view_text()
     }
 
     pub fn group(&self, chat: ChatId) -> String {
-        self.node.group(&chat).enc().to_text()
+        self.node.group(&chat).enc().view_text()
     }
 
     pub fn invitations(&self, now: u64) -> String {
-        self.node.invitations(now).enc().to_text()
+        self.node.invitations(now).enc().view_text()
     }
 
     pub fn timeline(&self, chat: ChatId, now: u64) -> R<String> {
         self.node
             .timeline(&self.store, &chat, now)
-            .map(|t| t.enc().to_text())
+            .map(|t| t.enc().view_text())
             .map_err(err)
     }
 
@@ -429,7 +429,7 @@ impl Core {
     pub fn take_changes(&mut self, now: u64) -> R<String> {
         self.node
             .take_changes(&mut self.store, now, &mut rng)
-            .map(|c| c.enc().to_text())
+            .map(|c| c.enc().view_text())
             .map_err(err)
     }
 
@@ -445,7 +445,7 @@ impl Core {
                 ("owner".into(), r.owner_id().enc()),
                 ("created_at".into(), J::Num(r.created_at())),
             ])
-            .to_text(),
+            .view_text(),
             None => "null".into(),
         }
     }
