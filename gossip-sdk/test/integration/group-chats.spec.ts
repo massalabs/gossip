@@ -579,4 +579,33 @@ describe('Group chats', { timeout: 120_000 }, () => {
     await deliver();
     expect(again.filter(k => refused.has(k))).toEqual([]);
   });
+
+  it('backs off the outbox retries of a ciphertext, within a bound', async () => {
+    const groupId = await twoMemberGroup();
+    const proto = internals(alice).messageProtocol;
+    vi.spyOn(proto, 'sendMessage').mockImplementation(async () => {
+      throw new Error('offline');
+    });
+    await alice.groups.sendMessage(groupId, 'later');
+    await alice.groups.settle();
+    const due = async () =>
+      (
+        await queriesOf(alice).groups.dueOutbox(alice.userId, new Date(8.64e15))
+      )[0].whenToSend.getTime();
+    const gaps: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      clock = (await due()) + 1;
+      const before = clock;
+      await alice.groups.tick();
+      await alice.groups.settle();
+      gaps.push((await due()) - before);
+    }
+    // Each wait at least as long as the one before, longer than the first,
+    // and never above an hour.
+    for (let i = 1; i < gaps.length; i++) {
+      expect(gaps[i]).toBeGreaterThanOrEqual(gaps[i - 1]);
+    }
+    expect(gaps[gaps.length - 1]).toBeGreaterThan(gaps[0]);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(60 * 60 * 1000);
+  });
 });
