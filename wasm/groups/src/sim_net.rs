@@ -5,7 +5,8 @@
 //! store and exchange plaintexts through a simulated backend that delays, reorders,
 //! duplicates and loses them, and keeps them until the recipient polls. Devices are online
 //! for a few minutes at a time, polling about every 30 s, then offline for minutes to hours,
-//! so they are rarely online together; a **sleeper** goes offline for days and its mailbox is
+//! so they are rarely online together; a **wake-up driven** device, online, polls only at
+//! the engine's next wake-up or when a plaintext arrives; a **sleeper** goes offline for days and its mailbox is
 //! emptied meanwhile, so what it missed can only come back through tip scans. An event
 //! reaches others only through the protocol: first sends, notices, lookups and scans.
 //!
@@ -127,6 +128,7 @@ pub(crate) struct Counters {
     neighbors_replaced: u64,
     expired_resends: u64,
     busy: u64,
+    wakeup_steps: u64,
     max_plaintexts_hour: u64,
     max_bytes_hour: u64,
     max_lookups_hour: u64,
@@ -170,7 +172,8 @@ impl Counters {
             tasks_renewed,
             neighbors_replaced,
             expired_resends,
-            busy
+            busy,
+            wakeup_steps
         );
         self.max_plaintexts_hour = self.max_plaintexts_hour.max(o.max_plaintexts_hour);
         self.max_bytes_hour = self.max_bytes_hour.max(o.max_bytes_hour);
@@ -211,6 +214,7 @@ impl Counters {
             ("tasks_renewed", self.tasks_renewed),
             ("neighbors_replaced", self.neighbors_replaced),
             ("expired_resends", self.expired_resends),
+            ("wakeup_steps", self.wakeup_steps),
         ];
         all.iter()
             .filter(|(_, n)| *n == 0)
@@ -239,6 +243,10 @@ struct Device {
     local_changes: bool,
     sleeper: bool,
     slept: bool,
+    /// Online, it polls only at the engine's next wake-up or when a plaintext arrives.
+    wakeup_driven: bool,
+    /// When it last polled.
+    last_step: u64,
     inbox: Vec<Mail>,
     /// Per hour: plaintexts, bytes, lookup entries handed off.
     hours: BTreeMap<u64, (u64, u64, u64)>,
@@ -343,6 +351,9 @@ impl Sim {
                         && ((i == honest - 1 && seed % 2 == 1) || chance(&mut rng, 15)),
                     sleeper: i == 1 && seed.is_multiple_of(2),
                     slept: false,
+                    // One honest device in every seed, a different one from seed to seed.
+                    wakeup_driven: hostile.is_none() && (seed as usize + i).is_multiple_of(honest),
+                    last_step: 0,
                     inbox: Vec::new(),
                     hours: BTreeMap::new(),
                     seen: Vec::new(),
@@ -488,6 +499,12 @@ impl Sim {
                 from,
                 bytes: bytes.clone(),
             });
+            // A plaintext wakes a wake-up driven device that is online (a push), but not
+            // sooner than its usual poll interval after its last poll.
+            let dev = &mut self.devs[to];
+            if dev.wakeup_driven && dev.online {
+                dev.next = dev.next.min(at.max(dev.last_step + 25 * SECOND));
+            }
         }
     }
 
@@ -907,12 +924,38 @@ impl Sim {
         if !self.devs[d].online {
             self.go_online(d);
         }
+        self.devs[d].last_step = self.now;
         self.step(d);
         if self.final_phase || self.now < self.devs[d].session_end {
-            self.devs[d].next = self.now + poll;
+            self.devs[d].next = if self.devs[d].wakeup_driven {
+                let wake = self.wakeup(d);
+                // Steps where it relied on the engine's wake-up to come back.
+                self.counters.wakeup_steps += u64::from(wake > self.now + poll);
+                wake.max(self.now + poll)
+            } else {
+                self.now + poll
+            };
         } else {
             self.go_offline(d);
         }
+    }
+
+    /// When a wake-up driven device next polls: the engine's next wake-up (on its clock)
+    /// or the next plaintext's arrival, whichever comes first. The caller then waits at
+    /// least one poll interval, as an application coalescing its wake-ups would: the engine
+    /// asks for each timer at its own instant, and polling at every one of them would send
+    /// one plaintext per timed-out lookup instead of batching them.
+    fn wakeup(&self, d: usize) -> u64 {
+        let dev = &self.devs[d];
+        let engine = dev
+            .node
+            .as_ref()
+            .expect("booted")
+            .next_wakeup(&dev.store, self.clock(d))
+            .expect("wakeup")
+            .map_or(u64::MAX, |t| t.saturating_add_signed(-dev.skew));
+        let mail = dev.inbox.iter().map(|m| m.at).min().unwrap_or(u64::MAX);
+        engine.min(mail)
     }
 
     fn go_online(&mut self, d: usize) {
