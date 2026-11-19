@@ -1457,3 +1457,30 @@ fn two_failed_announcements_leave_a_member_credible() {
     let score = net.devs[0].node.score(&member(1));
     assert!(score >= super::super::index::CREDIBLE, "{score}");
 }
+
+/// §2.2: any defined status, in any context, ends that attempt without penalty: `restart`
+/// or `unsupported` answering a lookup, `unsupported` answering a scan.
+#[test]
+fn any_defined_status_ends_the_attempt_without_penalty() {
+    for status in [Status::Restart, Status::Unsupported] {
+        let mut net = Net::new(3, 1);
+        let chat = net.chat();
+        let id = EventId::new(T0, [5; 16]);
+        net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+        let score = net.devs[0].node.score(&member(1));
+        let q = super::retrieval::sent_lookups(&mut net, 0);
+        assert_eq!(q[0].to, member(1));
+        super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Status(status));
+        assert_eq!(net.devs[0].node.score(&member(1)), score, "{status:?}");
+        assert_eq!(net.devs[0].node.stats().invalid, 0, "{status:?}");
+        // The next candidate is asked at once.
+        let q = super::retrieval::sent_lookups(&mut net, 0);
+        assert_eq!(q[0].to, member(2), "{status:?}");
+    }
+    let mut net = Net::new(3, 1);
+    let s = super::scans::start(&mut net, 1);
+    let score = net.devs[0].node.score(&member(1));
+    super::retrieval::answer(&mut net, 0, &s, ResponseResult::Status(Status::Unsupported));
+    assert_eq!(net.devs[0].node.score(&member(1)), score);
+    assert_eq!(net.devs[0].node.stats().invalid, 0);
+}
