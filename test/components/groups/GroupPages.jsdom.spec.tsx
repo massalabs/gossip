@@ -174,6 +174,21 @@ describe('group pages', () => {
     expect(r.container.querySelector('textarea')).not.toBeNull();
   });
 
+  it('says its status rather than a member count once removed, and a neutral placeholder in a chat of two', async () => {
+    const r = await openGroup('removed');
+    unmount = r.unmount;
+    const header = r.container.querySelector('h1')!.parentElement!;
+    expect(header.textContent).toContain('details.status_removed');
+    expect(header.textContent).not.toContain('list.members_count');
+    await unmount();
+    useGroupStore.getState().cleanup();
+    const m = await openGroup('member');
+    unmount = m.unmount;
+    expect(
+      m.container.querySelector('textarea')!.getAttribute('placeholder')
+    ).toBe('message_input.placeholder');
+  });
+
   it('disables the composer with its reason when read only', async () => {
     const r = await openGroup('removed');
     unmount = r.unmount;

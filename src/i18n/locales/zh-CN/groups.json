@@ -141,6 +141,7 @@
     "status_removed": "已被移出",
     "status_dissolved": "已解散",
     "status_dissolved-deleted": "已解散并删除",
+    "status_superseded": "已在新聊天中继续",
     "side_branches": "旁支",
     "side_branches_hint": "此群组的其他版本，仍可阅读。只有其群主能处理它们。",
     "former_branches": "前任群主的分支：{{count}}",

@@ -141,6 +141,7 @@
     "status_removed": "Удалены",
     "status_dissolved": "Распущена",
     "status_dissolved-deleted": "Распущена и удалена",
+    "status_superseded": "Продолжен в новом чате",
     "side_branches": "Боковые ветви",
     "side_branches_hint": "Другие версии этой группы, по-прежнему доступные для чтения. Разрешить их может только их владелец.",
     "former_branches": "Ветви бывших владельцев: {{count}}",

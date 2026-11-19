@@ -141,6 +141,7 @@
     "status_removed": "Removed",
     "status_dissolved": "Dissolved",
     "status_dissolved-deleted": "Dissolved and deleted",
+    "status_superseded": "Continued in a new chat",
     "side_branches": "Side branches",
     "side_branches_hint": "Other versions of this group, still readable. Only their owner can resolve them.",
     "former_branches": "Branches of former owners: {{count}}",
