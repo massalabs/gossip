@@ -2240,3 +2240,35 @@ fn a_stranger_cannot_make_a_device_keep_unbounded_records() {
         t.tasks.len()
     );
 }
+
+/// Finding 7 of the review of 54711780: a root notice from any peer was acted on, so a
+/// stranger learnt whether the device holds an epoch: an unknown ID brought a chat lookup
+/// back, a held or closed one nothing.
+#[test]
+fn a_root_notice_from_a_stranger_gets_no_reaction() {
+    let (mut net, _g) = founded(3);
+    let stranger = ident(7).id;
+    let unknown = ChatId::from_bytes([0x5a; 32]);
+    let pt = wire::encode_plaintext(&[Frame::Notice(Notice {
+        entries: vec![Entry {
+            chat_id: unknown,
+            item: EntryItem::Root,
+        }],
+        skipped: 0,
+    })])
+    .unwrap();
+    let now = net.now;
+    let dev = &mut net.devs[1];
+    dev.node
+        .handle_plaintext(&mut dev.store, stranger, &pt, now, &mut net.rng)
+        .unwrap();
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    assert!(
+        out.iter().all(|o| o.to != stranger),
+        "a lookup went back to the stranger"
+    );
+    assert!(dev.node.tables().tasks.keys().all(|k| k.chat_id != unknown));
+}
