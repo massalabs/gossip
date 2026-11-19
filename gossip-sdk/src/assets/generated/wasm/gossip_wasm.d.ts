@@ -272,6 +272,11 @@ export class GroupsNode {
   static open(public_keys: UserPublicKeys, secret_keys: UserSecretKeys, snapshot: any): GroupsNode;
   tick(now: number): void;
   /**
+   * The root of a held epoch in JSON: `{epoch, name, members, owner, created_at}`, or
+   * `null`.
+   */
+  epoch(epoch: Uint8Array): string;
+  /**
    * One group by any of its epochs, in JSON (`null` when unknown).
    */
   group(epoch: Uint8Array): string;
@@ -658,6 +663,7 @@ export interface InitOutput {
   readonly groupsnode_delete_group: (a: number, b: number, c: number, d: number) => [number, number];
   readonly groupsnode_dissolve_group: (a: number, b: number, c: number, d: number, e: number) => [number, number];
   readonly groupsnode_encode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_epoch: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_group: (a: number, b: number, c: number) => [number, number, number, number];
   readonly groupsnode_groups: (a: number) => [number, number];
   readonly groupsnode_handed_off: (a: number, b: number, c: number) => [number, number];
