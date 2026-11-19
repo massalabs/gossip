@@ -143,7 +143,7 @@ impl Node {
     }
 
     /// The page request to send for the scan of `chat` with `peer`, with its TTL, if one is
-    /// queued or resent after a reconnection.
+    /// queued or resent (after a reconnection or `expired`).
     pub(crate) fn scan_query(&self, chat: &ChatId, peer: &GossipId) -> Option<(QueryOp, u64)> {
         let op = self.t.scans_out.get(&(*chat, *peer))?;
         matches!(op.attempt, ScanAttempt::Queued | ScanAttempt::Sent { .. }).then_some((
@@ -157,7 +157,7 @@ impl Node {
     }
 
     /// The page request was handed off at `sent_at`: the stage's local wait starts (a
-    /// reconnection resend keeps the one running).
+    /// resend keeps the one running).
     pub(crate) fn scan_sent(&mut self, key: ScanKey, sent_at: u64) {
         if let Some(op) = self.t.scans_out.get_mut(&key)
             && op.attempt == ScanAttempt::Queued
@@ -292,9 +292,16 @@ impl Node {
                     && matches!(op.attempt, ScanAttempt::Sent { .. })
                     && (plausible || op.expired_resends < super::retrieval::MAX_EXPIRED_RESENDS)
                 {
+                    // The request stays sent with its local deadline: the resend does not
+                    // change the stage (§11.4).
                     op.expired_resends += 1;
                     self.stats.expired_resends += 1;
-                    self.resend_scan(key);
+                    self.queue_work(
+                        peer,
+                        Work::Query {
+                            purpose: Purpose::Scan(chat),
+                        },
+                    );
                 }
             }
             ResponseResult::Status(Status::Busy) => {
