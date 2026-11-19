@@ -201,6 +201,119 @@ describe('group pages', () => {
     ).toBe('a very long text');
   });
 
+  /** Types `text` into `textarea` as a paste would. */
+  async function typeInto(textarea: HTMLTextAreaElement, text: string) {
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value'
+      )!.set!;
+      setter.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  /** The toast errors shown since the last call. */
+  async function toastErrors(): Promise<unknown[]> {
+    const toast = vi.mocked((await import('react-hot-toast')).default);
+    const shown = toast.error.mock.calls.map(c => c[0]);
+    toast.error.mockClear();
+    return shown;
+  }
+
+  async function pressEnter(textarea: HTMLTextAreaElement) {
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+    });
+    await act(flush);
+  }
+
+  it('counts the composer text in UTF-8 bytes and keeps a text over the limit', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    const textarea = r.container.querySelector(
+      'textarea'
+    ) as HTMLTextAreaElement;
+    const counter = () =>
+      r.container.querySelector('[data-testid="message-size-counter"]');
+    // 8,193 characters of one byte each: far from the limit, no counter.
+    await typeInto(textarea, 'x'.repeat(8_193));
+    expect(counter()).toBeNull();
+    // 14,800 bytes: near the limit.
+    await typeInto(textarea, '\u00e9'.repeat(7_400));
+    expect(counter()?.textContent).toBe('message_input.size_counter');
+    expect(counter()?.className).not.toContain('text-destructive');
+    // The same 8,193 characters at two bytes each: over the limit. A paste
+    // over it is kept, and sending says it is too long.
+    const long = '\u00e9'.repeat(8_193);
+    await typeInto(textarea, long);
+    expect(counter()?.className).toContain('text-destructive');
+    await toastErrors();
+    await pressEnter(textarea);
+    expect(fake.service.sendMessage).not.toHaveBeenCalled();
+    expect(await toastErrors()).toEqual(['composer.too_long']);
+    expect(textarea.value).toBe(long);
+    // At the limit exactly, it is sent.
+    await typeInto(textarea, '\u00e9'.repeat(8_192));
+    await pressEnter(textarea);
+    expect(fake.service.sendMessage).toHaveBeenCalledWith(
+      'g1',
+      '\u00e9'.repeat(8_192),
+      { replyTo: undefined }
+    );
+  });
+
+  it('keeps an edit over the limit in the input', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    const bubble = r.container
+      .querySelectorAll('[data-testid="group-message"]')[0]
+      .querySelector('[role="button"]');
+    await click(bubble);
+    await click(byText('message_menu.edit'));
+    const textarea = r.container.querySelector(
+      'textarea'
+    ) as HTMLTextAreaElement;
+    const long = 'y'.repeat(16_385);
+    await typeInto(textarea, long);
+    await toastErrors();
+    await pressEnter(textarea);
+    expect(fake.service.editMessage).not.toHaveBeenCalled();
+    expect(await toastErrors()).toEqual(['composer.too_long']);
+    expect(textarea.value).toBe(long);
+    expect(byText('message_input.editing')).toBeDefined();
+  });
+
+  it('does not save a local edit over the limit, and keeps its text', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    const bubble = r.container
+      .querySelectorAll('[data-testid="group-message"]')[1]
+      .querySelector('[role="button"]');
+    await click(bubble);
+    await click(byText('message_menu.edit_locally'));
+    const field = document.getElementById('local-edit') as HTMLTextAreaElement;
+    expect(field.value).toBe('answer');
+    const long = '\u00e9'.repeat(8_193);
+    await typeInto(field, long);
+    expect(byText('composer.edit_too_long')).toBeDefined();
+    const save = byText('common:save') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    await click(save);
+    expect(fake.service.editMessageLocally).not.toHaveBeenCalled();
+    expect(field.value).toBe(long);
+    // Near the limit the size shows; within it, it saves.
+    await typeInto(field, '\u00e9'.repeat(8_000));
+    expect(byText('composer.edit_too_long')).toBeUndefined();
+    expect(byText('discussions:message_input.size_counter')).toBeDefined();
+    await click(byText('common:save'));
+    expect(fake.service.editMessageLocally).toHaveBeenCalledWith('g1', 's2', {
+      body: { type: 'text', text: '\u00e9'.repeat(8_000) },
+    });
+  });
+
   it('creates a group with contacts that have an active session only', async () => {
     fake.sdk.contacts.list.mockResolvedValue([
       { userId: 'alice', name: 'Alice' },
