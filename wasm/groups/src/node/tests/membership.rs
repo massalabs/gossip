@@ -1795,3 +1795,53 @@ fn nothing_is_published_in_a_read_only_group_or_by_an_owner_with_a_fork() {
     );
     assert_eq!(r.map(|_| ()), Err(NodeError::NotAllowed));
 }
+
+/// Finding 1 of the review of 54711780: a member that missed a long chain of roots and
+/// receives them newest first adopted them by recursion, one level per root, and rescanned
+/// every epoch at each level: 60 roots overflowed a 1 MiB stack, and nothing being
+/// committed, the device crashed again after a restart. The chain is now adopted from a
+/// worklist, a bounded number of steps per operation, the rest on later operations.
+#[test]
+fn a_long_chain_received_newest_first_is_adopted_without_recursion() {
+    let worker = std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let (mut net, g) = founded(3);
+            net.offline[2] = true;
+            let mut chain = Vec::new();
+            for i in 0..60 {
+                let e = net
+                    .change(
+                        0,
+                        g,
+                        GroupChange::Successor {
+                            add: vec![],
+                            remove: vec![],
+                            name: Some(format!("n{i}")),
+                        },
+                    )
+                    .unwrap();
+                chain.push(e);
+            }
+            net.exchange();
+            net.offline[2] = false;
+            net.dropped.clear();
+            for c in chain.iter().rev() {
+                let root = net.devs[1].node.root(c).unwrap();
+                let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+                let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+                let now = net.now;
+                let dev = &mut net.devs[2];
+                dev.node
+                    .handle_plaintext(&mut dev.store, gid(1), &pt, now, &mut net.rng)
+                    .unwrap();
+            }
+            net.run(5 * MIN);
+            let s = net.summary(2, &g).unwrap();
+            assert_eq!(s.current, *chain.last().unwrap());
+            assert!(s.side_branches.is_empty());
+            assert_eq!(net.devs[2].node.groups().len(), 1);
+        })
+        .unwrap();
+    worker.join().unwrap();
+}
