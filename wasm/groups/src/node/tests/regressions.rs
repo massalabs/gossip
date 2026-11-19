@@ -697,3 +697,56 @@ fn a_stranger_cannot_tell_a_held_anchor_from_an_unknown_one() {
     assert_eq!(statuses(&unknown), vec![Some(Status::NotAvailable)]);
     assert_eq!(statuses(&held), statuses(&unknown));
 }
+
+/// The answer rows and version notices queued for `peer` on device `d`.
+fn queued_for_peer(net: &Net, d: usize, peer: GossipId) -> (usize, usize) {
+    let mut out = (0, 0);
+    for (k, w) in net.devs[d].node.t.queue.iter() {
+        if k.0 == peer {
+            match w {
+                super::super::records::Work::Answer { .. } => out.0 += 1,
+                super::super::records::Work::VersionNotice => out.1 += 1,
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// Found by review (code at `6a916f2e`): every entry over a member's request budget queued
+/// a stored `busy` answer, so a member flooding queries while the answers could not leave
+/// grew the queue without bound; and the version notices sent were remembered per distinct
+/// version, which a peer chooses freely.
+#[test]
+fn query_floods_and_version_floods_queue_a_bounded_amount() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let now = net.now;
+    for rid in 0..200u8 {
+        let ops = (0..16u8)
+            .map(|i| QueryOp::Event {
+                chat_id: chat,
+                event_id: EventId::new(T0, [i; 16]),
+            })
+            .collect();
+        net.recv_frames(0, member(1), &[query(rid, now, MIN, ops)]);
+    }
+    let (answers, _) = queued_for_peer(&net, 0, member(1));
+    assert!(answers <= 512, "{answers} answers queued");
+    for v in 2..300u64 {
+        let mut pt = Vec::new();
+        prost::encoding::encode_varint(v, &mut pt);
+        net.recv(0, member(2), &pt);
+    }
+    let (_, notices) = queued_for_peer(&net, 0, member(2));
+    let versions = net.devs[0]
+        .node
+        .t
+        .peers
+        .get(&member(2))
+        .map_or(0, |r| r.version_notices.len());
+    assert!(
+        notices <= 1 && versions <= 8,
+        "{notices} notices, {versions} versions"
+    );
+}
