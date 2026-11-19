@@ -1425,13 +1425,8 @@ fn migrate_from_is_a_strict_uint64_and_field_12_is_unknown() {
         decode_event_blob(&event(&unknown), 1),
         Err(Error::Malformed(_))
     ));
-    // Field 11 as a varint: decoded, then refused on a root that is not of two members
-    // only by the root's own rule.
+    // Field 11 as a varint, on any root: decoded, presence kept apart from the value 0.
     let with = [root_bytes, vec![0x58, 0x00]].concat();
     let r = decode_event_blob(&event(&with), 1);
-    if root.members().len() == 2 && root.parents().len() == 1 {
-        assert!(matches!(r, Ok(EventObject::Root(ref x)) if x.migrate_from() == Some(0)));
-    } else {
-        assert_eq!(r.map(|_| ()), Err(Error::MigrateFrom));
-    }
+    assert!(matches!(r, Ok(EventObject::Root(ref x)) if x.migrate_from() == Some(0)));
 }
