@@ -1352,3 +1352,75 @@ fn a_handover_rejoining_a_removed_member_continues_its_group() {
     assert_eq!(s.current, h);
     assert_eq!(s.status, MyStatus::Member);
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=2`): a
+/// member restored from a backup learnt its leave, then accepted a later root of the group,
+/// which it could not link: the epoch between them, fetched by the parent lookup, continues
+/// a group that is read-only, and stayed an invitation. The device showed itself a member
+/// of a separate group although its leave applies there too.
+#[test]
+fn an_accepted_root_after_a_leave_is_linked_through_its_fetched_parents() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[3].store.clone();
+    net.offline[3] = true;
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![],
+            name: Some("x".into()),
+        },
+    )
+    .unwrap();
+    let e3 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("y".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.offline[3] = false;
+    net.dropped.clear();
+    // Device 3, still at the first epoch, leaves it; the owner applies the leave.
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    assert!(!net.summary(0, &g).unwrap().members.contains(&gid(3)));
+    // Restored, it is told of its leave, then receives the later root.
+    net.devs[3].store = backup;
+    net.restart(3);
+    net.say(3, &g, "back");
+    net.run(2 * MIN);
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Left);
+    let root = net.devs[1].node.root(&e3).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    let pt = wire::encode_plaintext(&[Frame::Event(blob)]).unwrap();
+    let now = net.now;
+    let dev = &mut net.devs[3];
+    dev.node
+        .handle_plaintext(&mut dev.store, gid(1), &pt, now, &mut net.rng)
+        .unwrap();
+    net.run(crate::constants::PROMPT_DELAY_MS + MIN);
+    net.accept_all(3);
+    net.run(2 * MIN);
+    let groups = net.devs[3].node.groups();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert_eq!(groups[0].status, MyStatus::Left);
+}
