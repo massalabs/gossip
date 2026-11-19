@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use crate::constants::MAX_EVENT_PARENTS;
 use crate::ids::{ChatId, EventId};
 use crate::rng::{Randomness, uniform_below};
-use crate::store::{StorageError, StorageRead};
+use crate::store::{StorageError, StorageRead, in_window};
 
 /// The tips of the epoch at `now`, with the cycle frontier, ascending (§6.1, §12.1).
 ///
@@ -36,31 +36,27 @@ pub fn tips<R: StorageRead + ?Sized>(
     chat_id: &ChatId,
     now: u64,
 ) -> Result<Vec<EventId>, StorageError> {
+    // A retained event is available exactly while its window is open.
     let nodes: Vec<EventId> = store
-        .event_rows(chat_id)?
-        .iter()
-        .filter(|r| r.available(now))
-        .map(|r| r.event_id)
+        .held_ids(chat_id)?
+        .into_iter()
+        .filter(|id| in_window(id, now))
         .collect();
-    let edges: BTreeMap<EventId, Vec<EventId>> = store.edges(chat_id)?.into_iter().collect();
-    Ok(source_members(&nodes, |id| {
-        edges.get(id).cloned().unwrap_or_default()
-    }))
+    let mut parents = Vec::with_capacity(nodes.len());
+    for id in &nodes {
+        parents.push(store.parents(chat_id, id)?.unwrap_or_default());
+    }
+    Ok(source_members(&nodes, &parents))
 }
 
-/// The members of the source components of the graph on `nodes` (ascending), with the edges
-/// child → parent given by `parents` restricted to `nodes`.
-fn source_members(nodes: &[EventId], parents: impl Fn(&EventId) -> Vec<EventId>) -> Vec<EventId> {
+/// The members of the source components of the graph on `nodes` (ascending), where
+/// `parents[i]` lists the parents of `nodes[i]`; parents outside `nodes` are ignored.
+fn source_members(nodes: &[EventId], parents: &[Vec<EventId>]) -> Vec<EventId> {
     let index_of: BTreeMap<EventId, usize> =
         nodes.iter().enumerate().map(|(i, id)| (*id, i)).collect();
-    let succ: Vec<Vec<usize>> = nodes
+    let succ: Vec<Vec<usize>> = parents
         .iter()
-        .map(|id| {
-            parents(id)
-                .iter()
-                .filter_map(|p| index_of.get(p).copied())
-                .collect()
-        })
+        .map(|ps| ps.iter().filter_map(|p| index_of.get(p).copied()).collect())
         .collect();
     let component = components(&succ);
     let count = component.iter().max().map_or(0, |m| m + 1);
@@ -176,7 +172,11 @@ mod tests {
             .collect();
         let mut nodes: Vec<EventId> = nodes.iter().map(|n| id(*n)).collect();
         nodes.sort_unstable();
-        source_members(&nodes, |i| edges.get(i).cloned().unwrap_or_default())
+        let parents: Vec<Vec<EventId>> = nodes
+            .iter()
+            .map(|i| edges.get(i).cloned().unwrap_or_default())
+            .collect();
+        source_members(&nodes, &parents)
     }
 
     #[test]

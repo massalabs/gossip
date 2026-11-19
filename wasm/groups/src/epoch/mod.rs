@@ -11,6 +11,7 @@ pub mod local;
 #[cfg(test)]
 pub(crate) mod tests;
 
+use crate::constants::RETENTION_MS;
 use crate::dag;
 use crate::error::Error;
 use crate::event::{MessageEvent, Payload};
@@ -241,10 +242,7 @@ impl<'a> Epoch<'a> {
         store: &R,
         now: u64,
     ) -> Result<Option<u64>, StorageError> {
-        let first = store
-            .pending_until(&self.chat_id(), u64::MAX)?
-            .first()
-            .map(|i| i.due);
+        let first = store.first_pending(&self.chat_id())?.map(|i| i.due);
         Ok(first.map(|due| match now.checked_add(MAX_TIMER_WAIT_MS) {
             Some(limit) => due.min(limit),
             None => due,
@@ -299,12 +297,12 @@ impl<'a> Epoch<'a> {
         let mut tx = Tx::new(&*store, self.chat_id());
         tick(&mut tx, now)?;
         let chat = tx.chat_id();
+        // After the tick every carrier is inside its window, hence available.
         let victims: Vec<(EventId, SyncObjId)> = tx
-            .event_rows(&chat)?
+            .carriers(&chat, u64::MAX, max)?
             .into_iter()
-            .filter(|r| r.available(now) && r.role() == Some(Role::Current))
+            .filter(|r| r.available(now))
             .filter_map(|r| r.event().map(|e| (r.event_id, e.payload().sync_obj_id())))
-            .take(max)
             .collect();
         for (id, sync) in &victims {
             prune_carrier(&mut tx, *id, *sync)?;
@@ -312,6 +310,29 @@ impl<'a> Epoch<'a> {
         let changes = tx.into_changes();
         store.commit(changes)?;
         Ok(victims.into_iter().map(|(id, _)| id).collect())
+    }
+
+    /// Capacity eviction of temporary-rejection markers (§9.6, D.32): removes up to `max`
+    /// markers, oldest event timestamp first. The IDs become unknown again, so a later
+    /// advertisement may recreate the retrieval work. Returns the removed IDs.
+    ///
+    /// # Errors
+    ///
+    /// A storage failure; nothing was committed then.
+    pub fn evict_markers<S: Storage + ?Sized>(
+        &self,
+        store: &mut S,
+        max: usize,
+    ) -> Result<Vec<EventId>, StorageError> {
+        let mut tx = Tx::new(&*store, self.chat_id());
+        let chat = tx.chat_id();
+        let victims = tx.markers(&chat, max)?;
+        for id in &victims {
+            tx.remove_marker(*id);
+        }
+        let changes = tx.into_changes();
+        store.commit(changes)?;
+        Ok(victims)
     }
 }
 
@@ -356,16 +377,23 @@ fn activate_due<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, now: u64) -> Result
 }
 
 /// Prunes every event that carries a current result and whose window has closed (§8.1).
-/// Pending versions past their window stay, unserved, until they activate.
+/// Pending events past their window stay, unserved, until they activate.
+///
+/// Only the carriers whose window has ended are read, through the carriers index: the
+/// window of an event ends at `ts + RETENTION`, so they are the carriers with
+/// `ts ≤ now − RETENTION`.
 pub(crate) fn expire<S: StorageRead + ?Sized>(
     tx: &mut Tx<'_, S>,
     now: u64,
 ) -> Result<(), StorageError> {
     let chat = tx.chat_id();
+    let Some(ts_until) = now.checked_sub(RETENTION_MS) else {
+        return Ok(());
+    };
     let expired: Vec<(EventId, SyncObjId)> = tx
-        .event_rows(&chat)?
+        .carriers(&chat, ts_until, usize::MAX)?
         .into_iter()
-        .filter(|r| r.role() == Some(Role::Current) && !in_window(&r.event_id, now))
+        .filter(|r| !in_window(&r.event_id, now))
         .filter_map(|r| r.event().map(|e| (r.event_id, e.payload().sync_obj_id())))
         .collect();
     for (id, sync) in expired {
@@ -685,6 +713,56 @@ pub(crate) fn check_invariants<R: StorageRead + ?Sized>(
                 return Err(format!("pending deletion {id:?} inconsistent at {now}"));
             }
         }
+    }
+    // The indexes agree with the records.
+    let e = |e: StorageError| e.to_string();
+    let held: Vec<EventId> = rows
+        .values()
+        .filter(|r| matches!(r.state, RowState::Held { .. }))
+        .map(|r| r.event_id)
+        .collect();
+    if store.held_ids(chat).map_err(e)? != held {
+        return Err("held index differs".into());
+    }
+    let carriers: Vec<EventRow> = rows
+        .values()
+        .filter(|r| r.role() == Some(Role::Current))
+        .cloned()
+        .collect();
+    if store.carriers(chat, u64::MAX, usize::MAX).map_err(e)? != carriers {
+        return Err("carriers index differs".into());
+    }
+    if let Some(mid) = carriers.get(carriers.len() / 2) {
+        let ts = mid.event_id.timestamp();
+        let until: Vec<EventRow> = carriers
+            .iter()
+            .filter(|r| r.event_id.timestamp() <= ts)
+            .take(3)
+            .cloned()
+            .collect();
+        if store.carriers(chat, ts, 3).map_err(e)? != until {
+            return Err("bounded carriers query differs".into());
+        }
+    }
+    let markers: Vec<EventId> = rows
+        .values()
+        .filter(|r| r.state == RowState::TemporarilyInvalid)
+        .map(|r| r.event_id)
+        .collect();
+    if store.markers(chat, usize::MAX).map_err(e)? != markers {
+        return Err("markers index differs".into());
+    }
+    let mut pending: Vec<crate::store::PendingItem> = store
+        .objects(chat)
+        .map_err(e)?
+        .iter()
+        .flat_map(ObjectRecord::pending_items)
+        .collect();
+    crate::store::sort_pending(&mut pending);
+    if store.pending_until(chat, u64::MAX).map_err(e)? != pending
+        || store.first_pending(chat).map_err(e)? != pending.first().copied()
+    {
+        return Err("pending index differs".into());
     }
     for (id, row) in &rows {
         if matches!(row.state, RowState::Held { .. }) && !claimed.contains(id) {

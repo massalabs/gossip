@@ -64,7 +64,8 @@ impl Role {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowState {
     /// A future-time rejection marker (§7.2, §9.6): not processed, no content, no parent
-    /// links. Cleared on the first valid acceptance of the event.
+    /// links. Cleared on the first valid acceptance of the event, or removed by capacity
+    /// eviction ([`crate::Epoch::evict_markers`]).
     TemporarilyInvalid,
     /// Processed and retained: the event's version and fields (its first valid
     /// interpretation, §7.1).
@@ -240,9 +241,10 @@ pub struct PendingItem {
 
 /// The writes of one logical step on one epoch, committed atomically (§15.2).
 ///
-/// Every map is an upsert: rows, edges and objects are never deleted within a retained
-/// group (stubs, edges and tombstones are kept until the group is closed, §14.1). Edges are
-/// written once per child, when it is first processed.
+/// Every map is an upsert. Processed rows, edges and objects are never deleted within a
+/// retained group (stubs, edges and tombstones are kept until the group is closed, §14.1);
+/// only a temporary-rejection marker can be removed, when capacity forces it out (§9.6).
+/// Edges are written once per child, when it is first processed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Changes {
     /// The epoch.
@@ -253,6 +255,9 @@ pub struct Changes {
     pub edges: BTreeMap<EventId, Vec<EventId>>,
     /// Current objects to insert or replace.
     pub objects: BTreeMap<SyncObjId, ObjectRecord>,
+    /// Temporary-rejection markers to remove (§9.6); never a processed row, and never a row
+    /// also listed in `rows`.
+    pub removed_rows: BTreeSet<EventId>,
 }
 
 impl Changes {
@@ -264,13 +269,17 @@ impl Changes {
             rows: BTreeMap::new(),
             edges: BTreeMap::new(),
             objects: BTreeMap::new(),
+            removed_rows: BTreeSet::new(),
         }
     }
 
     /// Whether nothing is to be written.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.rows.is_empty() && self.edges.is_empty() && self.objects.is_empty()
+        self.rows.is_empty()
+            && self.edges.is_empty()
+            && self.objects.is_empty()
+            && self.removed_rows.is_empty()
     }
 }
 
@@ -280,6 +289,12 @@ impl Changes {
 pub struct StorageError(pub String);
 
 /// Reads of the records of §14.1, scoped by epoch.
+///
+/// The engine's operations use only the reads that an index answers in time proportional to
+/// what they return: one row, one object, one event's parents, the retained IDs, the oldest
+/// carriers, the oldest markers and the due pending items. The whole-epoch reads
+/// ([`StorageRead::event_rows`], [`StorageRead::edges`], [`StorageRead::objects`]) serve the
+/// view, inspection and tests.
 pub trait StorageRead {
     /// The row of `(chat_id, event_id)`.
     ///
@@ -319,6 +334,37 @@ pub trait StorageRead {
         event_id: &EventId,
     ) -> Result<Option<Vec<EventId>>, StorageError>;
 
+    /// The IDs of every retained row (an event held with its content, whatever its role),
+    /// ascending. Index: the retained rows.
+    ///
+    /// # Errors
+    ///
+    /// A backend failure.
+    fn held_ids(&self, chat_id: &ChatId) -> Result<Vec<EventId>, StorageError>;
+
+    /// The retained rows that carry a current result ([`Role::Current`]) and whose event
+    /// timestamp is at most `ts_until`, ascending by event ID (oldest first), at most `limit`
+    /// of them. Index: the carriers by event ID, which is event-timestamp order; it serves
+    /// retention (the carriers whose window has ended) and capacity eviction (the oldest).
+    ///
+    /// # Errors
+    ///
+    /// A backend failure.
+    fn carriers(
+        &self,
+        chat_id: &ChatId,
+        ts_until: u64,
+        limit: usize,
+    ) -> Result<Vec<EventRow>, StorageError>;
+
+    /// The IDs of the temporary-rejection markers (§9.6), ascending by event ID (oldest
+    /// event timestamp first), at most `limit` of them. Index: the markers.
+    ///
+    /// # Errors
+    ///
+    /// A backend failure.
+    fn markers(&self, chat_id: &ChatId, limit: usize) -> Result<Vec<EventId>, StorageError>;
+
     /// The current object of `(chat_id, sync_obj_id)`.
     ///
     /// # Errors
@@ -345,6 +391,13 @@ pub trait StorageRead {
     /// A backend failure.
     fn pending_until(&self, chat_id: &ChatId, until: u64)
     -> Result<Vec<PendingItem>, StorageError>;
+
+    /// The first item of the pending index, by `(due, event_id)`.
+    ///
+    /// # Errors
+    ///
+    /// A backend failure.
+    fn first_pending(&self, chat_id: &ChatId) -> Result<Option<PendingItem>, StorageError>;
 }
 
 /// A store of the records of §14.1.

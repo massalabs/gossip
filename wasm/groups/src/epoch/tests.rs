@@ -8,7 +8,7 @@ use crate::constants::{MAX_SCHEDULE_MS, RETENTION_MS};
 use crate::event::{Body, Content};
 use crate::root::tests::founding;
 use crate::store::{MemoryStorage, ObjectRecord};
-use crate::test_support::{Identity, identity};
+use crate::test_support::{Identity, Instrumented, identity};
 use crate::wire::proto;
 
 pub(crate) const T0: u64 = 1_700_000_000_000;
@@ -1020,49 +1020,144 @@ fn a_cycle_exposes_its_available_members_as_frontier() {
 
 #[test]
 fn storage_failures_commit_nothing() {
-    #[derive(Default)]
-    struct Failing(MemoryStorage);
-    impl StorageRead for Failing {
-        fn event_row(&self, c: &ChatId, e: &EventId) -> Result<Option<EventRow>, StorageError> {
-            self.0.event_row(c, e)
-        }
-        fn event_rows(&self, c: &ChatId) -> Result<Vec<EventRow>, StorageError> {
-            self.0.event_rows(c)
-        }
-        fn edges(&self, c: &ChatId) -> Result<Vec<(EventId, Vec<EventId>)>, StorageError> {
-            self.0.edges(c)
-        }
-        fn parents(&self, c: &ChatId, e: &EventId) -> Result<Option<Vec<EventId>>, StorageError> {
-            self.0.parents(c, e)
-        }
-        fn object(&self, c: &ChatId, s: &SyncObjId) -> Result<Option<ObjectRecord>, StorageError> {
-            self.0.object(c, s)
-        }
-        fn objects(&self, c: &ChatId) -> Result<Vec<ObjectRecord>, StorageError> {
-            self.0.objects(c)
-        }
-        fn pending_until(
-            &self,
-            c: &ChatId,
-            u: u64,
-        ) -> Result<Vec<crate::store::PendingItem>, StorageError> {
-            self.0.pending_until(c, u)
-        }
-    }
-    impl Storage for Failing {
-        fn commit(&mut self, _: crate::store::Changes) -> Result<(), StorageError> {
-            Err(StorageError("disk full".into()))
-        }
-    }
     let f = Fixture::new();
-    let mut store = Failing::default();
+    let mut store = Instrumented::new(MemoryStorage::new());
+    store.fail_commits = true;
     let e = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "x"));
     assert!(
         f.epoch()
             .receive(&mut store, f.bob_sender(), e, T0)
             .is_err()
     );
-    assert_eq!(store.0, MemoryStorage::new());
+    assert_eq!(store.inner, MemoryStorage::new());
+}
+
+// ── Work per operation (§17.3, §17.4) ──────────────────────────────────────
+
+/// `n` events of distinct messages, or of 2-cycles when `cycles` (event 2i names 2i + 1 and
+/// conversely).
+fn many(f: &Fixture, n: u32, cycles: bool) -> Vec<MessageEvent> {
+    let id = |i: u32| {
+        let mut r = [0u8; 16];
+        r[..4].copy_from_slice(&i.to_be_bytes());
+        EventId::new(T0, r)
+    };
+    (0..n)
+        .map(|i| {
+            let mut s = [0u8; 32];
+            s[..4].copy_from_slice(&i.to_be_bytes());
+            let payload = Payload::Content(Content {
+                sync_obj_id: SyncObjId::from_bytes(s),
+                author: f.bob.id,
+                created_at: T0,
+                last_modified_at: T0,
+                body: Body::Text("x".into()),
+                edited: false,
+                metadata: BTreeMap::new(),
+            });
+            let parents = if cycles { vec![id(i ^ 1)] } else { vec![] };
+            MessageEvent::create(&f.root, id(i), &parents, payload).unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn receiving_reads_a_bounded_number_of_records_per_event() {
+    // Before the indexes, every operation read every row: n² records for n events.
+    let f = Fixture::new();
+    let mut store = Instrumented::new(MemoryStorage::new());
+    let n = 2_000;
+    for e in many(&f, n, false) {
+        f.epoch()
+            .receive(&mut store, f.bob_sender(), e, T0)
+            .unwrap();
+    }
+    assert!(store.reads() <= 8 * u64::from(n), "{} reads", store.reads());
+    // Retention reads only what expires.
+    let before = store.reads();
+    f.epoch().tick(&mut store, T0 + 1).unwrap();
+    assert_eq!(store.reads(), before);
+    f.epoch().tick(&mut store, T0 + RETENTION_MS).unwrap();
+    assert!(store.reads() - before <= 3 * u64::from(n));
+}
+
+#[test]
+fn tips_read_each_available_event_and_its_parents_once() {
+    let f = Fixture::new();
+    let mut store = Instrumented::new(MemoryStorage::new());
+    let n = 2_000;
+    for e in many(&f, n, true) {
+        f.epoch()
+            .receive(&mut store, f.bob_sender(), e, T0)
+            .unwrap();
+    }
+    let before = store.reads();
+    let tips = f.epoch().tips(&store, T0).unwrap();
+    assert_eq!(tips.len(), n as usize);
+    assert!(store.reads() - before <= 2 * u64::from(n) + 1);
+}
+
+/// Timings of the two workloads of the review (6,000 events; 3,000 hostile 2-cycles). Run
+/// with `cargo test -p groups --release -- --ignored --nocapture work_timings`.
+#[test]
+#[ignore = "timing benchmark"]
+fn work_timings() {
+    let f = Fixture::new();
+    let mut store = MemoryStorage::new();
+    let start = std::time::Instant::now();
+    for e in many(&f, 6_000, false) {
+        f.epoch()
+            .receive(&mut store, f.bob_sender(), e, T0)
+            .unwrap();
+    }
+    println!("receiving 6,000 events: {:?}", start.elapsed());
+    let mut store = MemoryStorage::new();
+    for e in many(&f, 6_000, true) {
+        f.epoch()
+            .receive(&mut store, f.bob_sender(), e, T0)
+            .unwrap();
+    }
+    let start = std::time::Instant::now();
+    let tips = f.epoch().tips(&store, T0).unwrap();
+    println!(
+        "tips over 3,000 2-cycles ({}): {:?}",
+        tips.len(),
+        start.elapsed()
+    );
+}
+
+#[test]
+fn markers_are_evicted_oldest_first() {
+    let mut f = Fixture::new();
+    let far = |r: u8, ts: u64| f.event(ts, r, &[], text(r, f.bob.id, T0, T0, "x"));
+    let (m3, m1, m2) = (
+        far(3, T0 + 30 * MIN),
+        far(1, T0 + 10 * MIN),
+        far(2, T0 + 20 * MIN),
+    );
+    for m in [&m3, &m1, &m2] {
+        assert_eq!(f.recv(m, T0), Outcome::TemporarilyInvalid);
+    }
+    let root = f.root.clone();
+    assert_eq!(
+        ep(&root).evict_markers(&mut f.store, 2).unwrap(),
+        vec![m1.event_id(), m2.event_id()]
+    );
+    assert_eq!(f.state(&m1), None);
+    assert_eq!(f.state(&m3), Some(RowState::TemporarilyInvalid));
+    // A removed marker is recreated by a later arrival, and cleared on acceptance.
+    assert_eq!(f.recv(&m1, T0), Outcome::TemporarilyInvalid);
+    assert_eq!(f.recv(&m1, T0 + 10 * MIN), Outcome::Accepted(Merge::Won));
+    assert_eq!(
+        ep(&root).evict_markers(&mut f.store, 10).unwrap(),
+        vec![m3.event_id()]
+    );
+    assert!(
+        ep(&root)
+            .evict_markers(&mut f.store, 10)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// Regression (simulation seed 7 at 22d9d782 with the scheduled-deletion exclusion off):
