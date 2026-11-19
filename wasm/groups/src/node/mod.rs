@@ -319,8 +319,8 @@ impl Node {
         for (r, k) in refs {
             self.work_refs.entry(r).or_default().insert(k);
         }
-        // In-flight items not confirmed are assembled again.
-        self.outbox.forget_items();
+        // The plaintexts in flight stay so: a failed operation does not change them, and a
+        // fresh engine starts with none, so their work is assembled again.
         Ok(())
     }
 
