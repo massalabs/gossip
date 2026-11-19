@@ -672,6 +672,46 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn root_id_projection_written_by_hand() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let owner = alice.public.to_bytes();
+        // The owner keys take a two-byte length: major type 2, additional information 25.
+        let owner_len = u16::try_from(owner.len()).unwrap();
+        assert!(owner_len >= 256);
+        let bytes32 = |b: &[u8; 32]| [&[0x58, 0x20][..], b].concat();
+        let projection = [
+            // An array of 11 items, then the domain as text of 20 bytes.
+            &[0x8b, 0x74][..],
+            b"gossip.groups.root.1",
+            // version 1, type 0 (successor), name "Team" as text.
+            &[0x01, 0x00, 0x64],
+            b"Team",
+            // parents: an array of one commitment.
+            &[0x81],
+            &bytes32(root.parents()[0].as_bytes()),
+            // members: an array of one GossipID.
+            &[0x81],
+            &bytes32(alice.id.as_bytes()),
+            // group_secret, then the owner keys as bytes.
+            &bytes32(&[0x10; 32]),
+            &[0x59],
+            &owner_len.to_be_bytes(),
+            &owner,
+            // epoch_challenge, then ref_chat_id_challenge.
+            &bytes32(&[0x11; 32]),
+            &bytes32(&[0x12; 32]),
+            // created_at 1,700,000,000,000 as an eight-byte unsigned integer.
+            &[0x1b, 0x00, 0x00, 0x01, 0x8b, 0xcf, 0xe5, 0x68, 0x00],
+        ]
+        .concat();
+        assert_eq!(
+            root.chat_id().as_bytes(),
+            blake3::hash(&projection).as_bytes()
+        );
+    }
+
+    #[test]
     fn created_roots_verify_and_round_trip() {
         let alice = identity(1);
         let bob = identity(2);
