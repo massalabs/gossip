@@ -1755,3 +1755,43 @@ fn an_invitation_between_a_left_group_and_an_accepted_root_is_joined() {
     assert_eq!(groups.len(), 1, "{groups:?}");
     assert_eq!(groups[0].status, MyStatus::Left);
 }
+
+#[test]
+fn nothing_is_published_in_a_read_only_group_or_by_an_owner_with_a_fork() {
+    let (mut net, g) = founded(3);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    let now = net.now;
+    let dev = &mut net.devs[2];
+    let r = dev.node.publish_message(
+        &mut dev.store,
+        g,
+        Body::Text("x".into()),
+        BTreeMap::new(),
+        None,
+        now,
+        &mut net.rng,
+    );
+    assert_eq!(r.map(|_| ()), Err(NodeError::NotAllowed));
+    // A new message in an older epoch is refused too.
+    let dev = &mut net.devs[1];
+    let r = dev.node.publish_message(
+        &mut dev.store,
+        g,
+        Body::Text("x".into()),
+        BTreeMap::new(),
+        None,
+        now,
+        &mut net.rng,
+    );
+    assert_eq!(r.map(|_| ()), Err(NodeError::NotAllowed));
+}
