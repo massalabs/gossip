@@ -221,7 +221,8 @@ impl Node {
             },
             ResponseResult::Status(Status::NotAvailable) => (Answer::NotAvailable, None),
             ResponseResult::Status(Status::Expired) => (Answer::Expired, None),
-            ResponseResult::Status(Status::Busy | Status::Malformed) => (Answer::Refused, None),
+            ResponseResult::Status(Status::Busy) => (Answer::Busy, None),
+            ResponseResult::Status(Status::Malformed) => (Answer::Refused, None),
             _ => (Answer::Invalid, None),
         })
     }
