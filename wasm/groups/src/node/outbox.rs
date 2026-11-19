@@ -88,13 +88,6 @@ pub(crate) struct InFlight {
     ratio: BTreeMap<GossipId, u8>,
 }
 
-impl InFlight {
-    pub(crate) fn forget_items(&mut self) {
-        self.sent.clear();
-        self.items.clear();
-    }
-}
-
 /// The event a queued full send or notice refers to.
 pub(crate) fn event_ref(w: &Work) -> Option<(ChatId, EventId)> {
     match w {
