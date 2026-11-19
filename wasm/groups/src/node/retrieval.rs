@@ -199,8 +199,30 @@ impl Node {
 
     /// Ends a task without counting a supply (the device obtained the item itself).
     pub(crate) fn resolve(&mut self, key: TaskKey) {
-        if self.t.tasks.remove(&key).is_some() {
+        if let Some(task) = self.t.tasks.remove(&key) {
             self.stats.tasks_resolved += 1;
+            self.credit_announcers(&task, None);
+        }
+    }
+
+    /// The item of `task` turned up: it was real. Each member that announced it in a
+    /// notice made a true announcement, which counts like a supply for its score (§11.8
+    /// leaves the formula open); one that then said it did not have it had pruned or
+    /// superseded it in between, as honest members do, and its penalty for that is
+    /// withdrawn. Fake IDs never turn up, so a member announcing them gains nothing and
+    /// keeps its penalties. `supplier` is rewarded on its own.
+    fn credit_announcers(&mut self, task: &Task, supplier: Option<&GossipId>) {
+        for (peer, c) in &task.candidates {
+            if !c.announced() {
+                continue;
+            }
+            let r = self.peer_mut(peer);
+            r.penalty = r
+                .penalty
+                .saturating_sub(u32::from(c.unavailable) * PENALTY_UNAVAILABLE);
+            if Some(peer) != supplier {
+                self.reward(peer);
+            }
         }
     }
 
@@ -211,9 +233,10 @@ impl Node {
             chat_id: chat,
             target,
         };
-        if self.t.tasks.remove(&key).is_some() {
+        if let Some(task) = self.t.tasks.remove(&key) {
             self.stats.tasks_resolved += 1;
             self.reward(peer);
+            self.credit_announcers(&task, Some(peer));
         }
     }
 
@@ -279,6 +302,7 @@ impl Node {
                     };
                 }
                 if announced {
+                    cand.unavailable = cand.unavailable.saturating_add(1);
                     self.penalize(&peer, PENALTY_UNAVAILABLE);
                 }
             }

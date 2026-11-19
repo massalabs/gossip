@@ -91,6 +91,9 @@ pub struct Candidate {
     pub attempts: u32,
     /// `busy` answers in a row in this run.
     pub busy: u8,
+    /// Penalties it got for "not available" after announcing the item: withdrawn if the
+    /// item turns up.
+    pub unavailable: u8,
 }
 
 impl Candidate {
@@ -101,6 +104,7 @@ impl Candidate {
             outstanding_until: None,
             attempts: 0,
             busy: 0,
+            unavailable: 0,
         }
     }
 
