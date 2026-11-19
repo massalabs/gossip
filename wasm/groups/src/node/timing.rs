@@ -67,6 +67,13 @@ pub const QUEUED_MISSING_PER_DEVICE: usize = 262_144;
 pub const REQUEST_BURST: u64 = 128;
 /// Its refill, entries per minute.
 pub const REQUEST_REFILL_PER_MIN: u64 = 16;
+/// Answers queued for one peer at most (stored work, §15.1): twice the request burst. A
+/// query entry beyond it is dropped unanswered, so a peer flooding queries while the
+/// answers cannot leave does not grow the queue. Not given by §17.4; provisional.
+pub const QUEUED_ANSWERS_PER_PEER: usize = 2 * REQUEST_BURST as usize;
+/// Versions for which the version notices sent to one peer are remembered (§13.8); the
+/// oldest is forgotten beyond it. Not given by §13.8; provisional.
+pub const VERSION_NOTICES_PER_PEER: usize = 4;
 /// The per-peer response budget: bytes of answers this device sends a peer, burst.
 pub const RESPONSE_BURST: u64 = 1024 * 1024;
 /// Its refill, bytes per minute.
