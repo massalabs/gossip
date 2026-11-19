@@ -1140,3 +1140,28 @@ fn lookup_results_survive_failed_commits_and_crashes_exactly_once() {
         vec![(chat, sync, LookupResult::NotFound)]
     );
 }
+
+/// Found by review (code at `6a916f2e`): correlation references were dropped only by `tick`,
+/// so a response arriving after its request's deadline, with no tick in between, was still
+/// matched to it (§13.4 keeps a reference only until that deadline).
+#[test]
+fn a_response_after_its_request_deadline_is_dropped_without_a_tick() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let q = super::retrieval::sent_lookups(&mut net, 0);
+    assert_eq!(q[0].to, member(1));
+    net.now = super::super::timing::deadline(q[0].sent_at, q[0].ttl) + 1;
+    super::retrieval::answer(
+        &mut net,
+        0,
+        &q[0],
+        ResponseResult::Status(Status::NotAvailable),
+    );
+    assert_eq!(
+        net.devs[0].node.score(&member(1)),
+        500_000,
+        "a stale answer counted"
+    );
+}
