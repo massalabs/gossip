@@ -218,15 +218,15 @@ describe('Group chats', { timeout: 120_000 }, () => {
     expect(snap.objects).toEqual([]);
     expect(snap.node.some(n => (n.fields ?? '').includes('hello'))).toBe(false);
     // Bob shared no other group: his tables hold nothing but the closed-chat
-    // marker(s), the engine's counter and his own keys (recorded again by the
-    // signer at every tick), at once.
+    // marker(s), the engine's counter, his own keys (recorded again by the
+    // signer at every tick) and the contacts he accepted (§13.8), at once.
     const own = JSON.stringify(bytesToHex(bob.userIdBytes));
     const kinds = new Set(
       snap.node
         .filter(n => !(n.kind === 'keys' && n.key === own))
         .map(n => n.kind)
     );
-    expect([...kinds].sort()).toEqual(['markers', 'meta']);
+    expect([...kinds].sort()).toEqual(['contacts', 'markers', 'meta']);
 
     // Alice re-learns Carol's keys from her contact when she adds her to a new
     // group, after the engine dropped them with the last group they shared.
