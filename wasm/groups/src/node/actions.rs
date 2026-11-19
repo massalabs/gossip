@@ -337,8 +337,13 @@ impl Node {
                 n.changed(g, ChangeKind::Joined, cx.now);
                 Ok(g)
             } else {
+                // An invitation to continue a chat of two supersedes it (§5.12).
+                let continues = n.continued_by(&rec.root, false);
                 n.adopt(cx, rec.root, rec.from, Vec::new(), false)?;
                 n.changed(chat, ChangeKind::Joined, cx.now);
+                if let Some(mine) = continues {
+                    n.supersede(cx, mine, chat)?;
+                }
                 Ok(n.group_of(&chat))
             }
         })

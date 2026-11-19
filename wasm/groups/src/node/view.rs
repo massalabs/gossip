@@ -99,6 +99,10 @@ pub struct InvitationSummary {
     /// version is known and the caller declared that conversation (condition 3). Otherwise
     /// an ordinary invitation.
     pub migration_of: Option<GossipId>,
+    /// The automatic chat of two this device owns with the same person, which this one
+    /// continues (§5.12): "`owner` wants to continue this conversation in a new group".
+    /// Accepting supersedes it; declining leaves it as it is.
+    pub continues: Option<ChatId>,
 }
 
 /// A line of the timeline (§5.6, §5.8, §5.10, §7.5).
@@ -286,6 +290,7 @@ impl Node {
                         .migrate_from()
                         .filter(|_| self.direct_owner(&r.root, inv.rejoins.is_some()).is_some()),
                     migration_of: self.migration_of(c),
+                    continues: self.continued_by(&r.root, inv.rejoins.is_some()),
                 }),
                 EpochStatus::Installed => None,
             })
