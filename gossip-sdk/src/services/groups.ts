@@ -701,6 +701,7 @@ export class GroupService {
     o: { handle: number; to: Uint8Array; plaintext: Uint8Array }
   ): Promise<boolean> {
     if (this.session.peerSessionStatus(o.to) !== SessionStatus.Active) {
+      // The engine's view was stale (a status change it was not told of).
       node.abandon(o.handle);
       node.set_session(o.to, false);
       return false;
@@ -715,9 +716,11 @@ export class GroupService {
     );
     if (!this.alive(node)) return false;
     if (!sent) {
-      // No session to encrypt with (or the peer lags too far behind).
+      // The session refused to encrypt (the peer lags too far behind) while
+      // its status is still Active: abandoning backs this peer's work off for
+      // a while in the engine. Marking the peer without a session would hold
+      // its work back until a status change that may never come.
       node.abandon(o.handle);
-      node.set_session(o.to, false);
       return false;
     }
     this.encrypted.push({
