@@ -147,9 +147,9 @@ pub enum Error {
     /// case (§1.1, §13.8).
     #[error("malformed protobuf: {0}")]
     Malformed(&'static str),
-    /// `migrate_from` on a root that does not create a group of exactly two members
-    /// (§4.1, §5.12).
-    #[error("migrate_from on a root that does not create a group of two")]
+    /// The creator sets `migrate_from` on a group that is not of exactly two members
+    /// (§5.12). Never a reason to refuse a received root.
+    #[error("migrate_from on a group that is not of two")]
     MigrateFrom,
 }
 

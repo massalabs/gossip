@@ -215,6 +215,17 @@ impl Root {
         owner_signing_key: &dyn Signer,
         randomness: [u8; SIGNING_RANDOMNESS_SIZE],
     ) -> Result<Self> {
+        // The creator sets it only on a group of two (§5.12). A receiver never judges a root
+        // by it: it cannot tell a founding root from a successor whose parent it lacks (§4.5),
+        // and later format versions must stay valid; it only decides whether to act on it.
+        if migrate_from.is_some() {
+            let mut members = params.members.clone();
+            members.sort_unstable();
+            members.dedup();
+            if members.len() != 2 {
+                return Err(Error::MigrateFrom);
+            }
+        }
         let root = Self::build(RootType::Successor, params, &[placeholder], migrate_from)?;
         root.sign_and_check(owner_signing_key, randomness, None)
     }
@@ -336,14 +347,6 @@ impl Root {
         let signature = SignatureBytes::from_slice(&p.signature)?;
         if p.owner.is_empty() {
             return Err(Error::Missing("owner"));
-        }
-        // §4.1, §5.12: only on a successor root with the single parent of a new group and two
-        // members. A receiver cannot tell that single commitment from that of a successor
-        // whose parent it lacks (§4.5); one that holds the parent rejects it on receipt.
-        if p.migrate_from.is_some()
-            && (root_type != RootType::Successor || parents.len() != 1 || members.len() != 2)
-        {
-            return Err(Error::MigrateFrom);
         }
         // §4.6: a root MUST fit one empty container.
         if !wire::fits_empty_container(wire::event_blob_len(
