@@ -289,7 +289,10 @@ impl Node {
                             .held_root(&key.chat_id)
                             .is_some_and(|child| child.commitment_for(&r.chat_id()) == c) =>
                     {
-                        (self.receive_root(cx, from, *r, Via::Parent)?, None)
+                        (
+                            self.receive_root(cx, from, *r, Via::Parent(key.chat_id))?,
+                            None,
+                        )
                     }
                     (
                         Ok(

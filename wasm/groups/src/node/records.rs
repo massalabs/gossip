@@ -792,6 +792,9 @@ pub struct Invitation {
     /// The held epoch in a kicked or dissolved group that the root continues, if any: an
     /// invitation to rejoin (§4.8 case 4), accepted into that group (§5.10).
     pub rejoins: Option<ChatId>,
+    /// For a root fetched as the parent of another (never prompted on its own): the
+    /// invitation the lookup started from, and how many parents away it is.
+    pub fetched_for: Option<(ChatId, u16)>,
 }
 
 /// The local status of an epoch.
@@ -913,8 +916,19 @@ pub struct SignedRecord {
 pub enum Marker {
     /// A closed epoch: roots that continue it are rejected (§4.8 case 3).
     Closed,
+    /// A root rejected because it continues a closed epoch (§4.8 case 3), recorded as
+    /// closed too, with the peer that delivered it (for the per-sender limit).
+    ClosedFrom(GossipId),
     /// Left by "Dissolve & Delete": every frame of the epoch is dropped (§14.2).
     Dissolved,
+}
+
+impl Marker {
+    /// Whether it rejects roots that continue the epoch (§4.8 case 3).
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        matches!(self, Marker::Closed | Marker::ClosedFrom(_))
+    }
 }
 
 /// The answers with a removal record sent to a removed peer in an epoch, per day (§5.6).

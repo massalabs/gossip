@@ -220,6 +220,9 @@ pub struct Stats {
     pub old_epoch_fallbacks: u64,
     /// Root notices sent to a scan responder that did not hold the anchor (§12.1).
     pub anchor_notices: u64,
+    /// Records refused at a limit (invitations, fetched parents, markers, held roots,
+    /// unverified leaves).
+    pub capped: u64,
 }
 
 /// The result of a sync-object lookup (§12.5).

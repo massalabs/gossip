@@ -14,6 +14,10 @@ use super::records::{
     Target, TaskKey, TriggerKind, Work,
 };
 use super::retrieval::Answer;
+use super::timing::{
+    FETCHED_PARENT_DEPTH, FETCHED_PARENTS_PER_INVITATION, INHERITED_MARKERS_PER_DEVICE,
+    INHERITED_MARKERS_PER_SENDER, INVITATIONS_PER_DEVICE, INVITATIONS_PER_SENDER,
+};
 use super::{Cx, EpochEntry, Node, NodeError, PENALTY_ROOT_ANNOUNCEMENT};
 use crate::constants::PROMPT_DELAY_MS;
 use crate::epoch::GroupState;
@@ -62,8 +66,8 @@ pub(crate) enum Via {
     Direct,
     /// As the answer to a chat lookup by ID or by reference (§12.7).
     Lookup,
-    /// As the answer to a parent lookup (§4.8).
-    Parent,
+    /// As the answer to a parent lookup of the held root given (§4.8).
+    Parent(ChatId),
 }
 
 impl Node {
@@ -401,7 +405,9 @@ impl Node {
         let id = root.chat_id();
         match self.t.markers.get(&id) {
             Some(Marker::Dissolved) => return Ok(Answer::Refused),
-            Some(Marker::Closed) if via != Via::Direct => return Ok(Answer::Refused),
+            Some(Marker::Closed | Marker::ClosedFrom(_)) if via != Via::Direct => {
+                return Ok(Answer::Refused);
+            }
             _ => {}
         }
         if self.t.epochs.contains(&id) {
@@ -449,7 +455,7 @@ impl Node {
             return Ok(Answer::Invalid);
         }
         self.take_held(&id);
-        let closed_before = self.t.markers.get(&id) == Some(&Marker::Closed);
+        let closed_before = self.t.markers.get(&id).is_some_and(Marker::is_closed);
         // Continuity (§4.7): the held parents over which the owner has authority.
         let held: Vec<ChatId> = matched
             .iter()
@@ -482,10 +488,26 @@ impl Node {
         // one it never held, and is an invitation (§5.10).
         let closed = matched
             .iter()
-            .filter(|c| self.t.markers.get(c) == Some(&Marker::Closed))
+            .filter(|c| self.t.markers.get(c).is_some_and(Marker::is_closed))
             .count();
         if closed > 0 && closed == root.parents().len() {
-            self.t.markers.insert(id, Marker::Closed);
+            // Recorded closed too, within limits per delivering peer: the markers a peer can
+            // make this device keep are bounded.
+            let mine = self
+                .t
+                .markers
+                .iter()
+                .filter(|(_, m)| **m == Marker::ClosedFrom(from))
+                .count();
+            let all = self
+                .t
+                .markers
+                .iter()
+                .filter(|(_, m)| matches!(m, Marker::ClosedFrom(_)))
+                .count();
+            if mine < INHERITED_MARKERS_PER_SENDER && all < INHERITED_MARKERS_PER_DEVICE {
+                self.t.markers.insert(id, Marker::ClosedFrom(from));
+            }
             return Ok(Answer::Supplied);
         }
         // Case 4: kicked, dissolved or waiting.
@@ -800,7 +822,36 @@ impl Node {
         via: Via,
     ) {
         let id = root.chat_id();
-        let hidden = via == Via::Parent;
+        let fetched_for = match via {
+            Via::Parent(child) => {
+                let (top, depth) = match self.t.epochs.get(&child).map(|r| &r.status) {
+                    Some(EpochStatus::Invitation(Invitation {
+                        fetched_for: Some((top, depth)),
+                        ..
+                    })) => (*top, depth.saturating_add(1)),
+                    _ => (child, 1),
+                };
+                let count = self
+                    .t
+                    .epochs
+                    .iter()
+                    .filter(|(_, r)| {
+                        matches!(&r.status, EpochStatus::Invitation(i) if i.fetched_for.is_some_and(|(t, _)| t == top))
+                    })
+                    .count();
+                if depth > FETCHED_PARENT_DEPTH || count >= FETCHED_PARENTS_PER_INVITATION {
+                    self.stats.capped += 1;
+                    return;
+                }
+                Some((top, depth))
+            }
+            _ => None,
+        };
+        let hidden = fetched_for.is_some();
+        if !hidden && !self.room_for_invitation(cx, &from) {
+            self.stats.capped += 1;
+            return;
+        }
         self.put_record(
             id,
             EpochRecord {
@@ -811,6 +862,7 @@ impl Node {
                     not_available: BTreeSet::new(),
                     closed_before,
                     rejoins: rejoins.map(|p| self.group_of(&p)),
+                    fetched_for,
                 }),
                 group: id,
                 parents: Vec::new(),
@@ -822,6 +874,16 @@ impl Node {
             },
         );
         for c in lookups {
+            // Parent lookups count in the root fetches a peer may cause (§11.8); beyond,
+            // the commitment is not looked up, and the prompt does not wait for it.
+            if self.root_fetches_of(&from) >= ROOT_FETCHES_PER_PEER {
+                if let Some(r) = self.t.epochs.get_mut(&id)
+                    && let EpochStatus::Invitation(inv) = &mut r.status
+                {
+                    inv.lookups.remove(&c);
+                }
+                continue;
+            }
             self.trigger(
                 cx,
                 TaskKey {
@@ -1232,13 +1294,55 @@ impl Node {
         self.trigger(cx, key, Some((from, kind)));
     }
 
-    /// The root tasks `peer` triggered.
+    /// The root and parent-lookup tasks `peer` triggered.
     fn root_fetches_of(&self, peer: &GossipId) -> usize {
         self.t
             .tasks
             .iter()
-            .filter(|(k, t)| k.target == Target::Root && t.candidates.contains_key(peer))
+            .filter(|(k, t)| {
+                matches!(k.target, Target::Root | Target::Parent(_))
+                    && t.candidates.get(peer).is_some_and(|c| c.trigger.is_some())
+            })
             .count()
+    }
+
+    /// Whether an invitation delivered by `from` may be kept: fewer than
+    /// [`INVITATIONS_PER_SENDER`] of its invitations are pending, and below
+    /// [`INVITATIONS_PER_DEVICE`] in all, or the newest invitation of a peer with more
+    /// pending than `from` is dropped to make room (never one of a peer with as few).
+    fn room_for_invitation(&mut self, cx: &mut Cx<'_>, from: &GossipId) -> bool {
+        let mut by_sender: BTreeMap<GossipId, Vec<(u64, ChatId)>> = BTreeMap::new();
+        for (c, r) in self.t.epochs.iter() {
+            if let EpochStatus::Invitation(inv) = &r.status
+                && inv.fetched_for.is_none()
+            {
+                by_sender
+                    .entry(r.from)
+                    .or_default()
+                    .push((inv.received_at, *c));
+            }
+        }
+        let mine = by_sender.get(from).map_or(0, Vec::len);
+        if mine >= INVITATIONS_PER_SENDER {
+            return false;
+        }
+        let all: usize = by_sender.values().map(Vec::len).sum();
+        if all < INVITATIONS_PER_DEVICE {
+            return true;
+        }
+        let Some((_, victims)) = by_sender
+            .iter()
+            .filter(|(s, v)| *s != from && v.len() > mine + 1)
+            .max_by_key(|(_, v)| v.len())
+        else {
+            return false;
+        };
+        let (_, newest) = *victims.iter().max().expect("non-empty");
+        self.take_record(&newest);
+        self.t.events.remove(&(newest, ChangeKind::Invitation));
+        self.drop_tasks_of(&[newest]);
+        let _ = cx;
+        true
     }
 }
 
