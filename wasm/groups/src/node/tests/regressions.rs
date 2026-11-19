@@ -667,3 +667,33 @@ fn a_freed_slot_wakes_credible_tasks_first_and_rotates_the_others() {
     assert_eq!(woken.len(), 3);
     assert!(woken[0] != woken[1] && woken[1] != woken[2], "{woken:?}");
 }
+
+/// Found by review (code at `6a916f2e`): a tips scan from a peer that is not a member was
+/// answered "not available" for an anchor this device does not hold, and ignored for one it
+/// holds, so anyone with a session learned which epochs the device holds.
+#[test]
+fn a_stranger_cannot_tell_a_held_anchor_from_an_unknown_one() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let stranger = member(9);
+    let scan = |anchor: ChatId, rid: u8, now: u64| {
+        query(
+            rid,
+            now,
+            MIN,
+            vec![QueryOp::TipsScan {
+                anchor,
+                scan_id: scan_id(rid),
+                offset: 0,
+            }],
+        )
+    };
+    let now = net.now;
+    net.recv_frames(0, stranger, &[scan(chat, 1, now)]);
+    let held = net.poll_frames(0).remove(&stranger).unwrap_or_default();
+    net.recv_frames(0, stranger, &[scan(ChatId::from_bytes([0x77; 32]), 2, now)]);
+    let unknown = net.poll_frames(0).remove(&stranger).unwrap_or_default();
+    let statuses = |f: &[Frame]| responses(f).iter().map(status).collect::<Vec<_>>();
+    assert_eq!(statuses(&unknown), vec![Some(Status::NotAvailable)]);
+    assert_eq!(statuses(&held), statuses(&unknown));
+}
