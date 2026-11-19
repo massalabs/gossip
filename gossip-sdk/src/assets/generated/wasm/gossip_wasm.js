@@ -181,9 +181,32 @@ function debugString(val) {
     // TODO we could test for more things here, like `Set`s and `Map`s.
     return className;
 }
+/**
+ * The largest group plaintext, in bytes (§13.10).
+ * @returns {number}
+ */
+export function group_max_plaintext_bytes() {
+    const ret = wasm.group_max_plaintext_bytes();
+    return ret >>> 0;
+}
 
-export function start() {
-    wasm.start();
+/**
+ * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
+ * forward of text. A longer one is refused by the engine and by every receiver.
+ * @returns {number}
+ */
+export function group_max_text_bytes() {
+    const ret = wasm.group_max_metadata_bytes();
+    return ret >>> 0;
+}
+
+/**
+ * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
+ * @returns {number}
+ */
+export function group_max_metadata_bytes() {
+    const ret = wasm.group_max_metadata_bytes();
+    return ret >>> 0;
 }
 
 function takeFromExternrefTable0(idx) {
@@ -191,6 +214,39 @@ function takeFromExternrefTable0(idx) {
     wasm.__externref_table_dealloc(idx);
     return value;
 }
+/**
+ * The size of message metadata, given as `publish_message` takes it (a list of
+ * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
+ * @param {string} metadata
+ * @returns {number}
+ */
+export function group_metadata_bytes(metadata) {
+    const ptr0 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.group_metadata_bytes(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] >>> 0;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+
+export function start() {
+    wasm.start();
+}
+
 /**
  * Generates user keys from a passphrase.
  *
@@ -209,18 +265,6 @@ export function generate_user_keys(passphrase) {
     return UserKeys.__wrap(ret[0]);
 }
 
-function _assertClass(instance, klass) {
-    if (!(instance instanceof klass)) {
-        throw new Error(`expected instance of ${klass.name}`);
-    }
-}
-
-function passArray8ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 1, 1) >>> 0;
-    getUint8ArrayMemory0().set(arg, ptr / 1);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
@@ -323,50 +367,6 @@ export function aead_decrypt(key, nonce, ciphertext, aad) {
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     }
     return v3;
-}
-
-/**
- * The largest group plaintext, in bytes (§13.10).
- * @returns {number}
- */
-export function group_max_plaintext_bytes() {
-    const ret = wasm.group_max_plaintext_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
- * forward of text. A longer one is refused by the engine and by every receiver.
- * @returns {number}
- */
-export function group_max_text_bytes() {
-    const ret = wasm.group_max_metadata_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
- * @returns {number}
- */
-export function group_max_metadata_bytes() {
-    const ret = wasm.group_max_metadata_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The size of message metadata, given as `publish_message` takes it (a list of
- * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
- * @param {string} metadata
- * @returns {number}
- */
-export function group_metadata_bytes(metadata) {
-    const ptr0 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.group_metadata_bytes(ptr0, len0);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return ret[0] >>> 0;
 }
 
 /**
@@ -989,6 +989,43 @@ export class GroupsNode {
         }
     }
     /**
+     * A media message (§7.6): `mimetype` is `type/subtype` (lowercase, no parameters, at most
+     * 127 bytes), `data` any bytes the event can hold; `metadata` as for `publish_message`
+     * (a name or a caption). Returns `{eventId, syncObjId, merge}` in JSON.
+     * @param {Uint8Array} epoch
+     * @param {string} mimetype
+     * @param {Uint8Array} data
+     * @param {string} metadata
+     * @param {number} now
+     * @returns {string}
+     */
+    publish_media(epoch, mimetype, data, metadata, now) {
+        let deferred6_0;
+        let deferred6_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(mimetype, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ptr3 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len3 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_publish_media(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, now);
+            var ptr5 = ret[0];
+            var len5 = ret[1];
+            if (ret[3]) {
+                ptr5 = 0; len5 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred6_0 = ptr5;
+            deferred6_1 = len5;
+            return getStringFromWasm0(ptr5, len5);
+        } finally {
+            wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+        }
+    }
+    /**
      * @param {Uint8Array} group
      * @param {boolean} must_delete
      * @param {number} now
@@ -1067,9 +1104,12 @@ export class GroupsNode {
         return ret >>> 0;
     }
     /**
-     * `body`: `{"t":"Text","text":…}`, `{"t":"Forward","content_type":"Text","content":hex}`,
-     * `{"t":"Reaction","reaction":hex}` or `{"t":"Media","media":hex}`; `metadata`: an array
-     * of `[name, hex]`. Returns `{eventId, syncObjId, merge}` in JSON.
+     * `body`: `{"t":"Text","text":…}`,
+     * `{"t":"Forward","content_type":"Text"|"Media","content":hex}` (a forwarded media
+     * message is the canonical encoding of a `Media`), or
+     * `{"t":"Media","media":{"mimetype":…,"data":hex}}`; a reaction goes through
+     * `publish_reaction`. `metadata`: an array of `[name, hex]`. Returns
+     * `{eventId, syncObjId, merge}` in JSON.
      * @param {Uint8Array} epoch
      * @param {string} body
      * @param {string} metadata
@@ -1156,6 +1196,41 @@ export class GroupsNode {
             return getStringFromWasm0(ptr3, len3);
         } finally {
             wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * Adds (`add`) or removes this device's reaction `emoji` (1 to 64 bytes of UTF-8) to the
+     * message `target` of `epoch`, the target's own epoch (§7.6). Returns
+     * `{eventId, syncObjId, merge}` in JSON; `syncObjId` is the reaction's.
+     * @param {Uint8Array} epoch
+     * @param {Uint8Array} target
+     * @param {string} emoji
+     * @param {boolean} add
+     * @param {number} now
+     * @returns {string}
+     */
+    publish_reaction(epoch, target, emoji, add, now) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(target, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(emoji, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_publish_reaction(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, add, now);
+            var ptr4 = ret[0];
+            var len4 = ret[1];
+            if (ret[3]) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
         }
     }
     /**
@@ -1490,6 +1565,25 @@ export class GroupsNode {
         }
     }
     /**
+     * The media message `sync_obj_id` of `epoch` with its data: `{mimetype, data}` (`data`
+     * a `Uint8Array`), or `null` when the message is not visible or holds no media.
+     * @param {Uint8Array} epoch
+     * @param {Uint8Array} sync_obj_id
+     * @param {number} now
+     * @returns {any}
+     */
+    media(epoch, sync_obj_id, now) {
+        const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(sync_obj_id, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_media(this.__wbg_ptr, ptr0, len0, ptr1, len1, now);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * @param {Uint8Array} epoch
      * @param {Uint8Array} sync_obj_id
      * @param {number} now
@@ -1559,6 +1653,9 @@ export class GroupsNode {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * The timeline in JSON. A message lists `reactions` as `[[author, emoji], …]`; a media
+     * message (or a forwarded one) comes without its data, with `data_len`: read the data
+     * with `media`.
      * @param {Uint8Array} epoch
      * @param {number} now
      * @returns {string}
