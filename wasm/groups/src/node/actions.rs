@@ -645,9 +645,27 @@ impl Node {
                 members.remove(m);
             }
         }
-        // §5.10: one more parent per distinct last epoch of the members added back.
+        // §5.10: one more parent per distinct last epoch of the members added back: among
+        // the epochs of the line the new root continues (the held ancestors of its parents)
+        // that list the member, one that no later epoch of the line listing it continues.
+        // Not the latest by date: a former owner's root continuing its old epoch, dated at
+        // the end of time (D.72), is latest by date whether a side branch or resolved into the
+        // line, and the member, which holds no handover leading to it, could not verify the
+        // new owner's authority over it and would not be joined.
         if handover.is_none() {
-            let group_epochs = self.group_epochs(&group);
+            let held_ancestors = |from: &[ChatId]| {
+                let mut seen: BTreeSet<ChatId> = BTreeSet::new();
+                let mut stack = from.to_vec();
+                while let Some(c) = stack.pop() {
+                    if seen.insert(c)
+                        && let Some(r) = self.t.epochs.get(&c)
+                    {
+                        stack.extend(r.parents.iter().copied());
+                    }
+                }
+                seen
+            };
+            let line = held_ancestors(&parents);
             for m in &members {
                 if parents
                     .iter()
@@ -655,10 +673,22 @@ impl Node {
                 {
                     continue;
                 }
-                let last = group_epochs
+                let listing: Vec<ChatId> = line
                     .iter()
+                    .filter(|c| self.t.epochs.get(c).is_some_and(|r| r.root.is_member(m)))
+                    .copied()
+                    .collect();
+                let continued: BTreeSet<ChatId> = listing
+                    .iter()
+                    .flat_map(|c| {
+                        let parents = self.t.epochs.get(c).map(|r| r.parents.clone());
+                        held_ancestors(&parents.unwrap_or_default())
+                    })
+                    .collect();
+                let last = listing
+                    .iter()
+                    .filter(|c| !continued.contains(c))
                     .filter_map(|c| self.t.epochs.get(c))
-                    .filter(|r| r.root.is_member(m))
                     .max_by_key(|r| (r.root.created_at(), r.root.chat_id()))
                     .map(|r| r.root.chat_id());
                 if let Some(last) = last
