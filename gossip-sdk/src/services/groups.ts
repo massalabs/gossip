@@ -54,7 +54,13 @@ export type GroupMemberStatus =
   | 'left'
   | 'removed'
   | 'dissolved'
-  | 'dissolved-deleted';
+  | 'dissolved-deleted'
+  /**
+   * A chat of two replaced by another chat of the same two (§5.12): kept,
+   * read-only, as the earlier part of the chat that continues it
+   * (`supersededBy`). Never a conversation of its own.
+   */
+  | 'superseded';
 
 export interface GroupSummary {
   /** The group key (local). */
@@ -76,6 +82,18 @@ export interface GroupSummary {
    */
   formerOwnerBranches: GroupId[];
   links: GroupId[];
+  /** For a superseded chat of two: the chat that continues it. */
+  supersededBy: GroupId | null;
+  /**
+   * A chat of two (§5.12): the chats of the same two it replaced, oldest
+   * first, shown before it as one conversation.
+   */
+  earlier: GroupId[];
+  /**
+   * A chat of two this device founded automatically: whether the other
+   * person took part in it. Null for any other group.
+   */
+  tookPart: boolean | null;
 }
 
 export interface GroupInvitation {
@@ -100,6 +118,12 @@ export interface GroupInvitation {
    * continuing (§5.12): shown inside that archive. Null otherwise.
    */
   migrationOf: string | null;
+  /**
+   * The chat of two this invitation continues (§5.12): shown inside that
+   * chat as "<owner> wants to continue this conversation in a new group";
+   * accepting makes it the current chat and the other its history.
+   */
+  continues: GroupId | null;
 }
 
 export type GroupMessageBody =
@@ -221,9 +245,9 @@ export type GroupChangeKind =
   | 'Fork'
   | 'Closed'
   /**
-   * Two creations at once (§5.12): this group was closed for `by`, which
-   * continues the same conversation; `lostMessages` if anything was written
-   * in it.
+   * A chat of two replaced (§5.12): this group is kept read-only as the
+   * earlier part of `by`, which continues the same conversation;
+   * `hasMessages` if anything was written in it. Nothing is erased.
    */
   | 'Superseded'
   /**
@@ -238,8 +262,8 @@ export interface GroupChange {
   kind: GroupChangeKind;
   /** For `Superseded`: the group kept. */
   by?: GroupId;
-  /** For `Superseded`: messages were written in the group closed. */
-  lostMessages?: boolean;
+  /** For `Superseded`: messages were written in the group replaced. */
+  hasMessages?: boolean;
 }
 
 /** The key of the changes about the device rather than a group. */
@@ -399,6 +423,9 @@ function summary(r: Raw): GroupSummary {
     mustResolve: r.must_resolve as boolean,
     formerOwnerBranches: r.former_owner_branches as string[],
     links: r.links as string[],
+    supersededBy: status === 'Superseded' ? (s.by as string) : null,
+    earlier: (r.earlier as string[] | undefined) ?? [],
+    tookPart: (r.took_part as boolean | null | undefined) ?? null,
   };
 }
 
@@ -584,12 +611,7 @@ export class GroupService {
   private reopen(): Promise<void> {
     const opening = (async () => {
       this.dropNode(true);
-      const snapshot = await this.queries.groups.loadSnapshot(this.owner);
-      const node = GroupsNode.open(
-        this.session.ourPk,
-        this.session.ourSk,
-        snapshot
-      );
+      const node = await this.openNode();
       try {
         const now = this.now();
         node.learn_keys(this.session.ourPk.to_bytes(), now);
@@ -622,6 +644,30 @@ export class GroupService {
     });
     const guarded = this.opening;
     return opening;
+  }
+
+  /**
+   * Opens the engine from the account's records. Records an earlier build
+   * wrote that this one cannot decode are erased (the group engine's tables
+   * only: earlier one-to-one conversations live elsewhere), and the engine
+   * starts empty.
+   */
+  private async openNode(): Promise<GroupsNode> {
+    const snapshot = await this.queries.groups.loadSnapshot(this.owner);
+    try {
+      return GroupsNode.open(this.session.ourPk, this.session.ourSk, snapshot);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.startsWith('groups:undecodable')) throw error;
+    }
+    logger.error('group records of an earlier version reset');
+    await this.queries.groups.resetEngine(this.owner);
+    return GroupsNode.open(this.session.ourPk, this.session.ourSk, {
+      rows: [],
+      edges: [],
+      objects: [],
+      node: [],
+    });
   }
 
   /**
@@ -850,7 +896,7 @@ export class GroupService {
           };
           if (kind === 'Superseded') {
             change.by = r.by as string;
-            change.lostMessages = r.lost_messages === true;
+            change.hasMessages = r.has_messages === true;
           }
           return change;
         }),
@@ -1172,6 +1218,30 @@ export class GroupService {
     );
   }
 
+  /**
+   * Declares the contacts the user accepted (§13.8: only they get a version
+   * notice), and clears those declared that are no longer: `accepted` is the
+   * full list. Automatic connections are never declared.
+   */
+  setAcceptedContacts(accepted: string[]): Promise<void> {
+    return this.run(node => {
+      const declared = new Set(
+        JSON.parse(node.accepted_contacts()) as string[]
+      );
+      const wanted = new Set(accepted.map(hexOfUser));
+      for (const peer of wanted) {
+        if (!declared.has(peer)) {
+          node.set_accepted_contact(hexToBytes(peer), true, this.now());
+        }
+      }
+      for (const peer of declared) {
+        if (!wanted.has(peer)) {
+          node.set_accepted_contact(hexToBytes(peer), false, this.now());
+        }
+      }
+    });
+  }
+
   /** Whether this device holds a direct chat with `peer` (§5.12). */
   holdsDirectChat(peer: string): Promise<boolean> {
     return this.read(n => n.holds_direct_chat(decodeUserId(peer)));
@@ -1217,11 +1287,14 @@ export class GroupService {
     });
   }
 
-  /** As the owner: hands the group over to a member, possibly leaving it. */
+  /**
+   * As the owner: hands the group over to a member, possibly leaving it
+   * ("hand over and leave"). The handover keeps every other member.
+   */
   handOver(
     groupId: GroupId,
     newOwner: string,
-    options: { leave?: boolean; remove?: string[]; name?: string | null } = {}
+    options: { leave?: boolean; name?: string | null } = {}
   ): Promise<GroupId> {
     return this.run(async node => {
       await this.learnMembers(node, [newOwner]);
@@ -1229,7 +1302,6 @@ export class GroupService {
         t: 'Handover',
         new_owner: hexOfUser(newOwner),
         leave: options.leave ?? false,
-        remove: (options.remove ?? []).map(hexOfUser),
         name: options.name ?? null,
       });
       return bytesToHex(
@@ -1534,6 +1606,7 @@ export class GroupService {
       rejoins: (r.rejoins as string | null) ?? null,
       migrateFrom: optionalNumber(r.migrate_from),
       migrationOf: r.migration_of ? userIdOf(r.migration_of as string) : null,
+      continues: (r.continues as string | null | undefined) ?? null,
     }));
   }
 

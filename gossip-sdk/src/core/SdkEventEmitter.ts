@@ -66,7 +66,7 @@ export type SdkEvents = {
     contactUserId: string | null;
     groupId: string;
     by: string;
-    lostMessages: boolean;
+    hasMessages: boolean;
   };
   [SdkEventType.ERROR]: { error: Error; context: string };
 };

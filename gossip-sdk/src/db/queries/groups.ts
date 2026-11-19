@@ -157,6 +157,35 @@ export class GroupQueries {
   }
 
   /** Erases every group record of the account. */
+  /**
+   * Erases the group engine's own records of an account (rows, edges,
+   * objects and node records), in one transaction. The outbox stays: its
+   * ciphertexts were encrypted already and must still be sent in order.
+   */
+  async resetEngine(ownerUserId: string): Promise<void> {
+    await this.conn.withTransaction(async tx => {
+      await this.deleteEngineRecords(ownerUserId, tx);
+    });
+  }
+
+  private async deleteEngineRecords(
+    ownerUserId: string,
+    db: DbContext
+  ): Promise<void> {
+    await db
+      .delete(schema.groupEventRows)
+      .where(eq(schema.groupEventRows.ownerUserId, ownerUserId));
+    await db
+      .delete(schema.groupEdges)
+      .where(eq(schema.groupEdges.ownerUserId, ownerUserId));
+    await db
+      .delete(schema.groupObjects)
+      .where(eq(schema.groupObjects.ownerUserId, ownerUserId));
+    await db
+      .delete(schema.groupRecords)
+      .where(eq(schema.groupRecords.ownerUserId, ownerUserId));
+  }
+
   async deleteByOwner(ownerUserId: string, tx?: DbContext): Promise<void> {
     const db = tx ?? this.conn.db;
     await db
