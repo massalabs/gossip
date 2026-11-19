@@ -160,9 +160,56 @@ to the user.
 - Each kind of thing sent in a session has **its own message type** (§13.1). A type is never
   reused to carry something else: a keep-alive keeps a session alive and carries nothing.
 
+- Keep-alives belong to the session layer and to a **connection**, never to a conversation: a
+  device keeps its connections with peers alive, whatever groups use them. The group layer sits on
+  top and neither sends nor interprets keep-alives.
+
 *Why:* one format for all conversations gives direct chats the same deniability, editing and
 deletion as groups, and a type that means one thing can be handled, limited and reasoned about on
 its own.
+
+Direct chats, contacts, automatic connections and the migration of earlier conversations are
+specified in §5.12.
+
+### 2.2 Compatibility within wire version 1
+
+Every implementation of wire version 1, whatever its release, MUST interoperate with every other
+without breaking it. A later release may behave better with its like; it never needs its like.
+The rules of this document are therefore of two kinds.
+
+**Fixed for the whole of wire version 1.** They cannot change without a new wire version:
+
+- every format: identifiers, hash projections, signatures and their contexts, protobuf schemas,
+  frames, status codes, size limits that decide validity;
+- every validity and authorization rule: what makes a root, a signed object, an event or a frame
+  valid or malformed, and who may be answered;
+- the merge rules, and everything else that decides what honest devices converge to;
+- how a device answers each query, including when it stays silent, and how it reacts to each
+  frame and status it receives.
+
+**Local policy.** A release may change these freely, and peers MUST NOT rely on another device's
+choice:
+
+- how many neighbors a device keeps and how it chooses and replaces them;
+- how it scores peers and ranks candidates;
+- periods, delays, time-to-live progressions, jitter and retry counts;
+- how many peers it asks, in what order, and how much it sends per period;
+- its own budgets, queue sizes and when it answers `busy`.
+
+Two obligations make the split hold:
+
+- **A requester tolerates any policy.** `busy`, "not available", `expired`, `restart`, silence, a
+  shorter page or fewer suggestions than expected are all valid answers at any rate, and never
+  make a peer malformed. No rule may assume a peer's neighbor count, timing, fan-out or limits.
+- **Penalties attach to fixed rules only.** A device penalises what is malformed, unauthorized or
+  false under the fixed rules. Being asked or told more or less often than its own policy would do
+  is answered with the fixed statuses (`busy`, silence), never treated as a protocol violation.
+
+Numbers in this document that belong to local policy are defaults. Where a number is fixed, the
+text says so or the number decides validity.
+
+*Why:* improving recovery, scoring and pacing release after release must make a group more stable
+as its members update, without ever cutting off those who have not.
 
 ## 3. Identifiers and constants
 
@@ -283,6 +330,7 @@ It carries:
 | `epoch_challenge` | 32 fresh random bytes (§4.5) |
 | `ref_chat_id_challenge` | 32 fresh random bytes (§4.5) |
 | `created_at` | the creator's clock at creation, u64 Unix milliseconds; a claim |
+| `migrate_from` | optional: the format version of the conversation this group continues (§5.12); `0` is the earlier one-to-one format |
 | `signature` | an ML-DSA-65 signature over the root ID (below) |
 
 The root has no event ID, no parents in the DAG sense and no payload.
@@ -291,12 +339,13 @@ Its only identifier is the **root ID**, which is also the epoch's `chat_id`:
 ```text
 chat_id = H("gossip.groups.root.1",
             version, type, name, parents, members, group_secret, owner,
-            epoch_challenge, ref_chat_id_challenge, created_at)
+            epoch_challenge, ref_chat_id_challenge, created_at, migrate_from)
 ```
 
 In this projection `version`, `type` and `created_at` are unsigned integers, `name` is a text
-string, `parents` and `members` are arrays of byte strings in their sorted order, and the other
-fields are byte strings.
+string, `parents` and `members` are arrays of byte strings in their sorted order, `migrate_from`
+is an array holding its one unsigned integer when the field is present and the empty array when it
+is absent, and the other fields are byte strings.
 The signature and the ID itself are not hashed.
 
 The **signature** is computed over the 32 bytes of the root ID, with the ML-DSA-65 signing context
@@ -1197,6 +1246,76 @@ The result is for display only; stored and relayed bytes are never changed.
    list beside the name.
 
 The same rules apply to a local name.
+
+
+### 5.12 Direct chats, contacts, connections and migration
+
+**Conversation format versions.** `0` is the earlier one-to-one format; `1` is this protocol.
+
+**Direct chats.** A direct chat is a group that was created with two members.
+Whoever creates it owns it, and it is an ordinary group in every respect: its owner may add
+members, rename it or hand it over.
+
+**Connections and contacts.** A connection is a session with a peer (§2.1).
+A device keeps, for each peer it has a connection with, whether its user **accepted** that peer as
+a contact or the connection is **automatic**.
+
+- A connection asked by a member of a group this device has accepted is opened automatically and
+  silently. The claim is checked against the member list of a group the device holds and has
+  accepted, never against a group it was only invited to. No conversation is created.
+- A connection asked by anyone else needs the user's consent, on the invitation screen below.
+- An automatic connection is revoked once its peer shares no group with this device and no epoch
+  the device still holds lists that peer, so that the replies owed to a removed member (§5.6) and
+  the deletions still served to it (§10.4) keep working until then. A peer the user accepted, or
+  with whom the device shares a group, is never revoked by this rule. The check runs after every
+  membership change.
+
+*Note:* a member whose connection is opened automatically learns that this device accepted the
+group; the scans that follow an acceptance already show it (D.77).
+
+**A new contact.** Accepting a contact request is the consent for a chat with that person.
+The requester's device then creates a group of the two, which it owns, and the accepting device
+adopts that root without a prompt.
+
+**Migrating an earlier conversation.**
+
+- A device that moves to this protocol turns each earlier one-to-one conversation into an
+  **archive**: it converts its own stored messages into its new local format and shows them
+  read-only. Nothing of the earlier conversation is sent to anyone.
+- An archive offers **Migrate to a new group** and **Archive**. "Archive" moves it to an archived
+  list; it can still be opened and migrated later, and is still linked if the other person
+  migrates.
+- "Migrate" creates a group of two, the user and the contact of that conversation, with
+  `migrate_from = 0`, and links it to the archive on this device: the two are displayed as one
+  continuous conversation, the archive first.
+- `migrate_from` MAY be set only on a root that creates a group (its single parent is the random
+  placeholder of §4.5) and that has exactly two members. A root with `migrate_from` that has
+  earlier epochs behind it, or another member count, is malformed.
+
+A device that receives a root with `migrate_from` treats it as a migration only when all of these
+hold:
+
+1. the group has exactly two members: the receiver itself and one other person;
+2. that other person is the owner who signed the root;
+3. the receiver itself holds an earlier conversation of that format version with that same person.
+
+It then shows the invitation inside that earlier conversation, with Accept and Decline, and on the
+conversation's row in the list; accepting links the group to the archive as above.
+When a condition fails, `migrate_from` is ignored and the root is an ordinary invitation.
+A device hides its own "Migrate" action as soon as it holds such an invitation, and before
+offering "Migrate" it first processes what it has received, so that the other person's invitation
+takes precedence.
+
+**Two creations at once.** If each of two people creates the group that continues the same earlier
+conversation, or the group that follows the same contact request, the group whose owner's GossipID
+sorts first (raw bytes, ascending) is kept: both devices adopt it without a prompt, and both
+delete the other at once, as a closed chat (§14.2).
+
+**The invitation screen.** Every invitation uses one screen made of sections shown as they apply:
+who asks; adding that person as a contact; the group, its owner and its members; the earlier
+conversation it continues; warnings (§4.8, §5.11); and the choices.
+A person who is not a contact and asks for a chat is shown once, on that screen, as asking both to
+become a contact and to open the chat.
 
 ## 6. Events
 
@@ -2433,8 +2552,10 @@ it; it is never relayed and never answered.
   version.
   The only extension point within a version is message metadata, whose unknown entries are
   preserved (§6.2).
-- This protocol is not compatible with earlier draft group designs, and no migration is defined.
-  Existing direct-message behavior is unaffected.
+- This protocol is not compatible with earlier draft group designs.
+  The earlier one-to-one conversation format is not part of it: its conversations are archived and
+  may be continued as groups (§5.12).
+- Within wire version 1, releases stay compatible as §2.2 requires.
 
 ### 13.9 Scheduling and packing
 
@@ -2491,7 +2612,7 @@ are fixed.
   chain of seekers can never be interrupted for a peer reachable only by mesh. A client checks
   this before encrypting, since encryption advances the session; a server MAY refuse a larger
   packet.
-- **Why 57,344.** A full container encrypts to at most 60,978 bytes (measured, see below), which
+- **Why 57,344.** A full container encrypts to at most 60,976 bytes (measured, see below), which
   leaves about 4.5 KiB under the packet ceiling for future growth of the session layer.
 - **Text and metadata** are limits on one message version, checked on creation, on reception and
   on every edit, local-only edits included. An event over either limit is malformed.
@@ -2503,7 +2624,7 @@ The notice entry and byte limits, the page byte limit, the member
 limit, the parent limit and the limits of §17.4 other than the hint cache are provisional and must
 be profiled before release.
 
-For sizing: the session layer adds at most 3,634 bytes to a group plaintext (two ML-KEM-768
+For sizing: the session layer and the group message type add at most 3,632 bytes to a group plaintext (two ML-KEM-768
 ciphertexts, a fresh ML-KEM-768 public key, a signed envelope and framing; no padding), whatever
 the size of the plaintext and the state of the session.
 An implementation MUST keep a test that encrypts a full container and fails above 65,536 bytes.
@@ -2947,6 +3068,7 @@ message GroupRoot {
   bytes ref_chat_id_challenge = 8; // 32 bytes
   uint64 created_at = 9;
   bytes signature = 10;            // ML-DSA-65 over the root ID; not hashed
+  optional uint64 migrate_from = 11; // only on a root that creates a group of two (§5.12)
 }
 
 message Leave {
@@ -4366,23 +4488,19 @@ afterwards.*
 - **A (recommended):** state these rules. The code follows them.
 - **B:** other rules, to be given.
 
-### D.81 Direct chats as groups of two: what is still open (§2.1)
+### D.81 Direct chats: details chosen while writing §5.12
 
-*Settled in §2.1:* every conversation is a group; a client does not support the earlier one-to-one
-format; a device that moves to this protocol archives its earlier one-to-one conversations; older
-clients are unsupported.
+*§2.1 and §5.12 are settled. These details were chosen to complete them and are not confirmed.*
 
-*Still open:*
+- A message of the earlier one-to-one format received from an unsupported client is ignored.
+- The "two creations at once" rule also covers two contact requests crossing each other.
+- The losing group of two creations at once is deleted even if messages were already written in
+  it; they are lost.
+- A link made by a migration is local, like the manual links of §5.10: each device links to its
+  own archive.
+- Declining a migration invitation leaves the archive as it is, and "Migrate" is offered again.
 
-- **Owner of a pair.** A group has one owner, who alone changes the member list. Which of the two
-  owns a direct chat, and what happens when the other wants to add a third person.
-- **Starting one.** A group starts with an invitation prompt; a contact is made by a contact
-  request. Whether a direct chat needs both prompts, or the contact request stands for the
-  invitation.
-- **The archive.** What an archived one-to-one conversation looks like and whether it is linked
-  to the direct chat that follows it.
-
-- **A (recommended):** decide them one by one before the direct-chat change is built.
+- **A (recommended):** confirm them one by one.
 
 ### D.82 Points from applying the size limits (§13.10, §17.4)
 
