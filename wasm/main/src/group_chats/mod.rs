@@ -98,7 +98,8 @@ impl GroupsNode {
     /// Opens the engine of the identity from a snapshot of its stored records
     /// (`{rows, edges, objects, node}`, see `take_batches`; empty arrays for a new account).
     /// Only the ML-DSA signing key is copied out of the secret keys; the copy is erased
-    /// when this object is freed.
+    /// when this object is freed. Fails with `groups:undecodable: …` when a stored record
+    /// cannot be decoded (one written by an earlier build).
     pub fn open(
         public_keys: &UserPublicKeys,
         secret_keys: &UserSecretKeys,
