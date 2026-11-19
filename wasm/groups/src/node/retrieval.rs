@@ -26,6 +26,12 @@ use crate::store::in_window;
 /// followed by a resend.
 pub(crate) const MAX_EXPIRED_RESENDS: u8 = 2;
 
+/// `busy` answers in a row from one peer, for one task in a run or one scan in a stage, that
+/// count as an unanswered timeout. `busy` asks for a retry a minute later (§13.4), which
+/// §11.4 does not count; without a bound a peer answering `busy` to everything would be
+/// asked for ever at no cost.
+pub(crate) const MAX_BUSY_IN_A_ROW: u8 = 3;
+
 /// Lookups a suspect task may have outstanding with one peer, and in total (a quarter of
 /// the limits of §17.4).
 pub(crate) const SUSPECT_LOOKUPS_PER_PEER: usize = ACTIVE_LOOKUPS_PER_PEER / 4;
@@ -44,7 +50,7 @@ pub(crate) enum Answer {
     /// `malformed`: failed for this pass, not penalised.
     Refused,
     /// `busy`: refused for resource reasons; asked again a minute later (§13.4), not
-    /// penalised.
+    /// penalised, and no sign of responsiveness; the third in a row counts as a timeout.
     Busy,
     /// `expired`: an immediate resend (§11.4); whether it is plausible (the request may have
     /// passed its receiver deadline).
@@ -206,7 +212,7 @@ impl Node {
         peer: GossipId,
         answer: Answer,
     ) {
-        if !matches!(answer, Answer::Expired(_)) {
+        if !matches!(answer, Answer::Expired(_) | Answer::Busy) {
             self.answered(&peer);
         }
         if answer == Answer::Supplied {
@@ -225,6 +231,10 @@ impl Node {
         let mut task = task;
         let current = matches!(task.run, Run::Active { attempt: Some(a), .. } if a.peer() == peer);
         let cand = task.candidates.entry(peer).or_insert_with(Candidate::new);
+        if !matches!(answer, Answer::Busy | Answer::Expired(_)) {
+            cand.busy = 0;
+        }
+        let mut timed_out = false;
         match answer {
             Answer::Supplied => unreachable!(),
             Answer::TemporarilyInvalid => {
@@ -262,12 +272,22 @@ impl Node {
                 }
             }
             Answer::Busy => {
-                // Retry later: skipped for one local wait of the first TTL, whatever the
-                // stage; a budget refills in seconds (§17.4), and a stage can last a day.
-                let wait = jittered(FIRST_TTL_MS, draw_jitter(cx.rng));
-                cand.outstanding_until = Some(cx.now.saturating_add(wait));
-                if current && let Run::Active { attempt, .. } = &mut task.run {
-                    *attempt = None;
+                cand.busy = cand.busy.saturating_add(1);
+                if cand.busy >= MAX_BUSY_IN_A_ROW {
+                    // As an unanswered timeout: failed for this run, and the stage ends.
+                    cand.busy = 0;
+                    cand.state = CandidateState::Failed;
+                    cand.outstanding_until = None;
+                    timed_out = true;
+                } else {
+                    // Retry later: skipped for one local wait of the first TTL, whatever
+                    // the stage; a budget refills in seconds (§17.4), and a stage can last
+                    // a day.
+                    let wait = jittered(FIRST_TTL_MS, draw_jitter(cx.rng));
+                    cand.outstanding_until = Some(cx.now.saturating_add(wait));
+                    if current && let Run::Active { attempt, .. } = &mut task.run {
+                        *attempt = None;
+                    }
                 }
             }
             Answer::Expired(plausible) => {
@@ -293,6 +313,36 @@ impl Node {
             }
         }
         self.t.tasks.insert(key, task);
+        if timed_out {
+            self.note_timeout(&peer, cx.now);
+            if current {
+                self.next_stage(cx, key);
+            }
+        }
+    }
+
+    /// The current stage of `key` ended unanswered: the next stage, with the next TTL and a
+    /// new jitter, and at once the next candidate (no extra backoff); after twenty, the
+    /// task pauses.
+    fn next_stage(&mut self, cx: &mut Cx<'_>, key: TaskKey) {
+        let Some(Run::Active { stage, ttl, .. }) = self.t.tasks.get(&key).map(|t| t.run) else {
+            return;
+        };
+        let stage = stage + 1;
+        if stage >= MAX_UNANSWERED_STAGES {
+            self.pause(key);
+        } else {
+            let jitter = draw_jitter(cx.rng);
+            let task = self.t.tasks.get_mut(&key).expect("present");
+            task.run = Run::Active {
+                stage,
+                ttl: next_ttl(ttl),
+                jitter,
+                attempt: None,
+                expired_resends: 0,
+            };
+        }
+        self.reindex(key);
     }
 
     /// Reports a sync-object lookup answered with an event (§12.5).
@@ -592,33 +642,15 @@ impl Node {
             }
             let task = self.t.tasks.get(&key).expect("indexed");
             let Run::Active {
-                stage,
-                ttl,
                 attempt: Some(Attempt::Sent { peer, .. }),
                 ..
             } = task.run
             else {
                 unreachable!("a timer belongs to a sent attempt");
             };
-            // An unanswered timeout: the next stage, with the next TTL and a new jitter,
-            // and at once the next candidate (no extra backoff).
             self.stats.timeouts += 1;
             self.note_timeout(&peer, cx.now);
-            let stage = stage + 1;
-            if stage >= MAX_UNANSWERED_STAGES {
-                self.pause(key);
-            } else {
-                let jitter = draw_jitter(cx.rng);
-                let task = self.t.tasks.get_mut(&key).expect("indexed");
-                task.run = Run::Active {
-                    stage,
-                    ttl: next_ttl(ttl),
-                    jitter,
-                    attempt: None,
-                    expired_resends: 0,
-                };
-            }
-            self.reindex(key);
+            self.next_stage(cx, key);
         }
     }
 
