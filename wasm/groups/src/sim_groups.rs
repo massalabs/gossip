@@ -680,7 +680,10 @@ impl Sim {
         let now = self.now;
         let invitations = self.node(d).invitations(now);
         for inv in invitations {
-            let legit = self.legit.contains(&inv.chat_id) && !self.devs[d].closed;
+            // A former owner's root after its handover is no invitation a user takes.
+            let legit = self.legit.contains(&inv.chat_id)
+                && !self.former_roots.contains(&inv.chat_id)
+                && !self.devs[d].closed;
             // Answering one invitation may settle another (the lookup of its parent
             // succeeded): an invitation that is gone is skipped.
             let r = if legit {
@@ -1696,8 +1699,14 @@ impl Sim {
             }
             // A former owner's root after its handover is never current (§5.9).
             if let Some(s) = self.group_of(d) {
+                // Unless it never got the handover (§5.9: a lagging device can be misled
+                // until it does), as when Dissolve & Delete erased it before it arrived.
+                let holds_handover = node.tables().epochs.iter().any(|(_, r)| {
+                    r.status == EpochStatus::Installed
+                        && r.root.root_type() == crate::root::RootType::Handover
+                });
                 assert!(
-                    !self.former_roots.contains(&s.current),
+                    !self.former_roots.contains(&s.current) || !holds_handover,
                     "device {d} follows a former owner's root"
                 );
             }
@@ -1724,8 +1733,10 @@ impl Sim {
                 let unverifiable = conversations
                     .iter()
                     .any(|c| c.owner != ident(0).id && !holds_handover_to(&c.owner));
+                // Dissolve & Delete erases roots on a best-effort basis: a member that
+                // lagged cannot fetch the epochs that would join its conversations.
                 assert!(
-                    unverifiable,
+                    unverifiable || self.dissolve_delete,
                     "device {d} shows the group as {} conversations",
                     conversations.len()
                 );
