@@ -862,11 +862,12 @@ impl Node {
         chat_id: ChatId,
         sync_obj_id: SyncObjId,
         body: Body,
-        metadata: BTreeMap<String, Vec<u8>>,
+        metadata: impl Into<crate::MetadataPatch>,
         scheduled_for: Option<u64>,
         now: u64,
         rng: &mut dyn Randomness,
     ) -> Result<Published, NodeError> {
+        let metadata: crate::MetadataPatch = metadata.into();
         self.publish_with(store, chat_id, now, rng, move |e, ov, now, rng| {
             e.publish_edit(ov, now, rng, sync_obj_id, body, metadata, scheduled_for)
         })
