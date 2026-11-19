@@ -284,6 +284,19 @@ impl Root {
             .expect("signed by its owner")
     }
 
+    /// Test only: `p` signed by `key`, whatever its type and fields, without any check (a
+    /// hostile owner's handover, for instance).
+    #[cfg(test)]
+    pub(crate) fn forge_unchecked(p: proto::GroupRoot, key: &dyn Signer) -> Self {
+        let mut root = Self::from_proto(EVENT_VERSION, p).expect("structurally valid");
+        root.signature = key.sign_id(
+            CONTEXT_ROOT_SIGNATURE,
+            root.chat_id.as_bytes(),
+            [7; SIGNING_RANDOMNESS_SIZE],
+        );
+        root
+    }
+
     fn sign_and_check(
         mut self,
         signing_key: &dyn Signer,
@@ -1388,6 +1401,62 @@ pub(crate) mod tests {
         assert_eq!(
             Root::from_proto(1, p).map(|_| ()),
             Err(Error::HandoverParentCount)
+        );
+    }
+
+    /// A handover root keeps the member list of its parent exactly, except that the
+    /// outgoing owner, who signs it, may be absent; nothing else may be added or removed.
+    /// The name may change (§4.7).
+    #[test]
+    fn a_handover_keeps_the_parents_members_but_its_signer() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let carol = identity(3);
+        let dave = identity(4);
+        let parent = founding(&alice, &[&alice, &bob, &carol]);
+        let signed = |members: &[&Identity], seed: u8| {
+            let mut p = params(&bob, members, seed);
+            p.name = "Renamed".into();
+            let root = Root::build(RootType::Handover, p, &[parent.chat_id()], None).unwrap();
+            Root::forge_unchecked(root.to_proto(), &alice.secret.dsa_signing_key)
+        };
+        // The same members, renamed: valid. Without the outgoing owner: valid.
+        assert!(
+            signed(&[&alice, &bob, &carol], 0x40)
+                .verify_signature(Some(&parent))
+                .is_ok()
+        );
+        assert!(
+            signed(&[&bob, &carol], 0x41)
+                .verify_signature(Some(&parent))
+                .is_ok()
+        );
+        // Another member dropped, with or without the outgoing owner: invalid.
+        for members in [&[&alice, &bob][..], &[&bob][..]] {
+            assert_eq!(
+                signed(members, 0x42).verify_signature(Some(&parent)),
+                Err(Error::HandoverAddsMember)
+            );
+        }
+        // A member added, even in place of a dropped one: invalid.
+        for members in [
+            &[&alice, &bob, &carol, &dave][..],
+            &[&bob, &carol, &dave][..],
+        ] {
+            assert_eq!(
+                signed(members, 0x43).verify_signature(Some(&parent)),
+                Err(Error::HandoverAddsMember)
+            );
+        }
+        // The builder refuses to drop a member other than the outgoing owner.
+        assert!(
+            Root::create_handover(
+                params(&bob, &[&alice, &bob], 0x44),
+                &parent,
+                &alice.secret.dsa_signing_key,
+                [2; 32]
+            )
+            .is_err()
         );
     }
 

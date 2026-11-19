@@ -3480,3 +3480,35 @@ fn adding_back_names_the_last_epoch_of_the_owners_line_not_a_former_owners_branc
     );
     assert!(!root.names_parent(&back.chat_id()));
 }
+
+/// A handover root keeps the parent's members exactly, but for its signer (§4.7): one that
+/// drops another member, validly signed by the parent's owner, is invalid for a device that
+/// holds the parent, and counts against the peer that delivered it.
+#[test]
+fn a_handover_that_drops_a_member_is_refused() {
+    let (mut net, g) = founded(4);
+    let parent = net.devs[2].node.root(&g).unwrap();
+    let mut p = parent.to_proto();
+    p.r#type = crate::wire::proto::RootType::Handover as i32;
+    p.owner = ident(1).public.to_bytes();
+    p.epoch_challenge = vec![0x61; 32];
+    p.parents = vec![parent_commitment_bytes(&p.epoch_challenge, &g)];
+    let mut members: Vec<GossipId> = [0, 1, 2].iter().map(|d| gid(*d)).collect();
+    members.sort();
+    p.members = members.iter().map(|m| m.as_bytes().to_vec()).collect();
+    let forged = crate::Root::forge_unchecked(p, &ident(0).secret.dsa_signing_key);
+    let id = forged.chat_id();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(forged))).unwrap();
+    net.recv_frames_m(2, 0, &[Frame::Event(blob)]);
+    assert!(!net.devs[2].node.tables().epochs.contains(&id));
+    assert_eq!(net.devs[2].node.stats().failed_announcements, 1);
+    assert_eq!(net.current(2, &g), Some(g));
+    assert_eq!(net.summary(2, &g).unwrap().owner, gid(0));
+}
+
+fn parent_commitment_bytes(challenge: &[u8], parent: &ChatId) -> Vec<u8> {
+    let c = crate::ids::Challenge::from_slice(challenge).unwrap();
+    crate::hash::parent_commitment(&c, parent)
+        .as_bytes()
+        .to_vec()
+}
