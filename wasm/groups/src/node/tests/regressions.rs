@@ -558,3 +558,18 @@ fn a_member_answering_busy_forever_runs_out_of_chances() {
         "{scan_ttls:?}"
     );
 }
+
+/// Found by review (code at `6a916f2e`): the lookup deadline of a task came from its ID's
+/// timestamp alone, so a task for an ID dated far in the future never ended, and enough of
+/// them filled the queue of missing IDs for good.
+#[test]
+fn a_task_for_an_id_dated_far_ahead_ends_within_a_retention_period() {
+    let mut net = Net::new(3, 1);
+    let chat = net.chat();
+    let far = EventId::new(T0 + 3_650 * DAY, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[far])]);
+    assert_eq!(net.devs[0].node.task_count().0, 1);
+    net.now = T0 + crate::constants::RETENTION_MS + MIN;
+    net.tick(0);
+    assert_eq!(net.devs[0].node.task_count(), (0, 0));
+}
