@@ -8,9 +8,18 @@
 //! Randomness (secrets, challenges, event IDs, signing randomness) and the current time are
 //! arguments.
 //!
-//! - [`cbor`]: the deterministic CBOR encoding of hash projections (§1.2).
+//! - [`hash`]: `H(domain, ...) = BLAKE3(CBOR([domain, ...]))` and every derived ID (§1.2, §3).
 
 #![warn(missing_docs)]
 
 pub mod cbor;
 pub mod constants;
+mod error;
+pub mod hash;
+mod ids;
+
+pub use error::{Error, Result};
+pub use ids::{
+    Challenge, ChatId, DissolveId, EventId, GossipId, GroupSecret, KickId, LeaveId,
+    ParentCommitment, RefChatId, RequestId, ScanId, SecretProof, SyncObjId,
+};
