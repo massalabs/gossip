@@ -7,8 +7,10 @@ export const groupsnode_accept_invitation: (a: number, b: number, c: number, d: 
 export const groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const groupsnode_create_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const groupsnode_decline_invitation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+export const groupsnode_decode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
 export const groupsnode_delete_group: (a: number, b: number, c: number, d: number) => [number, number];
 export const groupsnode_dissolve_group: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+export const groupsnode_encode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
 export const groupsnode_group: (a: number, b: number, c: number) => [number, number, number, number];
 export const groupsnode_groups: (a: number) => [number, number];
 export const groupsnode_handed_off: (a: number, b: number, c: number) => [number, number];
@@ -33,6 +35,7 @@ export const groupsnode_publish_deletion: (a: number, b: number, c: number, d: n
 export const groupsnode_publish_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
 export const groupsnode_publish_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
 export const groupsnode_published: (a: number, b: number, c: number) => [number, number];
+export const groupsnode_ref_chat_id: (a: number, b: number, c: number) => [number, number, number, number];
 export const groupsnode_resend_root: (a: number, b: number, c: number, d: number) => [number, number];
 export const groupsnode_retry: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const groupsnode_scan_shared_chats: (a: number, b: number, c: number, d: number) => [number, number];

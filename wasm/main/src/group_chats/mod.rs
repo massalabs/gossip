@@ -432,6 +432,25 @@ impl GroupsNode {
         self.core.take_changes(ms(now)?).map_err(js)
     }
 
+    /// The reference (§4.5) of a held epoch, which reply targets name.
+    pub fn ref_chat_id(&self, epoch: &[u8]) -> Result<Option<Vec<u8>>, JsValue> {
+        Ok(self
+            .core
+            .ref_chat_id(chat(epoch)?)
+            .map(|r| r.as_bytes().to_vec()))
+    }
+
+    /// The value of the metadata key `replyTo`: `targets` is
+    /// `[{"ref_chat_id":hex,"sync_obj_id":hex}]`, 1 to 32 of them.
+    pub fn encode_reply_to(&self, targets: &str) -> Result<Vec<u8>, JsValue> {
+        self.core.encode_reply_to(targets).map_err(js)
+    }
+
+    /// The targets of a `replyTo` value, in the JSON form `encode_reply_to` takes.
+    pub fn decode_reply_to(&self, value: &[u8]) -> Result<String, JsValue> {
+        self.core.decode_reply_to(value).map_err(js)
+    }
+
     /// The verified keys held for `id`, if any.
     pub fn keys(&self, id: &[u8]) -> Result<Option<Vec<u8>>, JsValue> {
         Ok(self.core.keys(peer(id)?))

@@ -415,3 +415,26 @@ fn a_plaintext_waits_for_its_batch() {
     assert!(net.peers[0].core.is_current(out[0].handle, now).unwrap());
     assert!(net.peers[0].core.is_current_unchecked(out[0].handle, now));
 }
+
+#[test]
+fn a_reply_names_the_reference_of_its_target_epoch() {
+    let mut net = Net::new(2);
+    let b = net.peers[1].id();
+    let now = net.now;
+    let group = net.peers[0]
+        .core
+        .create_group("G".into(), vec![b], now)
+        .unwrap();
+    let reference = net.peers[0].core.ref_chat_id(group).unwrap();
+    assert_ne!(reference.as_bytes(), group.as_bytes());
+    let targets = format!(
+        r#"[{{"ref_chat_id":"{}","sync_obj_id":"{}"}}]"#,
+        hex(reference.as_bytes()),
+        hex(&[7; 32])
+    );
+    let value = net.peers[0].core.encode_reply_to(&targets).unwrap();
+    assert_eq!(net.peers[0].core.decode_reply_to(&value).unwrap(), targets);
+    assert!(net.peers[0].core.encode_reply_to("[]").is_err());
+    assert!(net.peers[0].core.decode_reply_to(&[0xff]).is_err());
+    assert!(net.peers[1].core.ref_chat_id(group).is_none());
+}
