@@ -25,13 +25,16 @@
 //!   device switches to it by itself while the other person never took part in its own, and
 //!   otherwise holds it as an invitation that continues its chat
 //!   ([`super::InvitationSummary::continues`]): accepting it supersedes that chat, declining
-//!   leaves it. A chat the other person left is never kept against its new one.
+//!   leaves it. Only chats that both still list compete: an own chat that no longer lists
+//!   the other person (a signed decline, a leave, a removal) is history only, and a new
+//!   chat of that person is always an invitation to continue it.
 //! - **What the caller declares** decides the receiving side only. A **migration**
 //!   ([`Node::migration_of`]) is shown when the caller declared an earlier conversation with
 //!   the owner at that version ([`Node::set_earlier_conversation`]); a **new contact**'s chat
 //!   is adopted without a prompt under a one-shot consent ([`Node::consent_to_direct_chat`],
 //!   expiring after [`CONSENT_MS`]). Once the device holds a direct chat with that peer
-//!   ([`Node::holds_direct_chat`]), a later creation from it is an ordinary invitation.
+//!   ([`Node::holds_direct_chat`]: active, and listing both), a later creation from it is an
+//!   ordinary invitation.
 //! - **Connections.** [`Node::is_co_member`], [`Node::connections_to_revoke`] and
 //!   [`Node::peers_wanting_connection`] are pure queries; [`ChangeKind::Connections`] is
 //!   reported, keyed by [`DEVICE`], when what they answer may have changed.
@@ -208,13 +211,16 @@ impl Node {
     }
 
     /// Whether this device holds a direct chat with `peer`: an installed epoch, in an active
-    /// group, whose root founded an automatic group of the two (a successor with one parent
-    /// commitment, those two members, a known `migrate_from`), whoever owns it and however
-    /// the group grew since. A later creation from that peer is then an ordinary invitation.
+    /// group whose current epoch still lists both, whose root founded an automatic group of
+    /// the two (a successor with one parent commitment, those two members, a known
+    /// `migrate_from`), whoever owns it and however the group grew since. A later creation
+    /// from that peer is then an ordinary invitation. A chat that no longer lists one of the
+    /// two (a signed decline, a leave, a removal) is not held.
     #[must_use]
     pub fn holds_direct_chat(&self, peer: &GossipId) -> bool {
         self.t.epochs.iter().any(|(c, r)| {
             r.status == EpochStatus::Installed
+                && self.lists_both(c, *peer)
                 && r.root.root_type() == RootType::Successor
                 && r.root.parents().len() == 1
                 && r.root.members().len() == 2
@@ -247,9 +253,28 @@ impl Node {
 
     /// This device's own migration group with `peer` at format `version` that a peer's
     /// creation pairs with: an installed root it created founding a group of the two with
-    /// that `migrate_from`, in an active group that is still a chat of the two (or of this
-    /// device alone, after the peer's signed decline), owned by this device.
+    /// that `migrate_from`, in an active group that is still a chat of exactly the two,
+    /// owned by this device.
     fn own_migration(&self, peer: GossipId, version: u64) -> Option<ChatId> {
+        self.own_chats(peer, version)
+            .into_iter()
+            .find(|c| self.still_of_two(c, peer))
+    }
+
+    /// This device's own automatic chat with `peer` at format `version` that no longer
+    /// lists `peer`, of this device alone (§5.12): history only, competing in no tie. A new
+    /// chat of `peer` is an invitation to continue it.
+    fn own_former_chat(&self, peer: GossipId, version: u64) -> Option<ChatId> {
+        self.own_chats(peer, version).into_iter().find(|c| {
+            self.current_epoch(c)
+                .and_then(|e| self.t.epochs.get(&e))
+                .is_some_and(|r| r.root.members() == [self.me])
+        })
+    }
+
+    /// The installed roots this device created founding an automatic group of it and
+    /// `peer` with that `migrate_from`, in active groups, in order.
+    fn own_chats(&self, peer: GossipId, version: u64) -> Vec<ChatId> {
         self.t
             .epochs
             .iter()
@@ -264,21 +289,26 @@ impl Node {
                     && r.root.members().len() == 2
                     && r.root.is_member(&peer)
                     && self.group_status(c) == GroupStatus::Active
-                    && self.still_of_two(c, peer)
             })
             .map(|(c, _)| *c)
-            .min()
+            .collect()
     }
 
-    /// Whether the current epoch of the group of `chat` is owned by this device and lists no
-    /// one but this device and `peer`.
+    /// Whether the current epoch of the group of `chat` is owned by this device and lists
+    /// exactly this device and `peer`.
     fn still_of_two(&self, chat: &ChatId, peer: GossipId) -> bool {
-        self.current_epoch(chat)
+        self.lists_both(chat, peer)
+            && self
+                .current_epoch(&self.group_of(chat))
+                .and_then(|c| self.t.epochs.get(&c))
+                .is_some_and(|r| r.root.owner_id() == self.me && r.root.members().len() == 2)
+    }
+
+    /// Whether the current epoch of the group of `chat` lists both this device and `peer`.
+    fn lists_both(&self, chat: &ChatId, peer: GossipId) -> bool {
+        self.current_epoch(&self.group_of(chat))
             .and_then(|c| self.t.epochs.get(&c))
-            .is_some_and(|r| {
-                r.root.owner_id() == self.me
-                    && r.root.members().iter().all(|m| *m == self.me || *m == peer)
-            })
+            .is_some_and(|r| r.root.is_member(&self.me) && r.root.is_member(&peer))
     }
 
     /// The peer's migration groups with this device at format `version` that this device
@@ -295,6 +325,7 @@ impl Node {
                     && self.direct_owner(&r.root, false) == Some(peer)
                     && self.gx.children.get(c).is_none_or(BTreeSet::is_empty)
                     && self.group_status(c) == GroupStatus::Active
+                    && self.lists_both(c, peer)
             })
             .map(|(c, _)| *c)
             .collect()
@@ -323,6 +354,10 @@ impl Node {
             }
             self.settle_pair(cx, mine, root.clone(), from)?;
             return Ok(true);
+        }
+        if self.own_former_chat(peer, v).is_some() {
+            // Always an invitation to continue the chat the peer is no longer in.
+            return Ok(false);
         }
         if !closed_before
             && !self.holds_direct_chat(&peer)
@@ -359,7 +394,7 @@ impl Node {
             self.drop_fetched_for(id);
         }
         self.t.markers.remove(&id);
-        if !self.keeps_mine(&theirs, mine) {
+        if !self.keeps_mine(&theirs) {
             self.adopt(cx, theirs, from, Vec::new(), false)?;
             self.changed(id, ChangeKind::Joined, cx.now);
             self.supersede(cx, mine, id)?;
@@ -450,16 +485,10 @@ impl Node {
     }
 
     /// Whether the tie rule keeps this device's own chat `mine` against the peer's creating
-    /// root `theirs` for the same two and `migrate_from` (§5.12): its own GossipID sorts
-    /// first, and the peer is still a member of `mine` (a chat the peer left or declined
-    /// cannot continue the conversation with it).
-    fn keeps_mine(&self, theirs: &Root, mine: ChatId) -> bool {
-        let peer = theirs.owner_id();
-        self.me.as_bytes() < peer.as_bytes()
-            && self
-                .current_epoch(&self.group_of(&mine))
-                .and_then(|c| self.t.epochs.get(&c))
-                .is_some_and(|r| r.root.is_member(&peer))
+    /// root `theirs` for the same two and `migrate_from`, both still listing both (§5.12):
+    /// its own GossipID sorts first.
+    fn keeps_mine(&self, theirs: &Root) -> bool {
+        self.me.as_bytes() < theirs.owner_id().as_bytes()
     }
 
     /// Whether the peer's creating root `theirs`, for the same two and `migrate_from` as
@@ -467,7 +496,7 @@ impl Node {
     /// than a switch without a prompt (§5.12): the peer's chat wins the tie, and the peer took
     /// part in `mine`. The side that keeps its own chat is never asked.
     fn continues_mine(&self, theirs: &Root, mine: ChatId) -> bool {
-        !self.keeps_mine(theirs, mine)
+        !self.keeps_mine(theirs)
             && self
                 .t
                 .group_recs
@@ -476,13 +505,17 @@ impl Node {
     }
 
     /// The chat of this device that the creating root `root` of a peer (an invitation)
-    /// continues (§5.12): its own automatic chat with that peer, which `root` wins by the tie
-    /// rule, and in which the peer took part. Accepting it supersedes that chat.
+    /// continues (§5.12): its own automatic chat with that peer, either listing both, which
+    /// `root` wins by the tie rule and in which the peer took part, or no longer listing the
+    /// peer. Accepting it supersedes that chat.
     pub(crate) fn continued_by(&self, root: &Root, parent_held: bool) -> Option<ChatId> {
         let (peer, v) = self.direct_creation(root, parent_held)?;
-        let mine = self.own_migration(peer, v)?;
-        self.continues_mine(root, mine)
-            .then(|| self.group_of(&mine))
+        match self.own_migration(peer, v) {
+            Some(mine) => self
+                .continues_mine(root, mine)
+                .then(|| self.group_of(&mine)),
+            None => self.own_former_chat(peer, v).map(|c| self.group_of(&c)),
+        }
     }
 
     /// Whether `group` is an automatic chat of two this device founded (§5.12): its first
@@ -533,6 +566,9 @@ impl Node {
                 }
                 continue;
             }
+            if self.own_former_chat(peer, v).is_some() {
+                continue;
+            }
             if !self.holds_direct_chat(&peer)
                 && self
                     .t
@@ -568,6 +604,38 @@ impl Node {
             // The peer's migration accepted before: this device's own sorts first.
             for c in self.peer_migrations(peer, v) {
                 self.supersede(cx, c, created.chat_id())?;
+            }
+        }
+        if KNOWN_FORMAT_VERSIONS.contains(&v) {
+            // An automatic chat of the two this device was removed from or left is the
+            // earlier part of the conversation the new chat continues; it stays as it is.
+            let by = self.group_of(&created.chat_id());
+            let read_only: Vec<ChatId> = self
+                .gx
+                .current
+                .keys()
+                .filter(|g| {
+                    **g != by
+                        && matches!(
+                            self.group_status(g),
+                            GroupStatus::Removed { .. } | GroupStatus::Left { .. }
+                        )
+                        && self.t.epochs.get(g).is_some_and(|r| {
+                            r.root.root_type() == RootType::Successor
+                                && r.root.parents().len() == 1
+                                && r.root.migrate_from() == Some(v)
+                                && r.root.members().len() == 2
+                                && r.root.is_member(&self.me)
+                                && r.root.is_member(&peer)
+                        })
+                })
+                .copied()
+                .collect();
+            for g in read_only {
+                let b = self.group_rec_mut(by);
+                if !b.earlier.contains(&g) {
+                    b.earlier.push(g);
+                }
             }
         }
         self.settle_invitations_of(cx, peer)
