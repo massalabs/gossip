@@ -71,6 +71,7 @@
   },
   "timeline": {
     "founded": "{{owner}} создал(а) группу",
+    "joined": "{{owner}} добавил(а) вас",
     "added": "{{owner}} добавил(а) {{names}}",
     "removed": "{{owner}} удалил(а) {{names}}",
     "left": "{{names}} покинул(а) группу",
@@ -80,6 +81,7 @@
     "you_left": "Вы покинули эту группу",
     "dissolved": "Владелец распустил эту группу",
     "not_a_member": "Вы не были участником с {{from}} по {{to}}",
+    "added_back": "{{owner}} снова добавил(а) вас",
     "edited": "Изменено",
     "reply_to": "Ответ на",
     "reply_unavailable": "Сообщение недоступно",

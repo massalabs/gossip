@@ -44,9 +44,17 @@ export function lineTexts(
   switch (line.type) {
     case 'founded':
       return [t('timeline.founded', { owner: name(line.owner) })];
+    case 'joined':
+      return [t('timeline.joined', { owner: name(line.by) })];
     case 'epochChange': {
-      const owner = name(line.owner);
+      // `by` made the change: for a handover, the outgoing owner (§4.7).
+      const owner = name(line.by);
       const out: string[] = [];
+      // A handover first, then what it changed ("Hand over and leave": the
+      // outgoing owner named the next one, then left).
+      if (line.newOwner) {
+        out.push(t('timeline.new_owner', { owner, name: name(line.newOwner) }));
+      }
       if (line.added.length)
         out.push(t('timeline.added', { owner, names: names(line.added) }));
       if (line.removed.length) {
@@ -61,9 +69,6 @@ export function lineTexts(
             name: iso(safeName(line.renamed) || '—'),
           })
         );
-      }
-      if (line.newOwner) {
-        out.push(t('timeline.new_owner', { owner, name: name(line.newOwner) }));
       }
       return out;
     }
@@ -80,6 +85,8 @@ export function lineTexts(
           to: formatDateTime(toDate(line.to)),
         }),
       ];
+    case 'addedBack':
+      return [t('timeline.added_back', { owner: name(line.by) })];
   }
 }
 
