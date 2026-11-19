@@ -105,7 +105,8 @@
     "disabled_waiting": "Waiting for the owner to remove you. Messages were deleted.",
     "disabled_dissolved": "This group was dissolved by its owner.",
     "disabled_resolve": "The group has competing versions. Resolve them in the group details before sending.",
-    "too_long": "This message is too long for a group. Shorten it and send it again."
+    "too_long": "This message is too long for a group. Shorten it and send it again.",
+    "edit_too_long": "This text is too long for a group message. Shorten it to save it."
   },
   "message_menu": {
     "reply": "Reply",

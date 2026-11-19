@@ -105,7 +105,8 @@
     "disabled_waiting": "En attente que le propriétaire vous retire. Les messages ont été supprimés.",
     "disabled_dissolved": "Ce groupe a été dissous par son propriétaire.",
     "disabled_resolve": "Le groupe a des versions concurrentes. Résolvez-les dans les détails du groupe avant d'envoyer.",
-    "too_long": "Ce message est trop long pour un groupe. Raccourcissez-le et renvoyez-le."
+    "too_long": "Ce message est trop long pour un groupe. Raccourcissez-le et renvoyez-le.",
+    "edit_too_long": "Ce texte est trop long pour un message de groupe. Raccourcissez-le pour l'enregistrer."
   },
   "message_menu": {
     "reply": "Répondre",

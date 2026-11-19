@@ -105,7 +105,8 @@
     "disabled_waiting": "正在等待群主移出你。消息已删除。",
     "disabled_dissolved": "此群组已被群主解散。",
     "disabled_resolve": "此群组存在相互竞争的版本。请先在群组详情中处理后再发送。",
-    "too_long": "这条消息对群组来说太长了。请缩短后重新发送。"
+    "too_long": "这条消息对群组来说太长了。请缩短后重新发送。",
+    "edit_too_long": "这段文字对群组消息来说太长了。请缩短后再保存。"
   },
   "message_menu": {
     "reply": "回复",
