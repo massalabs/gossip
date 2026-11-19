@@ -2,6 +2,9 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_groupsnode_free: (a: number, b: number) => void;
+export const group_max_metadata_bytes: () => number;
+export const group_max_plaintext_bytes: () => number;
+export const group_metadata_bytes: (a: number, b: number) => [number, number, number];
 export const groupsnode_abandon: (a: number, b: number) => void;
 export const groupsnode_accept_invitation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
@@ -47,6 +50,7 @@ export const groupsnode_take_batches: (a: number) => [number, number, number];
 export const groupsnode_take_changes: (a: number, b: number) => [number, number, number, number];
 export const groupsnode_tick: (a: number, b: number) => [number, number];
 export const groupsnode_timeline: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const group_max_text_bytes: () => number;
 export const __wbg_addressedannouncement_free: (a: number, b: number) => void;
 export const __wbg_announcementresult_free: (a: number, b: number) => void;
 export const __wbg_encryptionkey_free: (a: number, b: number) => void;

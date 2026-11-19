@@ -1,5 +1,23 @@
 /* tslint:disable */
 /* eslint-disable */
+/**
+ * The largest group plaintext, in bytes (§13.10).
+ */
+export function group_max_plaintext_bytes(): number;
+/**
+ * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
+ * forward of text. A longer one is refused by the engine and by every receiver.
+ */
+export function group_max_text_bytes(): number;
+/**
+ * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
+ */
+export function group_max_metadata_bytes(): number;
+/**
+ * The size of message metadata, given as `publish_message` takes it (a list of
+ * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
+ */
+export function group_metadata_bytes(metadata: string): number;
 export function start(): void;
 /**
  * Generates user keys from a passphrase.
@@ -655,6 +673,9 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly __wbg_groupsnode_free: (a: number, b: number) => void;
+  readonly group_max_metadata_bytes: () => number;
+  readonly group_max_plaintext_bytes: () => number;
+  readonly group_metadata_bytes: (a: number, b: number) => [number, number, number];
   readonly groupsnode_abandon: (a: number, b: number) => void;
   readonly groupsnode_accept_invitation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
   readonly groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
@@ -700,6 +721,7 @@ export interface InitOutput {
   readonly groupsnode_take_changes: (a: number, b: number) => [number, number, number, number];
   readonly groupsnode_tick: (a: number, b: number) => [number, number];
   readonly groupsnode_timeline: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly group_max_text_bytes: () => number;
   readonly __wbg_addressedannouncement_free: (a: number, b: number) => void;
   readonly __wbg_announcementresult_free: (a: number, b: number) => void;
   readonly __wbg_encryptionkey_free: (a: number, b: number) => void;
