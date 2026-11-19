@@ -1424,3 +1424,28 @@ fn an_accepted_root_after_a_leave_is_linked_through_its_fetched_parents() {
     assert_eq!(groups.len(), 1, "{groups:?}");
     assert_eq!(groups[0].status, MyStatus::Left);
 }
+
+/// Regression (simulation, code at the parent of this commit, `GROUPS_MEMBERS_SEED=13`): a
+/// removed device, restored from a backup, was told of its removal; when it later joined
+/// the conversation it had accepted apart with the group the kick had made read-only, the
+/// joined group became active again: the device showed itself a member of an epoch it was
+/// removed from.
+#[test]
+fn joining_a_group_keeps_a_kick_of_its_current_epoch() {
+    let store = MemoryStorage::new();
+    let mut node = Node::open(&store, gid(0)).unwrap();
+    let kicked = ChatId::from_bytes([1; 32]);
+    let other = ChatId::from_bytes([2; 32]);
+    node.group_rec_mut(kicked).status = GroupStatus::Removed {
+        epoch: kicked,
+        at: 5,
+    };
+    node.group_rec_mut(other);
+    node.merge_groups(other, kicked);
+    // The merged group is judged again from what it holds (see `check_own_removal`); a
+    // kick naming a current epoch that the merge brings keeps it read-only.
+    assert!(matches!(
+        node.t.group_recs.get(&kicked).unwrap().status,
+        GroupStatus::Removed { .. }
+    ));
+}
