@@ -168,6 +168,8 @@ struct Counters {
     direct_consents: u64,
     /// Invitations to continue a chat of two in a new one, accepted (§5.12).
     direct_continuations: u64,
+    /// Devices restored from a backup made before their chat of two (§5.12, cases 7 and 8).
+    direct_restores: u64,
     /// Messages written in chats of two.
     direct_messages: u64,
     /// Migration roots replayed by a hostile member to a third party.
@@ -247,6 +249,7 @@ impl Counters {
             direct_superseded,
             direct_consents,
             direct_continuations,
+            direct_restores,
             direct_messages,
             direct_replays,
             direct_forged,
@@ -311,6 +314,7 @@ impl Counters {
             ("direct_superseded", self.direct_superseded),
             ("direct_consents", self.direct_consents),
             ("direct_continuations", self.direct_continuations),
+            ("direct_restores", self.direct_restores),
             ("direct_messages", self.direct_messages),
             ("direct_replays", self.direct_replays),
             ("direct_forged", self.direct_forged),
@@ -2699,14 +2703,16 @@ fn membership_simulation() {
 /// Direct chats (§5.12), run with every seed after the group above: honest devices that
 /// migrate their earlier conversations, sometimes both at once, contacts that consent to the
 /// chat the requester founds (sometimes both ways), ordinary groups of two left as
-/// invitations, and a hostile member that replays a migration root to a third party and
-/// forges `migrate_from` on a larger group. Plaintexts are delayed, reordered and
-/// duplicated; devices go offline.
+/// invitations, a pair of which one device restores a backup made before their chat and
+/// founds a new one (cases 7 and 8 of §5.12), and a hostile member that replays a migration
+/// root to a third party and forges `migrate_from` on a larger group. Plaintexts are delayed,
+/// reordered and duplicated; devices go offline.
 ///
 /// Checks: both devices of every migrating pair end with the same single migration group;
 /// no device adopts a group it neither created, nor accepted, nor consented to, nor won by
 /// the tie rule; no device holds a root it is not a member of; a forged or replayed root is
-/// never acted on.
+/// never acted on; a device whose own chat the tie rule keeps is never asked to continue the
+/// conversation in the other's.
 mod direct {
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -2722,7 +2728,9 @@ mod direct {
 
     const HONEST: usize = 5;
     const HOSTILE: usize = 5;
-    const N: usize = 6;
+    /// The pair of the restore scenario, apart from the others.
+    const RESTORED: [usize; 2] = [6, 7];
+    const N: usize = 8;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Kind {
@@ -2736,6 +2744,11 @@ mod direct {
         /// second, which sorts first, founds a new chat to continue the conversation (one
         /// that sorts last would get the chat it holds back from its creation).
         Continue,
+        /// The first consented to the second's chat, both wrote in it; an hour later the
+        /// first restores a backup made before and founds a new chat: case 7 when it sorts
+        /// last (the other keeps its chat, not asked), case 8 when it sorts first (the other
+        /// is asked).
+        Restore,
     }
 
     struct Dev {
@@ -2751,6 +2764,8 @@ mod direct {
         /// The chats of two it holds in which the other person took part or it wrote itself,
         /// since its last restore: never erased.
         kept: BTreeSet<ChatId>,
+        /// The store as it was before any chat.
+        backup: MemoryStorage,
     }
 
     struct Sim {
@@ -2783,6 +2798,7 @@ mod direct {
                     consented: BTreeSet::new(),
                     migrated: BTreeSet::new(),
                     kept: BTreeSet::new(),
+                    backup: MemoryStorage::new(),
                 })
                 .collect();
             for d in &mut devs {
@@ -2791,6 +2807,7 @@ mod direct {
                         .learn_keys(&mut d.store, &ident(k).public.to_bytes(), START, &mut rng)
                         .unwrap();
                 }
+                d.backup = d.store.clone();
             }
             let mut sim = Self {
                 rng,
@@ -2850,10 +2867,23 @@ mod direct {
                             sim.script.push((t, x, y, Kind::Contact { both: false }));
                             sim.script.push((t + HOUR, y, x, kind));
                         }
+                        Kind::Restore => unreachable!("scripted apart"),
                     }
                     sim.pairs.push((x, y, kind));
                 }
             }
+            // The restore pair: case 7 or case 8 by the seed.
+            let [a, b] = RESTORED;
+            let (restored, other) = if chance(&mut sim.rng, 50) {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            let t = START + below(&mut sim.rng, HOUR);
+            sim.script
+                .push((t, other, restored, Kind::Contact { both: false }));
+            sim.script.push((t + HOUR, restored, other, Kind::Restore));
+            sim.pairs.push((other, restored, Kind::Restore));
             // The hostile member migrates with an honest one that declared it.
             let x = below(&mut sim.rng, HONEST as u64) as usize;
             sim.declare(x, HOSTILE);
@@ -2956,7 +2986,19 @@ mod direct {
                     dev.created.insert(g);
                     dev.migrated.insert(peer);
                 }
-                Kind::Continue => {
+                Kind::Continue | Kind::Restore => {
+                    if kind == Kind::Restore {
+                        let dev = &mut self.devs[d];
+                        dev.store = dev.backup.clone();
+                        dev.node = Node::open(&dev.store, gid(d)).unwrap();
+                        dev.created.clear();
+                        dev.accepted.clear();
+                        dev.consented.clear();
+                        dev.migrated.clear();
+                        dev.kept.clear();
+                        dev.inbox.clear();
+                        self.counters.direct_restores += 1;
+                    }
                     let dev = &mut self.devs[d];
                     let g = dev
                         .node
@@ -3051,6 +3093,12 @@ mod direct {
             // chat of two; ordinary invitations wait.
             for inv in dev.node.invitations(now) {
                 if inv.continues.is_some() && d != HOSTILE {
+                    // Only the side whose chat loses the tie is ever asked.
+                    assert!(
+                        inv.owner.as_bytes() < gid(d).as_bytes(),
+                        "device {d} asked to continue in {:?}",
+                        inv.chat_id
+                    );
                     self.counters.direct_continuations += 1;
                 }
                 if (inv.migration_of.is_some() || inv.continues.is_some()) && d != HOSTILE {
@@ -3238,7 +3286,7 @@ mod direct {
                         assert_eq!(a.len(), 1, "pair {x} {y}: {a:?}");
                         assert_eq!(a, b, "pair {x} {y}");
                     }
-                    Kind::Contact { .. } | Kind::Continue => {
+                    Kind::Contact { .. } | Kind::Continue | Kind::Restore => {
                         // One chat, held by both, also when the requests crossed, and after a
                         // conversation continued in a new chat.
                         let (a, b) = (migration(x, y), migration(y, x));
