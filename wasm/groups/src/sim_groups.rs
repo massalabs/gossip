@@ -1499,7 +1499,7 @@ impl Sim {
                 }
             }
         }
-        let (Some(second), Some(cur)) = (self.second, self.node(heir).current_epoch(&old)) else {
+        let (Some(second), Some(cur)) = (self.second, self.node(o).current_epoch(&old)) else {
             return;
         };
         let b = ident(heir);
@@ -1884,6 +1884,12 @@ impl Sim {
                     continue;
                 }
                 if self.split && !dissolved.contains(&s.current) {
+                    continue;
+                }
+                // Dissolve & Delete removes the handover roots a remaining side branch of a
+                // former owner was judged against: that branch may stay current on its own
+                // (reported as a limit, not checked).
+                if self.dissolve_delete && self.former_roots.contains(&s.current) {
                     continue;
                 }
                 assert!(
