@@ -480,7 +480,7 @@ impl Sim {
             .filter(|s| self.legit.contains(&s.current))
             .max_by_key(|s| {
                 let at = node.root(&s.current).map_or(0, |r| r.created_at());
-                (u8::from(s.status == MyStatus::Member), at, s.current)
+                (at, s.current)
             })
     }
 
@@ -1426,6 +1426,30 @@ impl Sim {
                         "device {d} is a member of the current epoch but does not follow it"
                     );
                 }
+            }
+        }
+        // After a dissolve, every honest device that follows the group shows it dissolved
+        // (after a double handover, every device on the dissolved line).
+        if self.dissolved {
+            let dissolved: BTreeSet<ChatId> = honest
+                .iter()
+                .filter_map(|d| self.group_of(*d))
+                .filter(|s| matches!(s.status, MyStatus::Dissolved { .. }))
+                .map(|s| s.current)
+                .collect();
+            for &d in &honest {
+                let dev = &self.devs[d];
+                let Some(s) = self.group_of(d) else { continue };
+                if dev.closed || dev.removed || dev.restored {
+                    continue;
+                }
+                if self.split && !dissolved.contains(&s.current) {
+                    continue;
+                }
+                assert!(
+                    matches!(s.status, MyStatus::Dissolved { .. }),
+                    "device {d} did not apply the dissolve: {s:?}"
+                );
             }
         }
         for &d in &honest {
