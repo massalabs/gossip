@@ -66,6 +66,7 @@ import {
 import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
 import { GroupService } from './services/groups.js';
+import { ConversationService } from './services/conversations.js';
 import {
   SelfMessageService,
   reencryptSelfMessages,
@@ -273,6 +274,7 @@ class GossipSdk {
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
   private _groups: GroupService | null = null;
+  private _conversations: ConversationService | null = null;
 
   private createProfileService(queries: Queries): ProfileService {
     return new ProfileService(queries, async userId => {
@@ -740,6 +742,29 @@ class GossipSdk {
         this._message.setGroupPlaintextHandler((from, plaintext) =>
           groups.handlePlaintext(from, plaintext)
         );
+        // Conversations: archives, direct chats and connections (§5.12).
+        const discussions = this._discussion;
+        const conversations = new ConversationService(
+          session,
+          queries,
+          this.eventEmitter,
+          groups,
+          discussions
+        );
+        this._conversations = conversations;
+        discussions.setOnContactAccepted(peer =>
+          conversations.contactRequestAccepted(peer)
+        );
+        this._announcement.setConnectionPolicy({
+          isCoMember: peer => conversations.isCoMember(peer),
+          accept: async peer => {
+            await discussions.createSessionForContact(peer, new Uint8Array(0));
+          },
+          processed: async peer => {
+            void conversations.peerChanged(peer).catch(() => undefined);
+          },
+        });
+        void conversations.start();
       } catch {
         await groups.close();
         // A generic error: the engine's own message may name records.
@@ -777,6 +802,8 @@ class GossipSdk {
         this._refresh = null;
         this._contact = null;
         this._selfMessage = null;
+        this._conversations?.stop();
+        this._conversations = null;
         await this._groups?.close();
         this._groups = null;
         this.messageQueues.clear();
@@ -909,6 +936,10 @@ class GossipSdk {
     // last operation may still encrypt and persist (bounded wait), and it
     // frees its copy of the signing key. `close` never throws.
     this._message?.setGroupPlaintextHandler(null);
+    this._conversations?.stop();
+    this._conversations = null;
+    this._discussion?.setOnContactAccepted(undefined);
+    this._announcement?.setConnectionPolicy(undefined);
     await this._groups?.close();
     this._groups = null;
 
@@ -1997,6 +2028,18 @@ class GossipSdk {
   }
 
   /** Contact management */
+  /**
+   * Conversations (§5.12): archives, direct chats and connections. Throws
+   * when the group engine could not be opened.
+   */
+  get conversations(): ConversationService {
+    this.requireSession();
+    if (!this._conversations) {
+      throw new Error('Conversation service not initialized');
+    }
+    return this._conversations;
+  }
+
   /** Group chats. Throws when the group engine could not be opened. */
   get groups(): GroupService {
     this.requireSession();

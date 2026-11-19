@@ -137,6 +137,9 @@ export class DiscussionService {
         weAccepted: true,
         direction: DiscussionDirection.INITIATED,
         unreadCount: 0,
+        // A contact request: once accepted, this device founds the direct
+        // chat (§5.12).
+        directChatOwed: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -199,7 +202,54 @@ export class DiscussionService {
   }
 
   /**
-   * Accept a discussion request from a contact using SessionManager
+   * Opens a connection with `contact` (§5.12): a session, recorded by a
+   * discussion that is never a conversation, without a request message and
+   * without a direct chat owed. Used for the members of accepted groups.
+   */
+  async openConnection(contact: Contact): Promise<Result<Uint8Array, Error>> {
+    const userId = this.session.userIdEncoded;
+    const existing = await this.queries.discussions.getByOwnerAndContact(
+      userId,
+      contact.userId
+    );
+    if (existing) {
+      return this.createSessionForContact(contact.userId, new Uint8Array(0));
+    }
+    const discussionId = await this.queries.discussions.insert({
+      ownerUserId: userId,
+      contactUserId: contact.userId,
+      weAccepted: true,
+      direction: DiscussionDirection.INITIATED,
+      unreadCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const result = await this.createSessionForContact(
+      contact.userId,
+      new Uint8Array(0)
+    );
+    if (!result.success) {
+      await this.queries.discussions.deleteById(discussionId);
+    }
+    return result;
+  }
+
+  /**
+   * Called when the user accepts a contact request, before the session is
+   * accepted: the consent to the chat its requester founds (§5.12).
+   */
+  private onContactAccepted?: (contactUserId: string) => Promise<void>;
+
+  setOnContactAccepted(
+    hook: ((contactUserId: string) => Promise<void>) | undefined
+  ): void {
+    this.onContactAccepted = hook;
+  }
+
+  /**
+   * Accept a discussion request from a contact using SessionManager.
+   * Accepting a contact request is the consent to the chat with that person
+   * (§5.12): its requester founds it and this device adopts it.
    * @param discussion - The discussion to accept
    */
   async accept(discussion: Discussion): Promise<Result<Uint8Array, Error>> {
@@ -207,6 +257,12 @@ export class DiscussionService {
     try {
       if (!discussion.id) {
         return { success: false, error: new Error('Discussion ID is missing') };
+      }
+
+      try {
+        await this.onContactAccepted?.(discussion.contactUserId);
+      } catch {
+        log.error('consent to the direct chat not recorded');
       }
 
       const result = await this.createSessionForContact(

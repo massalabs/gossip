@@ -31,6 +31,10 @@ export * from './db/queries/index.js';
 export * from './db/sqlite.js';
 export { SELF_CONTACT_ID } from './services/selfMessage.js';
 export { GroupService } from './services/groups.js';
+export {
+  ConversationService,
+  MigrationUnavailableError,
+} from './services/conversations.js';
 export type {
   GroupId,
   GroupSummary,
