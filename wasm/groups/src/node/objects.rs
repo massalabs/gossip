@@ -986,11 +986,17 @@ impl Node {
         // removal names: it is sent the roots of the epochs between (it is a member of
         // each, and a removed peer is answered no lookup, §10.4) and the kick or leave of
         // the epoch it was removed from. A leave of an earlier epoch that is live for
-        // `chat` comes with the roots between them, so that the device can tell it applies.
+        // `chat` comes with its root and the roots between: the device can tell it applies.
         let (key, chain) = if self.t.signed.contains(&kick) {
             (kick, Vec::new())
         } else if let Some(leave) = self.leave_for(&chat, &peer) {
-            let chain = self.line_between(&leave.0, &chat, &peer);
+            // A leave of an earlier epoch is verified against that epoch's root, which the
+            // device may not hold (restored from a backup older than it, it got `chat` as an
+            // invitation): that root comes first.
+            let mut chain = self.line_between(&leave.0, &chat, &peer);
+            if leave.0 != chat {
+                chain.insert(0, leave.0);
+            }
             (leave, chain)
         } else if let Some(later) = self.later_removal(&chat, &peer) {
             let chain = self.line_between(&chat, &later.0, &peer);
