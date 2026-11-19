@@ -57,7 +57,10 @@ use crate::rng::{TestRng, bytes, uniform_below};
 use crate::root::{Root, RootParams};
 use crate::signed::{Kick, Leave};
 use crate::store::{MemoryStorage, StorageRead, StoredResult};
-use crate::wire::{self, Entry, EntryItem, EventObject, Frame, Notice};
+use crate::wire::{
+    self, Entry, EntryItem, EventObject, Frame, Notice, QueryEntry, QueryOp, Response,
+    ResponseResult,
+};
 
 const START: u64 = 1_700_000_000_000;
 const SECOND: u64 = 1_000;
@@ -115,6 +118,17 @@ struct Counters {
     lost: u64,
     duplicated: u64,
     crashes: u64,
+    /// Older epochs whose messages differ between two devices of one line (reported).
+    older_epoch_differences: u64,
+    forged_handovers: u64,
+    forged_dissolves: u64,
+    hostile_queries: u64,
+    wrong_answers: u64,
+    stranger_frames: u64,
+    former_owner_forks: u64,
+    takeovers: u64,
+    dissolve_deletes: u64,
+    long_chains: u64,
     max_plaintexts_hour: u64,
     max_bytes_hour: u64,
 }
@@ -157,7 +171,17 @@ impl Counters {
             key_queries_needed,
             lost,
             duplicated,
-            crashes
+            crashes,
+            older_epoch_differences,
+            forged_handovers,
+            forged_dissolves,
+            hostile_queries,
+            wrong_answers,
+            stranger_frames,
+            former_owner_forks,
+            takeovers,
+            dissolve_deletes,
+            long_chains
         );
         self.max_plaintexts_hour = self.max_plaintexts_hour.max(o.max_plaintexts_hour);
         self.max_bytes_hour = self.max_bytes_hour.max(o.max_bytes_hour);
@@ -198,6 +222,15 @@ impl Counters {
             ("lost", self.lost),
             ("duplicated", self.duplicated),
             ("crashes", self.crashes),
+            ("forged_handovers", self.forged_handovers),
+            ("forged_dissolves", self.forged_dissolves),
+            ("hostile_queries", self.hostile_queries),
+            ("wrong_answers", self.wrong_answers),
+            ("stranger_frames", self.stranger_frames),
+            ("former_owner_forks", self.former_owner_forks),
+            ("takeovers", self.takeovers),
+            ("dissolve_deletes", self.dissolve_deletes),
+            ("long_chains", self.long_chains),
         ];
         all.iter()
             .filter(|(_, n)| *n == 0)
@@ -216,6 +249,8 @@ struct Mail {
 struct Device {
     id: GossipId,
     hostile: bool,
+    /// A stranger: a hostile identity that is no member of the group.
+    stranger: bool,
     store: MemoryStorage,
     node: Option<Node>,
     online: bool,
@@ -259,6 +294,7 @@ enum Step {
     RemoveRestored,
     OwnerFork,
     Rename,
+    LongChain,
     Handover,
     DoubleHandover,
     Dissolve,
@@ -292,6 +328,14 @@ struct Sim {
     dissolved: bool,
     /// The owner forked and must resolve.
     forked: bool,
+    /// A second group of the founder, with the same members (the target of a takeover).
+    second: Option<ChatId>,
+    /// Signed objects built by hostile devices.
+    forged_objects: Vec<SignedObject>,
+    /// Roots of a former owner continuing its old epoch after a handover.
+    former_roots: BTreeSet<ChatId>,
+    /// Dissolve & Delete in this seed.
+    dissolve_delete: bool,
 }
 
 fn below(rng: &mut TestRng, n: u64) -> u64 {
@@ -315,11 +359,13 @@ impl Sim {
         // Honest devices 0..h, hostile ones after.
         let honest = 6 + below(&mut rng, 3) as usize;
         let hostile = 1 + below(&mut rng, 2) as usize;
-        let n = honest + hostile;
+        // The last device is a stranger, no member of the group.
+        let n = honest + hostile + 1;
         let devs = (0..n)
             .map(|i| Device {
                 id: ident(i).id,
                 hostile: i >= honest,
+                stranger: i == n - 1,
                 store: MemoryStorage::new(),
                 node: None,
                 online: false,
@@ -367,6 +413,7 @@ impl Sim {
         if seed.is_multiple_of(3) {
             script.push((at(&mut rng, 12), Step::Handover));
         }
+        script.push((at(&mut rng, 11), Step::LongChain));
         if seed % 4 == 3 {
             script.push((at(&mut rng, 14), Step::Dissolve));
         }
@@ -391,6 +438,10 @@ impl Sim {
             split: false,
             dissolved: false,
             forked: false,
+            second: None,
+            forged_objects: Vec::new(),
+            former_roots: BTreeSet::new(),
+            dissolve_delete: seed % 8 == 3,
         };
         for d in 0..n {
             sim.boot(d);
@@ -412,8 +463,11 @@ impl Sim {
                 }
             }
         }
-        // The founder creates the group with every device but the late one.
-        let members: Vec<GossipId> = (1..n).filter(|d| *d != late).map(|d| ident(d).id).collect();
+        // The founder creates the group with every device but the late one and the stranger.
+        let members: Vec<GossipId> = (1..n - 1)
+            .filter(|d| *d != late)
+            .map(|d| ident(d).id)
+            .collect();
         let s = signer(0);
         let dev = &mut sim.devs[0];
         let g = dev
@@ -432,6 +486,26 @@ impl Sim {
         sim.legit.insert(g);
         sim.owners.insert(ident(0).id);
         sim.group = Some(g);
+        sim.counters.groups_created += 1;
+        // A second group with the same members, which a new owner of the first must not be
+        // able to take over (a former owner's other group).
+        let members: Vec<GossipId> = (1..n - 1).map(|d| ident(d).id).collect();
+        let dev = &mut sim.devs[0];
+        let g2 = dev
+            .node
+            .as_mut()
+            .unwrap()
+            .create_group(
+                &mut dev.store,
+                &s,
+                "Other".into(),
+                members,
+                START,
+                &mut sim.rng,
+            )
+            .unwrap();
+        sim.legit.insert(g2);
+        sim.second = Some(g2);
         sim.counters.groups_created += 1;
         sim
     }
@@ -477,7 +551,7 @@ impl Sim {
         let node = self.node(d);
         node.groups()
             .into_iter()
-            .filter(|s| self.legit.contains(&s.current))
+            .filter(|s| self.legit.contains(&s.current) && Some(s.current) != self.second)
             .max_by_key(|s| {
                 let at = node.root(&s.current).map_or(0, |r| r.created_at());
                 (at, s.current)
@@ -558,7 +632,7 @@ impl Sim {
         arrived.sort_by_key(|m| (m.at, m.seq));
         if self.devs[d].hostile {
             for m in &arrived {
-                self.hostile_learn(d, &m.bytes);
+                self.hostile_learn(d, m.from, &m.bytes);
             }
             self.hostile_step(d);
             return;
@@ -913,6 +987,40 @@ impl Sim {
                         }
                     }
                 }
+                Step::LongChain => {
+                    // A member away while the owner renames the group many times: it gets a
+                    // long chain of roots back, in whatever order they come.
+                    let away = self.honest().into_iter().find(|d| {
+                        *d != o
+                            && !self.devs[*d].closed
+                            && !self.devs[*d].restored
+                            && !self.devs[*d].removed
+                    });
+                    if let Some(a) = away {
+                        self.devs[a].online = false;
+                        self.devs[a].away_until = self.now + HOUR;
+                        self.devs[a].next = self.devs[a].away_until;
+                    }
+                    let mut made = 0;
+                    for i in 0..12 {
+                        if self
+                            .change(
+                                o,
+                                GroupChange::Successor {
+                                    add: vec![],
+                                    remove: vec![],
+                                    name: Some(format!("chain {i}")),
+                                },
+                            )
+                            .is_some()
+                        {
+                            made += 1;
+                        }
+                    }
+                    if made > 0 {
+                        self.counters.long_chains += 1;
+                    }
+                }
                 Step::Rename => {
                     if self
                         .change(
@@ -951,6 +1059,19 @@ impl Sim {
                         .is_some()
                     {
                         self.counters.handovers += 1;
+                        if let Some(old) = self.group_of(o).map(|s| s.current) {
+                            // Its root of the former epoch is the line's previous end.
+                            let prev = self.node(o).root(&old).and_then(|_| {
+                                self.node(o)
+                                    .tables()
+                                    .epochs
+                                    .get(&old)
+                                    .and_then(|r| r.parents.first().copied())
+                            });
+                            if let Some(prev) = prev {
+                                self.after_handover(o, heir, prev);
+                            }
+                        }
                         if chance(&mut self.rng, 50) || self.counters.handovers_to_offline == 0 {
                             self.devs[heir].online = false;
                             self.devs[heir].away_until = self.now + 2 * HOUR;
@@ -1010,16 +1131,18 @@ impl Sim {
                     }
                 }
                 Step::Dissolve => {
+                    let delete = self.dissolve_delete;
                     let Some(s) = self.group_of(o) else { continue };
                     let sg = signer(o);
                     if self
                         .op(o, |n, st, now, rng| {
-                            n.dissolve_group(st, &sg, s.group, false, now, rng)
+                            n.dissolve_group(st, &sg, s.group, delete, now, rng)
                         })
                         .is_ok()
                     {
                         self.dissolved = true;
                         self.counters.dissolves += 1;
+                        self.counters.dissolve_deletes += u64::from(delete);
                     }
                 }
             }
@@ -1028,8 +1151,42 @@ impl Sim {
 
     // ── Hostile members ──────────────────────────────────────────────────────
 
-    fn hostile_learn(&mut self, d: usize, bytes: &[u8]) {
+    fn hostile_learn(&mut self, d: usize, from: usize, bytes: &[u8]) {
         for f in decode(bytes) {
+            // Wrong answers to every lookup: a stray root or object, its own keys.
+            if let Frame::Query(q) = &f {
+                let me = ident(d);
+                let mut out = Vec::new();
+                for (idx, e) in q.entries.iter().enumerate() {
+                    let result = match e {
+                        QueryEntry::Op(QueryOp::Keys { .. }) => {
+                            ResponseResult::Keys(me.public.to_bytes())
+                        }
+                        QueryEntry::Op(
+                            QueryOp::ChatById(_)
+                            | QueryOp::ChatByParent { .. }
+                            | QueryOp::SignedObject { .. },
+                        ) => match self.devs[d].seen.first() {
+                            Some(b) => ResponseResult::Event(b.clone()),
+                            None => continue,
+                        },
+                        _ => continue,
+                    };
+                    out.push(Frame::Response(Response {
+                        request_id: Some(q.request_id),
+                        idx: idx as u32,
+                        result,
+                    }));
+                }
+                if !out.is_empty() {
+                    self.counters.wrong_answers += out.len() as u64;
+                    if let Ok(pt) = wire::encode_plaintext(&out) {
+                        let to = self.devs[from].id;
+                        self.transmit(d, to, pt);
+                    }
+                }
+                continue;
+            }
             let Frame::Event(b) = f else { continue };
             match wire::decode_event_blob(&b, 1) {
                 Ok(EventObject::Root(r)) => {
@@ -1058,6 +1215,10 @@ impl Sim {
         if self.final_phase || !chance(&mut self.rng, 20) {
             return;
         }
+        if self.devs[d].stranger {
+            self.stranger_step(d);
+            return;
+        }
         let Some(root) = self.devs[d].roots.last().cloned() else {
             return;
         };
@@ -1072,7 +1233,7 @@ impl Sim {
             return;
         }
         let to = targets[below(&mut self.rng, targets.len() as u64) as usize];
-        let frame = match below(&mut self.rng, 6) {
+        let frame = match below(&mut self.rng, 9) {
             0 => {
                 // Its own root continuing the group: a valid signature, no authority.
                 let params = RootParams {
@@ -1119,6 +1280,7 @@ impl Sim {
                 ) else {
                     return;
                 };
+                self.forged_objects.push(SignedObject::Kick(k.clone()));
                 self.counters.forged_kicks += 1;
                 Frame::Event(wire::encode_event_blob(&EventObject::Kick(k)).unwrap())
             }
@@ -1138,8 +1300,69 @@ impl Sim {
                     signature: sig.as_bytes().to_vec(),
                 };
                 let Ok(l) = Leave::from_proto(&p) else { return };
+                self.forged_objects.push(SignedObject::Leave(l.clone()));
                 self.counters.forged_leaves += 1;
                 Frame::Event(wire::encode_event_blob(&EventObject::Leave(l)).unwrap())
+            }
+            6 => {
+                // A handover of the group to itself, with its own (wrong) signature.
+                let mut p = root.to_proto();
+                p.r#type = crate::wire::proto::RootType::Handover as i32;
+                p.parents.truncate(1);
+                p.owner = me.public.to_bytes();
+                p.name = "mine".into();
+                let Ok(r) = Root::from_proto(1, p) else {
+                    return;
+                };
+                self.forged.insert(r.chat_id());
+                self.counters.forged_handovers += 1;
+                Frame::Event(wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap())
+            }
+            7 => {
+                // A dissolve message of the group, signed with its own key.
+                let must_delete = chance(&mut self.rng, 50);
+                let id = crate::hash::dissolve_id(&root.chat_id(), must_delete);
+                let sig = crate::keys::Signer::sign_id(
+                    &me.secret.dsa_signing_key,
+                    crate::constants::CONTEXT_DISSOLVE_SIGNATURE,
+                    id.as_bytes(),
+                    bytes(&mut self.rng),
+                );
+                let p = crate::wire::proto::Dissolve {
+                    chat_id: root.chat_id().as_bytes().to_vec(),
+                    must_delete,
+                    signature: sig.as_bytes().to_vec(),
+                };
+                let Ok(x) = crate::signed::Dissolve::from_proto(&p) else {
+                    return;
+                };
+                self.forged_objects.push(SignedObject::Dissolve(x.clone()));
+                self.counters.forged_dissolves += 1;
+                Frame::Event(wire::encode_event_blob(&EventObject::Dissolve(x)).unwrap())
+            }
+            8 => {
+                // Membership lookups, often from a member removed since.
+                self.counters.hostile_queries += 1;
+                Frame::Query(crate::wire::Query {
+                    request_id: crate::ids::RequestId::from_bytes(bytes(&mut self.rng)),
+                    sent_at: self.now,
+                    ttl: MINUTE,
+                    entries: vec![
+                        QueryEntry::Op(QueryOp::ChatById(root.chat_id())),
+                        QueryEntry::Op(QueryOp::Keys {
+                            chat_id: root.chat_id(),
+                            gossip_id: to,
+                        }),
+                        QueryEntry::Op(QueryOp::Removal {
+                            chat_id: root.chat_id(),
+                            gossip_id: to,
+                        }),
+                        QueryEntry::Op(QueryOp::SharedChatsScan {
+                            scan_id: crate::ids::ScanId::from_bytes(bytes(&mut self.rng)),
+                            offset: 0,
+                        }),
+                    ],
+                })
             }
             4 => {
                 // A replay of a root or signed object it received, possibly of another
@@ -1176,6 +1399,120 @@ impl Sim {
         };
         let pt = wire::encode_plaintext(&[frame]).expect("fits");
         self.transmit(d, to, pt);
+    }
+
+    /// A stranger, no member of the group, sends a member roots of its own listing them
+    /// both (invitations nobody accepts), and root notices of epochs.
+    fn stranger_step(&mut self, d: usize) {
+        let honest = self.honest();
+        let target = honest[below(&mut self.rng, honest.len() as u64) as usize];
+        let to = self.devs[target].id;
+        let me = ident(d);
+        let frame = if chance(&mut self.rng, 50) {
+            let params = RootParams {
+                name: "join us".into(),
+                members: vec![to, me.id],
+                group_secret: GroupSecret::from_bytes(bytes(&mut self.rng)),
+                owner: me.public.clone(),
+                epoch_challenge: Challenge::from_bytes(bytes(&mut self.rng)),
+                ref_chat_id_challenge: Challenge::from_bytes(bytes(&mut self.rng)),
+                created_at: self.now,
+            };
+            let parents: Vec<ChatId> = (0..4)
+                .map(|_| ChatId::from_bytes(bytes(&mut self.rng)))
+                .collect();
+            let Ok(r) = Root::create_successor(
+                params,
+                &parents,
+                &me.secret.dsa_signing_key,
+                bytes(&mut self.rng),
+            ) else {
+                return;
+            };
+            self.forged.insert(r.chat_id());
+            Frame::Event(wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap())
+        } else {
+            let mut entries = vec![Entry {
+                chat_id: ChatId::from_bytes(bytes(&mut self.rng)),
+                item: EntryItem::Root,
+            }];
+            if let Some(g) = self.group {
+                entries.push(Entry {
+                    chat_id: g,
+                    item: EntryItem::Root,
+                });
+            }
+            Frame::Notice(Notice {
+                entries,
+                skipped: 0,
+            })
+        };
+        self.counters.stranger_frames += 1;
+        let pt = wire::encode_plaintext(&[frame]).expect("fits");
+        self.transmit(d, to, pt);
+    }
+
+    /// The former owner `o`, after handing the group over, signs a successor of its old
+    /// epoch dated at the end of time; the heir builds a root continuing both its line and
+    /// the former owner's second group. Neither may take effect.
+    fn after_handover(&mut self, o: usize, heir: usize, old: ChatId) {
+        let members: Vec<GossipId> = self
+            .node(o)
+            .root(&old)
+            .map(|r| r.members().to_vec())
+            .unwrap_or_default();
+        if members.is_empty() {
+            return;
+        }
+        let params =
+            |owner: &auth::UserPublicKeys, rng: &mut TestRng, at: u64, name: &str| RootParams {
+                name: name.into(),
+                members: members.clone(),
+                group_secret: GroupSecret::from_bytes(bytes(rng)),
+                owner: owner.clone(),
+                epoch_challenge: Challenge::from_bytes(bytes(rng)),
+                ref_chat_id_challenge: Challenge::from_bytes(bytes(rng)),
+                created_at: at,
+            };
+        let a = ident(o);
+        let p = params(&a.public, &mut self.rng, u64::MAX, "back");
+        if let Ok(r) =
+            Root::create_successor(p, &[old], &a.secret.dsa_signing_key, bytes(&mut self.rng))
+        {
+            // A former owner's root continuing its own epoch: valid, kept as a side branch
+            // (§5.9), never current.
+            self.legit.insert(r.chat_id());
+            self.former_roots.insert(r.chat_id());
+            self.counters.former_owner_forks += 1;
+            let blob = wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap();
+            for m in &members {
+                if *m != a.id {
+                    let pt = wire::encode_plaintext(&[Frame::Event(blob.clone())]).unwrap();
+                    self.transmit(o, *m, pt);
+                }
+            }
+        }
+        let (Some(second), Some(cur)) = (self.second, self.node(heir).current_epoch(&old)) else {
+            return;
+        };
+        let b = ident(heir);
+        let p = params(&b.public, &mut self.rng, self.now, "taken");
+        if let Ok(r) = Root::create_successor(
+            p,
+            &[cur, second],
+            &b.secret.dsa_signing_key,
+            bytes(&mut self.rng),
+        ) {
+            self.forged.insert(r.chat_id());
+            self.counters.takeovers += 1;
+            let blob = wire::encode_event_blob(&EventObject::Root(Box::new(r))).unwrap();
+            for m in &members {
+                if *m != b.id {
+                    let pt = wire::encode_plaintext(&[Frame::Event(blob.clone())]).unwrap();
+                    self.transmit(heir, *m, pt);
+                }
+            }
+        }
     }
 
     // ── Time ─────────────────────────────────────────────────────────────────
@@ -1344,6 +1681,44 @@ impl Sim {
                     );
                 }
             }
+            // No signed object a hostile member built is stored.
+            for (_, r) in node.tables().signed.iter() {
+                assert!(
+                    !self.forged_objects.contains(&r.object),
+                    "device {d} stored a forged signed object: {:?}",
+                    r.object.key()
+                );
+            }
+            // A former owner's root after its handover is never current (§5.9).
+            if let Some(s) = self.group_of(d) {
+                assert!(
+                    !self.former_roots.contains(&s.current),
+                    "device {d} follows a former owner's root"
+                );
+            }
+            // One logical group is one conversation.
+            let conversations = node
+                .groups()
+                .into_iter()
+                .filter(|s| {
+                    s.status == MyStatus::Member
+                        && self.legit.contains(&s.current)
+                        && Some(s.current) != self.second
+                })
+                .count();
+            assert!(
+                conversations <= 1,
+                "device {d} shows the group as {conversations} conversations"
+            );
+            // The second group stays the founder's.
+            if let Some(g2) = self.second
+                && let Some(s2) = node.group(&g2)
+            {
+                assert_eq!(
+                    s2.current, g2,
+                    "device {d}: the second group was taken over"
+                );
+            }
             // Every stored kick verifies with an authority of its epoch.
             for (_, r) in node.tables().signed.iter() {
                 if let SignedObject::Kick(k) = &r.object {
@@ -1390,8 +1765,13 @@ impl Sim {
         if !self.split {
             assert!(lines.len() <= 1, "owners differ: {lines:?}");
         } else {
+            // A double handover: each line is one of the two heirs' (or a later owner).
             assert!(lines.len() <= 2, "more than two lines: {lines:?}");
+            for o in lines.keys() {
+                assert!(self.owners.contains(o), "a line of an owner of no record");
+            }
         }
+        let mut diffs = 0u64;
         for devices in lines.values() {
             let reference = self.group_of(devices[0]).unwrap();
             for &d in devices {
@@ -1411,6 +1791,30 @@ impl Sim {
                     "messages of the current epoch: device {d} against {}",
                     devices[0]
                 );
+                // A member is listed in the current epoch it follows: a device that missed
+                // its removal would not be.
+                assert!(
+                    s.members.contains(&self.devs[d].id),
+                    "device {d} believes it is a member of an epoch that does not list it"
+                );
+                // Older epochs held by both: the same messages.
+                let mine: BTreeSet<ChatId> = self
+                    .node(d)
+                    .tables()
+                    .epochs
+                    .iter()
+                    .filter(|(_, r)| r.status == EpochStatus::Installed)
+                    .map(|(c, _)| *c)
+                    .collect();
+                for (c, r) in self.node(devices[0]).tables().epochs.iter() {
+                    if r.status == EpochStatus::Installed && mine.contains(c) && *c != s.current {
+                        let a = results(&self.devs[d].store, c);
+                        let b = results(&self.devs[devices[0]].store, c);
+                        if a != b {
+                            diffs += 1;
+                        }
+                    }
+                }
             }
             // Every honest member of the current epoch that did not close the group is in it.
             for &d in &honest {
@@ -1428,6 +1832,7 @@ impl Sim {
                 }
             }
         }
+        self.counters.older_epoch_differences += diffs;
         // After a dissolve, every honest device that follows the group shows it dissolved
         // (after a double handover, every device on the dissolved line).
         if self.dissolved {
