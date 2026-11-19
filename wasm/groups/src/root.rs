@@ -236,7 +236,7 @@ impl Root {
     /// # Errors
     ///
     /// As [`Root::create_successor`], plus [`Error::HandoverSameOwner`] and
-    /// [`Error::HandoverAddsMember`].
+    /// [`Error::HandoverChangesMembers`].
     pub fn create_handover(
         params: RootParams,
         parent: &Root,
@@ -481,14 +481,15 @@ impl Root {
     /// - Successor: with the ML-DSA-65 key of the root's own `owner`; `parent` is ignored.
     /// - Handover: `parent` must be the held root matching the single parent commitment. The
     ///   signature is verified with the key of that parent's owner; the new owner must differ
-    ///   from the parent's owner and every member must be a member of the parent.
+    ///   from the parent's owner and the members must be the parent's, the parent's owner
+    ///   being the only one that may be absent.
     ///
     /// # Errors
     ///
     /// [`Error::HandoverParentMissing`] when a handover root's parent is not given (the root
     /// is discarded without penalty and the parent is looked up, §4.7), otherwise
     /// [`Error::ParentMismatch`], [`Error::InvalidSignature`], [`Error::HandoverSameOwner`] or
-    /// [`Error::HandoverAddsMember`].
+    /// [`Error::HandoverChangesMembers`].
     pub fn verify_signature(&self, parent: Option<&Root>) -> Result<()> {
         match self.root_type {
             RootType::Successor => verify_id(
@@ -511,8 +512,14 @@ impl Root {
                 if self.owner_id == parent.owner_id {
                     return Err(Error::HandoverSameOwner);
                 }
-                if !self.members.iter().all(|m| parent.is_member(m)) {
-                    return Err(Error::HandoverAddsMember);
+                // The parent's members exactly, but for the outgoing owner, who may leave
+                // in it ("Hand over and leave", §5.7): a handover adds and removes no one.
+                let kept = parent
+                    .members
+                    .iter()
+                    .filter(|m| **m != parent.owner_id || self.is_member(m));
+                if !kept.eq(self.members.iter()) {
+                    return Err(Error::HandoverChangesMembers);
                 }
                 Ok(())
             }
@@ -1371,7 +1378,7 @@ pub(crate) mod tests {
                 [2; 32]
             )
             .map(|_| ()),
-            Err(Error::HandoverAddsMember)
+            Err(Error::HandoverChangesMembers)
         );
         assert_eq!(
             Root::create_handover(
@@ -1435,7 +1442,7 @@ pub(crate) mod tests {
         for members in [&[&alice, &bob][..], &[&bob][..]] {
             assert_eq!(
                 signed(members, 0x42).verify_signature(Some(&parent)),
-                Err(Error::HandoverAddsMember)
+                Err(Error::HandoverChangesMembers)
             );
         }
         // A member added, even in place of a dropped one: invalid.
@@ -1445,7 +1452,7 @@ pub(crate) mod tests {
         ] {
             assert_eq!(
                 signed(members, 0x43).verify_signature(Some(&parent)),
-                Err(Error::HandoverAddsMember)
+                Err(Error::HandoverChangesMembers)
             );
         }
         // The builder refuses to drop a member other than the outgoing owner.

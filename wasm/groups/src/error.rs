@@ -104,9 +104,10 @@ pub enum Error {
     /// A handover root keeps the parent's owner (§4.7, D.7).
     #[error("a handover root must name a new owner")]
     HandoverSameOwner,
-    /// A handover root lists someone who is not a member of the parent (§4.7).
-    #[error("a handover root cannot add members")]
-    HandoverAddsMember,
+    /// A handover root's members are not the parent's: it may only leave out the parent's
+    /// owner, who signs it (§4.7).
+    #[error("a handover root keeps the parent's members, but for the outgoing owner")]
+    HandoverChangesMembers,
     /// A handover root whose parent the device does not hold: discarded without penalty, and
     /// the parent is looked up (§4.7, §4.8).
     #[error("the parent of a handover root is not held")]
