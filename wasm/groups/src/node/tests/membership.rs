@@ -1131,3 +1131,84 @@ fn a_restored_member_learns_a_leave_of_an_older_epoch() {
     net.run(3 * MIN);
     assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Left);
 }
+
+/// Regression (simulation, code at afeb85d8, `GROUPS_MEMBERS_SEED=0`): the owner forked the
+/// group, then handed one branch over before it learnt the other. The new owner held the
+/// former owner's branch beside its own line and was never asked to resolve them (§5.9: it
+/// may take that branch as a parent), so members of that branch only were left behind.
+#[test]
+fn a_new_owner_resolves_the_former_owners_branch() {
+    let (mut net, g) = founded(4);
+    let backup = net.devs[0].store.clone();
+    let a = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("A".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.devs[0].store = backup;
+    net.restart(0);
+    // The owner, back at the first epoch, creates another successor and hands it over
+    // before it hears of the first one.
+    net.offline[1] = true;
+    let b = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("B".into()),
+            },
+        )
+        .unwrap();
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.offline[1] = false;
+    for (from, to, pt) in core::mem::take(&mut net.dropped) {
+        let now = net.now;
+        let dev = &mut net.devs[to];
+        dev.node
+            .handle_plaintext(&mut dev.store, gid(from), &pt, now, &mut net.rng)
+            .unwrap();
+    }
+    net.run(3 * MIN);
+    let s = net.summary(1, &g).unwrap();
+    assert_eq!(s.current, h);
+    assert!(s.side_branches.contains(&a), "{s:?}");
+    assert!(
+        s.must_resolve,
+        "the new owner must resolve the former owner's branch"
+    );
+    let r = net
+        .change(
+            1,
+            g,
+            GroupChange::Resolve {
+                members: vec![gid(0), gid(2), gid(3)],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    for d in 0..4 {
+        assert_eq!(net.current(d, &g), Some(r), "device {d}");
+    }
+    let _ = b;
+}
