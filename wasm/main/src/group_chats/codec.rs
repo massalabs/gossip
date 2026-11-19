@@ -659,11 +659,27 @@ record!(ReplyTarget {
 
 // ── Objects kept as the device's own encoding ────────────────────────────────
 
+thread_local! {
+    /// Set when an object could not be encoded: the batch that holds it is refused
+    /// ([`take_encode_failure`]) instead of panicking or storing a broken record.
+    static ENCODE_FAILED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Whether an object failed to encode since the last call; clears the flag.
+pub fn take_encode_failure() -> bool {
+    ENCODE_FAILED.with(|f| f.replace(false))
+}
+
 fn enc_object(object: EventObject) -> J {
-    // A held object was decoded or built under the limits, so it encodes again.
-    J::Str(hex(
-        &wire::encode_event_blob(&object).expect("a held object encodes")
-    ))
+    // A held object was decoded or built under the limits, so it encodes again; if it
+    // ever does not, the batch is refused rather than stored without it.
+    match wire::encode_event_blob(&object) {
+        Ok(blob) => J::Str(hex(&blob)),
+        Err(_) => {
+            ENCODE_FAILED.with(|f| f.set(true));
+            J::Null
+        }
+    }
 }
 
 fn dec_object(j: &J) -> R<EventObject> {
