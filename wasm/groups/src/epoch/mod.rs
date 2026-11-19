@@ -162,9 +162,11 @@ impl<'a> Epoch<'a> {
         self.root
     }
 
-    /// The acceptance checks of §6.3 that do not depend on local state, in the order listed
-    /// there.
-    fn gate(&self, sender: Sender, event: &MessageEvent) -> Option<Rejection> {
+    /// The acceptance checks of §6.3 that need neither the event nor local state, in the order
+    /// listed there: acceptance, membership of the immediate peer, removed peer, and the group
+    /// states that drop every event. They run before a blob is decoded, so that what a
+    /// non-member sends is classified as such whatever its bytes.
+    fn sender_gate(&self, sender: Sender) -> Option<Rejection> {
         if !self.accepted {
             return Some(Rejection::NotAccepted);
         }
@@ -176,13 +178,18 @@ impl<'a> Epoch<'a> {
                 return Some(Rejection::RemovedPeer);
             }
         }
-        let is_delete = matches!(event.payload(), Payload::Delete { .. });
         match self.group_state {
-            GroupState::Active => {}
-            GroupState::ReadOnlyAfterKick if is_delete => {}
-            GroupState::ReadOnlyAfterKick | GroupState::Waiting | GroupState::Dissolved => {
-                return Some(Rejection::GroupState);
-            }
+            GroupState::Waiting | GroupState::Dissolved => Some(Rejection::GroupState),
+            GroupState::Active | GroupState::ReadOnlyAfterKick => None,
+        }
+    }
+
+    /// The checks of §6.3 on the decoded event that do not depend on local state: the
+    /// read-only archive keeps deletions only, then the event's validity against the root.
+    fn event_gate(&self, event: &MessageEvent) -> Option<Rejection> {
+        let is_delete = matches!(event.payload(), Payload::Delete { .. });
+        if self.group_state == GroupState::ReadOnlyAfterKick && !is_delete {
+            return Some(Rejection::GroupState);
         }
         if let Err(e) = event.check_against_root(self.root) {
             return Some(Rejection::Invalid(e));
@@ -202,7 +209,7 @@ impl<'a> Epoch<'a> {
         event: MessageEvent,
         now: u64,
     ) -> Result<Received, StorageError> {
-        if let Some(rejection) = self.gate(sender, &event) {
+        if let Some(rejection) = self.sender_gate(sender).or_else(|| self.event_gate(&event)) {
             return Ok(Received::nothing(Outcome::Rejected(rejection)));
         }
         let mut tx = Tx::new(&*store, self.chat_id());
@@ -216,7 +223,9 @@ impl<'a> Epoch<'a> {
     }
 
     /// Decodes an event blob carried in a plaintext of version `plaintext_version` (§13.1)
-    /// and receives it. A malformed blob, or a root or signed object, is rejected.
+    /// and receives it. The checks on the sender and the group state run first, so a blob from
+    /// a non-member or a removed peer is rejected as such before it is decoded; then a
+    /// malformed blob, or a root or signed object, is rejected.
     ///
     /// # Errors
     ///
@@ -229,6 +238,9 @@ impl<'a> Epoch<'a> {
         plaintext_version: u64,
         now: u64,
     ) -> Result<Received, StorageError> {
+        if let Some(rejection) = self.sender_gate(sender) {
+            return Ok(Received::nothing(Outcome::Rejected(rejection)));
+        }
         match wire::decode_event_blob(blob, plaintext_version) {
             Ok(EventObject::Message(event)) => self.receive(store, sender, event, now),
             Ok(_) => Ok(Received::nothing(Outcome::Rejected(
