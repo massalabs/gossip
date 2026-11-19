@@ -3965,3 +3965,54 @@ fn a_handover_accepted_before_its_parent_deposes_the_former_owner_once_joined() 
     assert_eq!(rec.followed, Some(gid(1)));
     assert!(rec.deposed.contains(&gid(0)), "{rec:?}");
 }
+
+/// Found by the membership simulation: a former owner that stayed a member and is up to date
+/// edits its messages in older epochs (§10.4); only a contact about the handover's parent is
+/// answered with the handover root (§5.6), not one about an earlier epoch, which a member
+/// that is no removed peer learns past by its ordinary recovery.
+#[test]
+fn a_former_owner_still_a_member_is_answered_only_about_the_handovers_parent() {
+    let (mut net, g) = founded(4);
+    let m = net.say(0, &g, "mine");
+    net.run(MIN);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![],
+            name: Some("x".into()),
+        },
+    )
+    .unwrap();
+    net.run(MIN);
+    net.change(
+        0,
+        g,
+        GroupChange::Handover {
+            new_owner: gid(1),
+            leave: false,
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(2 * MIN);
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    dev.node
+        .publish_edit(
+            &mut dev.store,
+            g,
+            m.payload().sync_obj_id(),
+            Body::Text("edited".into()),
+            BTreeMap::new(),
+            None,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    for d in 1..4 {
+        assert_eq!(net.devs[d].node.stats().handover_replies, 0, "device {d}");
+    }
+}
