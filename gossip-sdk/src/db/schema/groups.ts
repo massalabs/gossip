@@ -60,6 +60,17 @@ export const groupObjects = sqliteTable(
     chatId: text('chatId').notNull(),
     syncObjId: text('syncObjId').notNull(),
     fields: text('fields').notNull(),
+    /**
+     * Whether the device may offer this record's events on its own initiative
+     * (`ObjectRecord::shareable`, §7.7, §14.1). `false` for a deletion kept
+     * for a message the device never processed, under a message timer: never
+     * announced nor listed in a tips scan, still served on a direct request.
+     *
+     * No default, on purpose: every write states it, and a write that does not
+     * is refused. A forgotten value would make a quiet record shareable, and
+     * its deletion could then be renewed between devices forever.
+     */
+    shareable: integer('shareable', { mode: 'boolean' }).notNull(),
   },
   table => [
     primaryKey({

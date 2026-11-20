@@ -39,7 +39,7 @@ const batch = (chat: string): GroupBatch => ({
   ],
   removedRows: [],
   edges: [{ chatId: chat, eventId: 'e1', parents: '[]' }],
-  objects: [{ chatId: chat, syncObjId: 's1', fields: '{}' }],
+  objects: [{ chatId: chat, syncObjId: 's1', fields: '{}', shareable: true }],
   node: [{ kind: 'meta', key: 'null', fields: '{"next_seq":1}' }],
   erase: [],
 });
