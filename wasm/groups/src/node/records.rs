@@ -20,7 +20,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::epoch::GroupState;
-use crate::ids::{ChatId, EventId, GossipId, ParentCommitment, RequestId, ScanId, SyncObjId};
+use crate::ids::{
+    ChatId, EventId, GossipId, ParentCommitment, RefChatId, RequestId, ScanId, SyncObjId,
+};
 use crate::root::Root;
 use crate::signed::{Dissolve, Kick, Leave};
 use crate::store::{Changes, Storage, StorageError};
@@ -48,6 +50,10 @@ pub enum Target {
     Removal(GossipId),
     /// The keys of a member of the task key's epoch (§4.3, §12.9).
     Keys(GossipId),
+    /// The root of the epoch a reply names by this reference, which no root this device
+    /// holds matches (§7.6, §12.7). The task key's `chat_id` is the epoch of the reply,
+    /// whose members are asked. One task is one round of [`RefLookup`].
+    Ref(RefChatId),
 }
 
 impl Target {
@@ -673,6 +679,7 @@ tables! {
     consents: GossipId => u64,
     backoff: GossipId => Backoff,
     contacts: GossipId => u64,
+    ref_lookups: RefChatId => RefLookup,
 }
 
 /// A table of the in-memory copy: the records and the keys written since the last commit.
@@ -1035,6 +1042,40 @@ pub struct HeldRoot {
     pub from: GossipId,
     /// When.
     pub at: u64,
+}
+
+/// A reply held by this device that names a reference (§7.6), kept by [`RefLookup`]: who
+/// delivered it, the author it claims, and when it arrived. Local, never sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefReply {
+    /// The peer that delivered it to this device.
+    pub from: GossipId,
+    /// Its author field: an unsigned claim, used only to order the peers asked.
+    pub author: GossipId,
+    /// When it was received (local time).
+    pub at: u64,
+}
+
+/// A reference named by replies this device holds, whose target it does not hold yet
+/// (§7.6, §12.7): the epoch is unknown and its root is looked up by reference, or it is an
+/// invitation not answered yet. Local, never sent; forgotten once no reply naming it is
+/// held.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefLookup {
+    /// The replies that name it, by `(epoch of the reply, its sync object, the target's sync
+    /// object)`. Bounded by [`super::timing::REF_REPLIES_KEPT`].
+    pub replies: BTreeMap<(ChatId, SyncObjId, SyncObjId), RefReply>,
+    /// Rounds of the lookup by reference started so far, at most
+    /// [`super::timing::REF_LOOKUP_ROUNDS`]; never reset while the record lasts.
+    pub rounds: u8,
+    /// When the last round started.
+    pub last_round: Option<u64>,
+    /// While a round runs: the epoch whose members it asks (the key of its task).
+    pub round: Option<ChatId>,
+    /// The peers of the running or last round, in the order they are asked.
+    pub asked: Vec<GossipId>,
+    /// When the record is examined next.
+    pub due: u64,
 }
 
 /// What changed, for the caller ([`super::Node::take_changes`]): coalesced per group and

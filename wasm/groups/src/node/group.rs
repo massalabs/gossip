@@ -1159,7 +1159,9 @@ impl Node {
     /// Stores an epoch record and indexes the parents its root names.
     pub(crate) fn put_record(&mut self, id: ChatId, rec: EpochRecord) {
         let fresh = !self.t.epochs.contains(&id) && !self.t.held_roots.contains(&id);
+        let reference = rec.root.ref_chat_id();
         self.t.epochs.insert(id, rec);
+        self.ref_stored(id, reference);
         if fresh {
             self.index_add(id);
         }
@@ -1169,6 +1171,7 @@ impl Node {
     /// Removes an epoch record and its index entries.
     pub(crate) fn take_record(&mut self, id: &ChatId) -> Option<EpochRecord> {
         let rec = self.t.epochs.remove(id)?;
+        self.ref_removed(rec.root.ref_chat_id());
         if !self.t.held_roots.contains(id) {
             self.index_remove(id);
         }

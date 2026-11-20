@@ -428,6 +428,14 @@ impl Node {
                     (Ok(EventObject::Root(r)), Target::Root) if r.chat_id() == key.chat_id => {
                         (self.receive_root(cx, from, *r, Via::Lookup)?, None)
                     }
+                    // A root returned for a reference must have that reference, computed
+                    // again here; any other root is an invalid answer (§13.4). It then goes
+                    // through the normal reception of a root (§4.8), with no special case.
+                    (Ok(EventObject::Root(r)), Target::Ref(reference))
+                        if r.ref_chat_id() == reference =>
+                    {
+                        (self.receive_root(cx, from, *r, Via::Lookup)?, None)
+                    }
                     // A removal lookup about a former owner, answered with the handover
                     // root it signed for the epoch looked up and left in (§5.6).
                     (Ok(EventObject::Root(r)), Target::Removal(m))

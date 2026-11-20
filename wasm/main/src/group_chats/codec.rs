@@ -19,9 +19,9 @@ use groups::display::VisibleMessage;
 use groups::node::records::{
     AnswerOp, Attempt, Backoff, Candidate, CandidateState, ChangeKind, EpochRecord, EpochStatus,
     FrozenScan, GroupRecord, GroupStatus, GroupSync, HeldRoot, Hint, Invitation, Junction,
-    JunctionKind, Lane, Marker, Meta, PeerRecord, PendingLeave, Purpose, RefEntry, ReplyCount,
-    RequestRef, Run, ScanAttempt, ScanOp, SignedObject, SignedRecord, Target, Task, TaskKey,
-    Trigger, TriggerKind, Work,
+    JunctionKind, Lane, Marker, Meta, PeerRecord, PendingLeave, Purpose, RefEntry, RefLookup,
+    RefReply, ReplyCount, RequestRef, Run, ScanAttempt, ScanOp, SignedObject, SignedRecord, Target,
+    Task, TaskKey, Trigger, TriggerKind, Work,
 };
 use groups::node::timing::Bucket;
 use groups::node::{
@@ -360,7 +360,8 @@ macro_rules! variants {
 
 // Retrieval.
 variants!(Target {
-    Event(id), SyncObj(id), Root, Parent(commitment), Object(kind, id), Removal(member), Keys(member)
+    Event(id), SyncObj(id), Root, Parent(commitment), Object(kind, id), Removal(member), Keys(member),
+    Ref(reference)
 });
 record!(TaskKey { chat_id, target });
 variants!(TriggerKind {
@@ -577,6 +578,15 @@ variants!(Marker { Closed, ClosedFrom(peer), Dissolved });
 record!(ReplyCount { since, count, owed });
 record!(PendingLeave { leave, from, at });
 record!(HeldRoot { root, from, at });
+record!(RefReply { from, author, at });
+record!(RefLookup {
+    replies,
+    rounds,
+    last_round,
+    round,
+    asked,
+    due
+});
 variants!(ChangeKind {
     Invitation,
     Joined,
@@ -1080,6 +1090,7 @@ mod tests {
             Target::Object(SignedKind::Dissolve, [1; 32]),
             Target::Removal(peer),
             Target::Keys(peer),
+            Target::Ref(RefChatId::from_bytes([13; 32])),
         ] {
             round_trip(TaskKey {
                 chat_id: chat,
@@ -1404,6 +1415,25 @@ mod tests {
             wait_ms: 3,
             window: 4,
         });
+        // A reference named by replies (§7.6, §12.7), with its key.
+        round_trip(RefChatId::from_bytes([13; 32]));
+        for round in [None, Some(chat)] {
+            round_trip(RefLookup {
+                replies: BTreeMap::from([(
+                    (chat, sync, SyncObjId::from_bytes([14; 32])),
+                    RefReply {
+                        from: peer,
+                        author: GossipId::from_bytes([15; 32]),
+                        at: 7,
+                    },
+                )]),
+                rounds: 2,
+                last_round: round.map(|_| 5),
+                round,
+                asked: vec![peer],
+                due: 9,
+            });
+        }
         // The key of an earlier conversation (§5.12): peer and format version.
         round_trip((peer, 0u64));
         round_trip((peer, u64::MAX));

@@ -127,7 +127,8 @@ macro_rules! node_tables {
             earlier,
             consents,
             backoff,
-            contacts
+            contacts,
+            ref_lookups
         )
     };
 }
