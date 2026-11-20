@@ -775,9 +775,10 @@ impl Node {
             ranked.push((
                 (
                     u8::from(!responsive),
-                    // Among the peers that answer, one already asked for this item, which let
-                    // a request time out or answered "not available" since it last announced
-                    // it, goes behind every member not yet asked for it (local policy, §11.2).
+                    // Among the peers that answer, one already asked for this item, which
+                    // answered "not available" since it last announced it, or let a request
+                    // time out without having announced it, goes behind every member not yet
+                    // asked for it (local policy, §11.2).
                     // Why: a peer that never held the item gives the same answer every time,
                     // while a member not yet asked may hold it. A peer that answers still
                     // comes before every unresponsive one, so that a holder that let one
@@ -915,7 +916,15 @@ impl Node {
                 .tasks
                 .get_mut(&key)
                 .and_then(|t| t.candidates.get_mut(&peer))
+                .filter(|c| c.trigger.is_none())
             {
+                // A peer that announced the item, or delivered a child naming it (tier 0),
+                // keeps its place for a timeout; only "not available" puts it behind the
+                // members not yet asked (see `select`). Why: a timeout says nothing of the
+                // item, while the announcement still stands; demoted, the holder waited
+                // behind every member never measured, each offline one costing a full stage,
+                // and the task could pause without asking it again. A holder that stops
+                // answering goes behind every responsive peer after three timeouts.
                 c.attempts = c.attempts.saturating_add(1);
             }
             self.next_stage(cx, key);
