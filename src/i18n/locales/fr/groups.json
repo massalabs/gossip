@@ -95,7 +95,9 @@
     "reply_unavailable": "Message indisponible",
     "empty": "Aucun message pour l'instant",
     "media": "Pièce jointe non prise en charge",
-    "forward": "Message transféré"
+    "forward": "Message transféré",
+    "timer_set": "Les messages envoyés à partir d’ici disparaissent après {{duration}}",
+    "timer_off": "Les messages envoyés à partir d’ici sont conservés"
   },
   "composer": {
     "placeholder": "Écrire au groupe",
@@ -222,5 +224,38 @@
     "choices": "Votre réponse",
     "open": "Ouvrir",
     "not_found": "Cette invitation n’est plus en attente."
+  },
+  "timer": {
+    "label": "Durée des messages",
+    "choose_hint": "Les messages disparaissent ce temps après leur envoi, sur chaque appareil. Un changement ne vaut que pour les messages envoyés après.",
+    "new_chat_hint": "Les messages de cette discussion disparaissent ce temps après leur envoi.",
+    "contact_request_hint": "Pour la discussion qui commence quand la personne accepte.",
+    "migration_hint": "Pour la nouvelle discussion. Vos anciens messages gardent leur propre règle.",
+    "change_hint": "Seuls les messages envoyés après un changement ont la nouvelle durée.",
+    "owner_only": "Seul le propriétaire peut la changer.",
+    "forever": "Pour toujours",
+    "month": "1 mois",
+    "disappear_after": "Les messages disparaissent après {{duration}}",
+    "kept": "Les messages sont conservés",
+    "seconds_one": "{{count}} seconde",
+    "seconds_few": "{{count}} secondes",
+    "seconds_many": "{{count}} secondes",
+    "seconds_other": "{{count}} secondes",
+    "minutes_one": "{{count}} minute",
+    "minutes_few": "{{count}} minutes",
+    "minutes_many": "{{count}} minutes",
+    "minutes_other": "{{count}} minutes",
+    "hours_one": "{{count}} heure",
+    "hours_few": "{{count}} heures",
+    "hours_many": "{{count}} heures",
+    "hours_other": "{{count}} heures",
+    "days_one": "{{count}} jour",
+    "days_few": "{{count}} jours",
+    "days_many": "{{count}} jours",
+    "days_other": "{{count}} jours",
+    "weeks_one": "{{count}} semaine",
+    "weeks_few": "{{count}} semaines",
+    "weeks_many": "{{count}} semaines",
+    "weeks_other": "{{count}} semaines"
   }
 }

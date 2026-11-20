@@ -210,7 +210,7 @@
   "privacy": {
     "title": "Privacy",
     "default_retention_title": "Default message auto-delete",
-    "default_retention_description": "New discussions will automatically have this retention policy applied."
+    "default_retention_description": "New chats you start get this message timer. You can choose another one when you start a chat."
   },
   "web3": {
     "title": "Web3",

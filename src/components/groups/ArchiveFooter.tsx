@@ -9,7 +9,10 @@ import {
   type Discussion,
 } from '@massalabs/gossip-sdk';
 import Button from '../ui/Button';
+import BaseModal from '../ui/BaseModal';
 import LeaveGroupSheet from './LeaveGroupSheet';
+import MessageTimerField from './MessageTimerField';
+import { messageTimerSentence } from '../../constants/messageTimer';
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { useGroupStore } from '../../stores/groupStore';
 import { useGroupMemberName } from '../../hooks/useGroupMemberName';
@@ -25,9 +28,11 @@ interface ArchiveFooterProps {
 /**
  * What an earlier one-to-one conversation offers instead of a composer
  * (§5.12): nothing is written in it any more. The peer's migration, when it
- * is pending, is shown with Accept and Decline and hides "Migrate"; otherwise
- * an archive offers "Migrate to a new group" and "Archive". A new contact
- * whose chat is not founded yet says what it waits for.
+ * is pending, is shown with its message timer, Accept and Decline, and hides
+ * "Migrate"; otherwise an archive offers "Migrate to a new group", confirmed
+ * with the message timer of the new chat (the conversation's own timer
+ * pre-selected), and "Archive". A new contact whose chat is not founded yet
+ * says what it waits for.
  */
 const ArchiveFooter: React.FC<ArchiveFooterProps> = ({
   contact,
@@ -43,6 +48,8 @@ const ArchiveFooter: React.FC<ArchiveFooterProps> = ({
   );
   const [busy, setBusy] = useState(false);
   const [declining, setDeclining] = useState(false);
+  // The migration being confirmed, with the timer chosen for the new chat.
+  const [migrating, setMigrating] = useState<{ timer: number } | null>(null);
   // Made safe (§5.11) and isolated from the direction of the sentence.
   const name = isolate(memberName(contact.userId));
 
@@ -71,10 +78,25 @@ const ArchiveFooter: React.FC<ArchiveFooterProps> = ({
       }
     });
 
-  const migrate = () =>
+  const confirmMigration = () =>
     run(async () => {
       try {
-        const groupId = await gossip.conversations.migrate(contact.userId);
+        // The timer the conversation has today (§7.7), pre-selected.
+        setMigrating({
+          timer: await gossip.conversations.migrationTimer(contact.userId),
+        });
+      } catch (error) {
+        logger.error('Migration timer not read', error);
+        toast.error(t('archive.migrate_failed'));
+      }
+    });
+
+  const migrate = (messageTimer: number) =>
+    run(async () => {
+      try {
+        const groupId = await gossip.conversations.migrate(contact.userId, {
+          messageTimer,
+        });
         await refresh();
         toast.success(t('archive.migrated'));
         navigate(ROUTES.group({ groupId }), { replace: true });
@@ -100,6 +122,12 @@ const ArchiveFooter: React.FC<ArchiveFooterProps> = ({
       <>
         <p className="text-sm text-foreground">
           {t('archive.invitation', { name })}
+        </p>
+        <p
+          className="mt-1 text-xs text-muted-foreground"
+          data-testid="archive-invitation-timer"
+        >
+          {messageTimerSentence(invitation.messageTimer, t)}
         </p>
         <div className="mt-3 flex gap-2 justify-center">
           <Button
@@ -132,7 +160,7 @@ const ArchiveFooter: React.FC<ArchiveFooterProps> = ({
         </p>
         <div className="mt-3 flex gap-2 justify-center flex-wrap">
           <Button
-            onClick={migrate}
+            onClick={() => void confirmMigration()}
             disabled={busy}
             variant="primary"
             size="custom"
@@ -178,6 +206,50 @@ const ArchiveFooter: React.FC<ArchiveFooterProps> = ({
       data-testid="archive-footer"
     >
       {body}
+      <BaseModal
+        isOpen={migrating !== null}
+        onClose={() => setMigrating(null)}
+        title={t('archive.migrate')}
+      >
+        {migrating && (
+          <div className="space-y-4 text-left">
+            <p className="text-sm text-foreground">
+              {t('archive.migrate_hint', { name })}
+            </p>
+            <div className="bg-card rounded-xl border border-border overflow-hidden">
+              <MessageTimerField
+                value={migrating.timer}
+                onChange={timer => setMigrating({ timer })}
+                hint={t('timer.migration_hint')}
+                testId="migration-message-timer"
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="primary"
+                size="custom"
+                className="flex-1 h-11 rounded-lg font-semibold"
+                data-testid="archive-migrate-confirm"
+                onClick={() => {
+                  const { timer } = migrating;
+                  setMigrating(null);
+                  void migrate(timer);
+                }}
+              >
+                {t('archive.migrate')}
+              </Button>
+              <Button
+                variant="secondary"
+                size="custom"
+                className="flex-1 h-11 rounded-lg font-semibold"
+                onClick={() => setMigrating(null)}
+              >
+                {t('choices.cancel')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </BaseModal>
       <LeaveGroupSheet
         isOpen={declining}
         mode="decline"

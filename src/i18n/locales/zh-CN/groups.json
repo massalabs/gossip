@@ -95,7 +95,9 @@
     "reply_unavailable": "消息不可用",
     "empty": "暂无消息",
     "media": "不支持的附件",
-    "forward": "转发的消息"
+    "forward": "转发的消息",
+    "timer_set": "此后发送的消息在 {{duration}}后消失",
+    "timer_off": "此后发送的消息永久保留"
   },
   "composer": {
     "placeholder": "发消息给群组",
@@ -222,5 +224,38 @@
     "choices": "你的回复",
     "open": "打开",
     "not_found": "此邀请已不再等待回复。"
+  },
+  "timer": {
+    "label": "消息定时",
+    "choose_hint": "消息在发送后经过这段时间，会在所有设备上消失。更改只对之后发送的消息有效。",
+    "new_chat_hint": "此聊天中的消息在发送后经过这段时间消失。",
+    "contact_request_hint": "用于对方接受后开始的聊天。",
+    "migration_hint": "用于新聊天。早先的消息保留自己的规则。",
+    "change_hint": "只有更改后发送的消息使用新的定时。",
+    "owner_only": "只有群主可以更改。",
+    "forever": "永久",
+    "month": "1 个月",
+    "disappear_after": "消息在 {{duration}}后消失",
+    "kept": "消息永久保留",
+    "seconds_one": "{{count}} 秒",
+    "seconds_few": "{{count}} 秒",
+    "seconds_many": "{{count}} 秒",
+    "seconds_other": "{{count}} 秒",
+    "minutes_one": "{{count}} 分钟",
+    "minutes_few": "{{count}} 分钟",
+    "minutes_many": "{{count}} 分钟",
+    "minutes_other": "{{count}} 分钟",
+    "hours_one": "{{count}} 小时",
+    "hours_few": "{{count}} 小时",
+    "hours_many": "{{count}} 小时",
+    "hours_other": "{{count}} 小时",
+    "days_one": "{{count}} 天",
+    "days_few": "{{count}} 天",
+    "days_many": "{{count}} 天",
+    "days_other": "{{count}} 天",
+    "weeks_one": "{{count}} 周",
+    "weeks_few": "{{count}} 周",
+    "weeks_many": "{{count}} 周",
+    "weeks_other": "{{count}} 周"
   }
 }

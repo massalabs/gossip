@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
-import { AlertTriangle, Shield } from 'react-feather';
+import { AlertTriangle, Clock, Shield } from 'react-feather';
 import type { GroupInvitation } from '@massalabs/gossip-sdk';
 import Button from '../ui/Button';
 import SafeName from './SafeName';
 import LeaveGroupSheet, { type LeaveAction } from './LeaveGroupSheet';
+import { messageTimerSentence } from '../../constants/messageTimer';
 
 interface GroupInvitationCardProps {
   invitation: GroupInvitation;
@@ -21,7 +22,8 @@ interface GroupInvitationCardProps {
 
 /**
  * The invitation prompt of §4.8: the verified owner, the group name, the
- * member list and who delivered it, with Accept and Decline (§5.2). The name
+ * member list, who delivered it and its message timer (§7.7), with Accept
+ * and Decline (§5.2). The name
  * is untrusted and shown beside the owner and the members (§5.11 rule 8).
  */
 const GroupInvitationCard: React.FC<GroupInvitationCardProps> = ({
@@ -84,6 +86,13 @@ const GroupInvitationCard: React.FC<GroupInvitationCardProps> = ({
           </li>
         ))}
       </ul>
+      <p
+        className="mt-2 flex items-center gap-1 text-xs text-muted-foreground"
+        data-testid="group-invitation-timer"
+      >
+        <Clock className="w-3.5 h-3.5 shrink-0" />
+        {messageTimerSentence(invitation.messageTimer, t)}
+      </p>
       {invitation.closedBefore && (
         <p className="mt-3 flex gap-2 text-xs text-destructive">
           <AlertTriangle className="w-4 h-4 shrink-0" />

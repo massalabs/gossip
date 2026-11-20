@@ -5,6 +5,7 @@ import type {
 } from '@massalabs/gossip-sdk';
 import { formatDateTime } from './timeUtils';
 import { safeName } from './groupName';
+import { messageTimerLabel } from '../constants/messageTimer';
 
 /** The largest time a Date holds, in ms (claimed times may be any u64). */
 const MAX_DATE_MS = 8_640_000_000_000_000n;
@@ -128,6 +129,15 @@ export function lineTexts(
       ];
     case 'addedBack':
       return [t('timeline.added_back', { owner: name(line.by) })];
+    case 'messageTimer':
+      // From this point on, each new message keeps this timer (§7.7).
+      return [
+        line.timer > 0
+          ? t('timeline.timer_set', {
+              duration: messageTimerLabel(line.timer, t),
+            })
+          : t('timeline.timer_off'),
+      ];
   }
 }
 

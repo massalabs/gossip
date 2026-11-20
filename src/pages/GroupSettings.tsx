@@ -21,6 +21,8 @@ import LeaveGroupSheet, {
   type LeaveAction,
 } from '../components/groups/LeaveGroupSheet';
 import ResolveForkPanel from '../components/groups/ResolveForkPanel';
+import MessageTimerField from '../components/groups/MessageTimerField';
+import { messageTimerSentence } from '../constants/messageTimer';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { useGroupMemberName } from '../hooks/useGroupMemberName';
 import { useAccountStore } from '../stores/accountStore';
@@ -66,9 +68,11 @@ const ActionButton: React.FC<{
 );
 
 /**
- * Group details (§5.11 names, members, owner) with the owner's tools (add,
- * remove, rename, transfer, the §5.8 popup, the §4.9 resolution) and the
- * member's tools (leave with its choices, delete locally, retry).
+ * Group details (§5.11 names, members, owner, the §7.7 message timer) with
+ * the owner's tools (add, remove, rename, the message timer, transfer, the
+ * §5.8 popup, the §4.9 resolution) and the member's tools (leave with its
+ * choices, delete locally, retry). Only the owner changes the timer, by a new
+ * root; the others see it.
  */
 const GroupSettings: React.FC = () => {
   const { groupId = '' } = useParams();
@@ -258,6 +262,16 @@ const GroupSettings: React.FC = () => {
         <Row label={t('details.status')}>
           {t(`details.status_${group.status}`)}
         </Row>
+        {!(isOwner && active) && (
+          <Row label={t('timer.label')}>
+            <span data-testid="group-timer">
+              {messageTimerSentence(group.messageTimer, t)}
+            </span>
+            <p className="text-xs text-muted-foreground mt-1">
+              {t('timer.owner_only')}
+            </p>
+          </Row>
+        )}
       </div>
 
       <div className="bg-card rounded-xl border border-border overflow-hidden">
@@ -368,6 +382,17 @@ const GroupSettings: React.FC = () => {
             label={t('details.rename')}
             onClick={() => setModal({ kind: 'rename' })}
           />
+          <div className="border-b border-border last:border-b-0">
+            <MessageTimerField
+              value={group.messageTimer}
+              hint={t('timer.change_hint')}
+              testId="group-timer-field"
+              onChange={timer => {
+                if (timer === group.messageTimer) return;
+                void run(() => service.setMessageTimer(groupId, timer));
+              }}
+            />
+          </div>
           {others.length > 0 && (
             <ActionButton
               icon={<Users className="w-4 h-4" />}

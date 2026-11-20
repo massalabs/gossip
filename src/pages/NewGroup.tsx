@@ -12,7 +12,9 @@ import SearchBar from '../components/ui/SearchBar';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import SafeName from '../components/groups/SafeName';
+import MessageTimerField from '../components/groups/MessageTimerField';
 import { useGossipSdk } from '../hooks/useGossipSdk';
+import { useDefaultMessageTimer } from '../hooks/useDefaultMessageTimer';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { ROUTES } from '../constants/routes';
@@ -37,6 +39,10 @@ const NewGroup: React.FC = () => {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
+  // The creator's default, pre-selected (§7.7).
+  const defaultTimer = useDefaultMessageTimer();
+  const [timer, setTimer] = useState<number | null>(null);
+  const messageTimer = timer ?? defaultTimer;
 
   useEffect(() => {
     let alive = true;
@@ -91,7 +97,9 @@ const NewGroup: React.FC = () => {
     if (!service || !canCreate) return;
     setCreating(true);
     try {
-      const groupId = await service.createGroup(name.trim(), [...selected]);
+      const groupId = await service.createGroup(name.trim(), [...selected], {
+        messageTimer,
+      });
       refresh();
       toast.success(t('new_group.created'));
       navigate(ROUTES.group({ groupId }), { replace: true });
@@ -122,6 +130,14 @@ const NewGroup: React.FC = () => {
           placeholder={t('new_group.name_placeholder')}
           helperText={t('new_group.name_hint')}
           error={nameTooLong ? t('new_group.name_too_long') : null}
+        />
+      </div>
+
+      <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <MessageTimerField
+          value={messageTimer}
+          onChange={setTimer}
+          hint={t('timer.new_chat_hint')}
         />
       </div>
 

@@ -10,6 +10,7 @@ import { useGroupStore } from '../../stores/groupStore';
 import { useGroupMemberName } from '../../hooks/useGroupMemberName';
 import { isolate } from '../../utils/groupName';
 import { ROUTES } from '../../constants/routes';
+import { messageTimerSentence } from '../../constants/messageTimer';
 import { logger } from '../../utils/logger.ts';
 
 interface ContinuationPromptProps {
@@ -80,6 +81,12 @@ const ContinuationPrompt: React.FC<ContinuationPromptProps> = ({
         }
       >
         {t('archive.continue_invitation', { name })}
+      </p>
+      <p
+        className="mt-0.5 text-xs text-muted-foreground"
+        data-testid="continuation-timer"
+      >
+        {messageTimerSentence(invitation.messageTimer, t)}
       </p>
       <div className={`mt-2 flex gap-2 ${compact ? '' : 'justify-center'}`}>
         <Button
