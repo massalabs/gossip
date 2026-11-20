@@ -1172,7 +1172,8 @@ epoch has this effect:
   and dissolve messages naming an epoch it holds, and applies a dissolve message naming that
   epoch: "Dissolve & Delete" erases its archive; it drops every other event it receives there;
 - it answers queries about that epoch exactly as a device that does not hold it would (§10.4):
-  silence to a lookup, "not available" to a tips scan;
+  "not available" to a lookup from a peer that shares an active chat with it, silence to any
+  other peer, "not available" to a tips scan;
 - from then on, every root that lists the device is an **invitation** (§4.8), whatever its parents.
 
 A kick that names an epoch which is not the device's current epoch is ignored, except in the
@@ -2351,14 +2352,14 @@ a dissolve naming an epoch the member holds reaches it, never a dissolve of a la
 
 A device that holds an epoch but is no longer active in its group (kicked, left, waiting for a
 kick, dissolved) answers a member exactly as a device that does not hold the epoch would, query by
-query: silence to an event, sync-object, signed-object, removal or key lookup (no entry at all),
-"not available" to a tips scan (§12.1). It sends a removed peer nothing either (§5.6).
+query: "not available" to an event, sync-object, signed-object, removal or key lookup from a peer
+that shares an active chat with it, silence to any other peer (§13.7), and "not available" to a
+tips scan (§12.1). It sends a removed peer nothing either (§5.6).
 The exceptions: a dissolved group still serves its roots and its dissolve message, and answers a
 member's tips scan with a page of these two entries only (§5.8); an archive ("Dissolve & Keep
 archived") gives a removed peer its own kick or leave (§12.8).
-*Why:* "not available" would tell a member that this device kept the chat. Silence cannot be told
-apart from a device that deleted the chat or is offline. The cost is one timeout for the asker,
-only until it learns that this device is out.
+*Why:* the answer is the one a device that deleted the chat, or never held it, gives; so a member
+cannot tell "kept the history" from "deleted the chat", and nobody waits on silence.
 
 **Limits.**
 
@@ -2685,6 +2686,7 @@ and clocks differ.
 Event-ID lookups are exact: a responder never substitutes another event under the requested ID.
 A root is never returned by an event lookup; it has its own lookup (§12.7).
 In a superseded epoch, §10.4 decides what a requester may be given.
+A lookup this device cannot or may not serve is answered under §13.7.
 
 ### 12.5 Sync-object lookups
 
@@ -2693,8 +2695,9 @@ Messages can be looked up by `syncObjId` as well as by `eventId`.
 - The responder returns any available event carrying its current result for that message; if none
   is available, the answer is N/A, even if the message is still displayed.
 - A responder never creates an event or restores a pruned one to answer.
-- A request from outside the epoch's membership is dropped silently (§13.7), and a removed peer
-  is answered under §10.4.
+- A request this device cannot or may not serve is answered under §13.7: "not available" to a
+  peer that shares an active chat with it, silence to any other; a removed peer is answered under
+  §10.4.
 
 An answer is the responder's current view, not proof of the global latest value.
 A lookup operation completes on its answer.
@@ -2749,14 +2752,14 @@ that epoch: the answer is the kick, the leave, or both, each as its own response
 or "not available" when the responder holds neither.
 A device uses it when it must answer a removed peer and holds no record for it (§5.6).
 
-- The responder answers only a requester that is a member of the named epoch, and only while its
-  group is active there; other requests are dropped silently, as for an epoch it does not hold
-  (§10.4).
+- The responder serves only a requester that is a member of the named epoch, and only while its
+  group is active there; other requests are answered as for an epoch it does not hold, under
+  §13.7.
 - It returns the full signed object if it holds it and still serves it (§5.3, §5.6, §5.8), and "not
   available" otherwise.
 - An archive ("Dissolve & Keep archived") answers a removed peer's removal lookup of its **own**
   record with its kick or leave, as it answers the signed-object lookup of the same record; a lookup
-  of another member's record gets silence.
+  of another member's record is answered under §13.7.
   *Why:* the same record gets the same answer whichever way it is asked. The dissolve names a later
   epoch the removed peer is not in, so nothing else would ever end its membership of the epoch it
   was removed from. Only its own record is given, so nothing leaks.
@@ -2767,9 +2770,9 @@ A device uses it when it must answer a removed peer and holds no record for it (
 
 A key query asks for the `UserPublicKeys` of a GossipID, as `[chat_id, gossipId]`.
 
-- The responder answers only if it holds the named epoch, its group is active there (§10.4), and
-  the requester, the responder and the subject are all members of it; other requests are dropped
-  silently.
+- The responder serves keys only if it holds the named epoch, its group is active there (§10.4),
+  and the requester, the responder and the subject are all members of it; other requests are
+  answered under §13.7.
 - It returns the keys it holds for that identity, or "not available".
 - The requester MUST check that the returned keys hash to the requested GossipID.
   An answer that does not is invalid, and gets the heaviest penalty of the peer score (§11.8).
@@ -3002,8 +3005,20 @@ it; it is never relayed and never answered.
 
 - Every frame is authorized using the **authenticated immediate Agraphon peer**, never a claimed
   author.
-- A peer that is not a member of the relevant epoch is ignored silently.
-  Shared-chats scans and chat lookups have no epoch context and follow §4.11 and §12.7 instead.
+- A peer that is not a member of the relevant epoch is ignored silently, with one exception:
+  **One answer for a lookup that cannot be served (§13.7).** An event, sync-object,
+  signed-object, removal or key lookup that this device cannot or may not serve is answered "not
+  available" when the asker shares an active accepted chat with this device, and with silence
+  otherwise. The answer is the same, byte for byte and with the same effect on the asker's budgets,
+  whether the device never held the epoch, holds it but the asker is not a member, holds it in a
+  group where it is no longer active, or holds it active without the object.
+  *Why:* nobody waits on silence, and one answer in every case means a member still cannot tell
+  "kept the history" from "deleted the chat". A peer that shares no active chat learns nothing
+  either way, as before.
+  The exceptions already settled stay: a removed peer gets its own kick or leave (§5.6, §10.4); a
+  dissolved group serves its roots and its dissolve message, an archive also a removed member's
+  own record (§5.8, §12.8).
+- Shared-chats scans and chat lookups have no epoch context and follow §4.11 and §12.7 instead.
 - A member of a superseded epoch that is a removed peer is served and heard under §10.4.
 - Errors, counts and timing state are allocated only after authorization.
 - Frames for unknown, unaccepted or closed epochs are dropped without staging.
@@ -4736,7 +4751,8 @@ silent toward a peer that is not a member of a held epoch.
 - **B:** silence in both cases (an honest member then cannot tell "not held" from a lost message).
 
 *Settled:* choice A, as coded. A device no longer active in the group answers a tips scan the same
-way (D.74).
+way (D.74). Lookups tied to an epoch now follow the same idea (§13.7): "not available" in every
+case where the device cannot or may not serve, to a peer that shares an active chat with it.
 
 ### D.52 `busy` without a bound (§11.4, §13.4, §17.4)
 
@@ -5073,9 +5089,12 @@ closed that epoch: silence means yes, a lookup means no.
 
 - A device that holds an epoch but is no longer active in its group (kicked, left, waiting,
   dissolved) answers a member exactly as a device that does not hold the epoch would, query by
-  query: silence to lookups, "not available" to a tips scan; it sends a removed peer nothing.
-  Why: a member must not be able to tell "kept the history" from "deleted the chat" or "offline";
-  the cost is one timeout for the asker, until it learns the device is out. The exceptions stay: a
+  query: "not available" to a lookup from a peer that shares an active chat with it, silence to
+  any other (§13.7), "not available" to a tips scan; it sends a removed peer nothing.
+  Why: a member must not be able to tell "kept the history" from "deleted the chat"; nobody waits
+  on silence, and the same answer in every case keeps the two apart for no one. (This replaced
+  silence to lookups, which cost each asker one timeout per inactive device; a simulated device
+  kept asking such peers for a day.) The exceptions stay: a
   dissolved group serves its roots and its dissolve message; an archive gives a removed peer its own
   kick or leave; the shared-chats scan rules below.
 - Any query, notice or message event from a removed peer that names the epoch makes a retained
