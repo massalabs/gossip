@@ -2403,6 +2403,12 @@ pruned, and never transmitted.
 A peer with an outstanding request for the task is not reselected until it answers or its request
 expires.
 A peer that already supplied the event is not asked again.
+A peer already asked for the item, that let the request time out or answered "not available",
+goes behind every eligible member not yet asked for it, before any re-ask, even when it announces
+the item again (local policy, §2.2).
+*Why:* a peer that went inactive in the group, or never held the item, gives the same answer every
+time, while a member not yet asked may hold it; a simulated device kept asking such peers for a day
+and hardly asked the member that held the events.
 
 ### 11.3 Query timing
 
