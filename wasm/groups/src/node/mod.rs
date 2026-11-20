@@ -1275,11 +1275,21 @@ impl Node {
                 if let Outcome::Accepted(merge) = outcome {
                     // A device no longer active in the group keeps what is pushed to it (a
                     // deletion after a kick or a leave, §10.4; what the members of a superseded
-                    // chat of two send it, §5.12), but fetches and relays nothing: a device
-                    // that deleted the chat or never held it sends nothing, so a relay would
-                    // tell a member that this one kept the history (D.74).
+                    // chat of two send it, §5.12), but relays nothing: a device that deleted the
+                    // chat or never held it sends nothing, so a relay would tell a member that
+                    // this one kept the history (D.74).
                     let relays = self.serves(&chat);
-                    for parent in event.parents().iter().filter(|_| relays) {
+                    // The parents it misses are still looked up, except in a superseded chat of
+                    // two, which fetches nothing (§5.12): while the group is inactive the
+                    // lookups ask no one, and they go on once it is active again (see
+                    // `trigger`). Why: no scan brings such a parent back, since the deletion
+                    // references it and it is no tip any more; a member added back kept the
+                    // older version of an edited message (§5.10).
+                    let fetches = !matches!(
+                        self.group_status(&chat),
+                        records::GroupStatus::Superseded { .. }
+                    );
+                    for parent in event.parents().iter().filter(|_| fetches) {
                         self.want_event(cx, chat, *parent, Some(from), TriggerKind::Child)?;
                     }
                     if relays

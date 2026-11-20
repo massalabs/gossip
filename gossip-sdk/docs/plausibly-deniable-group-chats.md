@@ -2414,6 +2414,9 @@ learnt before, which a scan does not always bring back (an older event reached o
 version since pruned); in the membership simulation, dropping them left a restored member added
 back without part of an older epoch's messages in 23 of 300 runs. Kept, they cost no traffic while the group is
 inactive.
+The missing parent of a pushed deletion is the clearest case: the deletion references it, so it is
+no tip any more and no scan lists it (§12.1); left unasked, it kept a member added back on the
+older version of a message edited while it was away (6 of 300 runs).
 A kick, a leave or a deletion of that epoch pushed to it is kept, but announced or relayed to no
 one.
 What it had queued, or already assembled, for that epoch when the group went inactive is decided
