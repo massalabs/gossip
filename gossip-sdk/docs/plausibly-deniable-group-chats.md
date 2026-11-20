@@ -568,7 +568,9 @@ On receiving a root, a device MUST, in order:
    that it equals the announced `chat_id`;
 3. parse the owner keys, hash them to the owner's GossipID and check that the owner is a member;
 4. check that it is itself a member;
-5. check that the immediate Agraphon peer that delivered the root is a member;
+5. check that the immediate Agraphon peer that delivered the root is a member; a handover root is
+   also accepted from the owner of its held parent, who signed it and may have left in it
+   ("Hand over and leave", §5.7, D.59);
 6. match the parent commitments against what it holds (§4.5);
 7. verify the signature:
    - **successor:** with the ML-DSA-65 key of the root's own `owner` field;
@@ -578,8 +580,15 @@ On receiving a root, a device MUST, in order:
 
 A root that fails any of these checks is discarded, and counts as a failed announcement against
 the peer that supplied it (§11.8).
-A handover root whose parent the device does not hold is discarded without that penalty, and the
-parent is looked up (§4.8).
+A handover root whose parent the device does not hold cannot be checked yet. It is **kept**,
+unverified and without penalty, while its parent is looked up from the peer that delivered it, and
+is checked again once the parent is held; it is dropped after two weeks if the parent never comes.
+The number kept is bounded per delivering peer and per device (§17.4).
+*Why kept and not discarded:* the root may arrive before its parent, for example from the outgoing
+owner of a "Hand over and leave"; discarding it would lose the handover until someone delivered it
+again.
+*Why the new owner must differ from the parent's owner:* it keeps the two root types apart; a root
+that keeps the owner is a successor (D.7).
 
 **Continuity.** For a successor root, each held parent is then checked for authority.
 The root's owner has authority over a held parent when:
@@ -3283,6 +3292,14 @@ Inspect against the §16.3 boundary:
 
   - Limit: 3 within 24 h, then a pause of 1 h, doubling up to 24 h (§11.8)
 
+- Resource: Unverified handover roots kept while their parent is looked up (§4.7)
+
+  - Limit: 64 per delivering peer, 1,024 per device, each kept two weeks at most
+  - The limit per peer is a total across every chat: the chat a handover root belongs to cannot be
+    known before its parent is held. A root is about 24 KB at 512 members and at most the
+    57,307-byte event blob, so the worst case is about 22 MB kept, 59 MB at the container ceiling.
+    These are local policy and may change in any release.
+
 Overflow returns **busy** or pauses work.
 It never marks events invalid or pruned.
 
@@ -3714,6 +3731,9 @@ The two checks state this for the receiver.
 
 - **A (recommended):** keep the current text.
 - **B:** drop the "new owner differs" check.
+
+*Settled as well:* choice A, as coded: the new owner differs from the parent's owner, which keeps the
+two root types apart.
 
 ### D.8 An edit in an older epoch when no neighbor is eligible (§10.4)
 
@@ -4314,9 +4334,13 @@ clock.
 
 *Context:* such a device never recovers anything and cannot tell why.
 
-- **A (recommended):** the receiver answers with a status (`expired`, or a new one) instead of
-  staying silent, within the usual limits.
+- **A:** the receiver answers with a status (`expired`, or a new one) instead of staying silent,
+  within the usual limits.
 - **B:** keep the silence.
+
+*Settled:* choice B; no new status. Why: the app can detect a wrong clock locally. This silence
+protects no deniability, so a later release may still answer `expired` under §2.2. A "your clock is
+ahead" status could be abused to make a device doubt its own clock.
 
 ### D.44 One attempt at a time with long waits (§11.2, §11.4)
 
@@ -4552,6 +4576,9 @@ refused it.
   parent. The code does this.
 - **B:** hand over first, leave in a second step.
 - **C:** the new owner delivers the root.
+
+§4.7 step 5 now states it. A handover root whose parent is not held is kept within limits while the
+parent is looked up, not discarded (§4.7, §17.4).
 
 ### D.60 Is an accepted root announced (§4.6, §4.8)
 
@@ -4834,8 +4861,9 @@ Members are also queried before the user answers the prompt, which weakens "Igno
   parent lookups and unverified handover roots, with expiry; before a root is verified, its parent
   is looked up only from the peer that delivered it. The code does this with provisional numbers:
   16 pending invitations per sender and 256 per device; 256 parents fetched for one invitation;
-  4 unverified handover roots per sender and 64 per device; 32 unverified leaves per sender; at
-  most 64 roots examined per operation when catching up on a chain.
+  4 unverified handover roots per sender and 64 per device (since raised to 64 and 1,024, §17.4); 32
+  unverified leaves per sender; at most 64 roots examined per operation when catching up on a
+  chain.
 - **B:** as A, and no lookup at all before the user accepts.
 
 ### D.76 Dissolve with deletion: what is kept and erased (§5.8)
