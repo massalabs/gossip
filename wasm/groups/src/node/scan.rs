@@ -221,6 +221,10 @@ impl Node {
                     .filter(|_| current)
                     .and_then(|op| op.total)
                     .is_none_or(|t| Some(t) == total);
+                // A page whose `offset + count` differs from the total of an earlier page of the
+                // scan is malformed: the scan ends and the sender is penalised (§12.1). Why: the
+                // list is frozen, so a moving total means entries skipped or repeated; an honest
+                // responder whose list is gone answers `restart` instead.
                 if p.scan_id != scan_id || p.offset != offset || total.is_none() || !consistent {
                     self.scan_invalid(cx, key, current);
                     return Ok(());
@@ -611,6 +615,8 @@ impl Node {
                 // Dropped or tombstoned, including an offset-0 request (§12.2).
                 return Ok(Some(AnswerOp::Status(Status::Restart)));
             };
+            // An offset past the frozen list is `malformed` (§12.1). Why: an empty last page or
+            // `restart` would hide the asker's own bug, which only it can fix.
             if offset > list.len() as u64 {
                 return Ok(Some(AnswerOp::Status(Status::Malformed)));
             }
@@ -747,6 +753,9 @@ impl Node {
         let mut objects: Vec<([u8; 32], Entry)> = Vec::new();
         let group = listed.first().map(|c| self.group_of(c));
         let current = group.and_then(|g| self.current_epoch(&g));
+        // A leave or a dissolve is listed only when the requester is a member of the epoch it
+        // names (`listed`, §12.1). Why: it is a membership fact of that epoch, which only its
+        // members may learn, as every object of it.
         for (key, rec) in self.t.signed.iter() {
             if !listed.contains(&key.0) || !self.signed_served_to(key, &peer) {
                 continue;
