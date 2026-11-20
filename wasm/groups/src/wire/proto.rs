@@ -200,9 +200,6 @@ pub struct MessagePayload {
     pub metadata: BTreeMap<String, Vec<u8>>,
 }
 
-/// The field number of `MessagePayload.metadata`, for [`super::metadata_len`].
-pub(crate) const METADATA_FIELD: u32 = 10;
-
 /// Field numbers of `MessagePayload` that are reserved: never used again in wire version 1,
 /// and refused as unknown.
 #[cfg_attr(not(test), allow(dead_code))]
