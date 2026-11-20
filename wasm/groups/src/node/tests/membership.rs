@@ -5061,3 +5061,55 @@ fn a_dissolved_group_answers_a_tips_scan_with_its_dissolve_only() {
         );
     }
 }
+
+/// §5.8, §12.7: after "Dissolve & Delete", a device keeps the named root and the dissolve
+/// message for two weeks from when it applied the dissolve, and serves both to a member of
+/// that root even when the two share no other chat; afterwards it answers as a device that
+/// never held the epoch.
+#[test]
+fn a_deleted_dissolve_keeps_serving_its_root_and_message_to_a_member_sharing_nothing_else() {
+    let (mut net, g) = founded(3);
+    net.offline[2] = true;
+    let now = net.now;
+    let s = signer(0);
+    let dev = &mut net.devs[0];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, g, true, now, &mut net.rng)
+        .unwrap();
+    net.run(MIN);
+    assert_eq!(
+        net.summary(1, &g).unwrap().status,
+        MyStatus::Dissolved { deleted: true }
+    );
+    net.offline[2] = false;
+    let dissolve = net.devs[1]
+        .node
+        .t
+        .signed
+        .iter()
+        .find_map(|(k, r)| matches!(r.object, SignedObject::Dissolve(_)).then_some(k.2))
+        .unwrap();
+    let ops = || {
+        vec![
+            QueryOp::ChatById(g),
+            QueryOp::SignedObject {
+                chat_id: g,
+                kind: crate::wire::SignedKind::Dissolve,
+                id: dissolve,
+            },
+        ]
+    };
+    let answers = answers_of(&mut net, 1, 2, ops());
+    assert!(
+        matches!(
+            &answers[..],
+            [(0, ResponseResult::Event(_)), (1, ResponseResult::Event(_))]
+        ),
+        "{answers:?}"
+    );
+    // Two weeks after it applied the dissolve, the device holds neither.
+    net.now += crate::node::objects::DISSOLVED_KEPT_MS;
+    net.tick(1);
+    let answers = answers_of(&mut net, 1, 2, ops());
+    assert!(answers.is_empty(), "{answers:?}");
+}
