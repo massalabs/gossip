@@ -1685,7 +1685,8 @@ A device accepts a message event only if:
 - the encoding, parents and payload are valid;
 - the secret proof matches;
 - the claimed author is a member of the epoch;
-- the event timestamp and the payload timestamps pass admission (§7.2).
+- the event timestamp and the payload timestamps pass admission (§7.2);
+- it is not a message past the moment of the message timer of its epoch (§7.7).
 
 ## 7. Message semantics
 
@@ -1811,7 +1812,8 @@ matters.
 - A message is displayed only once `now ≥ max(last_modified_at, created_at)`.
   Merging and activation still depend on `last_modified_at` only (§7.3); a current result whose
   `created_at` is still in the future is applied but stays hidden.
-- Deleted messages and pending future content are hidden.
+- Deleted messages, messages past the moment of the message timer (§7.7) and pending future
+  content are hidden.
 - Roots and signed objects are not messages.
   They produce lines in the view.
   A signed object's line is placed at the time the object was received.
@@ -1989,6 +1991,64 @@ Names, captions and similar details go in the metadata (§6.2).
 A mimetype extends what a message can be, never how the protocol behaves: queries, merging and
 membership are untouched by it. A device SHOULD fetch what a reference points to only when its
 user asks, since fetching from elsewhere is seen by whoever serves it.
+
+### 7.7 Message timer
+
+The root of each epoch carries a **message timer** `T`, in milliseconds (§4.1). It is a local
+rule: nothing is ever sent because of it.
+
+**The moment.** A message of the epoch is deleted on each device at its **moment**:
+
+```text
+moment = created_at + T
+```
+
+- `created_at` is the creation date of the message's current result (§6.2); an edit keeps it
+  (§7.2), so editing never extends a message.
+- `T` is the timer of the root of the epoch the message event belongs to. Each message keeps the
+  timer of its own epoch: a later root with another timer changes nothing for the messages of
+  earlier epochs.
+  *Why:* applying a newer timer to older messages was rejected, because one change of the timer
+  could then delete a whole chat by accident.
+- `T = 0`: never. The sum is exact (§1); a moment past the top of the integer range never comes.
+- A reaction is not deleted by the timer, and neither is a deletion event. A reaction to a deleted
+  message is not shown (§7.6), as for any deleted target.
+
+**At the moment** the device deletes the message as a local-only deletion (§9.2, §9.3): the
+tombstone replaces the result, every event of the message is pruned to a stub, pending versions
+are pruned, and pending scheduled deletions stay as they are (D.31). The moment is kept in the
+durable time-sorted index of §7.4 and wakes the device like a scheduled deletion; the view hides
+the message from its moment even before that runs.
+
+*Why local:* every device computes the same moment from the same dates, so all converge with no
+exchange: devices that were offline, read-only groups (kicked, left, superseded) and archives of
+dissolved groups included. *Why as a local-only deletion:* what a peer can see afterwards is what
+§9.3 already allows. A lookup of one of its events is answered "not available", as for a pruned
+event; it is no tip; a sync-object lookup finds no event carrying it.
+
+**A message that arrives after its moment** (or a pending version that takes effect after it) is
+dropped at once and never shown. Nothing about it is stored: no row, no stub, no parent link, and
+its parents are not looked up. Offered again by a late peer, it is refused again the same way,
+from its dates alone, whether or not the device ever held it. The lookup that fetched it is
+complete, without penalty for the peer that supplied it.
+*Why nothing is stored:* a record of an expired message would be a trace of it; and since the
+refusal depends only on the dates, every arrival gets the same answer.
+
+**Changing the timer.** Only the owner changes it, by a successor root that keeps the members, the
+name and the settings (§4.1, §4.6), like a rename. The interface shows each epoch's timer and when
+the epoch started, so that it can say from which point messages disappear after which time.
+
+Known limits:
+
+- A device whose clock is ahead deletes earlier, and answers "not available" earlier, than the
+  others; one whose clock is behind keeps the message longer.
+- When the versions of one message carry different creation dates (only after a local-only change
+  of the date and a Retry, §9.1, §9.4, or from a hostile member), a device that receives the
+  winning version only after its moment may show another version until that version's own moment.
+  Every device ends without the message at the latest moment of its versions.
+- A reaction to a deleted message is still served until the end of its retention window (§8.1),
+  as after any deletion.
+- Copies outside the protocol (backups, screenshots, unofficial clients) are out of reach (§16).
 
 ## 8. Retention
 
@@ -3088,7 +3148,8 @@ Physical layout is an implementation detail.
   marker.
   Message rows keep only a stub after pruning.
 - **Parent edges.**
-- **Current objects** keyed by `(chat_id, syncObjId)`, with their current result and pending
+- **Current objects** keyed by `(chat_id, syncObjId)`, with their current result, the moment of
+  the message timer (§7.7) and pending
   versions.
   The stored fields of each available event are the only stored copy of that event's content.
 - **Retrieval tasks** with per-peer candidate rows: trigger kind and time, attempts, outstanding
@@ -3533,6 +3594,7 @@ accept and relay such a root unchanged.
 | Periodic recovery lanes | 4 per group: neighbor, random, neighbor, random; 1 scan each per 24 h |
 | Periodic lane offset | floor(6 h × r) ms, r uniform in [0.95, 1.05] |
 | Scheduled-delete timers | wait ≤ 2 h; fallback 30 min (5 min when open) |
+| Message timer | per epoch, in its root: a message is deleted at `created_at + T` (§7.7) |
 | Hint expiry | 28 days |
 | Invitation delay `PROMPT_DELAY` | 5 min after receiving the root (§4.8) |
 | Successor after a leave or request | 30 s without a new one; at most 5 min after the first (§5.5) |
@@ -5206,3 +5268,21 @@ afterwards.*
   answer as an event the device does not hold, so that a withdrawn or deleted message leaves
   nothing a peer can tell apart (§9.3); the tip rule over available events already keeps
   discovery going (§12.1).
+
+### D.84 The message timer and the settings map: points to confirm (§4.1, §6.2, §7.6, §7.7)
+
+*Found while implementing the two root fields.*
+
+- **No rule between a root and its parents.** A receiver checks nothing between a root's timer
+  or settings and those of its parents (§4.1). Chosen because a member that lacks the parents
+  could not check it.
+- **A resolution root copies from the current epoch.** When competing ends carry different
+  timers or settings, the owner's resolution root copies those of its current epoch (§4.9).
+- **Reactions are not deleted by the timer.** A reaction to a deleted message is hidden, as for
+  any deleted target (§7.6), but its own events are served until their retention ends and its
+  stored result stays: who reacted, with which emoji, to which identifier. Choices: **A** keep
+  this (the code does); **B** delete a reaction at its own moment too, which needs a state that
+  is not the absorbing tombstone, since a reaction may be added again (§7.6).
+- **A key given twice.** The settings map refuses it (§4.1); a message's metadata still takes
+  the last value of a repeated key, as protobuf does. Choices: **A** keep the difference;
+  **B** refuse a repeated metadata key too, which changes what a message accepts.
