@@ -1,5 +1,10 @@
 //! Replies that name an epoch by its reference (§7.6, §12.7): the chat lookup by reference
 //! a device sends for an epoch it cannot place, and nothing for one it can.
+//!
+//! That side is off in the first release ([`crate::node::timing::REF_LOOKUPS_SENT`]): the
+//! tests of what it sends turn it on ([`MNet::set_ref_lookups`]); with it off, a reply
+//! naming a reference makes a device send exactly what the same reply without `replyTo`
+//! does.
 
 use std::collections::BTreeMap;
 
@@ -147,7 +152,12 @@ fn reply(
             sync_obj_id: *s,
         })
         .collect();
-    let metadata = BTreeMap::from([("replyTo".to_owned(), encode_reply_to(&targets).unwrap())]);
+    // No target: the same message without `replyTo`.
+    let metadata = if targets.is_empty() {
+        BTreeMap::new()
+    } else {
+        BTreeMap::from([("replyTo".to_owned(), encode_reply_to(&targets).unwrap())])
+    };
     let dev = &mut net.devs[d];
     dev.node
         .publish_message(
@@ -191,9 +201,11 @@ fn holds(net: &MNet, d: usize, chat: &ChatId, m: &MessageEvent) -> bool {
 }
 
 /// Six devices. G, of owner 0 with 1 and 2: device 3 is no member of it. H, of owner 4 with
-/// 1, 2, 3 and 5: where the replies are written. `m` is a message of G.
-fn scene() -> (MNet, ChatId, ChatId, MessageEvent) {
+/// 1, 2, 3 and 5: where the replies are written. `m` is a message of G. With `on`, the
+/// devices send what a reply's reference calls for.
+fn scene(on: bool) -> (MNet, ChatId, ChatId, MessageEvent) {
     let mut net = MNet::new(6, true);
+    net.set_ref_lookups(on);
     let g = net.create(0, &[1, 2]);
     let h = net.create(4, &[1, 2, 3, 5]);
     net.exchange();
@@ -238,7 +250,7 @@ fn next_round(net: &mut MNet, reference: RefChatId, last: u64) -> (Vec<(usize, u
 /// then stops for good.
 #[test]
 fn an_unknown_reference_is_asked_of_three_peers_in_order_each_week_four_times() {
-    let (mut net, g, h, m) = scene();
+    let (mut net, g, h, m) = scene(true);
     let r = reference(&net, 0, &g);
     let penalties = net.devs[3].node.stats().penalties;
     let scores: Vec<u64> = (0..6).map(|p| net.devs[3].node.score(&gid(p))).collect();
@@ -274,7 +286,7 @@ fn an_unknown_reference_is_asked_of_three_peers_in_order_each_week_four_times() 
 /// is deleted, the next round is not sent and the reference is forgotten.
 #[test]
 fn the_lookup_stops_once_no_reply_naming_the_reference_is_held() {
-    let (mut net, g, h, m) = scene();
+    let (mut net, g, h, m) = scene(true);
     let r = reference(&net, 0, &g);
     let e = reply_via(&mut net, 1, 2, 3, &h, &[(r, sync(&m))]);
     assert_eq!(by_ref(&run_log(&mut net, 2 * MIN), r).len(), 3);
@@ -291,7 +303,7 @@ fn the_lookup_stops_once_no_reply_naming_the_reference_is_held() {
 /// between rounds.
 #[test]
 fn the_rounds_of_a_lookup_survive_a_restart() {
-    let (mut net, g, h, m) = scene();
+    let (mut net, g, h, m) = scene(true);
     let r = reference(&net, 0, &g);
     reply_via(&mut net, 1, 2, 3, &h, &[(r, sync(&m))]);
     net.restart(3);
@@ -312,7 +324,7 @@ fn the_rounds_of_a_lookup_survive_a_restart() {
 /// (penalised, the next peer is asked), never the end of the lookup.
 #[test]
 fn a_root_that_does_not_match_the_reference_is_an_invalid_answer() {
-    let (mut net, g, h, m) = scene();
+    let (mut net, g, h, m) = scene(true);
     let r = reference(&net, 0, &g);
     reply_via(&mut net, 1, 2, 3, &h, &[(r, sync(&m))]);
     // Device 3 sends its first query; device 2 never sees it.
@@ -370,6 +382,7 @@ fn a_root_that_does_not_match_the_reference_is_an_invalid_answer() {
 fn nothing_is_asked_for_a_held_epoch_or_an_unanswered_invitation() {
     for accepted in [true, false] {
         let mut net = MNet::new(6, true);
+        net.set_ref_lookups(true);
         let g = net.create(0, &[1, 2, 3]);
         let h = net.create(4, &[1, 2, 3, 5]);
         net.exchange();
@@ -418,6 +431,7 @@ fn nothing_is_asked_for_a_held_epoch_or_an_unanswered_invitation() {
 #[test]
 fn a_skipped_epoch_fetched_by_reference_joins_the_history() {
     let mut net = MNet::new(5, true);
+    net.set_ref_lookups(true);
     let g = net.create(0, &[1, 2, 3]);
     let h = net.create(4, &[1, 3]);
     net.exchange();
@@ -462,6 +476,7 @@ fn a_skipped_epoch_fetched_by_reference_joins_the_history() {
 #[test]
 fn a_missed_invitation_fetched_by_reference_is_prompted() {
     let mut net = MNet::new(5, true);
+    net.set_ref_lookups(true);
     let g = net.create(0, &[1, 2]);
     let h = net.create(4, &[1, 3]);
     net.exchange();
@@ -509,6 +524,7 @@ fn a_missed_invitation_fetched_by_reference_is_prompted() {
 #[test]
 fn a_quoted_message_missing_from_a_held_epoch_is_fetched() {
     let mut net = MNet::new(5, true);
+    net.set_ref_lookups(true);
     let g = net.create(0, &[1, 2, 3]);
     let h = net.create(4, &[1, 3]);
     net.exchange();
@@ -544,6 +560,7 @@ fn a_quoted_message_missing_from_a_held_epoch_is_fetched() {
 fn nothing_is_asked_for_a_chat_the_user_closed() {
     for installed in [false, true] {
         let mut net = MNet::new(6, true);
+        net.set_ref_lookups(true);
         let g = net.create(0, &[1, 2, 3]);
         let h = net.create(4, &[1, 2, 3, 5]);
         net.exchange();
@@ -597,4 +614,225 @@ fn nothing_is_asked_for_a_chat_the_user_closed() {
         assert!(by_ref(&log, r).is_empty(), "installed={installed}");
         assert!(net.devs[3].node.root(&g).is_none());
     }
+}
+
+// ── Off in the first release ─────────────────────────────────────────────────
+
+/// Every frame sent, as `(from, to, frame)`.
+type Log = Vec<(usize, usize, Frame)>;
+
+/// `log` with the blob of `reply` written as an empty blob, wherever it is carried: the
+/// same reply with and without `replyTo` has the same IDs (drawn from the same randomness)
+/// but not the same bytes.
+fn without_blob(log: Log, reply: &MessageEvent) -> Log {
+    let b = blob(reply);
+    log.into_iter()
+        .map(|(f, t, fr)| {
+            let fr = match fr {
+                Frame::Event(x) if x == b => Frame::Event(Vec::new()),
+                Frame::Response(Response {
+                    request_id,
+                    idx,
+                    result: ResponseResult::Event(x),
+                }) if x == b => Frame::Response(Response {
+                    request_id,
+                    idx,
+                    result: ResponseResult::Event(Vec::new()),
+                }),
+                other => other,
+            };
+            (f, t, fr)
+        })
+        .collect()
+}
+
+/// What device 3 keeps and schedules for replies' references: its records, the tasks of
+/// their rounds, in memory and in its store, and when it would next wake up.
+fn ref_state(net: &MNet) -> (usize, usize, usize, Option<u64>) {
+    let dev = &net.devs[3];
+    let refs = |t: &TaskKey| matches!(t.target, Target::Ref(_));
+    let stored = dev.store.load_node().unwrap();
+    (
+        dev.node.t.ref_lookups.len() + dev.node.t.tasks.keys().filter(|k| refs(k)).count(),
+        stored.ref_lookups.len(),
+        stored.tasks.keys().filter(|k| refs(k)).count(),
+        dev.node.next_wakeup(&dev.store, net.now).unwrap(),
+    )
+}
+
+/// What the devices send once device 3 has received the reply: ten minutes, a week and an
+/// hour at once, ten minutes more.
+fn afterwards(net: &mut MNet) -> Log {
+    let mut log = run_log(net, 10 * MIN);
+    log.extend(jump(net, WEEK + HOUR));
+    log.extend(run_log(net, 10 * MIN));
+    log
+}
+
+/// Scene of [`scene`], the sending side `on` or not: device 1 writes in H a reply to a
+/// message of G (device 3 is no member of G), with `replyTo` or without; device 2 delivers
+/// it to device 3. Returns every frame sent from the reply on, and the reply.
+fn unknown_reference(on: bool, reply_to: bool) -> (Log, MessageEvent, MNet) {
+    let (mut net, g, h, m) = scene(on);
+    let r = reference(&net, 0, &g);
+    let targets = if reply_to {
+        vec![(r, sync(&m))]
+    } else {
+        vec![]
+    };
+    net.offline[3] = true;
+    let e = reply(&mut net, 1, &h, &targets);
+    let mut log = exchange_log(&mut net);
+    net.offline[3] = false;
+    net.recv_frames_m(3, 2, &[Frame::Event(blob(&e))]);
+    assert_eq!(
+        ref_state(&net).0,
+        usize::from(on && reply_to),
+        "a record only when on"
+    );
+    log.extend(exchange_log(&mut net));
+    log.extend(afterwards(&mut net));
+    (without_blob(log, &e), e, net)
+}
+
+/// Off (the first release), a reply naming an epoch device 3 cannot place makes it send
+/// exactly what the same reply without `replyTo` does: no lookup by reference, nothing
+/// recorded and nothing scheduled for it. On, it would ask.
+#[test]
+fn off_a_reply_naming_an_unknown_reference_sends_what_a_plain_reply_does() {
+    let (with, e1, n1) = unknown_reference(false, true);
+    let (plain, e2, n2) = unknown_reference(false, false);
+    assert_eq!(e1.event_id(), e2.event_id());
+    assert!(!with.is_empty());
+    assert_eq!(with, plain);
+    assert_eq!(ref_state(&n1), ref_state(&n2));
+    assert_eq!(ref_state(&n1).0, 0);
+    let (on, _, _) = unknown_reference(true, true);
+    assert_ne!(on, plain, "on, device 3 asks");
+}
+
+/// Device 3 holds G but missed `m`; device 1 writes in H a reply to `m`, with `replyTo` or
+/// without. Returns every frame sent from the reply on, and the reply.
+fn held_epoch_missing_target(
+    on: bool,
+    reply_to: bool,
+) -> (Log, MessageEvent, MNet, ChatId, MessageEvent) {
+    let mut net = MNet::new(5, true);
+    net.set_ref_lookups(on);
+    let g = net.create(0, &[1, 2, 3]);
+    let h = net.create(4, &[1, 3]);
+    net.exchange();
+    for d in 1..5 {
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    net.offline[3] = true;
+    let m = net.say(2, &g, "missed");
+    net.run(MIN);
+    net.offline[3] = false;
+    assert!(!holds(&net, 3, &g, &m));
+    let r = reference(&net, 0, &g);
+    let targets = if reply_to {
+        vec![(r, sync(&m))]
+    } else {
+        vec![]
+    };
+    let e = reply(&mut net, 1, &h, &targets);
+    let mut log = exchange_log(&mut net);
+    assert_eq!(ref_state(&net).0, usize::from(on && reply_to));
+    log.extend(afterwards(&mut net));
+    (without_blob(log, &e), e, net, g, m)
+}
+
+/// Off, a reply naming a message device 3 lacks in an epoch it holds starts no fetch of that
+/// message: what it sends is what the same reply without `replyTo` makes it send. On, it
+/// would fetch the message by a sync-object lookup.
+#[test]
+fn off_a_reply_naming_a_missing_target_in_a_held_epoch_sends_what_a_plain_reply_does() {
+    let (with, e1, n1, _, _) = held_epoch_missing_target(false, true);
+    let (plain, e2, n2, _, _) = held_epoch_missing_target(false, false);
+    assert_eq!(e1.event_id(), e2.event_id());
+    assert_eq!(with, plain);
+    assert_eq!(ref_state(&n1), ref_state(&n2));
+    let (on, _, _, g, m) = held_epoch_missing_target(true, true);
+    let fetch = QueryOp::SyncObj {
+        chat_id: g,
+        sync_obj_id: sync(&m),
+    };
+    assert!(ops(&on).iter().any(|(f, _, op)| *f == 3 && *op == fetch));
+    assert!(!ops(&plain).iter().any(|(f, _, op)| *f == 3 && *op == fetch));
+}
+
+/// A run of device 3 with the sending side on left a record and the task of its first round, queued but
+/// not sent; device 3 restarts with it `after`. Returns every frame sent from the restart on,
+/// the reply, and the record kept before the restart.
+fn restart_with_record(
+    reply_to: bool,
+    after: bool,
+) -> (Log, MessageEvent, MNet, (usize, usize, usize)) {
+    // Only device 3 had it on.
+    let (mut net, g, h, m) = scene(false);
+    net.ref_lookups = true;
+    net.restart(3);
+    net.ref_lookups = false;
+    let r = reference(&net, 0, &g);
+    let targets = if reply_to {
+        vec![(r, sync(&m))]
+    } else {
+        vec![]
+    };
+    net.offline[3] = true;
+    let e = reply(&mut net, 1, &h, &targets);
+    net.exchange();
+    net.offline[3] = false;
+    // Device 3 receives it and starts its round with randomness of its own, so that the
+    // shared one is drawn alike with and without `replyTo`.
+    let mut own = TestRng::new(77);
+    let pt = wire::encode_plaintext(&[Frame::Event(blob(&e))]).unwrap();
+    let now = net.now;
+    let dev = &mut net.devs[3];
+    dev.node
+        .handle_plaintext(&mut dev.store, gid(2), &pt, now, &mut own)
+        .unwrap();
+    net.now += 2 * MIN;
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .tick_with(&mut dev.store, Some(&s), now, &mut own)
+        .unwrap();
+    let (_, records, tasks, _) = ref_state(&net);
+    let before = (records, tasks, net.devs[3].node.stats().ref_rounds as usize);
+    net.ref_lookups = after;
+    net.restart(3);
+    let mut log = exchange_log(&mut net);
+    log.extend(afterwards(&mut net));
+    (without_blob(log, &e), e, net, before)
+}
+
+/// Off after a run that had it on: the record and the task of the round it started, persisted
+/// by that run, are dropped when the engine is opened, from its store too, and nothing of
+/// them is sent: device 3 sends what it sends after the same reply without `replyTo`. On, the
+/// round would go on.
+#[test]
+fn off_a_record_persisted_by_an_earlier_run_is_dropped_and_never_sent() {
+    let (with, e1, n1, before) = restart_with_record(true, false);
+    assert_eq!(
+        before,
+        (1, 1, 1),
+        "a record and its round's task were persisted"
+    );
+    let (plain, e2, n2, none) = restart_with_record(false, false);
+    assert_eq!(none, (0, 0, 0));
+    assert_eq!(e1.event_id(), e2.event_id());
+    assert_eq!(with, plain);
+    assert_eq!(ref_state(&n1), ref_state(&n2));
+    assert_eq!(ref_state(&n1).0, 0);
+    assert_eq!(
+        (ref_state(&n1).1, ref_state(&n1).2),
+        (0, 0),
+        "dropped from the store"
+    );
+    let (on, _, _, _) = restart_with_record(true, true);
+    assert_ne!(on, plain, "on, the round goes on");
 }
