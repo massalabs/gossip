@@ -743,32 +743,43 @@ impl Node {
         for k in refs {
             self.t.requests.remove(&k);
         }
-        // A queued answer to an event or sync-object lookup of these epochs becomes the answer
-        // of a device that does not hold them, decided as on receipt: "not available" to a peer
-        // that shares an active chat with this device, dropped for any other (§13.7, D.74).
-        // Why: the lookup was taken while this device held the epoch; dropping it would leave
-        // the asker with silence where a device that never held the epoch answers.
-        let lookups: Vec<(WorkKey, GossipId)> = self
+        // A queued answer to a lookup of these epochs (event, sync-object, root, signed-object
+        // or tips scan) becomes the answer of a device that does not hold them, decided as on
+        // receipt: "not available", or dropped where such a device stays silent (§13.7, D.74;
+        // see `unserved_answer`). A neighbor response becomes the decline such a device gives
+        // (§13.6, D.6). Why: the query was taken while this device held the epoch; dropping its
+        // answer would leave the asker with silence where a device that never held the epoch
+        // answers, and a member could tell the two apart. A key answer, decided on receipt and
+        // naming no epoch, goes as decided, as it does from a device that goes inactive.
+        let answers: Vec<(WorkKey, AnswerOp)> = self
             .t
             .queue
             .iter()
-            .filter(|(_, w)| {
-                matches!(w, Work::Answer {
-                    op: AnswerOp::Event { chat_id, .. } | AnswerOp::SyncObj { chat_id, .. },
-                    ..
-                } if names(chat_id))
+            .filter_map(|(k, w)| match w {
+                Work::Answer { op, .. }
+                    if match op {
+                        AnswerOp::Event { chat_id, .. }
+                        | AnswerOp::SyncObj { chat_id, .. }
+                        | AnswerOp::Root { chat_id }
+                        | AnswerOp::Object { chat_id, .. } => names(chat_id),
+                        AnswerOp::Page { anchor, .. } => names(anchor),
+                        AnswerOp::Keys { .. } | AnswerOp::Status(_) => false,
+                    } =>
+                {
+                    Some((*k, op.clone()))
+                }
+                _ => None,
             })
-            .map(|(k, _)| (*k, k.0))
             .collect();
-        for (k, peer) in lookups {
-            if let Some(Work::Answer {
-                request_id,
-                idx,
-                sent_at,
-                ttl,
-                op: AnswerOp::Event { .. } | AnswerOp::SyncObj { .. },
-            }) = self.t.queue.get(&k).cloned()
-                && self.shares_epoch(&peer)
+        for (k, op) in answers {
+            if self.unserved_answer(k.0, &op) == Some(true)
+                && let Some(Work::Answer {
+                    request_id,
+                    idx,
+                    sent_at,
+                    ttl,
+                    ..
+                }) = self.t.queue.get(&k).cloned()
             {
                 self.t.queue.insert(
                     k,
@@ -784,6 +795,25 @@ impl Node {
                 self.remove_queued(&k);
             }
         }
+        let responses: Vec<(WorkKey, ChatId)> = self
+            .t
+            .queue
+            .iter()
+            .filter_map(|(k, w)| match w {
+                Work::NeighborResponse { chat_id, .. } if names(chat_id) => Some((*k, *chat_id)),
+                _ => None,
+            })
+            .collect();
+        for (k, chat_id) in responses {
+            self.t.queue.insert(
+                k,
+                Work::NeighborResponse {
+                    chat_id,
+                    accepted: false,
+                    suggestions: Vec::new(),
+                },
+            );
+        }
         let work: Vec<_> = self
             .t
             .queue
@@ -794,21 +824,15 @@ impl Node {
                 | Work::Object { chat_id, .. }
                 | Work::ObjectNotice { chat_id, .. }
                 | Work::NeighborRequest { chat_id }
-                | Work::NeighborResponse { chat_id, .. }
                 | Work::LeaveRequest { chat_id } => names(chat_id),
                 Work::Query { purpose } => match purpose {
                     Purpose::Task(k) => names(&k.chat_id),
                     Purpose::Scan(g) => names(g),
                 },
-                Work::Answer { op, .. } => match op {
-                    AnswerOp::Event { chat_id, .. }
-                    | AnswerOp::SyncObj { chat_id, .. }
-                    | AnswerOp::Root { chat_id }
-                    | AnswerOp::Object { chat_id, .. } => names(chat_id),
-                    AnswerOp::Page { anchor, .. } => names(anchor),
-                    AnswerOp::Keys { .. } | AnswerOp::Status(_) => false,
-                },
-                Work::Blob(_) | Work::VersionNotice => false,
+                Work::Answer { .. }
+                | Work::NeighborResponse { .. }
+                | Work::Blob(_)
+                | Work::VersionNotice => false,
             })
             .map(|(k, _)| *k)
             .collect();

@@ -3104,7 +3104,11 @@ it; it is never relayed and never answered.
   The answer stays the same when it is assembled later (§15.1). An event or sync-object lookup
   taken while it could be served is decided again at assembly: if the epoch was deleted, or its
   group went inactive, in between, it gets the answer above, never the event and never silence
-  where a device that never held the epoch answers. A "not available" decided on receipt ages as
+  where a device that never held the epoch answers.
+  When the epoch is deleted, a queued root, signed-object or page answer gets the answer a device
+  that never held it gives, decided as on receipt: "not available", or silence where such a device
+  is silent; a queued neighbor response becomes a decline without suggestions (D.6).
+  A key answer names no epoch: decided on receipt, it goes as decided. A "not available" decided on receipt ages as
   content does: assembled past the request's deadline (§11.3), it is `expired` too.
   *Why:* otherwise the answer would tell apart, by its timing, a lookup the device could serve from
   one it could not.
