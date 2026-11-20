@@ -2,9 +2,10 @@
 //! chat lookup by reference, and the fetch of a target in an epoch this device holds.
 //!
 //! When a reply is received, each of its targets is placed against what the device holds:
-//! an installed epoch or an invitation not answered yet. A reference the device cannot place
-//! is looked up by reference, in rounds, from the members of the chat the reply was written
-//! in. All of it is local
+//! an installed epoch or an invitation not answered yet. A target
+//! in an installed epoch whose message the device lacks is fetched by a sync-object lookup
+//! in that epoch (§12.5). A reference the device cannot place is looked up by reference, in
+//! rounds, from the members of the chat the reply was written in. All of it is local
 //! policy and local storage ([`RefLookup`]); nothing here adds to the wire format.
 //!
 //! **When.** Only on receipt of a reply, after a short random wait
@@ -83,6 +84,20 @@ impl Node {
         })
     }
 
+    /// Whether the device holds the message `target` of the installed epoch `chat`, deleted
+    /// or not.
+    fn holds_target(
+        &self,
+        cx: &mut Cx<'_>,
+        chat: &ChatId,
+        target: &SyncObjId,
+    ) -> Result<bool, NodeError> {
+        Ok(cx
+            .ov
+            .object(chat, target)?
+            .is_some_and(|o| o.current.is_some()))
+    }
+
     /// Whether the reply `(chat, sync)` is still held and still names `target` under
     /// `reference`: not deleted, not past its moment (§7.7), not edited to drop it.
     fn reply_held(
@@ -147,7 +162,12 @@ impl Node {
         }
         for t in targets {
             match self.placed(&t.ref_chat_id) {
-                Some(Placed::Installed(_)) => continue,
+                Some(Placed::Installed(e)) => {
+                    // Nothing to fetch: the target is held, or its group is read-only.
+                    if !self.serves(&e) || self.holds_target(cx, &e, &t.sync_obj_id)? {
+                        continue;
+                    }
+                }
                 Some(Placed::Invitation) | None => {}
             }
             let reply = (chat, c.sync_obj_id, t.sync_obj_id);
@@ -265,8 +285,8 @@ impl Node {
     }
 
     /// The references whose place changed in this operation are examined again after a
-    /// short random wait: a root fetched by reference, or an invitation answered, ends or
-    /// changes what the record waits for.
+    /// short random wait: a root fetched by reference, or an invitation accepted, lets the
+    /// targets be fetched.
     pub(crate) fn refs_moved(&mut self, cx: &mut Cx<'_>) {
         let moved = core::mem::take(&mut self.rx.moved);
         for reference in moved {
@@ -300,9 +320,9 @@ impl Node {
     }
 
     /// A record is due: the replies no longer held are dropped (none left: the record is
-    /// forgotten); then, by where the reference leads, the record is done (an installed
-    /// epoch), waits (an invitation not answered yet), or a round of the lookup by reference
-    /// starts, at most once a week and at most [`REF_LOOKUP_ROUNDS`] times.
+    /// forgotten); then, by where the reference leads, the targets are fetched (an installed
+    /// epoch), the record waits (an invitation not answered yet), or a round of the lookup
+    /// by reference starts, at most once a week and at most [`REF_LOOKUP_ROUNDS`] times.
     fn examine_ref(&mut self, cx: &mut Cx<'_>, reference: RefChatId) -> Result<(), NodeError> {
         let Some(mut rec) = self.t.ref_lookups.get(&reference).cloned() else {
             return Ok(());
@@ -319,7 +339,22 @@ impl Node {
             })
         });
         match self.placed(&reference) {
-            Some(Placed::Installed(_)) => {
+            Some(Placed::Installed(epoch)) => {
+                // §7.6: a resolved target is loaded by a sync-object lookup in its epoch.
+                if self.serves(&epoch) {
+                    for (_, _, target) in rec.replies.keys() {
+                        if !self.holds_target(cx, &epoch, target)? {
+                            self.trigger(
+                                cx,
+                                TaskKey {
+                                    chat_id: epoch,
+                                    target: Target::SyncObj(*target),
+                                },
+                                None,
+                            );
+                        }
+                    }
+                }
                 self.forget_ref(&reference);
                 return Ok(());
             }
