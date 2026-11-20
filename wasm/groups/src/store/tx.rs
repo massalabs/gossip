@@ -61,6 +61,12 @@ impl<'s, S: StorageRead + ?Sized> Tx<'s, S> {
         self.changes.removed_rows.insert(id);
     }
 
+    /// Erases the row of `id` and its parent edges (§7.7).
+    pub(crate) fn erase_event(&mut self, id: EventId) {
+        self.remove_marker(id);
+        self.erase_edges(id);
+    }
+
     /// Erases the parent edges of `id` (§7.7).
     pub(crate) fn erase_edges(&mut self, id: EventId) {
         self.changes.edges.remove(&id);

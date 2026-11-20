@@ -202,6 +202,8 @@ pub struct Stats {
     pub neighbors_replaced: u64,
     /// Pending work invalidated by pruning or authorization.
     pub invalidated: u64,
+    /// Objects the message timer erased with every record of them (§7.7).
+    pub erased: u64,
     /// Roots created by this device as owner.
     pub roots_created: u64,
     /// Kicks created.
@@ -600,6 +602,8 @@ impl Node {
             r.map(|v| (v, ov.into_changes()))
         };
         let outcome = result.and_then(|(v, epochs)| {
+            self.forget_erased(&epochs);
+            let erased: usize = epochs.iter().map(|c| c.removed_objects.len()).sum();
             let node = self.t.take_changes();
             let erase = core::mem::take(&mut self.erase);
             store
@@ -609,7 +613,10 @@ impl Node {
                     erase,
                 })
                 .map_err(NodeError::from)
-                .map(|()| v)
+                .map(|()| {
+                    self.stats.erased += erased as u64;
+                    v
+                })
         });
         if outcome.is_err() {
             self.reload(store)?;

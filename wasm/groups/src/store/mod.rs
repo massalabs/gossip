@@ -10,6 +10,10 @@
 //!   events that carry it, the pending future versions and the pending deletions (§7.1, §7.3,
 //!   §7.4).
 //!
+//! In an epoch with a message timer, the timer erases a message with every record of it:
+//! its object, the rows and the parent edges of all its events (§7.7). This is the only way
+//! a processed row, an edge or an object is ever deleted within a retained group.
+//!
 //! A device stores an event's version and fields, never the bytes it received, and serves it
 //! under its own version (§13.1). Result hashes are recomputed when needed and never stored
 //! (§6.2).
@@ -183,6 +187,16 @@ pub struct ObjectRecord {
     /// plus the timer of the epoch. `None` with no timer, for a tombstone or a reaction, or
     /// when the moment is past the top of the integer range and so never comes.
     pub expires_at: Option<u64>,
+    /// When the message timer erases this object and every record of it (§7.7): the latest
+    /// moment among the versions this device processed, so that every version offered again
+    /// afterwards is refused by its own dates. A reaction's own moment counts too (§7.6).
+    /// `None`: never (no timer, a moment past the top of the integer range, or a message
+    /// deleted by a deletion event or by hand, whose tombstone is kept as without a timer).
+    pub erase_at: Option<u64>,
+    /// The pruned events of this object, kept only while `erase_at` is set, so that the
+    /// erasure finds their stubs and parent edges. Local bookkeeping: an event pruned by
+    /// another device is not in it.
+    pub stubs: BTreeSet<EventId>,
 }
 
 impl ObjectRecord {
@@ -196,6 +210,8 @@ impl ObjectRecord {
             pending_versions: BTreeSet::new(),
             pending_deletions: BTreeSet::new(),
             expires_at: None,
+            erase_at: None,
+            stubs: BTreeSet::new(),
         }
     }
 
@@ -225,7 +241,13 @@ impl ObjectRecord {
             sync_obj_id: self.sync_obj_id,
             kind: PendingKind::Expiry,
         });
-        versions.chain(deletion).chain(expiry)
+        let erasure = self.erase_at.map(|due| PendingItem {
+            due,
+            event_id: EXPIRY_EVENT_ID,
+            sync_obj_id: self.sync_obj_id,
+            kind: PendingKind::Erasure,
+        });
+        versions.chain(deletion).chain(expiry).chain(erasure)
     }
 
     /// The target of the reaction this object holds as its current result, if any (§7.6).
@@ -250,6 +272,9 @@ pub enum PendingKind {
     Deletion,
     /// The deletion of the current result by the message timer (§7.7).
     Expiry,
+    /// The erasure of the whole object by the message timer (§7.7). It sorts after the
+    /// expiry due at the same time.
+    Erasure,
 }
 
 /// The event ID of an expiry in the pending index: the deletion by the message timer belongs

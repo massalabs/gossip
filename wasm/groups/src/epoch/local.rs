@@ -8,7 +8,9 @@
 
 use std::collections::BTreeMap;
 
-use super::{Epoch, GroupState, Merge, absorb, apply_new, expire, prune, tick};
+use super::{
+    Cause, Epoch, GroupState, Merge, absorb, apply_new, expire, note_version, prune_in, tick,
+};
 use crate::constants::MAX_SCHEDULE_MS;
 use crate::dag;
 use crate::error::Error;
@@ -434,12 +436,14 @@ impl Epoch<'_> {
         // A new creation date moves the moment of the message timer (§7.7); a date already
         // past it deletes the message at once, below.
         obj.expires_at = super::moment(&new, tx.message_timer());
+        // The new date counts in the erasure of the message like any version (§7.7).
+        note_version(&mut obj, &new, tx.message_timer());
         obj.current = Some(StoredResult::Content(new));
         for old_id in core::mem::take(&mut obj.current_events) {
-            prune(&mut tx, old_id);
+            prune_in(&mut tx, &mut obj, old_id);
         }
         for (_, old_id) in core::mem::take(&mut obj.pending_versions) {
-            prune(&mut tx, old_id);
+            prune_in(&mut tx, &mut obj, old_id);
         }
         // Pending scheduled deletions carry no content; they stay pending.
         tx.put_object(obj);
@@ -475,7 +479,7 @@ impl Epoch<'_> {
             return Err(ChangeError::Deleted);
         }
         refuse_reaction(&obj)?;
-        absorb(&mut tx, &mut obj, None)?;
+        absorb(&mut tx, &mut obj, None, Cause::Event)?;
         tx.put_object(obj);
         let (changes, pruned) = tx.finish()?;
         store.commit(changes)?;

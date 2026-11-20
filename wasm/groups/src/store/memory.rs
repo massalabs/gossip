@@ -84,13 +84,18 @@ impl EpochRecords {
             }
             self.pending.extend(after.difference(before).map(key(kind)));
         }
-        if old.expires_at != obj.expires_at {
-            let expiry = |due| (due, super::EXPIRY_EVENT_ID, PendingKind::Expiry, sync);
-            if let Some(due) = old.expires_at {
-                self.pending.remove(&expiry(due));
-            }
-            if let Some(due) = obj.expires_at {
-                self.pending.insert(expiry(due));
+        for (before, after, kind) in [
+            (old.expires_at, obj.expires_at, PendingKind::Expiry),
+            (old.erase_at, obj.erase_at, PendingKind::Erasure),
+        ] {
+            if before != after {
+                let key = |due| (due, super::EXPIRY_EVENT_ID, kind, sync);
+                if let Some(due) = before {
+                    self.pending.remove(&key(due));
+                }
+                if let Some(due) = after {
+                    self.pending.insert(key(due));
+                }
             }
         }
         if let Some(t) = old.reaction_target() {

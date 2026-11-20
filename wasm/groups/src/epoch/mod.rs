@@ -403,22 +403,33 @@ fn activate_due<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, now: u64) -> Result
         let Some(mut obj) = tx.object(&item.sync_obj_id)? else {
             continue;
         };
-        if item.kind == PendingKind::Expiry {
-            // The message timer deletes the message on this device, as a local-only deletion
-            // (§7.7, §9.2, §9.3): every device computes the same moment from the dates, so
-            // they converge with nothing sent, and what a peer can see afterwards (no event
-            // to serve, no tip) is what a local-only deletion leaves.
-            if obj.expires_at == Some(item.due) {
-                absorb(tx, &mut obj, None)?;
-                tx.put_object(obj);
+        match item.kind {
+            PendingKind::Expiry => {
+                // The message timer deletes the message on this device, as a local-only
+                // deletion (§7.7, §9.2, §9.3): every device computes the same moment from the
+                // dates, so they converge with nothing sent, and what a peer can see
+                // afterwards (no event to serve, no tip) is what a local-only deletion leaves.
+                if obj.expires_at == Some(item.due) {
+                    absorb(tx, &mut obj, None, Cause::Timer)?;
+                    tx.put_object(obj);
+                }
+                continue;
             }
-            continue;
+            PendingKind::Erasure => {
+                // Every version this device knows is past its own moment: the message is
+                // erased with every record of it (§7.7).
+                if obj.erase_at == Some(item.due) {
+                    erase(tx, obj)?;
+                }
+                continue;
+            }
+            PendingKind::Version | PendingKind::Deletion => {}
         }
         let Some(event) = tx.row(&item.event_id)?.and_then(|r| r.event().cloned()) else {
             continue;
         };
         match item.kind {
-            PendingKind::Expiry => {}
+            PendingKind::Expiry | PendingKind::Erasure => {}
             PendingKind::Version => {
                 // Skipped if an earlier item of this pass already pruned it.
                 if !obj.pending_versions.remove(&(item.due, item.event_id)) {
@@ -427,7 +438,7 @@ fn activate_due<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, now: u64) -> Result
                 // A version that takes effect after the moment of its message is dropped,
                 // as it would be on arrival (§7.7).
                 if expired(&event, tx.message_timer(), now) {
-                    prune(tx, item.event_id);
+                    prune_in(tx, &mut obj, item.event_id);
                 } else {
                     merge_effective(tx, &mut obj, event)?;
                 }
@@ -436,7 +447,7 @@ fn activate_due<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, now: u64) -> Result
                 if !obj.pending_deletions.remove(&(item.due, item.event_id)) {
                     continue;
                 }
-                absorb(tx, &mut obj, Some(event))?;
+                absorb(tx, &mut obj, Some(event), Cause::Event)?;
             }
         }
         tx.put_object(obj);
@@ -476,10 +487,13 @@ fn prune_carrier<S: StorageRead + ?Sized>(
     id: EventId,
     sync: SyncObjId,
 ) -> Result<(), StorageError> {
-    prune(tx, id);
-    if let Some(mut obj) = tx.object(&sync)? {
-        obj.current_events.remove(&id);
-        tx.put_object(obj);
+    match tx.object(&sync)? {
+        Some(mut obj) => {
+            obj.current_events.remove(&id);
+            prune_in(tx, &mut obj, id);
+            tx.put_object(obj);
+        }
+        None => prune(tx, id),
     }
     Ok(())
 }
@@ -541,6 +555,7 @@ fn restore<S: StorageRead + ?Sized>(
     if !identical || !same_parents || !in_window(&event.event_id(), now) {
         return Ok(Outcome::KeptPruned);
     }
+    obj.stubs.remove(&event.event_id());
     // The same rule as on first arrival (D.31): a scheduled deletion keeps its scheduled form
     // until its own time, beside the tombstone.
     match event.payload() {
@@ -576,9 +591,10 @@ pub(crate) fn apply_new<S: StorageRead + ?Sized>(
         .unwrap_or_else(|| ObjectRecord::empty(sync));
     let merge = match event.payload().clone() {
         Payload::Content(c) => {
+            note_version(&mut obj, &c, tx.message_timer());
             // A deletion has no effect on a reaction (§7.1).
             if obj.is_deleted() && !c.is_reaction() {
-                prune(tx, id);
+                prune_in(tx, &mut obj, id);
                 Merge::Lost
             } else if c.last_modified_at > now {
                 obj.pending_versions.insert((c.last_modified_at, id));
@@ -607,7 +623,7 @@ pub(crate) fn apply_new<S: StorageRead + ?Sized>(
             hold(tx, event, Role::PendingDeletion { due });
             Merge::Pending
         }
-        Payload::Delete { .. } => absorb(tx, &mut obj, Some(event))?,
+        Payload::Delete { .. } => absorb(tx, &mut obj, Some(event), Cause::Event)?,
     };
     tx.put_object(obj);
     Ok(merge)
@@ -627,7 +643,7 @@ fn merge_effective<S: StorageRead + ?Sized>(
     };
     let merge = match &obj.current {
         Some(StoredResult::Tombstone) if !incoming.is_reaction() => {
-            prune(tx, id);
+            prune_in(tx, obj, id);
             return Ok(Merge::Lost);
         }
         Some(StoredResult::Tombstone) | None => Merge::Won,
@@ -637,7 +653,7 @@ fn merge_effective<S: StorageRead + ?Sized>(
             match incoming_key.cmp(&current_key) {
                 core::cmp::Ordering::Greater => Merge::Won,
                 core::cmp::Ordering::Less => {
-                    prune(tx, id);
+                    prune_in(tx, obj, id);
                     return Ok(Merge::Lost);
                 }
                 core::cmp::Ordering::Equal => Merge::Identical,
@@ -646,7 +662,7 @@ fn merge_effective<S: StorageRead + ?Sized>(
     };
     if merge == Merge::Won {
         for old in core::mem::take(&mut obj.current_events) {
-            prune(tx, old);
+            prune_in(tx, obj, old);
         }
         obj.expires_at = moment(&incoming, tx.message_timer());
         obj.current = Some(StoredResult::Content(incoming));
@@ -667,17 +683,109 @@ pub(crate) fn moment(content: &Content, timer: u64) -> Option<u64> {
     content.created_at.checked_add(timer)
 }
 
-/// Whether `event` is a message whose moment has passed at `now` (§7.7).
+/// The moment of the version `content` under the message timer `timer` (§7.7): its creation
+/// date plus the timer, for a reaction too (§7.6). `None` with no timer, and when the sum is
+/// past the top of the integer range.
+pub(crate) fn version_moment(content: &Content, timer: u64) -> Option<u64> {
+    if timer == 0 {
+        return None;
+    }
+    content.created_at.checked_add(timer)
+}
+
+/// Whether `event` is a message or a reaction whose moment has passed at `now` (§7.6, §7.7).
 fn expired(event: &MessageEvent, timer: u64, now: u64) -> bool {
     match event.payload() {
-        Payload::Content(c) => moment(c, timer).is_some_and(|m| m <= now),
+        Payload::Content(c) => version_moment(c, timer).is_some_and(|m| m <= now),
         Payload::Delete { .. } => false,
     }
 }
 
+/// Counts the version `content`, which this device is processing, in the date the timer
+/// erases its object: the latest moment of every version known (§7.7).
+///
+/// Why the latest: an erased event is unknown again, so a copy offered later is refused
+/// only by its own dates. When the versions of a message carry different creation dates
+/// (the known limit of §7.7), erasing at the moment of the current result would let a
+/// version with a later date come back and be shown. Honest versions share one creation
+/// date, so this is the moment of the message.
+///
+/// A message deleted by a deletion event or by hand is not erased: its tombstone follows
+/// the rules without a timer, and a later version is absorbed and not counted. A reaction
+/// is counted whatever tombstone its ID has, since a deletion has no effect on it (§7.1).
+fn note_version(obj: &mut ObjectRecord, content: &Content, timer: u64) {
+    if timer == 0 {
+        return;
+    }
+    let moment = version_moment(content, timer);
+    let first = obj.erase_at.is_none()
+        && obj.pending_versions.is_empty()
+        && match &obj.current {
+            None => true,
+            Some(StoredResult::Tombstone) => content.is_reaction(),
+            Some(StoredResult::Content(_)) => false,
+        };
+    obj.erase_at = if first {
+        moment
+    } else {
+        // `None` stays `None`: never erased, or deleted by hand.
+        obj.erase_at.zip(moment).map(|(a, b)| a.max(b))
+    };
+    if obj.erase_at.is_none() {
+        obj.stubs.clear();
+    }
+}
+
+/// Erases the object `obj` with every record of it (§7.7): the rows and the parent edges of
+/// all its events, carriers, pending versions, pending deletions and stubs, then the object
+/// itself; and the reactions to it, which go with their target (§7.6).
+///
+/// Why the parent edges of a child still held that names an erased event are kept: they are
+/// the child's own record, served with it (D.33). The device does not look the erased parent
+/// up because of them: parents are looked up when a child is first accepted, never for a
+/// child already held (§11.1). Tips and the cycle frontier are not affected: they are
+/// computed from the available events only, and an erased event was pruned, hence not
+/// available, before it was erased (§6.1, §12.1, D.27).
+pub(crate) fn erase<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    obj: ObjectRecord,
+) -> Result<(), StorageError> {
+    let chat = tx.chat_id();
+    let mut work = vec![obj];
+    while let Some(obj) = work.pop() {
+        let events = obj
+            .current_events
+            .iter()
+            .chain(obj.pending_versions.iter().map(|(_, id)| id))
+            .chain(obj.pending_deletions.iter().map(|(_, id)| id))
+            .chain(&obj.stubs);
+        for id in events {
+            tx.erase_event(*id);
+        }
+        tx.erase_object(obj.sync_obj_id);
+        for r in tx.reactions_to(&chat, &obj.sync_obj_id)? {
+            if let Some(reaction) = tx.object(&r)? {
+                work.push(reaction);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// What deletes a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cause {
+    /// A deletion event, received or published, or a local-only deletion (§7.4, §9.2): the
+    /// tombstone is kept as without a timer.
+    Event,
+    /// The message timer at the moment of the current result (§7.7): the message is erased
+    /// later, once every version it knows is past its moment.
+    Timer,
+}
+
 /// Applies a deletion: the tombstone absorbs the message, and every content event of it
 /// (carriers and pending versions) is pruned (§7.1, §7.4). `carrier` is the deletion event,
-/// stored in its immediate form; `None` for a local-only deletion.
+/// stored in its immediate form; `None` for a local-only deletion or the timer.
 ///
 /// A deletion has no effect on a reaction (§7.1, §7.6): when the current result is one, the
 /// deletion loses and is pruned; otherwise the tombstone is stored as for any message, but
@@ -691,27 +799,34 @@ pub(crate) fn absorb<S: StorageRead + ?Sized>(
     tx: &mut Tx<'_, S>,
     obj: &mut ObjectRecord,
     carrier: Option<MessageEvent>,
+    cause: Cause,
 ) -> Result<Merge, StorageError> {
     if matches!(&obj.current, Some(StoredResult::Content(c)) if c.is_reaction()) {
         if let Some(event) = carrier {
-            prune(tx, event.event_id());
+            prune_in(tx, obj, event.event_id());
         }
         return Ok(Merge::Lost);
     }
     let was_deleted = obj.is_deleted();
     if !was_deleted {
         for old in core::mem::take(&mut obj.current_events) {
-            prune(tx, old);
+            prune_in(tx, obj, old);
         }
         for (due, old) in core::mem::take(&mut obj.pending_versions) {
             if pending_reaction(tx, old)? {
                 obj.pending_versions.insert((due, old));
             } else {
-                prune(tx, old);
+                prune_in(tx, obj, old);
             }
         }
         obj.current = Some(StoredResult::Tombstone);
         obj.expires_at = None;
+        // A message deleted before the timer's moment keeps its tombstone as without a
+        // timer; a pending reaction under its ID keeps its own erasure (§7.1).
+        if cause == Cause::Event && obj.pending_versions.is_empty() {
+            obj.erase_at = None;
+            obj.stubs.clear();
+        }
     }
     if let Some(event) = carrier {
         obj.current_events.insert(event.event_id());
@@ -768,6 +883,19 @@ pub(crate) fn prune<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, id: EventId) {
         event_id: id,
         state: RowState::Pruned,
     });
+}
+
+/// Prunes `id`, an event of `obj`, and keeps it in the object's stubs while the timer is to
+/// erase the object (§7.7).
+pub(crate) fn prune_in<S: StorageRead + ?Sized>(
+    tx: &mut Tx<'_, S>,
+    obj: &mut ObjectRecord,
+    id: EventId,
+) {
+    prune(tx, id);
+    if obj.erase_at.is_some() {
+        obj.stubs.insert(id);
+    }
 }
 
 /// Checks that the stored records of an epoch are consistent with each other. Test helper.
@@ -844,6 +972,32 @@ pub(crate) fn check_invariants<R: StorageRead + ?Sized>(
             if row.role() != Some(Role::PendingDeletion { due }) || due <= now {
                 return Err(format!("pending deletion {id:?} inconsistent at {now}"));
             }
+        }
+        // The erasure of the timer (§7.7).
+        if obj.erase_at.is_some_and(|due| due <= now) {
+            return Err(format!("{s:?} is past its erasure at {now}"));
+        }
+        if obj.erase_at.is_none() && !obj.stubs.is_empty() {
+            return Err(format!("{s:?} keeps stubs with no erasure"));
+        }
+        if let (Some(erase), Some(expiry)) = (obj.erase_at, obj.expires_at)
+            && erase < expiry
+        {
+            return Err(format!("{s:?} is erased before its moment"));
+        }
+        for id in &obj.stubs {
+            claim(*id)?;
+            if rows.get(id).map(|r| &r.state) != Some(&RowState::Pruned) {
+                return Err(format!("stub {id:?} of {s:?} is not a pruned row"));
+            }
+        }
+        if let Some(target) = obj.reaction_target()
+            && !store
+                .reactions_to(chat, &target)
+                .map_err(|e| e.to_string())?
+                .contains(&s)
+        {
+            return Err(format!("reaction {s:?} missing from its target's index"));
         }
     }
     // A retained event is served with the parents its edges record (D.33).
