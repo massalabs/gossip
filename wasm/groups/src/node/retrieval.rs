@@ -727,6 +727,12 @@ impl Node {
             let at = c.trigger.map_or(0, |t| t.at);
             ranked.push((
                 (
+                    // A peer already asked for this item, which let the request time out or
+                    // answered "not available" (and may have announced it again since), goes
+                    // behind every member not yet asked for it (local policy, §11.2). Why: a
+                    // peer that went inactive or never held the item answers "not available"
+                    // or nothing every time, while a member not yet asked may hold it.
+                    u8::from(c.attempts > 0),
                     u8::from(!responsive),
                     tier,
                     u64::MAX - self.score(&peer),
@@ -753,7 +759,7 @@ impl Node {
         // Rather than a member that stopped answering, for a stage of up to a day, wait for
         // a responsive one that is outstanding or at its limit: it answers or frees a slot
         // in minutes when it is online. A free responsive member of any tier comes first.
-        if best.0 == 1 && (!responsive_later.is_empty() || responsive_until != u64::MAX) {
+        if best.1 == 1 && (!responsive_later.is_empty() || responsive_until != u64::MAX) {
             return Selection::Wait(Blocked {
                 peers: responsive_later,
                 until: responsive_until.min(until),
@@ -910,7 +916,7 @@ impl Node {
 
 /// The rank of a candidate, smaller first: unresponsive, tier, inverse score, inverse
 /// receipt time of its trigger.
-type Rank = (u8, u8, u64, u64);
+type Rank = (u8, u8, u8, u64, u64);
 
 enum Selection {
     Peer(GossipId),
