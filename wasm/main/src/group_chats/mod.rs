@@ -611,6 +611,13 @@ impl GroupsNode {
             .map_err(js)
     }
 
+    /// The results of the sync-object lookups completed since the last call, in JSON:
+    /// `[{epoch, syncObjId, found}]`, `found` the event ID received or `null`. Removing them
+    /// is a committed operation: take the batches after it.
+    pub fn take_lookup_results(&mut self, now: f64) -> Result<String, JsValue> {
+        self.core.take_lookup_results(ms(now)?).map_err(js)
+    }
+
     // ── Reads ────────────────────────────────────────────────────────────────
 
     /// Every group, in JSON.
