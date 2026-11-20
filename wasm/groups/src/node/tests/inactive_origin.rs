@@ -307,6 +307,66 @@ fn a_lookup_that_waited_while_inactive_goes_on_once_the_device_is_back() {
     assert!(asks(&net, before) > 0, "R asks for the event again");
 }
 
+/// §10.4, §5.10, D.74: while R is kicked from C, or has left it, Q pushes R a deletion of C
+/// whose parent R never got (an edit made after R went inactive, which only the members of
+/// the current epoch received). R keeps the deletion and asks no one for the parent; once R
+/// is added back and accepts, it asks for it. No scan would bring it back: the deletion
+/// references it, so it is no tip any more. Before, R made no lookup for the parents of an
+/// event it took while inactive, and a member added back kept the older version of the
+/// message (membership simulation, seeds 0, 36, 56, 156, 194 and 290 of 300).
+#[test]
+fn the_parent_of_a_deletion_taken_while_inactive_is_fetched_once_the_device_is_back() {
+    let mut wrong = Vec::new();
+    for how in [Inactive::Removed, Inactive::Left] {
+        let (mut net, [c, ..]) = setup(how, |_, _| {});
+        let root = net.devs[0].node.root(&c).unwrap();
+        let deletion = MessageEvent::create(
+            &root,
+            EventId::new(net.now - 1, [0x44; 16]),
+            &[EventId::new(net.now - 2, [0x66; 16])],
+            Payload::Delete {
+                sync_obj_id: SyncObjId::from_bytes([0x45; 32]),
+                scheduled_at: None,
+            },
+        )
+        .unwrap();
+        let f = Frame::Event(wire::encode_event_blob(&EventObject::Message(deletion)).unwrap());
+        net.offline[Q] = true;
+        net.recv_frames_m(R, Q, &[f]);
+        let asks = |net: &MNet, from: usize| {
+            net.dropped[from..]
+                .iter()
+                .filter(|(f, to, pt)| {
+                    *f == R && *to == Q && pt.windows(16).any(|w| w == [0x66; 16])
+                })
+                .count()
+        };
+        let before = net.dropped.len();
+        net.run(3 * HOUR);
+        if asks(&net, before) != 0 {
+            wrong.push((how, "asked while inactive"));
+        }
+        let cur = net.current(0, &c).unwrap();
+        net.change(
+            0,
+            cur,
+            GroupChange::Successor {
+                add: vec![gid(R)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+        net.run(2 * MIN);
+        assert_eq!(net.accept_all(R).len(), 1, "{how:?}");
+        net.run(10 * MIN);
+        if asks(&net, before) == 0 {
+            wrong.push((how, "never asked once back"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:?}");
+}
+
 /// A valid object of `kind` naming `chat`, as Q can push it: Q's own leave, the owner's kick
 /// of Q, or a deletion, which a member pushes in full to the removed peers of the epoch (§10.4).
 fn pushed(net: &MNet, kind: &str, chat: ChatId) -> Frame {
