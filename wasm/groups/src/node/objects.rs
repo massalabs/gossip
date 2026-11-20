@@ -365,6 +365,16 @@ impl Node {
             SignedObject::Dissolve(d) => {
                 let pool = self.object_pool(&chat, None);
                 self.relay_object(cx, chat, obj.item(), pool);
+                // Applied by a device kicked from that epoch, or that left it and keeps it
+                // read-only, as by any other (§5.6, §10.4): "Dissolve & Delete" then erases its
+                // archive. Why: the deletion is meant to erase the chat on every device that
+                // holds the epoch; otherwise the removed member would keep the only transcript
+                // of a chat everyone else erased. Single deletion events reach removed peers
+                // already (§10.4), and the owner gains nothing it did not have: it could have
+                // dissolved with deletion just before the kick. Known drawback: a removed
+                // member's archive stays within the owner's reach after the removal; only a
+                // dissolve naming an epoch that member holds reaches it, never one of a later
+                // epoch.
                 if current == Some(chat)
                     || matches!(status, GroupStatus::Dissolved { epoch, .. } if epoch == chat)
                 {
