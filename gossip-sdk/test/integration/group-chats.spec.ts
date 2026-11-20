@@ -16,7 +16,7 @@ import { GroupMessageTooLargeError } from '../../src/services/groups';
 import { MessageType } from '../../src/db';
 import type { Queries } from '../../src/db/queries';
 import { vi } from 'vitest';
-import { bytesToHex } from '@noble/hashes/utils';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 
 /** One clock for every SDK, advanced by the test. */
 let clock = 1_800_000_000_000;
@@ -815,5 +815,53 @@ describe('Group chats', { timeout: 120_000 }, () => {
     expect((await texts(bob.groups, groupId)).sort()).toEqual(
       ['first', ...Array.from({ length: 8 }, (_, i) => `group ${i}`)].sort()
     );
+  });
+
+  it('takes the results of the lookups the engine makes, so that they do not accumulate', async () => {
+    const groupId = await alice.groups.createGroup('Lookups', [bob.userId]);
+    await deliver();
+    const [inv] = await bob.groups.invitations();
+    await bob.groups.acceptInvitation(inv.epochId);
+    await deliver();
+
+    type LookupNode = {
+      lookup_sync_object: (e: Uint8Array, s: Uint8Array, now: number) => void;
+      take_lookup_results: (now: number) => string;
+    };
+    const service = alice.groups as unknown as {
+      node: LookupNode;
+      run: (op: (node: LookupNode) => void) => Promise<void>;
+    };
+    const taken: unknown[] = [];
+    const node = service.node;
+    const take = node.take_lookup_results.bind(node);
+    node.take_lookup_results = now => {
+      const results = take(now);
+      taken.push(...(JSON.parse(results) as unknown[]));
+      return results;
+    };
+    const stored = async () =>
+      (await queriesOf(alice).groups.loadSnapshot(alice.userId)).node.filter(
+        n => n.kind === 'lookup_results'
+      );
+
+    // Two objects nobody holds, one after the other (the engine looks up a
+    // quoted message it lacks by itself): each lookup ends without it, and
+    // its result is taken and not kept.
+    for (const fill of [7, 8]) {
+      const syncObjId = new Uint8Array(32).fill(fill);
+      await service.run(n =>
+        n.lookup_sync_object(hexToBytes(groupId), syncObjId, clock)
+      );
+      const before = taken.length;
+      for (let i = 0; i < 30 && taken.length === before; i++) {
+        clock += 60 * 60 * 1_000;
+        await deliver(1);
+      }
+      expect(taken.slice(before)).toEqual([
+        { epoch: groupId, syncObjId: bytesToHex(syncObjId), found: null },
+      ]);
+      expect(await stored()).toEqual([]);
+    }
   });
 });
