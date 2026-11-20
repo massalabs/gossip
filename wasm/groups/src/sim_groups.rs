@@ -2746,9 +2746,10 @@ impl Sim {
     }
 }
 
-/// The results of the epoch `chat`. Under a message timer (§7.7) what the timer leaves of a
-/// message (a tombstone or no result, with no event) is left out: a device that received
-/// the message only after its moment holds nothing for it, by design.
+/// The results of the epoch `chat`. Under a message timer (§7.7) a tombstone or an empty
+/// result with no event is left out: the timer erases what it deletes, so such a record is
+/// what a deletion arriving after the erasure leaves, which depends on arrival order, and a
+/// device that received the message only after its moment holds nothing for it, by design.
 fn results(
     store: &MemoryStorage,
     chat: &ChatId,

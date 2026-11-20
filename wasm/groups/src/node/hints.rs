@@ -129,6 +129,30 @@ impl Node {
         }
     }
 
+    /// Forgets the hints that name an event the message timer erased in `changes` (§7.7):
+    /// nothing about an erased message stays on the device, not even which peer had seen
+    /// one of its events.
+    pub(crate) fn forget_erased(&mut self, changes: &[crate::store::Changes]) {
+        for c in changes.iter().filter(|c| !c.removed_edges.is_empty()) {
+            let first = (
+                c.chat_id,
+                GossipId::from_bytes([0; 32]),
+                EventId::from_bytes([0; crate::constants::EVENT_ID_SIZE]),
+            );
+            let gone: Vec<HintKey> = self
+                .t
+                .hints
+                .range(first..)
+                .take_while(|(k, _)| k.0 == c.chat_id)
+                .filter(|(k, _)| c.removed_edges.contains(&k.2))
+                .map(|(k, _)| *k)
+                .collect();
+            for k in gone {
+                self.remove_hint(&k);
+            }
+        }
+    }
+
     pub(crate) fn remove_hint(&mut self, key: &HintKey) {
         if let Some(h) = self.t.hints.remove(key) {
             self.hint_lru.remove(&lru(h.used, *key));

@@ -205,7 +205,12 @@ fn effective<R: StorageRead + ?Sized>(
             best = Some(candidate);
         }
     }
-    Ok(best.map(|(_, c)| c).filter(|c| c.is_reaction() || !deleted))
+    // Once the timer is to erase the object, nothing of it is shown, a reaction included
+    // (§7.6, §7.7), even before the tick runs.
+    let erased = obj.erase_at.is_some_and(|due| due <= now);
+    Ok(best
+        .map(|(_, c)| c)
+        .filter(|c| !erased && (c.is_reaction() || !deleted)))
 }
 
 /// `M` of §7.5: the greatest `created_at` among the visible messages held in the root's

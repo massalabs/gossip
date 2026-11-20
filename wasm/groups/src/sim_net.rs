@@ -30,8 +30,10 @@
 //!   (72 hours by default, clocks corrected), every honest device without local-only changes holds, at a
 //!   common instant, the same retained events (rows and their parent links) and the same
 //!   objects, hence the same results; devices with local-only changes differ on purpose and
-//!   are checked for consistency only. Pruned stubs are not compared: an ID pruned everywhere
-//!   before a device heard of it can never reach that device, by design (§9.3, §11.7);
+//!   are checked for consistency only. Pruned stubs are not compared, nor the stubs an object
+//!   lists for the message timer to erase: an ID pruned everywhere before a device heard of it
+//!   can never reach that device, by design (§9.3, §11.7); under a timer, every object past
+//!   its erasure is gone (§7.7);
 //! - (b) the sleeper converges too, and recovers the current messages that only sat behind
 //!   pruned (superseded) events when it came back ([`Counters::behind_pruned`]);
 //! - (c) **bounded work**: plaintexts, bytes and lookup entries per device per simulated hour
@@ -1295,6 +1297,7 @@ fn add_stats(a: &mut crate::node::Stats, b: &crate::node::Stats) {
     a.expired_resends += b.expired_resends;
     a.busy_sent += b.busy_sent;
     a.temporarily_invalid += b.temporarily_invalid;
+    a.erased += b.erased;
 }
 
 /// The current messages whose carrier's children are all pruned: discoverable only because
@@ -1336,10 +1339,10 @@ type Retained = (
     Vec<ObjectRecord>,
 );
 
-/// Whether `o` holds only what the message timer can leave of a message (§7.7): the
-/// tombstone, or no result at all after a pending version came due past its moment, with no
-/// event. A device that received the message only after its moment holds nothing at all for
-/// it, by design, so such objects are not compared.
+/// Whether `o` holds only a tombstone, or no result at all, with no event (§7.7). The timer
+/// erases what it deletes, so under a timer such an object is what a deletion that arrives
+/// after the erasure leaves; whether a device has one depends on arrival order, so such
+/// objects are not compared.
 fn timer_remnant(o: &ObjectRecord) -> bool {
     (o.is_deleted() || o.current.is_none())
         && o.current_events.is_empty()
@@ -1361,11 +1364,17 @@ fn retained(store: &Store, chat: &ChatId, timed: bool) -> Retained {
         .into_iter()
         .filter(|(c, _)| held.contains(c))
         .collect();
+    // The stubs an object lists for the timer to erase are compared as the stub rows are:
+    // not at all. They name the pruned events this device knows, which differ by design.
     let objects = store
         .objects(chat)
         .unwrap()
         .into_iter()
         .filter(|o| !(timed && timer_remnant(o)))
+        .map(|mut o| {
+            o.stubs.clear();
+            o
+        })
         .collect();
     (rows, edges, objects)
 }
@@ -1435,7 +1444,8 @@ fn run(seed: u64, hours: u64) -> Counters {
         .collect();
     assert!(clean.len() >= 2, "fewer than two devices compared");
     let timed = sim.root.message_timer() > 0;
-    // Under a message timer, no honest device keeps a message past its moment (§7.7).
+    // Under a message timer, no honest device keeps a message past its moment, and none
+    // keeps an object past the moment the timer erases it (§7.7).
     if timed {
         for &d in &honest {
             for o in sim.devs[d].store.objects(&chat).unwrap() {
@@ -1446,10 +1456,14 @@ fn run(seed: u64, hours: u64) -> Counters {
                         "device {d} keeps a message past its moment"
                     );
                 }
-                if timer_remnant(&o) {
-                    sim.counters.timer_deletions += 1;
-                }
+                assert!(
+                    o.erase_at.is_none_or(|e| e > at),
+                    "device {d} keeps an object past its erasure"
+                );
             }
+            let dev = &sim.devs[d];
+            let node = dev.node.as_ref().expect("booted");
+            sim.counters.timer_deletions += dev.stats_before.erased + node.stats().erased;
         }
     }
     let reference = retained(&sim.devs[clean[0]].store, &chat, timed);

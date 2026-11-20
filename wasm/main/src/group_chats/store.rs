@@ -212,6 +212,8 @@ fn object_fields(o: &ObjectRecord) -> String {
         ("pendingVersions".into(), o.pending_versions.enc()),
         ("pendingDeletions".into(), o.pending_deletions.enc()),
         ("expiresAt".into(), o.expires_at.enc()),
+        ("eraseAt".into(), o.erase_at.enc()),
+        ("stubs".into(), o.stubs.enc()),
     ])
     .to_text()
 }
@@ -387,6 +389,17 @@ pub fn decode_snapshot(s: &BatchOut) -> R<(MemoryStorage, OpenReport)> {
             expires_at: match j.field("expiresAt") {
                 Ok(v) => Codec::dec(v)?,
                 Err(_) => None,
+            },
+            // When the timer erases the object, and the stubs it erases with it (§7.7);
+            // absent from an object stored before the erasure existed, which the timer then
+            // deletes and never erases, as it did.
+            erase_at: match j.field("eraseAt") {
+                Ok(v) => Codec::dec(v)?,
+                Err(_) => None,
+            },
+            stubs: match j.field("stubs") {
+                Ok(v) => Codec::dec(v)?,
+                Err(_) => Default::default(),
             },
         };
         entry(&mut epochs, chat).objects.insert(sync_obj_id, obj);
