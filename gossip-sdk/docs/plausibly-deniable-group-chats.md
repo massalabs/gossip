@@ -3470,7 +3470,8 @@ Physical layout is an implementation detail.
 - **Scan state and tombstones**, and **request correlation references**.
 - **Peer-knowledge hints.**
 - **Encrypted outbox.**
-- **Closed-chat markers** and **dissolved markers** (a chat ID only).
+- **Closed-chat markers** and **dissolved markers**: a chat ID and the reference of its root
+  (§14.2).
 
 Local fields are never transmitted or hashed.
 Only explicit protocol projections are serialized, never a whole stored record.
