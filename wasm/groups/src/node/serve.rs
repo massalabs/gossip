@@ -209,8 +209,10 @@ impl Node {
 
     /// Whether this device answers the per-epoch lookups of `chat` at all: its group is
     /// active there (D.74). A device that still holds the epoch but was kicked, left, waits
-    /// for a kick or saw the group dissolved stays silent, exactly as a device that does not
-    /// hold the epoch: no entry, no request token taken, the requester not marked as alive.
+    /// for a kick or saw the group dissolved answers exactly as a device that does not hold
+    /// the epoch, query kind by query kind: a lookup gets silence (no entry, no request token
+    /// taken, the requester not marked as alive), and a tips scan "not available", as for an
+    /// anchor not held (D.51, see `serve_tips_scan`).
     /// Why: "not available" would tell a member that this device kept the chat, where silence
     /// cannot be told apart from a device that deleted it or is offline. The cost is one
     /// timeout for the asker, only until it learns that this device is out. The exceptions

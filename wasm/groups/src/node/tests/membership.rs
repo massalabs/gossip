@@ -2006,9 +2006,34 @@ fn epoch_lookups(chat: ChatId, e: &MessageEvent, other: usize) -> Vec<QueryOp> {
     ]
 }
 
+/// Asserts that device `d` answers `from` for the held epoch `chat` exactly as for an epoch it
+/// never held: the per-epoch lookups (silence) and a tips scan anchored there ("not
+/// available", D.51), the same response frames, whatever the query.
+fn answers_as_not_held(net: &mut MNet, d: usize, from: usize, chat: ChatId, e: &MessageEvent) {
+    let unknown = ChatId::from_bytes([0xEE; 32]);
+    let ops = |c: ChatId| {
+        let mut ops = epoch_lookups(c, e, 2);
+        ops.push(QueryOp::TipsScan {
+            anchor: c,
+            scan_id: crate::ids::ScanId::from_bytes([4; 32]),
+            offset: 0,
+        });
+        ops
+    };
+    let not_held = answers_of(net, d, from, ops(unknown));
+    let held = answers_of(net, d, from, ops(chat));
+    assert_eq!(held, not_held, "device {d}");
+    assert_eq!(
+        not_held,
+        vec![(5, ResponseResult::Status(Status::NotAvailable))],
+        "device {d}"
+    );
+}
+
 /// D.74, settled: a device that holds an epoch but is no longer active in its group (kicked,
-/// waiting for a kick, dissolved) answers a member's per-epoch lookups exactly as a device
-/// that does not hold the epoch: with silence, no entry at all. Before, it answered "not
+/// waiting for a kick, dissolved) answers a member exactly as a device that does not hold the
+/// epoch: per-epoch lookups get silence, no entry at all, and a tips scan "not available"
+/// (D.51), the same response frames in both cases. Before, the lookups were answered "not
 /// available", which told the member it still held the chat.
 #[test]
 fn an_inactive_device_is_silent_like_one_that_does_not_hold_the_epoch() {
@@ -2033,6 +2058,7 @@ fn an_inactive_device_is_silent_like_one_that_does_not_hold_the_epoch() {
     assert!(not_held.is_empty(), "{not_held:?}");
     let kicked = answers_of(&mut net, 3, 1, epoch_lookups(g, &e, 2));
     assert!(kicked.is_empty(), "kicked: {kicked:?}");
+    answers_as_not_held(&mut net, 3, 1, g, &e);
     // Kicked in its turn, a device sends a member removed before it nothing either when that
     // member acts in an epoch it was removed from: no kick, no root, no lookup. Device 3 is
     // offline through a rename and its removal, so it is behind; device 2 is kicked next.
@@ -2110,6 +2136,7 @@ fn an_inactive_device_is_silent_like_one_that_does_not_hold_the_epoch() {
     assert_eq!(net.summary(2, &g).unwrap().status, MyStatus::Waiting);
     let waiting = answers_of(&mut net, 2, 1, epoch_lookups(g, &e, 3));
     assert!(waiting.is_empty(), "waiting: {waiting:?}");
+    answers_as_not_held(&mut net, 2, 1, g, &e);
     // Dissolved and kept as an archive: messages and other members' records are not served;
     // its dissolve message still is (§5.8).
     let (mut net, g) = founded(4);
