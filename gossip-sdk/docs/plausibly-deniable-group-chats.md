@@ -1101,8 +1101,9 @@ epoch has this effect:
   from this group", and the composer is disabled; the user can delete the group's data;
 - the device stops everything it starts itself in that epoch: sending, relaying, notices, scans and
   neighbor upkeep;
-- it still applies deletion events for that epoch (§10.4) and drops everything else it receives
-  there;
+- it still applies deletion events for that epoch (§10.4), still verifies and stores kicks, leaves
+  and dissolve messages naming an epoch it holds, and applies a dissolve message naming that
+  epoch: "Dissolve & Delete" erases its archive; it drops every other event it receives there;
 - it answers queries about that epoch exactly as a device that does not hold it would (§10.4):
   silence to a lookup, "not available" to a tips scan;
 - from then on, every root that lists the device is an **invitation** (§4.8), whatever its parents.
@@ -1120,6 +1121,15 @@ then at.
 
 *Why the group is not closed automatically:* an owner could otherwise erase the history on a
 member's device by removing that member.
+
+*Why a dissolve still applies to the removed member's archive:* "Dissolve & Delete" is meant to erase the chat on every device that holds the epoch;
+otherwise the removed member's device would keep the only transcript of a chat everyone else
+erased. It is consistent with single deletion events, which already reach removed peers (§10.4),
+and the owner gains no power it did not have: it could have dissolved with deletion just before the
+kick.
+*Known drawback:* a removed member's archive stays within the owner's reach after the removal. The
+owner can erase that member's copy of an epoch it holds although it is no longer in the group; only
+a dissolve naming an epoch the member holds reaches it, never a dissolve of a later epoch (§16.8).
 
 ### 5.7 Changing the owner
 
@@ -2141,10 +2151,20 @@ The cost is accepted: up to 511 ciphertexts for one deletion, each about 3.8 KB,
 session adds about 3.6 KB to every ciphertext whatever it carries.
 A notice would save nothing.
 
-**Groups in a special state.** A device whose group is a read-only archive after a kick (§5.6)
-applies deletion events for that epoch and drops every other incoming event.
+**Groups in a special state.** A device whose group is a read-only archive after a kick (§5.6),
+or after it left and keeps the group read-only, applies deletion events for that epoch, verifies
+and stores kicks, leaves and dissolve messages naming an epoch it holds, applies a dissolve message
+naming that epoch ("Dissolve & Delete" erases its archive), and drops every other incoming event.
 A device in the waiting state (§5.4), and a device whose group was dissolved (§5.8), drop every
-incoming event.
+incoming event except roots, kicks and dissolve messages.
+*Why:* "Dissolve & Delete" is meant to erase the chat on every device that holds the epoch;
+otherwise the removed member's device would keep the only transcript of a chat everyone else
+erased. It is consistent with single deletion events, which already reach removed peers (§10.4),
+and the owner gains no power it did not have: it could have dissolved with deletion just before the
+kick.
+*Known drawback:* a removed member's archive stays within the owner's reach after the removal. The
+owner can erase that member's copy of an epoch it holds although it is no longer in the group; only
+a dissolve naming an epoch the member holds reaches it, never a dissolve of a later epoch (§16.8).
 
 A device that holds an epoch but is no longer active in its group (kicked, left, waiting for a
 kick, dissolved) answers a member exactly as a device that does not hold the epoch would, query by
@@ -3198,6 +3218,18 @@ peers that share nothing (§4.6).
     recipient can check against one known epoch is itself a way to test membership offline,
     unless it is keyed by a secret of that epoch that an outsider cannot have. This needs a design
     and a proof, not a patch.
+
+### 16.8 Known limitation: a removed member's archive stays within the owner's reach
+
+A device kicked from an epoch, or that left it and keeps it read-only, still applies a dissolve
+message naming that epoch, and "Dissolve & Delete" erases its archive (§5.6, §10.4). The owner of an
+epoch can therefore erase a removed member's copy of it at any time after the removal, although
+that member is no longer in the group. Only a dissolve naming an epoch the member holds reaches it;
+a dissolve of a later epoch does not.
+
+This is accepted: deletion is meant to reach every device that holds the epoch, single deletion
+events already reach removed peers, and the owner could have dissolved with deletion just before
+the kick.
 
 ## 17. Readiness, validation and future work
 
