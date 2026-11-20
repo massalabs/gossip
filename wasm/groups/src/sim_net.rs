@@ -47,7 +47,12 @@
 //! Every failure prints its seed; a run replays from the seed alone. The run counts each
 //! generated behaviour ([`Counters`]); the default test asserts that each occurred.
 //!
-//! Environment variables (local runs; the default run takes a few seconds):
+//! The test is ignored by a plain `cargo test`; run it with
+//! `cargo test --release -p groups --lib -- --ignored --exact sim_net::network_simulation`.
+//! Every requested seed runs, failing or not, and the run ends with the report described in
+//! [`crate::sim_report`].
+//!
+//! Environment variables (the default run takes a few seconds):
 //!
 //! - `GROUPS_NET_SEED=<n>`: replay one seed;
 //! - `GROUPS_NET_SEEDS=<n>`: run seeds `GROUPS_NET_FIRST` (default 0) to `+ n` (default 5,
@@ -65,6 +70,7 @@ use crate::node::tests::{config, epoch_root_with_timer, member};
 use crate::node::{Node, NodeError};
 use crate::rng::{TestRng, bytes, uniform_below};
 use crate::root::Root;
+use crate::sim_report::{finish, run_seeds};
 use crate::store::{EventRow, MemoryStorage, ObjectRecord, RowState, StorageRead, StoredResult};
 use crate::test_support::Instrumented;
 use crate::wire::{
@@ -1760,6 +1766,7 @@ fn env_u64(name: &str) -> Option<u64> {
 }
 
 #[test]
+#[ignore = "simulation: run by the simulations job, or with --ignored"]
 fn network_simulation() {
     let hours = env_u64("GROUPS_NET_HOURS").unwrap_or(8);
     let single = env_u64("GROUPS_NET_SEED");
@@ -1772,29 +1779,22 @@ fn network_simulation() {
         }
     };
     let mut total = Counters::default();
-    for seed in &seeds {
-        let seed = *seed;
-        match std::panic::catch_unwind(|| run(seed, hours)) {
+    let mut failures = Vec::new();
+    for (seed, r) in run_seeds(&seeds, |seed| run(seed, hours)) {
+        match r {
             Ok(c) => total.add(&c),
-            Err(panic) => {
-                eprintln!(
-                    "network simulation failed with seed {seed} ({hours} hours); replay with \
-                     GROUPS_NET_SEED={seed} GROUPS_NET_HOURS={hours} cargo test -p groups \
-                     network_simulation"
-                );
-                std::panic::resume_unwind(panic);
-            }
+            Err(reason) => failures.push((seed, reason)),
         }
     }
     eprintln!(
         "network simulation counters over {} seeds: {total:?}",
         seeds.len()
     );
-    if single.is_none() && seeds.len() >= 5 {
-        assert!(
-            total.missing().is_empty(),
-            "situations never exercised: {:?}",
-            total.missing()
-        );
-    }
+    let missing = (single.is_none() && seeds.len() >= 5).then(|| total.missing());
+    finish("network", seeds.len(), &failures, missing, |seed| {
+        format!(
+            "GROUPS_NET_SEED={seed} GROUPS_NET_HOURS={hours} cargo test --release -p groups \
+             --lib -- --ignored --exact sim_net::network_simulation"
+        )
+    });
 }
