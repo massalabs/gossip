@@ -1071,7 +1071,13 @@ fn metadata_len_bounds_the_encoded_metadata_field() {
         // Prost leaves an empty key or value out; with none, the count is its encoding.
         let full = metadata.iter().all(|(k, v)| !k.is_empty() && !v.is_empty());
         let p = proto::MessagePayload {
-            metadata,
+            metadata: metadata
+                .iter()
+                .map(|(key, value)| proto::MetadataEntry {
+                    key: key.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
             ..Default::default()
         };
         assert!(len >= p.encoded_len());
