@@ -62,20 +62,29 @@ impl EpochRecords {
     fn put_object(&mut self, obj: ObjectRecord) {
         // Only the difference is reindexed: an object can hold many pending items.
         let sync = obj.sync_obj_id;
-        let old = self
-            .objects
-            .remove(&sync)
-            .unwrap_or_else(|| ObjectRecord::empty(sync));
+        let old = self.objects.remove(&sync);
+        self.reindex_object(old.as_ref(), Some(&obj), sync);
+        self.objects.insert(sync, obj);
+    }
+
+    /// Reindexes the object `sync` from `old` to `new` (`None`: no record).
+    fn reindex_object(
+        &mut self,
+        old: Option<&ObjectRecord>,
+        new: Option<&ObjectRecord>,
+        sync: SyncObjId,
+    ) {
+        let none = BTreeSet::new();
         let key = |kind| move |(due, id): &(u64, EventId)| (*due, *id, kind, sync);
         for (before, after, kind) in [
             (
-                &old.pending_versions,
-                &obj.pending_versions,
+                old.map_or(&none, |o| &o.pending_versions),
+                new.map_or(&none, |o| &o.pending_versions),
                 PendingKind::Version,
             ),
             (
-                &old.pending_deletions,
-                &obj.pending_deletions,
+                old.map_or(&none, |o| &o.pending_deletions),
+                new.map_or(&none, |o| &o.pending_deletions),
                 PendingKind::Deletion,
             ),
         ] {
@@ -85,8 +94,16 @@ impl EpochRecords {
             self.pending.extend(after.difference(before).map(key(kind)));
         }
         for (before, after, kind) in [
-            (old.expires_at, obj.expires_at, PendingKind::Expiry),
-            (old.erase_at, obj.erase_at, PendingKind::Erasure),
+            (
+                old.and_then(|o| o.expires_at),
+                new.and_then(|o| o.expires_at),
+                PendingKind::Expiry,
+            ),
+            (
+                old.and_then(|o| o.erase_at),
+                new.and_then(|o| o.erase_at),
+                PendingKind::Erasure,
+            ),
         ] {
             if before != after {
                 let key = |due| (due, super::EXPIRY_EVENT_ID, kind, sync);
@@ -98,20 +115,17 @@ impl EpochRecords {
                 }
             }
         }
-        if let Some(t) = old.reaction_target() {
+        if let Some(t) = old.and_then(ObjectRecord::reaction_target) {
             self.reactions.remove(&(t, sync));
         }
-        if let Some(t) = obj.reaction_target() {
+        if let Some(t) = new.and_then(ObjectRecord::reaction_target) {
             self.reactions.insert((t, sync));
         }
-        self.objects.insert(sync, obj);
     }
 
     fn remove_object(&mut self, sync: &SyncObjId) {
-        if self.objects.contains_key(sync) {
-            // Unindexed as an object with nothing, then dropped.
-            self.put_object(ObjectRecord::empty(*sync));
-            self.objects.remove(sync);
+        if let Some(old) = self.objects.remove(sync) {
+            self.reindex_object(Some(&old), None, *sync);
         }
     }
 }
@@ -375,7 +389,7 @@ mod tests {
             );
         }
         c.edges.insert(id(2), vec![id(1)]);
-        let mut obj = ObjectRecord::empty(sync);
+        let mut obj = ObjectRecord::empty(sync, true);
         obj.pending_versions.insert((30, id(2)));
         obj.pending_deletions.insert((20, id(1)));
         c.objects.insert(sync, obj);
@@ -400,12 +414,12 @@ mod tests {
 
         // Upsert.
         let mut c = Changes::new(chat);
-        c.objects.insert(sync, ObjectRecord::empty(sync));
+        c.objects.insert(sync, ObjectRecord::empty(sync, true));
         store.commit(c).unwrap();
         assert!(store.pending_until(&chat, u64::MAX).unwrap().is_empty());
         assert_eq!(
             store.objects(&chat).unwrap(),
-            vec![ObjectRecord::empty(sync)]
+            vec![ObjectRecord::empty(sync, true)]
         );
     }
 }

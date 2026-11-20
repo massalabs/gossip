@@ -312,6 +312,20 @@ impl<'a> Epoch<'a> {
         dag::tips(store, &self.chat_id(), now)
     }
 
+    /// The tips this device offers on its own initiative at `now` (§12.1, §14.1): those of the
+    /// available events of shareable records ([`ObjectRecord::shareable`]).
+    ///
+    /// # Errors
+    ///
+    /// A storage failure.
+    pub fn shareable_tips<R: StorageRead + ?Sized>(
+        &self,
+        store: &R,
+        now: u64,
+    ) -> Result<Vec<EventId>, StorageError> {
+        dag::shareable_tips(store, &self.chat_id(), now)
+    }
+
     /// The event to serve under `event_id` at `now`, under its own version (§13.1): only an
     /// available event. A pending version past its window is retained but not served (§8.1).
     ///
@@ -586,9 +600,13 @@ pub(crate) fn apply_new<S: StorageRead + ?Sized>(
     let id = event.event_id();
     tx.put_edges(id, event.parents().to_vec());
     let sync = event.payload().sync_obj_id();
-    let mut obj = tx
-        .object(&sync)?
-        .unwrap_or_else(|| ObjectRecord::empty(sync));
+    let existing = tx.object(&sync)?;
+    let created = existing.is_none();
+    // Every record starts shareable (§14.1); only a deletion below may make it quiet.
+    let mut obj = existing.unwrap_or_else(|| ObjectRecord::empty(sync, true));
+    if created && matches!(event.payload(), Payload::Delete { .. }) {
+        quiet_deletion(&mut obj, tx.message_timer(), now);
+    }
     let merge = match event.payload().clone() {
         Payload::Content(c) => {
             note_version(&mut obj, &c, tx.message_timer());
@@ -701,6 +719,26 @@ fn expired(event: &MessageEvent, timer: u64, now: u64) -> bool {
     }
 }
 
+/// Makes `obj`, a record a deletion event creates for a message this device has never
+/// processed, quiet under the timer `timer` (§7.7, §14.1): not shareable, and erased at
+/// `now` plus the timer, rounded up to the step of the timer. With no timer it stays
+/// shareable and is kept as long as the group.
+///
+/// Why: a deletion carries no date, so this device cannot know the message's moment. `now`
+/// plus the timer is a safe bound, since an honest message is never created after its own
+/// deletion. That deadline restarts whenever the deletion is received anew, so a device in
+/// this state keeps the deletion to itself: devices that offered it to each other would
+/// renew each other's copies forever. It still answers a direct request for it.
+fn quiet_deletion(obj: &mut ObjectRecord, timer: u64, now: u64) {
+    if timer == 0 {
+        return;
+    }
+    obj.shareable = false;
+    obj.erase_at = now
+        .checked_add(timer)
+        .and_then(|at| rounded_erasure(at, timer));
+}
+
 /// Counts the version `content`, which this device is processing, in the date the timer
 /// erases its object: the latest moment of every version known (§7.7).
 ///
@@ -719,13 +757,19 @@ fn note_version(obj: &mut ObjectRecord, content: &Content, timer: u64) {
         return;
     }
     let moment = version_moment(content, timer);
-    let first = obj.erase_at.is_none()
-        && obj.pending_versions.is_empty()
-        && match &obj.current {
-            None => true,
-            Some(StoredResult::Tombstone) => content.is_reaction(),
-            Some(StoredResult::Content(_)) => false,
-        };
+    // The first version of the message processed for a quiet record makes it shareable
+    // again (§14.1): its date is now known, the same on every device that holds it, so the
+    // date the deletion was processed no longer counts.
+    let first_of_quiet = !obj.shareable;
+    obj.shareable = true;
+    let first = first_of_quiet
+        || obj.erase_at.is_none()
+            && obj.pending_versions.is_empty()
+            && match &obj.current {
+                None => true,
+                Some(StoredResult::Tombstone) => content.is_reaction(),
+                Some(StoredResult::Content(_)) => false,
+            };
     obj.erase_at = if first {
         moment
     } else {

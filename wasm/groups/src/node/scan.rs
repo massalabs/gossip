@@ -698,7 +698,9 @@ impl Node {
         let mut others = Vec::new();
         for chat in &listed {
             let removed = self.removed_peer(chat, &peer);
-            for id in dag::tips(cx.ov, chat, cx.now)? {
+            // Only what this device offers on its own initiative: a quiet record's events
+            // are never listed, though a direct request for one is answered (§7.7, §14.1).
+            for id in dag::shareable_tips(cx.ov, chat, cx.now)? {
                 let Some(row) = cx.ov.event_row(chat, &id)? else {
                     continue;
                 };

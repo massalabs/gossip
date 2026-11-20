@@ -198,12 +198,42 @@ pub struct ObjectRecord {
     /// erasure finds their stubs and parent edges. Local bookkeeping: an event pruned by
     /// another device is not in it.
     pub stubs: BTreeSet<EventId>,
+    /// Whether the device may offer this record's events on its own initiative (§7.7,
+    /// §14.1). Local, never sent.
+    ///
+    /// - `true`: it announces them and lists them in tips scans. The normal state of every
+    ///   record.
+    /// - `false`: it keeps the record to itself. It neither announces nor lists its events,
+    ///   but it still answers a direct request for one of them (a lookup by ID).
+    ///
+    /// It is written at exactly three moments:
+    ///
+    /// 1. every record starts `true`;
+    /// 2. it is set to `false` when a deletion event creates the record, for a message the
+    ///    device has never processed, in an epoch with a timer; `erase_at` is then the time
+    ///    the deletion was processed plus the timer, rounded up to the step of the timer;
+    /// 3. it is set back to `true` the first time any version of the message itself is
+    ///    processed for that record, even a copy the tombstone blocks on arrival; `erase_at`
+    ///    is then recomputed from the message's creation date.
+    ///
+    /// With no timer, it is always `true`.
+    ///
+    /// Why: a deletion carries no date, so a device without the message cannot know the
+    /// message's moment. The processing time plus the timer is a safe bound, since an honest
+    /// message is never created after its own deletion. But that deadline restarts whenever
+    /// the deletion is received anew: if such devices offered it to each other, they would
+    /// renew each other's copies forever (one device that was offline is enough to stagger
+    /// the deadlines). A device that holds the message has a fixed deadline, the same on
+    /// every device, so offering is safe there. Answering a direct request is safe: a peer
+    /// asks only when something finite gave it the ID.
+    pub shareable: bool,
 }
 
 impl ObjectRecord {
-    /// An object with nothing yet.
+    /// An object with nothing yet. `shareable` is stated by every caller: see
+    /// [`ObjectRecord::shareable`] for when it is `false`.
     #[must_use]
-    pub fn empty(sync_obj_id: SyncObjId) -> Self {
+    pub fn empty(sync_obj_id: SyncObjId, shareable: bool) -> Self {
         Self {
             sync_obj_id,
             current: None,
@@ -213,6 +243,7 @@ impl ObjectRecord {
             expires_at: None,
             erase_at: None,
             stubs: BTreeSet::new(),
+            shareable,
         }
     }
 
