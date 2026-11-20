@@ -43,6 +43,16 @@ export interface DiscussionInitializationResult {
   announcement: Uint8Array;
 }
 
+/** What a contact request carries besides its announcement. */
+export interface DiscussionStartOptions {
+  /**
+   * The message timer (§7.7, milliseconds, 0 = forever) of the direct chat
+   * this device founds once the request is accepted; the account's default
+   * when absent.
+   */
+  messageTimer?: number;
+}
+
 /**
  * Service for managing discussions between users.
  *
@@ -109,7 +119,8 @@ export class DiscussionService {
    */
   async initialize(
     contact: Contact,
-    payload?: AnnouncementPayload
+    payload?: AnnouncementPayload,
+    options: DiscussionStartOptions = {}
   ): Promise<Result<DiscussionInitializationResult, Error>> {
     const log = logger.forMethod('initialize');
 
@@ -140,6 +151,8 @@ export class DiscussionService {
         // A contact request: once accepted, this device founds the direct
         // chat (§5.12).
         directChatOwed: true,
+        // Its message timer, remembered until the chat is founded.
+        directChatTimer: options.messageTimer ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -407,9 +420,10 @@ export class DiscussionService {
    */
   async start(
     contact: Contact,
-    payload?: AnnouncementPayload
+    payload?: AnnouncementPayload,
+    options: DiscussionStartOptions = {}
   ): Promise<Result<DiscussionInitializationResult, Error>> {
-    const result = await this.initialize(contact, payload);
+    const result = await this.initialize(contact, payload, options);
     if (result.success) {
       await this.refreshService?.stateUpdate();
       this.eventEmitter.emit(
@@ -428,7 +442,8 @@ export class DiscussionService {
   async startByUserId(
     contactUserId: string,
     name: string,
-    payload?: AnnouncementPayload
+    payload?: AnnouncementPayload,
+    options: DiscussionStartOptions = {}
   ): Promise<Result<DiscussionInitializationResult, Error>> {
     if (!this.authService) {
       return { success: false, error: new Error('AuthService not set') };
@@ -463,7 +478,7 @@ export class DiscussionService {
       contact = addResult.contact;
     }
 
-    const result = await this.initialize(contact, payload);
+    const result = await this.initialize(contact, payload, options);
     if (result.success) await this.refreshService?.stateUpdate();
     return result;
   }

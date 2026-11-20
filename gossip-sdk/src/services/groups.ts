@@ -95,6 +95,26 @@ export interface GroupSummary {
    * person took part in it. Null for any other group.
    */
   tookPart: boolean | null;
+  /**
+   * The message timer of the current epoch (§7.7), in milliseconds: each new
+   * message is deleted on every device that long after its creation date. 0
+   * keeps messages forever. Only the owner changes it (`setMessageTimer`).
+   */
+  messageTimer: number;
+  /**
+   * Every epoch of the group with its timer and when it started, in the
+   * order they started: each message keeps the timer of its own epoch.
+   */
+  timers: GroupEpochTimer[];
+}
+
+/** The message timer of one epoch of a group (§7.7). */
+export interface GroupEpochTimer {
+  epochId: GroupId;
+  /** Milliseconds; 0 keeps its messages forever. */
+  messageTimer: number;
+  /** When the epoch started (milliseconds since the epoch). */
+  startedAt: bigint;
 }
 
 export interface GroupInvitation {
@@ -125,6 +145,8 @@ export interface GroupInvitation {
    * accepting makes it the current chat and the other its history.
    */
   continues: GroupId | null;
+  /** The message timer of the invited root, in milliseconds; 0 = forever. */
+  messageTimer: number;
 }
 
 /** A body this account can send or set: text, or a forward of text. */
@@ -277,7 +299,14 @@ export type GroupLine =
   | { type: 'dissolved' }
   | { type: 'notAMember'; from: bigint; to: bigint }
   /** "<by> added you back", after `notAMember` (§5.10). */
-  | { type: 'addedBack'; epoch: GroupId; by: string };
+  | { type: 'addedBack'; epoch: GroupId; by: string }
+  /**
+   * From this epoch on, new messages disappear `timer` milliseconds after
+   * they were written, or are kept (`timer` 0) (§7.7). Shown where the timer
+   * changes, and at the start when the first epoch has one. Built from the
+   * group's epoch timers, never sent.
+   */
+  | { type: 'messageTimer'; epoch: GroupId; timer: number };
 
 export type GroupTimelineItem =
   | GroupMessage
@@ -324,6 +353,39 @@ export const GROUP_DEVICE_KEY: GroupId = '0'.repeat(64);
 
 /** The format version of the earlier one-to-one conversations (§5.12). */
 export const EARLIER_FORMAT_VERSION = 0;
+
+/** "1 month" of the message timer: 28 days, in milliseconds (§7.7). */
+export const GROUP_TIMER_28_DAYS_MS = 2_419_200_000;
+
+/** The earlier "1 month" of a retention in seconds, read as 28 days. */
+const EARLIER_MONTH_SECONDS = 2_592_000;
+
+/**
+ * The message timer (milliseconds, 0 = forever) of a retention in seconds:
+ * the account's default (`defaultRetentionDuration`) or the rule of an
+ * earlier one-to-one conversation (`messageRetentionDuration`). None (null
+ * or 0) is forever, and the earlier "1 month" (2,592,000 s) is 28 days.
+ */
+export function retentionToMessageTimer(
+  seconds: number | null | undefined
+): number {
+  if (!seconds || !Number.isSafeInteger(seconds) || seconds <= 0) return 0;
+  if (seconds === EARLIER_MONTH_SECONDS) return GROUP_TIMER_28_DAYS_MS;
+  return seconds * 1000;
+}
+
+/** Throws unless `timer` is a message timer the engine takes. */
+function checkTimer(timer: number): void {
+  if (!Number.isSafeInteger(timer) || timer < 0) {
+    throw new Error('groups:invalid: message timer');
+  }
+}
+
+/** A timer of the view (a decimal string): an imprecise one is kept as read. */
+function timerOf(v: unknown): number {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
 
 function optionalNumber(v: unknown): number | null {
   if (v === null || v === undefined) return null;
@@ -543,7 +605,63 @@ function summary(r: Raw): GroupSummary {
     supersededBy: status === 'Superseded' ? (s.by as string) : null,
     earlier: (r.earlier as string[] | undefined) ?? [],
     tookPart: (r.took_part as boolean | null | undefined) ?? null,
+    messageTimer: timerOf(r.message_timer),
+    timers: ((r.timers as Raw[] | undefined) ?? []).map(t => ({
+      epochId: t.epoch as string,
+      messageTimer: timerOf(t.message_timer),
+      startedAt: BigInt(t.started_at as string),
+    })),
   };
+}
+
+/** An identifier of a record as the engine writes it (JSON text): its hex. */
+function recordId(text: string): string {
+  if (!text.startsWith('"')) return text;
+  try {
+    return JSON.parse(text) as string;
+  } catch {
+    return text;
+  }
+}
+
+/** The time a timeline item is placed at. */
+function itemTime(i: GroupTimelineItem): bigint {
+  return i.kind === 'message' ? i.createdAt : i.at;
+}
+
+/**
+ * Adds to a timeline the lines of its group's message timer (§7.7): one
+ * where an epoch starts with a timer other than the one before, and one at
+ * the start when the first epoch has a timer. Each goes after the items
+ * placed at or before the start of its epoch (its own epoch line included).
+ */
+function withTimerLines(
+  items: GroupTimelineItem[],
+  timers: GroupEpochTimer[]
+): GroupTimelineItem[] {
+  const lines: GroupTimelineItem[] = [];
+  let previous = 0;
+  for (const t of timers) {
+    if (t.messageTimer !== previous) {
+      lines.push({
+        kind: 'line',
+        at: t.startedAt,
+        line: { type: 'messageTimer', epoch: t.epochId, timer: t.messageTimer },
+      });
+    }
+    previous = t.messageTimer;
+  }
+  if (lines.length === 0) return items;
+  const out: GroupTimelineItem[] = [];
+  let next = 0;
+  for (const i of items) {
+    while (next < lines.length && itemTime(lines[next]) < itemTime(i)) {
+      out.push(lines[next++]);
+    }
+    out.push(i);
+  }
+  out.push(...lines.slice(next));
+  return out;
 }
 
 function line(raw: unknown): GroupLine {
@@ -682,6 +800,15 @@ export class GroupService {
   /** Changes taken from the engine and not reported yet. */
   private takenChanges: Raw[] = [];
   /**
+   * The moments of the message timer (§7.7) of the messages held, by
+   * `epoch:syncObjId`, read from the records the engine writes
+   * (`expiresAt`). The engine hides a message from its moment and wakes the
+   * device then (`next_wakeup`), but reports no change: a `Messages` change
+   * is reported for its group once the moment has passed, so that the
+   * interface reads the timeline again. Memory only.
+   */
+  private expiries = new Map<string, { epoch: string; at: number }>();
+  /**
    * Ciphertexts encrypted and not stored yet (their session state is not
    * durable yet, or storing failed), oldest first. Memory only: they never
    * left the device.
@@ -757,6 +884,7 @@ export class GroupService {
   private reopen(): Promise<void> {
     const opening = (async () => {
       this.dropNode(true);
+      this.expiries.clear();
       const node = await this.openNode();
       try {
         const now = this.now();
@@ -773,10 +901,9 @@ export class GroupService {
         this.digests.clear();
         this.lookAtMessages(node);
         // Not through `persist`, which reopens on failure.
-        await this.queries.groups.applyBatches(
-          this.owner,
-          node.take_batches() as GroupBatch[]
-        );
+        const batches = node.take_batches() as GroupBatch[];
+        await this.queries.groups.applyBatches(this.owner, batches);
+        this.noteExpiries(batches);
       } catch (error) {
         try {
           node.free();
@@ -808,7 +935,13 @@ export class GroupService {
   private async openNode(): Promise<GroupsNode> {
     const snapshot = await this.queries.groups.loadSnapshot(this.owner);
     try {
-      return GroupsNode.open(this.session.ourPk, this.session.ourSk, snapshot);
+      const node = GroupsNode.open(
+        this.session.ourPk,
+        this.session.ourSk,
+        snapshot
+      );
+      this.noteExpiries([{ ...snapshot, erase: [] }]);
+      return node;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!message.startsWith('groups:undecodable')) throw error;
@@ -996,6 +1129,76 @@ export class GroupService {
       this.recover(error);
       throw error;
     }
+    this.noteExpiries(batches);
+  }
+
+  /**
+   * Keeps the moments of the message timer of the objects written (see
+   * `expiries`). A moment already passed is not kept: the message is hidden
+   * already, and the change that wrote it is reported; a moment kept that
+   * has come stays until it is reported.
+   */
+  private noteExpiries(batches: Pick<GroupBatch, 'objects' | 'erase'>[]) {
+    const now = this.now();
+    for (const b of batches) {
+      for (const o of b.objects) {
+        const epoch = recordId(o.chatId);
+        const key = `${epoch}:${recordId(o.syncObjId)}`;
+        let at: number | null = null;
+        try {
+          const raw = (JSON.parse(o.fields) as Raw).expiresAt;
+          if (raw !== null && raw !== undefined) at = Number(raw);
+        } catch {
+          // Not readable here: the engine still wakes the device.
+        }
+        const known = this.expiries.get(key);
+        if (known && known.at <= now) {
+          // Due: the deletion the engine writes at the moment is reported.
+          continue;
+        }
+        if (at !== null && Number.isFinite(at) && at > now) {
+          this.expiries.set(key, { epoch, at });
+        } else {
+          this.expiries.delete(key);
+        }
+      }
+      if (b.erase.length > 0) {
+        const erased = new Set(b.erase.map(recordId));
+        for (const [key, e] of this.expiries) {
+          if (erased.has(e.epoch)) this.expiries.delete(key);
+        }
+      }
+    }
+  }
+
+  /**
+   * Reports a `Messages` change for each group that holds a message whose
+   * moment has passed (§7.7), and makes what it shows now the reference.
+   */
+  private takeExpiries(node: GroupsNode): void {
+    const now = this.now();
+    const epochs = new Set<string>();
+    for (const [key, e] of this.expiries) {
+      if (e.at > now) continue;
+      this.expiries.delete(key);
+      epochs.add(e.epoch);
+    }
+    const groups = new Set<string>();
+    for (const epoch of epochs) {
+      const g = JSON.parse(node.group(hexToBytes(epoch))) as Raw | null;
+      if (g) groups.add(g.group as string);
+    }
+    for (const group of groups) {
+      try {
+        this.digests.set(
+          group,
+          messagesDigest(node.timeline(hexToBytes(group), now))
+        );
+      } catch {
+        this.digests.delete(group);
+      }
+      this.takenChanges.push({ group, kind: 'Messages' });
+    }
   }
 
   /** Whether `node` is still the open engine (after an await). */
@@ -1038,6 +1241,7 @@ export class GroupService {
     await this.retryOutbox();
     if (!this.alive(node)) return;
     this.takeChanges(node);
+    this.takeExpiries(node);
     await this.persist();
     const changes = this.takenChanges;
     this.takenChanges = [];
@@ -1378,11 +1582,43 @@ export class GroupService {
 
   // ── Groups ───────────────────────────────────────────────────────────────
 
-  /** Founds a group with these members (Gossip user IDs). Returns its key. */
-  createGroup(name: string, members: string[]): Promise<GroupId> {
+  /**
+   * The message timer this account gives a chat it founds (§7.7): its
+   * default retention (`accountSettings.defaultRetentionDuration`, seconds)
+   * in milliseconds, the earlier "1 month" read as 28 days; 28 days when the
+   * account has no settings yet; 0 (forever) when the default is off.
+   */
+  async defaultMessageTimer(): Promise<number> {
+    const settings = await this.queries.accountSettings
+      .get(this.owner)
+      .catch(() => undefined);
+    if (!settings) return GROUP_TIMER_28_DAYS_MS;
+    return retentionToMessageTimer(settings.defaultRetentionDuration);
+  }
+
+  /**
+   * Founds a group with these members (Gossip user IDs), with the message
+   * timer chosen (milliseconds, 0 = forever) or the account's default.
+   * Returns its key.
+   */
+  async createGroup(
+    name: string,
+    members: string[],
+    options: { messageTimer?: number } = {}
+  ): Promise<GroupId> {
+    const timer = options.messageTimer ?? (await this.defaultMessageTimer());
+    checkTimer(timer);
     return this.run(async node => {
       await this.learnMembers(node, members);
-      return bytesToHex(node.create_group(name, idsOf(members), this.now()));
+      return bytesToHex(
+        node.create_group_with_timer(
+          name,
+          idsOf(members),
+          undefined,
+          timer,
+          this.now()
+        )
+      );
     });
   }
 
@@ -1390,16 +1626,24 @@ export class GroupService {
    * Founds the direct chat of this device and `peer` (§5.12), for a
    * migration or a new contact: a group of two with `migrate_from = 0`.
    * Returns the group kept, which is the peer's own creation when it is held
-   * and its owner sorts first.
+   * and its owner sorts first. `messageTimer` (milliseconds, 0 = forever)
+   * defaults to the account's.
    */
-  createDirectChat(name: string, peer: string): Promise<GroupId> {
+  async createDirectChat(
+    name: string,
+    peer: string,
+    messageTimer?: number
+  ): Promise<GroupId> {
+    const timer = messageTimer ?? (await this.defaultMessageTimer());
+    checkTimer(timer);
     return this.run(async node => {
       await this.learnMembers(node, [peer]);
       return bytesToHex(
-        node.create_group_with(
+        node.create_group_with_timer(
           name,
           idsOf([peer]),
           EARLIER_FORMAT_VERSION,
+          timer,
           this.now()
         )
       );
@@ -1530,6 +1774,29 @@ export class GroupService {
         node.change_group(hexToBytes(groupId), json, this.now())
       );
     });
+  }
+
+  /**
+   * As the owner: sets the message timer (§7.7, milliseconds, 0 = forever)
+   * by a new root that keeps the members and the name. Only messages
+   * written after it get it; each message keeps the timer of its epoch.
+   * Refused to a member who is not the owner. Returns the new epoch.
+   */
+  setMessageTimer(groupId: GroupId, messageTimer: number): Promise<GroupId> {
+    try {
+      checkTimer(messageTimer);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return this.run(node =>
+      bytesToHex(
+        node.change_group(
+          hexToBytes(groupId),
+          JSON.stringify({ t: 'MessageTimer', timer: messageTimer }),
+          this.now()
+        )
+      )
+    );
   }
 
   /** As the owner: resolves competing ends with this member list (§4.9). */
@@ -1896,6 +2163,7 @@ export class GroupService {
       migrateFrom: optionalNumber(r.migrate_from),
       migrationOf: r.migration_of ? userIdOf(r.migration_of as string) : null,
       continues: (r.continues as string | null | undefined) ?? null,
+      messageTimer: timerOf(r.message_timer),
     }));
   }
 
@@ -1917,16 +2185,22 @@ export class GroupService {
 
   /**
    * The visible messages and lines of a group (and the groups linked to it),
-   * with the targets of replies resolved against the epochs it shows.
+   * with the lines of its message timer, and the targets of replies resolved
+   * against the epochs it shows.
    */
   async timeline(groupId: GroupId): Promise<GroupTimelineItem[]> {
     const node = await this.readyNode();
     const me = bytesToHex(this.session.userId);
-    const items = (
-      JSON.parse(
-        await this.read(n => n.timeline(hexToBytes(groupId), this.now()))
-      ) as unknown[]
-    ).map(raw => timelineItem(raw, me));
+    const raw = JSON.parse(
+      await this.read(n => n.timeline(hexToBytes(groupId), this.now()))
+    ) as unknown[];
+    const group = JSON.parse(
+      await this.read(n => n.group(hexToBytes(groupId)))
+    ) as Raw | null;
+    const items = withTimerLines(
+      raw.map(r => timelineItem(r, me)),
+      group ? summary(group).timers : []
+    );
     const epochs = new Set<string>();
     for (const i of items) {
       if (i.kind === 'message') epochs.add(i.epochId);

@@ -54,7 +54,9 @@ export type {
   GroupEpoch,
   GroupLocalEdit,
   GroupMessageLimits,
+  GroupEpochTimer,
 } from './services/groups.js';
+export type { DiscussionStartOptions } from './services/discussion.js';
 export {
   GROUP_MAX_SCHEDULE_MS,
   GROUP_DEVICE_KEY,
@@ -62,4 +64,6 @@ export {
   GroupMessageTooLargeError,
   GroupInvalidReactionError,
   GROUP_MAX_EMOJI_BYTES,
+  GROUP_TIMER_28_DAYS_MS,
+  retentionToMessageTimer,
 } from './services/groups.js';
