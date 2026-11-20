@@ -8,7 +8,7 @@ A group has one owner, who alone changes its member list; its messages are unsig
 Direct chats are the two-member case of the same protocol: a conversation between two people is a
 group of two, and there is no other conversation format (§2.1).
 Normative rules use **MUST**, **MUST NOT**, **SHOULD** and **MAY**.
-Short *Why* notes explain the reason for a rule in place; they are not additional requirements.
+Short _Why_ notes explain the reason for a rule in place; they are not additional requirements.
 
 **Status: experimental.** Several prerequisites (crash-safe session/outbox integration, measured
 resource limits, residual-state testing) are not yet met; see §17.
@@ -60,7 +60,7 @@ correlation fields.
 Hashes and event IDs compare as unsigned big-endian integers, which equals lexicographic byte
 order.
 
-*Why:* protobuf keeps the wire format extensible and compact, while the fixed CBOR projection keeps
+_Why:_ protobuf keeps the wire format extensible and compact, while the fixed CBOR projection keeps
 every hash reproducible across implementations, whatever protobuf encoder produced the bytes.
 
 ### 1.3 Naming
@@ -77,7 +77,7 @@ The full registry is in Appendix A.
 
 - **Epoch:** one fixed member list with one group secret and one event DAG, founded by one root and
   identified by its `chat_id`.
-  In protocol rules the word *chat* means an epoch, as in `chat_id`.
+  In protocol rules the word _chat_ means an epoch, as in `chat_id`.
 - **Group:** what the user sees as one conversation: the epochs connected by parent links (§4.5),
   plus the links the user made by hand (§5.10).
   It is also called the logical chat.
@@ -142,7 +142,7 @@ and by knowledge of the epoch's group secret.
 A member leaves by a signed leave message, by an unsigned request to the owner, or silently (§5.2).
 The owner removes members, hands the group over to another member, or dissolves it (§5).
 
-*Why:* unsigned messages keep every message deniable, while a signed root gives all members one
+_Why:_ unsigned messages keep every message deniable, while a signed root gives all members one
 verifiable member list and lets a group change its members without becoming an unrelated chat.
 
 ### 2.1 Sessions are channels, conversations are groups
@@ -164,7 +164,7 @@ to the user.
   device keeps its connections with peers alive, whatever groups use them. The group layer sits on
   top and neither sends nor interprets keep-alives.
 
-*Why:* one format for all conversations gives direct chats the same deniability, editing and
+_Why:_ one format for all conversations gives direct chats the same deniability, editing and
 deletion as groups, and a type that means one thing can be handled, limited and reasoned about on
 its own.
 
@@ -228,68 +228,56 @@ Two obligations make the split hold:
 Numbers in this document that belong to local policy are defaults. Where a number is fixed, the
 text says so or the number decides validity.
 
-*Why:* improving recovery, scoring and pacing release after release must make a group more stable
+_Why:_ improving recovery, scoring and pacing release after release must make a group more stable
 as its members update, without ever cutting off those who have not.
 
 ## 3. Identifiers and constants
 
 - Identifier: `eventId`
-
   - Size: 24 bytes
   - Generation: 8-byte big-endian timestamp ‖ 16 cryptographically random bytes
 
 - Identifier: `chat_id` (the root ID, the epoch ID)
-
   - Size: 32 bytes
   - Generation: hash of the root's content (§4.1)
 
 - Identifier: `secret_proof`
-
   - Size: 32 bytes
   - Generation: §4.2
 
 - Identifier: GossipID
-
   - Size: 32 bytes
   - Generation: `BLAKE3(bincode(UserPublicKeys))` of the identity
 
 - Identifier: `syncObjId`
-
   - Size: 32 bytes
   - Generation: cryptographically random, or a registered name hash
 
 - Identifier: `group_secret`
-
   - Size: 32 bytes
   - Generation: cryptographically random, fresh per epoch
 
 - Identifier: `epoch_challenge`, `ref_chat_id_challenge`
-
   - Size: 32 bytes each
   - Generation: cryptographically random, independent, fresh per epoch (§4.5)
 
 - Identifier: parent commitment
-
   - Size: 32 bytes
   - Generation: §4.5
 
 - Identifier: `ref_chat_id`
-
   - Size: 32 bytes
   - Generation: §4.5
 
 - Identifier: `leaveId`, `kickId`, `dissolveId`
-
   - Size: 32 bytes each
   - Generation: §5.3, §5.6, §5.8
 
 - Identifier: `scanId`
-
   - Size: 32 bytes
   - Generation: cryptographically random, chosen by the requester
 
 - Identifier: `request_id`
-
   - Size: 16 bytes
   - Generation: cryptographically random, chosen by the requester, fresh for every query frame sent
     (including resends)
@@ -301,7 +289,7 @@ Because the timestamp comes first, byte order of event IDs is chronological orde
 creation, with random tie-breaking.
 The event timestamp is a claim, not a proof.
 
-*Why:* a timestamp inside the ID gives every device the same age for an event, so retention and
+_Why:_ a timestamp inside the ID gives every device the same age for an event, so retention and
 ordering no longer depend on when each device happened to receive it.
 
 **Hash IDs.** A root, a leave, a kick and a dissolve message are identified by a 32-byte hash of
@@ -338,22 +326,22 @@ The other timing constants are in Appendix B.
 A root founds one epoch.
 It carries:
 
-| Field | Rule |
-| --- | --- |
-| `version` | the root's version prefix, `1` (§13.1) |
-| `type` | `successor` (0) or `handover` (1) (§4.7) |
-| `name` | the group name: UTF-8, 0 to 256 bytes (§5.11) |
-| `parents` | 1 to 32 parent commitments, 32 bytes each, distinct, sorted ascending (§4.5) |
-| `members` | 1 to 512 GossipIDs, distinct, nonzero, sorted ascending by raw bytes (§4.4) |
-| `group_secret` | 32 fresh random bytes |
-| `owner` | the owner's complete `UserPublicKeys`, serialized with bincode (§4.3) |
-| `epoch_challenge` | 32 fresh random bytes (§4.5) |
-| `ref_chat_id_challenge` | 32 fresh random bytes (§4.5) |
-| `created_at` | the creator's clock at creation, u64 Unix milliseconds; a claim |
-| `migrate_from` | optional: the protocol version of the conversation this group continues (§5.12, Appendix A); `0` is the earlier one-to-one format |
-| `message_timer` | the message timer: u64 milliseconds; `0`, absent on the wire, keeps messages forever |
-| `settings` | the settings map: text keys to byte values, at most 128 entries, empty when unused (below) |
-| `signature` | an ML-DSA-65 signature over the root ID (below) |
+| Field                   | Rule                                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `version`               | the root's version prefix, `1` (§13.1)                                                                                            |
+| `type`                  | `successor` (0) or `handover` (1) (§4.7)                                                                                          |
+| `name`                  | the group name: UTF-8, 0 to 256 bytes (§5.11)                                                                                     |
+| `parents`               | 1 to 32 parent commitments, 32 bytes each, distinct, sorted ascending (§4.5)                                                      |
+| `members`               | 1 to 512 GossipIDs, distinct, nonzero, sorted ascending by raw bytes (§4.4)                                                       |
+| `group_secret`          | 32 fresh random bytes                                                                                                             |
+| `owner`                 | the owner's complete `UserPublicKeys`, serialized with bincode (§4.3)                                                             |
+| `epoch_challenge`       | 32 fresh random bytes (§4.5)                                                                                                      |
+| `ref_chat_id_challenge` | 32 fresh random bytes (§4.5)                                                                                                      |
+| `created_at`            | the creator's clock at creation, u64 Unix milliseconds; a claim                                                                   |
+| `migrate_from`          | optional: the protocol version of the conversation this group continues (§5.12, Appendix A); `0` is the earlier one-to-one format |
+| `message_timer`         | the message timer: u64 milliseconds; `0`, absent on the wire, keeps messages forever                                              |
+| `settings`              | the settings map: text keys to byte values, at most 128 entries, empty when unused (below)                                        |
+| `signature`             | an ML-DSA-65 signature over the root ID (below)                                                                                   |
 
 The root has no event ID, no parents in the DAG sense and no payload.
 Its only identifier is the **root ID**, which is also the epoch's `chat_id`:
@@ -385,7 +373,7 @@ Changing any of them means creating a new root.
 **The message timer** has one single form: a plain proto3 integer, absent on the wire when it is
 `0`, read as `0` when absent, and always hashed as an unsigned integer. Every value is valid: a
 root is never invalid because of its timer. What it does is in §7.7.
-*Why one form:* two forms of "no timer" would give two root IDs for the same content.
+_Why one form:_ two forms of "no timer" would give two root IDs for the same content.
 
 **The settings map** is handled exactly as a message's metadata map: the same hash form and key
 order, and the same size measure (§13.10, every entry counting its key field and its value field).
@@ -398,7 +386,7 @@ Its limits decide validity:
 
 Version 1 knows no key. A device keeps and hashes every entry, relays it unchanged, and never acts
 on one; an unknown key never makes a root invalid.
-*Why:* only the owner can set or change a future group setting, because the map is hashed and
+_Why:_ only the owner can set or change a future group setting, because the map is hashed and
 signed with the root. Unknown keys are kept so that a later release can define settings without a
 new wire version. A key given twice is refused because protobuf decoders differ on which value
 they keep, and the two would hash different maps.
@@ -407,12 +395,12 @@ they keep, and the two would hash different maps.
 handover, the automatic successor after a leave or a request, a fork resolution), it copies the
 message timer and the whole settings map of its current epoch unchanged, entries it does not
 understand included, unless the owner changes the timer in that action (§7.7).
-*Why:* an owner on an older release must not silently erase settings made by a newer one.
+_Why:_ an owner on an older release must not silently erase settings made by a newer one.
 A receiver puts no validity rule between a root's timer or settings and those of its parents.
-*Why:* such a rule could not be checked by a member that lacks the parents (§4.5), and two
+_Why:_ such a rule could not be checked by a member that lacks the parents (§4.5), and two
 members would then judge the same root differently.
 
-*Why:* hashing every field into the ID means that two different member lists, names, secrets,
+_Why:_ hashing every field into the ID means that two different member lists, names, secrets,
 owners or parents can never claim the same epoch, that a relayer cannot alter a field under a valid
 signature, and that the ID stays unpredictable to anyone who has not seen the secret.
 One identifier serves as root ID, epoch ID and `chat_id`, because every use of `chat_id` only needs
@@ -445,7 +433,7 @@ of later epochs.
 serialized with bincode as the identity code does.
 The field MUST be the canonical bincode encoding: a receiver parses it, encodes the parsed keys
 again and refuses the root when the two differ; a key answer (§12.9) is checked the same way.
-*Why:* otherwise the same keys with bytes appended would give a second root ID for the same
+_Why:_ otherwise the same keys with bytes appended would give a second root ID for the same
 content (D.15).
 A recipient hashes them to the owner's GossipID and verifies the signature with the ML-DSA-65 key.
 No lookup is needed to verify a root.
@@ -469,7 +457,7 @@ for the `UserPublicKeys` of a GossipID.
 - when it accepts an invitation;
 - when it adopts a root that continues an epoch it already holds.
 
-*Why:* fetching only when a key is needed could leave a device unable to reach anyone in a group
+_Why:_ fetching only when a key is needed could leave a device unable to reach anyone in a group
 whose members are rarely online.
 
 A wrong answer to a key query gets the heaviest penalty of the peer score (§11.8).
@@ -491,7 +479,7 @@ With a full settings map, the longest timer and `migrate_from`, the largest root
 event blob: 41,832 bytes pushed alone in a plaintext and 41,860 bytes as the answer to a chat
 lookup, which leaves 15,484 bytes of the container unused.
 
-*Why:* with GossipIDs only, the cost of a large group is no longer the root but the keys.
+_Why:_ with GossipIDs only, the cost of a large group is no longer the root but the keys.
 At 512 members a new member downloads about 1.6 MB of keys, and the backend holds about 840 MB of
 key answers across the group for two weeks.
 
@@ -519,7 +507,7 @@ A device finds a parent by computing the commitment of each root it holds, and o
 marker (§14.2), under the new root's challenge.
 A commitment that matches nothing the device holds is **unmatched**.
 
-*Why:* a new member learns no parent ID, while a member who already holds a parent can verify the
+_Why:_ a new member learns no parent ID, while a member who already holds a parent can verify the
 link.
 The single dummy makes a new group look like an ordinary one-parent continuation.
 
@@ -568,7 +556,7 @@ To create a root, the owner's device:
 6. sends in the same plaintext, to each member who is also in the parent epoch, the kicks of the
    members it removed (§5.6).
 
-*Why direct delivery:* every member must receive the full root once, whoever sends it, so the total
+_Why direct delivery:_ every member must receive the full root once, whoever sends it, so the total
 volume is the same in every scheme (about members × root size).
 Sending directly adds no query and does not depend on a third peer being online.
 
@@ -580,7 +568,7 @@ A peer that lacks the root fetches it by chat lookup (§12.7) and checks it agai
 - Only a device that holds the full root and may serve it announces it.
 - A root notice is acted on although the epoch is unknown to the receiver (§13.7).
 
-*Why:* a member whose connection with the owner is broken gets the root only through this relay, so
+_Why:_ a member whose connection with the owner is broken gets the root only through this relay, so
 it is part of normal delivery.
 Relaying by notice, not by resending the full root to everyone, keeps the backend, which stores
 every blob for two weeks, from holding a number of copies that grows with the square of the group.
@@ -632,10 +620,10 @@ A handover root whose parent the device does not hold cannot be checked yet. It 
 unverified and without penalty, while its parent is looked up from the peer that delivered it, and
 is checked again once the parent is held; it is dropped after two weeks if the parent never comes.
 The number kept is bounded per delivering peer and per device (§17.4).
-*Why kept and not discarded:* the root may arrive before its parent, for example from the outgoing
+_Why kept and not discarded:_ the root may arrive before its parent, for example from the outgoing
 owner of a "Hand over and leave"; discarding it would lose the handover until someone delivered it
 again.
-*Why the new owner must differ from the parent's owner:* it keeps the two root types apart; a root
+_Why the new owner must differ from the parent's owner:_ it keeps the two root types apart; a root
 that keeps the owner is a successor (D.7).
 
 **Continuity.** For a successor root, each held parent is then checked for authority.
@@ -648,11 +636,11 @@ The root's owner has authority over a held parent when:
 A held parent over which the root's owner has no verified authority is treated as unmatched: the
 root does not continue it.
 
-*Why a handover root never adds members:* a new member holds no parent, so it could only check the
+_Why a handover root never adds members:_ a new member holds no parent, so it could only check the
 signature against the root's own `owner` field, which holds the new owner's keys and not the
 signer's.
 
-*Why it removes no one but the old owner:* every member of the parent is then a member of the
+_Why it removes no one but the old owner:_ every member of the parent is then a member of the
 handover epoch and entitled to its root. When the new owner later removes someone, the kick names
 an epoch the new owner owns, so a kick is always signed by the owner of the epoch it names (§5.6)
 and a removed member can always check it.
@@ -681,18 +669,18 @@ The first matching case applies.
    down the line is rejected too.
 4. **Kicked, left, dissolved, waiting or superseded.** A parent is an epoch the device holds in one
    of these states (judged by the group of the first such parent):
-   - *kicked* (§5.6), *left and kept read-only* (D.2) or *dissolved and kept* (§5.8): the root is
+   - _kicked_ (§5.6), _left and kept read-only_ (D.2) or _dissolved and kept_ (§5.8): the root is
      an **invitation** to rejoin that group;
-   - *waiting for a kick* (§5.4), or a *superseded chat of two* (§5.12): the root is adopted
+   - _waiting for a kick_ (§5.4), or a _superseded chat of two_ (§5.12): the root is adopted
      without a prompt and announced to no one, so that the current epoch names the right owner.
 5. **No parent matched.** The root is an **invitation**, after the parent lookup below.
 
-*Why case 2 has no prompt:* the owner is the party trusted with membership and the continuation is
+_Why case 2 has no prompt:_ the owner is the party trusted with membership and the continuation is
 verifiable; a prompt on every change is friction, and a member who ignores it drops out.
 The cost is accepted: when the owner adds someone, that person learns the GossipIDs of all current
 members without those members being asked, and a member who objects can only leave afterwards.
 
-*Why case 3 has no prompt:* a group that the user left keeps producing roots, and a prompt each
+_Why case 3 has no prompt:_ a group that the user left keeps producing roots, and a prompt each
 time would nag the user for ever and could be used to pester them.
 The way back is for the owner to remove and later add the person again (§5.10).
 
@@ -711,13 +699,13 @@ Before prompting, it therefore looks up the unmatched parents (§12.7):
   case 2, kept without a prompt under case 4 for a group waiting for a kick, an invitation to rejoin
   under case 4 for a kicked or dissolved group. A root the user closed before (case 1) stays an
   invitation.
-  *Why:* the same root in the same group state must end the same way whatever the order in which
+  _Why:_ the same root in the same group state must end the same way whatever the order in which
   roots arrive; otherwise a waiting device that got the child before its parent prompted the user
   with an old epoch it would have kept silently in the other order;
 - whenever a group the device was no longer active in becomes active again (the user accepts an
   invitation to rejoin it, or a later root), each other invitation to rejoin that group is decided
   again the same way: it now continues an active group, so it is adopted under case 2.
-  *Why:* two roots that both continue the epoch the device was kicked from are both invitations to
+  _Why:_ two roots that both continue the epoch the device was kicked from are both invitations to
   rejoin; a root that arrives after the user accepted one of them is adopted under case 2, so one
   that arrived before must end the same way rather than stay an invitation for good;
 - during the first `PROMPT_DELAY` (five minutes) after receiving the root, the invitation prompt is
@@ -730,7 +718,7 @@ Before prompting, it therefore looks up the unmatched parents (§12.7):
 - a decline made while the lookup is still running cannot be undone: a leave or request that was
   sent stays sent.
 
-*Why the owner's answer settles it:* the owner created the root and holds all its parents.
+_Why the owner's answer settles it:_ the owner created the root and holds all its parents.
 
 **Invitation.** The recipient MUST be asked to **Accept** or **Decline** in the UI.
 The prompt shows the owner as **verified** (the signature proves it), the group name, the member
@@ -752,7 +740,7 @@ marker with its reference, as the invitation does (§14.2). A fetched parent tha
 the device holds still names (another pending invitation, an installed epoch, a waiting group) is
 kept. A copy of a dropped parent announced again is then ignored, and a reply naming one is
 recognised without asking anyone (§7.6).
-*Why:* those roots are hidden records that nothing points to any more, and they hold the member
+_Why:_ those roots are hidden records that nothing points to any more, and they hold the member
 lists and names of earlier epochs of a chat the user refused. "Ignore and Delete", the action meant
 to leave the least trace, must not leave them behind.
 
@@ -802,7 +790,7 @@ member list:
 
 Members whose leave applies are left out of every page (§5.5).
 
-*Why the union is not preselected:* adding back a removed member by accident gives them the new
+_Why the union is not preselected:_ adding back a removed member by accident gives them the new
 secret and cannot be undone; dropping someone by accident can.
 
 ### 4.10 Lifetime of a root
@@ -839,7 +827,7 @@ Chat IDs that match the requester's closed-chat markers are ignored.
 A device MAY send this query to any peer; it SHOULD send it to its contacts after reinstalling and
 when the user asks to look for shared groups.
 
-*Why only the latest epochs:* listing every shared epoch would grow with every membership change of
+_Why only the latest epochs:_ listing every shared epoch would grow with every membership change of
 every shared group, for ever, while a device that holds the latest epoch can fetch the earlier ones
 itself.
 
@@ -860,11 +848,11 @@ Three signed objects accompany membership changes, besides the root.
 Each has a 32-byte hash ID with no timestamp and no random value, is signed with ML-DSA-65 over
 that ID, is never a parent or a tip, and does not expire with the retention period:
 
-| Object | Signed by | Meaning | Section |
-| --- | --- | --- | --- |
-| leave | the member who leaves | "I leave this epoch's group" | §5.3 |
-| kick | the owner | "this member is removed from this epoch" | §5.6 |
-| dissolve | the owner | "this group is ended" | §5.8 |
+| Object   | Signed by             | Meaning                                  | Section |
+| -------- | --------------------- | ---------------------------------------- | ------- |
+| leave    | the member who leaves | "I leave this epoch's group"             | §5.3    |
+| kick     | the owner             | "this member is removed from this epoch" | §5.6    |
+| dissolve | the owner             | "this group is ended"                    | §5.8    |
 
 Every device MUST verify a signed object before storing or relaying it.
 Message events stay unsigned.
@@ -874,11 +862,11 @@ Message events stay unsigned.
 There are three ways to leave a group or to decline an invitation.
 They are named by who sees them:
 
-| Spec term | What happens | Seen by |
-| --- | --- | --- |
-| **signed leave** | a leave message signed by the member, relayed by every member (§5.3) | everyone |
-| **owner-only request** | an unsigned request sent to the owner alone (§5.4) | the owner |
-| **silent close** | the group is closed on this device and nobody is told (§14.2) | no one |
+| Spec term              | What happens                                                         | Seen by   |
+| ---------------------- | -------------------------------------------------------------------- | --------- |
+| **signed leave**       | a leave message signed by the member, relayed by every member (§5.3) | everyone  |
+| **owner-only request** | an unsigned request sent to the owner alone (§5.4)                   | the owner |
+| **silent close**       | the group is closed on this device and nobody is told (§14.2)        | no one    |
 
 Accepting an invitation is silent; declining is explicit and works like leaving.
 
@@ -916,7 +904,7 @@ owner-only request reaches that state only after its waiting state (§5.4). On a
 answered yet, a decline and "Ignore and Delete" also drop the roots fetched as its parents, each
 with its own marker (§4.8): the earlier epochs' member lists do not stay behind.
 
-*Why "invited again" in choice 3:* nobody removed the user, who therefore stays in the member list.
+_Why "invited again" in choice 3:_ nobody removed the user, who therefore stays in the member list.
 The device rejects each new root by itself while it can match it to an epoch it closed (§4.8); if
 it misses one epoch in the chain, the next root looks new and prompts.
 
@@ -934,7 +922,7 @@ It is not hashed.
 The ID hashes no version. It inherits the version through the `chat_id`, whose root hashes its own
 version (§4.1). A later version that changes the fields of a leave, kick or dissolve MUST use a new
 hash label for its ID (a new hash domain, Appendix A).
-*Why:* otherwise an old and a new form of one object could share an ID (D.17).
+_Why:_ otherwise an old and a new form of one object could share an ID (D.17).
 
 - A member has exactly one possible leave per epoch; receiving it twice changes nothing.
 - The leaver's keys are not carried: a verifier uses the keys it holds (§4.3) or a key query.
@@ -959,15 +947,15 @@ own** leave, the leave is then not live for it; for any other member's leave, co
 on the epochs the device holds, and the leave is live.
 A device knows a root between is missing when a root on the line from E to C names a parent it does
 not hold.
-*Why for its own leave:* a member added back holds the epoch it left and the root that adds it back,
+_Why for its own leave:_ a member added back holds the epoch it left and the root that adds it back,
 never the epoch between that dropped it. Without this rule its own old leave would look live again
 on its own device, and make it read-only in the group it was just added back to.
-*Why only for its own leave:* applied to every leave, the rule made liveness depend on which
+_Why only for its own leave:_ applied to every leave, the rule made liveness depend on which
 parents a device holds. An owner with such a gap (a member added back, or one that was on one side
 only of a resolved fork) never acted on a late leaver's leave naming an earlier epoch: the leaver
 stayed listed, the others waited for a successor that never came, and such devices stopped relaying
 the leave.
-*Known cost:* an owner with a gap can apply an old leave of a member that was added back since, and
+_Known cost:_ an owner with a gap can apply an old leave of a member that was added back since, and
 remove that member again. This is visible to everyone, and the owner can add the member back.
 That adding back links the member's device to its conversation only through an epoch over which
 the owner's authority can be verified there (§5.10): the owner of a gap is often a new owner holding
@@ -995,7 +983,7 @@ When a device answers a member's tips scan "not available" and is about to tell 
 epoch by a root notice (§12.1), and that root adds the member back after a leave the device keeps,
 it first sends the leave in full, then the root in full, in that order.
 
-*Why send it to a member added back:* a device of that member restored from a backup made before
+_Why send it to a member added back:_ a device of that member restored from a backup made before
 the leave still acts as a member of the epoch it left. Given the root that adds it back first, it
 would take that root as the next epoch of its group, silently, as if it had never left. With its
 leave first, it shows the group as left, the root then comes as an invitation joined to the same
@@ -1005,7 +993,7 @@ given as a lookup answer would be read before the leave. The same member, up to 
 leave back when it looks up history of the epoch it left; it already holds it, so the cost is a few
 repeated sends a day at most.
 
-*Why keep it:* a leaver whose device was restored from an earlier backup does not know it left.
+_Why keep it:_ a leaver whose device was restored from an earlier backup does not know it left.
 It still acts as a member of that epoch, and the kept leave, which it can verify with its own key,
 tells it.
 Liveness alone decides whether a leave removes anyone, so keeping an old leave cannot replay it.
@@ -1016,22 +1004,22 @@ Other members do not act on it; they only relay it.
 
 The rule covers these cases:
 
-- *Late leaver.* M is in X and never received Y, where M is still listed.
+- _Late leaver._ M is in X and never received Y, where M is still listed.
   M can only sign a leave for X.
   X is an ancestor of Y and M is in both, so the leave removes M from Y.
-- *Replay.* M left from X and was removed in Y; later M is added again in Z and accepts.
+- _Replay._ M left from X and was removed in Y; later M is added again in Z and accepts.
   The old leave for X never expires, but Y does not contain M, so the leave is used up for good,
   although Z names X as an extra parent (§5.10) and M is in both.
-- *Leaving again.* Adding a member back always creates a new epoch, so a second leave names a new
+- _Leaving again._ Adding a member back always creates a new epoch, so a second leave names a new
   epoch and has a different `leaveId`.
   Two legitimate leaves never collide.
-- *Forks.* If M was removed in one branch but kept in another, and the resolution root keeps M, the
+- _Forks._ If M was removed in one branch but kept in another, and the resolution root keeps M, the
   leave is used up, since one epoch in between left M out: M stays listed until the owner removes
   it by hand. A resolution and an add-back have the same shape, and the rule must let an add-back
   stand. The case is rare: when merging, the owner's device already leaves out every member whose
   leave it holds (§5.5).
 
-*Why no random field:* it is not needed to tell two legitimate leaves apart, and it would let one
+_Why no random field:_ it is not needed to tell two legitimate leaves apart, and it would let one
 member produce any number of distinct valid leaves for one epoch, which every member would store
 and relay.
 
@@ -1086,15 +1074,15 @@ The state ends in one of two ways:
 - **Two weeks pass without a kick.** The device does the same as "Ignore and Delete": the roots are
   deleted, the entry disappears, and the user stays in the member list.
 
-*To keep in mind:* after two weeks without a kick, the device leaves quietly **on its own**, as
+_To keep in mind:_ after two weeks without a kick, the device leaves quietly **on its own**, as
 "Ignore and Delete" does. The chat is then closed, so its connections, all kept while waiting, are
 dropped as for any closed chat (§5.12), and the user still appears in the member list to the
 others, for as long as the owner does not remove them.
 
-*Why every root is kept:* with only the newest one, a competing successor of an already dropped
+_Why every root is kept:_ with only the newest one, a competing successor of an already dropped
 root would look like a new invitation, and a kick naming the other branch could not be checked.
 
-*Why the request follows an owner change without a special rule:* the waiting device adopts a
+_Why the request follows an owner change without a special rule:_ the waiting device adopts a
 handover root like any member, so its next daily request goes to the new owner.
 An old owner that receives a request ignores it.
 
@@ -1150,7 +1138,7 @@ root, as it answers a removed member with its kick and under the same limits. A 
 from a backup made before its own handover learns from it that it is no longer the owner, and
 that it left if the root no longer lists it.
 
-*Known limit:* people who are members only of a former owner's competing branch, and whom the new
+_Known limit:_ people who are members only of a former owner's competing branch, and whom the new
 owner drops when merging that branch, cannot be sent a kick they could check, and are not told.
 
 **Delivery.**
@@ -1178,13 +1166,13 @@ owner drops when merging that branch, cannot be sent a kick they could check, an
   - Only a member active in the group answers this way; a device that is kicked, left, waiting or
     dissolved sends nothing (§10.4), except that an archive ("Dissolve & Keep archived") still
     gives a removed peer its own kick or leave.
-  It sends this answer at most three times per removed peer per day and per epoch; each retained
-  member counts on its own.
-  This daily limit is local policy; the list of frames that count is fixed.
-  If it holds neither, it first sends other members a removal lookup (§12.8) and forwards what it
-  receives.
+    It sends this answer at most three times per removed peer per day and per epoch; each retained
+    member counts on its own.
+    This daily limit is local policy; the list of frames that count is fixed.
+    If it holds neither, it first sends other members a removal lookup (§12.8) and forwards what it
+    receives.
 
-  *Why one wide rule:* which frames a later client sends first is local policy and may change,
+  _Why one wide rule:_ which frames a later client sends first is local policy and may change,
   while this list is fixed for the wire version; with every frame that names the epoch counted, a
   removed peer is always told whatever it sends first. A pushed record is not a question, so it
   starts no loop.
@@ -1204,7 +1192,7 @@ when the member was added back since** and is a member of the current epoch; and
 about to tell that member of a root that adds it back by a root notice (§12.1), it first sends the
 kick in full, then the root in full, in that order. The kick applies only to the epoch it names, so
 it never removes the member from the root that adds it back.
-*Why:* one rule for both ways of going out of a group. A device of that member restored from a
+_Why:_ one rule for both ways of going out of a group. A device of that member restored from a
 backup made before its removal still acts in the epoch it was removed from; given the root that
 adds it back first, it would rejoin silently, without the prompt every other member added back
 gets. With its kick first it shows the group as removed, the root comes as an invitation joined to
@@ -1230,22 +1218,22 @@ A kick that names an epoch which is not the device's current epoch is ignored, e
 waiting state (§5.4).
 A kick for an epoch the device does not hold cannot be checked and is dropped.
 
-*Why a kick for another epoch is ignored:* after a fork made by the owner, a root listing the
+_Why a kick for another epoch is ignored:_ after a fork made by the owner, a root listing the
 device can arrive before the kick.
 The device has then adopted that root on the owner's own signature, and a kick for the older epoch
 contradicts it.
 The owner's resolution root settles who is in, and comes with a kick naming the epoch the member is
 then at.
 
-*Why the group is not closed automatically:* an owner could otherwise erase the history on a
+_Why the group is not closed automatically:_ an owner could otherwise erase the history on a
 member's device by removing that member.
 
-*Why a dissolve still applies to the removed member's archive:* "Dissolve & Delete" is meant to erase the chat on every device that holds the epoch;
+_Why a dissolve still applies to the removed member's archive:_ "Dissolve & Delete" is meant to erase the chat on every device that holds the epoch;
 otherwise the removed member's device would keep the only transcript of a chat everyone else
 erased. It is consistent with single deletion events, which already reach removed peers (§10.4),
 and the owner gains no power it did not have: it could have dissolved with deletion just before the
 kick.
-*Known drawback:* a removed member's archive stays within the owner's reach after the removal. The
+_Known drawback:_ a removed member's archive stays within the owner's reach after the removal. The
 owner can erase that member's copy of an epoch it holds although it is no longer in the group; only
 a dissolve naming an epoch the member holds reaches it, never a dissolve of a later epoch (§16.8).
 
@@ -1268,7 +1256,7 @@ field names another member B.
   An owner with competing ends first resolves them (§4.9), then hands over from that epoch.
 - A's device applies in it every live leave and every owner-only request it holds (§5.5).
 
-*Why no acceptance step:* it is deferred (§17.5).
+_Why no acceptance step:_ it is deferred (§17.5).
 The risk is accepted: if B never comes online or does not act as owner, the member list is frozen.
 Messages still flow, but nobody can add or remove members and leaves are never processed.
 
@@ -1325,7 +1313,7 @@ its ID.
   `must_delete` true it still erases the group's messages as below; with `must_delete` false
   nothing it does changes. Only a device that was active when it applied the dissolve keeps,
   announces and serves the named root and the message as below.
-  *Why:* announcing the dissolve, or serving its root and a page afterwards, told the members that
+  _Why:_ announcing the dissolve, or serving its root and a page afterwards, told the members that
   this device had kept the chat, which a device that deleted its copy never does. The owner pushes
   the message in full to every member, and the active members relay and serve it, so a device that
   missed it still learns it from them.
@@ -1360,13 +1348,13 @@ share another chat. A member's tips scan is answered with a page that lists only
 message and the root of the current epoch when it is not the anchor: no message event.
 After "Dissolve & Delete", once the two weeks are over, the device answers as one that never held
 the epoch.
-*Why:* this is how a device that missed the dissolve learns it; answering such a scan "not
+_Why:_ this is how a device that missed the dissolve learns it; answering such a scan "not
 available" left 9 of 300 simulated devices that never applied the dissolve. Listing only these two
 entries matches what a dissolved group already serves. No event ID is given, so nothing of the
 messages is revealed and the asker asks for nothing it would be refused. A device that missed the
 dissolve may share nothing else with this one, so the root is served without that condition.
 
-*Why not the automatic rejection of §4.8:* that rule respects a choice the user made.
+_Why not the automatic rejection of §4.8:_ that rule respects a choice the user made.
 After a dissolve the user chose nothing; the owner did.
 
 A handover root can only be checked against its parent.
@@ -1406,7 +1394,7 @@ There is no automatic winner: each device keeps as its current line the handover
   The members of the two lines stop seeing each other's new messages, unless they are listed in
   both.
 
-*Why no fixed winner:* any rule based on the roots' content, such as the greatest or the earliest
+_Why no fixed winner:_ any rule based on the roots' content, such as the greatest or the earliest
 `created_at`, is controlled by the former owner, who could always produce the winning handover and
 take the group back.
 
@@ -1425,7 +1413,7 @@ it is one that no later such epoch continues; of several, the latest by `created
 ID.
 If none does, no extra parent is named for that person, and the new root reaches it as an ordinary
 invitation.
-*Why authority:* the person's device links the new root only through a parent over which it can
+_Why authority:_ the person's device links the new root only through a parent over which it can
 verify the owner's authority, and it does not hold the roots between (the new owner's own root that
 resolved a former owner's branch, for instance). A former owner's branch resolved into the new
 owner's line lists the person, but no handover leads to it: named, it left the new root with no
@@ -1458,7 +1446,7 @@ The device then treats them as one group, with the newer line holding the curren
   a requester only receives entries for epochs it is a member of (§12.1).
 - A scan anchored in one group lists nothing of a group linked to it where the device is no longer
   active (kicked, left, waiting for a kick, dissolved).
-  *Why:* the link is local, so a device that deleted that group lists nothing of it either; listing
+  _Why:_ the link is local, so a device that deleted that group lists nothing of it either; listing
   it would tell a member of both groups that the device kept the history (§10.4).
 
 **At the junction.** After M accepts the invitation, the conversation shows:
@@ -1474,9 +1462,9 @@ The read-only state ends and the composer is enabled again.
 the group that list it, by the ordinary scans and lookups of its group (§12.1, §11.1), and the
 other members serve it, since it is a member of their current epoch (§10.4). It never gets the
 epochs between that left it out: it holds neither their roots nor their secrets.
-*Why:* those epochs are part of its conversation; a device restored from a backup made before it
+_Why:_ those epochs are part of its conversation; a device restored from a backup made before it
 left, for example, misses the messages sent in the epoch it left between the backup and the leave.
-*Known limit:* a message it processed and dropped while it was removed is not fetched again (D.79).
+_Known limit:_ a message it processed and dropped while it was removed is not fetched again (D.79).
 
 ### 5.11 Group name
 
@@ -1519,7 +1507,6 @@ The result is for display only; stored and relayed bytes are never changed.
 
 The same rules apply to a local name.
 
-
 ### 5.12 Direct chats, contacts, connections and migration
 
 **Conversation format versions.** They are the protocol version numbers of Appendix A: `0` is the
@@ -1544,31 +1531,31 @@ a contact or the connection is **automatic**.
 
 Which chats keep the connections with their members (D.86):
 
-| State of the device in the chat | Does the chat keep its connections? |
-|---|---|
-| Active member | Yes. A member the owner removed stays listed by the epochs held, so that the replies owed to it (§5.6) and the deletions still served to it (§10.4) keep working. |
-| Waiting to be kicked (§5.4) | Yes, all of them: the kick can come from the owner or from any member, who all hold it, and dropping them would also show the other members that the user asked to leave. Until the kick arrives or the two weeks end. |
-| After the wait ends: a kick arrived, or two weeks passed without one | No: the chat is closed. Without a kick the device leaves quietly as "Ignore and Delete" does (the roots deleted, the entry gone, the user still in the member list for the others). |
-| Kicked, history kept read-only | No. |
-| Left visibly (§5.3), history kept read-only | No, but only once the signed leave has been handed to the transport for every member it must reach. |
-| Superseded (a chat of two replaced) | No; its peer is a member of the chat that replaces it. |
-| Chat deleted | No. |
-| Archive of a chat dissolved while active ("Keep archived", §5.8) | Yes. |
+| State of the device in the chat                                      | Does the chat keep its connections?                                                                                                                                                                                    |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Active member                                                        | Yes. A member the owner removed stays listed by the epochs held, so that the replies owed to it (§5.6) and the deletions still served to it (§10.4) keep working.                                                      |
+| Waiting to be kicked (§5.4)                                          | Yes, all of them: the kick can come from the owner or from any member, who all hold it, and dropping them would also show the other members that the user asked to leave. Until the kick arrives or the two weeks end. |
+| After the wait ends: a kick arrived, or two weeks passed without one | No: the chat is closed. Without a kick the device leaves quietly as "Ignore and Delete" does (the roots deleted, the entry gone, the user still in the member list for the others).                                    |
+| Kicked, history kept read-only                                       | No.                                                                                                                                                                                                                    |
+| Left visibly (§5.3), history kept read-only                          | No, but only once the signed leave has been handed to the transport for every member it must reach.                                                                                                                    |
+| Superseded (a chat of two replaced)                                  | No; its peer is a member of the chat that replaces it.                                                                                                                                                                 |
+| Chat deleted                                                         | No.                                                                                                                                                                                                                    |
+| Archive of a chat dissolved while active ("Keep archived", §5.8)     | Yes.                                                                                                                                                                                                                   |
 
 An invitation not answered yet, and a handover root kept while its parent is looked up, keep
 listing their members as before.
 
-*Why a chat the device is out of keeps none, read-only or not:* a member that shares only that
+_Why a chat the device is out of keeps none, read-only or not:_ a member that shares only that
 chat with the device sees the device's keep-alives continue or stop. Were they kept with a
 read-only history and dropped with a deleted chat, that member could tell "kept the history" from
 "deleted the chat", which the device must hide (§10.4, D.74).
-*Cost:* a kept read-only history no longer receives the later deletions, or a "Dissolve & Delete",
+_Cost:_ a kept read-only history no longer receives the later deletions, or a "Dissolve & Delete",
 from members it shares nothing else with: the same loss as a device that deleted the chat.
-*Why the leave is waited for:* a visible leave closes the chat and is then pushed whole to every
+_Why the leave is waited for:_ a visible leave closes the chat and is then pushed whole to every
 member (§5.3); revoking the session before it is handed to the transport would lose it. The SDK
 also keeps a connection while a ciphertext for that peer waits in its outbox.
 
-*Note:* a member whose connection is opened automatically learns that this device accepted the
+_Note:_ a member whose connection is opened automatically learns that this device accepted the
 group; the scans that follow an acceptance already show it (D.77).
 
 **A new contact.** Accepting a contact request is the consent for a chat with that person.
@@ -1614,7 +1601,7 @@ A device hides its own "Migrate" action as soon as it holds such an invitation, 
 offering "Migrate" it first processes what it has received, so that the other person's invitation
 takes precedence.
 
-**Two automatic chats for one pair.** An *automatic chat* is a group created with `migrate_from`
+**Two automatic chats for one pair.** An _automatic chat_ is a group created with `migrate_from`
 between two people. A device may come to hold two for the same pair with the same `migrate_from`,
 neither continued by a later root: its own, and one created by the other person.
 
@@ -1636,8 +1623,8 @@ owner's GossipID sorts first (raw bytes, ascending) is the one to keep.
 - **If theirs is the one to keep and the other person has never taken part in mine,** the device
   switches to theirs without a prompt.
 - **If theirs is the one to keep and the other person has taken part in mine,** their chat is
-  shown as an invitation to continue the conversation: *"[Name] wants to continue this
-  conversation in a new group."* Accepting makes their chat the current one; declining changes
+  shown as an invitation to continue the conversation: _"[Name] wants to continue this
+  conversation in a new group."_ Accepting makes their chat the current one; declining changes
   nothing.
 - A second automatic chat created by the owner of the chat I already hold is an ordinary
   invitation.
@@ -1652,21 +1639,21 @@ groups are ever merged.
 The cases, with L the person whose GossipID sorts first, H the other, and G_L and G_H the chats
 each created. "Asked" means the invitation to continue above.
 
-| # | Situation | L's device | H's device | Continues in |
-| --- | --- | --- | --- | --- |
-| 1 | Both create at the same moment | not asked: keeps G_L | not asked: switches to G_L | G_L |
-| 2a | H creates after L accepted H's contact request; L has none yet | not asked: the contact was the consent | | G_H |
-| 2b | H migrates an earlier conversation with history; L has none yet | asked | | G_H if L accepts |
-| 3 | H creates and writes in G_H while L is offline; L had created G_L | not asked: keeps G_L, G_H is history | not asked: switches to G_L, G_H is history | G_L |
-| 4a | L ignored H's invitation without answering; later L creates G_L | not asked: keeps G_L | not asked: switches to G_L, G_H is history | G_L |
-| 4b | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L | asked | G_L if H accepts |
-| 5 | L took part in G_H, then sends a new G_L | | asked | G_H; G_L if H accepts |
-| 6 | H sends a new G_H, whether or not H took part in G_L | not asked: keeps G_L, G_H is history | | G_L |
-| 7 | H joined G_L, then restores an old backup and creates G_H | not asked: keeps G_L | not asked: switches to G_L | G_L |
-| 8 | L joined G_H, then restores an old backup and creates G_L | not asked: keeps G_L | asked | each on its own until H accepts, then G_L |
-| 9 | H restores a backup from before L took part; L sends G_L | | not asked: switches to G_L, G_H is history | G_L |
+| #   | Situation                                                                         | L's device                             | H's device                                 | Continues in                              |
+| --- | --------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------ | ----------------------------------------- |
+| 1   | Both create at the same moment                                                    | not asked: keeps G_L                   | not asked: switches to G_L                 | G_L                                       |
+| 2a  | H creates after L accepted H's contact request; L has none yet                    | not asked: the contact was the consent |                                            | G_H                                       |
+| 2b  | H migrates an earlier conversation with history; L has none yet                   | asked                                  |                                            | G_H if L accepts                          |
+| 3   | H creates and writes in G_H while L is offline; L had created G_L                 | not asked: keeps G_L, G_H is history   | not asked: switches to G_L, G_H is history | G_L                                       |
+| 4a  | L ignored H's invitation without answering; later L creates G_L                   | not asked: keeps G_L                   | not asked: switches to G_L, G_H is history | G_L                                       |
+| 4b  | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L                   | asked                                      | G_L if H accepts                          |
+| 5   | L took part in G_H, then sends a new G_L                                          |                                        | asked                                      | G_H; G_L if H accepts                     |
+| 6   | H sends a new G_H, whether or not H took part in G_L                              | not asked: keeps G_L, G_H is history   |                                            | G_L                                       |
+| 7   | H joined G_L, then restores an old backup and creates G_H                         | not asked: keeps G_L                   | not asked: switches to G_L                 | G_L                                       |
+| 8   | L joined G_H, then restores an old backup and creates G_L                         | not asked: keeps G_L                   | asked                                      | each on its own until H accepts, then G_L |
+| 9   | H restores a backup from before L took part; L sends G_L                          |                                        | not asked: switches to G_L, G_H is history | G_L                                       |
 
-*Why:* two people who start the same chat at the same moment must end on one chat without being
+_Why:_ two people who start the same chat at the same moment must end on one chat without being
 asked, but a chat both have used must not be replaced by one of them without the other's consent,
 since owning the chat is what allows adding people to it. The other person's first traffic in my
 chat is the only sign I ever get that they accepted it.
@@ -1699,42 +1686,42 @@ become a contact and to open the chat.
 - A tip is an available event that no available event references as a parent; a pruned child does
   not hide its parent (§12.1, D.27).
 
-*Why:* bounded parents keep events small while still recording causal context for recovery.
+_Why:_ bounded parents keep events small while still recording causal context for recovery.
 
 ### 6.2 Message event
 
 A message event carries:
 
-| Field | Rule |
-| --- | --- |
-| `version` | the event's version prefix, `1` (§13.1) |
-| event type | `GROUP_MESSAGE_EVENT` |
-| `eventId` | `ts ‖ random` (§3) |
-| `chat_id` | the epoch (§4.1) |
-| `secret_proof` | §4.2 |
-| `parents` | §6.1 |
-| `payload` | the message result, an extensible protobuf message (below) |
+| Field          | Rule                                                       |
+| -------------- | ---------------------------------------------------------- |
+| `version`      | the event's version prefix, `1` (§13.1)                    |
+| event type     | `GROUP_MESSAGE_EVENT`                                      |
+| `eventId`      | `ts ‖ random` (§3)                                         |
+| `chat_id`      | the epoch (§4.1)                                           |
+| `secret_proof` | §4.2                                                       |
+| `parents`      | §6.1                                                       |
+| `payload`      | the message result, an extensible protobuf message (below) |
 
 **Payload** for every type except `delete`:
 
-| Field | Rule |
-| --- | --- |
-| `syncObjId` | 32 bytes; random for ordinary messages |
-| `type` | see the table below |
-| `author` | the claimed author's GossipID; MUST be a member of the epoch |
-| `created_at` | claimed creation time; display ordering key |
+| Field              | Rule                                                                                                                       |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `syncObjId`        | 32 bytes; random for ordinary messages                                                                                     |
+| `type`             | see the table below                                                                                                        |
+| `author`           | the claimed author's GossipID; MUST be a member of the epoch                                                               |
+| `created_at`       | claimed creation time; display ordering key                                                                                |
 | `last_modified_at` | claimed modification time; version ranking key; MUST be present on every type except a deletion, or the event is malformed |
-| `body` | type-specific |
-| `edited` | claimed edited flag, independent of the timestamps |
-| `metadata` | map from text keys to byte values; empty when unused; a key given twice makes the event malformed |
+| `body`             | type-specific                                                                                                              |
+| `edited`           | claimed edited flag, independent of the timestamps                                                                         |
+| `metadata`         | map from text keys to byte values; empty when unused; a key given twice makes the event malformed                          |
 
-| Tag | Type | Body |
-| --- | --- | --- |
-| 0 | `text` | UTF-8 text |
-| 1 | `forward` | `[content_type, content]`: a content-only copy (§7.6) |
-| 2 | `reaction` | `[target, emoji, action]` (§7.6) |
-| 3 | `media` | `[mimetype, data]` (§7.6) |
-| 4 | `delete` | no body (see below) |
+| Tag | Type       | Body                                                  |
+| --- | ---------- | ----------------------------------------------------- |
+| 0   | `text`     | UTF-8 text                                            |
+| 1   | `forward`  | `[content_type, content]`: a content-only copy (§7.6) |
+| 2   | `reaction` | `[target, emoji, action]` (§7.6)                      |
+| 3   | `media`    | `[mimetype, data]` (§7.6)                             |
+| 4   | `delete`   | no body (see below)                                   |
 
 **Delete** is a tombstone carrying only `syncObjId` and `type = 4`, plus an optional
 `last_modified_at` present only while a scheduled deletion is pending (§7.4).
@@ -1767,7 +1754,7 @@ it is `[domain, chat_id, syncObjId, 4]`, four items. No item is optional: every 
 the nine items in these positions (`metadata` is an empty map when unused, and `last_modified_at`
 is always present on such a result), and a delete never carries its pending `last_modified_at`.
 The list therefore reads one way only.
-*Why flat:* a pure convention, chosen so that every hash of the protocol is the domain followed by
+_Why flat:_ a pure convention, chosen so that every hash of the protocol is the domain followed by
 its items (D.22).
 
 Worked example: in epoch `chat_id = 0x11…11` (32 bytes), a text "hello" with `syncObjId =
@@ -1801,7 +1788,7 @@ protocol version (§13.8).
 Each metadata key defines the encoding of its value.
 A key given twice in the metadata of one payload makes the event malformed, exactly as in the
 settings map of a root (§4.1), with the same penalty as any malformed event.
-*Why:* one single way to write each message, so that every implementation reads the same content
+_Why:_ one single way to write each message, so that every implementation reads the same content
 from the same bytes. Protobuf keeps the last value of a repeated map key; an implementation keeping
 the first would read a different message. An honest device writes metadata from a map and never
 repeats a key.
@@ -1810,7 +1797,7 @@ Metadata conveys no membership authority.
 **Claimed authors.** The claimed author MUST be a member of the epoch; others are rejected.
 Independently, the immediate Agraphon peer MUST be a member; it need not be the claimed author.
 
-*Why:* members may fabricate messages in each other's names (deniability), but outsiders cannot be
+_Why:_ members may fabricate messages in each other's names (deniability), but outsiders cannot be
 named as authors.
 
 ### 6.3 Receiving a message event
@@ -1840,7 +1827,7 @@ For an incoming event under a **new** event ID:
 - **Reactions** (§7.6) differ in two ways. A delete has **no effect** on a reaction: whatever
   tombstone exists for its `syncObjId`, a reaction's state is decided only by its own versions.
   And between two versions of a reaction with the same `last_modified_at`, a version whose action
-  is *remove* wins over one whose action is *add*; only then does `resultHash` decide.
+  is _remove_ wins over one whose action is _add_; only then does `resultHash` decide.
 - **Wins:** replace the stored result, prune the superseded events and keep the incoming event
   available.
 - **Loses:** prune the incoming event; the stored winner and its available events are unchanged.
@@ -1884,7 +1871,7 @@ Arrivals under an already-known, pruned event ID follow §9.5.
   still in the future.
 - Allowed timestamps are accepted as claimed, without local correction.
 
-*Why:* monotonic edit times let an edit win locally even across clock rollback.
+_Why:_ monotonic edit times let an edit win locally even across clock rollback.
 The event timestamp is always the creation time, even for a scheduled message, so it needs only
 clock-skew tolerance; the tight bound stops a fast or dishonest clock from extending an event's
 retention or pushing it to the front of tip scans.
@@ -1937,7 +1924,7 @@ It then schedules each remaining one idempotently, with each wait clamped to 2 h
 While connected it runs a fallback scan every 30 minutes, and every 5 minutes for an open chat.
 Timer callbacks only wake the shared apply path, which rechecks state.
 
-*Why:* deletion is terminal and events cannot be withdrawn, so only the earliest scheduled deletion
+_Why:_ deletion is terminal and events cannot be withdrawn, so only the earliest scheduled deletion
 matters.
 
 ### 7.5 Display
@@ -1969,7 +1956,7 @@ matters.
   the line; the line does not move.
   Devices may compute slightly different `T` for one root; this affects display only.
 
-  *Why:* the line never sits above an old-epoch message the device already showed, every device
+  _Why:_ the line never sits above an old-epoch message the device already showed, every device
   normally shows the owner's date, and an owner with a fast clock cannot push the line into the
   future.
 
@@ -1979,6 +1966,7 @@ matters.
   - "You were removed from this group" (§5.6);
   - "This group was dissolved by its owner" (§5.8);
   - the lines of §5.10 when the device is added back.
+
 - Two groups are shown as one conversation only when they are linked (§5.10).
 
 ### 7.6 Replies, forwards, reactions and media
@@ -1996,7 +1984,7 @@ A list with more than 32 targets is malformed.
 A `replyTo` entry that is present but holds no target, more than 32, or a target that does not
 decode makes the whole event malformed (D.21); "never rejected because of its references" applies
 to well-formed targets that cannot be resolved.
-*Why:* one single way to write each message.
+_Why:_ one single way to write each message.
 The limit bounds the list of one message; the number of messages that reply to one message is not
 bounded.
 
@@ -2042,12 +2030,12 @@ closed-chat markers (§14.2).
 - **An installed epoch.** To load a target it lacks, the device performs a sync-object lookup in
   the target's epoch (§12.5), subject to §10.4. Nothing is fetched in a read-only group.
 - **An invitation not answered yet.** Nothing is sent. The target is fetched as above once the
-  user accepts. *Why:* nothing is sent in an epoch the user has not accepted (§4.8).
+  user accepts. _Why:_ nothing is sent in an epoch the user has not accepted (§4.8).
 - **A closed chat**, whatever closed it, "Ignore and Delete" included. Nothing is sent, ever.
 - **No match.** The device sends a chat lookup by `ref_chat_id` (§12.7), which returns the root
   only to a member of that epoch.
 
-*Why never ask for a closed chat:* when the marker kept the chat ID only, a reply naming that chat
+_Why never ask for a closed chat:_ when the marker kept the chat ID only, a reply naming that chat
 made the device ask, the root came back and was dropped, and the next reply made it ask again. A
 peer could see the device throw the root away. With the reference kept in the marker the device
 never asks, which is exactly what a device holding an unanswered invitation does: "ignored and
@@ -2055,7 +2043,7 @@ deleted" and "not answered yet" look the same.
 
 **When.** Only on receipt of the reply, after a short random wait; never on display or reading.
 No action of the interface starts a lookup or a fetch of a target.
-*Why:* a lookup made when the user opens the message would tell a peer when it was read.
+_Why:_ a lookup made when the user opens the message would tell a peer when it was read.
 
 **Whom.** At most three peers per round, among the members of the reply's epoch that may receive
 anything of it (§10.4), this device excluded, in this order:
@@ -2102,7 +2090,7 @@ content.
 - A single-click toggle switches between most recent first and least recent first; it starts on
   most recent first.
 
-*Why no "Not a member" answer:* such an answer would be a first-hand statement that the epoch
+_Why no "Not a member" answer:_ such an answer would be a first-hand statement that the epoch
 exists and that the responder was in it, and would let a later member map an earlier member list by
 asking every peer.
 
@@ -2134,15 +2122,15 @@ Recipients MUST NOT need access to the source to render a forward.
 Media in a forward must be copied into fresh destination-authorized objects; the mechanism is part
 of the content specification.
 
-*Why:* references would leak source metadata and fail for recipients without source access.
+_Why:_ references would leak source metadata and fail for recipients without source access.
 
 **Reactions.** A reaction is a message event of type `reaction`. Its body holds:
 
-| Field | Rule |
-| --- | --- |
+| Field    | Rule                                                                   |
+| -------- | ---------------------------------------------------------------------- |
 | `target` | the `syncObjId` of the message reacted to, 32 bytes, in the same epoch |
-| `emoji` | UTF-8 text, 1 to 64 bytes |
-| `action` | `add` (0) or `remove` (1) |
+| `emoji`  | UTF-8 text, 1 to 64 bytes                                              |
+| `action` | `add` (0) or `remove` (1)                                              |
 
 The person reacting is the event's `author` field.
 
@@ -2155,29 +2143,30 @@ The person reacting is the event's `author` field.
   A reaction whose `syncObjId` is anything else is malformed. A reaction is therefore unique per
   message, per author and per emoji: a second one with the same three values is another version of
   the same object, never a second reaction.
+
 - **Versions.** Adding and removing are versions of that one object, ranked like any message
   (§7.1, §7.2): the greater `last_modified_at` wins, and a new version takes the later of now and
-  the previous date plus one, so a date in the future freezes nothing. On equal dates a *remove*
-  wins over an *add* (§7.1).
+  the previous date plus one, so a date in the future freezes nothing. On equal dates a _remove_
+  wins over an _add_ (§7.1).
 - **No deletion.** A delete naming a reaction's `syncObjId` has no effect on it (§7.1): a reaction
   can be removed and added again, never deleted for good.
 - **What is checked.** The lengths, that `emoji` is well-formed UTF-8, and the identity above.
   Whether the text is an emoji is not checked: that changes with each Unicode release, and devices
   must agree on validity. Whether the target exists is not checked either.
-- **What a device may keep.** After a *remove*, the `syncObjId` and the date are enough.
+- **What a device may keep.** After a _remove_, the `syncObjId` and the date are enough.
 - **Message timer.** In an epoch with a message timer, a reaction is erased by the timer, record
   included (§7.7).
-- **Display.** A reaction is shown on its target while its current version is an *add*. The author
+- **Display.** A reaction is shown on its target while its current version is an _add_. The author
   is a claim, like every author here; a device shows at most one reaction per author and emoji
   because the identity allows only one. A reaction whose target is not shown is not shown.
 - A reaction is never forwarded: a forward whose content type is `reaction` is malformed.
 
 **Media.** A media message is a message event of type `media`. Its body holds:
 
-| Field | Rule |
-| --- | --- |
-| `mimetype` | says what `data` is; see below |
-| `data` | any bytes, possibly none; opaque to this protocol |
+| Field      | Rule                                              |
+| ---------- | ------------------------------------------------- |
+| `mimetype` | says what `data` is; see below                    |
+| `data`     | any bytes, possibly none; opaque to this protocol |
 
 - **The mimetype** MUST have the form `type/subtype`, at most 127 bytes in all. `type` and
   `subtype` each start with a lowercase letter or a digit and continue with lowercase letters,
@@ -2190,7 +2179,7 @@ The person reacting is the event's `author` field.
   envelope (§13.10), like every event.
 - A forward whose content type is `media` carries the same two fields and is checked the same way.
 
-*Why a mimetype and nothing more:* it is how kinds of content are added within this wire version.
+_Why a mimetype and nothing more:_ it is how kinds of content are added within this wire version.
 A later release may define a new one, whether standard (`text/vcard` for a contact card) or its
 own under the vendor tree (`application/vnd.…`), and every device of version 1 carries it without
 understanding it. In particular the data may be a **reference** instead of the content itself: a
@@ -2220,7 +2209,7 @@ moment = created_at + T
 - `T` is the timer of the root of the epoch the message event belongs to. Each message keeps the
   timer of its own epoch: a later root with another timer changes nothing for the messages of
   earlier epochs.
-  *Why:* applying a newer timer to older messages was rejected, because one change of the timer
+  _Why:_ applying a newer timer to older messages was rejected, because one change of the timer
   could then delete a whole chat by accident.
 - `T = 0`: never. The sum is exact (§1); a moment past the top of the integer range never comes.
 - A deletion event has no moment of its own: it goes with the message it deletes (below).
@@ -2233,11 +2222,11 @@ goes in the same commit (§15.2). The moment is kept in the durable time-sorted 
 wakes the device like a scheduled deletion; the view hides the message from its moment even
 before that runs.
 
-*Why local:* every device computes the same moment from the same dates, so all converge with no
+_Why local:_ every device computes the same moment from the same dates, so all converge with no
 exchange: devices that were offline, read-only groups (kicked, left, superseded) and archives of
-dissolved groups included. *Why erased rather than kept as a tombstone:* a stub, a parent link or
+dissolved groups included. _Why erased rather than kept as a tombstone:_ a stub, a parent link or
 a tombstone would show, on an unlocked device, that a message existed and when, for as long as the
-group is kept; the timer is there so that nothing is left. *Why this is safe:* stubs and
+group is kept; the timer is there so that nothing is left. _Why this is safe:_ stubs and
 tombstones exist so that a deleted event is not fetched again and a deleted message does not come
 back; under the timer the dates do that job, since every copy offered after the moment is refused
 by its own dates (below), whether the device held it or not. What a peer can see is what §9.3
@@ -2261,12 +2250,12 @@ moment rounded up, and is then erased like a message the timer deleted:
 erase_at = ceil((created_at + T) / step) × step
 ```
 
-| `T` | `step` |
-| --- | --- |
-| `T` ≤ 1 hour | 5 minutes |
-| 1 hour < `T` ≤ 1 day | 1 hour |
-| 1 day < `T` ≤ 1 week | 1 day (24 hours) |
-| `T` > 1 week | 1 week (7 × 24 hours) |
+| `T`                  | `step`                |
+| -------------------- | --------------------- |
+| `T` ≤ 1 hour         | 5 minutes             |
+| 1 hour < `T` ≤ 1 day | 1 hour                |
+| 1 day < `T` ≤ 1 week | 1 day (24 hours)      |
+| `T` > 1 week         | 1 week (7 × 24 hours) |
 
 - The multiples are counted from the Unix origin in milliseconds: plain arithmetic, no calendar,
   no time zone. The arithmetic is exact (§1): a rounded date past the top of the integer range
@@ -2279,10 +2268,10 @@ erase_at = ceil((created_at + T) / step) × step
   offered late is refused by its own dates, as for any erased message.
 - `T = 0`: nothing changes; the tombstone is kept as long as the group (§7.1).
 
-*Why:* deleting a message by hand must not leave more trace than letting the timer run. Kept as
+_Why:_ deleting a message by hand must not leave more trace than letting the timer run. Kept as
 without a timer, the tombstone would say, for as long as the group is kept, that a message
-existed. *Why rounded:* the exact moment would keep the exact creation date of the message beside
-its tombstone. *Cost:* the device keeps one coarse date beside the tombstone until then.
+existed. _Why rounded:_ the exact moment would keep the exact creation date of the message beside
+its tombstone. _Cost:_ the device keeps one coarse date beside the tombstone until then.
 
 **A deletion for a message the device never processed.** A deletion carries no date, so a device
 that receives one for a message it never processed (erased already, never received, or not yet
@@ -2306,18 +2295,18 @@ processed, in an epoch with a timer, sets it `false`; the first version of the m
 for that record sets it back to `true`. While it is `false` the device never announces nor lists
 the record's events, and always answers a direct request for them.
 
-*Why the processing time plus `T`:* it is a safe bound, because an honest message is never created
-after its own deletion. *Why quiet:* that deadline restarts whenever the deletion is received
+_Why the processing time plus `T`:_ it is a safe bound, because an honest message is never created
+after its own deletion. _Why quiet:_ that deadline restarts whenever the deletion is received
 anew. If devices in this state offered it to each other, they would renew each other's copies
 forever: one device that was offline is enough to stagger the deadlines. A device that holds the
-message has a fixed deadline, the same on every device, so offering is safe there. *Why a direct
-request is still answered:* a peer asks only when something finite gave it the ID (a child event
+message has a fixed deadline, the same on every device, so offering is safe there. _Why a direct
+request is still answered:_ a peer asks only when something finite gave it the ID (a child event
 or a reply, each with its own moment), so answering cannot keep the deletion alive.
 
 **When the versions disagree.** Honest versions of a message share one creation date, so its
 moment is that of each version. When versions carry different creation dates (the known limit
 below), the device deletes the message at the moment of its current result, as a local-only
-deletion (§9.2, §9.3), and erases it once every version it knows is past its own moment. *Why:* an
+deletion (§9.2, §9.3), and erases it once every version it knows is past its own moment. _Why:_ an
 erased event is unknown again; a version offered later is then refused only if its own moment has
 passed. Erasing at the earlier moment would let a version with a later creation date come back and
 be shown.
@@ -2328,10 +2317,10 @@ be shown.
 - its own moment, `created_at + T` of its epoch, in any case.
 
 Removing and adding a reaction again keeps its creation date while its record exists (§7.6), so
-toggling never extends its life; once it is erased, adding it again starts a new life. *Why:* a
+toggling never extends its life; once it is erased, adding it again starts a new life. _Why:_ a
 reaction's `syncObjId = H(target, author, emoji)` can be checked by anyone who guesses the three
 values, so a kept record says who reacted to what with which emoji, long after the target is gone.
-*Why its own moment as well:* a device that does not hold the target cannot know the target's
+_Why its own moment as well:_ a device that does not hold the target cannot know the target's
 moment; the reaction's own date bounds it, since a reaction is made after its target exists.
 
 **A message or reaction that arrives after its moment** (or a pending version that takes effect
@@ -2340,7 +2329,7 @@ parent link, and its parents are not looked up. Offered again by a late peer, it
 the same way, from its dates alone, whether or not the device ever held it. The lookup that fetched
 it is complete, without penalty for the peer that supplied it, and the device neither relays it
 nor records a hint for it, so two devices never pass it back and forth.
-*Why nothing is stored:* a record of an expired message would be a trace of it; and since the
+_Why nothing is stored:_ a record of an expired message would be a trace of it; and since the
 refusal depends only on the dates, every arrival gets the same answer.
 
 **What an erased event still costs.** An erased ID is unknown again, so the rule that a known
@@ -2398,7 +2387,7 @@ signed objects (§4.10, §5.1).
   once (or kept unserved until activation, if pending).
 - An event restored under §9.5 is available only while its window is still open.
 
-*Why:* aging by the event's own timestamp gives every device the same expiry for the same event, so
+_Why:_ aging by the event's own timestamp gives every device the same expiry for the same event, so
 every honest device stops serving it at the same moment, and the lookup deadline (§11.6) can equal
 it exactly.
 Scheduled events need no longer window: one obtained while available is applied locally when its
@@ -2442,7 +2431,7 @@ The stub is indistinguishable from ordinary retention pruning.
 
 Already encrypted packets may still carry the earlier content (§15.3).
 
-*Why:* the altered message stays visible locally, but this device stops serving any version of it,
+_Why:_ the altered message stays visible locally, but this device stops serving any version of it,
 so it cannot leak the alteration or contradict it.
 
 ### 9.4 Retry synchronisation
@@ -2471,7 +2460,7 @@ After normal validation:
 
 A notice or parent reference to a pruned ID never triggers a fetch (§11.7).
 
-*Why:* if a device altered "hello" to "bye" locally and pruned the event, a duplicate "hello" under
+_Why:_ if a device altered "hello" to "bye" locally and pruned the event, a duplicate "hello" under
 the old ID must not become servable: serving "bye" under it would leak the edit, and keeping
 "hello" would retain old plaintext.
 
@@ -2529,10 +2518,10 @@ Every rule below is limited to the peers that may receive the item (§10.4, and 
 objects §4.6 and §5).
 
 - **Own messages:** send the full event to every neighbor that is a member of the event's epoch.
-  *Why:* neighbors hold copies even if the sender goes offline right after sending.
+  _Why:_ neighbors hold copies even if the sender goes offline right after sending.
 - **Relayed events and fabricated messages** (attributed to another member): send gossip notices
   only, and answer explicit requests with the full event.
-  *Why:* fabrication then looks like an honest relay.
+  _Why:_ fabrication then looks like an honest relay.
 - **Roots and signed objects:** their first send is defined in §4.6, §5.3, §5.6 and §5.8.
   A device that received one relays it by notice only, and answers explicit requests with the full
   object.
@@ -2592,13 +2581,13 @@ later added back is no longer a removed peer.
 **Where a device publishes.** Take X = {A, B, C}, superseded by Y = {A, C, D}, the current epoch; B
 was removed.
 
-| Published | In which epoch | To whom |
-| --- | --- | --- |
-| A new message | the current epoch (Y) | its members (A, C, D) |
-| An edit or a Retry (§9.4) of a message of X | X | the members of X who are in the current epoch (A, C) |
-| A deletion of a message of X | X | every member of X (A, B, C) |
+| Published                                   | In which epoch        | To whom                                              |
+| ------------------------------------------- | --------------------- | ---------------------------------------------------- |
+| A new message                               | the current epoch (Y) | its members (A, C, D)                                |
+| An edit or a Retry (§9.4) of a message of X | X                     | the members of X who are in the current epoch (A, C) |
+| A deletion of a message of X                | X                     | every member of X (A, B, C)                          |
 
-*Why:* an edit carries new content, which a removed member should not get; a deletion removes
+_Why:_ an edit carries new content, which a removed member should not get; a deletion removes
 content, and should reach everyone who had the message.
 
 **Serving a removed peer.** The table binds every device and every way of handing out the events of
@@ -2615,14 +2604,14 @@ messages.
 The filter is on the delivering peer, so an event relayed by a member that has not adopted the
 successor yet is still accepted.
 
-*Why:* a removed member must not be able to affect the group any more than it already has, even
+_Why:_ a removed member must not be able to affect the group any more than it already has, even
 where that costs convergence between devices that had processed different events before adopting
 the successor.
 
 Signed objects are the exception: a root, a kick, a leave or a dissolve message that a removed peer
 sends in full is accepted when valid, its notices of them are acted on, and the device may fetch
 from that peer what it announced.
-*Why:* a signed object proves itself, whoever carries it, and a removed peer cannot forge one.
+_Why:_ a signed object proves itself, whoever carries it, and a removed peer cannot forge one.
 Refusing it would lose a membership fact when that peer is the only device online that holds it,
 and would refuse its own leave coming from it. The cost is that a lookup tells that peer this device
 lacked one membership object, which says nothing about messages or about who wrote them.
@@ -2636,7 +2625,7 @@ lacked one membership object, which says nothing about messages or about who wro
   of that epoch **and directly to every removed peer of that epoch**.
   Relays use notices as usual, and scans cover failures.
 
-*Why push deletions to every removed peer:* removed members are nobody's neighbors, so nothing
+_Why push deletions to every removed peer:_ removed members are nobody's neighbors, so nothing
 else would bring them the deletion quickly.
 The cost is accepted: up to 511 ciphertexts for one deletion, each about 3.8 KB, because the
 session adds about 3.6 KB to every ciphertext whatever it carries.
@@ -2649,12 +2638,12 @@ naming that epoch silently ("Dissolve & Delete" erases its archive; it stays kic
 announces nothing, §5.8), and drops every other incoming event.
 A device in the waiting state (§5.4), and a device whose group was dissolved (§5.8), drop every
 incoming event except roots, kicks and dissolve messages.
-*Why:* "Dissolve & Delete" is meant to erase the chat on every device that holds the epoch;
+_Why:_ "Dissolve & Delete" is meant to erase the chat on every device that holds the epoch;
 otherwise the removed member's device would keep the only transcript of a chat everyone else
 erased. It is consistent with single deletion events, which already reach removed peers (§10.4),
 and the owner gains no power it did not have: it could have dissolved with deletion just before the
 kick.
-*Known drawback:* a removed member's archive stays within the owner's reach after the removal. The
+_Known drawback:_ a removed member's archive stays within the owner's reach after the removal. The
 owner can erase that member's copy of an epoch it holds although it is no longer in the group; only
 a dissolve naming an epoch the member holds reaches it, never a dissolve of a later epoch (§16.8).
 
@@ -2669,7 +2658,7 @@ sending when the group goes inactive. They are kept, and go on if the group beco
 (the device is added back and accepts); so does a lookup it needs meanwhile for an event it still
 accepts, such as the missing parent of a deletion pushed to it, which asks no one until then. A sync-object lookup the user asks for there ends at once,
 not found.
-*Why kept:* a member added back, or a device restored from a backup, would otherwise lose the IDs it
+_Why kept:_ a member added back, or a device restored from a backup, would otherwise lose the IDs it
 learnt before, which a scan does not always bring back (an older event reached only through a
 version since pruned); in the membership simulation, dropping them left a restored member added
 back without part of an older epoch's messages in 23 of 300 runs. Kept, they cost no traffic while the group is
@@ -2685,20 +2674,20 @@ what a device that does not hold the epoch gives ("not available", or silence wh
 is silent; a neighbor request is declined without suggestions); a frozen tips-scan list of that
 group is dropped; a sync-object lookup in progress ends, not found; and a removed peer is owed
 nothing more.
-*Why:* a device that deleted the chat drops or answers all of this the same way (§13.7); otherwise
+_Why:_ a device that deleted the chat drops or answers all of this the same way (§13.7); otherwise
 work taken a moment before the kick would still tell a member that the device kept the history.
 The exceptions stay: a request to be kicked goes (§5.4), a superseded chat of two still sends the
 events queued before the switch (§5.12), an archive still serves what §5.8 lists, and a key answer
 decided on receipt, which names no epoch, goes as decided.
 What such a device still needs reaches it pushed in full: its own kick or leave (§5.6), deletion
 events (above), a dissolve message (§5.8) and the roots that concern it.
-*Why:* a lookup or a notice tells the peer that gets it that the device still holds the epoch,
+_Why:_ a lookup or a notice tells the peer that gets it that the device still holds the epoch,
 while a device that deleted the chat or never held it sends nothing. A root notice naming the epoch
 was already ignored, as by a device that holds or closed it (§16.7).
 The exceptions: a dissolved group still serves its roots and its dissolve message, and answers a
 member's tips scan with a page of these two entries only (§5.8); an archive ("Dissolve & Keep
 archived") gives a removed peer its own kick or leave (§12.8).
-*Why:* the answer is the one a device that deleted the chat, or never held it, gives; so a member
+_Why:_ the answer is the one a device that deleted the chat, or never held it, gives; so a member
 cannot tell "kept the history" from "deleted the chat", and nobody waits on silence.
 
 **Limits.**
@@ -2753,11 +2742,11 @@ A `busy` or an `expired` answer does not count: a `busy` peer is asked again abo
 (D.46).
 A timeout does not move a peer that announced the item: it is asked again once its request has
 expired, until three timeouts in a row make it a peer that stopped answering.
-*Why a timeout does not count for an announcer:* a timeout says nothing of the item, while the
+_Why a timeout does not count for an announcer:_ a timeout says nothing of the item, while the
 announcement still stands. Moved behind the members not yet asked, the only holder waited behind
 every member never measured (each offline one costing a full stage), and the task could pause after
 its last stage without asking it again.
-*Why:* a peer that went inactive in the group, or never held the item, gives the same answer every
+_Why:_ a peer that went inactive in the group, or never held the item, gives the same answer every
 time, while a member not yet asked may hold it; a simulated device kept asking such peers for a day
 and hardly asked the member that held the events. The order keeps responsive peers first, so that a
 holder that was busy once, or let one request time out, is not asked again only after each member
@@ -2783,7 +2772,7 @@ milliseconds.
 - On a local timeout, the requester immediately tries the next candidate with the next TTL; there
   is no extra backoff sleep.
 
-*Why:* exponential growth fits asynchronous peers that may be offline for days, the local jitter
+_Why:_ exponential growth fits asynchronous peers that may be offline for days, the local jitter
 decorrelates traffic, and the receiver's margin covers that jitter plus 5 minutes of clock skew.
 
 ### 11.4 Attempts, answers and resends
@@ -2829,7 +2818,7 @@ This is exactly when every honest device stops serving it (§8.1).
 - At the deadline the device stops new requests and resends, and prunes the ID to a generic stub.
   Requests already sent keep their own validity, and a valid late full answer is still processed.
 
-*Why:* retention counts from the event's own timestamp, so after `ts + RETENTION` no honest peer
+_Why:_ retention counts from the event's own timestamp, so after `ts + RETENTION` no honest peer
 serves the event any more and further requests would be wasted traffic.
 
 ### 11.7 No refetch of pruned IDs
@@ -2870,7 +2859,7 @@ shared-chats page.
   These numbers are provisional (§17.4).
 - Other traffic with that peer is unaffected.
 
-*Why a pause in addition to the score:* for an unknown epoch the announcer is the only peer the
+_Why a pause in addition to the score:_ for an unknown epoch the announcer is the only peer the
 device can ask, so ranking alone cannot stop the waste.
 
 These answers are legitimate and are **not** failed announcements: "not available" to a tip scan
@@ -2913,7 +2902,7 @@ epoch each entry belongs to.
 - For an epoch from which the requester is a removed peer, only deletion events are listed (§10.4).
 - A leave or a dissolve message is listed only when the requester is a member of the epoch it
   names.
-  *Why:* it is a membership fact of that epoch, which only its members may learn, like every other
+  _Why:_ it is a membership fact of that epoch, which only its members may learn, like every other
   object of it.
 - An epoch with no retained events has no tips, so the size of a scan follows what is pending, not
   the number of membership changes.
@@ -2925,7 +2914,7 @@ epoch each entry belongs to.
 
 **Tips.** A tip is an available event that no **available** event references as a parent (plus the
 cycle frontier entries of §6.1).
-*Why "available" and not "accepted":* a pruned event answers "not available", so its parent links
+_Why "available" and not "accepted":_ a pruned event answers "not available", so its parent links
 cannot be learned from anyone. Example: E1 creates message 1; X1 creates message 2 with parent E1;
 X2 edits message 2 with parent X1, and every device prunes X1 as superseded. If X1 still hid E1, the
 only tip would be X2; a device that was offline fetches X2, asks for X1, gets "not available"
@@ -2943,7 +2932,7 @@ tip again once X1 is pruned (D.27).
 
 IDs are never invented or reshuffled afterwards.
 
-*Why:* leaves and a dissolve change who is in the group, so they travel first; there are at most
+_Why:_ leaves and a dissolve change who is in the group, so they travel first; there are at most
 511 per epoch.
 Deletions travel ahead of other events so that removals are processed early when many pages are
 needed, but new content is never starved behind a long run of deletions.
@@ -2956,13 +2945,13 @@ needed, but new content is never starved behind a long run of deletions.
 - A valid empty end page is `count = 0, entries = []`.
 - An empty page with a positive count is invalid.
 - A request whose offset is past the end of the frozen list is answered `malformed`.
-  *Why:* an empty last page or `restart` would hide the requester's own bug, which only it can fix.
+  _Why:_ an empty last page or `restart` would hide the requester's own bug, which only it can fix.
 - A page with one entry that cannot be read (an ID of the wrong length) is malformed as a whole
   (§13.5): nothing of it is used, its sender is penalised once, and the scan ends as for any
   invalid page.
 - The requester treats a page whose `offset + count` differs from the total implied by an earlier
   page of the same scan as malformed: the scan ends and the sender is penalised.
-  *Why:* the list is frozen, so a moving total means entries skipped or repeated; an honest
+  _Why:_ the list is frozen, so a moving total means entries skipped or repeated; an honest
   responder whose list is gone answers `restart` instead.
 - Any in-range offset is accepted; pages need not align to 128, since byte limits may shorten them.
 - Pages carry IDs only; the requester fetches the unknown items.
@@ -3035,7 +3024,7 @@ There is one set of triggers per group, whatever its number of epochs.
      After being offline, a device runs one overdue round, not one per missed day.
    - Phase starts at the device's first time online, never at a fixed hour.
 
-*Why:* neighbor scans recover what the usual peers hold, while scans of random non-neighbors reach
+_Why:_ neighbor scans recover what the usual peers hold, while scans of random non-neighbors reach
 members outside the neighbor set and so can find events from a part of the group that the neighbor
 connections never reach.
 
@@ -3081,11 +3070,11 @@ responder (§4.11); other peers are ignored silently and learn nothing, not even
 A chat lookup asks for a root.
 It has three forms:
 
-| Form | Data | Used for |
-| --- | --- | --- |
-| by ID | `chat_id` | a root that was announced or listed (§4.6, §4.11) |
-| by reference | `ref_chat_id` | the epoch of a reply target (§7.6) |
-| by parent | `chat_id, parentCommitment` | an unmatched parent of a root the requester holds (§4.8) |
+| Form         | Data                        | Used for                                                 |
+| ------------ | --------------------------- | -------------------------------------------------------- |
+| by ID        | `chat_id`                   | a root that was announced or listed (§4.6, §4.11)        |
+| by reference | `ref_chat_id`               | the epoch of a reply target (§7.6)                       |
+| by parent    | `chat_id, parentCommitment` | an unmatched parent of a root the requester holds (§4.8) |
 
 - The responder answers only a requester that shares at least one accepted epoch with it, as for
   shared-chats discovery (§4.11); any other request is dropped silently.
@@ -3094,7 +3083,7 @@ It has three forms:
   exactly as it would answer a lookup of that root by ID: a group dissolved and kept as an archive
   serves its roots both ways, and a device no longer active in the group answers "not available",
   as for a reference it does not hold (§10.4).
-  *Why:* the same root gets the same answer whichever way it is asked.
+  _Why:_ the same root gets the same answer whichever way it is asked.
   When a requester sends it, to whom, how often, and what it never asks for: §7.6.
   Every version-1 device answers it; the first release does not send it (local policy, off by
   default, to be turned on in a later release, §7.6).
@@ -3105,7 +3094,7 @@ It has three forms:
   root.
   Otherwise it answers "not available", whether or not it holds a matching root.
 
-*Why:* the same answer for "not held" and "held, but you are not a member" stops anyone who learned
+_Why:_ the same answer for "not held" and "held, but you are not a member" stops anyone who learned
 an ID, a reference or a commitment from testing who belongs to that epoch.
 
 There is no "Not a member" answer (§7.6); status code 1 stays reserved and is never sent.
@@ -3127,7 +3116,7 @@ A device uses it when it must answer a removed peer and holds no record for it (
 - An archive ("Dissolve & Keep archived") answers a removed peer's removal lookup of its **own**
   record with its kick or leave, as it answers the signed-object lookup of the same record; a lookup
   of another member's record is answered under §13.7.
-  *Why:* the same record gets the same answer whichever way it is asked. The dissolve names a later
+  _Why:_ the same record gets the same answer whichever way it is asked. The dissolve names a later
   epoch the removed peer is not in, so nothing else would ever end its membership of the epoch it
   was removed from. Only its own record is given, so nothing leaks.
 - A returned object MUST hash to the requested ID and pass verification; otherwise it is an invalid
@@ -3144,7 +3133,7 @@ A key query asks for the `UserPublicKeys` of a GossipID, as `[chat_id, gossipId]
 - The requester MUST check that the returned keys hash to the requested GossipID.
   An answer that does not is invalid, and gets the heaviest penalty of the peer score (§11.8).
 
-*Why no backend lookup:* asking the backend for a member's keys would reveal to it who shares a
+_Why no backend lookup:_ asking the backend for a member's keys would reveal to it who shares a
 group with whom.
 
 ## 13. Wire protocol
@@ -3161,10 +3150,10 @@ It travels in an Agraphon session as a session message of the type reserved for 
 and of no other type.
 Session messages are typed, and each type has one meaning:
 
-| Session message type | Carries |
-| --- | --- |
-| group | one group plaintext, and nothing else |
-| keep-alive | nothing; it only keeps the session alive |
+| Session message type | Carries                                  |
+| -------------------- | ---------------------------------------- |
+| group                | one group plaintext, and nothing else    |
+| keep-alive           | nothing; it only keeps the session alive |
 
 A receiver MUST ignore a group plaintext found under any other type, and MUST NOT treat a
 keep-alive as carrying content.
@@ -3178,15 +3167,15 @@ responses, notices) may share one ciphertext and one seeker.
 
 Each frame holds exactly one kind:
 
-| Kind | Frame |
-| --- | --- |
-| `event` | one blob: a root (§4.1), a signed object (§5.1) or a message event (§6.2) |
-| `query` | queries (§13.3) |
-| `response` | responses (§13.4) |
-| `notice` | gossip notices (§13.5) |
-| `neighbor_request` | §13.6 |
-| `neighbor_response` | §13.6 |
-| `leave_request` | §13.6 |
+| Kind                | Frame                                                                     |
+| ------------------- | ------------------------------------------------------------------------- |
+| `event`             | one blob: a root (§4.1), a signed object (§5.1) or a message event (§6.2) |
+| `query`             | queries (§13.3)                                                           |
+| `response`          | responses (§13.4)                                                         |
+| `notice`            | gossip notices (§13.5)                                                    |
+| `neighbor_request`  | §13.6                                                                     |
+| `neighbor_response` | §13.6                                                                     |
+| `leave_request`     | §13.6                                                                     |
 
 **Event blobs.** Every root, signed object and message event, wherever it travels (an `event`
 frame or inside a response), is an opaque byte string with its own version prefix:
@@ -3216,7 +3205,7 @@ The receiver reads the event's version first, then parses the rest with that ver
   An activated scheduled deletion (§7.4) changes once: it is served, under its own version,
   without its `last_modified_at`.
 
-*Why:* events outlive the plaintext that carried them, so a device that has upgraded must still be
+_Why:_ events outlive the plaintext that carried them, so a device that has upgraded must still be
 able to relay older events unchanged; everything else is built fresh for each send and needs only
 the plaintext's version.
 Keeping the event's version outside its protobuf encoding lets a receiver choose the right schema
@@ -3272,18 +3261,18 @@ They are laid out as:
 A query carries a `request_id`, `sent_at`, `ttl` and at most 16 entries.
 Each entry is one operation:
 
-| Operation | Data |
-| --- | --- |
-| chat lookup by ID | `chat_id` |
-| chat lookup by reference | `ref_chat_id` |
-| chat lookup by parent | `chat_id, parentCommitment` |
-| shared-chats scan | `scanId, offset` |
-| event lookup | `chat_id, eventId` |
-| sync-object lookup | `chat_id, syncObjId` |
-| signed-object lookup | `chat_id, kind, id` |
-| removal lookup | `chat_id, gossipId` |
-| tips scan | `chat_id` (the anchor), `scanId, offset` |
-| key query | `chat_id, gossipId` |
+| Operation                | Data                                     |
+| ------------------------ | ---------------------------------------- |
+| chat lookup by ID        | `chat_id`                                |
+| chat lookup by reference | `ref_chat_id`                            |
+| chat lookup by parent    | `chat_id, parentCommitment`              |
+| shared-chats scan        | `scanId, offset`                         |
+| event lookup             | `chat_id, eventId`                       |
+| sync-object lookup       | `chat_id, syncObjId`                     |
+| signed-object lookup     | `chat_id, kind, id`                      |
+| removal lookup           | `chat_id, gossipId`                      |
+| tips scan                | `chat_id` (the anchor), `scanId, offset` |
+| key query                | `chat_id, gossipId`                      |
 
 Requesters emit distinct entries.
 Receivers still answer every entry position independently, and limits count all entries.
@@ -3295,22 +3284,22 @@ A response carries the query's `request_id`, `idx` and one result.
 `idx` is the zero-based position of the answered entry in the original request; answers may be
 reordered.
 
-| Result | Content |
-| --- | --- |
-| event | a blob (§13.1): a full root, signed object or message event with its version prefix |
-| page | `[scanId, offset, count, entries]` |
-| keys | the `UserPublicKeys` of the requested GossipID, serialized with bincode |
-| status | a status code |
+| Result | Content                                                                             |
+| ------ | ----------------------------------------------------------------------------------- |
+| event  | a blob (§13.1): a full root, signed object or message event with its version prefix |
+| page   | `[scanId, offset, count, entries]`                                                  |
+| keys   | the `UserPublicKeys` of the requested GossipID, serialized with bincode             |
+| status | a status code                                                                       |
 
-| Status | Code | Meaning |
-| --- | --- | --- |
-| `not_available` | 0 | authorized, but not available here |
-| reserved | 1 | reserved and never sent (§12.7) |
-| `restart` | 2 | the scan state is gone; start a fresh scan |
-| `expired` | 3 | the query was past its receiver deadline |
-| `malformed` | 4 | the entry could not be parsed |
-| `unsupported` | 5 | the plaintext's protocol version is higher than the receiver supports |
-| `busy` | 6 | refused for resource reasons; retry later |
+| Status          | Code | Meaning                                                               |
+| --------------- | ---- | --------------------------------------------------------------------- |
+| `not_available` | 0    | authorized, but not available here                                    |
+| reserved        | 1    | reserved and never sent (§12.7)                                       |
+| `restart`       | 2    | the scan state is gone; start a fresh scan                            |
+| `expired`       | 3    | the query was past its receiver deadline                              |
+| `malformed`     | 4    | the entry could not be parsed                                         |
+| `unsupported`   | 5    | the plaintext's protocol version is higher than the receiver supports |
+| `busy`          | 6    | refused for resource reasons; retry later                             |
 
 Statuses carry no reason text.
 **expired** is not an answer for retry purposes.
@@ -3333,13 +3322,13 @@ Otherwise it is an invalid answer (§11.4).
 A notice holds at most 128 entries and at most 16 KiB.
 Each entry is `[chat_id, kind, id]`:
 
-| Kind | `id` | Announces |
-| --- | --- | --- |
-| event | 24-byte `eventId` | a message event |
-| root | empty | the root whose ID is `chat_id` |
-| leave | 32-byte `leaveId` | a signed leave (§5.3) |
-| kick | 32-byte `kickId` | a kick (§5.6) |
-| dissolve | 32-byte `dissolveId` | a dissolve message (§5.8) |
+| Kind     | `id`                 | Announces                      |
+| -------- | -------------------- | ------------------------------ |
+| event    | 24-byte `eventId`    | a message event                |
+| root     | empty                | the root whose ID is `chat_id` |
+| leave    | 32-byte `leaveId`    | a signed leave (§5.3)          |
+| kick     | 32-byte `kickId`     | a kick (§5.6)                  |
+| dissolve | 32-byte `dissolveId` | a dissolve message (§5.8)      |
 
 Entries may mix epochs, and each is authorized independently.
 Page entries of a tips scan (§12.1) use the same form.
@@ -3347,7 +3336,7 @@ Page entries of a tips scan (§12.1) use the same form.
 One entry that cannot be read (an ID of the wrong length for its kind, a `chat_id` that is not 32
 bytes) makes the whole notice or page malformed: nothing of it is used, and the sender is penalised
 once, as for one malformed item.
-*Why:* version-1 input that is not valid is rejected and counts against its sender. An honest
+_Why:_ version-1 input that is not valid is rejected and counts against its sender. An honest
 device builds these lists from identifiers it already checked, so it never sends such an entry and
 cannot be framed by one; a spoiled list gives a hostile peer nothing more than sending no list.
 
@@ -3379,7 +3368,7 @@ it; it is never relayed and never answered.
   otherwise. The answer is the same, byte for byte and with the same effect on the asker's budgets,
   whether the device never held the epoch, holds it but the asker is not a member, holds it in a
   group where it is no longer active, or holds it active without the object.
-  *Why:* nobody waits on silence, and one answer in every case means a member still cannot tell
+  _Why:_ nobody waits on silence, and one answer in every case means a member still cannot tell
   "kept the history" from "deleted the chat". A peer that shares no active chat learns nothing
   either way, as before.
   The exceptions already settled stay: a removed peer gets its own kick or leave (§5.6, §10.4); a
@@ -3394,7 +3383,7 @@ it; it is never relayed and never answered.
   is silent; a queued neighbor response becomes a decline without suggestions (D.6).
   A key answer names no epoch: decided on receipt, it goes as decided. A "not available" decided on receipt ages as
   content does: assembled past the request's deadline (§11.3), it is `expired` too.
-  *Why:* otherwise the answer would tell apart, by its timing, a lookup the device could serve from
+  _Why:_ otherwise the answer would tell apart, by its timing, a lookup the device could serve from
   one it could not.
 - Shared-chats scans and chat lookups have no epoch context and follow §4.11 and §12.7 instead.
 - A member of a superseded epoch that is a removed peer is served and heard under §10.4.
@@ -3474,33 +3463,33 @@ Each requested ID consumes one slot when issued.
   The allocation continues across ciphertext boundaries.
 - Requests never carry deletion hints, and IDs are never invented to fill a share.
 
-*Why:* deletions should propagate early, but no category may starve the other.
+_Why:_ deletions should propagate early, but no category may starve the other.
 
 ### 13.10 Size limits
 
-| Limit | Value |
-| --- | --- |
-| Group plaintext (version prefix, all protobuf frames and events) | 57,344 bytes |
-| Encrypted binary packet, as stored under a seeker | 65,536 bytes |
-| Message text (also the content of a forwarded text) | 16,384 bytes of UTF-8 |
-| Message metadata, all entries together, as encoded | 16,384 bytes |
-| Settings map of a root, measured as metadata | 128 entries and 16,384 bytes; keys of 1 to 64 bytes (§4.1) |
-| Entries per query frame | 16 |
-| Entries per logical response allocation | 128 |
-| Notice | 128 entries and 16 KiB |
-| Page | 128 entries and 16 KiB |
-| Root | must fit one empty container |
-| Members per epoch | 512 (§4.4) |
-| Parent commitments per root | 32 (§4.5) |
-| Group name | 256 bytes (§5.11) |
-| Reply targets per message | 32 (§7.6) |
+| Limit                                                            | Value                                                      |
+| ---------------------------------------------------------------- | ---------------------------------------------------------- |
+| Group plaintext (version prefix, all protobuf frames and events) | 57,344 bytes                                               |
+| Encrypted binary packet, as stored under a seeker                | 65,536 bytes                                               |
+| Message text (also the content of a forwarded text)              | 16,384 bytes of UTF-8                                      |
+| Message metadata, all entries together, as encoded               | 16,384 bytes                                               |
+| Settings map of a root, measured as metadata                     | 128 entries and 16,384 bytes; keys of 1 to 64 bytes (§4.1) |
+| Entries per query frame                                          | 16                                                         |
+| Entries per logical response allocation                          | 128                                                        |
+| Notice                                                           | 128 entries and 16 KiB                                     |
+| Page                                                             | 128 entries and 16 KiB                                     |
+| Root                                                             | must fit one empty container                               |
+| Members per epoch                                                | 512 (§4.4)                                                 |
+| Parent commitments per root                                      | 32 (§4.5)                                                  |
+| Group name                                                       | 256 bytes (§5.11)                                          |
+| Reply targets per message                                        | 32 (§7.6)                                                  |
 
 Every complete frame and every single event, root or signed object MUST fit an empty container.
 For an event, root or signed object this means an event blob of at most 57,307 bytes (D.50), and
 the length compared is that of the blob **as received**. A copy over the limit is malformed and
 counts against the peer that sent it; it names no event to the receiver, so a proper copy of the
 same event from another peer is still accepted.
-*Why the received length:* every receiver sees it and can check it before decoding, so all
+_Why the received length:_ every receiver sees it and can check it before decoding, so all
 receivers of one copy agree. The canonical length is never longer than the received one, since
 padding, repeated fields and written default values only lengthen an encoding; checking it as well
 refuses nothing more.
@@ -3531,7 +3520,7 @@ are fixed.
   (one byte of field key, the varint length of the entry, then the key as field 1 and the value as
   field 2, each with one byte of field key and a varint length); the metadata size is the sum over
   the entries.
-  *Why both fields always:* some protobuf libraries write an empty key or value and others leave it
+  _Why both fields always:_ some protobuf libraries write an empty key or value and others leave it
   out. Counting both gives the size of the largest standard encoding, an upper bound for every
   library, so two implementations agree on an event at the 16,384-byte boundary and neither
   rejects and penalises what the other accepts.
@@ -3587,12 +3576,12 @@ Physical layout is an implementation detail.
   - It has no default: every place that creates or writes a record states it, so that no write
     can forget it. A forgotten `false` would let a quiet deletion be renewed between devices
     forever (§7.7).
-  - *Why:* a deletion carries no date, so a device without the message bounds its moment by the
+  - _Why:_ a deletion carries no date, so a device without the message bounds its moment by the
     processing time plus `T`. That bound restarts whenever the deletion is received anew, so
     devices in this state must not offer it to each other; a device holding the message has a
     fixed deadline, the same everywhere, and may. A direct request is answered because a peer
     asks only when something finite gave it the ID (§7.7).
-  The stored fields of each available event are the only stored copy of that event's content.
+    The stored fields of each available event are the only stored copy of that event's content.
 - **Retrieval tasks** with per-peer candidate rows: trigger kind and time, attempts, outstanding
   and N/A state; the per-peer waiting lists and pauses of §11.8.
 - **Scan state and tombstones**, and **request correlation references**.
@@ -3623,7 +3612,7 @@ except what the message timer erases (§7.7).
   An invitation deleted before it is answered ("Ignore and Delete") leaves a marker as one declined
   does, and so does each root fetched as a parent of an invitation that is declined or deleted,
   unless something else the device holds still names it (§4.8).
-  *Why:* the action meant to leave the least trace must not leave the earlier epochs' member lists
+  _Why:_ the action meant to leave the least trace must not leave the earlier epochs' member lists
   behind.
 - **Closed-chat marker.** A root that continues a closed epoch is rejected automatically and
   recorded as closed too (§4.8).
@@ -3638,9 +3627,9 @@ except what the message timer erases (§7.7).
   The device drops every frame for that epoch, its root included.
   It does not reject successors: a later root that lists the device is an invitation.
 
-*Why markers:* keeping nothing but a chat ID and a reference leaves no member list or secret
+_Why markers:_ keeping nothing but a chat ID and a reference leaves no member list or secret
 behind, while frames of that epoch are dropped instead of silently recreating the group.
-*Why the reference:* a reply naming the closed epoch is then recognised without asking anyone for
+_Why the reference:_ a reply naming the closed epoch is then recognised without asking anyone for
 it (§7.6); asking would let a peer see the device drop the root it gets back.
 
 **Emergency wipe.** Wiping the device or the application's data is never blocked or delayed by any
@@ -3820,12 +3809,12 @@ peers that share nothing (§4.6).
 - **No lookup before the user accepts.** Bob's device sends nothing until Bob has answered, then
   fetches the parent.
   - It closes the probe completely, and makes "Ignore and Delete" invisible to the sender.
-  - *Drawback:* a member that missed one epoch and receives the next can no longer be recognised
+  - _Drawback:_ a member that missed one epoch and receives the next can no longer be recognised
     before the prompt, so that member is asked to accept a continuation of a chat it is already
     in. Every membership change that reaches a device out of order becomes a prompt.
 - **Always look up, as cover.** Bob's device sends the lookup whether or not it holds X.
   - It keeps the adoption without a prompt.
-  - *Drawbacks:* the lookup is only the first step. When the parent is not held and the sender
+  - _Drawbacks:_ the lookup is only the first step. When the parent is not held and the sender
     answers "not available", the device goes on to ask the other listed members and shows the
     prompt after a delay or enough answers; when it is held, none of that happens. To hide the
     difference the device must act out the whole sequence in both cases, with the same messages
@@ -3833,11 +3822,11 @@ peers that share nothing (§4.6).
     invitation arrived, and lets anyone trigger useless traffic at will.
 - **Ask someone else.** Bob's device looks the parent up from members of chats it holds, never
   from the sender.
-  - *Drawback:* it only helps when Bob holds a chat whose members can answer, which is exactly the
+  - _Drawback:_ it only helps when Bob holds a chat whose members can answer, which is exactly the
     case that needs no lookup; otherwise there is nobody to ask but the sender.
 - **Bind the parent to the invitation.** The root would carry a value that only a member of the
   parent epoch can compute for this recipient, so that a device can check the claim offline.
-  - *Drawback:* it changes the root format and the parent commitment (§4.5), and a commitment a
+  - _Drawback:_ it changes the root format and the parent commitment (§4.5), and a commitment a
     recipient can check against one known epoch is itself a way to test membership offline,
     unless it is keyed by a secret of that epoch that an outsider cannot have. This needs a design
     and a proof, not a patch.
@@ -3920,47 +3909,36 @@ Inspect against the §16.3 boundary:
 ### 17.4 Provisional resource limits
 
 - Resource: Live scans
-
   - Limit: 4 per peer, 64 per device, 16 MiB of frozen IDs in total
 
 - Resource: Active lookup entries
-
   - Limit: 16 per peer, 64 per device; one ordinary supplier per item
 
 - Resource: Queued missing IDs
-
   - Limit: 65,536 per group, 262,144 per device; back-pressure pauses paging
 
 - Resource: Per-peer request budget
-
   - Limit: burst 128 entries, refill 16 per minute
 
 - Resource: Per-peer response budget
-
   - Limit: burst 1 MiB, refill 256 KiB per minute
 
 - Resource: Aggregate device work
-
   - Limit: a separate device-wide ceiling with fair rotation across peers; value to be profiled
 
 - Resource: DAG traversal
-
   - Limit: 4,096 edges per scheduling turn
 
 - Resource: Peer-knowledge hints
-
   - Limit: 65,536 per group, 28-day expiry
 
 - Resource: Root fetches in progress
-
   - Limit: 4 per peer, with a waiting list of 256 announced IDs per peer (§11.8)
 
 - Resource: Failed announcements
-
   - Limit: 3 within 24 h, then a pause of 1 h, doubling up to 24 h (§11.8)
 
 - Resource: Unverified handover roots kept while their parent is looked up (§4.7)
-
   - Limit: 64 per delivering peer, 1,024 per device, each kept two weeks at most
   - The limit per peer is a total across every chat: the chat a handover root belongs to cannot be
     known before its parent is held. A root is about 24 KB at 512 members and at most the
@@ -4002,28 +3980,28 @@ It never marks events invalid or pruned.
 
 ### Hash domains
 
-| Domain | Use |
-| --- | --- |
-| `gossip.groups.root.1` | root ID, which is the `chat_id` (§4.1) |
-| `gossip.groups.predecessor.1` | parent commitment (§4.5) |
-| `gossip.groups.reference.1` | `ref_chat_id` (§4.5) |
-| `gossip.groups.leave.1` | `leaveId` (§5.3) |
-| `gossip.groups.kick.1` | `kickId` (§5.6) |
-| `gossip.groups.dissolve.1` | `dissolveId` (§5.8) |
-| `gossip.groups.message.secret_proof.1` | `secret_proof` |
-| `gossip.groups.message.result.1` | message result hash |
-| `gossip.groups.sync_obj_name.1` | sync-object ID of a registered name |
-| `gossip.groups.reaction.1` | sync-object ID of a reaction (§7.6) |
+| Domain                                 | Use                                    |
+| -------------------------------------- | -------------------------------------- |
+| `gossip.groups.root.1`                 | root ID, which is the `chat_id` (§4.1) |
+| `gossip.groups.predecessor.1`          | parent commitment (§4.5)               |
+| `gossip.groups.reference.1`            | `ref_chat_id` (§4.5)                   |
+| `gossip.groups.leave.1`                | `leaveId` (§5.3)                       |
+| `gossip.groups.kick.1`                 | `kickId` (§5.6)                        |
+| `gossip.groups.dissolve.1`             | `dissolveId` (§5.8)                    |
+| `gossip.groups.message.secret_proof.1` | `secret_proof`                         |
+| `gossip.groups.message.result.1`       | message result hash                    |
+| `gossip.groups.sync_obj_name.1`        | sync-object ID of a registered name    |
+| `gossip.groups.reaction.1`             | sync-object ID of a reaction (§7.6)    |
 
 ### Signing contexts
 
 ML-DSA-65 signing contexts are distinct from every hash domain.
 
-| Context | Signed message |
-| --- | --- |
-| `gossip.groups.root.signature.1` | the 32-byte root ID |
-| `gossip.groups.leave.signature.1` | the 32-byte `leaveId` |
-| `gossip.groups.kick.signature.1` | the 32-byte `kickId` |
+| Context                              | Signed message           |
+| ------------------------------------ | ------------------------ |
+| `gossip.groups.root.signature.1`     | the 32-byte root ID      |
+| `gossip.groups.leave.signature.1`    | the 32-byte `leaveId`    |
+| `gossip.groups.kick.signature.1`     | the 32-byte `kickId`     |
 | `gossip.groups.dissolve.signature.1` | the 32-byte `dissolveId` |
 
 ### Registered names
@@ -4036,41 +4014,41 @@ Future protocol-named message objects use names under `gossip.groups.message.*`.
 `migrate_from` (§4.1, §5.12) holds a protocol version number, with the numbering of the wire
 version (§13.1):
 
-| Value | Meaning |
-| --- | --- |
-| `0` | before version 1: the earlier one-to-one conversation format |
-| `n ≥ 1` | wire version `n` |
+| Value   | Meaning                                                      |
+| ------- | ------------------------------------------------------------ |
+| `0`     | before version 1: the earlier one-to-one conversation format |
+| `n ≥ 1` | wire version `n`                                             |
 
 A version-1 device acts only on `0`. It keeps and hashes any other value without acting on it.
 The field never makes a root invalid.
-*Why:* a later version may continue its own conversations, and a version-1 device must still
+_Why:_ a later version may continue its own conversations, and a version-1 device must still
 accept and relay such a root unchanged.
 
 ## Appendix B: Timing constants
 
-| Constant | Value |
-| --- | --- |
-| Message retention | 2 weeks + 5 min after the event timestamp (fixed) |
-| Lookup deadline | event timestamp + retention |
-| Event timestamp admission | now + 5 min |
-| `created_at`, `last_modified_at` | ≤ event timestamp + 2 weeks |
-| Query clock tolerance | `sent_at` ≤ now + 5 min |
-| Receiver deadline | `sent_at + 1.05 × ttl + 5 min` |
-| First TTL / growth / cap | 60 s / × 3.142 (ceil) / 24 h |
-| Local jitter | uniform ±5 %, floored to ms |
-| Unanswered stages before pause | 20 |
-| Scan tombstone | 24 h after drop |
-| Periodic recovery lanes | 4 per group: neighbor, random, neighbor, random; 1 scan each per 24 h |
-| Periodic lane offset | floor(6 h × r) ms, r uniform in [0.95, 1.05] |
-| Scheduled-delete timers | wait ≤ 2 h; fallback 30 min (5 min when open) |
-| Message timer | per epoch, in its root: a message is deleted at `created_at + T` (§7.7) |
-| Hint expiry | 28 days |
-| Invitation delay `PROMPT_DELAY` | 5 min after receiving the root (§4.8) |
-| Successor after a leave or request | 30 s without a new one; at most 5 min after the first (§5.5) |
-| Owner-only request resend | every 24 h (§5.4) |
-| Waiting for a kick | at most 2 weeks (§5.4) |
-| Root and dissolve message kept after "Dissolve & Delete" | 2 weeks (§5.8) |
-| Failed announcements before a pause (provisional) | 3 within 24 h; pause 1 h, doubling, at most 24 h |
+| Constant                                                                                | Value                                                                                                                              |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Message retention                                                                       | 2 weeks + 5 min after the event timestamp (fixed)                                                                                  |
+| Lookup deadline                                                                         | event timestamp + retention                                                                                                        |
+| Event timestamp admission                                                               | now + 5 min                                                                                                                        |
+| `created_at`, `last_modified_at`                                                        | ≤ event timestamp + 2 weeks                                                                                                        |
+| Query clock tolerance                                                                   | `sent_at` ≤ now + 5 min                                                                                                            |
+| Receiver deadline                                                                       | `sent_at + 1.05 × ttl + 5 min`                                                                                                     |
+| First TTL / growth / cap                                                                | 60 s / × 3.142 (ceil) / 24 h                                                                                                       |
+| Local jitter                                                                            | uniform ±5 %, floored to ms                                                                                                        |
+| Unanswered stages before pause                                                          | 20                                                                                                                                 |
+| Scan tombstone                                                                          | 24 h after drop                                                                                                                    |
+| Periodic recovery lanes                                                                 | 4 per group: neighbor, random, neighbor, random; 1 scan each per 24 h                                                              |
+| Periodic lane offset                                                                    | floor(6 h × r) ms, r uniform in [0.95, 1.05]                                                                                       |
+| Scheduled-delete timers                                                                 | wait ≤ 2 h; fallback 30 min (5 min when open)                                                                                      |
+| Message timer                                                                           | per epoch, in its root: a message is deleted at `created_at + T` (§7.7)                                                            |
+| Hint expiry                                                                             | 28 days                                                                                                                            |
+| Invitation delay `PROMPT_DELAY`                                                         | 5 min after receiving the root (§4.8)                                                                                              |
+| Successor after a leave or request                                                      | 30 s without a new one; at most 5 min after the first (§5.5)                                                                       |
+| Owner-only request resend                                                               | every 24 h (§5.4)                                                                                                                  |
+| Waiting for a kick                                                                      | at most 2 weeks (§5.4)                                                                                                             |
+| Root and dissolve message kept after "Dissolve & Delete"                                | 2 weeks (§5.8)                                                                                                                     |
+| Failed announcements before a pause (provisional)                                       | 3 within 24 h; pause 1 h, doubling, at most 24 h                                                                                   |
 | Chat lookup by reference (local policy; not sent in the first release, always answered) | after a wait of up to 1 min from the reply's receipt; at most 3 peers per round; one round per week; 4 rounds per reference (§7.6) |
 
 ## Appendix C: Protobuf schema
@@ -4317,10 +4295,10 @@ Until an entry is decided, the text of the section it names is the provisional r
 
 ### D.1 What a tips scan lists among signed objects (§12.1)
 
-*Current text:* a scan lists first every live leave and the dissolve message of the responder's
+_Current text:_ a scan lists first every live leave and the dissolve message of the responder's
 current epoch, and never lists kicks.
 
-*Context:* live leaves first was decided.
+_Context:_ live leaves first was decided.
 The dissolve message was added beside them because it is as urgent.
 Kicks reach retained members with the root and reach the removed member by direct sends (§5.6), so
 listing them would only spend page space.
@@ -4329,17 +4307,17 @@ listing them would only spend page space.
 - **B:** also list kicks, after the leaves.
 - **C:** list live leaves only; the dissolve message spreads by notices alone.
 
-*Settled:* choice A, frozen as coded. §12.1 also states the two rules that were in the code only:
+_Settled:_ choice A, frozen as coded. §12.1 also states the two rules that were in the code only:
 a leave or dissolve is listed only for a requester that is a member of the epoch it names, and a
 page whose total moves is malformed.
 
 ### D.2 What a device does when it receives its own signed leave (§5.3)
 
-*Current text:* none.
+_Current text:_ none.
 A peer sends a kept leave back to the leaver that contacts it (§5.3, §5.6), which happens when the
 leaver's device was restored from a backup made before it left.
 
-*Context:* the leave is signed with the device's own key and names its current epoch, so it can
+_Context:_ the leave is signed with the device's own key and names its current epoch, so it can
 verify it.
 The original leave closed the group and deleted its data (§14.2), but a user who restored a backup
 may have done so to get the history back.
@@ -4352,12 +4330,12 @@ may have done so to get the history back.
 
 ### D.3 A root whose owner's authority cannot be verified (§4.7, §4.8)
 
-*Current text:* a successor root whose owner has no verified authority over a parent the device
+_Current text:_ a successor root whose owner has no verified authority over a parent the device
 holds does not continue that parent; it is treated as unmatched, so as an invitation.
 When the user accepts such an invitation, the root starts a **separate** group that the user may
 link by hand (§5.10).
 
-*Context:* this is stricter than the earlier wording "once accepted, the history continues in the
+_Context:_ this is stricter than the earlier wording "once accepted, the history continues in the
 same chat", which is kept for the case where authority is verified.
 Without the rule, any member who knows an epoch's ID and challenge could attach a group of its own
 to another group's history on a device that missed a handover.
@@ -4369,11 +4347,11 @@ to another group's history on a device that missed a handover.
 
 ### D.4 Provisional numbers for roots and failed announcements (§11.8, §17.4)
 
-*Current text:* at most 4 root fetches in progress per peer; a waiting list of at most 256 IDs per
+_Current text:_ at most 4 root fetches in progress per peer; a waiting list of at most 256 IDs per
 peer; 3 failed announcements from a peer within 24 hours pause fetching from its announcements for
 1 hour, doubling at each repeat up to 24 hours.
 
-*Context:* none of these values was measured.
+_Context:_ none of these values was measured.
 They bound what one peer can make a device fetch or remember.
 
 - **A (recommended):** keep them as provisional values, to be tuned by the simulations of §17.
@@ -4381,9 +4359,9 @@ They bound what one peer can make a device fetch or remember.
 
 ### D.5 Packing order in responses (§13.9)
 
-*Current text:* roots, signed objects and key answers are packed before other answers.
+_Current text:_ roots, signed objects and key answers are packed before other answers.
 
-*Context:* they are small and few, and other answers often cannot be used without them (an event of
+_Context:_ they are small and few, and other answers often cannot be used without them (an event of
 an epoch whose root is missing is not accepted).
 
 - **A (recommended):** keep the current text.
@@ -4391,13 +4369,13 @@ an epoch whose root is missing is not accepted).
 
 ### D.6 A neighbor request for an epoch the receiver does not hold (§10.1, §13.6)
 
-*Settled:* a request naming an epoch the device does not hold, and a request from someone who is
+_Settled:_ a request naming an epoch the device does not hold, and a request from someone who is
 not a member of an epoch it holds, both get the same decline with no suggestions. The two cases
 cannot be told apart. A member asking a device that holds the epoch is answered as §10.1 says.
 
-*Current text:* the request is declined with no suggestions.
+_Current text:_ the request is declined with no suggestions.
 
-*Context:* the receiver cannot name members of an epoch it does not hold.
+_Context:_ the receiver cannot name members of an epoch it does not hold.
 Declining tells the requester to try another member; the root itself spreads by root notices.
 
 - **A (recommended):** keep the current text.
@@ -4406,13 +4384,13 @@ Declining tells the requester to try another member; the root itself spreads by 
 
 ### D.7 Constraints on a handover root (§4.7)
 
-*Settled:* a handover keeps the member list, except that the old owner may leave in it (§4.7).
+_Settled:_ a handover keeps the member list, except that the old owner may leave in it (§4.7).
 
-*Current text:* the new owner MUST differ from the parent's owner, and the members MUST be a subset
+_Current text:_ the new owner MUST differ from the parent's owner, and the members MUST be a subset
 of the parent's members.
 A root that breaks either rule is invalid.
 
-*Context:* it was decided that a handover root has one parent, may remove members and rename, and
+_Context:_ it was decided that a handover root has one parent, may remove members and rename, and
 may not add members.
 The two checks state this for the receiver.
 "New owner differs" keeps the two root types apart: a root that keeps the owner is a successor.
@@ -4420,14 +4398,14 @@ The two checks state this for the receiver.
 - **A (recommended):** keep the current text.
 - **B:** drop the "new owner differs" check.
 
-*Settled as well:* choice A, as coded: the new owner differs from the parent's owner, which keeps the
+_Settled as well:_ choice A, as coded: the new owner differs from the parent's owner, which keeps the
 two root types apart.
 
 ### D.8 An edit in an older epoch when no neighbor is eligible (§10.4)
 
-*Current text:* the edit goes to one random member of both epochs, plus the usual extra recipients.
+_Current text:_ the edit goes to one random member of both epochs, plus the usual extra recipients.
 
-*Context:* it was decided that such an edit goes to neighbors who are in the older epoch, or
+_Context:_ it was decided that such an edit goes to neighbors who are in the older epoch, or
 otherwise to another peer in both.
 How many "another peer" means was left open.
 
@@ -4436,10 +4414,10 @@ How many "another peer" means was left open.
 
 ### D.9 "Left" or "removed" in the view (§7.5)
 
-*Current text:* a member dropped by a root is shown as having left when the device holds that
+_Current text:_ a member dropped by a root is shown as having left when the device holds that
 member's signed leave for a parent epoch, and as removed otherwise.
 
-*Context:* a member who used the owner-only request is shown as removed, which is the intended
+_Context:_ a member who used the owner-only request is shown as removed, which is the intended
 cover.
 A device that never received the leave shows "removed" until it does.
 
@@ -4448,10 +4426,10 @@ A device that never received the leave shows "removed" until it does.
 
 ### D.10 One kick per parent epoch (§5.6)
 
-*Current text:* when a root has several parents, the owner creates one kick for each parent that
+_Current text:_ when a root has several parents, the owner creates one kick for each parent that
 lists the removed member.
 
-*Context:* a kick names one epoch, and a device ignores a kick that does not name its current
+_Context:_ a kick names one epoch, and a device ignores a kick that does not name its current
 epoch.
 After a fork, removed members may be on different branches, so each branch needs its own kick.
 
@@ -4460,16 +4438,16 @@ After a fork, removed members may be on different branches, so each branch needs
 
 ### D.11 Version numbers (§13.1, Appendix C)
 
-*Current text:* the wire version stays `1` and the protobuf package stays `gossip.groups.v1`.
+_Current text:_ the wire version stays `1` and the protobuf package stays `gossip.groups.v1`.
 
-*Context:* no earlier draft was released, so no device speaks an older version.
+_Context:_ no earlier draft was released, so no device speaks an older version.
 
 - **A (recommended):** keep the current text.
 - **B:** start at another number.
 
 ### D.12 Terms (§1)
 
-*Current text:* "epoch" is a fixed member list with its own `chat_id`; "group" is the logical chat
+_Current text:_ "epoch" is a fixed member list with its own `chat_id`; "group" is the logical chat
 made of linked epochs; in protocol rules "chat" means an epoch.
 
 - **A (recommended):** keep the current text.
@@ -4477,9 +4455,9 @@ made of linked epochs; in protocol rules "chat" means an epoch.
 
 ### D.13 Which epoch a signed leave names (§5.3)
 
-*Current text:* the leaver's current epoch, or the epoch of the invitation being declined.
+_Current text:_ the leaver's current epoch, or the epoch of the invitation being declined.
 
-*Context:* a leaver can only sign for an epoch whose root it holds.
+_Context:_ a leaver can only sign for an epoch whose root it holds.
 The liveness rule carries a leave for an older epoch forward to the current one.
 
 - **A (recommended):** keep the current text.
@@ -4490,7 +4468,7 @@ The liveness rule carries a leave for an older epoch forward to the current one.
 §16 still holds the text of the previous draft.
 The revised section is planned to state the following.
 
-*What is signed, and what it proves*
+_What is signed, and what it proves_
 
 1. **Root:** the owner provably created an epoch with that member list, name and parents.
    The owner has no deniability about owning the group.
@@ -4507,7 +4485,7 @@ The revised section is planned to state the following.
 7. **Signatures are ML-DSA-65 only,** with no second classical signature: no fallback inside
    version 1 if ML-DSA-65 is broken (§16.9, D.83).
 
-*What the owner and former owners can do*
+_What the owner and former owners can do_
 
 8. **The owner** can remove anyone, and with "Dissolve & Delete" can erase the history on every
    honest device.
@@ -4520,14 +4498,14 @@ The revised section is planned to state the following.
 12. **The owner dates its roots.**
     Receivers do not check the date; they bound only where its line is shown (§7.5).
 
-*What removal does and does not guarantee*
+_What removal does and does not guarantee_
 
 13. Removal takes effect device by device, as each one adopts the successor.
     A removed member keeps what they already had.
 14. Edits are not sent to removed members.
     Deletions are pushed to them on a best-effort basis.
 
-*What others can infer*
+_What others can infer_
 
 15. **Reply references:** the same value for every reference to one epoch, so repeated references
     can be linked.
@@ -4537,7 +4515,7 @@ The revised section is planned to state the following.
 17. **Key queries:** answers are checked against the GossipID, and a wrong answer is the most
     heavily penalised.
 
-*Connections*
+_Connections_
 
 21. **A chat the device is out of keeps no connection** (§5.12, D.86): kicked, left or
     superseded, whether the history is kept read-only or deleted, so that a member sharing nothing
@@ -4546,13 +4524,13 @@ The revised section is planned to state the following.
     waiting state keeps every connection until the kick or the end of the two weeks, when the
     device leaves quietly as "Ignore and Delete" does and its connections go.
 
-*What stays on a device*
+_What stays on a device_
 
 18. Closed-chat markers, the marker left by "Dissolve & Delete", the roots kept for up to two weeks
     while waiting for a kick or relaying a dissolve, kicks and signed leaves kept with their root,
     and the local name.
 
-*Known blind spots*
+_Known blind spots_
 
 19. The link for a re-added member fails when the owner does not hold that member's last epoch.
 20. "Dissolve & Delete" is best effort: offline peers, backups, unofficial clients and compromised
@@ -4563,12 +4541,12 @@ The revised section is planned to state the following.
 
 ### D.15 Canonical encoding of `UserPublicKeys` (§3, §4.3, §12.9)
 
-*Found during implementation.*
+_Found during implementation._
 
-*Current text:* the owner field of a root and a key answer are "`UserPublicKeys`, serialized with
+_Current text:_ the owner field of a root and a key answer are "`UserPublicKeys`, serialized with
 bincode", and are checked by deriving the GossipID.
 
-*Context:* the existing parser accepts extra bytes after a valid key bundle, and deriving the
+_Context:_ the existing parser accepts extra bytes after a valid key bundle, and deriving the
 GossipID serializes the parsed keys again.
 Bytes that are not the canonical encoding therefore pass the check, and the same owner keys could
 give several root IDs.
@@ -4578,37 +4556,37 @@ The code refuses any input that does not equal the re-serialized keys.
   encoding, and that a receiver MUST refuse bytes that differ from the re-serialized keys.
 - **B:** leave the text as it is and rely on the implementation.
 
-*Settled:* choice A, as coded; §4.3 states it. Why: otherwise the same keys with trailing bytes
+_Settled:_ choice A, as coded; §4.3 states it. Why: otherwise the same keys with trailing bytes
 give a second root for the same content.
 
 ### D.16 Nonzero GossipIDs in a member list (§4.1, §4.7)
 
-*Found during implementation.*
+_Found during implementation._
 
-*Current text:* §4.7 step 1 requires every GossipID of the member list to be nonzero; the table of
+_Current text:_ §4.7 step 1 requires every GossipID of the member list to be nonzero; the table of
 §4.1 does not mention it.
 
-*Context:* the two places should agree.
+_Context:_ the two places should agree.
 The code applies the rule of §4.7.
 
 - **A (recommended):** add "nonzero" to the `members` row of §4.1.
 - **B:** remove the requirement from §4.7.
 
-*Settled:* choice A, as coded; §4.1 states it: a member GossipID of all zeros is invalid.
+_Settled:_ choice A, as coded; §4.1 states it: a member GossipID of all zeros is invalid.
 
 ### D.17 Signed-object IDs do not include a version (§5.3, §5.6, §5.8, §13.1)
 
-*Settled:* choice A. §5.3, §5.6 and §5.8 say that the three IDs hash no version, inherit it
+_Settled:_ choice A. §5.3, §5.6 and §5.8 say that the three IDs hash no version, inherit it
 through the `chat_id`, and that a later version that changes the fields of a leave, kick or
 dissolve MUST use a new hash label for its ID. Why: the IDs stay as they are, and the rule alone
 keeps an old and a new form apart.
 
-*Found during implementation.*
+_Found during implementation._
 
-*Current text:* a leave, a kick and a dissolve message travel with a version prefix, but `leaveId`,
+_Current text:_ a leave, a kick and a dissolve message travel with a version prefix, but `leaveId`,
 `kickId` and `dissolveId` hash no version, while the root ID does.
 
-*Context:* nothing is wrong at version 1.
+_Context:_ nothing is wrong at version 1.
 If a later version gave one of these objects different fields, the old and the new form would share
 an ID.
 
@@ -4619,14 +4597,14 @@ an ID.
 
 ### D.18 Who signs the kick when a new owner resolves a fork (§5.6, §5.9)
 
-*Settled:* a kick is valid only when signed by the owner of the epoch it names (§5.6). The case below remains a known limit, stated in §5.6.
+_Settled:_ a kick is valid only when signed by the owner of the epoch it names (§5.6). The case below remains a known limit, stated in §5.6.
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* a kick is signed by the owner of the epoch it names (§5.6).
+_Current text:_ a kick is signed by the owner of the epoch it names (§5.6).
 After a handover from A to B, B may resolve a fork by taking A's branch as a parent (§5.9).
 
-*Context:* members of A's branch that B's root drops need kicks naming A's epoch, which by §5.6
+_Context:_ members of A's branch that B's root drops need kicks naming A's epoch, which by §5.6
 only A can sign.
 B cannot produce them, so those members are never told.
 The removed member is never shown the new root, but it may hold the handover root that made B the
@@ -4642,69 +4620,69 @@ owner.
 
 ### D.19 Presence of `last_modified_at` on a message that is not a deletion (§6.2, Appendix C)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* the field is `optional` in the schema, with a comment only for deletions.
+_Current text:_ the field is `optional` in the schema, with a comment only for deletions.
 The code refuses a non-deletion without it.
 
 - **A (recommended):** state in §6.2 that for every type except a deletion the field MUST be
   present; an event without it is malformed.
 - **B:** an absent field reads as 0, as for other scalar fields.
 
-*Settled:* choice A, as coded; §6.2 states it. Why: read as 0, the version would silently lose to
+_Settled:_ choice A, as coded; §6.2 states it. Why: read as 0, the version would silently lose to
 every other version.
 
 ### D.20 What a forward may carry (§6.2, §7.6)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* a forward holds "a permitted copied content value", without defining "permitted".
+_Current text:_ a forward holds "a permitted copied content value", without defining "permitted".
 The code refuses a forward whose inner type is a forward or a deletion, and a forwarded text that
 is not valid UTF-8.
 
 - **A (recommended):** state the code's rule in §7.6.
 - **B:** any inner type and any bytes are accepted.
 
-*Settled:* choice A, as coded; §7.6 states it: text or media only, a text valid UTF-8 within 16,384
+_Settled:_ choice A, as coded; §7.6 states it: text or media only, a text valid UTF-8 within 16,384
 bytes. Why: one single way to write each message.
 
 ### D.21 A `replyTo` list that is malformed (§7.6)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* a list has 1 to 32 targets and one with more than 32 is malformed; a receiver never
+_Current text:_ a list has 1 to 32 targets and one with more than 32 is malformed; a receiver never
 rejects a message because of its references.
 The text does not say what happens to the **message** when the list is empty, too long, has a
 target of the wrong length or does not decode.
 The code treats the whole event as malformed.
 
-*Context:* "never rejects because of its references" is about targets that cannot be resolved, not
+_Context:_ "never rejects because of its references" is about targets that cannot be resolved, not
 about a list that breaks the format.
 
 - **A (recommended):** the event is malformed, and §7.6 says so, including for an empty list.
 - **B:** the message is kept and the list is ignored.
 
-*Settled:* choice A, as coded; §7.6 states it. Why: one single way to write each message.
+_Settled:_ choice A, as coded; §7.6 states it. Why: one single way to write each message.
 
 ### D.22 The result hash projection (§6.2)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* `H("...result.1", fullMessage)`, where `fullMessage` is itself a list.
+_Current text:_ `H("...result.1", fullMessage)`, where `fullMessage` is itself a list.
 It can be read as a nested list `[domain, [chat_id, ...]]` or a flat one `[domain, chat_id, ...]`.
 The code uses the nested form, which is the literal reading.
 
 - **A (recommended):** state the nested form.
 - **B:** the flat form, which changes the hash.
 
-*Settled:* choice B, the user's choice: a pure convention. §6.2 states the list exactly, with a
+_Settled:_ choice B, the user's choice: a pure convention. §6.2 states the list exactly, with a
 worked example; the code and its vectors follow it.
 
 ### D.23 One invalid entry in a notice or a page (§13.5, §13.7)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text (before this was settled):* §13.7 said invalid entries are isolated, which is clear
+_Current text (before this was settled):_ §13.7 said invalid entries are isolated, which is clear
 for query entries only. The code skipped an entry with an ID of the wrong length and used the
 others.
 
@@ -4712,7 +4690,7 @@ others.
   malformed item.
 - **B:** the whole frame is refused.
 
-*Settled:* choice B for notices and pages (§13.5, §13.7, §12.1): nothing of the list is used, the
+_Settled:_ choice B for notices and pages (§13.5, §13.7, §12.1): nothing of the list is used, the
 sender is penalised once, a scan in progress ends as for an invalid page. Why: version-1 input that
 is not valid is rejected and counts against its sender; an honest device builds these lists from
 identifiers it already checked, so it never sends one and cannot be framed; a spoiled list gives a
@@ -4721,9 +4699,9 @@ gets `malformed`, the others their normal answers.
 
 ### D.24 A frame that holds two kinds (§13.1)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text (before this was settled):* "each frame holds exactly one kind".
+_Current text (before this was settled):_ "each frame holds exactly one kind".
 Protobuf lets an encoder write two cases of one `oneof`, and decoders keep the last.
 The code now refuses it at every level, as choice A says.
 
@@ -4731,15 +4709,15 @@ The code now refuses it at every level, as choice A says.
   for every `oneof` of the schema.
 - **B:** the last case wins, and §1 says so.
 
-*Settled:* choice A, as coded. Why: a stock protobuf decoder keeps the last case and another
+_Settled:_ choice A, as coded. Why: a stock protobuf decoder keeps the last case and another
 decoder may keep the first, so two implementations could read different messages from the same
 bytes.
 
 ### D.25 Arithmetic near the top of the integer range (§1, §7.2)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* §1 allows "checked or widened" arithmetic.
+_Current text:_ §1 allows "checked or widened" arithmetic.
 For `ts + MAX_SCHEDULE` the two give different outcomes at the top of the 64-bit range: malformed
 for good, or temporarily invalid.
 
@@ -4747,17 +4725,17 @@ for good, or temporarily invalid.
   everywhere.
 - **B:** leave the text as it is; the values concerned are not reachable in practice.
 
-*Settled:* choice A, as coded: time bounds use exact 128-bit arithmetic, so every device reaches the
+_Settled:_ choice A, as coded: time bounds use exact 128-bit arithmetic, so every device reaches the
 same outcome at the top of the range.
 
 ### D.26 Several scheduled deletions of one message (§7.4)
 
-*Found by simulation during implementation (code at commit `614a2345`, seed 7, 160 steps).*
+_Found by simulation during implementation (code at commit `614a2345`, seed 7, 160 steps)._
 
-*Current text:* "only the earliest pending deletion is kept; later scheduled deletions are pruned
+_Current text:_ "only the earliest pending deletion is kept; later scheduled deletions are pruned
 immediately".
 
-*Context:* the result depends on arrival order.
+_Context:_ the result depends on arrival order.
 A later scheduled deletion is pruned when it arrives while an earlier one is pending, but is kept
 as one more event carrying the tombstone when it arrives after the earlier one has applied.
 A duplicate arriving after the tombstone (§9.5) can also restore a pruned deletion on some devices
@@ -4774,15 +4752,15 @@ The cost is a few more events that hold no content.
 
 ### D.27 "Available child" or "accepted child" for tips and the cycle frontier (§6.1, §12.1)
 
-*Settled:* choice B; §6.1 and §12.1 now state it, with the example below as the reason.
+_Settled:_ choice B; §6.1 and §12.1 now state it, with the example below as the reason.
 
-*Found during implementation; the recommendation was changed after review.*
+_Found during implementation; the recommendation was changed after review._
 
-*Current text:* the cycle-frontier rule of §6.1 speaks of a component with "no available child"
+_Current text:_ the cycle-frontier rule of §6.1 speaks of a component with "no available child"
 outside it; the tip definition of §12.1 says "no known accepted event references it".
 The two differ once a child has been pruned.
 
-*Context:* with "accepted", a pruned child still hides its parent from the tips, and a pruned event
+_Context:_ with "accepted", a pruned child still hides its parent from the tips, and a pruned event
 answers "not available", so its parent links cannot be learned by anyone.
 Example with honest devices only: E1 creates message 1; X1 creates message 2 with parent E1; X2
 edits message 2 with parent X1, and every device prunes X1 as superseded.
@@ -4802,13 +4780,13 @@ name none at all, which shows as much.
 
 ### D.28 A local-only edit and a pending scheduled deletion (§9.3)
 
-*Found during implementation.*
+_Found during implementation._
 
-*Current text:* a local-only change "prunes every event of that message".
+_Current text:_ a local-only change "prunes every event of that message".
 Read literally, a local-only edit would also prune a real scheduled deletion that is still pending,
 which cancels that deletion on the device.
 
-*Context:* the code keeps pending scheduled deletions through a local-only edit, since they hold no
+_Context:_ the code keeps pending scheduled deletions through a local-only edit, since they hold no
 content, and prunes them only on a local-only deletion.
 
 - **A (recommended):** the code's rule.
@@ -4816,27 +4794,27 @@ content, and prunes them only on a local-only deletion.
 
 ### D.29 An edit dated later than now (§7.2, §7.3)
 
-*Found during implementation; the code follows the current text.*
+_Found during implementation; the code follows the current text._
 
-*Current text:* an edit sets `last_modified_at = max(now, previous + 1)`, and a version becomes
+_Current text:_ an edit sets `last_modified_at = max(now, previous + 1)`, and a version becomes
 active only when its date is reached.
 
-*Context:* after two edits in the same millisecond, or after the clock moved back, the new date is
+_Context:_ after two edits in the same millisecond, or after the clock moved back, the new date is
 later than `now`, so the user's own edit waits as a hidden future version until that date.
 If `previous + 1` is beyond `now + MAX_SCHEDULE`, the edit cannot be published at all.
-The *Why* note "an edit wins locally even across clock rollback" is therefore true only after a
+The _Why_ note "an edit wins locally even across clock rollback" is therefore true only after a
 wait.
 
-- **A (recommended):** keep the rule and correct the *Why* note; the device shows its own waiting
+- **A (recommended):** keep the rule and correct the _Why_ note; the device shows its own waiting
   edit as "pending" in the meantime.
 - **B:** a version created by the device itself is shown at once on that device, whatever its date.
 - **C:** another rule.
 
 ### D.30 Content stored twice in the logical records (§14.1)
 
-*Found during implementation.*
+_Found during implementation._
 
-*Current text:* "the stored fields of each available event are the only stored copy of that event's
+_Current text:_ "the stored fields of each available event are the only stored copy of that event's
 content", while the current object also holds the current result.
 
 - **A (recommended):** say that the current object **refers** to the event that carries the current
@@ -4845,11 +4823,11 @@ content", while the current object also holds the current result.
 
 ### D.31 The form in which a scheduled deletion is served (§7.4, §9.3)
 
-*Found during review of the implementation; it refines D.26.*
+_Found during review of the implementation; it refines D.26._
 
-*Current text:* a scheduled deletion is served with its date until it applies, then without it.
+_Current text:_ a scheduled deletion is served with its date until it applies, then without it.
 
-*Context:* under the first implementation the form depended on other deletions and on local state.
+_Context:_ under the first implementation the form depended on other deletions and on local state.
 After a local-only deletion, a scheduled deletion that arrived again was stored and served at once
 in its immediate form, so a device fetching it deleted the message up to two weeks early, against
 "MUST NOT absorb the message before its time".
@@ -4862,12 +4840,12 @@ in its immediate form, so a device fetching it deleted the message up to two wee
 
 ### D.32 Limits on pending versions, pending deletions and rejection markers (§8.2, §9.6, §17.4)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* §8.2 says the storage of pending events "is reserved at admission" and gives no
+_Current text:_ §8.2 says the storage of pending events "is reserved at admission" and gives no
 number; §9.6 expects capacity to force out temporary-rejection markers.
 
-*Context:* a member can park any number of scheduled versions or deletions for two weeks, and they
+_Context:_ a member can park any number of scheduled versions or deletions for two weeks, and they
 cannot be evicted.
 A limit applied at arrival makes honest devices differ when they reach it at different moments, so
 the rule must be one every device computes the same way.
@@ -4880,12 +4858,12 @@ the rule must be one every device computes the same way.
 
 ### D.33 A full event arriving under a pruned ID with other parents (§9.5)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* §9.5 compares only the payload; §7.1 says an ID "keeps its first valid
+_Current text:_ §9.5 compares only the payload; §7.1 says an ID "keeps its first valid
 interpretation entirely".
 
-*Context:* the first implementation restored such an event with its new parents while its tips
+_Context:_ the first implementation restored such an event with its new parents while its tips
 were still computed from the first parents.
 
 - **A (recommended):** the event is restored only when its parents equal the stored parent links;
@@ -4894,11 +4872,11 @@ were still computed from the first parents.
 
 ### D.34 A local-only edit dated in the future (§9.1, §7.5)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* a local-only edit may set any dates.
+_Current text:_ a local-only edit may set any dates.
 
-*Context:* with a `last_modified_at` in the future, the message disappears from the user's own view
+_Context:_ with a `last_modified_at` in the future, the message disappears from the user's own view
 until that date, and honest edits dated before it lose on this device.
 
 - **A (recommended):** a local-only edit MUST NOT set `last_modified_at` later than now.
@@ -4906,12 +4884,12 @@ until that date, and honest edits dated before it lose on this device.
 
 ### D.35 "Indistinguishable from ordinary retention pruning" (§9.3)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* a stub left by a local-only change "is indistinguishable from ordinary retention
+_Current text:_ a stub left by a local-only change "is indistinguishable from ordinary retention
 pruning".
 
-*Context:* retention cannot prune an event inside its two-week window, and eviction takes the
+_Context:_ retention cannot prune an event inside its two-week window, and eviction takes the
 oldest first.
 A recent stub beside older events still held, or a current result with no event carrying it, can
 be told apart by someone who inspects the device.
@@ -4923,7 +4901,7 @@ Peers can also see that a recent tip is missing from the device's next parent li
 
 ### D.36 Two limits inherent in the merge rules (§7.1, §7.4)
 
-*Found during review of the implementation; no change is proposed.*
+_Found during review of the implementation; no change is proposed._
 
 - A device whose clock runs fast normalises a scheduled deletion early and serves its immediate
   form, which deletes the message at once on devices that had not seen it.
@@ -4935,12 +4913,12 @@ Peers can also see that a recent tip is missing from the device's next parent li
 
 ### D.37 Page counts when an entry is skipped (§12.1, §13.5)
 
-*Found during implementation; it depends on D.23.*
+_Found during implementation; it depends on D.23._
 
-*Current text:* a page is final when `count` equals "the number of entries it carries", and the next
+_Current text:_ a page is final when `count` equals "the number of entries it carries", and the next
 offset follows the entries received.
 
-*Context:* if invalid entries are skipped (D.23), counting only the valid ones would make a final
+_Context:_ if invalid entries are skipped (D.23), counting only the valid ones would make a final
 page look unfinished and shift the next offset.
 An entry of an unknown kind is an unknown enum value, which §1 says refuses the whole frame, so
 only an ID of the wrong length is skipped.
@@ -4948,17 +4926,16 @@ only an ID of the wrong length is skipped.
 - **A (recommended):** "entries it carries" means entries as received, skipped ones included.
 - **B:** a page with any invalid entry is refused whole (D.23, choice B).
 
-*Settled:* choice B, with D.23: no entry is ever skipped, so the question no longer arises, and the
+_Settled:_ choice B, with D.23: no entry is ever skipped, so the question no longer arises, and the
 count of skipped entries is gone.
-
 
 ### D.38 A lane that is still scanning at its turn (§12.3)
 
-*Found by simulation of the implementation.*
+_Found by simulation of the implementation._
 
-*Current text:* the lanes start in turn, and a start "waits until it is eligible".
+_Current text:_ the lanes start in turn, and a start "waits until it is eligible".
 
-*Context:* a lane scanning a member that never answers stays pending through all its stages, about
+_Context:_ a lane scanning a member that never answers stays pending through all its stages, about
 two weeks.
 Read literally, the other lanes wait behind it, so one silent member stops periodic recovery for
 the whole group.
@@ -4970,11 +4947,11 @@ The code skips the turn.
 
 ### D.39 Resends after `expired` (§11.4)
 
-*Found by simulation of the implementation.*
+_Found by simulation of the implementation._
 
-*Current text:* the requester resends after an `expired` status, with no bound.
+_Current text:_ the requester resends after an `expired` status, with no bound.
 
-*Context:* a peer that always answers `expired` keeps the requester sending forever.
+_Context:_ a peer that always answers `expired` keeps the requester sending forever.
 A fixed small bound is wrong the other way: a member back from a long absence gets honest
 `expired` answers to queries that waited in its mailbox, and a bound of 2 left it unable to
 recover in the simulation.
@@ -4987,11 +4964,11 @@ recover in the simulation.
 
 ### D.40 Scan restarts (§12.2)
 
-*Found during implementation.*
+_Found during implementation._
 
-*Current text:* on `restart` the requester starts a fresh scan; nothing bounds how often.
+_Current text:_ on `restart` the requester starts a fresh scan; nothing bounds how often.
 
-*Context:* a peer answering `restart` to every page keeps the scan running forever.
+_Context:_ a peer answering `restart` to every page keeps the scan running forever.
 
 - **A (recommended):** at most 3 restarts of one scan with one peer since the last page that made
   progress; then the scan ends as failed.
@@ -5000,11 +4977,11 @@ recover in the simulation.
 
 ### D.41 The stub left when a retrieval task reaches its deadline (§11.6)
 
-*Found during implementation.*
+_Found during implementation._
 
-*Current text:* at the deadline the device "prunes the ID to a generic stub".
+_Current text:_ at the deadline the device "prunes the ID to a generic stub".
 
-*Context:* for an ID that was only announced and never held, a stored stub is one record per fake
+_Context:_ for an ID that was only announced and never held, a stored stub is one record per fake
 ID a hostile member announces.
 The deadline is computed from the ID, so the device needs no record to refuse it later.
 The code stores nothing.
@@ -5014,13 +4991,13 @@ The code stores nothing.
 
 ### D.42 A member that announces IDs it never supplies (§11.8, §17.4)
 
-*Found by simulation of the implementation. This is the largest open point of the retrieval
-design.*
+_Found by simulation of the implementation. This is the largest open point of the retrieval
+design._
 
-*Current text:* the score counts supplied items and penalties; a timeout is not a penalty.
+_Current text:_ the score counts supplied items and penalties; a timeout is not a penalty.
 Device-wide fairness is left to the implementation.
 
-*Context:* a member that announces fake IDs and stays silent pays nothing.
+_Context:_ a member that announces fake IDs and stays silent pays nothing.
 Each fake ID costs up to one lookup per other member, lives up to 14 days, fills responders'
 request budgets and the queue of 65,536 IDs, and in the simulation it delayed honest retrieval by
 days.
@@ -5046,26 +5023,26 @@ announced, and can lose standing with its peers; telling it apart would break de
 
 ### D.43 A device whose clock runs fast gets no answers (§11.3)
 
-*Found during implementation.*
+_Found during implementation._
 
-*Current text:* a receiver ignores a query whose `sent_at` is more than 5 minutes ahead of its
+_Current text:_ a receiver ignores a query whose `sent_at` is more than 5 minutes ahead of its
 clock.
 
-*Context:* such a device never recovers anything and cannot tell why.
+_Context:_ such a device never recovers anything and cannot tell why.
 
 - **A:** the receiver answers with a status (`expired`, or a new one) instead of staying silent,
   within the usual limits.
 - **B:** keep the silence.
 
-*Settled:* choice B; no new status. Why: the app can detect a wrong clock locally. This silence
+_Settled:_ choice B; no new status. Why: the app can detect a wrong clock locally. This silence
 protects no deniability, so a later release may still answer `expired` under §2.2. A "your clock is
 ahead" status could be abused to make a device doubt its own clock.
 
 ### D.44 One attempt at a time with long waits (§11.2, §11.4)
 
-*Found by simulation of the implementation; no change is made in the code.*
+_Found by simulation of the implementation; no change is made in the code._
 
-*Context:* a task asks one candidate at a time, and later stages wait up to 24 hours.
+_Context:_ a task asks one candidate at a time, and later stages wait up to 24 hours.
 One unresponsive candidate costs up to a day per stage, which is where the remaining convergence
 delays in the simulation come from.
 
@@ -5074,9 +5051,9 @@ delays in the simulation come from.
 
 ### D.45 "A conflicting immutable context is rejected" (§12.2)
 
-*Found during implementation.*
+_Found during implementation._
 
-*Context:* the key of a scan already holds everything the text calls its context, so the
+_Context:_ the key of a scan already holds everything the text calls its context, so the
 implementer found no case the sentence can apply to.
 
 - **A (recommended):** remove the sentence, or name the fields it means.
@@ -5084,8 +5061,8 @@ implementer found no case the sentence can apply to.
 
 ### D.46 Details the code had to choose (§10, §11, §13.9, §17.4)
 
-*Found during implementation. Each is a guess where the text gives no value; listed together so
-they can be confirmed or changed.*
+_Found during implementation. Each is a guess where the text gives no value; listed together so
+they can be confirmed or changed._
 
 - Score: `(supplied + 1) / (supplied + penalty + 2)`, both halved when their total passes 1,024.
   Penalty weights: wrong key answer 64, wrong root 16, malformed 4, "not available" after
@@ -5114,7 +5091,7 @@ they can be confirmed or changed.*
 
 ### D.47 Rules not implemented yet (§12.1, §17.4, D.8)
 
-*Recorded so they are not forgotten; no decision is needed unless one is dropped.*
+_Recorded so they are not forgotten; no decision is needed unless one is dropped._
 
 - §12.1: "run the scan with another peer" for scans outside the lanes.
 - §17.4: the traversal budget is applied to ancestor sampling only, not to the tip computation,
@@ -5128,7 +5105,7 @@ they can be confirmed or changed.*
 
 ### D.48 Small points from the merge fixes (§9.1, §14.2)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
 - D.34 is applied strictly: a local-only edit is also refused when the automatic date
   `previous + 1` would be later than now.
@@ -5139,12 +5116,12 @@ they can be confirmed or changed.*
 
 ### D.49 Does a resend restart the wait of its stage (§11.4, §12.3)
 
-*Found during review of the implementation; it caused a convergence failure in simulation.*
+_Found during review of the implementation; it caused a convergence failure in simulation._
 
-*Current text:* a resend after a reconnection or an `expired` status does "not change the stage, TTL
+_Current text:_ a resend after a reconnection or an `expired` status does "not change the stage, TTL
 progression or jitter". The local wait is not named.
 
-*Context:* the first implementation restarted the wait at each resend.
+_Context:_ the first implementation restarted the wait at each resend.
 A member that resets its session more often than the stage's TTL then holds a task or a scan
 forever, and one honest device never got an edit the others held.
 
@@ -5153,16 +5130,16 @@ forever, and one honest device never got an edit the others held.
 
 ### D.50 Largest event against the frame that carries it (§13.10)
 
-*Settled:* choice A. The length compared with 57,307 bytes is that of the event blob as received; a
+_Settled:_ choice A. The length compared with 57,307 bytes is that of the event blob as received; a
 copy over it is malformed and counts against its sender, and a proper copy of the same event from
 another peer is still accepted. The canonical length is never longer, so checking it too refuses
 nothing more (§13.10).
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* an event is admitted if it fits an empty container as an event frame.
+_Current text:_ an event is admitted if it fits an empty container as an event frame.
 
-*Context:* a lookup answer carries the event in a response frame, which adds `request_id` and
+_Context:_ a lookup answer carries the event in a response frame, which adds `request_id` and
 `idx`.
 An event of the largest admitted size cannot be served by lookup at all; the first implementation
 crashed on it.
@@ -5175,30 +5152,30 @@ The limit must be one every device computes the same way, since it decides valid
 
 ### D.51 A tips scan from a peer that is not a member (§12.1, §13.7)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* §12.1 answers "not available" for an anchor the device does not hold; §13.7 keeps
+_Current text:_ §12.1 answers "not available" for an anchor the device does not hold; §13.7 keeps
 silent toward a peer that is not a member of a held epoch.
 
-*Context:* together they tell any peer with a session whether the device holds a given epoch:
+_Context:_ together they tell any peer with a session whether the device holds a given epoch:
 "not available" means no, silence means yes.
 
 - **A (recommended):** a requester that is not a member of the held epoch gets the same answer as
   for an unheld anchor. The code does this.
 - **B:** silence in both cases (an honest member then cannot tell "not held" from a lost message).
 
-*Settled:* choice A, as coded. A device no longer active in the group answers a tips scan the same
+_Settled:_ choice A, as coded. A device no longer active in the group answers a tips scan the same
 way (D.74). Lookups tied to an epoch now follow the same idea (§13.7): "not available" in every
 case where the device cannot or may not serve, to a peer that shares an active chat with it.
 
 ### D.52 `busy` without a bound (§11.4, §13.4, §17.4)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* `busy` asks the requester to come back later; no bound, and the text does not say
+_Current text:_ `busy` asks the requester to come back later; no bound, and the text does not say
 whether it counts as an answer.
 
-*Context:* a member that answers `busy` to everything was asked 2,885 times in three simulated
+_Context:_ a member that answers `busy` to everything was asked 2,885 times in three simulated
 days, kept its standing, and as a neighbor stopped both neighbor lanes.
 
 - **A (recommended):** `busy` is not an answer for the score or for responsiveness; after 3 in a
@@ -5208,13 +5185,13 @@ days, kept its standing, and as a neighbor stopped both neighbor lanes.
 
 ### D.53 An announced ID dated far in the future (§11.6, §17.4)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* the lookup deadline of an ID is computed from its timestamp, with no upper bound on
+_Current text:_ the lookup deadline of an ID is computed from its timestamp, with no upper bound on
 that timestamp. A full queue "pauses paging"; nothing is said about IDs from notices and parent
 references.
 
-*Context:* 65,536 IDs dated ten years ahead never expire and fill the queue of missing IDs for
+_Context:_ 65,536 IDs dated ten years ahead never expire and fill the queue of missing IDs for
 good; later missing IDs of the group are then dropped.
 
 - **A (recommended):** a task ends at the earlier of the ID's deadline and its creation plus the
@@ -5224,12 +5201,12 @@ good; later missing IDs of the group are then dropped.
 
 ### D.54 Queued answers and version notices (§13.8, §17.4)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* one version notice per peer and version; over budget the answer is `busy`. Neither
+_Current text:_ one version notice per peer and version; over budget the answer is `busy`. Neither
 has a bound.
 
-*Context:* each over-budget query entry queued one stored `busy` answer, and each distinct version
+_Context:_ each over-budget query entry queued one stored `busy` answer, and each distinct version
 number one stored notice, without limit.
 
 - **A (recommended):** a cap on queued answers per peer, beyond which entries are dropped, and a
@@ -5239,9 +5216,9 @@ number one stored notice, without limit.
 
 ### D.55 What a notice reveals about processing (§11.7)
 
-*Found during review of the implementation; no change is made in the code.*
+_Found during review of the implementation; no change is made in the code._
 
-*Context:* a member can send a notice for an ID and learn, from whether a lookup comes back,
+_Context:_ a member can send a notice for an ID and learn, from whether a lookup comes back,
 whether the device has already processed that ID.
 This is known to members only and concerns held-or-seen, not content.
 
@@ -5250,9 +5227,9 @@ This is known to members only and concerns held-or-seen, not content.
 
 ### D.56 Neighbor capacity and ending a relation (§10.1)
 
-*Found during review of the implementation; no change is made in the code.*
+_Found during review of the implementation; no change is made in the code._
 
-*Context:* "capacity" is not defined; the code takes it equal to the target of 10.
+_Context:_ "capacity" is not defined; the code takes it equal to the target of 10.
 In a large group where everyone already has 10 neighbors, a newcomer is declined by all.
 There is no message to end a relation, so the sets become one-sided, and the use of suggestions is
 not specified (a declining member can steer the choice).
@@ -5263,9 +5240,9 @@ not specified (a declining member can steer the choice).
 
 ### D.57 Is a page entry an announcement (§11.8, §12.2)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Context:* "not available" after announcing is penalised, but §12.2 lets a frozen list keep IDs
+_Context:_ "not available" after announcing is penalised, but §12.2 lets a frozen list keep IDs
 pruned since it was frozen, so an honest responder can be penalised for its own page.
 
 - **A (recommended):** a page entry is not an announcement for the penalty. The code does this.
@@ -5273,9 +5250,9 @@ pruned since it was frozen, so an honest responder can be penalised for its own 
 
 ### D.58 Ancestors marked as seen by a relay (§10.3)
 
-*Raised during review; plausible, not shown by a test.*
+_Raised during review; plausible, not shown by a test._
 
-*Context:* when a peer delivers an event, its ancestors are marked as seen by that peer, though a
+_Context:_ when a peer delivers an event, its ancestors are marked as seen by that peer, though a
 relay may not hold those parents.
 
 - **A (recommended):** check with a test when several epochs are in place, then decide.
@@ -5283,14 +5260,14 @@ relay may not hold those parents.
 
 ### D.59 Hand over and leave in one root (§4.7 step 5, §5.9)
 
-*Settled:* choice A; the old owner may leave in its handover (§4.7, §5.7).
+_Settled:_ choice A; the old owner may leave in its handover (§4.7, §5.7).
 
-*Found during implementation of membership.*
+_Found during implementation of membership._
 
-*Current text:* a root is accepted when its deliverer is a member of it (§4.7 step 5). A handover
+_Current text:_ a root is accepted when its deliverer is a member of it (§4.7 step 5). A handover
 may drop the outgoing owner from the member list.
 
-*Context:* the outgoing owner is then not a member of the root it delivers, so every receiver
+_Context:_ the outgoing owner is then not a member of the root it delivers, so every receiver
 refused it.
 
 - **A (recommended):** a handover root is also accepted when delivered by the owner of its held
@@ -5303,9 +5280,9 @@ parent is looked up, not discarded (§4.7, §17.4).
 
 ### D.60 Is an accepted root announced (§4.6, §4.8)
 
-*Found during implementation of membership.*
+_Found during implementation of membership._
 
-*Current text:* §4.6 says an accepted root is announced by root notice; §4.8 says Accept "sends
+_Current text:_ §4.6 says an accepted root is announced by root notice; §4.8 says Accept "sends
 nothing" and the other members are not told.
 
 - **A (recommended):** only automatic adoptions are announced; accepting an invitation sends
@@ -5314,9 +5291,9 @@ nothing" and the other members are not told.
 
 ### D.61 A leave that names an earlier epoch (§5.6, D.2, D.13)
 
-*Found by simulation of the implementation.*
+_Found by simulation of the implementation._
 
-*Context:* a member that missed epochs signs its leave of an older one, and the owner applies it
+_Context:_ a member that missed epochs signs its leave of an older one, and the owner applies it
 with no kick.
 Nothing then names the epoch the member was removed from, so a device of that member restored from
 a backup is never told.
@@ -5328,16 +5305,16 @@ a backup is never told.
 
 ### D.62 A member removed while several epochs behind (§5.6)
 
-*Settled:* choice A. The same push serves a member that left and was added back, whose device is
+_Settled:_ choice A. The same push serves a member that left and was added back, whose device is
 restored from a backup made before it left: it is sent its kept leave, and, when a member is about
 to tell it of the root that adds it back by a root notice, the leave first and then that root, both
 in full (§5.3 "Keeping"). Why: given the root first, the restored device would take it as its next
 epoch, silently, as if it had never left; with its leave first it shows the group as left and gets
 the root as an invitation to accept again.
 
-*Found by simulation of the implementation.*
+_Found by simulation of the implementation._
 
-*Context:* the member is still at an old epoch that no record names, and it cannot verify a kick
+_Context:_ the member is still at an old epoch that no record names, and it cannot verify a kick
 that names a root it does not hold.
 The same holds for a device restored to before its own leave.
 
@@ -5349,11 +5326,11 @@ The same holds for a device restored to before its own leave.
 
 ### D.63 The former owner's branch after a handover (§5.9, §4.9)
 
-*Found by simulation of the implementation.*
+_Found by simulation of the implementation._
 
-*Current text:* the new owner "may resolve" the former owner's branch.
+_Current text:_ the new owner "may resolve" the former owner's branch.
 
-*Context:* if it never does, members that are only on that branch are left behind without notice.
+_Context:_ if it never does, members that are only on that branch are left behind without notice.
 
 - **A (recommended):** it is a fork under §4.9: the new owner is prompted and sends nothing in the
   group until it is resolved. The code does this.
@@ -5361,24 +5338,24 @@ The same holds for a device restored to before its own leave.
 
 ### D.64 A root entry in tip lists (§12.1)
 
-*Found during implementation of membership.*
+_Found during implementation of membership._
 
-*Context:* a member that missed a root and its notices cannot learn it while the new epoch has no
+_Context:_ a member that missed a root and its notices cannot learn it while the new epoch has no
 events, because a tip list of the older epoch names none.
 
 - **A (recommended):** a tip list carries a root entry for the responder's current epoch when the
   requester is a member of that epoch and it is not the anchor. The code does this.
 - **B:** rely on root notices and shared-chats scans.
 
-*Settled:* choice A, as coded.
+_Settled:_ choice A, as coded.
 
 ### D.65 A kick or dissolve held before its epoch is current (§5.4, §5.8)
 
-*Found during implementation of membership.*
+_Found during implementation of membership._
 
-*Current text:* "a kick naming another epoch is ignored".
+_Current text:_ "a kick naming another epoch is ignored".
 
-*Context:* a device that receives the kick before it adopts the epoch would ignore it for ever.
+_Context:_ a device that receives the kick before it adopts the epoch would ignore it for ever.
 
 - **A (recommended):** it is kept with its root and applied when that epoch becomes current. The
   code does this.
@@ -5386,7 +5363,7 @@ events, because a tip list of the older epoch names none.
 
 ### D.66 Joining conversations (§5.10)
 
-*Found by simulation of the implementation; the text is silent.*
+_Found by simulation of the implementation; the text is silent._
 
 - Every invitation that is an ancestor of an accepted root is joined to it, even when its parent's
   group is read-only.
@@ -5400,11 +5377,11 @@ events, because a tip list of the older epoch names none.
 
 ### D.67 Kick signer after a handover: gap in choice A (D.18)
 
-*Settled with D.18:* see §5.6.
+_Settled with D.18:_ see §5.6.
 
-*Found during implementation; it adds to D.18.*
+_Found during implementation; it adds to D.18._
 
-*Context:* the code follows D.18 choice A: a kick naming epoch E is valid when signed by E's owner
+_Context:_ the code follows D.18 choice A: a kick naming epoch E is valid when signed by E's owner
 or by an identity that a held handover passes ownership to, from E or an ancestor of E.
 A removed member that does not hold the handover root, and is not listed in it, can never fetch
 it, since a chat lookup answers members only. It is then never told of its removal.
@@ -5420,7 +5397,7 @@ not counted against the member that relayed it.
 
 ### D.68 Details the membership code had to choose (§4.8, §5.5, §12)
 
-*Found during implementation. Listed together so they can be confirmed or changed.*
+_Found during implementation. Listed together so they can be confirmed or changed._
 
 - Root fetches: "4 in progress per peer" is approximated by at most 260 root tasks per peer (4 plus
   the waiting list of 256); beyond that a shared-chats scan of that peer starts.
@@ -5430,7 +5407,7 @@ not counted against the member that relayed it.
 - A leave that is no longer live is served only to its leaver and to removal lookups; a
   signed-object lookup for it gets "not available".
 - "Ask to be kicked" on an invitation installs that root as a group in the waiting state.
-- *Settled, not active in the first release:* the requester side of a chat lookup by reference is
+- _Settled, not active in the first release:_ the requester side of a chat lookup by reference is
   built as §7.6 states: on receipt of a reply only, three peers per round at most, once a week,
   four rounds at most, never for an epoch the device can place (installed, an invitation not
   answered yet, or closed). Version-1 devices answer the lookup; the first release does not send
@@ -5445,14 +5422,14 @@ not counted against the member that relayed it.
 
 ### D.69 A handover gives authority over which parents (§4.7)
 
-*Settled:* choice A.
+_Settled:_ choice A.
 
-*Found during review of the implementation. A security defect of the text.*
+_Found during review of the implementation. A security defect of the text._
 
-*Current text:* a root is continuous when its signer owns each parent or is the new owner after "a
+_Current text:_ a root is continuous when its signer owns each parent or is the new owner after "a
 previous owner in the root's line". Nothing ties that previous owner to the same group.
 
-*Context:* A owns two groups G1 and G2 with the same members and hands G1 to B.
+_Context:_ A owns two groups G1 and G2 with the same members and hands G1 to B.
 B can then sign a root naming the current epochs of both; every device adopted it without a
 prompt, G2 passed under B, and B could dissolve it with deletion.
 
@@ -5465,12 +5442,12 @@ prompt, G2 passed under B, and B could dissolve it with deletion.
 
 ### D.70 Adding back a member that closed the group (§4.8 case 3, §5.2, §5.10)
 
-*Found during review of the implementation. The text contradicts itself.*
+_Found during review of the implementation. The text contradicts itself._
 
-*Current text:* a re-add root names the member's last epoch as an extra parent (§5.10). A root
+_Current text:_ a re-add root names the member's last epoch as an extra parent (§5.10). A root
 with a closed parent is rejected silently (§4.8 case 3).
 
-*Context:* the extra parent is exactly the epoch the member closed, so after "Ignore and Delete"
+_Context:_ the extra parent is exactly the epoch the member closed, so after "Ignore and Delete"
 or deleting a kicked archive, the member can never be invited again and sees nothing.
 
 - **A (recommended):** the silent rejection applies only when every parent is closed; a root with
@@ -5480,11 +5457,11 @@ or deleting a kicked archive, the member can never be invited again and sees not
 
 ### D.71 An old leave made live again by a re-add (§5.3 "Replay", §5.10)
 
-*Settled:* choice A; §5.3 now states it.
+_Settled:_ choice A; §5.3 now states it.
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Context:* the extra parent links the epoch the member left to the new one, and the member is in
+_Context:_ the extra parent links the epoch the member left to the new one, and the member is in
 both, so its old signed leave is live again: the owner's device removed it again by itself.
 
 - **A (recommended):** a leave is not live for a root that re-adds its leaver (a root with a parent
@@ -5494,15 +5471,15 @@ both, so its old signed leave is live again: the owner's device removed it again
 
 ### D.72 A former owner's roots after a handover (§5.9, §4.6 step 4, D.63)
 
-*Settled:* choice A. Which end is current is also settled as written in §4.9 and §5.9: among one
+_Settled:_ choice A. Which end is current is also settled as written in §4.9 and §5.9: among one
 owner's ends the greatest `(created_at, chat_id)`; a handover deposes the former owner whatever the
 dates; of two handovers from one owner each device follows the one it received first. A rule that
 made the lowest new owner's GossipID win was considered and rejected: it would let a former owner
 move the group to another member long after the handover.
 
-*Found during review of the implementation; it corrects D.63.*
+_Found during review of the implementation; it corrects D.63._
 
-*Context:* with D.63 choice A, a former owner signs a new successor of an epoch it used to own
+_Context:_ with D.63 choice A, a former owner signs a new successor of an epoch it used to own
 whenever it wants, and the new owner is blocked each time until it resolves.
 With `created_at = u64::MAX` on that root, the new owner's next date `L + 1` overflowed and the
 group was frozen for good.
@@ -5517,11 +5494,11 @@ owner chooses.
 
 ### D.73 A root notice from a peer that shares nothing (§4.6, §13.7, §12.7)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* a root notice for an unknown ID starts a chat lookup toward its sender.
+_Current text:_ a root notice for an unknown ID starts a chat lookup toward its sender.
 
-*Context:* any peer with a session that learnt a chat ID can test whether a contact holds or
+_Context:_ any peer with a session that learnt a chat ID can test whether a contact holds or
 closed that epoch: silence means yes, a lookup means no.
 
 - **A (recommended):** a root notice is acted on only when its sender shares an active accepted
@@ -5530,7 +5507,7 @@ closed that epoch: silence means yes, a lookup means no.
 
 ### D.74 Removal records and removed peers (§10.4, §12.8, §5.6, §4.11)
 
-*Settled, for inactive devices and removed peers:*
+_Settled, for inactive devices and removed peers:_
 
 - A device that holds an epoch but is no longer active in its group (kicked, left, waiting,
   dissolved) answers a member exactly as a device that does not hold the epoch would, query by
@@ -5557,7 +5534,7 @@ closed that epoch: silence means yes, a lookup means no.
   only its message events are dropped (§10.4). Why: a signed object proves itself whoever carries
   it; refusing it would lose a membership fact when that peer is the only one online that holds it.
 
-*Settled, for a dissolved group:* in both forms, while it keeps them, a device serves the named
+_Settled, for a dissolved group:_ in both forms, while it keeps them, a device serves the named
 root and the dissolve message to a member of that root, whether or not they share another chat,
 and answers a member's tips scan with a page that lists only the dissolve message and the root of
 its current epoch, never a message event (§5.8, §12.1). "Dissolve & Delete" keeps them two weeks
@@ -5566,7 +5543,7 @@ owner's. Why: it is how a device that missed the dissolve learns it ("not availa
 simulated devices never applying it), it matches what a dissolved group already serves, and no
 event ID is given, so nothing of the messages is revealed and nothing is asked for in vain.
 
-*Settled, for the shared-chats scan:* the scan lists, for a chat the asker is no longer in, the
+_Settled, for the shared-chats scan:_ the scan lists, for a chat the asker is no longer in, the
 last epoch in which the asker is listed, whether it was removed from it or left it. A lookup of
 that root by that asker is answered, since it was a member of that epoch, and the kick or the kept
 leave naming that epoch is sent with it. Nothing about any later epoch is given. A device that
@@ -5574,13 +5551,13 @@ holds nothing of the chat installs it read-only, as "you were removed" or "you l
 answers `restart` when a chat it listed stops being listable before all pages are sent, so that a
 device never names a chat its user has since left or deleted.
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Current text:* §12.8 answers "a member of the named epoch"; §10.4 answers a removed peer "not
+_Current text:_ §12.8 answers "a member of the named epoch"; §10.4 answers a removed peer "not
 available" except for its own removal. §5.4 does not say what a waiting device answers, and §4.11
 does not say whether waiting, kicked or dissolved epochs are listed in shared-chats scans.
 
-*Context:* a removed member could fetch the kicks and leaves of the other removed members, and a
+_Context:_ a removed member could fetch the kicks and leaves of the other removed members, and a
 kicked device kept serving its root and listing its epochs.
 
 - **A (recommended):** a removed peer gets only its own kick or leave; a device that is kicked,
@@ -5592,12 +5569,12 @@ kicked device kept serving its root and listing its epochs.
 
 ### D.75 Limits on invitations and parent lookups (§4.8, §11.8, §17.4)
 
-*Settled:* choice A; the limits stay provisional numbers of local policy. The probe it leaves open is
+_Settled:_ choice A; the limits stay provisional numbers of local policy. The probe it leaves open is
 stated in §16.7 with the fixes a later version could adopt.
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Context:* nothing bounds pending invitations, the depth of a parent chain, or roots held before
+_Context:_ nothing bounds pending invitations, the depth of a parent chain, or roots held before
 their parent is known. A stranger sent 40 self-signed roots and created 41 epoch records and 1,281
 lookups; a chain of 60 roots received newest first crashed the first implementation.
 Members are also queried before the user answers the prompt, which weakens "Ignore and Delete
@@ -5614,9 +5591,9 @@ Members are also queried before the user answers the prompt, which weakens "Igno
 
 ### D.76 Dissolve with deletion: what is kept and erased (§5.8)
 
-*Found during review of the implementation.*
+_Found during review of the implementation._
 
-*Context:* the text does not say whether older roots are kept two weeks with the named one, nor
+_Context:_ the text does not say whether older roots are kept two weeks with the named one, nor
 what happens to side branches; it says side branches are not erased.
 
 - **A (recommended):** only the named root is kept, and served, for two weeks; side branches are
@@ -5632,7 +5609,7 @@ what happens to side branches; it says side branches are not erased.
 
 ### D.77 Points raised by the review with no change in the code
 
-*Recorded for the security section and for D.14.*
+_Recorded for the security section and for D.14._
 
 - A link made by hand between two groups is visible to a peer that scans both (§5.10 against
   §12.1).
@@ -5650,8 +5627,8 @@ what happens to side branches; it says side branches are not erased.
 
 ### D.78 Carrying group traffic in the app (§13, §15.2, §14.2)
 
-*Found while binding the engine into the app. These are decisions about the app, listed here so
-they are settled with the rest.*
+_Found while binding the engine into the app. These are decisions about the app, listed here so
+they are settled with the rest._
 
 - **Carrier. Settled:** group traffic has its own session message type; a keep-alive carries
   nothing (§2.1, §13.1). The first implementation placed it in a keep-alive so that older clients
@@ -5679,7 +5656,7 @@ they are settled with the rest.*
 
 ### D.79 Points from the last membership fixes (§5.3, §10.4, §11.7, §12.3)
 
-*Found by simulation of the implementation.*
+_Found by simulation of the implementation._
 
 - A leave sent back to its leaver is preceded by the root of the epoch it names; a device restored
   from a backup could not verify it otherwise.
@@ -5698,7 +5675,7 @@ they are settled with the rest.*
   known limits.
 - **B:** for the fourth, let a member added back fetch again what it dropped.
 
-*Settled:* choice A. For the third point, an archive gives a removed peer its own kick or leave to a
+_Settled:_ choice A. For the third point, an archive gives a removed peer its own kick or leave to a
 removal lookup too, as to a signed-object lookup (§12.8): the same record gets the same answer
 whichever way it is asked, and nothing else would ever end that peer's membership of the epoch it
 was removed from. A member added back fetches the history of the earlier epochs that list it
@@ -5708,8 +5685,8 @@ and dropped while removed is not fetched again.
 
 ### D.80 Points from the first runs of the app (§14.2, §4.8, §5.10, §7.5)
 
-*Found by running the app on a PWA and an Android emulator, and by the simulation check added
-afterwards.*
+_Found by running the app on a PWA and an Android emulator, and by the simulation check added
+afterwards._
 
 - **Closed markers.** §14.2 keeps a marker "for each of its ends". A member that left and was added
   back was then offered the group's first epoch again as a fresh invitation: its scan listed that
@@ -5737,7 +5714,7 @@ afterwards.*
 
 ### D.81 Direct chats: details chosen while writing §5.12
 
-*§2.1 and §5.12 are settled. These details were chosen to complete them and are not confirmed.*
+_§2.1 and §5.12 are settled. These details were chosen to complete them and are not confirmed._
 
 - A message of the earlier one-to-one format received from an unsupported client is ignored.
 - A link made by a migration is local, like the manual links of §5.10: each device links to its
@@ -5748,7 +5725,7 @@ afterwards.*
 
 ### D.82 Points from applying the size limits (§13.10, §17.4)
 
-*Found while applying the limits of §13.10.*
+_Found while applying the limits of §13.10._
 
 - A forwarded text counts as text and has the same 16,384-byte limit. Media and reaction bodies
   are bounded by the container only.
@@ -5761,7 +5738,7 @@ afterwards.*
 
 ### D.83 Additions to the wire format, refused (§2.2, §4.7, §10.1, §11.3, §11.7, §12.1, §13.1, §13.4)
 
-*Settled:* none of them is added. The format of version 1 stays fully closed (§2.2, §13.8).
+_Settled:_ none of them is added. The format of version 1 stays fully closed (§2.2, §13.8).
 
 - **An ignorable hints field in the container**, which a device could fill with advice for its
   peers and a receiver could skip. Why not: the container is closed, so an unknown field is
@@ -5789,31 +5766,31 @@ afterwards.*
 
 ### D.84 The message timer and the settings map: points to confirm (§4.1, §6.2, §7.6, §7.7)
 
-*Found while implementing the two root fields.*
+_Found while implementing the two root fields._
 
 - **No rule between a root and its parents.** A receiver checks nothing between a root's timer
   or settings and those of its parents (§4.1). Chosen because a member that lacks the parents
   could not check it.
 - **A resolution root copies from the current epoch.** When competing ends carry different
   timers or settings, the owner's resolution root copies those of its current epoch (§4.9).
-- **Reactions and the timer.** *Settled, choice B, in this form:* a reaction is erased, record
+- **Reactions and the timer.** _Settled, choice B, in this form:_ a reaction is erased, record
   included, when the timer erases its target or at its own moment, whichever comes first (§7.7).
   The state that is not the absorbing tombstone is no state at all: the record goes, and a copy
   offered after the reaction's own moment is refused by its dates. Why: a kept reaction says who
   reacted to what with which emoji, and its identity can be checked by anyone who guesses them.
-- **A key given twice.** *Settled, choice B:* a key given twice makes a message malformed, as it
+- **A key given twice.** _Settled, choice B:_ a key given twice makes a message malformed, as it
   makes a root malformed in the settings map (§4.1, §6.2). Why: one single way to write each
   message, so that every implementation reads the same content from the same bytes.
 
 ### D.85 What the message timer erases (§7.7, §14.1, §11.7)
 
-*Found while making the timer leave nothing.*
+_Found while making the timer leave nothing._
 
-*Earlier text:* at the moment the device deleted the message as a local-only deletion, and kept,
+_Earlier text:_ at the moment the device deleted the message as a local-only deletion, and kept,
 until the group was closed, the tombstone, a stub of every event of the message, their parent
 links and pending scheduled deletions.
 
-*Settled:* the message is erased with every record of it (§7.7). The points that had to be
+_Settled:_ the message is erased with every record of it (§7.7). The points that had to be
 decided:
 
 - **Erase at the moment, or keep a stub while a child still held names it.** Erase at the moment.
@@ -5827,7 +5804,7 @@ decided:
   rounded up (§7.7, §14.1; this replaces "a tombstone, as without a timer"). Refusing a deletion
   by its dates was considered and not done: a deletion does not carry its target's creation date,
   so any such rule could keep a deleted scheduled message alive.
-- **A message deleted by hand or by a deletion event before its moment.** *Revised:* erased with
+- **A message deleted by hand or by a deletion event before its moment.** _Revised:_ erased with
   its tombstone at its moment rounded up to a step of the timer (§7.7), so that deleting by hand
   leaves no more trace than letting the timer run. The earlier text kept it as without a timer.
 - **The storage contract.** A change set now deletes rows, parent edges and objects, besides
@@ -5842,13 +5819,13 @@ decided:
 
 ### D.86 Which chats keep the device's connections (§5.12, §5.4, §10.4)
 
-*Found by review: a member that shares only one chat with a device saw the device's keep-alives
-continue when the device, kicked, kept the history read-only, and stop when it deleted the chat.*
+_Found by review: a member that shares only one chat with a device saw the device's keep-alives
+continue when the device, kicked, kept the history read-only, and stop when it deleted the chat._
 
-*Earlier text:* an automatic connection was revoked once no epoch the device still held listed
+_Earlier text:_ an automatic connection was revoked once no epoch the device still held listed
 the peer, read-only groups included.
 
-*Settled:* once a device is out of a chat (kicked, or its own leave sent) or the chat is
+_Settled:_ once a device is out of a chat (kicked, or its own leave sent) or the chat is
 superseded, that chat no longer keeps the device's automatic connections, whether the user keeps
 the history read-only or deletes the chat. The table of §5.12 gives every state. The points that
 had to be decided:
@@ -5869,7 +5846,7 @@ had to be decided:
   chat.
 - **A member added back** receives the new root from the owner, accepts it, and then opens its
   connections to the members again as co-members of an accepted group; each member takes the new
-  session as that of a member announcing itself anew. *Known limit:* the root reaches it only over a
+  session as that of a member announcing itself anew. _Known limit:_ the root reaches it only over a
   session it still holds with the owner, such as an accepted contact's. An owner it shared nothing
   else with was dropped with the chat, and the owner, which still holds its own side, is not told:
   the member then learns of the re-add only once a session with the owner is renewed, as a device
