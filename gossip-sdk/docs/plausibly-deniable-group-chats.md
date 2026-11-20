@@ -2355,6 +2355,23 @@ kick, dissolved) answers a member exactly as a device that does not hold the epo
 query: "not available" to an event, sync-object, signed-object, removal or key lookup from a peer
 that shares an active chat with it, silence to any other peer (§13.7), and "not available" to a
 tips scan (§12.1). It sends a removed peer nothing either (§5.6).
+It also starts nothing for that epoch: no event, sync-object, signed-object, removal, key or parent
+lookup, whatever a member announces in a notice or a page, and the lookups it had in progress stop
+sending when the group goes inactive. They are kept, and go on if the group becomes active again
+(the device is added back and accepts); so does a lookup it needs meanwhile for an event it still
+accepts, such as the missing parent of a deletion pushed to it, which asks no one until then. A sync-object lookup the user asks for there ends at once,
+not found.
+*Why kept:* a member added back, or a device restored from a backup, would otherwise lose the IDs it
+learnt before, which a scan does not always bring back (an older event reached only through a
+version since pruned); in the membership simulation, dropping them left a restored member added
+back without part of an older epoch's messages in 23 of 300 runs. Kept, they cost no traffic while the group is
+inactive.
+A kick or a leave of that epoch pushed to it is kept, but announced to no one.
+What such a device still needs reaches it pushed in full: its own kick or leave (§5.6), deletion
+events (above), a dissolve message (§5.8) and the roots that concern it.
+*Why:* a lookup or a notice tells the peer that gets it that the device still holds the epoch,
+while a device that deleted the chat or never held it sends nothing. A root notice naming the epoch
+was already ignored, as by a device that holds or closed it (§16.7).
 The exceptions: a dissolved group still serves its roots and its dissolve message, and answers a
 member's tips scan with a page of these two entries only (§5.8); an archive ("Dissolve & Keep
 archived") gives a removed peer its own kick or leave (§12.8).
@@ -5096,7 +5113,10 @@ closed that epoch: silence means yes, a lookup means no.
 - A device that holds an epoch but is no longer active in its group (kicked, left, waiting,
   dissolved) answers a member exactly as a device that does not hold the epoch would, query by
   query: "not available" to a lookup from a peer that shares an active chat with it, silence to
-  any other (§13.7), "not available" to a tips scan; it sends a removed peer nothing.
+  any other (§13.7), "not available" to a tips scan; it sends a removed peer nothing. It starts
+  no lookup for that epoch, whatever a member announces, sends nothing for the ones in progress
+  while the group is inactive (they go on if it becomes active again), and announces no kick or
+  leave of that epoch pushed to it; what it needs is pushed to it in full (§10.4). Why: a lookup or a notice would tell its recipient that it kept the epoch.
   Why: a member must not be able to tell "kept the history" from "deleted the chat"; nobody waits
   on silence, and the same answer in every case keeps the two apart for no one. (This replaced
   silence to lookups, which cost each asker one timeout per inactive device; a simulated device

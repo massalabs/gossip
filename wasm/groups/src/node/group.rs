@@ -881,6 +881,7 @@ impl Node {
             {
                 self.group_rec_mut(group).status = GroupStatus::Active;
                 self.rebuild_epochs();
+                self.resume_lookups(group);
             }
             _ => {}
         }

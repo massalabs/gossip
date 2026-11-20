@@ -321,7 +321,9 @@ impl Node {
                     return Ok(());
                 }
                 self.changed(group, ChangeKind::Membership, cx.now);
-                if self.leave_live_anywhere(&chat, &leaver) {
+                // A device no longer active in the group keeps the leave and announces it to
+                // no one, as a device that does not hold the epoch (see `retrieves`).
+                if self.serves(&chat) && self.leave_live_anywhere(&chat, &leaver) {
                     let pool = self.object_pool(&chat, None);
                     self.relay_object(cx, chat, obj.item(), pool);
                     self.collect_live_leaves(cx, group);
@@ -348,12 +350,14 @@ impl Node {
                     }
                     return Ok(());
                 }
-                // Relayed to members of the current epoch who were in the named one.
+                // Relayed to members of the current epoch who were in the named one; by a device
+                // no longer active in the group, to no one (see `retrieves`).
                 let pool: Vec<GossipId> = self
                     .object_pool(&chat, None)
                     .into_iter()
                     .filter(|m| {
                         *m != removed
+                            && self.serves(&chat)
                             && current
                                 .and_then(|c| self.t.epochs.get(&c))
                                 .is_some_and(|r| r.root.is_member(m))
@@ -408,7 +412,8 @@ impl Node {
         self.changed(group, ChangeKind::ReadOnly, cx.now);
     }
 
-    /// Stops the neighbors, lanes and scans of a group.
+    /// Stops the neighbors, lanes and scans of a group: it went inactive, or is closed. Its
+    /// lookups send nothing more while it is inactive (see `retrieves`).
     pub(crate) fn stop_sync(&mut self, group: ChatId) {
         self.t.groups.remove(&group);
         let scans: Vec<_> = self
@@ -942,7 +947,9 @@ impl Node {
         let Some(key) = item_key(chat, item) else {
             return;
         };
-        if !self.installed(&chat) || self.t.signed.contains(&key) {
+        // Only in a group where this device is active: an inactive device fetches nothing, as a
+        // device that does not hold the epoch (see `retrieves`); what it needs is pushed.
+        if !self.serves(&chat) || self.t.signed.contains(&key) {
             return;
         }
         let Some(root) = self.held_root(&chat).cloned() else {
@@ -964,11 +971,6 @@ impl Node {
             if !self.leave_live_anywhere(&chat, &m) && m != self.me {
                 return;
             }
-        }
-        if matches!(self.group_status(&chat), GroupStatus::Waiting { .. })
-            && matches!(item, EntryItem::Leave(_))
-        {
-            return;
         }
         self.trigger(
             cx,
