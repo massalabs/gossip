@@ -108,6 +108,9 @@ pub enum Outcome {
     Restored,
     /// The ID was processed and pruned and stays so (§9.5).
     KeptPruned,
+    /// A message whose moment, its creation date plus the message timer of the epoch, has
+    /// passed (§7.7): dropped, and nothing about it was stored or changed.
+    Expired,
     /// Accepted under a new ID and merged.
     Accepted(Merge),
 }

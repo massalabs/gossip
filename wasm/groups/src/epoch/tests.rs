@@ -1544,3 +1544,224 @@ fn a_reaction_outranks_another_type_under_its_id() {
     assert_eq!(g.recv(&back, T0 + 10), Outcome::Accepted(Merge::Lost));
     assert!(g.obj(9).is_deleted());
 }
+
+// ── The message timer (§7.7) ─────────────────────────────────────────────────
+
+const HOUR: u64 = 60 * MIN;
+
+impl Fixture {
+    /// As [`Fixture::new`], with the message timer `timer` in the root.
+    pub(crate) fn with_timer(timer: u64) -> Self {
+        let mut f = Self::new();
+        let mut p = crate::root::tests::params(&f.alice, &[&f.alice, &f.bob], 0x10);
+        p.message_timer = timer;
+        f.root = Root::create_successor(
+            p,
+            &[ChatId::from_bytes([0xd0; 32])],
+            &f.alice.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+        .unwrap();
+        f
+    }
+
+    fn visible(&self, now: u64) -> Vec<SyncObjId> {
+        crate::display::view(&self.store, &[self.root.chat_id()], now)
+            .unwrap()
+            .iter()
+            .map(crate::display::VisibleMessage::sync_obj_id)
+            .collect()
+    }
+}
+
+/// §7.7: a message is deleted on the device at its creation date plus the timer of its
+/// epoch, as a local-only deletion (§9.2, §9.3): the tombstone, every event pruned, nothing
+/// to serve and no tip; the device wakes up for it.
+#[test]
+fn a_message_is_deleted_at_its_creation_date_plus_the_timer() {
+    let mut f = Fixture::with_timer(HOUR);
+    let e = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "hi"));
+    assert_eq!(f.recv(&e, T0 + 1), Outcome::Accepted(Merge::Won));
+    assert_eq!(
+        f.epoch().next_wakeup(&f.store, T0 + 1).unwrap(),
+        Some(T0 + HOUR)
+    );
+    f.tick(T0 + HOUR - 1);
+    assert_eq!(f.current_text(1).as_deref(), Some("hi"));
+    assert_eq!(f.visible(T0 + HOUR - 1), vec![sid(1)]);
+    // The view hides it at its moment, before the tick runs.
+    assert!(f.visible(T0 + HOUR).is_empty());
+    let root = f.root.clone();
+    let pruned = ep(&root).tick(&mut f.store, T0 + HOUR).unwrap();
+    assert_eq!(pruned, vec![e.event_id()]);
+    check_invariants(&f.store, &f.root.chat_id(), T0 + HOUR).unwrap();
+    assert!(f.obj(1).is_deleted());
+    assert_eq!(f.state(&e), PRUNED);
+    assert!(f.has_edges(e.event_id()));
+    assert_eq!(
+        f.epoch().serve(&f.store, &e.event_id(), T0 + HOUR).unwrap(),
+        None
+    );
+    assert!(f.tips(T0 + HOUR).is_empty());
+    assert_eq!(f.epoch().next_wakeup(&f.store, T0 + HOUR).unwrap(), None);
+}
+
+/// §7.7: an edit keeps the creation date (§7.2), so it does not extend the message; a
+/// pending edit due after the moment is pruned with it.
+#[test]
+fn an_edit_does_not_extend_a_message() {
+    let mut f = Fixture::with_timer(HOUR);
+    let e = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "hi"));
+    let edit = f.event(
+        T0 + 10,
+        2,
+        &[e.event_id()],
+        text(1, f.bob.id, T0, T0 + 10, "edited"),
+    );
+    let later = f.event(
+        T0 + 20,
+        3,
+        &[],
+        text(1, f.bob.id, T0, T0 + 2 * HOUR, "later"),
+    );
+    f.recv(&e, T0 + 1);
+    assert_eq!(f.recv(&edit, T0 + 11), Outcome::Accepted(Merge::Won));
+    assert_eq!(f.recv(&later, T0 + 21), Outcome::Accepted(Merge::Pending));
+    f.tick(T0 + HOUR);
+    assert!(f.obj(1).is_deleted());
+    for x in [&e, &edit, &later] {
+        assert_eq!(f.state(x), PRUNED);
+    }
+    f.tick(T0 + 3 * HOUR);
+    assert!(f.visible(T0 + 3 * HOUR).is_empty());
+}
+
+/// §7.7: a message that arrives after its moment is dropped at once, never shown, and
+/// nothing about it is stored: no row, no parent links, no object; offered again, it is
+/// refused again the same way, from its dates alone. A temporary-rejection marker for it
+/// is cleared.
+#[test]
+fn a_message_arriving_after_its_moment_is_dropped_and_nothing_is_stored() {
+    let mut f = Fixture::with_timer(HOUR);
+    let parent = EventId::new(T0 - 1, [7; 16]);
+    let e = f.event(T0, 1, &[parent], text(1, f.bob.id, T0, T0, "late"));
+    let before = f.store.clone();
+    for now in [T0 + HOUR, T0 + 2 * HOUR] {
+        assert_eq!(f.recv(&e, now), Outcome::Expired);
+        assert_eq!(f.store, before);
+    }
+    assert_eq!(f.state(&e), None);
+    assert!(!f.has_edges(e.event_id()));
+    assert!(f.store.objects(&f.root.chat_id()).unwrap().is_empty());
+    // Held, deleted at its moment, then offered again: refused, the stub unchanged.
+    let mut g = Fixture::with_timer(HOUR);
+    g.recv(&e, T0 + 1);
+    g.tick(T0 + HOUR);
+    let stub = g.store.clone();
+    assert_eq!(g.recv(&e, T0 + HOUR + 1), Outcome::Expired);
+    assert_eq!(g.store, stub);
+    // A marker left by an early arrival (§9.6) is cleared.
+    let mut h = Fixture::with_timer(HOUR);
+    let future = h.event(T0 + HOUR, 2, &[], text(2, h.bob.id, T0, T0, "x"));
+    assert_eq!(h.recv(&future, T0), Outcome::TemporarilyInvalid);
+    assert_eq!(h.recv(&future, T0 + HOUR), Outcome::Expired);
+    assert_eq!(h.state(&future), None);
+    // A pending version whose message is past its moment is dropped too.
+    let mut k = Fixture::with_timer(HOUR);
+    let pending = k.event(T0 + HOUR, 3, &[], text(3, k.bob.id, T0, T0 + 3 * HOUR, "p"));
+    assert_eq!(k.recv(&pending, T0 + HOUR), Outcome::Expired);
+    assert_eq!(k.state(&pending), None);
+}
+
+/// §7.7: with no timer nothing is deleted, and a moment beyond the top of the integer range
+/// never comes (exact arithmetic, §1).
+#[test]
+fn no_timer_or_a_moment_out_of_range_never_deletes() {
+    for timer in [0, u64::MAX] {
+        let mut f = Fixture::with_timer(timer);
+        let e = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "kept"));
+        assert_eq!(f.recv(&e, T0 + 1), Outcome::Accepted(Merge::Won));
+        assert_eq!(f.epoch().next_wakeup(&f.store, T0 + 1).unwrap(), None);
+        f.tick(u64::MAX);
+        assert_eq!(f.current_text(1).as_deref(), Some("kept"), "{timer}");
+        assert_eq!(f.recv(&e, u64::MAX), Outcome::KeptPruned, "{timer}");
+    }
+    // The last millisecond of the range is a moment like any other.
+    let mut f = Fixture::with_timer(u64::MAX - T0);
+    let e = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "x"));
+    f.recv(&e, T0 + 1);
+    f.tick(u64::MAX - 1);
+    assert!(!f.obj(1).is_deleted());
+    f.tick(u64::MAX);
+    assert!(f.obj(1).is_deleted());
+}
+
+/// §7.7, §7.6: the timer does not delete a reaction; a reaction to a deleted message is not
+/// shown, as for any deleted target. A deletion event is received as without a timer.
+#[test]
+fn reactions_and_deletions_are_not_deleted_by_the_timer() {
+    let mut f = Fixture::with_timer(HOUR);
+    let e = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "hi"));
+    let r = crate::Reaction {
+        target: sid(1),
+        emoji: "\u{1f44d}".into(),
+        action: crate::ReactionAction::Add,
+    };
+    let rid = r.sync_obj_id(&f.bob.id);
+    let reaction = f.event(
+        T0 + 5,
+        2,
+        &[],
+        Payload::Content(Content {
+            sync_obj_id: rid,
+            author: f.bob.id,
+            created_at: T0 + 5,
+            last_modified_at: T0 + 5,
+            body: Body::Reaction(r),
+            edited: false,
+            metadata: BTreeMap::new(),
+        }),
+    );
+    f.recv(&e, T0 + 1);
+    f.recv(&reaction, T0 + 6);
+    f.tick(T0 + 3 * HOUR);
+    assert!(f.obj(1).is_deleted());
+    let obj = f.store.object(&f.root.chat_id(), &rid).unwrap().unwrap();
+    assert!(matches!(obj.current, Some(StoredResult::Content(ref c)) if c.is_reaction()));
+    assert_eq!(
+        f.epoch()
+            .serve(&f.store, &reaction.event_id(), T0 + 3 * HOUR)
+            .unwrap()
+            .map(|e| e.event_id()),
+        Some(reaction.event_id())
+    );
+    assert!(f.visible(T0 + 3 * HOUR).is_empty());
+    // A deletion arriving after the moment is merged as usual.
+    let d = f.event(T0 + 3 * HOUR, 3, &[], del(1, None));
+    assert_eq!(
+        f.recv(&d, T0 + 3 * HOUR),
+        Outcome::Accepted(Merge::Identical)
+    );
+}
+
+/// §7.7: the deletion is local and computed from the dates, so it runs whatever the state of
+/// the group: a read-only archive after a kick, a dissolved group kept as an archive, a
+/// superseded chat of two.
+#[test]
+fn the_timer_deletes_in_every_group_state() {
+    for state in [
+        GroupState::Active,
+        GroupState::ReadOnlyAfterKick,
+        GroupState::Dissolved,
+        GroupState::Superseded,
+    ] {
+        let mut f = Fixture::with_timer(HOUR);
+        let e = f.event(T0, 1, &[], text(1, f.bob.id, T0, T0, "hi"));
+        f.recv(&e, T0 + 1);
+        let root = f.root.clone();
+        Epoch::new(&root, true, state)
+            .tick(&mut f.store, T0 + HOUR)
+            .unwrap();
+        assert!(f.obj(1).is_deleted(), "{state:?}");
+    }
+}
