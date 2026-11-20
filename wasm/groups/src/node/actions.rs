@@ -1082,7 +1082,9 @@ impl Node {
                     last_request,
                 } => {
                     if cx.now >= since.saturating_add(super::objects::WAITING_MS) {
-                        // As "Ignore and Delete": the user stays in the member list.
+                        // Two weeks without a kick: the device leaves quietly, as "Ignore
+                        // and Delete" does. The user stays in the member list for the others,
+                        // and the chat's connections go with it (§5.4, §5.12, D.86).
                         self.close_group(cx, g, true);
                     } else if cx.now
                         >= last_request.saturating_add(super::objects::REQUEST_RESEND_MS)

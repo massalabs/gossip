@@ -25,7 +25,10 @@ pub(crate) const REPLIES_PER_DAY: u8 = 3;
 pub(crate) const UNVERIFIED_LEAVES: usize = 1_024;
 /// "Dissolve & Delete" keeps the named root and the message two weeks (§5.8).
 pub(crate) const DISSOLVED_KEPT_MS: u64 = 14 * DAY_MS;
-/// The longest wait for a kick (§5.4).
+/// The longest wait for a kick (§5.4). Without a kick by then, the device leaves quietly on
+/// its own, as "Ignore and Delete" does: its roots are deleted, the entry disappears, and the
+/// user still appears in the member list to the others. Its connections for the chat, all
+/// kept while waiting, are dropped then, as for any closed chat (§5.12, D.86).
 pub(crate) const WAITING_MS: u64 = 14 * DAY_MS;
 /// The owner-only request is sent again every 24 hours (§5.4).
 pub(crate) const REQUEST_RESEND_MS: u64 = DAY_MS;

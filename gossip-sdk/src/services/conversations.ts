@@ -23,8 +23,10 @@
  * - **Connections.** Members of groups this device accepted are connected
  *   automatically and silently (an `automatic` contact and its discussion,
  *   which is a session record, never a conversation); automatic connections
- *   the engine no longer needs are revoked. A contact the user accepted is
- *   never revoked.
+ *   the engine no longer needs are revoked (a chat the device is out of,
+ *   kicked or left, needs none, its history kept or not), once nothing waits
+ *   for the peer in the group outbox. A contact the user accepted is never
+ *   revoked.
  *
  * Nothing is stored about group traffic: a link names a group key next to a
  * peer the engine's own records already list as its member.
@@ -136,6 +138,8 @@ export class ConversationService {
     this.started = false;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
+    if (this.revokeTimer) clearTimeout(this.revokeTimer);
+    this.revokeTimer = null;
     this.eventEmitter.off(SdkEventType.GROUPS_CHANGED, this.onGroupsChanged);
     this.eventEmitter.off(
       SdkEventType.SESSION_STATUS_CHANGED,
@@ -632,11 +636,30 @@ export class ConversationService {
     }
   }
 
+  /** A later try of the revocations held for a ciphertext still waiting. */
+  private revokeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private revokeLater(): void {
+    if (this.revokeTimer || !this.started) return;
+    this.revokeTimer = setTimeout(() => {
+      this.revokeTimer = null;
+      void this.enqueue(() => this.revokeConnections()).catch(() => undefined);
+    }, CONNECTION_RETRY_MS);
+    (this.revokeTimer as { unref?: () => void }).unref?.();
+  }
+
   private async revokeConnections(): Promise<void> {
     const automatic = (await this.queries.contacts.getByOwner(this.owner))
       .filter(c => c.connection === 'automatic')
       .map(c => c.userId);
     for (const peer of await this.groups.connectionsToRevoke(automatic)) {
+      // A ciphertext still waiting for this peer, such as the signed leave
+      // pushed once a chat is closed, would be deleted with the contact: the
+      // connection goes once it is sent (§5.12, D.86).
+      if (await this.queries.groups.hasOutboxFor(this.owner, peer)) {
+        this.revokeLater();
+        continue;
+      }
       const result = await deleteContact(
         this.owner,
         peer,
