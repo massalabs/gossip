@@ -188,8 +188,11 @@ impl Node {
                         && (self.answers_epoch(chat_id)
                             || self.signed_served_to(&(*chat_id, *kind, *id), &from))
                 }
-                QueryOp::Removal { chat_id, .. } => {
-                    member_of(self, chat_id) && self.answers_epoch(chat_id)
+                // An archive also answers a removed peer's lookup of its own record (§5.8).
+                QueryOp::Removal { chat_id, gossip_id } => {
+                    member_of(self, chat_id)
+                        && (self.answers_epoch(chat_id)
+                            || (*gossip_id == from && self.archive_gives_own(chat_id, &from)))
                 }
                 // The requester, the responder and the subject are all members (§12.9).
                 QueryOp::Keys { chat_id, gossip_id } => {
@@ -732,7 +735,7 @@ impl Node {
                 }]
             }
             QueryOp::Removal { chat_id, gossip_id }
-                if !self.serves(chat_id)
+                if (!self.serves(chat_id) && !self.archive_gives_own(chat_id, &from))
                     || (self.removed_peer(chat_id, &from) && *gossip_id != from) =>
             {
                 vec![na]
@@ -962,21 +965,14 @@ impl Node {
     /// the removed peers' own kicks and leaves), and a removed peer of the epoch gets only its
     /// own kick or leave (§10.4, §5.6).
     pub(crate) fn signed_served_to(&self, key: &SignedKey, peer: &GossipId) -> bool {
-        let dissolved = |keep_only: bool| {
-            self.installed(&key.0)
-                && matches!(
-                    self.group_status(&key.0),
-                    super::records::GroupStatus::Dissolved { must_delete, .. }
-                        if !(keep_only && must_delete)
-                )
-        };
-        // An archive ("Dissolve & Keep archived") also tells a removed peer of its own
-        // removal (§5.6): the dissolve names an epoch that peer is not in, and nothing else
-        // would ever end its membership of the epoch it was removed from.
-        let own_removal = self.removed_peer(&key.0, peer)
-            && matches!(key.1, SignedKind::Kick | SignedKind::Leave)
-            && dissolved(true);
-        let dissolve_kept = key.1 == SignedKind::Dissolve && dissolved(false);
+        let own_removal = matches!(key.1, SignedKind::Kick | SignedKind::Leave)
+            && self.archive_gives_own(&key.0, peer);
+        let dissolve_kept = key.1 == SignedKind::Dissolve
+            && self.installed(&key.0)
+            && matches!(
+                self.group_status(&key.0),
+                super::records::GroupStatus::Dissolved { .. }
+            );
         if !self.serves(&key.0) && !dissolve_kept && !own_removal {
             return false;
         }
@@ -992,6 +988,26 @@ impl Node {
 }
 
 impl Node {
+    /// Whether this device keeps `chat` in an archive ("Dissolve & Keep archived", §5.8) and
+    /// `peer` is a removed peer of it: the archive then gives `peer` its own kick or leave
+    /// naming `chat`, to a signed-object lookup and to a removal lookup alike, and nothing
+    /// else of the epoch (§5.6, D.79).
+    ///
+    /// Why: the dissolve names a later epoch that peer is not in, so nothing else would ever
+    /// end its membership of the epoch it was removed from; the same record gets the same
+    /// answer whichever way it is asked; and only its own record is given, so nothing leaks.
+    pub(crate) fn archive_gives_own(&self, chat: &ChatId, peer: &GossipId) -> bool {
+        self.installed(chat)
+            && self.removed_peer(chat, peer)
+            && matches!(
+                self.group_status(chat),
+                super::records::GroupStatus::Dissolved {
+                    must_delete: false,
+                    ..
+                }
+            )
+    }
+
     /// Whether `peer` is a member of an installed epoch of a group dissolved with "Dissolve
     /// & Keep archived" (§5.8).
     pub(crate) fn shares_archive(&self, peer: &GossipId) -> bool {
