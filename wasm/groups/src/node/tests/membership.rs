@@ -2874,6 +2874,101 @@ fn a_former_owner_cannot_mute_or_freeze_the_new_owner() {
     assert!(net.devs[1].node.root(&r).unwrap().parents().len() == 2);
 }
 
+/// §5.10, D.69: the extra parent naming the last epoch of a member added back is one over
+/// which the owner has authority as the member's device judges it. Owner 0 hands G over to
+/// 1 (H), then continues G on a branch of its own (D), which lists bob; bob and the new owner
+/// hold it. The new owner resolves D into its line without bob (R, parents H and D: in the
+/// membership simulation, seed 22, bob was dropped there by its old leave), then adds bob
+/// back (Z). D is the epoch of the line that lists bob latest, but on bob's device, which
+/// does not hold R, the new owner has no authority over D, a branch of the deposed owner
+/// that no handover leads to: named for bob, D left Z with no parent bob could match, and Z
+/// started a second conversation there. H, owned by the new owner, links Z to bob's group.
+#[test]
+fn a_member_added_back_is_linked_by_an_epoch_the_owner_has_authority_over() {
+    let (mut net, g) = founded(4);
+    let bob = 3;
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.run(MIN);
+    // D: the former owner continues G after its handover, a minute after H.
+    let params = crate::root::RootParams {
+        name: "mine again".into(),
+        members: (0..4).map(gid).collect(),
+        group_secret: crate::ids::GroupSecret::from_bytes([4; 32]),
+        owner: ident(0).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
+        created_at: net.devs[0].node.root(&h).unwrap().created_at() + MIN,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
+    };
+    let root =
+        Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [1; 32]).unwrap();
+    let d = root.chat_id();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    for m in [1, bob] {
+        net.recv_frames_m(m, 0, &[Frame::Event(blob.clone())]);
+        assert_eq!(net.current(m, &g), Some(h), "device {m}");
+        assert!(net.devs[m].node.root(&d).is_some(), "device {m} holds D");
+    }
+    let r = net
+        .change(
+            1,
+            g,
+            GroupChange::Resolve {
+                members: vec![gid(0), gid(2)],
+                name: None,
+            },
+        )
+        .unwrap();
+    assert!(net.devs[1].node.root(&r).unwrap().names_parent(&d));
+    net.exchange();
+    net.run(2 * MIN);
+    assert_eq!(net.summary(bob, &g).unwrap().status, MyStatus::Removed);
+    let z = net
+        .change(
+            1,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(bob)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.run(2 * MIN);
+    net.accept(bob, z);
+    net.run(10 * MIN);
+    assert_eq!(
+        net.devs[bob].node.groups().len(),
+        1,
+        "one conversation on bob's device"
+    );
+    let s = net.summary(bob, &g).unwrap();
+    assert_eq!(s.status, MyStatus::Member, "{s:?}");
+    assert_eq!(s.current, z);
+    let zr = net.devs[1].node.root(&z).unwrap();
+    assert!(
+        !zr.names_parent(&d),
+        "D, a deposed owner's branch, is no link"
+    );
+    assert!(
+        zr.names_parent(&h),
+        "H, the new owner's own epoch, is the link"
+    );
+}
+
 /// Finding 6 of the review of 54711780: any peer with a session could make a device keep
 /// unbounded records: 40 self-signed roots, each with 32 unmatched parents, gave 41 epoch
 /// records and 1,281 retrieval tasks.
