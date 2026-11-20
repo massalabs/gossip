@@ -119,6 +119,44 @@ describe('group pages', () => {
     expect(useGroupStore.getState().currentGroupId).toBe('g1');
   });
 
+  it('shows the quote of a reply to a message of another chat, as the SDK gives it', async () => {
+    fake.state.groups = [summary()];
+    fake.state.timelines.set('g1', [
+      message({
+        syncObjId: 's2',
+        author: 'bob',
+        body: { type: 'text', text: 'about that' },
+        replyTo: [
+          {
+            epochId: 'other',
+            syncObjId: 'sx',
+            message: message({
+              epochId: 'other',
+              syncObjId: 'sx',
+              body: { type: 'text', text: 'over there' },
+            }) as never,
+          },
+          { epochId: null, syncObjId: 'sy', message: null },
+        ] as never,
+      }),
+    ]);
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <GroupDiscussion />,
+      '/group/g1',
+      '/group/:groupId'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    const text = r.container.querySelector(
+      '[data-testid="group-message"]'
+    )!.textContent;
+    expect(text).toContain('over there');
+    // A target not held yet says so; displaying it asks for nothing.
+    expect(text).toContain('timeline.reply_unavailable');
+  });
+
   it('shows the chats a chat replaced before its timeline, read only, and asks to continue in a new one', async () => {
     fake.state.groups = [
       summary({ groupId: 'g0', status: 'superseded', supersededBy: 'g1' }),
