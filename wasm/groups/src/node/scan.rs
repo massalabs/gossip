@@ -734,16 +734,27 @@ impl Node {
     }
 
     /// The installed epochs of the group of `anchor`, and of the groups linked to it by
-    /// hand, that `peer` is a member of (§12.1).
+    /// hand where this device is still active, that `peer` is a member of (§12.1).
+    ///
+    /// A linked group where this device is no longer active (kicked, left, waiting for a kick,
+    /// dissolved, superseded) lists nothing. Why: a link is local, so a device that deleted
+    /// that group lists nothing of it either; listing it would tell a member of both groups
+    /// that this device kept the history (§10.4, D.74). The anchor's own group is judged by
+    /// `serve_tips_scan` and `tip_list`.
     fn listed_epochs(&self, anchor: &ChatId, peer: &GossipId) -> Vec<ChatId> {
         let group = self.group_of(anchor);
-        let mut groups = vec![group];
+        let mut epochs = self.group_epochs(&group);
         if let Some(g) = self.t.group_recs.get(&group) {
-            groups.extend(g.links.iter().copied());
+            for linked in &g.links {
+                epochs.extend(
+                    self.group_epochs(linked)
+                        .into_iter()
+                        .filter(|c| self.serves(c)),
+                );
+            }
         }
-        groups
-            .iter()
-            .flat_map(|g| self.group_epochs(g))
+        epochs
+            .into_iter()
             .filter(|c| self.epochs.get(c).is_some_and(|e| e.root.is_member(peer)))
             .collect()
     }
