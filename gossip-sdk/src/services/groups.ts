@@ -1219,6 +1219,10 @@ export class GroupService {
     const node = this.node;
     if (!node || this.closed) return;
     node.tick(this.now());
+    // The results of the lookups the engine made by itself (a quoted message
+    // it fetches): nothing here uses them, the object found arrives as any
+    // other; taken so that they do not accumulate in its records.
+    node.take_lookup_results(this.now());
     await this.persist();
     for (let round = 0; round < 64 && this.alive(node); round++) {
       const out = node.poll_outbox(this.now()) as {
