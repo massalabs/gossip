@@ -1970,8 +1970,30 @@ It carries no quote: every preview is built from the reader's own copy of the ta
   A reference it cannot resolve may name an epoch it was never in, and validity must not depend on
   which roots a device holds.
 
-**Resolving a reference.** A device resolves a reference against what it holds (§4.5): the
-roots it installed, the invitations it has not answered, and its closed-chat markers (§14.2).
+**Not active in the first release.** Every version-1 device **answers** a chat lookup by
+reference (§12.7). The first release does not **send** one, and does not fetch a quoted target
+because a reply names it: nothing that follows from "Resolving a reference" to "What comes back"
+is sent. This is local policy (§2.2), off by default, to be turned on in a later release once these
+points are settled:
+
+- the fetch of a quoted target in an installed epoch asks every eligible member; it should be
+  bounded to the peers of the round;
+- the limits on the references looked up count per delivering peer; they should be per chat;
+- the count of rounds restarts once every reply naming a reference is deleted and sent again; it
+  should hold across such a deletion;
+- the reply's author field, an unsigned claim, chooses the second peer asked;
+- a reply held only in a read-only chat must start nothing, on every path.
+
+Turning it on later is compatible: nothing of it is on the wire beyond the lookup that every device
+already answers. What stays on in the first release is what makes it safe to turn on: the
+closed-chat and dissolved markers keep the reference of the root they close (§14.2), and the
+references of the held roots and of the invitations not answered yet are computed. A quote is
+shown, as below, when the device already holds its target. The rules below are the design for the
+release that turns it on.
+
+**Resolving a reference** (not active in the first release). A device resolves a reference against
+what it holds (§4.5): the roots it installed, the invitations it has not answered, and its
+closed-chat markers (§14.2).
 
 - **An installed epoch.** To load a target it lacks, the device performs a sync-object lookup in
   the target's epoch (§12.5), subject to §10.4. Nothing is fetched in a read-only group.
@@ -2965,6 +2987,8 @@ It has three forms:
   as for a reference it does not hold (§10.4).
   *Why:* the same root gets the same answer whichever way it is asked.
   When a requester sends it, to whom, how often, and what it never asks for: §7.6.
+  Every version-1 device answers it; the first release does not send it (local policy, off by
+  default, to be turned on in a later release, §7.6).
 - **By parent:** `chat_id` names a root that both peers must be members of; the responder looks,
   among the roots it holds, for the one whose commitment under that root's `epoch_challenge` equals
   `parentCommitment`.
@@ -3461,11 +3485,14 @@ except what the message timer erases (§7.7).
   signed objects, pending tasks, hints and links of that group, and keeps only a minimal non-secret
   **closed-chat marker** for each of its ends: the chat ID, and the reference of its root (§4.5),
   computed when closing while the root is still held.
-  A marker recorded before the reference was kept has the chat ID only and stays valid.
+  A marker recorded before the reference was kept has the chat ID only and stays valid; it takes
+  the reference of the first root it refuses.
   Other groups, shared sessions and sequence-dependent ciphertext are kept.
   The UI warns that recovery obligations and deletion knowledge are lost.
 - A group is closed by "Ignore and Delete", by a signed leave or decline once it is sent, by the
   end of the waiting state (§5.2, §5.4) and by **Delete** on a kicked or dissolved group.
+  An invitation deleted before it is answered leaves a marker as one declined does, and so does
+  each root fetched as a parent of an invitation that is declined (§4.8).
 - **Closed-chat marker.** A root that continues a closed epoch is rejected automatically and
   recorded as closed too (§4.8).
   The device drops every frame for a closed epoch silently, except its root delivered in full by a
@@ -3912,7 +3939,7 @@ accept and relay such a root unchanged.
 | Waiting for a kick | at most 2 weeks (§5.4) |
 | Root and dissolve message kept after "Dissolve & Delete" | 2 weeks (§5.8) |
 | Failed announcements before a pause (provisional) | 3 within 24 h; pause 1 h, doubling, at most 24 h |
-| Chat lookup by reference (local policy) | after a wait of up to 1 min from the reply's receipt; at most 3 peers per round; one round per week; 4 rounds per reference (§7.6) |
+| Chat lookup by reference (local policy; not sent in the first release, always answered) | after a wait of up to 1 min from the reply's receipt; at most 3 peers per round; one round per week; 4 rounds per reference (§7.6) |
 
 ## Appendix C: Protobuf schema
 
@@ -5262,9 +5289,15 @@ not counted against the member that relayed it.
 - A leave that is no longer live is served only to its leaver and to removal lookups; a
   signed-object lookup for it gets "not available".
 - "Ask to be kicked" on an invitation installs that root as a group in the waiting state.
-- *Settled:* the requester side of a chat lookup by reference is built as §7.6 states: on receipt
-  of a reply only, three peers per round at most, once a week, four rounds at most, never for an
-  epoch the device can place (installed, an invitation not answered yet, or closed).
+- *Settled, not active in the first release:* the requester side of a chat lookup by reference is
+  built as §7.6 states: on receipt of a reply only, three peers per round at most, once a week,
+  four rounds at most, never for an epoch the device can place (installed, an invitation not
+  answered yet, or closed). Version-1 devices answer the lookup; the first release does not send
+  it, nor fetch a quoted target because a reply names it (local policy, off by default). It is to be
+  turned on in a later release once these points are settled: bounding the fetch of a quoted target
+  to the round's peers; limits per chat; counting rounds across the deletion and re-sending of the
+  replies; the unsigned author field choosing the second peer; a reply held only in a read-only chat
+  starting nothing. The markers keep their references meanwhile.
 
 - **A (recommended):** confirm them one by one.
 - **B:** leave them to implementations.
