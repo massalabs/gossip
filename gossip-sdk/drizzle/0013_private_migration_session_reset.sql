@@ -1,0 +1,1 @@
+ALTER TABLE `privateMigration` ADD `sessionReset` integer DEFAULT false NOT NULL;
