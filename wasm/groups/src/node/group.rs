@@ -1508,14 +1508,17 @@ impl Node {
         }
     }
 
-    /// Queues a root or a signed object in full, once.
-    pub(crate) fn queue_object(&mut self, peer: GossipId, chat: ChatId, item: EntryItem) {
-        let queued = self
-            .t
+    /// Whether a root or a signed object is queued in full for `peer`.
+    pub(crate) fn object_queued(&self, peer: GossipId, chat: ChatId, item: EntryItem) -> bool {
+        self.t
             .queue
             .range((peer, 0)..=(peer, u64::MAX))
-            .any(|(_, w)| matches!(w, Work::Object { chat_id, item: i } if *chat_id == chat && *i == item));
-        if !queued {
+            .any(|(_, w)| matches!(w, Work::Object { chat_id, item: i } if *chat_id == chat && *i == item))
+    }
+
+    /// Queues a root or a signed object in full, once.
+    pub(crate) fn queue_object(&mut self, peer: GossipId, chat: ChatId, item: EntryItem) {
+        if !self.object_queued(peer, chat, item) {
             self.queue_work(
                 peer,
                 Work::Object {
