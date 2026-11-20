@@ -106,6 +106,18 @@ impl Node {
         key: TaskKey,
         from: Option<(GossipId, TriggerKind)>,
     ) {
+        // Nothing is asked for an epoch of a group where this device is no longer active (see
+        // `retrieves`): a task made then, for the parents of an event it still accepts, waits
+        // without asking anyone until the group is active again (see `schedule`). A
+        // sync-object lookup the caller asked for there ends at once, not found.
+        if let Target::SyncObj(sync) = key.target
+            && !self.retrieves(&key.chat_id)
+        {
+            self.t
+                .lookup_results
+                .insert((key.chat_id, sync), LookupResult::NotFound);
+            return;
+        }
         if !self.t.tasks.contains(&key) {
             if self.t.tasks.len() >= QUEUED_MISSING_PER_GROUP.min(QUEUED_MISSING_PER_DEVICE)
                 && self.tasks_full(&key.chat_id)
@@ -553,6 +565,22 @@ impl Node {
                 self.reindex(key);
                 continue;
             };
+            // A task of a group where this device is no longer active waits, asking no one,
+            // until the group is active again (see `retrieves`, `resume_lookups`). Why not
+            // dropped: a member added back, or a device restored from a backup, would lose the
+            // IDs it learnt before, which a scan does not always bring back (an older event
+            // reached only through a version since pruned); kept, it asks for them again once
+            // it is back, and sends nothing meanwhile.
+            if !self.retrieves(&key.chat_id) {
+                self.tix.block(
+                    key,
+                    Blocked {
+                        peers: Vec::new(),
+                        until: u64::MAX,
+                    },
+                );
+                continue;
+            }
             if past_deadline(&key, task, cx.now) {
                 // Removed by the next timer pass; not ranked meanwhile.
                 self.tix.block(
@@ -587,6 +615,21 @@ impl Node {
             }
         }
         Ok(())
+    }
+
+    /// The group `group` is active again: its lookups that waited are ranked again (see
+    /// `schedule`).
+    pub(crate) fn resume_lookups(&mut self, group: ChatId) {
+        let keys: Vec<TaskKey> = self
+            .t
+            .tasks
+            .keys()
+            .filter(|k| self.group_of(&k.chat_id) == group)
+            .copied()
+            .collect();
+        for k in keys {
+            self.reindex(k);
+        }
     }
 
     /// Brings the task index up to date for `key`.
@@ -812,6 +855,10 @@ impl Node {
     /// The query entry to send for `key`, with its TTL, if the task still wants `peer`: a
     /// queued attempt, or a resend of a sent one (after a reconnection or `expired`).
     pub(crate) fn task_query(&self, key: &TaskKey, peer: &GossipId) -> Option<u64> {
+        // A query queued before its group went inactive is not sent (see `retrieves`).
+        if !self.retrieves(&key.chat_id) {
+            return None;
+        }
         match self.t.tasks.get(key)?.run {
             Run::Active {
                 attempt: Some(Attempt::Queued { peer: p } | Attempt::Sent { peer: p, .. }),

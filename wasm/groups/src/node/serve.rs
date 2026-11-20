@@ -522,7 +522,9 @@ impl Node {
                     continue;
                 }
             };
-            if !self.may_receive(&chat, &from, false) {
+            // A device no longer active in the group of `chat` acts on it as a device that does
+            // not hold the epoch: nothing is looked up, nothing is noted (§10.4, D.74).
+            if !self.serves(&chat) || !self.may_receive(&chat, &from, false) {
                 continue;
             }
             // A valid entry from a member: it is responsive (§10.1).

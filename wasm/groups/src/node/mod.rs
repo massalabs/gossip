@@ -1135,6 +1135,20 @@ impl Node {
         self.installed(chat) && self.group_status(chat) == records::GroupStatus::Active
     }
 
+    /// Whether this device may start or go on with a lookup keyed by `chat`: `chat` is not an
+    /// installed epoch of a group where the device is no longer active (kicked, left, waiting
+    /// for a kick, dissolved or superseded). An invitation, a held handover root or an unknown
+    /// epoch is looked up as before (§10.4, D.74).
+    ///
+    /// Why: a lookup tells the peer asked that this device still holds the epoch. A device
+    /// that deleted the chat or never held it sends nothing, so an inactive device must send
+    /// nothing either, or a member could tell "kept the history" from "deleted the chat". What
+    /// such a device still needs reaches it pushed in full: its own kick or leave, a deletion
+    /// event, a dissolve message and the roots that concern it (§10.4, §5.6).
+    pub(crate) fn retrieves(&self, chat: &ChatId) -> bool {
+        !self.installed(chat) || self.group_status(chat) == records::GroupStatus::Active
+    }
+
     /// Whether `peer` may receive an event of `chat` (§10.2, §10.4): a member other than
     /// this device, and not a removed peer unless the event is a deletion.
     fn may_receive(&self, chat: &ChatId, peer: &GossipId, deletion: bool) -> bool {

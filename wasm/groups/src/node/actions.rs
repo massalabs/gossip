@@ -331,6 +331,7 @@ impl Node {
                     gr.followed = Some(owner);
                 }
                 n.rebuild_epochs();
+                n.resume_lookups(g);
                 n.adopt(cx, rec.root, rec.from, parents, false)?;
                 let g = n.group_of(&chat);
                 n.recheck_status(cx, g);

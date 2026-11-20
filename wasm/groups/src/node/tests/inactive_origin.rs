@@ -269,6 +269,44 @@ fn never_replaced() -> ChatId {
     ChatId::from_bytes([0x13; 32])
 }
 
+/// §10.4, D.74: a lookup that waited while R was kicked from C goes on once R is added back and
+/// accepts: R asks for the event again, which a scan might never bring back.
+#[test]
+fn a_lookup_that_waited_while_inactive_goes_on_once_the_device_is_back() {
+    let (mut net, [c, ..]) = setup(Inactive::Removed, |net, c| {
+        net.offline[Q] = true;
+        let n = Frame::Notice(Notice {
+            entries: vec![entry("event", c, net.now)],
+        });
+        net.recv_frames_m(R, Q, &[n]);
+        net.run(MIN);
+    });
+    let asks = |net: &MNet, from: usize| {
+        net.dropped[from..]
+            .iter()
+            .filter(|(f, to, pt)| *f == R && *to == Q && pt.windows(16).any(|w| w == [0x66; 16]))
+            .count()
+    };
+    let before = net.dropped.len();
+    net.run(3 * HOUR);
+    assert_eq!(asks(&net, before), 0, "nothing while removed");
+    let cur = net.current(0, &c).unwrap();
+    net.change(
+        0,
+        cur,
+        GroupChange::Successor {
+            add: vec![gid(R)],
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.accept_all(R).len(), 1);
+    net.run(10 * MIN);
+    assert!(asks(&net, before) > 0, "R asks for the event again");
+}
+
 /// A valid signed object of `kind` naming `chat`, as Q can push it: Q's own leave, or the
 /// owner's kick of Q.
 fn pushed(net: &MNet, kind: &str, chat: ChatId) -> Frame {
