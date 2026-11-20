@@ -1148,6 +1148,19 @@ There is no exception for a member who was added back, and no rule that keeps on
 of a member: a member who was offline through a removal, a return and a second removal is still at
 the first epoch and needs the kick naming that epoch.
 
+A kept kick is used as a kept leave is (§5.3 "Keeping"): it is sent in full to the member it names
+when that member contacts the device in that epoch, under the same rules and daily limit, **even
+when the member was added back since** and is a member of the current epoch; and when a device is
+about to tell that member of a root that adds it back by a root notice (§12.1), it first sends the
+kick in full, then the root in full, in that order. The kick applies only to the epoch it names, so
+it never removes the member from the root that adds it back.
+*Why:* one rule for both ways of going out of a group. A device of that member restored from a
+backup made before its removal still acts in the epoch it was removed from; given the root that
+adds it back first, it would rejoin silently, without the prompt every other member added back
+gets. With its kick first it shows the group as removed, the root comes as an invitation joined to
+the same conversation (§4.8 case 4, §5.10), and its history then matches what every other member
+saw.
+
 **On the removed member's device.** A valid kick that names the device itself and its **current**
 epoch has this effect:
 
