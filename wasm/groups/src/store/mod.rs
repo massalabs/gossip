@@ -189,9 +189,10 @@ pub struct ObjectRecord {
     pub expires_at: Option<u64>,
     /// When the message timer erases this object and every record of it (§7.7): the latest
     /// moment among the versions this device processed, so that every version offered again
-    /// afterwards is refused by its own dates. A reaction's own moment counts too (§7.6).
-    /// `None`: never (no timer, a moment past the top of the integer range, or a message
-    /// deleted by a deletion event or by hand, whose tombstone is kept as without a timer).
+    /// afterwards is refused by its own dates. A reaction's own moment counts too (§7.6). For
+    /// a message deleted by a deletion event or by hand, that moment rounded up to the step
+    /// of the timer, so that the exact creation date is not kept beside the tombstone.
+    /// `None`: never (no timer, or a date past the top of the integer range).
     pub erase_at: Option<u64>,
     /// The pruned events of this object, kept only while `erase_at` is set, so that the
     /// erasure finds their stubs and parent edges. Local bookkeeping: an event pruned by

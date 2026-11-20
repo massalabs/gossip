@@ -710,9 +710,10 @@ fn expired(event: &MessageEvent, timer: u64, now: u64) -> bool {
 /// version with a later date come back and be shown. Honest versions share one creation
 /// date, so this is the moment of the message.
 ///
-/// A message deleted by a deletion event or by hand is not erased: its tombstone follows
-/// the rules without a timer, and a later version is absorbed and not counted. A reaction
-/// is counted whatever tombstone its ID has, since a deletion has no effect on it (§7.1).
+/// A message that is deleted keeps its tombstone until the latest moment, rounded up to the
+/// step of the timer ([`rounded_erasure`]): a later version that the tombstone absorbs still
+/// counts, and the date is rounded again. A reaction is counted whatever tombstone its ID
+/// has, since a deletion has no effect on it (§7.1).
 fn note_version(obj: &mut ObjectRecord, content: &Content, timer: u64) {
     if timer == 0 {
         return;
@@ -728,12 +729,50 @@ fn note_version(obj: &mut ObjectRecord, content: &Content, timer: u64) {
     obj.erase_at = if first {
         moment
     } else {
-        // `None` stays `None`: never erased, or deleted by hand.
+        // `None` stays `None`: never erased.
         obj.erase_at.zip(moment).map(|(a, b)| a.max(b))
     };
+    // A deleted message keeps only a coarse date beside its tombstone (§7.7). A reaction
+    // replaces the tombstone of its ID, so its own moment stays exact.
+    if obj.is_deleted() && !content.is_reaction() {
+        obj.erase_at = obj.erase_at.and_then(|at| rounded_erasure(at, timer));
+    }
     if obj.erase_at.is_none() {
         obj.stubs.clear();
     }
+}
+
+/// The step to which the date kept beside a deleted message is rounded up, by the timer
+/// `timer` (§7.7): 5 minutes for a timer up to an hour, an hour up to a day, a day up to a
+/// week, a week beyond.
+pub(crate) fn erasure_step(timer: u64) -> u64 {
+    const MINUTE: u64 = 60 * 1000;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+    const WEEK: u64 = 7 * DAY;
+    if timer <= HOUR {
+        5 * MINUTE
+    } else if timer <= DAY {
+        HOUR
+    } else if timer <= WEEK {
+        DAY
+    } else {
+        WEEK
+    }
+}
+
+/// When the timer `timer` erases a deleted message whose latest moment is `at` (§7.7): `at`
+/// rounded up to a multiple of [`erasure_step`], counted from the Unix origin in
+/// milliseconds (plain arithmetic, no calendar, no time zone). `None`, never, when the
+/// rounded date is past the top of the integer range.
+///
+/// Why rounded: a tombstone kept until the exact moment would keep the exact creation date
+/// of the message beside it. Rounded, the device keeps one coarse date until then, and
+/// nothing after. Why erased at all: deleting a message by hand must not leave more trace
+/// than letting the timer run.
+pub(crate) fn rounded_erasure(at: u64, timer: u64) -> Option<u64> {
+    let step = erasure_step(timer);
+    at.div_ceil(step).checked_mul(step)
 }
 
 /// Erases the object `obj` with every record of it (§7.7): the rows and the parent edges of
@@ -775,8 +814,9 @@ pub(crate) fn erase<S: StorageRead + ?Sized>(
 /// What deletes a message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Cause {
-    /// A deletion event, received or published, or a local-only deletion (§7.4, §9.2): the
-    /// tombstone is kept as without a timer.
+    /// A deletion event, received or published, or a local-only deletion (§7.4, §9.2): under
+    /// a timer the tombstone is kept until the latest moment of the message rounded up to the
+    /// step of the timer ([`rounded_erasure`]); without one, as long as the group.
     Event,
     /// The message timer at the moment of the current result (§7.7): the message is erased
     /// later, once every version it knows is past its moment.
@@ -821,11 +861,20 @@ pub(crate) fn absorb<S: StorageRead + ?Sized>(
         }
         obj.current = Some(StoredResult::Tombstone);
         obj.expires_at = None;
-        // A message deleted before the timer's moment keeps its tombstone as without a
-        // timer; a pending reaction under its ID keeps its own erasure (§7.1).
-        if cause == Cause::Event && obj.pending_versions.is_empty() {
-            obj.erase_at = None;
-            obj.stubs.clear();
+        // A message deleted by a deletion event or by hand before the timer's moment keeps
+        // its tombstone, stubs and deletion events until its latest moment rounded up to the
+        // step of the timer, then the timer erases it all (§7.7). Why: deleting by hand must
+        // not leave more trace than letting the timer run; the cost is one coarse date kept
+        // beside the tombstone until then. The timer itself erases at the exact date.
+        if cause == Cause::Event {
+            let timer = tx.message_timer();
+            obj.erase_at = obj
+                .erase_at
+                .filter(|_| timer > 0)
+                .and_then(|at| rounded_erasure(at, timer));
+            if obj.erase_at.is_none() {
+                obj.stubs.clear();
+            }
         }
     }
     if let Some(event) = carrier {
