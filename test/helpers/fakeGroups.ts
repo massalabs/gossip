@@ -25,6 +25,7 @@ export function makeFakeGroups() {
     changeMembers: vi.fn(async () => 'e2'),
     handOver: vi.fn(async () => 'e2'),
     resolveFork: vi.fn(async () => 'e3'),
+    setMessageTimer: vi.fn(async () => 'e4'),
     dissolve: vi.fn(async () => {}),
     leave: vi.fn(async () => {}),
     deleteGroup: vi.fn(async () => {}),
@@ -62,6 +63,13 @@ export function makeFakeGroups() {
     handlers,
     discussions: { getStatus: vi.fn(() => 0) },
     contacts: { list: vi.fn(async () => []) },
+    conversations: {
+      migrationTimer: vi.fn(async () => 0),
+      migrate: vi.fn(async () => 'g9'),
+      acceptInvitation: vi.fn(async (e: string) => e),
+      declineInvitation: vi.fn(async () => {}),
+      setArchived: vi.fn(async () => {}),
+    },
   };
   return { state, service, sdk };
 }
@@ -82,6 +90,8 @@ export function summary(over: Partial<GroupSummary> = {}): GroupSummary {
     supersededBy: null,
     earlier: [],
     tookPart: null,
+    messageTimer: 0,
+    timers: [],
     ...over,
   };
 }
