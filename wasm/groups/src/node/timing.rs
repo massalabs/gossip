@@ -154,6 +154,29 @@ pub const ABANDON_BACKOFF_MS: u64 = MINUTE_MS;
 /// §17.4 leaves its value to profiling; this one is provisional.
 pub const PLAINTEXTS_PER_POLL: usize = 64;
 
+// ── Replies that name an epoch this device cannot place (§7.6, §12.7) ────────
+
+/// The longest wait after a reply is received before what it names is looked up: the wait
+/// is drawn uniformly up to it. Why: a lookup sent at the instant of receipt would tie it to
+/// that delivery more tightly than needed. Never tied to display or reading: a lookup made
+/// when the user opens the message would tell a peer when it was read.
+pub const REF_LOOKUP_DELAY_MS: u64 = MINUTE_MS;
+/// The shortest time between two rounds of a chat lookup by reference.
+pub const REF_LOOKUP_INTERVAL_MS: u64 = 7 * DAY_MS;
+/// Rounds of a chat lookup by reference at most, for one reference. After the last one the
+/// device stops for good for that reference, while it holds a reply naming it.
+pub const REF_LOOKUP_ROUNDS: u8 = 4;
+/// Peers asked in one round at most.
+pub const REF_LOOKUP_PEERS: usize = 3;
+/// References looked up at most, per peer that delivered the latest reply naming them, and
+/// in total (provisional). A new reference beyond them is not looked up.
+pub const REF_LOOKUPS_PER_SENDER: usize = 64;
+/// See [`REF_LOOKUPS_PER_SENDER`].
+pub const REF_LOOKUPS_PER_DEVICE: usize = 1_024;
+/// Replies naming one reference that its record keeps at most (provisional): enough to know
+/// whether one is still held.
+pub const REF_REPLIES_KEPT: usize = 32;
+
 /// The next nominal TTL after an unanswered timeout: `min(24 h, ceil(current × 3142 / 1000))`.
 #[must_use]
 pub fn next_ttl(current: u64) -> u64 {

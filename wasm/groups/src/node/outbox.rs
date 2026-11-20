@@ -616,6 +616,7 @@ impl Node {
                                     QueryOp::Removal { chat_id, gossip_id }
                                 }
                                 Target::Keys(gossip_id) => QueryOp::Keys { chat_id, gossip_id },
+                                Target::Ref(reference) => QueryOp::ChatByRef(reference),
                             };
                             (op, ttl)
                         }),

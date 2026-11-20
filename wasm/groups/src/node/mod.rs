@@ -59,6 +59,7 @@ mod index;
 mod neighbors;
 mod objects;
 mod outbox;
+mod references;
 mod retrieval;
 mod scan;
 mod serve;
@@ -238,8 +239,10 @@ pub struct Stats {
     /// Root notices sent to a scan responder that did not hold the anchor (§12.1).
     pub anchor_notices: u64,
     /// Records refused at a limit (invitations, fetched parents, markers, held roots,
-    /// unverified leaves).
+    /// unverified leaves, references looked up).
     pub capped: u64,
+    /// Rounds of chat lookups by reference started (§7.6, §12.7).
+    pub ref_rounds: u64,
 }
 
 /// The result of a sync-object lookup (§12.5).
@@ -307,6 +310,8 @@ pub struct Node {
     ri: group::RootIndex,
     /// What the connection queries answered at the last commit (derived, §5.12).
     conn_view: direct::ConnectionView,
+    /// The references of the roots held (derived, §4.5).
+    rx: references::RefIndex,
 }
 
 impl core::fmt::Debug for Node {
@@ -343,6 +348,7 @@ impl Node {
             erase: BTreeSet::new(),
             ri: group::RootIndex::default(),
             conn_view: direct::ConnectionView::default(),
+            rx: references::RefIndex::default(),
         };
         node.reload(store)?;
         Ok(node)
@@ -355,6 +361,7 @@ impl Node {
         self.epochs.clear();
         self.rebuild_epochs();
         self.rebuild_root_index();
+        self.rebuild_ref_index();
         self.hint_lru.clear();
         self.hint_age.clear();
         self.hint_count.clear();
@@ -594,6 +601,7 @@ impl Node {
                     .and_then(|()| f(self, &mut cx))
                     .and_then(|v| {
                         self.reconsider(&mut cx)?;
+                        self.refs_moved(&mut cx);
                         self.schedule(&mut cx)?;
                         self.connections_changed(&mut cx);
                         Ok(v)
@@ -794,6 +802,7 @@ impl Node {
             n.expire_frozen(cx.now);
             n.group_timers(cx);
             n.direct_timers(cx);
+            n.ref_timers(cx)?;
             if let Some(signer) = signer {
                 n.remember_own_keys(cx, signer);
                 n.auto_successors(cx, signer)?;
@@ -831,6 +840,9 @@ impl Node {
             add(t);
         }
         if let Some(t) = self.direct_wakeup() {
+            add(t);
+        }
+        if let Some(t) = self.ref_wakeup() {
             add(t);
         }
         // Roots left to adopt by the bounded worklist of the last operation.
@@ -1305,6 +1317,9 @@ impl Node {
                     {
                         self.disseminate(cx, &entry, &event, Form::Notice, false)?;
                     }
+                    // On receipt, never on display: what the reply names is placed, fetched
+                    // or looked up later (§7.6).
+                    self.note_reply(cx, chat, from, &event)?;
                     let group = self.group_of(&chat);
                     self.changed(group, records::ChangeKind::Messages, cx.now);
                 }

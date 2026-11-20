@@ -256,6 +256,8 @@ impl Node {
                 .epochs
                 .get(&key.chat_id)
                 .is_some_and(|e| e.root.is_member(peer)),
+            // The peers chosen for the round, and no other (see `references`).
+            Target::Ref(_) => self.ref_position(key, peer).is_some(),
             _ => self.may_receive(&key.chat_id, peer, false),
         }
     }
@@ -312,6 +314,7 @@ impl Node {
                 pool.extend(announcers);
                 pool
             }
+            Target::Ref(_) => self.ref_pool(key),
             _ => self.eligible(&key.chat_id),
         }
     }
@@ -376,6 +379,7 @@ impl Node {
                 _ => {
                     self.parent_lookup_over(&key, cx.now);
                     self.supplied(&peer, key.chat_id, key.target);
+                    self.ref_round_over(&key);
                 }
             }
             return;
@@ -700,6 +704,9 @@ impl Node {
                     self.stats.tasks_paused += 1;
                 }
             }
+            // A round ends here; the next one is started by the record (see `references`),
+            // never by a renewal of the task.
+            Target::Ref(_) => self.ref_round_over(&key),
             _ => {
                 if let Some(t) = self.t.tasks.get_mut(&key) {
                     t.run = Run::Paused;
@@ -764,7 +771,13 @@ impl Node {
             if limited && responsive {
                 responsive_later.push(peer);
             }
-            let tier = if c.trigger.is_some() {
+            // The peers of a round of a lookup by reference are asked in the order the round
+            // chose (see `references`), whether they answer or not.
+            let position = self.ref_position(key, &peer);
+            let responsive = responsive || position.is_some();
+            let tier = if let Some(i) = position {
+                u8::try_from(i).unwrap_or(u8::MAX)
+            } else if c.trigger.is_some() {
                 0
             } else if self.is_neighbor(&key.chat_id, &peer) {
                 1
