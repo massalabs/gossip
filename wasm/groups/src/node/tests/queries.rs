@@ -557,3 +557,156 @@ fn the_owner_takes_a_leave_request_from_a_member() {
         1
     );
 }
+
+/// Device `d` takes the query `ops` from `from` now, `meanwhile` runs, and then `d` assembles
+/// its answers to `from`, by entry position.
+fn assembled_later(
+    net: &mut super::membership::MNet,
+    d: usize,
+    from: usize,
+    ops: Vec<QueryOp>,
+    meanwhile: impl FnOnce(&mut super::membership::MNet),
+) -> Vec<(u32, ResponseResult)> {
+    net.recv_frames_m(d, from, &[query(9, net.now, MIN, ops)]);
+    meanwhile(net);
+    super::membership::answers_of(net, d, from, Vec::new())
+}
+
+/// The groups of the answer tests: A = {0, 1, 2, 3} active on R = 1 and Q = 3; B = {0, 1, 2}
+/// does not list Q; C = {0, 1, 3}, from which R was removed; G = {0, 1, 3}, active on both.
+fn answer_groups() -> (super::membership::MNet, [ChatId; 4]) {
+    use super::membership::{MNet, gid};
+    let mut net = MNet::new(5, true);
+    let a = net.create(0, &[1, 2, 3]);
+    let b = net.create(0, &[1, 2]);
+    let c = net.create(0, &[1, 3]);
+    let g = net.create(0, &[1, 3]);
+    net.exchange();
+    for d in 1..4 {
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    net.change(
+        0,
+        c,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(1)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.summary(1, &c).unwrap().status, MyStatus::Removed);
+    (net, [a, b, c, g])
+}
+
+/// §13.7, §15.1, D.74: an event or sync-object lookup from Q that R cannot or may not serve is
+/// answered past its deadline exactly as one it could serve: `expired`, whether R never held the
+/// epoch, holds it but Q is not a member, holds it in a group where it is no longer active, or
+/// holds it active without the item. A "not available" decided on receipt ages as content does.
+#[test]
+fn a_late_answer_is_expired_whether_or_not_the_lookup_could_be_served() {
+    let (mut net, [a, b, c, _]) = answer_groups();
+    let (r, q) = (1, 3);
+    let missing = EventId::new(net.now - 1, [0x66; 16]);
+    let sync = crate::ids::SyncObjId::from_bytes([0x55; 32]);
+    for (case, chat) in [
+        ("never held", ChatId::from_bytes([0x77; 32])),
+        ("not a member", b),
+        ("inactive", c),
+        ("active", a),
+    ] {
+        for op in [
+            lookup(chat, missing),
+            QueryOp::SyncObj {
+                chat_id: chat,
+                sync_obj_id: sync,
+            },
+        ] {
+            let answers = assembled_later(&mut net, r, q, vec![op.clone()], |net| {
+                net.now += 10 * MIN;
+            });
+            assert_eq!(
+                answers,
+                vec![(0, ResponseResult::Status(Status::Expired))],
+                "{case}: {op:?}"
+            );
+        }
+    }
+}
+
+/// §13.7, §15.1, D.74: a lookup R took while it held the epoch, active, and could serve, is
+/// answered at assembly as R would answer it then: "not available" once R deleted the chat in
+/// between, as a device that never held it answers; "not available", not the event, once R was
+/// kicked in between.
+#[test]
+fn an_answer_assembled_after_the_epoch_was_deleted_or_went_inactive_is_not_available() {
+    use super::membership::gid;
+    let (r, q) = (1, 3);
+    let na = vec![(0, ResponseResult::Status(Status::NotAvailable))];
+    for sync in [false, true] {
+        for kicked in [false, true] {
+            let (mut net, [_, _, _, g]) = answer_groups();
+            let e = net.say(q, &g, "kept");
+            net.run(MIN);
+            let op = if sync {
+                QueryOp::SyncObj {
+                    chat_id: g,
+                    sync_obj_id: e.payload().sync_obj_id(),
+                }
+            } else {
+                lookup(g, e.event_id())
+            };
+            let answers = assembled_later(&mut net, r, q, vec![op.clone()], |net| {
+                if kicked {
+                    // Only R and the owner exchange: the kick reaches R, nothing reaches Q.
+                    net.offline[q] = true;
+                    net.change(
+                        0,
+                        g,
+                        GroupChange::Successor {
+                            add: vec![],
+                            remove: vec![gid(r)],
+                            name: None,
+                        },
+                    )
+                    .unwrap();
+                    let now = net.now;
+                    let dev = &mut net.devs[0];
+                    let out = dev
+                        .node
+                        .poll_outbox(&mut dev.store, now, &mut net.rng)
+                        .unwrap();
+                    for o in out {
+                        let dev = &mut net.devs[0];
+                        dev.node
+                            .handed_off(&mut dev.store, o.handle, now, &mut net.rng)
+                            .unwrap();
+                        if o.to == gid(r) {
+                            let dev = &mut net.devs[r];
+                            dev.node
+                                .handle_plaintext(
+                                    &mut dev.store,
+                                    gid(0),
+                                    &o.plaintext,
+                                    now,
+                                    &mut net.rng,
+                                )
+                                .unwrap();
+                        }
+                    }
+                    net.offline[q] = false;
+                    assert_eq!(net.summary(r, &g).unwrap().status, MyStatus::Removed);
+                } else {
+                    let now = net.now;
+                    let dev = &mut net.devs[r];
+                    dev.node
+                        .delete_group(&mut dev.store, g, now, &mut net.rng)
+                        .unwrap();
+                }
+            });
+            assert_eq!(answers, na, "kicked {kicked}: {op:?}");
+        }
+    }
+}
