@@ -784,6 +784,19 @@ export class AnnouncementService {
 
     const answersOurs = this.awaitingAnswer.delete(contactUserId);
     const statusNow = this.session.peerSessionStatus(contactUserIdRaw);
+    if (!isNewContact && statusNow === SessionStatus.Active && !answersOurs) {
+      // The peer's new announcement replaced an active session (it renewed
+      // it, or it was restored from a copy, or it added us back): what was
+      // sent on the old one may never be read. The group engine is told, as
+      // for a renewal of ours, and scans the peer.
+      const row = await this.queries.discussions.getByOwnerAndContact(
+        this.session.userIdEncoded,
+        contactUserId
+      );
+      if (row) {
+        this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, toDiscussion(row));
+      }
+    }
     if (
       (automatic && statusNow === SessionStatus.PeerRequested) ||
       (statusNow === SessionStatus.Active &&

@@ -68,6 +68,7 @@ import { ContactService } from './services/contact.js';
 import { GroupService } from './services/groups.js';
 import { ConversationService } from './services/conversations.js';
 import {
+  SELF_CONTACT_ID,
   SelfMessageService,
   reencryptSelfMessages,
 } from './services/selfMessage.js';
@@ -90,7 +91,11 @@ import {
   type SecureStorageState,
 } from './db/sqlite.js';
 import { Queries } from './db/queries/index.js';
-import { type UserPublicKeys, SessionManagerWrapper } from './wasm/bindings.js';
+import {
+  type UserPublicKeys,
+  SessionManagerWrapper,
+  SessionStatus,
+} from './wasm/bindings.js';
 import {
   SdkEventEmitter,
   SdkEventType,
@@ -209,6 +214,15 @@ export interface OpenSessionOptions {
    * authenticated.
    */
   autoStartPolling?: boolean;
+  /**
+   * The account comes from a copy of its storage imported into a new
+   * generation (a backup): the sessions of `encryptedSession` may have moved
+   * on elsewhere, and their next seekers be already used. Every session is
+   * given up as the state is loaded, before anything can be sent, except
+   * the contact requests still waiting for this user's answer; then call
+   * `rebuildMessagingSessions`.
+   */
+  sessionReset?: boolean;
   /**
    * Publish the session public key while opening. Defaults to `true`.
    * Set to `false` only for tentative in-memory/onboarding sessions whose
@@ -637,6 +651,13 @@ class GossipSdk {
       // Restore existing session state if provided
       if (options.encryptedSession) {
         session.load(options.encryptedSession, encryptionKey);
+      }
+      if (options.sessionReset) {
+        for (const peer of session.peerList()) {
+          if (session.peerSessionStatus(peer) !== SessionStatus.PeerRequested) {
+            await session.peerDiscard(peer);
+          }
+        }
       }
 
       // Get config from initialized state
@@ -1159,6 +1180,31 @@ class GossipSdk {
       throw new Error('No encryption key found. Call openSession() first.');
     }
     return state.session.toEncryptedBlob(state.encryptionKey);
+  }
+
+  /**
+   * Opens a new session with every peer a discussion was accepted with (the
+   * contacts and the automatic connections), with a new announcement to
+   * each, after the sessions were given up (`sessionReset`) or lost. Queued
+   * messages are kept and sent once each session is active. The caller
+   * persists the session state afterwards.
+   */
+  async rebuildMessagingSessions(): Promise<void> {
+    const owner = this.requireSession().session.userIdEncoded;
+    for (const discussion of await this.queries.discussions.getByOwner(owner)) {
+      if (
+        !discussion.weAccepted ||
+        discussion.contactUserId === SELF_CONTACT_ID
+      ) {
+        continue;
+      }
+      const reopened = await this.discussions.createSessionForContact(
+        discussion.contactUserId,
+        new Uint8Array(0),
+        { resetQueue: false, triggerRefresh: false }
+      );
+      if (!reopened.success) throw reopened.error;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────
