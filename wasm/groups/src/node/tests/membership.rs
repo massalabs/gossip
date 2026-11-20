@@ -1888,7 +1888,7 @@ fn not_available(r: &ResponseResult) -> bool {
 /// kept answering for its epochs and listing them in shared-chats scans. Its root, which
 /// lists the removed peer, is answered since the decision on shared-chats scans (§4.11).
 #[test]
-fn removed_peers_and_removed_devices_answer_not_available() {
+fn removed_peers_get_not_available_and_removed_devices_are_silent() {
     let (mut net, g) = founded(4);
     let e = net.say(1, &g, "before");
     net.run(MIN);
@@ -1958,7 +1958,7 @@ fn removed_peers_and_removed_devices_answer_not_available() {
         by_idx(4).iter().all(not_available),
         "another member's records"
     );
-    // The kicked device answers for its epochs as for an epoch it does not hold.
+    // The kicked device answers for its epochs as for an epoch it does not hold: silence.
     let b = answers_of(
         &mut net,
         3,
@@ -1975,12 +1975,7 @@ fn removed_peers_and_removed_devices_answer_not_available() {
             },
         ],
     );
-    for (i, r) in &b {
-        match r {
-            ResponseResult::Page(p) => assert!(p.entries.is_empty(), "entry {i}"),
-            r => assert!(not_available(r), "entry {i}: {r:?}"),
-        }
-    }
+    assert!(b.is_empty(), "{b:?}");
 }
 
 /// The per-epoch lookups of `chat` a member sends, with a member `other` named where a lookup
