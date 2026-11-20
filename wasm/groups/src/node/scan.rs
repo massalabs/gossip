@@ -676,6 +676,18 @@ impl Node {
         // that the requester is a member of.
         let listed = self.listed_epochs(&anchor, &peer);
         let mut list = self.signed_scan_entries(&listed, anchor, peer);
+        // A dissolved group, in either form, lists only its dissolve message and the root of
+        // its current epoch (§12.1, §5.8, D.74). Why: this is how a device that missed the
+        // dissolve learns it; it matches what a dissolved group still serves (its roots and
+        // its dissolve message); and no event ID is given, so nothing of the messages is
+        // revealed and the asker asks for nothing it would be refused.
+        if matches!(
+            self.group_status(&anchor),
+            super::records::GroupStatus::Dissolved { .. }
+        ) {
+            list.retain(|e| matches!(e.item, EntryItem::Dissolve(_) | EntryItem::Root));
+            return Ok(list);
+        }
         let mut deletions = Vec::new();
         let mut others = Vec::new();
         for chat in &listed {
