@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use auth::UserPublicKeys;
 
 use super::records::{
-    ChangeKind, EpochStatus, GroupStatus, Marker, PendingLeave, ReplyCount, SignedKey,
+    ChangeKind, EpochStatus, GroupStatus, MarkerKind, PendingLeave, ReplyCount, SignedKey,
     SignedObject, SignedRecord, Target, TaskKey, TriggerKind, Work,
 };
 use super::retrieval::Answer;
@@ -157,7 +157,7 @@ impl Node {
             return Ok(Answer::Invalid);
         }
         let chat = key.0;
-        if self.t.markers.get(&chat) == Some(&Marker::Dissolved) {
+        if self.marker_kind(&chat) == Some(MarkerKind::Dissolved) {
             return Ok(Answer::Refused);
         }
         let Some(rec) = self.t.epochs.get(&chat).cloned() else {
@@ -290,7 +290,7 @@ impl Node {
             return Ok(());
         };
         self.t.events.remove(&(chat, ChangeKind::Invitation));
-        self.t.markers.remove(&chat);
+        self.take_marker(&chat);
         let tasks: Vec<TaskKey> = self
             .t
             .tasks
@@ -550,10 +550,11 @@ impl Node {
                 r.state_override = Some(crate::epoch::GroupState::Dissolved);
             }
             if *c != chat && !kept_lines.contains(c) {
+                let reference = self.held_root(c).map(crate::root::Root::ref_chat_id);
                 self.drop_epoch(c);
-                // A dissolved marker (a chat ID only, §14.2): the same root relayed
-                // again is dropped, not an invitation.
-                self.t.markers.insert(*c, Marker::Dissolved);
+                // A dissolved marker (a chat ID and its reference, §14.2): the same root
+                // relayed again is dropped, not an invitation.
+                self.put_marker(*c, MarkerKind::Dissolved, reference);
             }
         }
     }
@@ -648,10 +649,16 @@ impl Node {
     /// of the group the requester is a member of), and a delayed delivery of its root does
     /// too; with no marker it was fetched and offered as a fresh invitation, which accepted
     /// was a second copy of the group, that the device then announced to the other members.
-    /// A marker is a chat ID only, and the device held each of these epochs.
+    /// A marker is a chat ID and the reference of its root, and the device held each of
+    /// these epochs.
     pub(crate) fn close_group(&mut self, cx: &mut Cx<'_>, group: ChatId, markers: bool) {
         let group = self.group_of(&group);
-        let installed = self.group_epochs(&group);
+        // The references are taken while the roots are still held (see `Marker`).
+        let installed: Vec<(ChatId, Option<crate::ids::RefChatId>)> = self
+            .group_epochs(&group)
+            .into_iter()
+            .map(|c| (c, self.held_root(&c).map(crate::root::Root::ref_chat_id)))
+            .collect();
         let epochs: Vec<ChatId> = self
             .t
             .epochs
@@ -746,8 +753,8 @@ impl Node {
         }
         self.t.group_recs.remove(&group);
         if markers {
-            for e in installed {
-                self.t.markers.insert(e, Marker::Closed);
+            for (e, reference) in installed {
+                self.put_marker(e, MarkerKind::Closed, reference);
             }
         }
         self.forget_closed(&epochs, group);

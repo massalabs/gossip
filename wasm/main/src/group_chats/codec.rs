@@ -19,9 +19,9 @@ use groups::display::VisibleMessage;
 use groups::node::records::{
     AnswerOp, Attempt, Backoff, Candidate, CandidateState, ChangeKind, EpochRecord, EpochStatus,
     FrozenScan, GroupRecord, GroupStatus, GroupSync, HeldRoot, Hint, Invitation, Junction,
-    JunctionKind, Lane, Marker, Meta, PeerRecord, PendingLeave, Purpose, RefEntry, RefLookup,
-    RefReply, ReplyCount, RequestRef, Run, ScanAttempt, ScanOp, SignedObject, SignedRecord, Target,
-    Task, TaskKey, Trigger, TriggerKind, Work,
+    JunctionKind, Lane, Marker, MarkerKind, Meta, PeerRecord, PendingLeave, Purpose, RefEntry,
+    RefLookup, RefReply, ReplyCount, RequestRef, Run, ScanAttempt, ScanOp, SignedObject,
+    SignedRecord, Target, Task, TaskKey, Trigger, TriggerKind, Work,
 };
 use groups::node::timing::Bucket;
 use groups::node::{
@@ -574,7 +574,31 @@ record!(SignedRecord {
     object,
     received_at
 });
-variants!(Marker { Closed, ClosedFrom(peer), Dissolved });
+variants!(MarkerKind { Closed, ClosedFrom(peer), Dissolved });
+/// A marker: `{"kind": …, "reference": hex | null}`. A marker stored before the reference was
+/// kept is its kind alone (`"Closed"`, `{"t": "ClosedFrom", …}`, `"Dissolved"`): it is read
+/// with no reference and stays valid.
+impl Codec for Marker {
+    fn enc(&self) -> J {
+        J::Obj(vec![
+            ("kind".to_owned(), self.kind.enc()),
+            ("reference".to_owned(), self.reference.enc()),
+        ])
+    }
+    fn dec(j: &J) -> R<Self> {
+        if matches!(j, J::Str(_)) || j.field("t").is_ok() {
+            return Ok(Marker {
+                kind: Codec::dec(j)?,
+                reference: None,
+            });
+        }
+        Ok(Marker {
+            kind: Codec::dec(j.field("kind")?)?,
+            reference: Codec::dec(j.field("reference")?)?,
+        })
+    }
+}
+impl Elem for Marker {}
 record!(ReplyCount { since, count, owed });
 record!(PendingLeave { leave, from, at });
 record!(HeldRoot { root, from, at });
@@ -1399,9 +1423,26 @@ mod tests {
         ] {
             round_trip(status);
         }
-        round_trip(Marker::Closed);
-        round_trip(Marker::ClosedFrom(peer));
-        round_trip(Marker::Dissolved);
+        let reference = RefChatId::from_bytes([16; 32]);
+        for kind in [
+            MarkerKind::Closed,
+            MarkerKind::ClosedFrom(peer),
+            MarkerKind::Dissolved,
+        ] {
+            round_trip(kind);
+            for reference in [None, Some(reference)] {
+                round_trip(Marker { kind, reference });
+            }
+            // A marker stored before the reference was kept: its kind alone, read with no
+            // reference.
+            assert_eq!(
+                Marker::dec(&J::parse(&kind.enc().to_text()).unwrap()),
+                Ok(Marker {
+                    kind,
+                    reference: None
+                })
+            );
+        }
         // The key of an unverified leave: epoch, leaver, supplier.
         round_trip((chat, peer, GossipId::from_bytes([12; 32])));
         round_trip(ReplyCount {

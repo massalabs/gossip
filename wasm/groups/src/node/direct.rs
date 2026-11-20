@@ -396,7 +396,7 @@ impl Node {
             self.drop_tasks_of(&[id]);
             self.drop_fetched_for(id);
         }
-        self.t.markers.remove(&id);
+        self.take_marker(&id);
         if !self.keeps_mine(&theirs) {
             self.adopt(cx, theirs, from, Vec::new(), false)?;
             self.changed(id, ChangeKind::Joined, cx.now);
