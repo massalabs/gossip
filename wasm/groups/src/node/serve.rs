@@ -224,6 +224,45 @@ impl Node {
         epoch_lookup(entry) && from != self.me && self.shares_epoch(&from)
     }
 
+    /// Whether a queued answer `op` to `from` that this device can no longer give is replaced
+    /// by "not available" (true) or dropped (false), decided now as on receipt
+    /// (`handle_query`): a device that does not hold the epoch, or holds it in a group where
+    /// it is no longer active, answers an authorized entry "not available" and an
+    /// unauthorized one "not available" only when it is a lookup tied to an epoch from a peer
+    /// that shares an active chat with it (§13.7, D.74). The entry is the one the answer was
+    /// decided for: a root as a lookup of it by ID (by reference or parent, the same rule), a
+    /// signed object as a signed-object lookup, a page as a tips scan. `None` for a status or a
+    /// key answer, decided on receipt and naming no epoch.
+    pub(crate) fn unserved_answer(&mut self, from: GossipId, op: &AnswerOp) -> Option<bool> {
+        let op = match *op {
+            AnswerOp::Event { chat_id, event_id } => QueryOp::Event { chat_id, event_id },
+            AnswerOp::SyncObj {
+                chat_id,
+                sync_obj_id,
+            } => QueryOp::SyncObj {
+                chat_id,
+                sync_obj_id,
+            },
+            AnswerOp::Root { chat_id } => QueryOp::ChatById(chat_id),
+            AnswerOp::Object { chat_id, item } => {
+                let (chat_id, kind, id) = super::objects::item_key(chat_id, item)?;
+                QueryOp::SignedObject { chat_id, kind, id }
+            }
+            AnswerOp::Page {
+                anchor,
+                scan_id,
+                offset,
+            } => QueryOp::TipsScan {
+                anchor,
+                scan_id,
+                offset,
+            },
+            AnswerOp::Status(_) | AnswerOp::Keys { .. } => return None,
+        };
+        let entry = QueryEntry::Op(op);
+        Some(self.authorize(from, &entry) || self.unservable_answered(from, &entry))
+    }
+
     /// Whether this device answers the per-epoch lookups of `chat` at all: its group is
     /// active there (D.74). A device that still holds the epoch but was kicked, left, waits
     /// for a kick or saw the group dissolved answers exactly as a device that does not hold
