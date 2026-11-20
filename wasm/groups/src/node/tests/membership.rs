@@ -39,6 +39,9 @@ pub(crate) struct MNet {
     pub offline: Vec<bool>,
     /// Plaintexts dropped because the recipient was offline: `(from, to, bytes)`.
     pub dropped: Vec<(usize, usize, Vec<u8>)>,
+    /// Whether the devices send what a reply's reference calls for, on every restart too
+    /// (off as [`crate::node::timing::REF_LOOKUPS_SENT`] unless a test turns it on).
+    pub ref_lookups: bool,
 }
 
 impl MNet {
@@ -58,6 +61,7 @@ impl MNet {
             now: T0,
             offline: vec![false; n],
             dropped: Vec::new(),
+            ref_lookups: crate::node::timing::REF_LOOKUPS_SENT,
         };
         for d in 0..n {
             for k in 0..n {
@@ -243,8 +247,18 @@ impl MNet {
 
     /// Restarts device `d` from its store.
     pub(crate) fn restart(&mut self, d: usize) {
+        let on = self.ref_lookups;
         let dev = &mut self.devs[d];
-        dev.node = Node::open(&dev.store, gid(d)).unwrap();
+        dev.node = Node::open_with_ref_lookups(&dev.store, gid(d), on).unwrap();
+    }
+
+    /// Turns on or off, on every device from now on, what a reply's reference makes a device
+    /// send (the requester side of §7.6 and §12.7): each device is restarted with it.
+    pub(crate) fn set_ref_lookups(&mut self, on: bool) {
+        self.ref_lookups = on;
+        for d in 0..self.devs.len() {
+            self.restart(d);
+        }
     }
 }
 
