@@ -482,3 +482,134 @@ fn a_tips_scan_lists_nothing_of_a_linked_group_where_the_device_is_inactive() {
     }
     assert!(wrong.is_empty(), "(status, lists C): {wrong:?}");
 }
+
+/// A = {0, 1, 2, 3} and C = {0, 1, 3}, both active on R and Q, and a message of Q in C.
+/// Returns `(net, A, C)`.
+fn active() -> (MNet, ChatId, ChatId) {
+    let mut net = MNet::new(5, true);
+    let a = net.create(0, &[1, 2, 3]);
+    let c = net.create(0, &[1, 3]);
+    net.exchange();
+    for m in 1..4 {
+        net.accept_all(m);
+    }
+    net.run(2 * MIN);
+    net.say(Q, &c, "before");
+    net.run(MIN);
+    assert_eq!(net.summary(R, &c).unwrap().status, MyStatus::Member);
+    (net, a, c)
+}
+
+/// Everything R sends now, handed off and delivered to nobody: `(recipient, frames)`.
+fn drain(net: &mut MNet) -> Vec<(GossipId, Vec<Frame>)> {
+    let now = net.now;
+    let dev = &mut net.devs[R];
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    let mut sent = Vec::new();
+    for o in out {
+        let dev = &mut net.devs[R];
+        dev.node
+            .handed_off(&mut dev.store, o.handle, now, &mut net.rng)
+            .unwrap();
+        sent.push((o.to, frames(&o.plaintext)));
+    }
+    sent
+}
+
+/// The query Q sends R about C in the tests of queued answers, and the neighbor request.
+fn lookups_of_c(c: ChatId) -> Vec<Frame> {
+    vec![
+        query(
+            9,
+            T0,
+            MIN,
+            vec![
+                QueryOp::ChatById(c),
+                QueryOp::SignedObject {
+                    chat_id: c,
+                    kind: crate::wire::SignedKind::Leave,
+                    id: *crate::hash::leave_id(&c, &gid(Q)).as_bytes(),
+                },
+                QueryOp::TipsScan {
+                    anchor: c,
+                    scan_id: scan_id(4),
+                    offset: 0,
+                },
+                QueryOp::Keys {
+                    chat_id: c,
+                    gossip_id: gid(0),
+                },
+            ],
+        ),
+        Frame::NeighborRequest(NeighborRequest { chat_id: c }),
+    ]
+}
+
+/// What R sends Q in answer to [`lookups_of_c`]: the responses by entry position, and the
+/// neighbor responses naming `c`.
+fn answers_to_q(
+    sent: &[(GossipId, Vec<Frame>)],
+    c: ChatId,
+) -> (Vec<(u32, ResponseResult)>, Vec<Frame>) {
+    let mut answers = Vec::new();
+    let mut neighbor = Vec::new();
+    for (to, frames) in sent {
+        if *to != gid(Q) {
+            continue;
+        }
+        for f in frames {
+            match f {
+                Frame::Response(r) if r.request_id == Some(RequestId::from_bytes([9; 16])) => {
+                    answers.push((r.idx, r.result.clone()));
+                }
+                Frame::NeighborResponse(n) if n.chat_id == c => neighbor.push(f.clone()),
+                _ => {}
+            }
+        }
+    }
+    answers.sort_by_key(|(i, _)| *i);
+    (answers, neighbor)
+}
+
+/// §13.7, D.74: Q asks R, active in C, for C's root, for its own leave R holds, for a tips
+/// scan anchored in C and for the keys of a member, and asks to be its neighbor in C. R
+/// deletes C before the answers go out. A device that never held C answers each lookup "not
+/// available" (Q shares the active chat A with it) and declines the neighbor request without
+/// suggestions, so R gives these answers too: never silence where a device that never held
+/// the epoch answers. The key answer, decided on receipt and naming no chat, still goes. Before,
+/// the root, signed-object and page answers and the neighbor response were dropped.
+#[test]
+fn answers_queued_when_the_chat_is_deleted_are_those_of_a_device_that_never_held_it() {
+    let (mut net, _, c) = active();
+    let leave = pushed(&net, "leave", c);
+    net.recv_frames_m(R, Q, &[leave]);
+    drain(&mut net);
+    net.recv_frames_m(R, Q, &lookups_of_c(c));
+    let now = net.now;
+    let dev = &mut net.devs[R];
+    dev.node
+        .delete_group(&mut dev.store, c, now, &mut net.rng)
+        .unwrap();
+    let (answers, neighbor) = answers_to_q(&drain(&mut net), c);
+    let na = ResponseResult::Status(Status::NotAvailable);
+    assert_eq!(
+        answers
+            .iter()
+            .map(|(i, r)| (*i, r == &na))
+            .collect::<Vec<_>>(),
+        vec![(0, true), (1, true), (2, true), (3, false)],
+        "{answers:?}"
+    );
+    assert!(matches!(answers[3].1, ResponseResult::Keys(_)));
+    assert_eq!(
+        neighbor,
+        vec![Frame::NeighborResponse(crate::wire::NeighborResponse {
+            chat_id: c,
+            accepted: false,
+            suggestions: Vec::new(),
+        })]
+    );
+}
