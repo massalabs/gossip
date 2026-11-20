@@ -676,7 +676,9 @@ fn the_neighbor_lanes_visit_every_neighbor_before_repeating() {
 }
 
 #[test]
-fn a_page_with_skipped_entries_is_used_and_its_sender_penalised() {
+/// D.23 and D.37, settled: one unreadable entry makes the whole page malformed; nothing of
+/// it is used, its sender is penalised once, and the page does not end the scan as final.
+fn a_page_with_an_unreadable_entry_is_malformed_whole() {
     use prost::Message;
 
     use crate::wire::proto;
@@ -713,7 +715,6 @@ fn a_page_with_skipped_entries_is_used_and_its_sender_penalised() {
     pt.extend(container.encode_to_vec());
     net.recv(0, member(1), &pt);
     assert!(net.devs[0].node.score(&member(1)) < 500_000);
-    // The valid entry is used, and the page counts as final with its skipped entry (D.37).
-    assert_eq!(net.devs[0].node.t.tasks.len(), 1);
-    assert_eq!(net.devs[0].node.stats.scans_completed, 1);
+    assert_eq!(net.devs[0].node.t.tasks.len(), 0, "nothing of it is used");
+    assert_eq!(net.devs[0].node.stats.scans_completed, 0);
 }

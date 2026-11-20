@@ -438,7 +438,9 @@ fn an_unparseable_frame_from_a_member_is_penalised() {
 }
 
 #[test]
-fn a_notice_with_skipped_entries_is_penalised_and_its_valid_entries_used() {
+/// D.23, settled: one unreadable entry makes the whole notice malformed; nothing of it is
+/// used, and its sender is penalised once.
+fn a_notice_with_an_unreadable_entry_is_malformed_whole() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
     let n = proto::Notice {
@@ -463,9 +465,15 @@ fn a_notice_with_skipped_entries_is_penalised_and_its_valid_entries_used() {
     };
     let mut pt = vec![1u8];
     pt.extend(container.encode_to_vec());
+    let invalid = net.devs[0].node.stats().invalid;
     net.recv(0, member(1), &pt);
     assert!(net.devs[0].node.score(&member(1)) < 500_000);
-    assert_eq!(net.devs[0].node.t.tasks.len(), 1);
+    assert_eq!(
+        net.devs[0].node.stats().invalid,
+        invalid + 1,
+        "penalised once"
+    );
+    assert_eq!(net.devs[0].node.t.tasks.len(), 0, "nothing of it is used");
 }
 
 #[test]
