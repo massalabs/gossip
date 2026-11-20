@@ -15,7 +15,7 @@ use groups::{ChatId, GossipId, SyncObjId};
 struct Db {
     rows: BTreeMap<(String, String), (String, Option<String>)>,
     edges: BTreeMap<(String, String), String>,
-    objects: BTreeMap<(String, String), String>,
+    objects: BTreeMap<(String, String), (String, bool)>,
     node: BTreeMap<(String, String), String>,
 }
 
@@ -38,8 +38,10 @@ impl Db {
             self.edges.remove(&(k.chat_id.clone(), k.event_id.clone()));
         }
         for o in &b.objects {
-            self.objects
-                .insert((o.chat_id.clone(), o.sync_obj_id.clone()), o.fields.clone());
+            self.objects.insert(
+                (o.chat_id.clone(), o.sync_obj_id.clone()),
+                (o.fields.clone(), o.shareable),
+            );
         }
         for k in &b.removed_objects {
             self.objects
@@ -88,10 +90,11 @@ impl Db {
             objects: self
                 .objects
                 .iter()
-                .map(|((c, s), f)| ObjectOut {
+                .map(|((c, s), (f, shareable))| ObjectOut {
                     chat_id: c.clone(),
                     sync_obj_id: s.clone(),
                     fields: f.clone(),
+                    shareable: *shareable,
                 })
                 .collect(),
             node: self
@@ -128,7 +131,7 @@ impl Db {
             || self
                 .objects
                 .iter()
-                .any(|((c, _), f)| c.contains(needle) || f.contains(needle))
+                .any(|((c, _), (f, _))| c.contains(needle) || f.contains(needle))
             || self
                 .node
                 .iter()
@@ -1142,4 +1145,32 @@ fn lookup_results_are_taken_once_and_the_taking_is_persisted() {
         net.peers[0].core.take_lookup_results(net.now).unwrap(),
         "[]"
     );
+}
+
+/// §14.1: whether a record is shareable is stored in a field of its own beside the object's
+/// fields, both values, and read back as written when the node opens from the tables.
+#[test]
+fn the_shareable_flag_is_stored_beside_the_fields_and_read_back() {
+    use groups::node::records::{Batch, NodeChanges};
+    use groups::store::{Changes, ObjectRecord, StorageRead};
+    let chat = ChatId::from_bytes([7; 32]);
+    let mut c = Changes::new(chat);
+    for (n, shareable) in [(1u8, true), (2, false)] {
+        let mut o = ObjectRecord::empty(SyncObjId::from_bytes([n; 32]), shareable);
+        o.erase_at = Some(1_700_000_000_000 + u64::from(n));
+        c.objects.insert(o.sync_obj_id, o);
+    }
+    let expected: Vec<ObjectRecord> = c.objects.values().cloned().collect();
+    let out = super::store::encode_batch(&Batch {
+        epochs: vec![c],
+        node: NodeChanges::default(),
+        erase: BTreeSet::new(),
+    });
+    let flags: Vec<bool> = out.objects.iter().map(|o| o.shareable).collect();
+    assert_eq!(flags, vec![true, false]);
+    assert!(out.objects.iter().all(|o| !o.fields.contains("shareable")));
+    let mut db = Db::default();
+    db.apply(&out);
+    let (mem, _) = super::store::decode_snapshot(&db.snapshot()).unwrap();
+    assert_eq!(mem.objects(&chat).unwrap(), expected);
 }
