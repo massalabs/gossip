@@ -227,6 +227,18 @@ impl ObjectRecord {
         });
         versions.chain(deletion).chain(expiry)
     }
+
+    /// The target of the reaction this object holds as its current result, if any (§7.6).
+    #[must_use]
+    pub fn reaction_target(&self) -> Option<SyncObjId> {
+        match &self.current {
+            Some(StoredResult::Content(Content {
+                body: crate::event::Body::Reaction(r),
+                ..
+            })) => Some(r.target),
+            _ => None,
+        }
+    }
 }
 
 /// What a pending item is.
@@ -260,10 +272,12 @@ pub struct PendingItem {
 
 /// The writes of one logical step on one epoch, committed atomically (§15.2).
 ///
-/// Every map is an upsert. Processed rows, edges and objects are never deleted within a
-/// retained group (stubs, edges and tombstones are kept until the group is closed, §14.1);
-/// only a temporary-rejection marker can be removed, when capacity forces it out (§9.6).
-/// Edges are written once per child, when it is first processed.
+/// The maps are upserts and the sets are deletions; a key is never in both. Stubs, edges
+/// and tombstones are kept until the group is closed (§14.1), with two exceptions: a
+/// temporary-rejection marker is removed on acceptance or when capacity forces it out
+/// (§9.6), and the message timer erases a message with its object, the rows of all its
+/// events and their parent edges (§7.7). Edges are written once per child, when it is
+/// first processed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Changes {
     /// The epoch.
@@ -274,9 +288,15 @@ pub struct Changes {
     pub edges: BTreeMap<EventId, Vec<EventId>>,
     /// Current objects to insert or replace.
     pub objects: BTreeMap<SyncObjId, ObjectRecord>,
-    /// Temporary-rejection markers to remove (§9.6); never a processed row, and never a row
-    /// also listed in `rows`.
+    /// Event rows to delete: a temporary-rejection marker (§9.6), or a row the message timer
+    /// erases (§7.7). Never a row also listed in `rows`.
     pub removed_rows: BTreeSet<EventId>,
+    /// Parent edges to delete, by child: those of an event the message timer erases (§7.7).
+    /// Never a child also listed in `edges`.
+    pub removed_edges: BTreeSet<EventId>,
+    /// Objects to delete: those the message timer erases (§7.7). Never one also listed in
+    /// `objects`.
+    pub removed_objects: BTreeSet<SyncObjId>,
 }
 
 impl Changes {
@@ -289,6 +309,8 @@ impl Changes {
             edges: BTreeMap::new(),
             objects: BTreeMap::new(),
             removed_rows: BTreeSet::new(),
+            removed_edges: BTreeSet::new(),
+            removed_objects: BTreeSet::new(),
         }
     }
 
@@ -299,6 +321,8 @@ impl Changes {
             && self.edges.is_empty()
             && self.objects.is_empty()
             && self.removed_rows.is_empty()
+            && self.removed_edges.is_empty()
+            && self.removed_objects.is_empty()
     }
 }
 
@@ -417,6 +441,19 @@ pub trait StorageRead {
     ///
     /// A backend failure.
     fn first_pending(&self, chat_id: &ChatId) -> Result<Option<PendingItem>, StorageError>;
+
+    /// The objects whose current result is a reaction to `target` (§7.6), ascending. Index:
+    /// the reactions by target ([`ObjectRecord::reaction_target`]); it serves the erasure of
+    /// a message's reactions with it (§7.7).
+    ///
+    /// # Errors
+    ///
+    /// A backend failure.
+    fn reactions_to(
+        &self,
+        chat_id: &ChatId,
+        target: &SyncObjId,
+    ) -> Result<Vec<SyncObjId>, StorageError>;
 }
 
 /// A store of the records of §14.1.

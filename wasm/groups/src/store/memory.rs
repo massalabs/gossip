@@ -20,6 +20,7 @@ struct EpochRecords {
     carriers: BTreeSet<EventId>,
     markers: BTreeSet<EventId>,
     pending: BTreeSet<(u64, EventId, PendingKind, SyncObjId)>,
+    reactions: BTreeSet<(SyncObjId, SyncObjId)>,
 }
 
 impl EpochRecords {
@@ -92,7 +93,21 @@ impl EpochRecords {
                 self.pending.insert(expiry(due));
             }
         }
+        if let Some(t) = old.reaction_target() {
+            self.reactions.remove(&(t, sync));
+        }
+        if let Some(t) = obj.reaction_target() {
+            self.reactions.insert((t, sync));
+        }
         self.objects.insert(sync, obj);
+    }
+
+    fn remove_object(&mut self, sync: &SyncObjId) {
+        if self.objects.contains_key(sync) {
+            // Unindexed as an object with nothing, then dropped.
+            self.put_object(ObjectRecord::empty(*sync));
+            self.objects.remove(sync);
+        }
     }
 }
 
@@ -248,6 +263,25 @@ impl StorageRead for MemoryStorage {
             .get(chat_id)
             .and_then(|e| e.pending.first().map(|k| item(*k))))
     }
+
+    fn reactions_to(
+        &self,
+        chat_id: &ChatId,
+        target: &SyncObjId,
+    ) -> Result<Vec<SyncObjId>, StorageError> {
+        let first = (*target, SyncObjId::from_bytes([0; 32]));
+        Ok(self
+            .epochs
+            .get(chat_id)
+            .map(|e| {
+                e.reactions
+                    .range(first..)
+                    .take_while(|(t, _)| t == target)
+                    .map(|(_, r)| *r)
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
 }
 
 impl MemoryStorage {
@@ -263,8 +297,14 @@ impl MemoryStorage {
             epoch.remove_row(id);
         }
         epoch.edges.extend(changes.edges);
+        for id in &changes.removed_edges {
+            epoch.edges.remove(id);
+        }
         for obj in changes.objects.into_values() {
             epoch.put_object(obj);
+        }
+        for sync in &changes.removed_objects {
+            epoch.remove_object(sync);
         }
     }
 }
