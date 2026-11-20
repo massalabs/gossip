@@ -312,6 +312,9 @@ pub struct Node {
     conn_view: direct::ConnectionView,
     /// The references of the roots held (derived, §4.5).
     rx: references::RefIndex,
+    /// Whether this device sends anything because of a reply's reference
+    /// ([`timing::REF_LOOKUPS_SENT`]; set otherwise only by tests).
+    ref_lookups: bool,
 }
 
 impl core::fmt::Debug for Node {
@@ -332,6 +335,25 @@ impl Node {
     ///
     /// A storage failure.
     pub fn open<S: NodeStorage>(store: &S, me: GossipId) -> Result<Self, NodeError> {
+        Self::open_as(store, me, timing::REF_LOOKUPS_SENT)
+    }
+
+    /// [`Node::open`], sending or not what a reply's reference calls for, whatever
+    /// [`timing::REF_LOOKUPS_SENT`] says: for the tests of that side only.
+    #[cfg(test)]
+    pub(crate) fn open_with_ref_lookups<S: NodeStorage>(
+        store: &S,
+        me: GossipId,
+        on: bool,
+    ) -> Result<Self, NodeError> {
+        Self::open_as(store, me, on)
+    }
+
+    fn open_as<S: NodeStorage>(
+        store: &S,
+        me: GossipId,
+        ref_lookups: bool,
+    ) -> Result<Self, NodeError> {
         let mut node = Self {
             me,
             epochs: BTreeMap::new(),
@@ -349,6 +371,7 @@ impl Node {
             ri: group::RootIndex::default(),
             conn_view: direct::ConnectionView::default(),
             rx: references::RefIndex::default(),
+            ref_lookups,
         };
         node.reload(store)?;
         Ok(node)
@@ -384,6 +407,9 @@ impl Node {
             .collect();
         for (r, k) in refs {
             self.work_refs.entry(r).or_default().insert(k);
+        }
+        if !self.ref_lookups {
+            self.drop_ref_lookups();
         }
         self.conn_view = self.connection_view();
         // The plaintexts in flight stay so: a failed operation does not change them, and a

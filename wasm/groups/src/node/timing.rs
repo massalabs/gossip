@@ -156,6 +156,23 @@ pub const PLAINTEXTS_PER_POLL: usize = 64;
 
 // ── Replies that name an epoch this device cannot place (§7.6, §12.7) ────────
 
+/// Whether this device sends anything because of the reference a received reply names: the
+/// chat lookup by reference (§12.7) and the sync-object fetch of a quoted target it lacks
+/// (§7.6). Off in the first release, to be turned on in a later one; answering a chat
+/// lookup by reference does not depend on it.
+///
+/// Off, a received reply records nothing and schedules nothing, and the records of these
+/// lookups left by an earlier run are dropped when the engine is opened, with the round
+/// each one ran, so that none of them is ever sent. Why off: the open points of §7.6 (the
+/// fetch of a quoted target asks every eligible member rather than the round's peers, the
+/// limits count per delivering peer rather than per chat, the count of rounds restarts once
+/// the replies naming a reference are deleted and sent again, the reply's unsigned author
+/// field picks the second peer, and a reply held only in a read-only chat must start
+/// nothing). What stays on is what makes turning it on later safe: the closed-chat and
+/// dissolved markers keep the reference of the root they close, and the references of the
+/// held roots and the invitations not answered yet are computed.
+pub const REF_LOOKUPS_SENT: bool = false;
+
 /// The longest wait after a reply is received before what it names is looked up: the wait
 /// is drawn uniformly up to it. Why: a lookup sent at the instant of receipt would tie it to
 /// that delivery more tightly than needed. Never tied to display or reading: a lookup made
