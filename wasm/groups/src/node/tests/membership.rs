@@ -5199,3 +5199,103 @@ fn a_member_added_back_and_restored_before_its_kick_learns_it_and_gets_its_histo
     assert_eq!(net.current(0, &x), Some(z));
     assert_eq!(net.summary(bob, &x).unwrap().status, MyStatus::Member);
 }
+
+/// §13.7, §12.4, §12.5, §12.8, §12.9, D.74: a lookup tied to an epoch from a peer that shares
+/// an active accepted chat with this device is answered "not available" whenever this device
+/// cannot or may not serve it, the same way, byte for byte, whether it never held the epoch,
+/// holds it but the asker is not a member, holds it in a group where it is no longer active,
+/// or holds it active without the object; and with the same effect on the asker's request
+/// and response budgets and on whether it counts as alive. A peer that shares no active chat
+/// gets silence.
+#[test]
+fn every_unservable_lookup_from_a_member_gets_the_same_not_available() {
+    // R = 1 answers Q = 3. A = {0, 1, 2, 3} is active on both; B = {0, 1, 2} does not list
+    // Q; C = {0, 1, 3} is a group R was removed from.
+    let mut net = MNet::new(5, true);
+    let a = net.create(0, &[1, 2, 3]);
+    let b = net.create(0, &[1, 2]);
+    let c = net.create(0, &[1, 3]);
+    net.exchange();
+    for d in 1..4 {
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    net.change(
+        0,
+        c,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(1)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.summary(1, &c).unwrap().status, MyStatus::Removed);
+    let (r, q) = (1, 3);
+    let never = ChatId::from_bytes([0x77; 32]);
+    let missing_event = EventId::new(net.now - 1, [0x66; 16]);
+    let missing_sync = crate::ids::SyncObjId::from_bytes([0x55; 32]);
+    let lookups = |chat: ChatId| {
+        vec![
+            QueryOp::Event {
+                chat_id: chat,
+                event_id: missing_event,
+            },
+            QueryOp::SyncObj {
+                chat_id: chat,
+                sync_obj_id: missing_sync,
+            },
+            QueryOp::SignedObject {
+                chat_id: chat,
+                kind: crate::wire::SignedKind::Leave,
+                id: [0x44; 32],
+            },
+            QueryOp::Removal {
+                chat_id: chat,
+                gossip_id: gid(4),
+            },
+            QueryOp::Keys {
+                chat_id: chat,
+                gossip_id: gid(4),
+            },
+        ]
+    };
+    let peer = |net: &MNet| net.devs[r].node.t.peers.get(&gid(q)).cloned().unwrap();
+    // One lookup first, so that both budgets are computed at this instant: the time stands
+    // still from here on, and each case's effect is a plain difference.
+    answers_of(&mut net, r, q, lookups(a));
+    let mut seen: Vec<(Vec<(u32, ResponseResult)>, i128, i128, u32)> = Vec::new();
+    for (case, chat) in [
+        ("never held", never),
+        ("not a member", b),
+        ("inactive", c),
+        ("active", a),
+    ] {
+        // Each lookup alone, so that every answer is a frame of its own.
+        for op in lookups(chat) {
+            let before = peer(&net);
+            let answers = answers_of(&mut net, r, q, vec![op.clone()]);
+            let after = peer(&net);
+            let effect = (
+                answers,
+                i128::from(before.requests.level) - i128::from(after.requests.level),
+                i128::from(before.responses.level) - i128::from(after.responses.level),
+                after.failures,
+            );
+            assert_eq!(
+                effect.0,
+                vec![(0, ResponseResult::Status(Status::NotAvailable))],
+                "{case}: {op:?}"
+            );
+            if let Some(first) = seen.first() {
+                assert_eq!(&effect, first, "{case}: {op:?}");
+            }
+            seen.push(effect);
+        }
+    }
+    // A peer that shares no active chat: silence (device 4 holds nothing with R).
+    for op in lookups(a) {
+        assert!(answers_of(&mut net, r, 4, vec![op]).is_empty());
+    }
+}
