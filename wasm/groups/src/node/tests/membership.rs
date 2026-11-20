@@ -2944,13 +2944,16 @@ fn accepting_a_rejoin_after_deleting_the_group_starts_a_new_one() {
 
 /// Finding 9 of the review of 54711780: handover roots whose parent is not held were kept
 /// unverified, 64 for the whole device, with no expiry: a stranger filled every slot, and
-/// the parent lookup of each went to the members the unverified root lists.
+/// the parent lookup of each went to the members the unverified root lists. The limits are
+/// local policy, settled at 64 per sender (across every chat) and 1,024 per device.
 #[test]
 fn unverified_handover_roots_are_bounded_per_sender_and_asked_of_their_sender() {
+    use crate::node::timing::{HELD_ROOTS_PER_DEVICE, HELD_ROOTS_PER_SENDER};
+    assert_eq!((HELD_ROOTS_PER_SENDER, HELD_ROOTS_PER_DEVICE), (64, 1_024));
     let (mut net, _g) = founded(3);
     let stranger = ident(7);
     let members = vec![gid(0), gid(1), gid(2), stranger.id];
-    for i in 0..10u8 {
+    for i in 0..70u8 {
         let params = |owner: &auth::UserPublicKeys, seed: u8| crate::root::RootParams {
             name: format!("h{i}"),
             members: members.clone(),
@@ -2982,7 +2985,7 @@ fn unverified_handover_roots_are_bounded_per_sender_and_asked_of_their_sender() 
             .handle_plaintext(&mut dev.store, stranger.id, &pt, now, &mut net.rng)
             .unwrap();
     }
-    assert!(net.devs[0].node.tables().held_roots.len() <= 4);
+    assert_eq!(net.devs[0].node.tables().held_roots.len(), 64);
     let now = net.now;
     let dev = &mut net.devs[0];
     let out = dev
