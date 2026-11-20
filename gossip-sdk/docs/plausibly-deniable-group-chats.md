@@ -440,7 +440,7 @@ GossipID.
 
 An epoch has **at most 512 members**, the owner included.
 
-The limit is provisional, like those of §17.4.
+The limit is fixed for wire version 1 (§2.2): a larger group needs a new wire version.
 It is not set by the container: the fixed part of a root (owner keys, signature, secret,
 challenges, time and wrappers) is about 6.7 KB, and each member costs 34 encoded bytes, so about
 1,490 members would fit one empty 57,344-byte container (§13.10).
@@ -2796,9 +2796,10 @@ are fixed.
   computed from the decoded entries, so that every device obtains the same number.
   A message with both at their limits, 16 parents and 32 reply targets is 33,383 bytes.
 
-The notice entry and byte limits, the page byte limit, the member
-limit, the parent limit and the limits of §17.4 other than the hint cache are provisional and must
-be profiled before release.
+Every limit in the table above is fixed for wire version 1 (§2.2): a receiver rejects what exceeds
+it, so none can be raised later. The byte limit of a notice or a page is a second guard only: 128
+entries at their largest take about 9.2 KiB, so a list within the entry limit never reaches it.
+The limits of §17.4 are local policy and may change from release to release.
 
 For sizing: the session layer and the group message type add at most 3,632 bytes to a group plaintext (two ML-KEM-768
 ciphertexts, a fresh ML-KEM-768 public key, a signed envelope and framing; no padding), whatever
@@ -3011,6 +3012,58 @@ attempted; other copies may remain."** Remote erasure is never claimed.
 - recovery after every shareable copy is gone;
 - a globally latest message version;
 - traffic-analysis resistance.
+
+### 16.7 Known limitation: an invitation can probe whether a device holds a chat
+
+**The limitation.** Take Bob, and Alice, a contact of Bob who has learnt the identifier of some
+chat X and wants to know whether Bob is in it. Alice builds a root that lists Bob as a member
+and names X as its parent, signs it, and delivers it to Bob as an invitation.
+
+Before showing Bob the prompt, Bob's device tries to obtain the parent (§4.8), so that it can
+recognise an epoch that continues a chat Bob is already in, and adopt it without asking:
+
+- if Bob's device does not hold X, it sends a lookup for it to Alice's device;
+- if Bob's device holds X, or Bob closed it, it sends nothing.
+
+Alice therefore learns, from whether a lookup comes back, whether Bob holds or once closed X.
+The lookup also shows that the invitation reached Bob's device before Bob answered it.
+
+**What it takes.** Alice must be someone whose invitations reach Bob's device, and must already
+know X's identifier, which is unpredictable to anyone who never saw a root or a message of X or of
+the epoch that continues it. Alice learns one bit about one chat per invitation, and nothing
+about its members or content.
+
+**Why version 1 accepts it.** Closing it costs either a convenience honest members rely on or a
+mechanism that is hard to make exact; see below. The same kind of probe was closed where it was
+free to close: neighbor requests (§10.1), tip scans from non-members (§12.1) and root notices from
+peers that share nothing (§4.6).
+
+**Fixes a later wire version could adopt, and what each costs.**
+
+- **No lookup before the user accepts.** Bob's device sends nothing until Bob has answered, then
+  fetches the parent.
+  - It closes the probe completely, and makes "Ignore and Delete" invisible to the sender.
+  - *Drawback:* a member that missed one epoch and receives the next can no longer be recognised
+    before the prompt, so that member is asked to accept a continuation of a chat it is already
+    in. Every membership change that reaches a device out of order becomes a prompt.
+- **Always look up, as cover.** Bob's device sends the lookup whether or not it holds X.
+  - It keeps the adoption without a prompt.
+  - *Drawbacks:* the lookup is only the first step. When the parent is not held and the sender
+    answers "not available", the device goes on to ask the other listed members and shows the
+    prompt after a delay or enough answers; when it is held, none of that happens. To hide the
+    difference the device must act out the whole sequence in both cases, with the same messages
+    and the same timing, and any step that differs reopens the probe. It also still shows that the
+    invitation arrived, and lets anyone trigger useless traffic at will.
+- **Ask someone else.** Bob's device looks the parent up from members of chats it holds, never
+  from the sender.
+  - *Drawback:* it only helps when Bob holds a chat whose members can answer, which is exactly the
+    case that needs no lookup; otherwise there is nobody to ask but the sender.
+- **Bind the parent to the invitation.** The root would carry a value that only a member of the
+  parent epoch can compute for this recipient, so that a device can check the claim offline.
+  - *Drawback:* it changes the root format and the parent commitment (§4.5), and a commitment a
+    recipient can check against one known epoch is itself a way to test membership offline,
+    unless it is keyed by a secret of that epoch that an outsider cannot have. This needs a design
+    and a proof, not a patch.
 
 ## 17. Readiness, validation and future work
 
@@ -4470,6 +4523,8 @@ not counted against the member that relayed it.
 
 ### D.69 A handover gives authority over which parents (§4.7)
 
+*Settled:* choice A.
+
 *Found during review of the implementation. A security defect of the text.*
 
 *Current text:* a root is continuous when its signer owns each parent or is the new owner after "a
@@ -4517,6 +4572,12 @@ both, so its old signed leave is live again: the owner's device removed it again
 
 ### D.72 A former owner's roots after a handover (§5.9, §4.6 step 4, D.63)
 
+*Settled:* choice A. Which end is current is also settled as written in §4.9 and §5.9: among one
+owner's ends the greatest `(created_at, chat_id)`; a handover deposes the former owner whatever the
+dates; of two handovers from one owner each device follows the one it received first. A rule that
+made the lowest new owner's GossipID win was considered and rejected: it would let a former owner
+move the group to another member long after the handover.
+
 *Found during review of the implementation; it corrects D.63.*
 
 *Context:* with D.63 choice A, a former owner signs a new successor of an epoch it used to own
@@ -4547,6 +4608,14 @@ closed that epoch: silence means yes, a lookup means no.
 
 ### D.74 Removal records and removed peers (§10.4, §12.8, §5.6, §4.11)
 
+*Settled, for the shared-chats scan:* the scan lists, for a chat the asker is no longer in, the
+last epoch in which the asker is listed, whether it was removed from it or left it. A lookup of
+that root by that asker is answered, since it was a member of that epoch, and the kick or the kept
+leave naming that epoch is sent with it. Nothing about any later epoch is given. A device that
+holds nothing of the chat installs it read-only, as "you were removed" or "you left". The scan
+answers `restart` when a chat it listed stops being listable before all pages are sent, so that a
+device never names a chat its user has since left or deleted.
+
 *Found during review of the implementation.*
 
 *Current text:* §12.8 answers "a member of the named epoch"; §10.4 answers a removed peer "not
@@ -4564,6 +4633,9 @@ kicked device kept serving its root and listing its epochs.
 - **B:** other rules, to be given.
 
 ### D.75 Limits on invitations and parent lookups (§4.8, §11.8, §17.4)
+
+*Settled:* choice A; the limits stay provisional numbers of local policy. The probe it leaves open is
+stated in §16.7 with the fixes a later version could adopt.
 
 *Found during review of the implementation.*
 
