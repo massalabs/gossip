@@ -1,5 +1,6 @@
 //! Unit tests of the engine: one rule per test where possible (§10 to §13, §15, §17.4).
 
+mod connections;
 mod content;
 mod direct;
 mod dissemination;

@@ -558,6 +558,107 @@ describe('Direct chats, contacts and connections', { timeout: 300_000 }, () => {
     );
   });
 
+  it('drops the connections of a chat the device was kicked from, its history kept, and connects again once added back', async () => {
+    const [alice, bob, carol] = await open(3);
+    await setupSession(alice, bob, 'Bob', 'Alice');
+    await setupSession(alice, carol, 'Carol', 'Alice');
+
+    const groupId = await alice.groups.createGroup('Trip', [
+      bob.userId,
+      carol.userId,
+    ]);
+    await deliver();
+    for (const p of [bob, carol]) {
+      const [inv] = await p.groups.invitations();
+      await p.conversations.acceptInvitation(inv.epochId);
+    }
+    await deliver(20, 10_000);
+    expect(carol.discussions.getStatus(bob.userId)).toBe(SessionStatus.Active);
+
+    // Carol is kicked and keeps the history read-only: the chat no longer
+    // keeps her connection to Bob, as if she had deleted it (§5.12, D.86).
+    await alice.groups.changeMembers(groupId, { remove: [carol.userId] });
+    await deliver(10, 10_000);
+    expect((await carol.groups.get(groupId))?.status).toBe('removed');
+    expect(
+      await carol.queries.contacts.getByOwnerAndUser(carol.userId, bob.userId)
+    ).toBeUndefined();
+    // A contact the user accepted stays.
+    expect(
+      await carol.queries.contacts.getByOwnerAndUser(carol.userId, alice.userId)
+    ).toBeDefined();
+
+    // Alice adds her back: the root comes over Alice's session; once Carol
+    // accepts, she connects to Bob again, who takes her new announcement.
+    await alice.groups.changeMembers(groupId, { add: [carol.userId] });
+    await deliver(10, 10_000);
+    const [inv] = await carol.groups.invitations();
+    expect(inv).toBeDefined();
+    const rejoined = await carol.conversations.acceptInvitation(inv.epochId);
+    await deliver(20, 10_000);
+    expect(carol.discussions.getStatus(bob.userId)).toBe(SessionStatus.Active);
+    expect(bob.discussions.getStatus(carol.userId)).toBe(SessionStatus.Active);
+
+    await alice.closeSession();
+    peers = [bob, carol];
+    await carol.groups.sendMessage(rejoined, 'from carol, added back');
+    await deliver(10, 10_000);
+    expect(await texts(bob.groups, groupId)).toContain(
+      'from carol, added back'
+    );
+  });
+
+  it('keeps a connection while the signed leave for that peer waits in the outbox', async () => {
+    const [alice, bob, carol] = await open(3);
+    await setupSession(alice, bob, 'Bob', 'Alice');
+    await setupSession(alice, carol, 'Carol', 'Alice');
+
+    const groupId = await alice.groups.createGroup('Trip', [
+      bob.userId,
+      carol.userId,
+    ]);
+    await deliver();
+    for (const p of [bob, carol]) {
+      const [inv] = await p.groups.invitations();
+      await p.conversations.acceptInvitation(inv.epochId);
+    }
+    await deliver(20, 10_000);
+    expect(bob.discussions.getStatus(carol.userId)).toBe(SessionStatus.Active);
+
+    // Bob leaves visibly while his sends fail: the leave is encrypted for
+    // Carol and waits in his outbox.
+    const send = net.sendMessage.bind(net);
+    net.sendMessage = async () => {
+      throw new Error('offline');
+    };
+    await bob.groups.leave(groupId, 'Signed');
+    await bob.groups.tick();
+    await bob.groups.settle();
+    await bob.conversations.settle();
+    expect(await bob.groups.get(groupId)).toBeNull();
+    expect(
+      await bob.queries.groups.hasOutboxFor(bob.userId, carol.userId)
+    ).toBe(true);
+    expect(
+      await bob.queries.contacts.getByOwnerAndUser(bob.userId, carol.userId)
+    ).toBeDefined();
+
+    // Sent: the connection goes, and Carol got the leave.
+    net.sendMessage = send;
+    await deliver(10, 600_000);
+    await bob.conversations.catchUp();
+    await bob.conversations.settle();
+    expect(
+      await bob.queries.groups.hasOutboxFor(bob.userId, carol.userId)
+    ).toBe(false);
+    expect(
+      await bob.queries.contacts.getByOwnerAndUser(bob.userId, carol.userId)
+    ).toBeUndefined();
+    expect((await carol.groups.get(groupId))?.members).not.toContain(
+      bob.userId
+    );
+  });
+
   /**
    * The account of `p` restored from its recovery phrase on an empty
    * device, `p` closed for good; the board read from now on, as the app
