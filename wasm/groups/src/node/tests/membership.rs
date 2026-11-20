@@ -3864,6 +3864,89 @@ fn a_restored_member_learns_its_kick_from_an_archived_group() {
     assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
 }
 
+/// D.79, settled: an archive ("Dissolve & Keep archived") answers a removed member's removal
+/// lookup of its own record with that record, as it answers the signed-object lookup of the
+/// same kick or leave; a lookup of another member's record gets silence (D.74).
+#[test]
+fn an_archive_gives_a_removed_member_its_own_record_on_a_removal_lookup() {
+    for leave in [false, true] {
+        let (mut net, g) = founded(4);
+        if leave {
+            let now = net.now;
+            let s = signer(3);
+            let dev = &mut net.devs[3];
+            dev.node
+                .leave_group(
+                    &mut dev.store,
+                    &s,
+                    g,
+                    LeaveChoice::Signed,
+                    now,
+                    &mut net.rng,
+                )
+                .unwrap();
+            net.run(2 * MIN);
+        } else {
+            net.change(
+                0,
+                g,
+                GroupChange::Successor {
+                    add: vec![],
+                    remove: vec![gid(3)],
+                    name: None,
+                },
+            )
+            .unwrap();
+            net.exchange();
+        }
+        assert!(!net.summary(0, &g).unwrap().members.contains(&gid(3)));
+        let now = net.now;
+        let s = signer(0);
+        let dev = &mut net.devs[0];
+        dev.node
+            .dissolve_group(&mut dev.store, &s, g, false, now, &mut net.rng)
+            .unwrap();
+        net.exchange();
+        assert_eq!(
+            net.summary(1, &g).unwrap().status,
+            MyStatus::Dissolved { deleted: false }
+        );
+        let a = answers_of(
+            &mut net,
+            1,
+            3,
+            vec![
+                QueryOp::Removal {
+                    chat_id: g,
+                    gossip_id: gid(3),
+                },
+                QueryOp::Removal {
+                    chat_id: g,
+                    gossip_id: gid(2),
+                },
+            ],
+        );
+        let own: Vec<_> = a
+            .iter()
+            .filter(|(i, _)| *i == 0)
+            .map(|(_, r)| match r {
+                ResponseResult::Event(b) => wire::decode_event_blob(b, 1).ok(),
+                _ => None,
+            })
+            .collect();
+        let ok = match own.as_slice() {
+            [Some(EventObject::Kick(k))] => !leave && k.removed() == gid(3),
+            [Some(EventObject::Leave(l))] => leave && l.leaver() == gid(3),
+            _ => false,
+        };
+        assert!(ok, "leave={leave}: its own record: {a:?}");
+        assert!(
+            a.iter().all(|(i, _)| *i == 0),
+            "leave={leave}: another member's record: {a:?}"
+        );
+    }
+}
+
 /// Issue "member who left is invited again to an old epoch" (first real run): a member
 /// left by a signed leave at E2 and was added back at E4. The owner's tip list for E4's
 /// group names E1, the epoch before the one it left, which it also held and erased with the
