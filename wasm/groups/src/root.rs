@@ -1404,6 +1404,36 @@ pub(crate) mod tests {
         );
     }
 
+    /// §4.6: the container guard counts the settings map. A root that fits one container
+    /// without its settings, and not with them, does not fit.
+    #[test]
+    fn the_container_guard_counts_the_settings_map() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let mut p = root.to_proto();
+        p.settings = (0..64)
+            .map(|i| proto::SettingsEntry {
+                key: format!("k{i:02}"),
+                value: vec![0; 240],
+            })
+            .collect();
+        let settings =
+            prost::Message::encoded_len(&p) - prost::Message::encoded_len(&root.to_proto());
+        assert!(settings > 15_000, "{settings}");
+        // The owner field fills the container but for less than the settings take.
+        p.owner = vec![0; crate::constants::MAX_EVENT_BLOB_BYTES - 10_000];
+        let mut without = p.clone();
+        without.settings.clear();
+        assert!(wire::fits_empty_container(wire::event_blob_len(
+            1,
+            prost::Message::encoded_len(&without)
+        )));
+        assert_eq!(
+            Root::from_proto(1, p).map(|_| ()),
+            Err(Error::DoesNotFitContainer)
+        );
+    }
+
     #[test]
     fn builder_rejects_duplicates_non_members_and_wrong_keys() {
         let alice = identity(1);
