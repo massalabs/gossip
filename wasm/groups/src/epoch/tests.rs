@@ -2114,3 +2114,204 @@ fn the_timer_erases_in_every_group_state() {
         assert!(f.holds_nothing(), "{state:?}");
     }
 }
+
+// ── Deletions for a message the device never processed, under a timer (§7.7, §14.1) ─────
+
+impl Fixture {
+    /// The tips this device offers on its own initiative at `now`.
+    fn shareable_tips(&self, now: u64) -> Vec<EventId> {
+        self.epoch().shareable_tips(&self.store, now).unwrap()
+    }
+
+    fn served(&self, e: &MessageEvent, now: u64) -> bool {
+        self.epoch()
+            .serve(&self.store, &e.event_id(), now)
+            .unwrap()
+            .is_some()
+    }
+}
+
+/// §7.7: a deletion that arrives before its message makes a quiet record: not offered on the
+/// device's own initiative, served on direct request, erased at the time it was processed
+/// plus the timer, rounded up. The first version of the message processed for it, even one
+/// the tombstone blocks, makes the record shareable again and moves its erasure to the
+/// message's moment, rounded up: the deletion is then offered normally.
+#[test]
+fn a_deletion_before_its_message_is_quiet_until_the_message_arrives() {
+    let mut f = Fixture::with_timer(HOUR);
+    let bob = f.bob.id;
+    let d = f.event(T0 + 10, 2, &[], del(1, None));
+    assert_eq!(f.recv(&d, T0 + 11), Outcome::Accepted(Merge::Won));
+    let obj = f.obj(1);
+    assert!(obj.is_deleted());
+    assert!(!obj.shareable);
+    assert_eq!(obj.erase_at, Some(up(T0 + 11 + HOUR, 5 * MIN)));
+    assert_eq!(f.tips(T0 + 11), vec![d.event_id()]);
+    assert!(f.shareable_tips(T0 + 11).is_empty());
+    assert!(f.served(&d, T0 + 11));
+    // The message a moment later: blocked by the tombstone, and the record is shareable.
+    let e = f.event(T0, 1, &[], text(1, bob, T0, T0, "hi"));
+    assert_eq!(f.recv(&e, T0 + 12), Outcome::Accepted(Merge::Lost));
+    let obj = f.obj(1);
+    assert!(obj.is_deleted());
+    assert!(obj.shareable);
+    assert_eq!(obj.erase_at, Some(up(T0 + HOUR, 5 * MIN)));
+    assert_eq!(f.shareable_tips(T0 + 12), vec![d.event_id()]);
+    f.tick(up(T0 + HOUR, 5 * MIN));
+    assert!(f.holds_nothing(), "{:?}", f.records());
+
+    // A scheduled deletion first: quiet too; its message makes it shareable, with the exact
+    // moment while the message is not deleted yet, rounded up once it is.
+    let mut g = Fixture::with_timer(HOUR);
+    let s = g.event(T0 + 10, 3, &[], del(2, Some(T0 + 20 * MIN)));
+    assert_eq!(g.recv(&s, T0 + 11), Outcome::Accepted(Merge::Pending));
+    assert!(!g.obj(2).shareable);
+    assert_eq!(g.obj(2).erase_at, Some(up(T0 + 11 + HOUR, 5 * MIN)));
+    assert!(g.shareable_tips(T0 + 11).is_empty());
+    let e2 = g.event(T0, 4, &[], text(2, bob, T0, T0, "soon gone"));
+    assert_eq!(g.recv(&e2, T0 + 12), Outcome::Accepted(Merge::Won));
+    assert!(g.obj(2).shareable);
+    assert_eq!(g.obj(2).erase_at, Some(T0 + HOUR));
+    g.tick(T0 + 20 * MIN);
+    assert!(g.obj(2).is_deleted());
+    assert!(g.obj(2).shareable);
+    assert_eq!(g.obj(2).erase_at, Some(up(T0 + HOUR, 5 * MIN)));
+}
+
+/// §7.7: a deletion for a message already erased, or never stored, makes a quiet record: not
+/// offered on the device's own initiative (no tip it lists), served on direct request, and
+/// erased at the time the deletion was processed plus the timer, rounded up. Another copy of
+/// a deletion while the record exists renews nothing; one that arrives after the erasure
+/// makes a new quiet record.
+#[test]
+fn a_late_deletion_is_quiet_and_erased_a_timer_after_it_was_processed() {
+    let bob = Fixture::new().bob.id;
+    // The message was erased by the timer.
+    let mut f = Fixture::with_timer(HOUR);
+    let e = f.event(T0, 1, &[], text(1, bob, T0, T0, "hi"));
+    f.recv(&e, T0 + 1);
+    f.tick(T0 + HOUR);
+    assert!(f.holds_nothing());
+    let d = f.event(T0 + 10, 2, &[], del(1, None));
+    let at = T0 + 2 * HOUR + 7;
+    assert_eq!(f.recv(&d, at), Outcome::Accepted(Merge::Won));
+    let erase = up(at + HOUR, 5 * MIN);
+    assert!(!f.obj(1).shareable);
+    assert_eq!(f.obj(1).erase_at, Some(erase));
+    assert!(f.shareable_tips(at).is_empty());
+    assert!(f.served(&d, at));
+    // A second deletion of the same message renews nothing.
+    let d2 = f.event(T0 + 20, 3, &[], del(1, None));
+    assert_eq!(
+        f.recv(&d2, at + 30 * MIN),
+        Outcome::Accepted(Merge::Identical)
+    );
+    assert!(!f.obj(1).shareable);
+    assert_eq!(f.obj(1).erase_at, Some(erase));
+    assert!(f.shareable_tips(at + 30 * MIN).is_empty());
+    // The message offered late is refused by its dates and changes nothing.
+    assert_eq!(f.recv(&e, at + 31 * MIN), Outcome::Expired);
+    assert!(!f.obj(1).shareable);
+    f.tick(erase - 1);
+    assert!(f.obj(1).is_deleted());
+    f.tick(erase);
+    assert!(f.holds_nothing(), "{:?}", f.records());
+    // Received anew after its erasure: a new quiet record, from the new time.
+    let again = erase + 3 * MIN;
+    assert_eq!(f.recv(&d, again), Outcome::Accepted(Merge::Won));
+    assert!(!f.obj(1).shareable);
+    assert_eq!(f.obj(1).erase_at, Some(up(again + HOUR, 5 * MIN)));
+
+    // The message was never stored at all.
+    let mut g = Fixture::with_timer(DAY);
+    let d = g.event(T0 + 10, 2, &[], del(5, None));
+    assert_eq!(g.recv(&d, T0 + 11), Outcome::Accepted(Merge::Won));
+    assert!(!g.obj(5).shareable);
+    assert_eq!(g.obj(5).erase_at, Some(up(T0 + 11 + DAY, HOUR)));
+    assert!(g.shareable_tips(T0 + 11).is_empty());
+    assert!(g.served(&d, T0 + 11));
+    g.tick(up(T0 + 11 + DAY, HOUR));
+    assert!(g.holds_nothing());
+}
+
+/// §7.7: with no timer, a deletion for a message the device never processed makes an
+/// ordinary record: shareable, kept as long as the group, offered as before.
+#[test]
+fn without_a_timer_a_deletion_first_is_shareable_and_kept() {
+    let mut f = Fixture::new();
+    let d = f.event(T0 + 10, 2, &[], del(1, None));
+    assert_eq!(f.recv(&d, T0 + 11), Outcome::Accepted(Merge::Won));
+    assert!(f.obj(1).shareable);
+    assert_eq!(f.obj(1).erase_at, None);
+    assert_eq!(f.shareable_tips(T0 + 11), vec![d.event_id()]);
+    let s = f.event(T0 + 10, 3, &[], del(2, Some(T0 + HOUR)));
+    assert_eq!(f.recv(&s, T0 + 12), Outcome::Accepted(Merge::Pending));
+    assert!(f.obj(2).shareable);
+    f.tick(T0 + 3 * HOUR);
+    assert!(f.obj(1).is_deleted() && f.obj(2).is_deleted());
+    assert!(f.obj(1).shareable && f.obj(2).shareable);
+}
+
+/// §14.1: every path that creates or rewrites an object states whether it is shareable.
+/// Only a deletion for a message never processed, under a timer, makes a quiet record; every
+/// other path leaves the record shareable.
+#[test]
+fn every_record_path_states_whether_it_is_shareable() {
+    let bob = Fixture::new().bob.id;
+    for timer in [0, HOUR] {
+        let quiet = timer > 0;
+        let mut f = Fixture::with_timer(timer);
+        // A message, a pending version, a reaction: shareable.
+        f.recv(&f.event(T0, 1, &[], text(1, bob, T0, T0, "m")), T0 + 1);
+        f.recv(
+            &f.event(T0, 2, &[], text(2, bob, T0, T0 + 20 * MIN, "later")),
+            T0 + 1,
+        );
+        f.recv(
+            &f.reaction(T0, 3, 1, T0, T0, crate::ReactionAction::Add),
+            T0 + 1,
+        );
+        // A deletion and a scheduled deletion for messages never processed.
+        f.recv(&f.event(T0 + 2, 4, &[], del(4, None)), T0 + 3);
+        f.recv(
+            &f.event(T0 + 2, 5, &[], del(5, Some(T0 + 30 * MIN))),
+            T0 + 3,
+        );
+        // A deletion of a message processed, published and by hand, and a local edit.
+        let root = f.root.clone();
+        let mut rng = crate::rng::TestRng::new(3);
+        f.recv(&f.event(T0, 6, &[], text(6, bob, T0, T0, "x")), T0 + 1);
+        f.recv(&f.event(T0, 7, &[], text(7, bob, T0, T0, "y")), T0 + 1);
+        f.recv(&f.event(T0, 8, &[], text(8, bob, T0, T0, "z")), T0 + 1);
+        ep(&root)
+            .publish_deletion(&mut f.store, T0 + 4, &mut rng, sid(6), None)
+            .unwrap();
+        ep(&root)
+            .local_delete(&mut f.store, T0 + 4, sid(7))
+            .unwrap();
+        ep(&root)
+            .local_edit(
+                &mut f.store,
+                T0 + 4,
+                sid(8),
+                local::LocalEdit {
+                    body: Some(Body::Text("edited".into())),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        check_invariants(&f.store, &f.root.chat_id(), T0 + 4).unwrap();
+        for o in f.store.objects(&f.root.chat_id()).unwrap() {
+            let never_processed = [sid(4), sid(5)].contains(&o.sync_obj_id);
+            assert_eq!(
+                o.shareable,
+                !(quiet && never_processed),
+                "{timer} {:?}",
+                o.sync_obj_id
+            );
+        }
+        // Rewritten by the tick that applies the scheduled deletion: unchanged.
+        f.tick(T0 + 30 * MIN);
+        assert_eq!(f.obj(5).shareable, !quiet, "{timer}");
+    }
+}

@@ -343,3 +343,171 @@ fn an_erased_event_offered_again_costs_at_most_one_lookup_per_offer() {
     assert_eq!(asked, vec![member(1), member(2), member(3)]);
     assert!(!net.known(0, &e1.event_id()));
 }
+
+// ── Deletions for a message the device never processed (§7.7, §14.1) ─────────
+
+const DAY: u64 = 24 * HOUR;
+
+/// Whether device 0 announces `id` in what it sends now.
+fn announces(net: &mut Net, id: EventId) -> bool {
+    net.poll_frames(0)
+        .values()
+        .any(|f| announced(f).contains(&id) || full_events(f).contains(&id))
+}
+
+/// Member 2 asks device 0 for `id` by a direct event lookup; the event answered, if any.
+fn looked_up(net: &mut Net, rid: u8, id: EventId) -> Option<MessageEvent> {
+    let chat = net.chat();
+    let q = query(
+        rid,
+        net.now,
+        MIN,
+        vec![QueryOp::Event {
+            chat_id: chat,
+            event_id: id,
+        }],
+    );
+    net.recv_frames(0, member(2), &[q]);
+    let frames = net.poll_frames(0).remove(&member(2)).unwrap_or_default();
+    let rs = responses(&frames);
+    assert_eq!(rs.len(), 1);
+    answer_event(&rs[0])
+}
+
+/// The event IDs device 0 lists to member 2 in a new tips scan.
+fn listed(net: &mut Net, rid: u8) -> Vec<EventId> {
+    super::scans::ids(&super::scans::page(super::scans::ask(net, 2, rid, rid, 0)))
+}
+
+/// §7.7, §14.1: a deletion that arrives before its message is neither announced nor listed
+/// in a tips scan, and is answered on a direct request. Once the message arrives a moment
+/// later, blocked by the tombstone, the record is shareable again and the deletion is
+/// listed as any other.
+#[test]
+fn a_deletion_before_its_message_is_offered_once_the_message_arrives() {
+    let mut net = Net::timed(3, 1, HOUR);
+    let e = net.event(T0, 1, &[], 1);
+    let d = net.deletion(T0 + 10, 2, 1);
+    net.now = T0 + 11;
+    net.give(0, 1, &d);
+    assert!(!announces(&mut net, d.event_id()));
+    assert!(listed(&mut net, 1).is_empty());
+    assert_eq!(looked_up(&mut net, 2, d.event_id()), Some(d.clone()));
+    net.now = T0 + 12;
+    net.give(0, 1, &e);
+    assert!(net.known(0, &e.event_id()));
+    assert!(!net.held(0, &e.event_id()));
+    assert_eq!(listed(&mut net, 3), vec![d.event_id()]);
+}
+
+/// §7.7, §14.1: a deletion for a message already erased is kept quiet: not announced, not
+/// listed in a tips scan, served on direct request, and erased at the time it was processed
+/// plus the timer, rounded up to the step of the timer; a restart changes nothing.
+#[test]
+fn a_late_deletion_is_not_offered_but_served_on_request_and_then_erased() {
+    let mut net = Net::timed(3, 1, HOUR);
+    let e = net.event(T0, 1, &[], 1);
+    net.give(0, 1, &e);
+    net.poll(0);
+    net.now = T0 + HOUR;
+    net.tick(0);
+    assert!(!net.known(0, &e.event_id()));
+    let d = net.deletion(T0 + 10, 2, 1);
+    let at = T0 + 2 * HOUR + 7;
+    net.now = at;
+    net.give(0, 1, &d);
+    assert!(net.held(0, &d.event_id()));
+    assert!(!announces(&mut net, d.event_id()));
+    assert!(listed(&mut net, 1).is_empty());
+    assert_eq!(looked_up(&mut net, 2, d.event_id()), Some(d.clone()));
+    // A restart reads the same record.
+    let dev = &mut net.devs[0];
+    dev.node = Node::open(&dev.store, member(0)).unwrap();
+    assert!(listed(&mut net, 3).is_empty());
+    let erase = (at + HOUR).div_ceil(5 * MIN) * 5 * MIN;
+    net.now = erase - 1;
+    net.tick(0);
+    assert!(net.held(0, &d.event_id()));
+    net.now = erase;
+    net.tick(0);
+    assert!(!net.known(0, &d.event_id()));
+    assert!(net.devs[0].store.objects(&net.chat()).unwrap().is_empty());
+}
+
+/// §7.7: in a quiet chat with a long timer, devices that receive a deletion at staggered
+/// times, after its message was deleted everywhere, keep it to themselves; the deletion
+/// disappears from every device within a bounded time. If those devices offered it to each
+/// other, each copy would restart the deadline of the next and it would never go.
+#[test]
+fn a_deletion_received_at_staggered_times_disappears_from_every_device() {
+    let timer = 2 * DAY;
+    let mut net = MNet::new(4, true);
+    let g = found_timed(&mut net, &[1, 2, 3], timer);
+    let chat = net.current(0, &g).unwrap();
+    net.offline[2] = true;
+    net.offline[3] = true;
+    let start = net.now;
+    let m = net.say(0, &g, "short-lived");
+    let sync = m.payload().sync_obj_id();
+    net.run(MIN);
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    let d = dev
+        .node
+        .publish_deletion(&mut dev.store, chat, sync, None, now, &mut net.rng)
+        .unwrap()
+        .event;
+    net.run(MIN);
+    let holds = |net: &MNet, i: usize| {
+        net.devs[i]
+            .store
+            .event_row(&chat, &d.event_id())
+            .unwrap()
+            .is_some()
+    };
+    let shareable = |net: &MNet, i: usize| {
+        net.devs[i]
+            .store
+            .object(&chat, &sync)
+            .unwrap()
+            .map(|o| o.shareable)
+    };
+    assert!(holds(&net, 1));
+    assert_eq!(shareable(&net, 1), Some(true));
+    // Coarse steps: ticks and exchanges every ten minutes.
+    let run = |net: &mut MNet, until: u64| {
+        while net.now < until {
+            net.now = (net.now + 10 * MIN).min(until);
+            for i in 0..net.devs.len() {
+                if !net.offline[i] {
+                    net.tick(i);
+                }
+            }
+            net.exchange();
+        }
+    };
+    run(&mut net, start + 12 * HOUR);
+    net.offline[2] = false;
+    run(&mut net, start + 24 * HOUR);
+    assert!(holds(&net, 2), "device 2 fetched the deletion by a scan");
+    assert_eq!(shareable(&net, 2), Some(false));
+    net.offline[3] = false;
+    // Device 2 restarts in between: the record keeps its state.
+    net.restart(2);
+    run(&mut net, start + 2 * DAY);
+    assert!(holds(&net, 3), "device 3 fetched the deletion by a scan");
+    assert_eq!(shareable(&net, 3), Some(false));
+
+    // The last device received it before `start + 2 days`: every copy is gone a timer
+    // later, rounded up to a day, plus a day of margin.
+    run(&mut net, start + 5 * DAY);
+    for i in 0..4 {
+        assert!(!holds(&net, i), "device {i} still holds the deletion");
+        assert!(net.devs[i].store.object(&chat, &sync).unwrap().is_none());
+    }
+    // And it does not come back.
+    run(&mut net, start + 8 * DAY);
+    for i in 0..4 {
+        assert!(!holds(&net, i), "device {i} holds the deletion again");
+    }
+}
