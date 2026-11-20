@@ -4880,3 +4880,30 @@ fn a_chat_lookup_by_reference_is_answered_by_the_rules() {
         "stranger"
     );
 }
+
+/// §12.7 with §5.8 and D.74: a group dissolved and kept as an archive serves its roots, by
+/// reference as by ID, to a member of them: the same root gets the same answer whichever way
+/// it is asked.
+#[test]
+fn an_archive_answers_a_chat_lookup_by_reference_as_by_id() {
+    let (mut net, g) = founded(3);
+    let now = net.now;
+    let s = signer(0);
+    let dev = &mut net.devs[0];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, g, false, now, &mut net.rng)
+        .unwrap();
+    net.exchange();
+    assert_eq!(
+        net.summary(1, &g).unwrap().status,
+        MyStatus::Dissolved { deleted: false }
+    );
+    let rg = net.devs[0].node.root(&g).unwrap().ref_chat_id();
+    let by_id = answers_of(&mut net, 1, 2, vec![QueryOp::ChatById(g)]);
+    let by_ref = answers_of(&mut net, 1, 2, vec![QueryOp::ChatByRef(rg)]);
+    assert!(
+        matches!(&by_id[..], [(0, ResponseResult::Event(_))]),
+        "{by_id:?}"
+    );
+    assert_eq!(by_ref, by_id);
+}
