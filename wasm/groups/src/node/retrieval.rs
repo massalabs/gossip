@@ -367,10 +367,19 @@ impl Node {
             return;
         }
         // The own removal from an epoch held as an invitation is not there: the invitation
-        // stands, and is shown once due (§4.8).
+        // stands, and is shown once due (§4.8). Only the member that listed the root or its
+        // owner says so for sure: they hold the epoch. Any other member answers "not
+        // available" as well when it does not hold the epoch or is no longer active in it
+        // (§13.7, D.74), so its answer only moves the lookup to the next member.
+        let knows = self
+            .t
+            .epochs
+            .get(&key.chat_id)
+            .is_some_and(|r| r.from == peer || r.root.owner_id() == peer);
         if answer == Answer::NotAvailable
             && key.target == Target::Removal(self.me)
             && !self.installed(&key.chat_id)
+            && knows
         {
             self.t.tasks.remove(&key);
             if self.prompt_due(&key.chat_id, cx.now) {

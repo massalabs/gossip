@@ -45,7 +45,15 @@ impl Node {
             .count();
         let mut alive = false;
         for (idx, entry) in q.entries.iter().enumerate() {
-            if !self.authorize(from, entry) {
+            // A lookup tied to an epoch that this device cannot or may not serve is answered
+            // "not available" to a peer that shares an active accepted chat with it, the same
+            // way whether it never held the epoch, holds it but the asker is not a member,
+            // holds it in a group where it is no longer active, or holds it without the
+            // object (§13.7, D.74). Why: nobody waits on silence, and one answer for every
+            // case means a member still cannot tell "kept the history" from "deleted the
+            // chat". A peer that shares no active chat gets silence, as before.
+            let unservable = !self.authorize(from, entry);
+            if unservable && !(epoch_lookup(entry) && from != self.me && self.shares_epoch(&from)) {
                 continue;
             }
             // A query about the messages of a chat of two is taking part in it (§5.12).
@@ -71,6 +79,8 @@ impl Node {
                 vec![AnswerOp::Status(Status::Busy)]
             } else if !live {
                 vec![AnswerOp::Status(Status::Expired)]
+            } else if unservable {
+                vec![AnswerOp::Status(Status::NotAvailable)]
             } else if let QueryEntry::Op(op) = entry
                 && let Some(ops) =
                     self.membership_answer(cx, from, op, deadline(q.sent_at, q.ttl))?
@@ -637,6 +647,21 @@ impl Node {
 }
 
 /// Whether `ops` answer with a kick naming `peer` or a leave `peer` signed.
+/// Whether `entry` is a lookup tied to an epoch: an event, sync-object, signed-object,
+/// removal or key lookup (§12.4, §12.5, §12.8, §12.9).
+fn epoch_lookup(entry: &QueryEntry) -> bool {
+    matches!(
+        entry,
+        QueryEntry::Op(
+            QueryOp::Event { .. }
+                | QueryOp::SyncObj { .. }
+                | QueryOp::SignedObject { .. }
+                | QueryOp::Removal { .. }
+                | QueryOp::Keys { .. }
+        )
+    )
+}
+
 fn carries_own_removal(ops: &[AnswerOp], peer: &GossipId) -> bool {
     ops.iter().any(|op| match op {
         AnswerOp::Object {
