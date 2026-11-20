@@ -2144,6 +2144,205 @@ fn an_inactive_device_is_silent_like_one_that_does_not_hold_the_epoch() {
     );
 }
 
+/// The full kicks naming `removed` that device `d` sends `removed` after receiving `f` from it,
+/// in event frames and in responses alike.
+fn kicks_sent_back(net: &mut MNet, d: usize, removed: usize, f: Frame) -> usize {
+    net.recv_frames_m(d, removed, &[f]);
+    let now = net.now;
+    let dev = &mut net.devs[d];
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    let mut kicks = 0;
+    for o in out {
+        let dev = &mut net.devs[d];
+        dev.node
+            .handed_off(&mut dev.store, o.handle, now, &mut net.rng)
+            .unwrap();
+        if o.to != gid(removed) {
+            continue;
+        }
+        for f in frames(&o.plaintext) {
+            let blob = match f {
+                Frame::Event(b) => b,
+                Frame::Response(Response {
+                    result: ResponseResult::Event(b),
+                    ..
+                }) => b,
+                _ => continue,
+            };
+            if let Ok(EventObject::Kick(k)) = wire::decode_event_blob(&blob, 1)
+                && k.removed() == gid(removed)
+            {
+                kicks += 1;
+            }
+        }
+    }
+    kicks
+}
+
+/// §5.6, settled: any query, notice or message event from a removed peer that names the epoch
+/// it was removed from makes a retained member send it its kick, the three membership lookups
+/// included (signed object, removal, keys); never a response, never a frame that names no
+/// epoch; and a lookup of its own record gives that record once, not twice.
+#[test]
+fn a_removed_peer_is_told_of_its_removal_by_any_query_notice_or_event_naming_the_epoch() {
+    let probe = |f: Frame| {
+        let (mut net, g) = founded(4);
+        let e = net.say(1, &g, "before");
+        net.run(MIN);
+        net.offline[3] = true;
+        net.change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![gid(3)],
+                name: None,
+            },
+        )
+        .unwrap();
+        net.exchange();
+        net.offline[3] = false;
+        let f = match f {
+            Frame::Notice(n) if n.entries.is_empty() => notice(g, &[e.event_id()]),
+            Frame::Query(mut q) => {
+                for entry in &mut q.entries {
+                    if let QueryEntry::Op(op) = entry {
+                        set_chat(op, g);
+                    }
+                }
+                q.sent_at = net.now;
+                Frame::Query(q)
+            }
+            Frame::Notice(mut n) => {
+                for entry in &mut n.entries {
+                    entry.chat_id = g;
+                    if let EntryItem::Leave(_) = entry.item {
+                        entry.item = EntryItem::Leave(crate::hash::leave_id(&g, &gid(2)));
+                    }
+                }
+                Frame::Notice(n)
+            }
+            Frame::Response(mut r) => {
+                r.result = ResponseResult::Event(blob(&e));
+                Frame::Response(r)
+            }
+            f => f,
+        };
+        kicks_sent_back(&mut net, 1, 3, f)
+    };
+    let any = ChatId::from_bytes([0; 32]);
+    let q = |op: QueryOp| query(7, 0, MIN, vec![op]);
+    let own_kick = |c: &ChatId| *crate::hash::kick_id(c, &gid(3)).as_bytes();
+    let cases: Vec<(&str, Frame, usize)> = vec![
+        (
+            "an event notice",
+            Frame::Notice(Notice {
+                entries: vec![],
+                skipped: 0,
+            }),
+            1,
+        ),
+        (
+            "a leave notice",
+            Frame::Notice(Notice {
+                entries: vec![Entry {
+                    chat_id: any,
+                    item: EntryItem::Leave(crate::hash::leave_id(&any, &gid(2))),
+                }],
+                skipped: 0,
+            }),
+            1,
+        ),
+        (
+            "a key lookup",
+            q(QueryOp::Keys {
+                chat_id: any,
+                gossip_id: gid(2),
+            }),
+            1,
+        ),
+        (
+            "a removal lookup of another member",
+            q(QueryOp::Removal {
+                chat_id: any,
+                gossip_id: gid(2),
+            }),
+            1,
+        ),
+        (
+            "a signed-object lookup of another record",
+            q(QueryOp::SignedObject {
+                chat_id: any,
+                kind: crate::wire::SignedKind::Kick,
+                id: *crate::hash::kick_id(&any, &gid(2)).as_bytes(),
+            }),
+            1,
+        ),
+        (
+            "a removal lookup of its own record",
+            q(QueryOp::Removal {
+                chat_id: any,
+                gossip_id: gid(3),
+            }),
+            1,
+        ),
+        (
+            "a signed-object lookup of its own kick",
+            q(QueryOp::SignedObject {
+                chat_id: any,
+                kind: crate::wire::SignedKind::Kick,
+                id: own_kick(&any),
+            }),
+            1,
+        ),
+        (
+            "a response",
+            Frame::Response(Response {
+                request_id: Some(crate::ids::RequestId::from_bytes([5; 16])),
+                idx: 0,
+                result: ResponseResult::Status(Status::NotAvailable),
+            }),
+            0,
+        ),
+        (
+            "a shared-chats scan",
+            q(QueryOp::SharedChatsScan {
+                scan_id: crate::ids::ScanId::from_bytes([3; 32]),
+                offset: 0,
+            }),
+            0,
+        ),
+    ];
+    let wrong: Vec<(&str, usize, usize)> = cases
+        .into_iter()
+        .map(|(name, f, want)| (name, probe(f), want))
+        .filter(|(_, got, want)| got != want)
+        .collect();
+    assert!(wrong.is_empty(), "(case, kicks sent, expected): {wrong:?}");
+}
+
+/// Points `op` at `chat`, recomputing an ID derived from the epoch.
+fn set_chat(op: &mut QueryOp, chat: ChatId) {
+    match op {
+        QueryOp::Keys { chat_id, .. } | QueryOp::Removal { chat_id, .. } => *chat_id = chat,
+        QueryOp::SignedObject { chat_id, id, .. } => {
+            // The member whose kick is asked for: 2 or 3, told apart by the placeholder.
+            let any = ChatId::from_bytes([0; 32]);
+            let m = if *id == *crate::hash::kick_id(&any, &gid(3)).as_bytes() {
+                3
+            } else {
+                2
+            };
+            *chat_id = chat;
+            *id = *crate::hash::kick_id(&chat, &gid(m)).as_bytes();
+        }
+        _ => {}
+    }
+}
+
 /// Finding 3 of the review of 54711780: after a handover from A to B in one group, a root of
 /// B naming the current epochs of that group and of another group of A was adopted, and
 /// merged A's other group under B: the handover gave B authority over every epoch of A.
