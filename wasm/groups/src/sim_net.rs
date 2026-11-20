@@ -59,7 +59,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::epoch::check_invariants;
 use crate::event::Body;
 use crate::ids::{ChatId, EventId, GossipId, SyncObjId};
-use crate::node::tests::{config, epoch_root, member};
+use crate::node::tests::{config, epoch_root_with_timer, member};
 use crate::node::{Node, NodeError};
 use crate::rng::{TestRng, bytes, uniform_below};
 use crate::root::Root;
@@ -129,6 +129,8 @@ pub(crate) struct Counters {
     query_floods: u64,
     huge_pages: u64,
     huge_events: u64,
+    timed_runs: u64,
+    timer_deletions: u64,
     invalid_answers: u64,
     fake_notices: u64,
     scans_completed: u64,
@@ -180,6 +182,8 @@ impl Counters {
             query_floods,
             huge_pages,
             huge_events,
+            timed_runs,
+            timer_deletions,
             invalid_answers,
             fake_notices,
             scans_completed,
@@ -228,6 +232,8 @@ impl Counters {
             ("query_floods", self.query_floods),
             ("huge_pages", self.huge_pages),
             ("huge_events", self.huge_events),
+            ("timed_runs", self.timed_runs),
+            ("timer_deletions", self.timer_deletions),
             ("invalid_answers", self.invalid_answers),
             ("fake_notices", self.fake_notices),
             ("scans_completed", self.scans_completed),
@@ -342,7 +348,15 @@ impl Sim {
         let honest = 3 + below(&mut rng, 3) as usize;
         let hostile = 1 + below(&mut rng, 2) as usize;
         let n = honest + hostile;
-        let root = epoch_root(n, 0x20 + (seed % 200) as u8);
+        // Some seeds have a message timer (§7.7): a short one, under which messages are
+        // deleted while devices are still offline and arrive after their moment, and one
+        // under which the oldest messages are deleted during the final period.
+        let timer = match seed % 5 {
+            2 => 3 * HOUR,
+            4 => 76 * HOUR,
+            _ => 0,
+        };
+        let root = epoch_root_with_timer(n, 0x20 + (seed % 200) as u8, timer);
         let kinds = [
             Hostility::Silent,
             Hostility::Announcer,
@@ -350,7 +364,10 @@ impl Sim {
             Hostility::Flooder,
             Hostility::Staller,
         ];
-        let mut counters = Counters::default();
+        let mut counters = Counters {
+            timed_runs: u64::from(timer > 0),
+            ..Counters::default()
+        };
         let devs = (0..n)
             .map(|i| {
                 // Every kind occurs in any five consecutive seeds.
@@ -1319,7 +1336,18 @@ type Retained = (
     Vec<ObjectRecord>,
 );
 
-fn retained(store: &Store, chat: &ChatId) -> Retained {
+/// Whether `o` holds only what the message timer can leave of a message (§7.7): the
+/// tombstone, or no result at all after a pending version came due past its moment, with no
+/// event. A device that received the message only after its moment holds nothing at all for
+/// it, by design, so such objects are not compared.
+fn timer_remnant(o: &ObjectRecord) -> bool {
+    (o.is_deleted() || o.current.is_none())
+        && o.current_events.is_empty()
+        && o.pending_versions.is_empty()
+        && o.pending_deletions.is_empty()
+}
+
+fn retained(store: &Store, chat: &ChatId, timed: bool) -> Retained {
     let rows: Vec<EventRow> = store
         .event_rows(chat)
         .unwrap()
@@ -1333,14 +1361,21 @@ fn retained(store: &Store, chat: &ChatId) -> Retained {
         .into_iter()
         .filter(|(c, _)| held.contains(c))
         .collect();
-    (rows, edges, store.objects(chat).unwrap())
+    let objects = store
+        .objects(chat)
+        .unwrap()
+        .into_iter()
+        .filter(|o| !(timed && timer_remnant(o)))
+        .collect();
+    (rows, edges, objects)
 }
 
-fn results(store: &Store, chat: &ChatId) -> BTreeMap<SyncObjId, Option<StoredResult>> {
+fn results(store: &Store, chat: &ChatId, timed: bool) -> BTreeMap<SyncObjId, Option<StoredResult>> {
     store
         .objects(chat)
         .unwrap()
         .into_iter()
+        .filter(|o| !(timed && timer_remnant(o)))
         .map(|o| (o.sync_obj_id, o.current))
         .collect()
 }
@@ -1359,6 +1394,17 @@ fn explain(a: &Retained, b: &Retained, label: &str) -> String {
     }
     if a.1 != b.1 {
         return format!("{label}: edges differ");
+    }
+    let oa: BTreeMap<_, _> = a.2.iter().map(|o| (o.sync_obj_id, o)).collect();
+    let ob: BTreeMap<_, _> = b.2.iter().map(|o| (o.sync_obj_id, o)).collect();
+    for id in oa.keys().chain(ob.keys()) {
+        if oa.get(id) != ob.get(id) {
+            return format!(
+                "{label}: object {id:?}:\n  {:?}\n  {:?}",
+                oa.get(id),
+                ob.get(id)
+            );
+        }
     }
     format!("{label}: objects differ")
 }
@@ -1388,14 +1434,32 @@ fn run(seed: u64, hours: u64) -> Counters {
         .filter(|d| !sim.devs[*d].local_changes)
         .collect();
     assert!(clean.len() >= 2, "fewer than two devices compared");
-    let reference = retained(&sim.devs[clean[0]].store, &chat);
-    let reference_results = results(&sim.devs[clean[0]].store, &chat);
+    let timed = sim.root.message_timer() > 0;
+    // Under a message timer, no honest device keeps a message past its moment (§7.7).
+    if timed {
+        for &d in &honest {
+            for o in sim.devs[d].store.objects(&chat).unwrap() {
+                if let Some(StoredResult::Content(c)) = &o.current {
+                    let moment = crate::epoch::moment(c, sim.root.message_timer());
+                    assert!(
+                        moment.is_none_or(|m| m > at),
+                        "device {d} keeps a message past its moment"
+                    );
+                }
+                if timer_remnant(&o) {
+                    sim.counters.timer_deletions += 1;
+                }
+            }
+        }
+    }
+    let reference = retained(&sim.devs[clean[0]].store, &chat, timed);
+    let reference_results = results(&sim.devs[clean[0]].store, &chat, timed);
     for &d in &honest {
         if sim.devs[d].local_changes {
             // Its own alterations differ on purpose; every other message converges.
             continue;
         }
-        let mine = retained(&sim.devs[d].store, &chat);
+        let mine = retained(&sim.devs[d].store, &chat, timed);
         if mine != reference && std::env::var("GROUPS_NET_DEBUG").is_ok() {
             sim.debug(&mine, &reference, at);
         }
@@ -1408,15 +1472,16 @@ fn run(seed: u64, hours: u64) -> Counters {
                 &format!("device {d} against device {}", clean[0])
             )
         );
-        assert_eq!(results(&sim.devs[d].store, &chat), reference_results);
+        assert_eq!(results(&sim.devs[d].store, &chat, timed), reference_results);
     }
     // (b) The sleeper holds the current messages that were behind pruned events.
     if let Some(s) = sim.sleeper_back
         && !sim.devs[s].local_changes
     {
         for (sync, id) in &sim.behind {
-            let obj = sim.devs[s].store.object(&chat, sync).unwrap();
-            let cur = sim.devs[clean[0]].store.object(&chat, sync).unwrap();
+            let remnant = |o: Option<ObjectRecord>| o.filter(|o| !(timed && timer_remnant(o)));
+            let obj = remnant(sim.devs[s].store.object(&chat, sync).unwrap());
+            let cur = remnant(sim.devs[clean[0]].store.object(&chat, sync).unwrap());
             assert_eq!(
                 obj.as_ref().map(|o| &o.current),
                 cur.as_ref().map(|o| &o.current),

@@ -403,7 +403,7 @@ pub trait StorageRead {
     fn objects(&self, chat_id: &ChatId) -> Result<Vec<ObjectRecord>, StorageError>;
 
     /// The pending index: every pending item of the epoch with `due ≤ until`, ascending by
-    /// `(due, event_id)`.
+    /// `(due, event_id, kind, sync_obj_id)`.
     ///
     /// # Errors
     ///
@@ -429,7 +429,8 @@ pub trait Storage: StorageRead {
     fn commit(&mut self, changes: Changes) -> Result<(), StorageError>;
 }
 
-/// Sorts pending items by `(due, event_id)`.
+/// Sorts pending items by `(due, event_id)`, then kind and sync object: expiries share one
+/// event ID ([`EXPIRY_EVENT_ID`]), and their order must be the same everywhere.
 pub(crate) fn sort_pending(items: &mut [PendingItem]) {
-    items.sort_unstable_by_key(|i| (i.due, i.event_id));
+    items.sort_unstable_by_key(|i| (i.due, i.event_id, i.kind, i.sync_obj_id));
 }
