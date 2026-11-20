@@ -1691,12 +1691,12 @@ mod tests {
         // {"z": h'01', "aa": h'02'}: shorter encoded key first.
         expected.extend_from_slice(&[0xa2, 0x61, b'z', 0x41, 0x01, 0x62, b'a', b'a', 0x41, 0x02]);
         assert_eq!(full, expected);
-        // resultHash = H(domain, fullMessage): an array of two, the domain as text of 30 bytes,
-        // then the nested projection.
+        // resultHash = H(domain, chat_id, ...): the flat form (D.22), one array of ten, the
+        // domain as text of 30 bytes, then the nine items of `fullMessage` poured into it.
         let hashed = [
-            &[0x82, 0x78, 0x1e][..],
+            &[0x8a, 0x78, 0x1e][..],
             b"gossip.groups.message.result.1",
-            &expected,
+            &expected[1..],
         ]
         .concat();
         assert_eq!(
@@ -1705,7 +1705,7 @@ mod tests {
         );
         assert_eq!(
             hex::encode(payload.result_hash(&chat)),
-            "2051520f1d0ff2bca88d85b44ec94e3564ad5dad34888a706f35cfea31e59c1d"
+            "c338cd5ad15710a66cf559e7423d726988df5faeaadb86bd94d50da09c51f8c3"
         );
 
         let delete = Payload::Delete {
@@ -1718,16 +1718,17 @@ mod tests {
         expected.extend_from_slice(&[0x77; 32]);
         expected.push(0x04);
         assert_eq!(delete.full_message(&chat).encode(), expected);
+        // A delete: one array of four, the domain then its three items.
         let hashed = [
-            &[0x82, 0x78, 0x1e][..],
+            &[0x84, 0x78, 0x1e][..],
             b"gossip.groups.message.result.1",
-            &expected,
+            &expected[1..],
         ]
         .concat();
         assert_eq!(&delete.result_hash(&chat), blake3::hash(&hashed).as_bytes());
         assert_eq!(
             hex::encode(delete.result_hash(&chat)),
-            "201366475cab2e5f66f7e0f7fce0c0edd6f29f37f8bec64d67bae022218ea3dd"
+            "31e523ef5da878e2e44a8f7acb748173f70a05e59d42ecb5264deef34bd010ed"
         );
 
         let forward = Payload::Content(Content {
