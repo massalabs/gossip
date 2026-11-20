@@ -179,7 +179,8 @@ fn effective<R: StorageRead + ?Sized>(
         || obj
             .pending_deletions
             .first()
-            .is_some_and(|(due, _)| *due <= now);
+            .is_some_and(|(due, _)| *due <= now)
+        || obj.expires_at.is_some_and(|due| due <= now);
     let ranked = |c: Content| {
         let hash = Payload::Content(c.clone()).result_hash(chat_id);
         (c.rank(hash), c)

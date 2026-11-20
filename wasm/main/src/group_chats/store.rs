@@ -183,6 +183,7 @@ fn object_fields(o: &ObjectRecord) -> String {
         ("currentEvents".into(), o.current_events.enc()),
         ("pendingVersions".into(), o.pending_versions.enc()),
         ("pendingDeletions".into(), o.pending_deletions.enc()),
+        ("expiresAt".into(), o.expires_at.enc()),
     ])
     .to_text()
 }
@@ -353,6 +354,12 @@ pub fn decode_snapshot(s: &BatchOut) -> R<(MemoryStorage, OpenReport)> {
             current_events: Codec::dec(j.field("currentEvents")?)?,
             pending_versions: Codec::dec(j.field("pendingVersions")?)?,
             pending_deletions: Codec::dec(j.field("pendingDeletions")?)?,
+            // The moment of the message timer (§7.7); absent from an object stored before
+            // the timer existed, which had none.
+            expires_at: match j.field("expiresAt") {
+                Ok(v) => Codec::dec(v)?,
+                Err(_) => None,
+            },
         };
         entry(&mut epochs, chat).objects.insert(sync_obj_id, obj);
     }

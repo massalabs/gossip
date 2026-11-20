@@ -334,7 +334,7 @@ impl Epoch<'_> {
     ) -> Result<Published, ChangeError> {
         self.check_can_send()?;
         let chat = self.chat_id();
-        let mut tx = Tx::new(&*store, chat);
+        let mut tx = self.tx(&*store);
         tick(&mut tx, now)?;
         let payload = build(&tx)?;
         let tips = dag::tips(&tx, &chat, now)?;
@@ -382,7 +382,7 @@ impl Epoch<'_> {
         if !self.accepted {
             return Err(ChangeError::NotAccepted);
         }
-        let mut tx = Tx::new(&*store, self.chat_id());
+        let mut tx = self.tx(&*store);
         tick(&mut tx, now)?;
         let mut obj = object(&tx, &sync_obj_id)?;
         let old = current_content(&obj)?;
@@ -431,6 +431,9 @@ impl Epoch<'_> {
         )
         .map_err(ChangeError::Invalid)?;
 
+        // A new creation date moves the moment of the message timer (§7.7); a date already
+        // past it deletes the message at once, below.
+        obj.expires_at = super::moment(&new, tx.message_timer());
         obj.current = Some(StoredResult::Content(new));
         for old_id in core::mem::take(&mut obj.current_events) {
             prune(&mut tx, old_id);
@@ -440,6 +443,7 @@ impl Epoch<'_> {
         }
         // Pending scheduled deletions carry no content; they stay pending.
         tx.put_object(obj);
+        tick(&mut tx, now)?;
         let (changes, pruned) = tx.finish()?;
         store.commit(changes)?;
         Ok(pruned)
@@ -464,7 +468,7 @@ impl Epoch<'_> {
         if !self.accepted {
             return Err(ChangeError::NotAccepted);
         }
-        let mut tx = Tx::new(&*store, self.chat_id());
+        let mut tx = self.tx(&*store);
         tick(&mut tx, now)?;
         let mut obj = object(&tx, &sync_obj_id)?;
         if obj.is_deleted() {

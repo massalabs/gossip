@@ -14,7 +14,7 @@ pub(crate) mod tests;
 use crate::constants::RETENTION_MS;
 use crate::dag;
 use crate::error::Error;
-use crate::event::{MessageEvent, Payload};
+use crate::event::{Content, MessageEvent, Payload};
 use crate::ids::{ChatId, EventId, GossipId, SyncObjId};
 use crate::root::Root;
 use crate::store::tx::Tx;
@@ -161,6 +161,11 @@ impl<'a> Epoch<'a> {
         self.root.chat_id()
     }
 
+    /// A transaction on this epoch, which knows its message timer (§7.7).
+    pub(crate) fn tx<'s, S: StorageRead + ?Sized>(&self, store: &'s S) -> Tx<'s, S> {
+        Tx::new(store, self.chat_id()).with_timer(self.root.message_timer())
+    }
+
     /// The root.
     #[must_use]
     pub fn root(&self) -> &'a Root {
@@ -217,7 +222,7 @@ impl<'a> Epoch<'a> {
         if let Some(rejection) = self.sender_gate(sender).or_else(|| self.event_gate(&event)) {
             return Ok(Received::nothing(Outcome::Rejected(rejection)));
         }
-        let mut tx = Tx::new(&*store, self.chat_id());
+        let mut tx = self.tx(&*store);
         tick(&mut tx, now)?;
         let outcome = receive_in(&mut tx, event, now)?;
         // An event received after its window is merged, then pruned at once (§8.1).
@@ -268,7 +273,7 @@ impl<'a> Epoch<'a> {
         store: &mut S,
         now: u64,
     ) -> Result<Vec<EventId>, StorageError> {
-        let mut tx = Tx::new(&*store, self.chat_id());
+        let mut tx = self.tx(&*store);
         tick(&mut tx, now)?;
         let (changes, pruned) = tx.finish()?;
         store.commit(changes)?;
@@ -339,7 +344,7 @@ impl<'a> Epoch<'a> {
         now: u64,
         max: usize,
     ) -> Result<Vec<EventId>, StorageError> {
-        let mut tx = Tx::new(&*store, self.chat_id());
+        let mut tx = self.tx(&*store);
         tick(&mut tx, now)?;
         let chat = tx.chat_id();
         // After the tick every carrier is inside its window, hence available.
@@ -369,7 +374,7 @@ impl<'a> Epoch<'a> {
         store: &mut S,
         max: usize,
     ) -> Result<Vec<EventId>, StorageError> {
-        let mut tx = Tx::new(&*store, self.chat_id());
+        let mut tx = self.tx(&*store);
         let chat = tx.chat_id();
         let victims = tx.markers(&chat, max)?;
         for id in &victims {
@@ -398,16 +403,34 @@ fn activate_due<S: StorageRead + ?Sized>(tx: &mut Tx<'_, S>, now: u64) -> Result
         let Some(mut obj) = tx.object(&item.sync_obj_id)? else {
             continue;
         };
+        if item.kind == PendingKind::Expiry {
+            // The message timer deletes the message on this device, as a local-only deletion
+            // (§7.7, §9.2, §9.3): every device computes the same moment from the dates, so
+            // they converge with nothing sent, and what a peer can see afterwards (no event
+            // to serve, no tip) is what a local-only deletion leaves.
+            if obj.expires_at == Some(item.due) {
+                absorb(tx, &mut obj, None)?;
+                tx.put_object(obj);
+            }
+            continue;
+        }
         let Some(event) = tx.row(&item.event_id)?.and_then(|r| r.event().cloned()) else {
             continue;
         };
         match item.kind {
+            PendingKind::Expiry => {}
             PendingKind::Version => {
                 // Skipped if an earlier item of this pass already pruned it.
                 if !obj.pending_versions.remove(&(item.due, item.event_id)) {
                     continue;
                 }
-                merge_effective(tx, &mut obj, event)?;
+                // A version that takes effect after the moment of its message is dropped,
+                // as it would be on arrival (§7.7).
+                if expired(&event, tx.message_timer(), now) {
+                    prune(tx, item.event_id);
+                } else {
+                    merge_effective(tx, &mut obj, event)?;
+                }
             }
             PendingKind::Deletion => {
                 if !obj.pending_deletions.remove(&(item.due, item.event_id)) {
@@ -468,6 +491,16 @@ pub(crate) fn receive_in<S: StorageRead + ?Sized>(
     now: u64,
 ) -> Result<Outcome, StorageError> {
     let row = tx.row(&event.event_id())?;
+    // A message past its moment is refused from its dates alone, whatever this device held
+    // (§7.7): nothing is stored, not even a stub or its parent links, so that no parent is
+    // looked up for it, and the same arrival always gets the same answer. Every honest device
+    // computes the same moment, so none serves it any more either.
+    if expired(&event, tx.message_timer(), now) {
+        if row.is_some_and(|r| r.state == RowState::TemporarilyInvalid) {
+            tx.remove_marker(event.event_id());
+        }
+        return Ok(Outcome::Expired);
+    }
     match row.map(|r| r.state) {
         Some(RowState::Held { .. }) => Ok(Outcome::Duplicate),
         Some(RowState::Pruned) => restore(tx, event, now),
@@ -615,11 +648,31 @@ fn merge_effective<S: StorageRead + ?Sized>(
         for old in core::mem::take(&mut obj.current_events) {
             prune(tx, old);
         }
+        obj.expires_at = moment(&incoming, tx.message_timer());
         obj.current = Some(StoredResult::Content(incoming));
     }
     obj.current_events.insert(id);
     hold(tx, event, Role::Current);
     Ok(merge)
+}
+
+/// The moment the message timer `timer` deletes the result `content` (§7.7): its creation
+/// date plus the timer. `None` with no timer, for a reaction (the timer deletes only what a
+/// reaction can point to: a reaction to a deleted message is not shown, §7.6), and when the
+/// sum is past the top of the integer range: that moment never comes (exact arithmetic, §1).
+pub(crate) fn moment(content: &Content, timer: u64) -> Option<u64> {
+    if timer == 0 || content.is_reaction() {
+        return None;
+    }
+    content.created_at.checked_add(timer)
+}
+
+/// Whether `event` is a message whose moment has passed at `now` (§7.7).
+fn expired(event: &MessageEvent, timer: u64, now: u64) -> bool {
+    match event.payload() {
+        Payload::Content(c) => moment(c, timer).is_some_and(|m| m <= now),
+        Payload::Delete { .. } => false,
+    }
 }
 
 /// Applies a deletion: the tombstone absorbs the message, and every content event of it
@@ -658,6 +711,7 @@ pub(crate) fn absorb<S: StorageRead + ?Sized>(
             }
         }
         obj.current = Some(StoredResult::Tombstone);
+        obj.expires_at = None;
     }
     if let Some(event) = carrier {
         obj.current_events.insert(event.event_id());

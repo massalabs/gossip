@@ -179,6 +179,10 @@ pub struct ObjectRecord {
     /// into one more carrier of the tombstone; the earliest one deletes the message (D.26,
     /// D.31; this departs from "only the earliest is kept").
     pub pending_deletions: BTreeSet<(u64, EventId)>,
+    /// The moment the message timer deletes the current result (§7.7): its creation date
+    /// plus the timer of the epoch. `None` with no timer, for a tombstone or a reaction, or
+    /// when the moment is past the top of the integer range and so never comes.
+    pub expires_at: Option<u64>,
 }
 
 impl ObjectRecord {
@@ -191,6 +195,7 @@ impl ObjectRecord {
             current_events: BTreeSet::new(),
             pending_versions: BTreeSet::new(),
             pending_deletions: BTreeSet::new(),
+            expires_at: None,
         }
     }
 
@@ -214,7 +219,13 @@ impl ObjectRecord {
             sync_obj_id: self.sync_obj_id,
             kind: PendingKind::Deletion,
         });
-        versions.chain(deletion)
+        let expiry = self.expires_at.map(|due| PendingItem {
+            due,
+            event_id: EXPIRY_EVENT_ID,
+            sync_obj_id: self.sync_obj_id,
+            kind: PendingKind::Expiry,
+        });
+        versions.chain(deletion).chain(expiry)
     }
 }
 
@@ -225,14 +236,21 @@ pub enum PendingKind {
     Version,
     /// A pending scheduled deletion (§7.4).
     Deletion,
+    /// The deletion of the current result by the message timer (§7.7).
+    Expiry,
 }
+
+/// The event ID of an expiry in the pending index: the deletion by the message timer belongs
+/// to the message, not to one of its events. The all-zero ID sorts it first among the items
+/// due at the same time, which fixes the order on every device.
+pub const EXPIRY_EVENT_ID: EventId = EventId::from_bytes([0; crate::constants::EVENT_ID_SIZE]);
 
 /// An entry of the time-sorted pending index (§7.4 "durable time-sorted index").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PendingItem {
     /// When it becomes due.
     pub due: u64,
-    /// The pending event.
+    /// The pending event; [`EXPIRY_EVENT_ID`] for an expiry.
     pub event_id: EventId,
     /// Its sync object.
     pub sync_obj_id: SyncObjId,
