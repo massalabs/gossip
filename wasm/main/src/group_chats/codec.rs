@@ -780,6 +780,16 @@ impl Codec for Root {
             ),
             ("created_at".into(), J::Num(self.created_at())),
             ("migrate_from".into(), self.migrate_from().enc()),
+            ("message_timer".into(), J::Num(self.message_timer())),
+            (
+                "settings".into(),
+                J::Arr(
+                    self.settings()
+                        .iter()
+                        .map(|(k, v)| J::Arr(vec![J::Str(k.clone()), J::Str(hex(v))]))
+                        .collect(),
+                ),
+            ),
             ("signature".into(), J::Str(hex(self.signature().as_bytes()))),
         ])
     }
@@ -802,12 +812,37 @@ impl Codec for Root {
                 Ok(v) => Codec::dec(v)?,
                 Err(_) => None,
             },
-            0,
-            &std::collections::BTreeMap::new(),
+            // Absent from a root stored before the fields existed, which had neither.
+            match j.field("message_timer") {
+                Ok(v) => v.as_u64()?,
+                Err(_) => 0,
+            },
+            &match j.field("settings") {
+                Ok(v) => settings(v)?,
+                Err(_) => std::collections::BTreeMap::new(),
+            },
             &sig(j)?,
         )
         .map_err(|e| format!("root: {e}"))
     }
+}
+
+/// The settings map of a root, stored as `[[key, hex], …]` in key order (§4.1).
+fn settings(j: &J) -> R<std::collections::BTreeMap<String, Vec<u8>>> {
+    let mut out = std::collections::BTreeMap::new();
+    for e in j.as_arr()? {
+        let pair = e.as_arr()?;
+        let [k, v] = &pair[..] else {
+            return Err("settings: expected [key, hex]".into());
+        };
+        if out
+            .insert(k.as_str()?.to_owned(), unhex(v.as_str()?)?)
+            .is_some()
+        {
+            return Err("settings: a key given twice".into());
+        }
+    }
+    Ok(out)
 }
 
 impl Codec for Leave {
@@ -983,6 +1018,29 @@ mod tests {
             round_trip(root.clone());
             assert_eq!(Root::dec(&root.enc()).unwrap().migrate_from(), m);
         }
+        // With a timer and settings, unknown keys included (§4.1).
+        let mut p = groups::RootParams {
+            name: "n".into(),
+            members: vec![me, other],
+            group_secret: GroupSecret::from_bytes([1; 32]),
+            owner: public.clone(),
+            epoch_challenge: Challenge::from_bytes([2; 32]),
+            ref_chat_id_challenge: Challenge::from_bytes([3; 32]),
+            created_at: 4,
+            message_timer: 0,
+            settings: std::collections::BTreeMap::new(),
+        };
+        p.message_timer = u64::MAX;
+        p.settings = std::collections::BTreeMap::from([
+            ("a".to_owned(), vec![]),
+            ("later.key".to_owned(), vec![0, 0xff]),
+        ]);
+        let timed =
+            Root::create_founding(p, ChatId::from_bytes([5; 32]), None, &signer, [6; 32]).unwrap();
+        round_trip(timed.clone());
+        let back = Root::dec(&timed.enc()).unwrap();
+        assert_eq!(back.chat_id(), timed.chat_id());
+        assert_eq!(back.settings(), timed.settings());
         let root = make(None);
         let J::Obj(fields) = root.enc() else { panic!() };
         let old = J::Obj(
