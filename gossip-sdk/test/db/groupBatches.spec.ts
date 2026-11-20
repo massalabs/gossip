@@ -4,6 +4,8 @@
  * transaction: all or nothing, epoch changes, then erasure, then node records.
  */
 import { describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
+import * as schema from '../../src/db/schema';
 import { DatabaseConnection } from '../../src/db/sqlite';
 import { GroupQueries, type GroupBatch } from '../../src/db/queries/groups';
 import { getTestStorageConfig } from '../testDb';
@@ -21,6 +23,7 @@ function changes(chats: string[], n: number, nextSeq: number): GroupBatch {
       chatId,
       syncObjId: object(n),
       fields: '{}',
+      shareable: true,
     })),
     removedObjects: [],
     node: [{ kind: 'meta', key: 'null', fields: `{"next_seq":${nextSeq}}` }],
@@ -92,6 +95,7 @@ describe('group batches on SQLite (engine conformance)', () => {
         chatId: a,
         syncObjId: object(n),
         fields: '{}',
+        shareable: true,
       })),
     };
     await q.applyBatches(owner, [written]);
@@ -114,6 +118,47 @@ describe('group batches on SQLite (engine conformance)', () => {
       other.edges.length,
       other.objects.length,
     ]).toEqual([3, 3, 3]);
+    await conn.close();
+  });
+
+  it('stores whether a record is shareable in its own column, with no default', async () => {
+    const conn = await DatabaseConnection.create({
+      storage: getTestStorageConfig(),
+    });
+    const q = new GroupQueries(conn);
+    const owner = 'owner';
+    const batch = (shareable: boolean[]): GroupBatch => ({
+      ...changes([], 0, 1),
+      objects: shareable.map((s, i) => ({
+        chatId: a,
+        syncObjId: object(i + 1),
+        fields: '{}',
+        shareable: s,
+      })),
+    });
+    // Both values are written and read back as written.
+    await q.applyBatches(owner, [batch([true, false])]);
+    let snap = await q.loadSnapshot(owner);
+    expect(snap.objects.map(o => o.shareable)).toEqual([true, false]);
+    // An upsert writes the value again: a quiet record made shareable.
+    await q.applyBatches(owner, [batch([true, true])]);
+    snap = await q.loadSnapshot(owner);
+    expect(snap.objects.map(o => o.shareable)).toEqual([true, true]);
+    // The column has no default: a write that does not state it is refused.
+    await expect(
+      conn.db.insert(schema.groupObjects).values({
+        ownerUserId: owner,
+        chatId: b,
+        syncObjId: object(9),
+        fields: '{}',
+      } as typeof schema.groupObjects.$inferInsert)
+    ).rejects.toThrow();
+    // PRAGMA table_info rows: cid, name, type, notnull, dflt_value, pk.
+    const columns = (await conn.db.all(
+      sql`PRAGMA table_info(groupObjects)`
+    )) as unknown[][];
+    const shareable = columns.find(c => c[1] === 'shareable');
+    expect(shareable?.slice(2, 5)).toEqual(['INTEGER', 1, null]);
     await conn.close();
   });
 });
