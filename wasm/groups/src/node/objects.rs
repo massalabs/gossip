@@ -641,8 +641,8 @@ impl Node {
     }
 
     /// Closes a group (§14.2): its roots, secrets, messages, signed objects, tasks, hints
-    /// and links are removed; with `markers`, a closed-chat marker is kept for each of its
-    /// installed epochs.
+    /// and links are removed; with `markers`, a closed-chat marker is kept for each epoch
+    /// record removed, installed or an invitation not answered yet ("Ignore and Delete").
     ///
     /// §14.2 keeps a marker for each end only. An older epoch would then come back: a
     /// member's tip list for the group the device rejoins names it (§12.1 lists every epoch
@@ -650,22 +650,20 @@ impl Node {
     /// too; with no marker it was fetched and offered as a fresh invitation, which accepted
     /// was a second copy of the group, that the device then announced to the other members.
     /// A marker is a chat ID and the reference of its root, and the device held each of
-    /// these epochs.
+    /// these epochs. An invitation deleted without an answer leaves one too, as one declined
+    /// does: with none, a copy of its root announced again was fetched and prompted again,
+    /// and a reply naming it found nothing to place it (§7.6).
     pub(crate) fn close_group(&mut self, cx: &mut Cx<'_>, group: ChatId, markers: bool) {
         let group = self.group_of(&group);
         // The references are taken while the roots are still held (see `Marker`).
-        let installed: Vec<(ChatId, Option<crate::ids::RefChatId>)> = self
-            .group_epochs(&group)
-            .into_iter()
-            .map(|c| (c, self.held_root(&c).map(crate::root::Root::ref_chat_id)))
-            .collect();
-        let epochs: Vec<ChatId> = self
+        let closed: Vec<(ChatId, crate::ids::RefChatId)> = self
             .t
             .epochs
             .iter()
             .filter(|(_, r)| r.group == group)
-            .map(|(c, _)| *c)
+            .map(|(c, r)| (*c, r.root.ref_chat_id()))
             .collect();
+        let epochs: Vec<ChatId> = closed.iter().map(|(c, _)| *c).collect();
         for c in &epochs {
             self.erase_messages(*c);
             self.take_record(c);
@@ -753,8 +751,8 @@ impl Node {
         }
         self.t.group_recs.remove(&group);
         if markers {
-            for (e, reference) in installed {
-                self.put_marker(e, MarkerKind::Closed, reference);
+            for (e, reference) in closed {
+                self.put_marker(e, MarkerKind::Closed, Some(reference));
             }
         }
         self.forget_closed(&epochs, group);

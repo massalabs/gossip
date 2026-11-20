@@ -385,7 +385,12 @@ impl Node {
             n.take_record(&chat);
             n.t.events.remove(&(chat, ChangeKind::Invitation));
             n.drop_tasks_of(&[chat]);
-            n.drop_fetched_for(chat);
+            // The roots fetched as its parents go with it, each leaving a closed-chat marker
+            // with its reference, as the invitation does: a copy of one is refused, and a
+            // reply naming one is placed (§7.6) as while the invitation was not answered.
+            for (parent, reference) in n.drop_fetched_for(chat) {
+                n.put_marker(parent, MarkerKind::Closed, Some(reference));
+            }
             match choice {
                 LeaveChoice::Signed => {
                     n.send_leave(cx, signer, &rec.root)?;
