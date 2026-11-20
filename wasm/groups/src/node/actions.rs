@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::records::{
-    ChangeKind, EpochRecord, EpochStatus, GroupStatus, Junction, JunctionKind, Marker,
+    ChangeKind, EpochRecord, EpochStatus, GroupStatus, Junction, JunctionKind, MarkerKind,
     SignedObject, SignedRecord, Work,
 };
 use super::{Cx, Node, NodeError};
@@ -299,7 +299,7 @@ impl Node {
                 return Err(NodeError::UnknownEpoch);
             };
             n.take_record(&chat);
-            n.t.markers.remove(&chat);
+            n.take_marker(&chat);
             n.t.events.remove(&(chat, ChangeKind::Invitation));
             // The parent lookup keeps running: when it succeeds, the conversations are
             // joined (§4.8).
@@ -389,10 +389,10 @@ impl Node {
             match choice {
                 LeaveChoice::Signed => {
                     n.send_leave(cx, signer, &rec.root)?;
-                    n.t.markers.insert(chat, Marker::Closed);
+                    n.put_marker(chat, MarkerKind::Closed, Some(rec.root.ref_chat_id()));
                 }
                 LeaveChoice::Silent => {
-                    n.t.markers.insert(chat, Marker::Closed);
+                    n.put_marker(chat, MarkerKind::Closed, Some(rec.root.ref_chat_id()));
                 }
                 LeaveChoice::AskToBeKicked => {
                     let root = rec.root.clone();
@@ -1105,8 +1105,9 @@ impl Node {
                 {
                     // The named root and the message go; side branches stay (§5.8), in a group
                     // that stays dissolved (see `recheck_status`).
+                    let reference = self.held_root(&epoch).map(Root::ref_chat_id);
                     self.drop_epoch(&epoch);
-                    self.t.markers.insert(epoch, Marker::Dissolved);
+                    self.put_marker(epoch, MarkerKind::Dissolved, reference);
                     self.rebuild_epochs();
                     if self.group_epochs(&g).is_empty() {
                         self.close_group(cx, g, false);

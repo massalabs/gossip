@@ -629,8 +629,8 @@ fn dissolve_and_delete_erases_the_messages_and_leaves_a_marker_after_two_weeks()
         net.tick(d);
         assert!(net.devs[d].node.groups().is_empty());
         assert_eq!(
-            net.devs[d].node.t.markers.get(&g),
-            Some(&crate::node::records::Marker::Dissolved)
+            net.devs[d].node.t.markers.get(&g).map(|m| m.kind),
+            Some(crate::node::records::MarkerKind::Dissolved)
         );
     }
 }

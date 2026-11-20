@@ -2,7 +2,7 @@
 //! chat lookup by reference, and the fetch of a target in an epoch this device holds.
 //!
 //! When a reply is received, each of its targets is placed against what the device holds:
-//! an installed epoch or an invitation not answered yet. A target
+//! an installed epoch, an invitation not answered yet, or a chat the user closed. A target
 //! in an installed epoch whose message the device lacks is fetched by a sync-object lookup
 //! in that epoch (§12.5). A reference the device cannot place is looked up by reference, in
 //! rounds, from the members of the chat the reply was written in. All of it is local
@@ -13,15 +13,19 @@
 //! it. Why: a lookup made when the user opens the message would tell a peer when it was
 //! read.
 //!
-//! **Never for what the device can place.** An installed epoch and an invitation not
-//! answered yet are never asked for.
+//! **Never for what the device can place.** An installed epoch, an invitation not answered
+//! yet and a closed chat are never asked for. Why: a device that holds an invitation it has
+//! not answered never asks, and a device that closed the chat (with "Ignore and Delete" too)
+//! must look the same; if it asked, the root would come back and be dropped, and each new
+//! reply would make it ask again, so a peer could watch it throw the root away. The
+//! closed-chat marker keeps the reference for this ([`Marker`]).
 //!
 //! **What comes back** goes through the normal reception of a root (§4.8): a skipped epoch
 //! of a group the device is in joins that group's history without a prompt, a group the
 //! user was added to whose invitation never arrived becomes an invitation. Nothing is
 //! fetched in an epoch the user has not accepted.
 
-use super::records::{RefLookup, RefReply, Target, TaskKey};
+use super::records::{Marker, MarkerKind, RefLookup, RefReply, Target, TaskKey};
 use super::timing::{
     REF_LOOKUP_DELAY_MS, REF_LOOKUP_INTERVAL_MS, REF_LOOKUP_PEERS, REF_LOOKUP_ROUNDS,
     REF_LOOKUPS_PER_DEVICE, REF_LOOKUPS_PER_SENDER, REF_REPLIES_KEPT,
@@ -34,12 +38,15 @@ use crate::rng::uniform_below;
 use crate::store::StoredResult;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The references of the roots this device holds (installed or invitations), derived from
-/// the epoch records, and the references whose place changed in this operation.
+/// The references of the roots this device holds (installed or invitations) and of the
+/// markers that keep one, derived from the records, and the references whose place changed
+/// in this operation.
 #[derive(Debug, Default)]
 pub(crate) struct RefIndex {
     /// Reference → the epoch record whose root it is.
     pub(crate) epochs: BTreeMap<RefChatId, ChatId>,
+    /// Reference → the marker that keeps it.
+    pub(crate) markers: BTreeMap<RefChatId, ChatId>,
     /// References whose place changed since the last pass.
     pub(crate) moved: BTreeSet<RefChatId>,
 }
@@ -51,6 +58,8 @@ pub(crate) enum Placed {
     Installed(ChatId),
     /// An invitation not answered yet: what it names is fetched only once it is accepted.
     Invitation,
+    /// A chat the user closed, or erased by "Dissolve & Delete" (§14.2).
+    Closed,
 }
 
 impl Node {
@@ -60,6 +69,45 @@ impl Node {
         for (c, r) in self.t.epochs.iter() {
             self.rx.epochs.insert(r.root.ref_chat_id(), *c);
         }
+        for (c, m) in self.t.markers.iter() {
+            if let Some(reference) = m.reference {
+                self.rx.markers.insert(reference, *c);
+            }
+        }
+    }
+
+    /// Records a marker for `chat`, with the reference of its root: `reference`, or the one
+    /// of the root still held, or the one of the marker it replaces.
+    pub(crate) fn put_marker(
+        &mut self,
+        chat: ChatId,
+        kind: MarkerKind,
+        reference: Option<RefChatId>,
+    ) {
+        let reference = reference
+            .or_else(|| self.held_root(&chat).map(crate::root::Root::ref_chat_id))
+            .or_else(|| self.t.markers.get(&chat).and_then(|m| m.reference));
+        self.take_marker(&chat);
+        if let Some(r) = reference {
+            self.rx.markers.insert(r, chat);
+            self.rx.moved.insert(r);
+        }
+        self.t.markers.insert(chat, Marker { kind, reference });
+    }
+
+    /// Removes the marker of `chat`.
+    pub(crate) fn take_marker(&mut self, chat: &ChatId) -> Option<Marker> {
+        let m = self.t.markers.remove(chat)?;
+        if let Some(r) = m.reference {
+            self.rx.markers.remove(&r);
+            self.rx.moved.insert(r);
+        }
+        Some(m)
+    }
+
+    /// What the marker of `chat` records, if there is one.
+    pub(crate) fn marker_kind(&self, chat: &ChatId) -> Option<MarkerKind> {
+        self.t.markers.get(chat).map(|m| m.kind)
     }
 
     /// An epoch record was stored: its reference now leads to it.
@@ -76,12 +124,17 @@ impl Node {
 
     /// Where `reference` leads on this device, if anywhere.
     pub(crate) fn placed(&self, reference: &RefChatId) -> Option<Placed> {
-        let chat = self.rx.epochs.get(reference)?;
-        Some(if self.installed(chat) {
-            Placed::Installed(*chat)
-        } else {
-            Placed::Invitation
-        })
+        if let Some(chat) = self.rx.epochs.get(reference) {
+            return Some(if self.installed(chat) {
+                Placed::Installed(*chat)
+            } else {
+                Placed::Invitation
+            });
+        }
+        self.rx
+            .markers
+            .contains_key(reference)
+            .then_some(Placed::Closed)
     }
 
     /// Whether the device holds the message `target` of the installed epoch `chat`, deleted
@@ -162,6 +215,8 @@ impl Node {
         }
         for t in targets {
             match self.placed(&t.ref_chat_id) {
+                // Never asked for, never fetched (see the module documentation).
+                Some(Placed::Closed) => continue,
                 Some(Placed::Installed(e)) => {
                     // Nothing to fetch: the target is held, or its group is read-only.
                     if !self.serves(&e) || self.holds_target(cx, &e, &t.sync_obj_id)? {
@@ -339,6 +394,10 @@ impl Node {
             })
         });
         match self.placed(&reference) {
+            Some(Placed::Closed) => {
+                self.forget_ref(&reference);
+                return Ok(());
+            }
             Some(Placed::Installed(epoch)) => {
                 // §7.6: a resolved target is loaded by a sync-object lookup in its epoch.
                 if self.serves(&epoch) {

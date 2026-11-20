@@ -990,9 +990,35 @@ pub struct SignedRecord {
     pub received_at: u64,
 }
 
-/// A closed-chat or dissolved marker (§14.2): a chat ID only.
+/// A closed-chat or dissolved marker (§14.2): kept under the chat ID, with the reference of
+/// the root it closes, computed when it was recorded while the root was still held (32
+/// bytes, local only). A marker stored before the reference was kept has none and stays
+/// valid.
+///
+/// Why the reference: with the chat ID only, a reply naming that chat made the device look
+/// the reference up (§7.6, §12.7); the root came back and was dropped, and the next reply
+/// made it ask again, so a peer could see the device throw the root away. With the reference
+/// the device never asks, as a device holding an invitation it has not answered does not:
+/// "ignored and deleted" and "not answered yet" look the same.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Marker {
+pub struct Marker {
+    /// What it records.
+    pub kind: MarkerKind,
+    /// The reference of the root it closes (§4.5), when known.
+    pub reference: Option<RefChatId>,
+}
+
+impl Marker {
+    /// Whether it rejects roots that continue the epoch (§4.8 case 3).
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.kind.is_closed()
+    }
+}
+
+/// What a marker records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerKind {
     /// A closed epoch: roots that continue it are rejected (§4.8 case 3).
     Closed,
     /// A root rejected because it continues a closed epoch (§4.8 case 3), recorded as
@@ -1002,11 +1028,11 @@ pub enum Marker {
     Dissolved,
 }
 
-impl Marker {
+impl MarkerKind {
     /// Whether it rejects roots that continue the epoch (§4.8 case 3).
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        matches!(self, Marker::Closed | Marker::ClosedFrom(_))
+        matches!(self, MarkerKind::Closed | MarkerKind::ClosedFrom(_))
     }
 }
 

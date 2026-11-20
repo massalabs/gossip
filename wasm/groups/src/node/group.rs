@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use super::records::{
     ChangeKind, EpochRecord, EpochStatus, GroupRecord, GroupStatus, HeldRoot, Invitation, Marker,
-    Target, TaskKey, TriggerKind, Work,
+    MarkerKind, Target, TaskKey, TriggerKind, Work,
 };
 use super::retrieval::Answer;
 use super::timing::PROMPT_DELAY_MS;
@@ -22,7 +22,7 @@ use super::timing::{
 };
 use super::{Cx, EpochEntry, Node, NodeError, PENALTY_ROOT_ANNOUNCEMENT};
 use crate::epoch::GroupState;
-use crate::ids::{ChatId, GossipId, ParentCommitment};
+use crate::ids::{ChatId, GossipId, ParentCommitment, RefChatId};
 use crate::root::{Root, RootType};
 use crate::wire::EntryItem;
 
@@ -458,9 +458,9 @@ impl Node {
         via: Via,
     ) -> Result<Answer, NodeError> {
         let id = root.chat_id();
-        match self.t.markers.get(&id) {
-            Some(Marker::Dissolved) => return Ok(Answer::Refused),
-            Some(Marker::Closed | Marker::ClosedFrom(_)) if via != Via::Direct => {
+        match self.marker_kind(&id) {
+            Some(MarkerKind::Dissolved) => return Ok(Answer::Refused),
+            Some(MarkerKind::Closed | MarkerKind::ClosedFrom(_)) if via != Via::Direct => {
                 return Ok(Answer::Refused);
             }
             _ => {}
@@ -586,7 +586,7 @@ impl Node {
             .filter(|c| self.t.markers.get(c).is_some_and(Marker::is_closed))
             .count();
         if closed > 0 && closed == root.parents().len() {
-            if self.record_closed(id, from) {
+            if self.record_closed(id, root.ref_chat_id(), from) {
                 self.reject_continuations(id);
             }
             return Ok(Answer::Supplied);
@@ -651,21 +651,21 @@ impl Node {
     /// Records `id`, a root rejected because it continues a closed epoch, as closed too
     /// (§4.8 case 3), within limits per delivering peer: the markers a peer can make this
     /// device keep are bounded. Returns whether it was recorded.
-    fn record_closed(&mut self, id: ChatId, from: GossipId) -> bool {
+    fn record_closed(&mut self, id: ChatId, reference: RefChatId, from: GossipId) -> bool {
         let mine = self
             .t
             .markers
             .iter()
-            .filter(|(_, m)| **m == Marker::ClosedFrom(from))
+            .filter(|(_, m)| m.kind == MarkerKind::ClosedFrom(from))
             .count();
         let all = self
             .t
             .markers
             .iter()
-            .filter(|(_, m)| matches!(m, Marker::ClosedFrom(_)))
+            .filter(|(_, m)| matches!(m.kind, MarkerKind::ClosedFrom(_)))
             .count();
         if mine < INHERITED_MARKERS_PER_SENDER && all < INHERITED_MARKERS_PER_DEVICE {
-            self.t.markers.insert(id, Marker::ClosedFrom(from));
+            self.put_marker(id, MarkerKind::ClosedFrom(from), Some(reference));
             return true;
         }
         false
@@ -686,7 +686,7 @@ impl Node {
                 .filter(|(_, m)| m.is_closed())
                 .map(|(k, _)| *k)
                 .collect();
-            let rejected: Vec<(ChatId, GossipId)> = self
+            let rejected: Vec<(ChatId, RefChatId, GossipId)> = self
                 .t
                 .epochs
                 .iter()
@@ -695,14 +695,14 @@ impl Node {
                         && r.root.names_parent(&c)
                         && r.root.match_parents(markers.iter()).len() == r.root.parents().len()
                 })
-                .map(|(x, r)| (*x, r.from))
+                .map(|(x, r)| (*x, r.root.ref_chat_id(), r.from))
                 .collect();
-            for (x, from) in rejected {
+            for (x, reference, from) in rejected {
                 self.take_record(&x);
                 self.t.events.remove(&(x, ChangeKind::Invitation));
                 self.drop_tasks_of(&[x]);
                 self.drop_fetched_for(x);
-                if self.record_closed(x, from) {
+                if self.record_closed(x, reference, from) {
                     work.push(x);
                 }
             }
