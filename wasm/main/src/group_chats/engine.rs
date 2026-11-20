@@ -251,10 +251,9 @@ impl Core {
         now: u64,
     ) -> R<ChatId> {
         let signer = &self.identity;
-        let _ = message_timer;
         let options = groups::node::GroupOptions {
             migrate_from,
-            ..Default::default()
+            message_timer,
         };
         self.node
             .create_group_with(
