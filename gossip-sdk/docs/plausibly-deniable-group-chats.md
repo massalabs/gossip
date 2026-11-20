@@ -2537,7 +2537,11 @@ It has three forms:
 - The responder answers only a requester that shares at least one accepted epoch with it, as for
   shared-chats discovery (§4.11); any other request is dropped silently.
 - **By ID:** the responder looks for an accepted root with that ID.
-- **By reference:** it looks for an accepted root with that `ref_chat_id` (§4.5).
+- **By reference:** it looks for an accepted root with that `ref_chat_id` (§4.5), and answers
+  exactly as it would answer a lookup of that root by ID: a group dissolved and kept as an archive
+  serves its roots both ways, and a device no longer active in the group answers "not available",
+  as for a reference it does not hold (§10.4).
+  *Why:* the same root gets the same answer whichever way it is asked.
 - **By parent:** `chat_id` names a root that both peers must be members of; the responder looks,
   among the roots it holds, for the one whose commitment under that root's `epoch_challenge` equals
   `parentCommitment`.
