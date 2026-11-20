@@ -1337,18 +1337,24 @@ impl Node {
                     for parent in event.parents().iter().filter(|_| fetches) {
                         self.want_event(cx, chat, *parent, Some(from), TriggerKind::Child)?;
                     }
-                    // A quiet record's events are never announced: the device keeps them to
-                    // itself and only answers a direct request (§7.7, §14.1).
+                    // A quiet record's events are never announced to a current member: the
+                    // device keeps them to itself and only answers a direct request (§7.7,
+                    // §14.1). A quiet deletion still goes in full to every removed peer of the
+                    // epoch, as a deletion does (§10.4): a removed peer relays nothing, so this
+                    // cannot renew the deletion between devices.
                     let shareable = cx
                         .ov
                         .object(&chat, &event.payload().sync_obj_id())?
                         .is_some_and(|o| o.shareable);
                     if relays
-                        && shareable
                         && merge != Merge::Lost
                         && entry.epoch().serve(cx.ov, &id, cx.now)?.is_some()
                     {
-                        self.disseminate(cx, &entry, &event, Form::Notice, false)?;
+                        if shareable {
+                            self.disseminate(cx, &entry, &event, Form::Notice, false)?;
+                        } else if matches!(event.payload(), Payload::Delete { .. }) {
+                            self.push_to_removed(&entry, id, &[]);
+                        }
                     }
                     // On receipt, never on display: what the reply names is placed, fetched
                     // or looked up later (§7.6).
@@ -1441,21 +1447,28 @@ impl Node {
             others.swap(i, j);
             recipients.push(others[i]);
         }
+        for peer in &recipients {
+            match form {
+                Form::Full => self.queue_full(*peer, chat, id),
+                Form::Notice => self.queue_notice(cx, *peer, chat, id),
+            }
+        }
         // §10.4: the author of a deletion pushes it to every removed peer.
         if own && deletion {
-            for r in &entry.removed {
-                if !recipients.contains(r) && self.may_receive(&chat, r, true) {
-                    recipients.push(*r);
-                }
-            }
-        }
-        for peer in recipients {
-            match form {
-                Form::Full => self.queue_full(peer, chat, id),
-                Form::Notice => self.queue_notice(cx, peer, chat, id),
-            }
+            self.push_to_removed(entry, id, &recipients);
         }
         Ok(())
+    }
+
+    /// Pushes the deletion `id` in full to every removed peer of `entry` not in `sent` (§10.4):
+    /// by its author, and by a device that holds it as a quiet record (§7.7, §14.1).
+    fn push_to_removed(&mut self, entry: &EpochEntry, id: EventId, sent: &[GossipId]) {
+        let chat = entry.root.chat_id();
+        for r in &entry.removed {
+            if !sent.contains(r) && self.may_receive(&chat, r, true) {
+                self.queue_full(*r, chat, id);
+            }
+        }
     }
 
     /// Invalidates the pending work that refers to events just pruned (§9.3, §15.1).
