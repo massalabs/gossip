@@ -729,3 +729,34 @@ fn a_holder_that_timed_out_once_is_asked_again_before_unresponsive_members() {
     assert_eq!(asked, vec![6, 1], "{asked:?}");
     assert!(at.is_some_and(|t| t <= sent + 8 * MIN), "{at:?}");
 }
+
+/// §11.2, D.46: 21 members besides device 0; member 1, the only holder, announced the event;
+/// members 2 to 21 are offline and were never measured, so they count as responsive. The lookup
+/// to member 1 times out once. Member 1 is asked again as soon as its request has expired, one
+/// or two stages later, before most of them: a timeout says nothing of the item, and its
+/// announcement still stands. Before, member 1 went behind the 20
+/// members not yet asked, each costing a full stage, and the task paused after 20 stages without
+/// asking it again.
+#[test]
+fn a_holder_that_announced_the_item_and_timed_out_once_is_asked_again_before_members_not_yet_asked()
+{
+    let mut net = Net::new(22, 1);
+    let chat = net.chat();
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    let mut order = Vec::new();
+    while order.len() < 4 {
+        let q = sent_lookups(&mut net, 0);
+        if let [q] = &q[..] {
+            order.push(index(&q.to));
+            // Nobody answers: the next stage starts at the end of this one's local wait.
+            net.now = q.sent_at + q.ttl * 105 / 100;
+        } else {
+            assert!(q.is_empty(), "{q:?}");
+            net.now += MIN;
+        }
+        net.tick(0);
+    }
+    assert_eq!(order[0], 1);
+    assert!(order[1..].contains(&1), "{order:?}");
+}
