@@ -152,8 +152,8 @@ fn compute_chat_id(
     ref_chat_id_challenge: &Challenge,
     created_at: u64,
     migrate_from: Option<u64>,
-    _message_timer: u64,
-    _settings: &BTreeMap<String, Vec<u8>>,
+    message_timer: u64,
+    settings: &BTreeMap<String, Vec<u8>>,
 ) -> ChatId {
     ChatId::from_bytes(h(
         DOMAIN_ROOT,
@@ -169,6 +169,13 @@ fn compute_chat_id(
             Value::Bytes(ref_chat_id_challenge.as_bytes()),
             Value::Uint(created_at),
             Value::Array(migrate_from.into_iter().map(Value::Uint).collect()),
+            Value::Uint(message_timer),
+            Value::Map(
+                settings
+                    .iter()
+                    .map(|(k, v)| (Value::Text(k), Value::Bytes(v)))
+                    .collect(),
+            ),
         ],
     ))
 }
@@ -178,7 +185,38 @@ fn compute_chat_id(
 /// measure of a message's metadata (§13.10) make the root malformed. Any other key is kept,
 /// known or not.
 fn settings_map(entries: Vec<proto::SettingsEntry>) -> Result<BTreeMap<String, Vec<u8>>> {
-    Ok(entries.into_iter().map(|e| (e.key, e.value)).collect())
+    check_count("settings", entries.len(), 0, MAX_SETTINGS_ENTRIES)?;
+    let mut map = BTreeMap::new();
+    for e in entries {
+        if e.key.is_empty() {
+            return Err(Error::TooFew {
+                field: "settings key",
+                min: 1,
+                got: 0,
+            });
+        }
+        if e.key.len() > MAX_SETTINGS_KEY_BYTES {
+            return Err(Error::TooMany {
+                field: "settings key",
+                max: MAX_SETTINGS_KEY_BYTES,
+                got: e.key.len(),
+            });
+        }
+        // One single form: protobuf would keep the last value of a repeated key, another
+        // decoder the first, and the two would hash different settings.
+        if map.insert(e.key, e.value).is_some() {
+            return Err(Error::Duplicate("settings"));
+        }
+    }
+    let len = wire::metadata_len(&map);
+    if len > MAX_SETTINGS_BYTES {
+        return Err(Error::TooMany {
+            field: "settings",
+            max: MAX_SETTINGS_BYTES,
+            got: len,
+        });
+    }
+    Ok(map)
 }
 
 /// The settings map as protobuf entries, by ascending key.
