@@ -3041,6 +3041,13 @@ it; it is never relayed and never answered.
   The exceptions already settled stay: a removed peer gets its own kick or leave (§5.6, §10.4); a
   dissolved group serves its roots and its dissolve message, an archive also a removed member's
   own record (§5.8, §12.8).
+  The answer stays the same when it is assembled later (§15.1). An event or sync-object lookup
+  taken while it could be served is decided again at assembly: if the epoch was deleted, or its
+  group went inactive, in between, it gets the answer above, never the event and never silence
+  where a device that never held the epoch answers. A "not available" decided on receipt ages as
+  content does: assembled past the request's deadline (§11.3), it is `expired` too.
+  *Why:* otherwise the answer would tell apart, by its timing, a lookup the device could serve from
+  one it could not.
 - Shared-chats scans and chat lookups have no epoch context and follow §4.11 and §12.7 instead.
 - A member of a superseded epoch that is a removed peer is served and heard under §10.4.
 - Errors, counts and timing state are allocated only after authorization.
