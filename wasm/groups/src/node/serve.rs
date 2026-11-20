@@ -688,11 +688,15 @@ impl Node {
                 vec![AnswerOp::Root { chat_id: *chat }]
             }
             QueryOp::ChatById(chat) => vec![root_for(self, chat)],
+            // The held epoch with that reference, answered as a lookup of it by ID would be
+            // (`root_served_to`): the same root gets the same answer whichever way it is asked,
+            // so an archive serves it too, and a device no longer active in the group answers
+            // "not available", as for a reference it does not hold.
             QueryOp::ChatByRef(r) => {
                 let chat = self
                     .epochs
                     .iter()
-                    .find(|(c, e)| e.root.ref_chat_id() == *r && self.serves(c))
+                    .find(|(_, e)| e.root.ref_chat_id() == *r)
                     .map(|(c, _)| *c);
                 vec![chat.map_or(na, |c| root_for(self, &c))]
             }
