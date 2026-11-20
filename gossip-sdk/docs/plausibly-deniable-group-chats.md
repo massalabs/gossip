@@ -174,7 +174,9 @@ specified in §5.12.
 ### 2.2 Compatibility within wire version 1
 
 Every implementation of wire version 1, whatever its release, MUST interoperate with every other
-without breaking it. A later release may behave better with its like; it never needs its like.
+without breaking it. A later release may improve its own local behaviour: its timing, its choice of
+peers, its retries. This is expected to help mixed groups too. No device detects or depends on the
+release of a peer: this is an expectation, not a rule anything relies on.
 The rules of this document are therefore of two kinds.
 
 **Fixed for the whole of wire version 1.** They cannot change without a new wire version:
@@ -348,7 +350,7 @@ It carries:
 | `epoch_challenge` | 32 fresh random bytes (§4.5) |
 | `ref_chat_id_challenge` | 32 fresh random bytes (§4.5) |
 | `created_at` | the creator's clock at creation, u64 Unix milliseconds; a claim |
-| `migrate_from` | optional: the format version of the conversation this group continues (§5.12); `0` is the earlier one-to-one format |
+| `migrate_from` | optional: the protocol version of the conversation this group continues (§5.12, Appendix A); `0` is the earlier one-to-one format |
 | `signature` | an ML-DSA-65 signature over the root ID (below) |
 
 The root has no event ID, no parents in the DAG sense and no payload.
@@ -858,6 +860,11 @@ The signature is the leaver's ML-DSA-65 signature over the 32 bytes of `leaveId`
 context `gossip.groups.leave.signature.1`.
 It is not hashed.
 
+The ID hashes no version. It inherits the version through the `chat_id`, whose root hashes its own
+version (§4.1). A later version that changes the fields of a leave, kick or dissolve MUST use a new
+hash label for its ID (a new hash domain, Appendix A).
+*Why:* otherwise an old and a new form of one object could share an ID (D.17).
+
 - A member has exactly one possible leave per epoch; receiving it twice changes nothing.
 - The leaver's keys are not carried: a verifier uses the keys it holds (§4.3) or a key query.
 - A receiver verifies the signature and that the leaver is a member of the named epoch.
@@ -1037,6 +1044,9 @@ The signature is the ML-DSA-65 signature of that epoch's owner over the 32 bytes
 the signing context `gossip.groups.kick.signature.1`.
 The ID of the new epoch is never shown to the removed member.
 
+As for a leave (§5.3), `kickId` hashes no version and inherits it through the `chat_id`. A later
+version that changes the fields of a leave, kick or dissolve MUST use a new hash label for its ID.
+
 **Creation.** When the owner's device creates a root, it creates one kick for each parent epoch and
 each member of that parent who is not in the new root, except members whose live signed leave it
 holds.
@@ -1195,6 +1205,9 @@ dissolveId = H("gossip.groups.dissolve.1", chat_id, must_delete)
 A dissolve message carries the `chat_id` of the epoch it names, the boolean `must_delete` and the
 signature: the ML-DSA-65 signature of that epoch's owner over the 32 bytes of `dissolveId`, with
 the signing context `gossip.groups.dissolve.signature.1`.
+As for a leave (§5.3), `dissolveId` hashes no version and inherits it through the `chat_id`. A
+later version that changes the fields of a leave, kick or dissolve MUST use a new hash label for
+its ID.
 
 - The owner's device sends it in full to all members of the named epoch.
 - Every member relays it like a signed leave: notice `[chat_id, dissolveId]` and signed-object
@@ -1362,7 +1375,8 @@ The same rules apply to a local name.
 
 ### 5.12 Direct chats, contacts, connections and migration
 
-**Conversation format versions.** `0` is the earlier one-to-one format; `1` is this protocol.
+**Conversation format versions.** They are the protocol version numbers of Appendix A: `0` is the
+earlier one-to-one format; `1` is this protocol. A version-1 device acts only on `0`.
 
 **Direct chats.** A direct chat is a group that was created with two members.
 Whoever creates it owns it, and it is an ordinary group in every respect: its owner may add
@@ -2732,6 +2746,7 @@ They are laid out as:
 [epoch_challenge]
 [ref_chat_id_challenge]
 [created_at]
+[migrate_from: optional, the protocol version of the conversation it continues]
 [signature]
 ```
 
@@ -3442,6 +3457,21 @@ ML-DSA-65 signing contexts are distinct from every hash domain.
 None yet.
 Future protocol-named message objects use names under `gossip.groups.message.*`.
 
+### Protocol version numbers
+
+`migrate_from` (§4.1, §5.12) holds a protocol version number, with the numbering of the wire
+version (§13.1):
+
+| Value | Meaning |
+| --- | --- |
+| `0` | before version 1: the earlier one-to-one conversation format |
+| `n ≥ 1` | wire version `n` |
+
+A version-1 device acts only on `0`. It keeps and hashes any other value without acting on it.
+The field never makes a root invalid.
+*Why:* a later version may continue its own conversations, and a version-1 device must still
+accept and relay such a root unchanged.
+
 ## Appendix B: Timing constants
 
 | Constant | Value |
@@ -3978,6 +4008,11 @@ The code applies the rule of §4.7.
 *Settled:* choice A, as coded; §4.1 states it: a member GossipID of all zeros is invalid.
 
 ### D.17 Signed-object IDs do not include a version (§5.3, §5.6, §5.8, §13.1)
+
+*Settled:* choice A. §5.3, §5.6 and §5.8 say that the three IDs hash no version, inherit it
+through the `chat_id`, and that a later version that changes the fields of a leave, kick or
+dissolve MUST use a new hash label for its ID. Why: the IDs stay as they are, and the rule alone
+keeps an old and a new form apart.
 
 *Found during implementation.*
 
@@ -5107,3 +5142,20 @@ afterwards.*
 
 - **A (recommended):** confirm the first; scale the budget of the second with the container.
 - **B:** keep the budget as it is.
+
+### D.83 Three additions to the wire format, refused (§2.2, §11.3, §11.7, §12.1, §13.1)
+
+*Settled:* none of the three is added. The format of version 1 stays fully closed (§2.2, §13.8).
+
+- **An ignorable hints field in the container**, which a device could fill with advice for its
+  peers and a receiver could skip. Why not: the container is closed, so an unknown field is
+  malformed (§1.1); a field that a receiver may skip is an extension point inside version 1, and
+  two releases would then act differently on the same bytes. What such hints would carry is local
+  policy (§2.2), which a later release improves without telling anyone.
+- **A "clock ahead" status** for a query whose `sent_at` is too far ahead (D.43). Why not: the app
+  can detect a wrong clock locally, and such a status could be used to make a device doubt its own
+  clock. Silence stays the answer.
+- **A pruned event answered with its parent links** (D.27, choice C). Why not: a pruned event must
+  answer as an event the device does not hold, so that a withdrawn or deleted message leaves
+  nothing a peer can tell apart (§9.3); the tip rule over available events already keeps
+  discovery going (§12.1).
