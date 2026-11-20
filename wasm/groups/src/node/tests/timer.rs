@@ -511,3 +511,173 @@ fn a_deletion_received_at_staggered_times_disappears_from_every_device() {
         assert!(!holds(&net, i), "device {i} holds the deletion again");
     }
 }
+
+/// A timed epoch of five members, devices for the first three, in which device 0 has member
+/// 2 as a removed peer (§10.4); device 2 does not know of its removal.
+fn timed_with_removed() -> Net {
+    let mut net = Net::timed(5, 3, HOUR);
+    let mut cfg = config(&net.root);
+    cfg.removed = BTreeSet::from([member(2)]);
+    let dev = &mut net.devs[0];
+    dev.node
+        .install_epoch(&mut dev.store, cfg, false, T0, &mut net.rng)
+        .unwrap();
+    net
+}
+
+/// §7.7, §10.4, §14.1: a device holding a quiet deletion pushes it in full to the removed
+/// peers of the epoch, as a deletion is pushed to them, and offers it to no current member,
+/// neighbor or not: no full event, no notice. A removed peer relays nothing, so this cannot
+/// renew the deletion between devices.
+#[test]
+fn a_quiet_deletion_is_pushed_in_full_to_removed_peers_only() {
+    let mut net = timed_with_removed();
+    super::dissemination::neighbors_of(&mut net, 0, &[1, 3]);
+    let d = net.deletion(T0 + 10, 2, 1);
+    net.now = T0 + 11;
+    net.give(0, 1, &d);
+    let chat = net.chat();
+    assert_eq!(
+        net.devs[0]
+            .store
+            .object(&chat, &d.payload().sync_obj_id())
+            .unwrap()
+            .map(|o| o.shareable),
+        Some(false)
+    );
+    let sent = net.poll_frames(0);
+    for (to, frames) in &sent {
+        let full = full_events(frames).contains(&d.event_id());
+        let notice = announced(frames).contains(&d.event_id());
+        if *to == member(2) {
+            assert!(full, "the removed peer gets the deletion in full");
+        } else {
+            assert!(!full && !notice, "a current member is offered the deletion");
+        }
+    }
+    assert!(
+        sent.get(&member(2))
+            .is_some_and(|f| full_events(f).contains(&d.event_id())),
+        "nothing pushed to the removed peer"
+    );
+    assert!(listed(&mut net, 1).is_empty());
+}
+
+/// §10.4: the removed peer keeps the quiet deletion pushed to it and passes it on to no one,
+/// although it does not know of its removal: the record is quiet there too, and it has no
+/// removed peer of its own.
+#[test]
+fn a_removed_peer_does_not_pass_a_pushed_quiet_deletion_on() {
+    let mut net = timed_with_removed();
+    let d = net.deletion(T0 + 10, 2, 1);
+    net.now = T0 + 11;
+    net.give(0, 1, &d);
+    let pushed = net.poll_frames(0).remove(&member(2)).unwrap_or_default();
+    net.recv_frames(2, member(0), &pushed);
+    assert!(
+        net.held(2, &d.event_id()),
+        "the removed peer keeps the deletion"
+    );
+    for (to, frames) in net.poll_frames(2) {
+        assert!(
+            !full_events(&frames).contains(&d.event_id())
+                && !announced(&frames).contains(&d.event_id()),
+            "the removed peer passed the deletion on to {to:?}"
+        );
+    }
+}
+
+/// §7.7, §10.4: as [`a_deletion_received_at_staggered_times_disappears_from_every_device`],
+/// in an epoch with removed peers: every device that receives the quiet deletion pushes it to
+/// them, one of them back online only after the deletion was published, and the deletion still disappears from every
+/// device within a bounded time.
+#[test]
+fn a_quiet_deletion_pushed_to_removed_peers_still_disappears_from_every_device() {
+    let timer = 2 * DAY;
+    let mut net = MNet::new(6, true);
+    let g = found_timed(&mut net, &[1, 2, 3, 4, 5], timer);
+    let chat = net.current(0, &g).unwrap();
+    net.offline[2] = true;
+    net.offline[3] = true;
+    net.offline[5] = true;
+    let start = net.now;
+    let m = net.say(0, &g, "short-lived");
+    let sync = m.payload().sync_obj_id();
+    net.run(MIN);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(4), gid(5)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(2 * MIN);
+    // Devices 2 and 3 learn of the successor while offline, so that they look up the
+    // superseded epoch once back.
+    let next = net.current(0, &g).unwrap();
+    let root = net.devs[0].node.root(&next).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    for d in [2, 3] {
+        net.recv_frames_m(d, 0, &[Frame::Event(blob.clone())]);
+        assert_eq!(net.current(d, &g), Some(next), "device {d}");
+    }
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    let d = dev
+        .node
+        .publish_deletion(&mut dev.store, chat, sync, None, now, &mut net.rng)
+        .unwrap()
+        .event;
+    net.run(MIN);
+    let holds = |net: &MNet, i: usize| {
+        net.devs[i]
+            .store
+            .event_row(&chat, &d.event_id())
+            .unwrap()
+            .is_some()
+    };
+    let shareable = |net: &MNet, i: usize| {
+        net.devs[i]
+            .store
+            .object(&chat, &sync)
+            .unwrap()
+            .map(|o| o.shareable)
+    };
+    assert!(holds(&net, 1) && holds(&net, 4));
+    let run = |net: &mut MNet, until: u64| {
+        while net.now < until {
+            net.now = (net.now + 10 * MIN).min(until);
+            for i in 0..net.devs.len() {
+                if !net.offline[i] {
+                    net.tick(i);
+                }
+            }
+            net.exchange();
+        }
+    };
+    run(&mut net, start + 12 * HOUR);
+    net.offline[2] = false;
+    net.offline[5] = false;
+    run(&mut net, start + 24 * HOUR);
+    assert!(holds(&net, 2), "device 2 fetched the deletion by a scan");
+    assert_eq!(shareable(&net, 2), Some(false));
+    assert!(holds(&net, 5), "the removed device 5 got the deletion");
+    assert_eq!(shareable(&net, 5), Some(false));
+    net.offline[3] = false;
+    run(&mut net, start + 2 * DAY);
+    assert!(holds(&net, 3), "device 3 fetched the deletion by a scan");
+    assert_eq!(shareable(&net, 3), Some(false));
+
+    run(&mut net, start + 5 * DAY);
+    for i in 0..6 {
+        assert!(!holds(&net, i), "device {i} still holds the deletion");
+        assert!(net.devs[i].store.object(&chat, &sync).unwrap().is_none());
+    }
+    run(&mut net, start + 8 * DAY);
+    for i in 0..6 {
+        assert!(!holds(&net, i), "device {i} holds the deletion again");
+    }
+}
