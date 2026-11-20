@@ -25,7 +25,8 @@ use groups::node::records::{
 };
 use groups::node::timing::Bucket;
 use groups::node::{
-    Change, GroupChange, GroupSummary, InvitationSummary, LeaveChoice, LookupResult, MyStatus,
+    Change, EpochTimer, GroupChange, GroupSummary, InvitationSummary, LeaveChoice, LookupResult,
+    MyStatus,
     TimelineItem, TimelineLine,
 };
 use groups::store::{Role, StoredResult};
@@ -624,6 +625,7 @@ variants!(Payload { Content(content), Delete { sync_obj_id, scheduled_at } });
 variants!(GroupChange {
     Successor { add, remove, name },
     Handover { new_owner, leave, name },
+    MessageTimer { timer },
     Resolve { members, name }
 });
 variants!(LeaveChoice {
@@ -690,7 +692,14 @@ record!(GroupSummary {
     former_owner_branches,
     links,
     earlier,
-    took_part
+    took_part,
+    message_timer,
+    timers
+});
+record!(EpochTimer {
+    epoch,
+    message_timer,
+    started_at
 });
 record!(InvitationSummary {
     chat_id,
@@ -702,7 +711,8 @@ record!(InvitationSummary {
     rejoins,
     migrate_from,
     migration_of,
-    continues
+    continues,
+    message_timer
 });
 variants!(TimelineLine {
     Founded { epoch, owner },

@@ -87,7 +87,9 @@ pub(crate) use index::CREDIBLE;
 pub use outbox::Outgoing;
 use records::{HintKey, NodeStorage, Tables, Target, TaskKey, TriggerKind, WorkKey};
 use timing::EDGES_PER_TURN;
-pub use view::{Change, GroupSummary, InvitationSummary, MyStatus, TimelineItem, TimelineLine};
+pub use view::{
+    Change, EpochTimer, GroupSummary, InvitationSummary, MyStatus, TimelineItem, TimelineLine,
+};
 
 /// Why an engine operation failed. Nothing was committed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

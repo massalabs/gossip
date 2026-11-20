@@ -51,6 +51,13 @@ pub enum GroupChange {
         /// A new name, if any.
         name: Option<String>,
     },
+    /// A successor root that changes only the message timer (§4.1, §7.7): the members, the
+    /// name and the settings stay. The new timer applies to the messages of the new epoch;
+    /// those of earlier epochs keep the timer of their own epoch.
+    MessageTimer {
+        /// The new message timer, in milliseconds; 0 keeps messages forever.
+        timer: u64,
+    },
     /// A resolution root whose parents are all the competing ends, with this member list
     /// (§4.9). Members whose leave applies are left out whatever the list says (§5.5).
     Resolve {
@@ -606,6 +613,7 @@ impl Node {
                 }
                 (vec![cur], m, name.clone(), None)
             }
+            GroupChange::MessageTimer { .. } => return Err(NodeError::NotAllowed),
             GroupChange::Handover {
                 new_owner,
                 leave,

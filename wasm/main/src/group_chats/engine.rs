@@ -249,7 +249,10 @@ impl Core {
         now: u64,
     ) -> R<ChatId> {
         let signer = &self.identity;
-        let options = groups::node::GroupOptions { migrate_from };
+        let options = groups::node::GroupOptions {
+            migrate_from,
+            ..Default::default()
+        };
         self.node
             .create_group_with(
                 &mut self.store,
