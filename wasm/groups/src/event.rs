@@ -925,6 +925,24 @@ mod tests {
         }
     }
 
+    /// §6.2, §13.10, D.84: a key given twice in a message's metadata makes the payload
+    /// malformed, as in a root's settings map; one key once reads the same as before.
+    #[test]
+    fn a_metadata_key_given_twice_is_malformed() {
+        let alice = identity(1);
+        let mut p = text(alice.id, "hi");
+        content(&mut p).metadata.insert("k".to_owned(), vec![1]);
+        let once = prost::Message::encode_to_vec(&p.to_proto());
+        let decoded = |bytes: &[u8]| {
+            Payload::from_proto(<proto::MessagePayload as prost::Message>::decode(bytes).unwrap())
+        };
+        assert_eq!(decoded(&once), Ok(p));
+        // The same entry again, field 10: { 1: "k", 2: [2] }.
+        let mut twice = once.clone();
+        twice.extend_from_slice(&[0x52, 6, 0x0a, 1, b'k', 0x12, 1, 2]);
+        assert_eq!(decoded(&twice), Err(Error::Duplicate("metadata")));
+    }
+
     #[test]
     fn create_verify_round_trip() {
         let alice = identity(1);
