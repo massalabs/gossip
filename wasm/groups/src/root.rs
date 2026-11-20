@@ -581,6 +581,8 @@ impl Root {
     /// [`Error::ParentMismatch`], [`Error::InvalidSignature`], [`Error::HandoverSameOwner`] or
     /// [`Error::HandoverChangesMembers`].
     pub fn verify_signature(&self, parent: Option<&Root>) -> Result<()> {
+        // ML-DSA-65 only, with no second classical signature (D.83, §16.9): a flaw in it has no
+        // fallback inside wire version 1.
         match self.root_type {
             RootType::Successor => verify_id(
                 &self.owner_keys,
