@@ -176,8 +176,8 @@ impl Node {
                 QueryOp::TipsScan { .. } => from != self.me,
                 // No epoch context: a requester that shares an accepted epoch (§4.11, §12.7).
                 QueryOp::SharedChatsScan { .. } => from != self.me && self.shares_epoch(&from),
-                // Chat lookups also from a member of an archived dissolved group, whose roots
-                // stay served (see `root_served_to`).
+                // Chat lookups also from a member of a dissolved group whose roots this device
+                // still keeps (see `root_served_to`, `shares_archive`).
                 QueryOp::ChatById(_) | QueryOp::ChatByRef(_) | QueryOp::ChatByParent { .. } => {
                     from != self.me && (self.shares_epoch(&from) || self.shares_archive(&from))
                 }
@@ -1015,17 +1015,19 @@ impl Node {
             )
     }
 
-    /// Whether `peer` is a member of an installed epoch of a group dissolved with "Dissolve
-    /// & Keep archived" (§5.8).
+    /// Whether `peer` is a member of an installed epoch of a dissolved group (§5.8): an
+    /// archive ("Dissolve & Keep archived"), or the named root that "Dissolve & Delete" keeps
+    /// for two weeks from when this device applied the dissolve. Chat lookups from such a
+    /// member are answered whether or not the two share another chat.
+    ///
+    /// Why: these roots and the dissolve message are kept only so that a device that missed
+    /// the dissolve learns it, and that device may share nothing else with this one.
     pub(crate) fn shares_archive(&self, peer: &GossipId) -> bool {
         self.epochs.iter().any(|(c, e)| {
             e.root.is_member(peer)
                 && matches!(
                     self.group_status(c),
-                    super::records::GroupStatus::Dissolved {
-                        must_delete: false,
-                        ..
-                    }
+                    super::records::GroupStatus::Dissolved { .. }
                 )
         })
     }
