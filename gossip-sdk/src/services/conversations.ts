@@ -45,7 +45,7 @@ import type {
   GroupSummary,
   LeaveChoice,
 } from './groups.js';
-import { EARLIER_FORMAT_VERSION } from './groups.js';
+import { EARLIER_FORMAT_VERSION, retentionToMessageTimer } from './groups.js';
 import type { DiscussionService } from './discussion.js';
 import { SELF_CONTACT_ID } from './selfMessage.js';
 import { Logger } from '../utils/logs.js';
@@ -188,6 +188,7 @@ export class ConversationService {
     await this.queries.discussions.updateById(d.id, {
       linkedGroupId: groupId,
       directChatOwed: false,
+      directChatTimer: null,
       updatedAt: new Date(),
     });
     this.emitDiscussion(d);
@@ -213,12 +214,27 @@ export class ConversationService {
   }
 
   /**
-   * "Migrate to a new group" (§5.12): founds the direct chat with the
-   * archive's peer and links it. What was received is processed first, and
-   * the peer's own migration takes precedence: with one pending, this
-   * throws `MigrationUnavailableError('invitation-pending')`.
+   * The message timer (§7.7, milliseconds, 0 = forever) a migration of the
+   * conversation with `contactUserId` starts with: the retention it has
+   * today (none is forever, the earlier "1 month" is 28 days). The archive
+   * itself keeps its own rule.
    */
-  migrate(contactUserId: string): Promise<GroupId> {
+  async migrationTimer(contactUserId: string): Promise<number> {
+    const d = await this.discussionOf(contactUserId);
+    return retentionToMessageTimer(d?.messageRetentionDuration);
+  }
+
+  /**
+   * "Migrate to a new group" (§5.12): founds the direct chat with the
+   * archive's peer and links it, with the message timer chosen or the one
+   * the conversation has (`migrationTimer`). What was received is processed
+   * first, and the peer's own migration takes precedence: with one pending,
+   * this throws `MigrationUnavailableError('invitation-pending')`.
+   */
+  migrate(
+    contactUserId: string,
+    options: { messageTimer?: number } = {}
+  ): Promise<GroupId> {
     return this.enqueue(async () => {
       const d = await this.discussionOf(contactUserId);
       if (!d?.isArchive) throw new MigrationUnavailableError('not-an-archive');
@@ -228,7 +244,12 @@ export class ConversationService {
       if (await this.migrationInvitation(contactUserId)) {
         throw new MigrationUnavailableError('invitation-pending');
       }
-      const groupId = await this.groups.createDirectChat('', contactUserId);
+      const groupId = await this.groups.createDirectChat(
+        '',
+        contactUserId,
+        options.messageTimer ??
+          retentionToMessageTimer(d.messageRetentionDuration)
+      );
       await this.link(d, groupId);
       return groupId;
     });
@@ -350,9 +371,13 @@ export class ConversationService {
 
   /**
    * Opens the chat with a contact: its direct chat, founded now if there is
-   * none (`migrate_from = 0`). For an archive, see `migrate`.
+   * none (`migrate_from = 0`), with the message timer chosen or the
+   * account's default. For an archive, see `migrate`.
    */
-  startDirectChat(contactUserId: string): Promise<GroupId> {
+  startDirectChat(
+    contactUserId: string,
+    options: { messageTimer?: number } = {}
+  ): Promise<GroupId> {
     return this.enqueue(async () => {
       const held = await this.directChatWith(contactUserId);
       const d = await this.discussionOf(contactUserId);
@@ -363,7 +388,11 @@ export class ConversationService {
       if (d?.isArchive && (await this.migrationInvitation(contactUserId))) {
         throw new MigrationUnavailableError('invitation-pending');
       }
-      const groupId = await this.groups.createDirectChat('', contactUserId);
+      const groupId = await this.groups.createDirectChat(
+        '',
+        contactUserId,
+        options.messageTimer
+      );
       if (d) await this.link(d, groupId);
       return groupId;
     });
@@ -405,7 +434,8 @@ export class ConversationService {
 
   /**
    * The requester's side of a new contact (§5.12): once the session is
-   * active, found the direct chat it owes, unless one is held.
+   * active, found the direct chat it owes, unless one is held, with the
+   * message timer chosen with the request (the account's default if none).
    */
   private async foundOwedDirectChats(): Promise<void> {
     for (const d of await this.discussionRows()) {
@@ -416,7 +446,12 @@ export class ConversationService {
       if (status !== SessionStatus.Active) continue;
       const held = await this.directChatWith(d.contactUserId);
       const groupId =
-        held ?? (await this.groups.createDirectChat('', d.contactUserId));
+        held ??
+        (await this.groups.createDirectChat(
+          '',
+          d.contactUserId,
+          d.directChatTimer ?? undefined
+        ));
       await this.link(d, groupId);
     }
   }
