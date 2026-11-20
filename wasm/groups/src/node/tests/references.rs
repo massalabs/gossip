@@ -8,10 +8,12 @@
 
 use std::collections::BTreeMap;
 
-use super::membership::{MNet, gid, signer};
+use super::membership::{MNet, answers_of, gid, signer};
 use super::*;
 use crate::event::{ReplyTarget, encode_reply_to};
 use crate::ids::RefChatId;
+use crate::node::records::{Marker, MarkerKind};
+use crate::node::references::Placed;
 
 const WEEK: u64 = 7 * DAY;
 
@@ -614,6 +616,289 @@ fn nothing_is_asked_for_a_chat_the_user_closed() {
         assert!(by_ref(&log, r).is_empty(), "installed={installed}");
         assert!(net.devs[3].node.root(&g).is_none());
     }
+}
+
+/// A notice of the root of `chat` from `from` to device 3.
+fn root_notice(net: &mut MNet, from: usize, chat: ChatId) {
+    net.recv_frames_m(
+        3,
+        from,
+        &[Frame::Notice(Notice {
+            entries: vec![Entry {
+                chat_id: chat,
+                item: EntryItem::Root,
+            }],
+        })],
+    );
+}
+
+/// The closed-chat marker device 3 keeps for `chat`.
+fn marker(net: &MNet, chat: &ChatId) -> Option<Marker> {
+    net.devs[3].node.t.markers.get(chat).copied()
+}
+
+/// What device `d` answers peer 1 about the epoch `chat` of reference `r`.
+fn answers_about(
+    net: &mut MNet,
+    d: usize,
+    chat: ChatId,
+    r: RefChatId,
+) -> Vec<(u32, ResponseResult)> {
+    answers_of(
+        net,
+        d,
+        1,
+        vec![QueryOp::ChatById(chat), QueryOp::ChatByRef(r)],
+    )
+}
+
+/// "Ignore and Delete" on an invitation device 3 has not answered (`delete_group`) leaves a
+/// closed-chat marker with the reference of its root, as declining it does. Why: with none, a
+/// copy of the root announced again was fetched and prompted again, and a reply naming it
+/// found nothing to place it, so that, with the lookups by reference on, the device asked for
+/// it. With the marker the copy is refused silently and nothing is asked; what the device
+/// answers about that epoch is what a device that never held it answers.
+#[test]
+fn deleting_an_unanswered_invitation_leaves_a_marker_with_its_reference() {
+    let mut net = MNet::new(6, true);
+    net.set_ref_lookups(true);
+    let g = net.create(0, &[1, 2, 3]);
+    let h = net.create(4, &[1, 2, 3, 5]);
+    net.exchange();
+    for d in 1..6 {
+        let due: Vec<ChatId> = net.devs[d]
+            .node
+            .invitations(net.now)
+            .iter()
+            .map(|i| i.chat_id)
+            .filter(|c| d != 3 || *c != g)
+            .collect();
+        for c in due {
+            net.accept(d, c);
+        }
+    }
+    net.run(2 * MIN);
+    let m = net.say(0, &g, "quoted");
+    net.run(MIN);
+    let r = reference(&net, 0, &g);
+    let now = net.now;
+    let dev = &mut net.devs[3];
+    dev.node
+        .delete_group(&mut dev.store, g, now, &mut net.rng)
+        .unwrap();
+    net.run(MIN);
+    assert!(net.devs[3].node.root(&g).is_none());
+    assert_eq!(
+        marker(&net, &g),
+        Some(Marker {
+            kind: MarkerKind::Closed,
+            reference: Some(r),
+        })
+    );
+    assert_eq!(net.devs[3].node.placed(&r), Some(Placed::Closed));
+    // A copy announced again is not fetched, and prompts nothing.
+    root_notice(&mut net, 1, g);
+    let mut log = exchange_log(&mut net);
+    log.extend(run_log(&mut net, 10 * MIN));
+    assert!(
+        !ops(&log)
+            .iter()
+            .any(|(f, _, op)| *f == 3 && *op == QueryOp::ChatById(g))
+    );
+    assert!(net.devs[3].node.invitations(net.now).is_empty());
+    // A reply naming it asks nothing.
+    reply_via(&mut net, 1, 2, 3, &h, &[(r, sync(&m))]);
+    let mut log = run_log(&mut net, 5 * MIN);
+    log.extend(jump(&mut net, WEEK + HOUR));
+    assert!(by_ref(&log, r).is_empty());
+    // Asked about it, it answers as device 5, which never held it.
+    assert_eq!(
+        answers_about(&mut net, 3, g, r),
+        answers_about(&mut net, 5, g, r)
+    );
+}
+
+/// Declining an invitation drops the roots fetched as its parents (§4.8); each now leaves a
+/// closed-chat marker with its reference, as the invitation does. Why: while the invitation
+/// was not answered, a reply naming such a parent was placed (§7.6); declined, with no
+/// marker, it would have been asked for, and a copy of the parent announced again was
+/// fetched and prompted as a fresh invitation. What the device answers about it is what a
+/// device that never held it answers.
+#[test]
+fn declining_an_invitation_leaves_markers_for_the_parents_fetched_for_it() {
+    let mut net = MNet::new(4, true);
+    net.set_ref_lookups(true);
+    let g = net.create(0, &[1, 2]);
+    let h = net.create(1, &[2, 3]);
+    net.exchange();
+    for d in 1..4 {
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    net.offline[3] = true;
+    let e2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(3)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    let m = net.say(1, &g, "before you came");
+    let e3 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("y".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.offline[3] = false;
+    net.dropped.clear();
+    let root = net.devs[1].node.root(&e3).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    net.recv_frames_m(3, 1, &[Frame::Event(blob)]);
+    net.run(crate::node::timing::PROMPT_DELAY_MS + MIN);
+    assert!(
+        net.devs[3].node.root(&e2).is_some(),
+        "the parent was fetched"
+    );
+    let (r2, r3) = (reference(&net, 1, &e2), reference(&net, 1, &e3));
+    assert_eq!(net.devs[3].node.placed(&r2), Some(Placed::Invitation));
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .decline_invitation(
+            &mut dev.store,
+            &s,
+            e3,
+            LeaveChoice::Silent,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    assert!(net.devs[3].node.root(&e2).is_none());
+    for (c, r) in [(e2, r2), (e3, r3)] {
+        assert_eq!(
+            marker(&net, &c),
+            Some(Marker {
+                kind: MarkerKind::Closed,
+                reference: Some(r),
+            })
+        );
+        assert_eq!(net.devs[3].node.placed(&r), Some(Placed::Closed));
+    }
+    // A copy of the parent announced again is not fetched, and prompts nothing.
+    root_notice(&mut net, 1, e2);
+    let mut log = exchange_log(&mut net);
+    log.extend(run_log(&mut net, 10 * MIN));
+    assert!(
+        !ops(&log)
+            .iter()
+            .any(|(f, _, op)| *f == 3 && *op == QueryOp::ChatById(e2))
+    );
+    assert!(net.devs[3].node.invitations(net.now).is_empty());
+    // A reply naming it asks nothing.
+    reply(&mut net, 1, &h, &[(r2, sync(&m))]);
+    let mut log = exchange_log(&mut net);
+    log.extend(run_log(&mut net, 5 * MIN));
+    log.extend(jump(&mut net, WEEK + HOUR));
+    assert!(by_ref(&log, r2).is_empty());
+    assert!(net.devs[3].node.root(&e2).is_none());
+    // Asked about it, it answers as about an epoch it never held.
+    let never = net.create(0, &[1]);
+    net.run(MIN);
+    let rn = reference(&net, 0, &never);
+    let held = answers_about(&mut net, 3, e2, r2);
+    assert_eq!(held.len(), 2);
+    assert_eq!(
+        held,
+        answers_of(
+            &mut net,
+            3,
+            2,
+            vec![QueryOp::ChatById(never), QueryOp::ChatByRef(rn)]
+        )
+    );
+}
+
+/// A marker stored before markers kept a reference has none: a reply naming its epoch then
+/// made the device ask, and the root came back to be refused. The refused root now gives
+/// the marker its reference, so that the device does not ask again. The same for a
+/// dissolved marker, which refuses even a root delivered in full.
+#[test]
+fn a_marker_without_reference_takes_the_one_of_a_root_it_refuses() {
+    let mut net = MNet::new(6, true);
+    net.set_ref_lookups(true);
+    let g = net.create(0, &[1, 2, 3]);
+    let h = net.create(4, &[1, 2, 3, 5]);
+    net.exchange();
+    for d in 1..6 {
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    let m = net.say(0, &g, "quoted");
+    net.run(MIN);
+    let r = reference(&net, 0, &g);
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::Silent,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(MIN);
+    // As stored before the reference was kept.
+    let old = Marker {
+        kind: MarkerKind::Closed,
+        reference: None,
+    };
+    net.devs[3].node.t.markers.insert(g, old);
+    net.devs[3].node.rebuild_ref_index();
+    assert_eq!(net.devs[3].node.placed(&r), None);
+    reply_via(&mut net, 1, 2, 3, &h, &[(r, sync(&m))]);
+    let (asked, _) = watch(&mut net, r, 3 * MIN);
+    assert_eq!(asked.first(), Some(&(3, 2)), "asked, as before the change");
+    assert_eq!(marker(&net, &g).and_then(|m| m.reference), Some(r));
+    assert_eq!(net.devs[3].node.placed(&r), Some(Placed::Closed));
+    assert!(net.devs[3].node.root(&g).is_none());
+    // Never again, a new reply naming it neither.
+    reply_via(&mut net, 5, 5, 3, &h, &[(r, sync(&m))]);
+    let mut log = run_log(&mut net, 5 * MIN);
+    log.extend(jump(&mut net, 2 * WEEK));
+    assert!(by_ref(&log, r).is_empty());
+    // A dissolved marker without a reference, and the root delivered in full.
+    let dissolved = Marker {
+        kind: MarkerKind::Dissolved,
+        reference: None,
+    };
+    net.devs[3].node.t.markers.insert(g, dissolved);
+    net.devs[3].node.rebuild_ref_index();
+    let root = net.devs[1].node.root(&g).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    net.recv_frames_m(3, 1, &[Frame::Event(blob)]);
+    assert!(net.devs[3].node.root(&g).is_none());
+    assert_eq!(
+        marker(&net, &g),
+        Some(Marker {
+            kind: MarkerKind::Dissolved,
+            reference: Some(r),
+        })
+    );
 }
 
 // ── Off in the first release ─────────────────────────────────────────────────
