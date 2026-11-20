@@ -1045,7 +1045,7 @@ fn a_message_timer_through_the_bindings() {
                 .unwrap(),
             HOUR
         );
-        let timers = g.field("timers").unwrap().as_arr().unwrap().clone();
+        let timers = g.field("timers").unwrap().as_arr().unwrap();
         assert_eq!(timers.len(), 1);
         assert_eq!(
             timers[0]

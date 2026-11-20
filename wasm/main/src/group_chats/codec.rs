@@ -866,7 +866,7 @@ fn settings(j: &J) -> R<std::collections::BTreeMap<String, Vec<u8>>> {
     let mut out = std::collections::BTreeMap::new();
     for e in j.as_arr()? {
         let pair = e.as_arr()?;
-        let [k, v] = &pair[..] else {
+        let [k, v] = pair else {
             return Err("settings: expected [key, hex]".into());
         };
         if out
