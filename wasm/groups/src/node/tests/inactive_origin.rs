@@ -307,11 +307,23 @@ fn a_lookup_that_waited_while_inactive_goes_on_once_the_device_is_back() {
     assert!(asks(&net, before) > 0, "R asks for the event again");
 }
 
-/// A valid signed object of `kind` naming `chat`, as Q can push it: Q's own leave, or the
-/// owner's kick of Q.
+/// A valid object of `kind` naming `chat`, as Q can push it: Q's own leave, the owner's kick
+/// of Q, or a deletion, which a member pushes in full to the removed peers of the epoch (§10.4).
 fn pushed(net: &MNet, kind: &str, chat: ChatId) -> Frame {
     let root = net.devs[0].node.root(&chat).unwrap();
     let obj = match kind {
+        "deletion" => EventObject::Message(
+            MessageEvent::create(
+                &root,
+                EventId::new(net.now - 1, [0x44; 16]),
+                &[],
+                Payload::Delete {
+                    sync_obj_id: SyncObjId::from_bytes([0x45; 32]),
+                    scheduled_at: None,
+                },
+            )
+            .unwrap(),
+        ),
         "leave" => EventObject::Leave(
             crate::Leave::sign(
                 &root,
@@ -335,15 +347,16 @@ fn pushed(net: &MNet, kind: &str, chat: ChatId) -> Frame {
     Frame::Event(wire::encode_event_blob(&obj).unwrap())
 }
 
-/// §10.4, D.74: Q pushes R, in full, a valid leave or kick naming C, an epoch R holds in a
-/// group where it is no longer active. R may keep it, but everything it then sends, for three
-/// hours, is the same, byte for byte (the chat ID aside), as for the same object naming D, which
-/// R deleted, or E, which R never held: it relays no notice of it to the members of C.
+/// §10.4, D.74: Q pushes R, in full, a valid leave, kick or deletion naming C, an epoch R holds
+/// in a group where it is no longer active. R may keep it, but everything it then sends, for
+/// three hours, is the same, byte for byte (the chat ID aside), as for the same object naming D,
+/// which R deleted, or E, which R never held: it relays no notice of it to the members of C.
+/// Before, a kicked device or one that left relayed a pushed deletion by notices.
 #[test]
 fn an_inactive_device_relays_nothing_pushed_to_it_for_its_epoch() {
     let mut wrong = Vec::new();
     for how in ALL {
-        for kind in ["leave", "kick"] {
+        for kind in ["leave", "kick", "deletion"] {
             let probe = |pick: usize| {
                 let (mut net, chats) = setup(how, |_, _| {});
                 let f = pushed(&net, kind, chats[pick]);
