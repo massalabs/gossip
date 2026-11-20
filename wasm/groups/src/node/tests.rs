@@ -3,6 +3,7 @@
 mod content;
 mod direct;
 mod dissemination;
+mod inactive_origin;
 pub(crate) mod membership;
 mod neighbors;
 mod packing;
