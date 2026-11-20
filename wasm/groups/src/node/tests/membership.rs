@@ -2087,6 +2087,95 @@ fn a_member_that_left_can_be_added_back() {
     assert_eq!(s0.current, z);
 }
 
+/// A member in X is saved to a backup; messages are then sent in X by it and by others (the
+/// gap); it leaves, the owner makes Y without it, then adds it back in Z (parents Y and X,
+/// §5.10), and it accepts. Its device is then restored from the backup and believes it is an
+/// active member of X. It must (a) receive its own kept leave and show the group as left
+/// (§5.3 "Keeping"); (b) get Z as an invitation attached to the same group; (c) once it
+/// accepts, hold one active conversation with every message of X, the gap included, and the
+/// messages of Z, never those of Y. The old leave does not remove it from Z (it is used up).
+#[test]
+fn a_member_added_back_and_restored_before_its_leave_learns_it_and_gets_its_history() {
+    let (mut net, x) = founded(4);
+    let bob = 3;
+    net.say(1, &x, "x before");
+    net.run(MIN);
+    let backup = net.devs[bob].store.clone();
+    // The gap: messages of X the backup does not hold, from the member itself and others.
+    net.say(bob, &x, "x gap from bob");
+    net.say(2, &x, "x gap from dave");
+    net.run(MIN);
+    let now = net.now;
+    let s = signer(bob);
+    let dev = &mut net.devs[bob];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            x,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    let y = net.current(0, &x).unwrap();
+    assert_ne!(y, x);
+    assert!(!net.summary(0, &x).unwrap().members.contains(&gid(bob)));
+    net.say(1, &x, "y secret");
+    net.run(MIN);
+    let z = net
+        .change(
+            0,
+            x,
+            GroupChange::Successor {
+                add: vec![gid(bob)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    // Its device closed the group when it left (§5.3): Z starts a conversation of its own.
+    assert_eq!(net.accept_all(bob), vec![z]);
+    net.run(2 * MIN);
+    net.say(0, &x, "z hello");
+    net.run(MIN);
+    // Restored from the backup: it is an active member of X, and holds nothing later.
+    net.devs[bob].store = backup;
+    net.restart(bob);
+    assert_eq!(net.current(bob, &x), Some(x));
+    assert_eq!(net.summary(bob, &x).unwrap().status, MyStatus::Member);
+    // Its talks with the others in the following day (scans of their lanes, §12.3).
+    net.run(DAY);
+    // (a) Its own leave comes back.
+    let s = net.summary(bob, &x).unwrap();
+    assert_eq!(s.status, MyStatus::Left, "(a) {s:?}");
+    assert!(net.lines(bob, &x).contains(&TimelineLine::YouLeft));
+    // (b) Z is an invitation that rejoins the same group.
+    let inv = net.devs[bob].node.invitations(net.now);
+    assert!(
+        inv.iter().any(|i| i.chat_id == z && i.rejoins == Some(x)),
+        "(b) {inv:?}"
+    );
+    // (c) Accepted, it is one active conversation with the whole history of X and Z.
+    assert_eq!(net.accept(bob, z), x);
+    net.run(10 * MIN);
+    let s = net.summary(bob, &x).unwrap();
+    assert_eq!(s.status, MyStatus::Member, "(c) {s:?}");
+    assert_eq!(s.current, z);
+    assert_eq!(net.devs[bob].node.groups().len(), 1, "one conversation");
+    let texts = net.texts(bob, &x);
+    for t in ["x before", "x gap from bob", "x gap from dave", "z hello"] {
+        assert!(texts.contains(&t.to_owned()), "(c) {t}: {texts:?}");
+    }
+    assert!(!texts.contains(&"y secret".to_owned()), "(c) never Y");
+    // The old leave did not remove it from Z.
+    net.run(5 * MIN);
+    assert!(net.summary(0, &x).unwrap().members.contains(&gid(bob)));
+    assert_eq!(net.current(0, &x), Some(z));
+}
+
 /// Finding 5 of the review of 54711780: after handing the group over, the former owner made
 /// a root of its own, dated at the end of time, continuing its old epoch. The new owner then
 /// had a "fork to resolve" that blocked its messages and automatic successors, and could not
