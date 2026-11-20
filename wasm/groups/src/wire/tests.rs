@@ -1121,8 +1121,9 @@ fn fitting_blob_len(object: &EventObject) -> usize {
     blob.len()
 }
 
-/// The largest valid root: 512 members, 32 parents, a 256-byte name, the owner's keys and
-/// the longest `created_at`.
+/// The largest valid root: 512 members, 32 parents, a 256-byte name, the owner's keys, the
+/// longest `created_at`, `migrate_from` and message timer, and a settings map of 128 entries
+/// of 64-byte keys filling its 16,384 bytes exactly.
 fn largest_root(owner: &crate::test_support::Identity) -> crate::Root {
     let mut members: Vec<GossipId> = (1u16..512)
         .map(|i| {
@@ -1136,10 +1137,27 @@ fn largest_root(owner: &crate::test_support::Identity) -> crate::Root {
     params.name = "\u{e9}".repeat(128);
     params.members = members;
     params.created_at = u64::MAX;
+    params.message_timer = u64::MAX;
+    // Each entry: 1 + 1 + (1 + 1 + 64) + (1 + 1 + 58) = 128 bytes; 128 of them, 16,384.
+    params.settings = (0..crate::constants::MAX_SETTINGS_ENTRIES)
+        .map(|i| (format!("{i:0>64}"), vec![0xa5; 58]))
+        .collect();
+    assert_eq!(
+        metadata_len(&params.settings),
+        crate::constants::MAX_SETTINGS_BYTES
+    );
     let parents: Vec<ChatId> = (0u8..32).map(|i| ChatId::from_bytes([i; 32])).collect();
     let root =
         crate::Root::create_successor(params, &parents, &owner.secret.dsa_signing_key, [0; 32])
             .unwrap();
+    // `migrate_from` at its longest encoding, signed again.
+    let mut p = root.to_proto();
+    p.migrate_from = Some(u64::MAX);
+    let root = crate::Root::forge(p, &owner.secret.dsa_signing_key);
+    assert_eq!(
+        root.settings().len(),
+        crate::constants::MAX_SETTINGS_ENTRIES
+    );
     assert_eq!(root.name().len(), crate::constants::MAX_NAME_BYTES);
     assert_eq!(root.members().len(), crate::constants::MAX_MEMBERS);
     assert_eq!(root.parents().len(), crate::constants::MAX_ROOT_PARENTS);
@@ -1171,9 +1189,74 @@ fn the_largest_root_and_signed_objects_fit_one_container() {
         ),
     ];
     println!("{sizes:?} of at most {MAX_EVENT_BLOB_BYTES}");
-    // A root of 512 members is about 24 KB (§4.4), well within the container.
-    assert!(sizes[0].1 < MAX_EVENT_BLOB_BYTES / 2, "{sizes:?}");
+    // A root of 512 members is about 24 KB (§4.4); with a full settings map about 41.8 KB,
+    // still within the container with about 15 KB to spare (§4.6).
+    assert_eq!(sizes[0].1, LARGEST_ROOT_BLOB);
 }
+
+/// The event blob of the largest root, in bytes.
+const LARGEST_ROOT_BLOB: usize = 41_823;
+
+/// §4.6, §13.10: the largest root fits one group plaintext with its frame, pushed in full as
+/// an event frame and as the answer to a chat lookup (a response frame with the longest
+/// `request_id` and `idx`).
+#[test]
+fn the_largest_root_fits_one_plaintext_pushed_and_as_a_lookup_answer() {
+    let alice = identity(1);
+    let blob = encode_event_blob(&EventObject::Root(Box::new(largest_root(&alice)))).unwrap();
+    let pushed = encode_plaintext(&[Frame::Event(blob.clone())]).unwrap();
+    let answer = encode_plaintext(&[Frame::Response(Response {
+        request_id: Some(RequestId::from_bytes([0xff; 16])),
+        idx: u32::MAX,
+        result: ResponseResult::Event(blob.clone()),
+    })])
+    .unwrap();
+    println!(
+        "largest root: blob {}, pushed {}, answer {}, of {MAX_PLAINTEXT_BYTES}",
+        blob.len(),
+        pushed.len(),
+        answer.len()
+    );
+    assert_eq!(blob.len(), LARGEST_ROOT_BLOB);
+    assert_eq!(pushed.len(), LARGEST_ROOT_PUSHED);
+    assert_eq!(answer.len(), LARGEST_ROOT_ANSWER);
+    assert!(answer.len() <= MAX_PLAINTEXT_BYTES);
+    // Where a root travels with other objects, each is a frame of its own, packed greedily
+    // and split across plaintexts (§4.6 step 6, §5.3, D.62): a leave then the root still
+    // share one plaintext; a root takes 4 kicks with it, the others follow; two of the
+    // largest roots never share one.
+    let alice_leave = Leave::sign(
+        &largest_root(&alice),
+        &alice.public,
+        &alice.secret.dsa_signing_key,
+        [1; 32],
+    )
+    .unwrap();
+    let leave = Frame::Event(encode_event_blob(&EventObject::Leave(alice_leave)).unwrap());
+    let both = encode_plaintext(&[leave, Frame::Event(blob.clone())]).unwrap();
+    println!("a leave then the largest root: {}", both.len());
+    let root = largest_root(&alice);
+    let kick = |i: usize| {
+        let k = Kick::sign(
+            &root,
+            root.members()[i],
+            &alice.secret.dsa_signing_key,
+            [2; 32],
+        )
+        .unwrap();
+        Frame::Event(encode_event_blob(&EventObject::Kick(k)).unwrap())
+    };
+    let mut frames = vec![Frame::Event(blob.clone())];
+    while encode_plaintext(&frames).is_ok() {
+        frames.push(kick(frames.len()));
+    }
+    assert_eq!(frames.len() - 2, 4);
+    assert!(encode_plaintext(&[Frame::Event(blob.clone()), Frame::Event(blob)]).is_err());
+}
+
+/// The largest root pushed alone in a plaintext, and as a lookup answer, in bytes.
+const LARGEST_ROOT_PUSHED: usize = 41_832;
+const LARGEST_ROOT_ANSWER: usize = 41_860;
 
 /// A maximal message event: 16 parents, 32 reply targets, metadata and text at their
 /// limits, the longest timestamps; `body` turns the text into the body.
