@@ -1562,3 +1562,34 @@ fn an_uncorrelated_response_never_delivers_a_root() {
     );
     assert!(net.devs[0].node.root(&other.chat_id()).is_none());
 }
+
+/// §13.10, settled: the length compared to 57,307 bytes is that of the event blob as
+/// received. A copy padded past it (here with empty repeats of the event's `oneof` case,
+/// which a decoder merges away) is malformed and counts against its sender; it names no
+/// event, so a proper copy of the same event from another peer is still accepted.
+#[test]
+fn an_event_padded_past_the_limit_is_refused_and_a_proper_copy_still_accepted() {
+    let mut net = Net::new(3, 1);
+    let e = net.event(T0, 1, &[], 1);
+    let proper = blob(&e);
+    let mut padded = proper.clone();
+    while padded.len() <= crate::constants::MAX_EVENT_BLOB_BYTES {
+        // Field 2 of `Event` (the message event case), length-delimited, empty.
+        padded.extend_from_slice(&[0x12, 0x00]);
+    }
+    // The padding changes nothing once decoded: only its length is over.
+    let mut r = proper.clone();
+    r.extend_from_slice(&[0x12, 0x00]);
+    assert!(matches!(
+        wire::decode_event_blob(&r, 1),
+        Ok(EventObject::Message(m)) if m == e
+    ));
+    let before = net.devs[0].node.score(&member(1));
+    let invalid = net.devs[0].node.stats().invalid;
+    net.recv_frames(0, member(1), &[Frame::Event(padded)]);
+    assert!(!net.known(0, &e.event_id()));
+    assert_eq!(net.devs[0].node.stats().invalid, invalid + 1);
+    assert!(net.devs[0].node.score(&member(1)) < before, "penalised");
+    net.recv_frames(0, member(2), &[Frame::Event(proper)]);
+    assert!(net.held(0, &e.event_id()), "the proper copy is accepted");
+}
