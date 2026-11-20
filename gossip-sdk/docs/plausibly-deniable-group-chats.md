@@ -2222,6 +2222,9 @@ goes in the same commit (§15.2). The moment is kept in the durable time-sorted 
 wakes the device like a scheduled deletion; the view hides the message from its moment even
 before that runs.
 
+The database overwrites what an erasure frees; the encrypted storage below it can keep an earlier
+copy for a short time (§16.10).
+
 _Why local:_ every device computes the same moment from the same dates, so all converge with no
 exchange: devices that were offline, read-only groups (kicked, left, superseded) and archives of
 dissolved groups included. _Why erased rather than kept as a tombstone:_ a stub, a parent link or
@@ -3866,6 +3869,29 @@ identity key (§2, D.83). If a flaw is found in ML-DSA-65, there is **no fallbac
 1**: anyone able to forge these signatures can sign roots, kicks and dissolve messages in another
 member's name, and the account identity is broken as well. Recovery takes a new protocol version,
 which a break of the identity key needs in any case.
+
+### 16.10 Known limitation: the encrypted storage keeps an erased block for a short time
+
+When the message timer erases a message (§7.7), or a user deletes one, the database overwrites the
+space it frees with zeros (`secure_delete`). Nothing of the message can then be read back from the
+account's database, free pages included.
+
+One layer down, the encrypted storage writes the changed block again, under the same key, and does
+not destroy the block's previous ciphertext at once:
+
+- on phones, the storage file keeps it until later writes reuse that space; in a test, that took
+  the next one or two commits or cover-traffic rounds, which come every 10 to 30 seconds;
+- on the web, it depends on the browser;
+- a phone's file system and flash memory can keep physical copies that no app controls.
+
+So for a short time after an erasure, someone who holds **both** a raw copy of the storage taken in
+that window **and** the account's password can still recover the erased content. Without the
+password, nothing changes.
+
+This is accepted. Closing it needs a change inside the storage layer, or a storage format where
+every write uses a fresh key. The first would flush the old versions of a block, with a trigger
+still to be designed so that the flush does not itself show that something was erased. Both are
+outside this protocol and are proposed separately (D.87).
 
 ## 17. Readiness, validation and future work
 
@@ -5867,3 +5893,14 @@ had to be decided:
   else with was dropped with the chat, and the owner, which still holds its own side, is not told:
   the member then learns of the re-add only once a session with the owner is renewed, as a device
   that deleted the chat does.
+
+### D.87 What the encrypted storage keeps after an erasure (§7.7, §16.10)
+
+_Found while testing what an erased message leaves on the device._
+
+_Settled, accepted as a known limit of this release:_ the database zeroes what an erasure frees
+(`secure_delete`), and the encrypted storage below it can keep the previous ciphertext of a
+rewritten block for a short time, readable with the account's password (§16.10). Closing it is
+left to the storage layer: flushing the old versions of a block, with a trigger that does not
+itself signal an erasure, or a format where every write uses a fresh key. Both are proposed
+separately from this protocol.
