@@ -65,7 +65,9 @@ const EarlierChats: React.FC<EarlierChatsProps> = ({
             message={item}
             isOutgoing={item.author === me}
             authorName={memberName(item.author)}
-            replyPreviews={item.replyTo.map(() => null)}
+            replyPreviews={item.replyTo.map(r =>
+              r.message ? messageText(r.message, t) : null
+            )}
             canWrite={false}
             memberName={memberName}
             onCopy={m => {
