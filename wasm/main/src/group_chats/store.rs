@@ -57,13 +57,19 @@ pub struct ObjectKey {
     pub sync_obj_id: String,
 }
 
-/// A current object.
+/// A current object: its fields, and whether the device may offer its events on its own
+/// initiative, in a field of its own ([`ObjectRecord::shareable`], §14.1).
+///
+/// `shareable` has no default, on purpose: every write states it, and a snapshot without it
+/// is refused. A forgotten value would make a quiet record shareable, and its deletion
+/// could then be renewed between devices forever (§7.7).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectOut {
     pub chat_id: String,
     pub sync_obj_id: String,
     pub fields: String,
+    pub shareable: bool,
 }
 
 /// A node record: its table (`kind`), its key, and its fields; no fields deletes it.
@@ -196,6 +202,7 @@ fn encode_changes(c: &Changes, out: &mut BatchOut) {
             chat_id: chat.clone(),
             sync_obj_id: text(&obj.sync_obj_id),
             fields: object_fields(obj),
+            shareable: obj.shareable,
         });
     }
     for sync in &c.removed_objects {
@@ -402,6 +409,8 @@ pub fn decode_snapshot(s: &BatchOut) -> R<(MemoryStorage, OpenReport)> {
                 Ok(v) => Codec::dec(v)?,
                 Err(_) => Default::default(),
             },
+            // Stored in its own column, with no default (§14.1).
+            shareable: o.shareable,
         };
         entry(&mut epochs, chat).objects.insert(sync_obj_id, obj);
     }
