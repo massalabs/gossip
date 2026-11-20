@@ -13,6 +13,7 @@ describe('PrivateMigrationQueries', () => {
       formatVersion: 1,
       installationEpoch: EPOCH_A,
       completedPhase: 0,
+      sessionReset: false,
     });
     await queries.completePhase(EPOCH_A, 1);
     await expect(queries.begin(EPOCH_A)).resolves.toMatchObject({
@@ -110,6 +111,54 @@ describe('PrivateMigrationQueries', () => {
       formatVersion: 1,
       installationEpoch: EPOCH_B,
       completedPhase: 0,
+      sessionReset: true,
+    });
+  });
+
+  it('marks a session reset only when the journal came from another generation', async () => {
+    const queries = getTestQueries().privateMigration;
+    // No journal yet: an account upgraded in place keeps its sessions.
+    await expect(queries.begin(EPOCH_A)).resolves.toMatchObject({
+      sessionReset: false,
+    });
+    await queries.beginCompleted(EPOCH_A);
+    // Copied into another generation (a backup imported): reset, and the
+    // mark survives a restart of the journal until it is acknowledged.
+    await expect(queries.begin(EPOCH_B)).resolves.toMatchObject({
+      completedPhase: 0,
+      sessionReset: true,
+    });
+    await expect(queries.begin(EPOCH_B)).resolves.toMatchObject({
+      sessionReset: true,
+    });
+    for (let phase = 1; phase <= 5; phase++) {
+      await queries.completePhase(EPOCH_B, phase);
+    }
+    await expect(queries.get()).resolves.toMatchObject({
+      completedPhase: 5,
+      sessionReset: true,
+    });
+    await queries.acknowledgeSessionReset(EPOCH_B);
+    await expect(queries.get()).resolves.toMatchObject({
+      completedPhase: 5,
+      sessionReset: false,
+    });
+    // A stale writer changes nothing.
+    await queries.begin(EPOCH_A);
+    await queries.acknowledgeSessionReset(EPOCH_B);
+    await expect(queries.get()).resolves.toMatchObject({
+      installationEpoch: EPOCH_A,
+      sessionReset: true,
+    });
+  });
+
+  it('keeps no reset across an in-place re-encryption', async () => {
+    const queries = getTestQueries().privateMigration;
+    await queries.beginCompleted(EPOCH_A);
+    await expect(queries.carryOver(EPOCH_A, EPOCH_B)).resolves.toBe(true);
+    await expect(queries.begin(EPOCH_B)).resolves.toMatchObject({
+      completedPhase: 5,
+      sessionReset: false,
     });
   });
 
