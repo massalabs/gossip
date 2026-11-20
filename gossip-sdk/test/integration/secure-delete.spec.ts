@@ -14,7 +14,8 @@
  * - deleted by hand, for everyone;
  * - a contact's one-to-one messages, the contact deleted.
  * With `secure_delete` off, the same scenario leaves the marker in the file:
- * the check sees what a deletion leaves.
+ * the check sees what a deletion leaves. With `FAST`, a long message stays in
+ * the overflow pages its deletion frees: the SDK sets `ON`.
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -83,15 +84,20 @@ describe('Secure delete (file database)', { timeout: 300_000 }, () => {
     peers = [];
   });
 
-  async function openPeer(secureDeleteOff: boolean): Promise<GossipSdk> {
+  /** `secure_delete` as the SDK sets it, or another setting to compare. */
+  type Setting = 'default' | 'OFF' | 'FAST';
+
+  async function openPeer(setting: Setting): Promise<GossipSdk> {
     const dir = mkdtempSync(join(tmpdir(), 'gossip-secure-delete-'));
     const sdk = new GossipSdk();
     await sdk.init({
       storage: { type: 'node-fs', path: dir },
       messageProtocol: net,
     });
-    if (secureDeleteOff) {
-      await connection(sdk).db.run(sql.raw('PRAGMA secure_delete = OFF'));
+    if (setting !== 'default') {
+      await connection(sdk).db.run(
+        sql.raw(`PRAGMA secure_delete = ${setting}`)
+      );
     }
     await sdk.openSession({
       mnemonic: generateMnemonic(),
@@ -106,10 +112,10 @@ describe('Secure delete (file database)', { timeout: 300_000 }, () => {
     return sdk;
   }
 
-  async function open(secureDeleteOff = false): Promise<GossipSdk[]> {
+  async function open(setting: Setting = 'default'): Promise<GossipSdk[]> {
     net = new MockMessageProtocol();
-    const alice = await openPeer(secureDeleteOff);
-    const bob = await openPeer(secureDeleteOff);
+    const alice = await openPeer(setting);
+    const bob = await openPeer(setting);
     await setupSession(alice, bob, 'Bob', 'Alice');
     return [alice, bob];
   }
@@ -138,12 +144,14 @@ describe('Secure delete (file database)', { timeout: 300_000 }, () => {
   /**
    * Alice founds a group with Bob (`timer`), writes a message with a marker in
    * its text and one in its metadata, and Bob reacts to it. Returns the
-   * markers, found in both raw databases.
+   * markers, found in both raw databases. A `long` text (11 KB) is stored
+   * across overflow pages, which its deletion frees whole.
    */
   async function markedGroupMessage(
     alice: GossipSdk,
     bob: GossipSdk,
-    timer: number
+    timer: number,
+    long = false
   ): Promise<{
     groupId: string;
     epochId: string;
@@ -160,14 +168,15 @@ describe('Secure delete (file database)', { timeout: 300_000 }, () => {
 
     const text = newMarker('SDTEXT');
     const meta = newMarker('SDMETA');
-    const published = await alice.groups.sendMessage(groupId, text, {
+    const body = long ? 'x'.repeat(6000) + text + 'y'.repeat(5000) : text;
+    const published = await alice.groups.sendMessage(groupId, body, {
       metadata: { note: new TextEncoder().encode(meta) },
     });
     await deliver(3);
     await bob.groups.react(groupId, published.syncObjId, '👍');
     await deliver(3);
     for (const p of [alice, bob]) {
-      expect(await texts(p.groups, groupId)).toEqual([text]);
+      expect(await texts(p.groups, groupId)).toEqual([body]);
     }
     const epochId = (await alice.groups.get(groupId))!.timers[0].epochId;
     // Before the erasure the text is in both files: the search sees it.
@@ -182,12 +191,16 @@ describe('Secure delete (file database)', { timeout: 300_000 }, () => {
     };
   }
 
-  async function erasedByTimer(secureDeleteOff: boolean): Promise<string[]> {
-    const [alice, bob] = await open(secureDeleteOff);
+  async function erasedByTimer(
+    setting: Setting,
+    long = false
+  ): Promise<string[]> {
+    const [alice, bob] = await open(setting);
     const { groupId, markers } = await markedGroupMessage(
       alice,
       bob,
-      FIVE_MINUTES
+      FIVE_MINUTES,
+      long
     );
     clock += FIVE_MINUTES + 1;
     for (const p of [alice, bob]) {
@@ -206,11 +219,20 @@ describe('Secure delete (file database)', { timeout: 300_000 }, () => {
   });
 
   it('leaves nothing of a message the timer erased, its metadata and reaction included', async () => {
-    expect(await erasedByTimer(false)).toEqual([]);
+    expect(await erasedByTimer('default')).toEqual([]);
   });
 
   it('leaves the marker with secure_delete off: the check sees what a deletion leaves', async () => {
-    const found = await erasedByTimer(true);
+    const found = await erasedByTimer('OFF');
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  it('leaves nothing of a long message the timer erased, its overflow pages included', async () => {
+    expect(await erasedByTimer('default', true)).toEqual([]);
+  });
+
+  it('leaves a long message in the pages it freed with secure_delete FAST: hence ON', async () => {
+    const found = await erasedByTimer('FAST', true);
     expect(found.length).toBeGreaterThan(0);
   });
 
