@@ -256,6 +256,21 @@ impl GroupsNode {
         migrate_from: Option<f64>,
         now: f64,
     ) -> Result<Vec<u8>, JsValue> {
+        self.create_group_with_timer(name, members, migrate_from, 0.0, now)
+    }
+
+    /// As `create_group_with`, with the message timer of the group in milliseconds (§7.7):
+    /// each message is deleted on every device at its creation date plus the timer; 0 keeps
+    /// messages forever. The owner changes it later with `change_group`
+    /// (`{"t":"MessageTimer","timer":ms}`).
+    pub fn create_group_with_timer(
+        &mut self,
+        name: String,
+        members: &[u8],
+        migrate_from: Option<f64>,
+        message_timer: f64,
+        now: f64,
+    ) -> Result<Vec<u8>, JsValue> {
         if !members.len().is_multiple_of(32) {
             return Err(JsValue::from_str("groups:invalid: members"));
         }
@@ -266,7 +281,7 @@ impl GroupsNode {
         let migrate_from = migrate_from.map(ms).transpose()?;
         let g = self
             .core
-            .create_group_with(name, members, migrate_from, ms(now)?)
+            .create_group_with(name, members, migrate_from, ms(message_timer)?, ms(now)?)
             .map_err(js)?;
         Ok(g.as_bytes().to_vec())
     }
@@ -369,8 +384,9 @@ impl GroupsNode {
     }
 
     /// `change`: `{"t":"Successor","add":[hex],"remove":[hex],"name":null|string}`,
-    /// `{"t":"Handover","new_owner":hex,"leave":bool,"name":…}` or
-    /// `{"t":"Resolve","members":[hex],"name":…}`. Returns the new epoch.
+    /// `{"t":"Handover","new_owner":hex,"leave":bool,"name":…}`,
+    /// `{"t":"MessageTimer","timer":ms}` or `{"t":"Resolve","members":[hex],"name":…}`.
+    /// Returns the new epoch.
     pub fn change_group(
         &mut self,
         group: &[u8],

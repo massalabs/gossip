@@ -26,8 +26,7 @@ use groups::node::records::{
 use groups::node::timing::Bucket;
 use groups::node::{
     Change, EpochTimer, GroupChange, GroupSummary, InvitationSummary, LeaveChoice, LookupResult,
-    MyStatus,
-    TimelineItem, TimelineLine,
+    MyStatus, TimelineItem, TimelineLine,
 };
 use groups::store::{Role, StoredResult};
 use groups::wire::{Entry, EntryItem, QueryOp, SignedKind, Status};
