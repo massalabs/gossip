@@ -5553,7 +5553,9 @@ fn every_unservable_lookup_from_a_member_gets_the_same_not_available() {
     // One lookup first, so that both budgets are computed at this instant: the time stands
     // still from here on, and each case's effect is a plain difference.
     answers_of(&mut net, r, q, lookups(a));
-    let mut seen: Vec<(Vec<(u32, ResponseResult)>, i128, i128, u32)> = Vec::new();
+    // The answers, what the two budgets lost, and the failures counted after one lookup.
+    type Effect = (Vec<(u32, ResponseResult)>, i128, i128, u32);
+    let mut seen: Vec<Effect> = Vec::new();
     for (case, chat) in [
         ("never held", never),
         ("not a member", b),
