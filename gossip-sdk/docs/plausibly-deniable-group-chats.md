@@ -1058,6 +1058,8 @@ While waiting, the device:
 - keeps every root of that group, those it held when asking and each one it receives, and applies
   the rules of §4.9 and §5.9 to them, so that its current epoch names the right owner;
 - starts nothing itself in that group, except the lookup of a missing parent root (§4.8);
+- keeps every connection of that group (§5.12): the kick can come from the owner or from any
+  member, who all hold it;
 - lets the user switch, from the entry, to "Leave (visible to everyone)" (or "Decline (visible to
   everyone)" for an invitation) or to "Ignore and Delete (visible to no one)".
 
@@ -1071,6 +1073,11 @@ The state ends in one of two ways:
   The roots are deleted, the entry disappears, and only the closed-chat marker remains.
 - **Two weeks pass without a kick.** The device does the same as "Ignore and Delete": the roots are
   deleted, the entry disappears, and the user stays in the member list.
+
+*To keep in mind:* after two weeks without a kick, the device leaves quietly **on its own**, as
+"Ignore and Delete" does. The chat is then closed, so its connections, all kept while waiting, are
+dropped as for any closed chat (§5.12), and the user still appears in the member list to the
+others, for as long as the owner does not remove them.
 
 *Why every root is kept:* with only the newest one, a competing successor of an already dropped
 root would look like a new invitation, and a kick naming the other branch could not be checked.
@@ -1518,11 +1525,36 @@ a contact or the connection is **automatic**.
   silently. The claim is checked against the member list of a group the device holds and has
   accepted, never against a group it was only invited to. No conversation is created.
 - A connection asked by anyone else needs the user's consent, on the invitation screen below.
-- An automatic connection is revoked once its peer shares no group with this device and no epoch
-  the device still holds lists that peer, so that the replies owed to a removed member (§5.6) and
-  the deletions still served to it (§10.4) keep working until then. A peer the user accepted, or
-  with whom the device shares a group, is never revoked by this rule. The check runs after every
-  membership change.
+- An automatic connection is revoked once no chat that keeps connections lists its peer, as a
+  member or a removed peer, and nothing pushed whole is still owed to it (below). A peer the user
+  accepted, or a member of another chat where the device is active, is never revoked by this
+  rule. The check runs after every membership change and after every hand-off to the transport.
+
+Which chats keep the connections with their members (D.86):
+
+| State of the device in the chat | Does the chat keep its connections? |
+|---|---|
+| Active member | Yes. A member the owner removed stays listed by the epochs held, so that the replies owed to it (§5.6) and the deletions still served to it (§10.4) keep working. |
+| Waiting to be kicked (§5.4) | Yes, all of them: the kick can come from the owner or from any member, who all hold it, and dropping them would also show the other members that the user asked to leave. Until the kick arrives or the two weeks end. |
+| After the wait ends: a kick arrived, or two weeks passed without one | No: the chat is closed. Without a kick the device leaves quietly as "Ignore and Delete" does (the roots deleted, the entry gone, the user still in the member list for the others). |
+| Kicked, history kept read-only | No. |
+| Left visibly (§5.3), history kept read-only | No, but only once the signed leave has been handed to the transport for every member it must reach. |
+| Superseded (a chat of two replaced) | No; its peer is a member of the chat that replaces it. |
+| Chat deleted | No. |
+| Archive of a chat dissolved while active ("Keep archived", §5.8) | Yes. |
+
+An invitation not answered yet, and a handover root kept while its parent is looked up, keep
+listing their members as before.
+
+*Why a chat the device is out of keeps none, read-only or not:* a member that shares only that
+chat with the device sees the device's keep-alives continue or stop. Were they kept with a
+read-only history and dropped with a deleted chat, that member could tell "kept the history" from
+"deleted the chat", which the device must hide (§10.4, D.74).
+*Cost:* a kept read-only history no longer receives the later deletions, or a "Dissolve & Delete",
+from members it shares nothing else with: the same loss as a device that deleted the chat.
+*Why the leave is waited for:* a visible leave closes the chat and is then pushed whole to every
+member (§5.3); revoking the session before it is handed to the transport would lose it. The SDK
+also keeps a connection while a ciphertext for that peer waits in its outbox.
 
 *Note:* a member whose connection is opened automatically learns that this device accepted the
 group; the scans that follow an acceptance already show it (D.77).
@@ -4406,6 +4438,15 @@ The revised section is planned to state the following.
 17. **Key queries:** answers are checked against the GossipID, and a wrong answer is the most
     heavily penalised.
 
+*Connections*
+
+21. **A chat the device is out of keeps no connection** (§5.12, D.86): kicked, left or
+    superseded, whether the history is kept read-only or deleted, so that a member sharing nothing
+    else with the device cannot tell the two apart by its keep-alives. A kept history then misses
+    the later deletions and a "Dissolve & Delete" from such members, as a deleted chat does. The
+    waiting state keeps every connection until the kick or the end of the two weeks, when the
+    device leaves quietly as "Ignore and Delete" does and its connections go.
+
 *What stays on a device*
 
 18. Closed-chat markers, the marker left by "Dissolve & Delete", the roots kept for up to two weeks
@@ -5697,3 +5738,38 @@ decided:
 - **What is left for a short time.** A frozen tip list that named an erased event keeps naming it
   until it is dropped, at most 10 minutes later (§12.2); a request correlation reference lives
   until its deadline. Both are references only, with no content.
+
+### D.86 Which chats keep the device's connections (§5.12, §5.4, §10.4)
+
+*Found by review: a member that shares only one chat with a device saw the device's keep-alives
+continue when the device, kicked, kept the history read-only, and stop when it deleted the chat.*
+
+*Earlier text:* an automatic connection was revoked once no epoch the device still held listed
+the peer, read-only groups included.
+
+*Settled:* once a device is out of a chat (kicked, or its own leave sent) or the chat is
+superseded, that chat no longer keeps the device's automatic connections, whether the user keeps
+the history read-only or deletes the chat. The table of §5.12 gives every state. The points that
+had to be decided:
+
+- **The waiting state keeps them all.** The kick can come from any member, who all hold it, and
+  dropping the connections would show the other members that the user asked to leave. After two
+  weeks without a kick the device leaves quietly on its own, as "Ignore and Delete" does: the
+  chat is closed, its connections go, and the user still appears in the member list to the
+  others.
+- **A visible leave is sent first.** The signed leave is pushed whole to every member after the
+  chat is closed; the connection with a member goes only once the leave was handed to the
+  transport for it (the engine), and once no ciphertext for it waits in the outbox (the SDK).
+- **The archive of a chat dissolved while active keeps them**, as already decided.
+- **Only peers the device shares nothing else with are dropped:** an accepted contact, or a member
+  of another chat where the device is active, stays connected.
+- **Cost:** a kept read-only history no longer receives the later deletions or a "Dissolve &
+  Delete" from members it shares nothing else with, the same loss as a device that deleted the
+  chat.
+- **A member added back** receives the new root from the owner, accepts it, and then opens its
+  connections to the members again as co-members of an accepted group; each member takes the new
+  session as that of a member announcing itself anew. *Known limit:* the root reaches it only over a
+  session it still holds with the owner, such as an accepted contact's. An owner it shared nothing
+  else with was dropped with the chat, and the owner, which still holds its own side, is not told:
+  the member then learns of the re-add only once a session with the owner is renewed, as a device
+  that deleted the chat does.
