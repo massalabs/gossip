@@ -21,6 +21,11 @@ import {
   MESSAGE_TIMER_OPTIONS,
   messageTimerLabel,
 } from '../../../src/constants/messageTimer';
+import i18next from 'i18next';
+import enGroups from '../../../src/i18n/locales/en/groups.json';
+import frGroups from '../../../src/i18n/locales/fr/groups.json';
+import ruGroups from '../../../src/i18n/locales/ru/groups.json';
+import zhGroups from '../../../src/i18n/locales/zh-CN/groups.json';
 import { flush, makeFakeGroups, summary } from '../../helpers/fakeGroups';
 import { byText, click, renderAt } from './render';
 
@@ -124,7 +129,11 @@ describe('message timer labels', () => {
   it('names the values offered, and any other as a plain duration', () => {
     expect(MESSAGE_TIMER_OPTIONS).toEqual([
       300_000,
+      900_000,
+      1_800_000,
       HOUR,
+      2 * HOUR,
+      4 * HOUR,
       8 * HOUR,
       12 * HOUR,
       24 * HOUR,
@@ -141,7 +150,11 @@ describe('message timer labels', () => {
     ]);
     expect(MESSAGE_TIMER_OPTIONS.map(ms => messageTimerLabel(ms, tr))).toEqual([
       'groups:timer.minutes:5',
+      'groups:timer.minutes:15',
+      'groups:timer.minutes:30',
       'groups:timer.hours:1',
+      'groups:timer.hours:2',
+      'groups:timer.hours:4',
       'groups:timer.hours:8',
       'groups:timer.hours:12',
       'groups:timer.days:1',
@@ -163,6 +176,32 @@ describe('message timer labels', () => {
       'groups:timer.days:1 groups:timer.hours:2'
     );
     expect(messageTimerLabel(1_500, tr)).toBe('groups:timer.seconds:2');
+  });
+
+  it('names 15 and 30 minutes, 2 and 4 hours in every language by its plural keys', async () => {
+    const choices = [15 * 60_000, 30 * 60_000, 2 * HOUR, 4 * HOUR];
+    const expected: [string, unknown, string[]][] = [
+      ['en', enGroups, ['15 minutes', '30 minutes', '2 hours', '4 hours']],
+      ['fr', frGroups, ['15 minutes', '30 minutes', '2 heures', '4 heures']],
+      ['ru', ruGroups, ['15 минут', '30 минут', '2 часа', '4 часа']],
+      ['zh-CN', zhGroups, ['15 分钟', '30 分钟', '2 小时', '4 小时']],
+    ];
+    for (const [lng, groups, labels] of expected) {
+      const i18n = i18next.createInstance();
+      await i18n.init({
+        lng,
+        ns: ['groups'],
+        resources: { [lng]: { groups } } as never,
+      });
+      const t = (key: string, options?: Record<string, unknown>) =>
+        i18n.t(key, options) as string;
+      expect(
+        choices.map(ms => {
+          expect(MESSAGE_TIMER_OPTIONS).toContain(ms);
+          return messageTimerLabel(ms, t);
+        })
+      ).toEqual(labels);
+    }
   });
 });
 
