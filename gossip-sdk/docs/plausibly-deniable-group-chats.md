@@ -2279,7 +2279,9 @@ received) cannot know the message's moment. In an epoch with a timer:
 
 - the record the deletion creates is **quiet**: the device keeps it to itself. It never announces
   its events (§10.2) and never lists them in a tips scan (§12.1). It still answers a direct request
-  for one of them (an event lookup or a sync-object lookup).
+  for one of them (an event lookup or a sync-object lookup), and still pushes the deletion in full
+  to every removed peer of the epoch when it processes it, as any deletion is pushed to them
+  (§10.4).
 - It is erased, with every record of it, at the time the deletion was processed plus `T`, rounded
   up with the table above. Another deletion of the same message while the record exists changes
   nothing.
@@ -2293,7 +2295,8 @@ This is the local field `shareable` of the current object (§14.1). It is writte
 moments: every record starts `true`; a deletion that creates a record for a message never
 processed, in an epoch with a timer, sets it `false`; the first version of the message processed
 for that record sets it back to `true`. While it is `false` the device never announces nor lists
-the record's events, and always answers a direct request for them.
+the record's events to current members, always answers a direct request for them, and pushes a
+deletion it processes in full to the removed peers of the epoch (§10.4).
 
 _Why the processing time plus `T`:_ it is a safe bound, because an honest message is never created
 after its own deletion. _Why quiet:_ that deadline restarts whenever the deletion is received
@@ -2301,7 +2304,13 @@ anew. If devices in this state offered it to each other, they would renew each o
 forever: one device that was offline is enough to stagger the deadlines. A device that holds the
 message has a fixed deadline, the same on every device, so offering is safe there. _Why a direct
 request is still answered:_ a peer asks only when something finite gave it the ID (a child event
-or a reply, each with its own moment), so answering cannot keep the deletion alive.
+or a reply, each with its own moment), so answering cannot keep the deletion alive. _Why the push to
+removed peers:_ a removed peer relays nothing (§10.4), so the push cannot restart the renewal; without
+it, removed members would stop receiving deletions, which must reach everyone who had the message.
+_Side effect:_ a pushed deletion naming an epoch the receiver does not hold acts as a root notice
+(§4.6), so the push is also how a deposed or removed device that missed a successor can learn that
+a newer epoch exists. This is a side effect, not a guarantee: a dependable way for such a device
+to learn of a successor root remains an open improvement for later.
 
 **When the versions disagree.** Honest versions of a message share one creation date, so its
 moment is that of each version. When versions carry different creation dates (the known limit
@@ -2534,7 +2543,8 @@ objects §4.6 and §5).
 - A device MUST NOT announce an event, a root or a signed object unless it currently holds its full
   content and may serve it.
 - A device MUST NOT announce an event of a quiet record (`shareable = false`, §7.7, §14.1); it
-  still answers a direct request for it.
+  still answers a direct request for it, and still pushes a deletion of it in full to the removed
+  peers of its epoch (§10.4).
   Receiving a notice never makes an item announceable; it must first be fetched, validated,
   processed and still be available.
 
@@ -2624,6 +2634,9 @@ lacked one membership object, which says nothing about messages or about who wro
 - The author of a deletion in an older epoch sends the full event to its neighbors who are members
   of that epoch **and directly to every removed peer of that epoch**.
   Relays use notices as usual, and scans cover failures.
+- A device that processes a deletion it holds as a quiet record (§7.7, §14.1) sends the full event
+  directly to every removed peer of that epoch, under the same conditions as any relay of it, and
+  to no current member.
 
 _Why push deletions to every removed peer:_ removed members are nobody's neighbors, so nothing
 else would bring them the deletion quickly.
@@ -3565,8 +3578,9 @@ Physical layout is an implementation detail.
   pending versions, and **`shareable`**.
   - `shareable` says whether the device may offer the record's events on its own initiative.
     `true`: it announces them and lists them in tips scans; the normal state of every record.
-    `false` (a **quiet** record): it neither announces them nor lists them, and still answers a
-    direct request (a lookup by ID) for them.
+    `false` (a **quiet** record): it neither announces them nor lists them, still answers a
+    direct request (a lookup by ID) for them, and pushes a deletion of it in full to the removed
+    peers of the epoch (§10.4), which relay nothing.
   - It is written at exactly three moments: (1) every record starts `true`; (2) it is set to
     `false` when a deletion event creates the record for a message the device has never
     processed, in an epoch with a timer, and the record is then erased at the time the deletion
