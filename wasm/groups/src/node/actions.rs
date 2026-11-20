@@ -741,8 +741,12 @@ impl Node {
             epoch_challenge: Challenge::from_bytes(bytes(cx.rng)),
             ref_chat_id_challenge: Challenge::from_bytes(bytes(cx.rng)),
             created_at,
-            message_timer: 0,
-            settings: std::collections::BTreeMap::new(),
+            // §4.1 "Carried forward": the timer and the whole settings map of the current
+            // epoch, entries this release does not understand included, so that an owner on
+            // an older release never erases what a newer one set. Receivers put no rule
+            // between a root's timer or settings and its parents'.
+            message_timer: cur_root.message_timer(),
+            settings: cur_root.settings().clone(),
         };
         let root = match handover {
             Some(_) => Root::create_handover(params, &cur_root, signer, bytes(cx.rng)),
