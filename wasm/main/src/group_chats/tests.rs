@@ -107,6 +107,14 @@ impl Db {
         }
     }
 
+    /// Whether a row, an edge or an object of the epoch `chat` is stored.
+    fn holds_messages_of(&self, chat: ChatId) -> bool {
+        let chat = hex(chat.as_bytes());
+        self.rows.keys().any(|(c, _)| *c == chat)
+            || self.edges.keys().any(|(c, _)| *c == chat)
+            || self.objects.keys().any(|(c, _)| *c == chat)
+    }
+
     /// Whether any stored text mentions `needle` (a hex identifier).
     fn mentions(&self, needle: &str) -> bool {
         self.rows.iter().any(|((c, e), (_, f))| {
@@ -958,7 +966,9 @@ fn records_that_no_longer_decode_are_refused_as_undecodable() {
 /// §4.1, §7.7: a group founded with a message timer through the bindings: the invitation,
 /// the summary and the epochs show it; the root is stored by its fields with the timer and
 /// the settings map, and an object with the moment of its message; the owner changes the
-/// timer; the message is deleted at its moment, also after reopening from the tables.
+/// timer; the message and its reaction are erased at its moment: the batches delete their
+/// rows, edges and objects from the tables, and no record names them, also after
+/// reopening from the tables.
 #[test]
 fn a_message_timer_through_the_bindings() {
     const HOUR: u64 = 3_600_000;
@@ -986,12 +996,39 @@ fn a_message_timer_through_the_bindings() {
     net.peers[1].persist();
     net.settle(1_000);
     let sent = net.now;
-    net.peers[0]
-        .core
-        .publish_message(group, &text("brief"), "[]", None, sent)
-        .unwrap();
+    let published = J::parse(
+        &net.peers[0]
+            .core
+            .publish_message(group, &text("brief"), "[]", None, sent)
+            .unwrap(),
+    )
+    .unwrap();
     net.peers[0].persist();
     net.settle(1_000);
+    let ids: Vec<String> = ["eventId", "syncObjId"]
+        .iter()
+        .map(|k| published.field(k).unwrap().as_str().unwrap().to_owned())
+        .collect();
+    let sync: groups::SyncObjId = Codec::dec(published.field("syncObjId").unwrap()).unwrap();
+    let reaction = J::parse(
+        &net.peers[1]
+            .core
+            .publish_reaction(group, sync, "\u{1f44d}".into(), true, net.now)
+            .unwrap(),
+    )
+    .unwrap();
+    net.peers[1].persist();
+    net.settle(1_000);
+    let reaction_ids: Vec<String> = ["eventId", "syncObjId"]
+        .iter()
+        .map(|k| reaction.field(k).unwrap().as_str().unwrap().to_owned())
+        .collect();
+    for i in 0..2 {
+        net.peers[i].persist();
+        for id in ids.iter().chain(&reaction_ids) {
+            assert!(net.peers[i].db.mentions(id), "peer {i}: {id}");
+        }
+    }
     for i in 0..2 {
         net.peers[i].reopen();
         assert_eq!(net.timeline_texts(i, group), vec!["brief"], "peer {i}");
@@ -1032,6 +1069,10 @@ fn a_message_timer_through_the_bindings() {
         net.peers[i].core.tick(net.now).unwrap();
         net.peers[i].reopen();
         assert!(net.timeline_texts(i, group).is_empty(), "peer {i}");
+        assert!(!net.peers[i].db.holds_messages_of(group), "peer {i}");
+        for id in ids.iter().chain(&reaction_ids) {
+            assert!(!net.peers[i].db.mentions(id), "peer {i}: {id}");
+        }
         let g = group_json(&net.peers[i], group);
         assert_eq!(
             g.field("message_timer")

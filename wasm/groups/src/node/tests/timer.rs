@@ -122,7 +122,7 @@ fn found_timed(net: &mut MNet, members: &[usize], timer: u64) -> ChatId {
     g
 }
 
-/// §7.7: a group founded with a timer; its messages are deleted on every device at their
+/// §7.7: a group founded with a timer; its messages are erased on every device at their
 /// moment, a device offline until after it never shows it, and nothing is sent for it.
 #[test]
 fn a_group_founded_with_a_timer_deletes_its_messages_on_every_device() {
@@ -146,15 +146,18 @@ fn a_group_founded_with_a_timer_deletes_its_messages_on_every_device() {
     net.run(sent + HOUR - net.now);
     for d in 0..2 {
         assert!(net.texts(d, &g).is_empty(), "device {d}");
-        assert_eq!(
-            net.devs[d]
-                .store
-                .event_row(&g, &e.event_id())
-                .unwrap()
-                .map(|r| r.state),
-            Some(crate::store::RowState::Pruned),
+        // Erased with every record of it: no stub, no parent links, no object.
+        let store = &net.devs[d].store;
+        assert!(
+            store.event_row(&g, &e.event_id()).unwrap().is_none(),
             "device {d}"
         );
+        assert!(
+            store.parents(&g, &e.event_id()).unwrap().is_none(),
+            "device {d}"
+        );
+        let sync = e.payload().sync_obj_id();
+        assert!(store.object(&g, &sync).unwrap().is_none(), "device {d}");
     }
     net.offline[2] = false;
     net.run(30 * MIN);
@@ -242,4 +245,101 @@ fn a_removed_members_archive_deletes_its_messages_too() {
     assert_eq!(net.texts(2, &g), vec!["brief".to_owned()]);
     net.run(sent + HOUR - net.now);
     assert!(net.texts(2, &g).is_empty());
+}
+
+/// The lookup entries for `id` that device 0 sends now.
+fn lookups_of(net: &mut Net, id: EventId) -> Vec<super::retrieval::Sent> {
+    super::retrieval::sent_lookups(net, 0)
+        .into_iter()
+        .filter(|s| matches!(s.op, QueryOp::Event { event_id, .. } if event_id == id))
+        .collect()
+}
+
+/// Whether device 0 keeps a hint naming `id` (§10.3).
+fn hinted(net: &Net, id: EventId) -> bool {
+    net.devs[0].node.t.hints.iter().any(|(k, _)| k.2 == id)
+}
+
+/// §7.7, §11.1: once the timer erased a message, nothing about it is left on the device,
+/// not even a hint of which peer had seen it; an event still held that names it as a
+/// parent does not make the device look it up, however long it waits.
+#[test]
+fn an_erased_event_is_not_looked_up_for_a_child_still_held() {
+    let mut net = Net::timed(4, 1, HOUR);
+    let chat = net.chat();
+    let e1 = net.event(T0, 1, &[], 1);
+    let e2 = net.event(T0 + 30 * MIN, 2, &[e1.event_id()], 1);
+    net.give(0, 1, &e1);
+    net.poll(0);
+    assert!(hinted(&net, e1.event_id()));
+    net.now = T0 + 30 * MIN;
+    net.give(0, 1, &e2);
+    net.poll(0);
+    net.now = T0 + HOUR;
+    net.tick(0);
+    assert!(!net.known(0, &e1.event_id()));
+    assert!(net.held(0, &e2.event_id()));
+    assert!(!hinted(&net, e1.event_id()));
+    for _ in 0..12 {
+        assert!(lookups_of(&mut net, e1.event_id()).is_empty());
+        net.now += 10 * MIN;
+        net.tick(0);
+    }
+    assert!(!net.known(0, &e2.event_id()));
+    assert!(net.devs[0].store.event_rows(&chat).unwrap().is_empty());
+    assert!(net.devs[0].store.edges(&chat).unwrap().is_empty());
+    assert!(net.devs[0].store.objects(&chat).unwrap().is_empty());
+}
+
+/// §7.7, §11: a peer whose clock is late still holds an erased event and offers it again.
+/// Each offer costs at most one lookup: the event comes back, is refused by its dates and
+/// nothing is stored, relayed or hinted, so two devices never pass it back and forth. A
+/// child that arrives late and names it starts one lookup task, which asks each member at
+/// most once and then pauses: every honest device erased the event at the same moment.
+#[test]
+fn an_erased_event_offered_again_costs_at_most_one_lookup_per_offer() {
+    let mut net = Net::timed(4, 1, HOUR);
+    let chat = net.chat();
+    let e1 = net.event(T0, 1, &[], 1);
+    net.give(0, 1, &e1);
+    net.poll(0);
+    net.now = T0 + HOUR;
+    net.tick(0);
+    assert!(!net.known(0, &e1.event_id()));
+    for _ in 0..3 {
+        net.recv_frames(0, member(1), &[notice(chat, &[e1.event_id()])]);
+        let q = lookups_of(&mut net, e1.event_id());
+        assert_eq!(q.len(), 1);
+        assert_eq!(q[0].to, member(1));
+        super::retrieval::answer(&mut net, 0, &q[0], ResponseResult::Event(blob(&e1)));
+        assert!(!net.known(0, &e1.event_id()));
+        assert!(!hinted(&net, e1.event_id()));
+        let sent = net.poll_frames(0);
+        assert!(
+            sent.values()
+                .all(|f| !announced(f).contains(&e1.event_id()))
+        );
+        assert!(
+            sent.values()
+                .all(|f| !full_events(f).contains(&e1.event_id()))
+        );
+        net.now += MIN;
+    }
+    // A child published before the moment arrives late and names it.
+    let e3 = net.event(T0 + 50 * MIN, 3, &[e1.event_id()], 2);
+    net.give(0, 2, &e3);
+    assert!(net.held(0, &e3.event_id()));
+    let mut asked = Vec::new();
+    for _ in 0..200 {
+        for q in lookups_of(&mut net, e1.event_id()) {
+            asked.push(q.to);
+            let na = ResponseResult::Status(Status::NotAvailable);
+            super::retrieval::answer(&mut net, 0, &q, na);
+        }
+        net.now += 10 * MIN;
+        net.tick(0);
+    }
+    asked.sort_unstable();
+    assert_eq!(asked, vec![member(1), member(2), member(3)]);
+    assert!(!net.known(0, &e1.event_id()));
 }

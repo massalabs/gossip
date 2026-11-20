@@ -114,7 +114,15 @@ impl Net {
     /// `n` members; devices run for the first `devices` of them (the others are driven by
     /// hand as peers).
     pub(crate) fn new(n: usize, devices: usize) -> Self {
-        let root = epoch_root(n, 0x10);
+        Self::with_root(epoch_root(n, 0x10), devices)
+    }
+
+    /// As [`Net::new`], for an epoch whose root has the message timer `timer` (§7.7).
+    pub(crate) fn timed(n: usize, devices: usize, timer: u64) -> Self {
+        Self::with_root(epoch_root_with_timer(n, 0x10, timer), devices)
+    }
+
+    fn with_root(root: Root, devices: usize) -> Self {
         let mut rng = TestRng::new(7);
         let devs = (0..devices)
             .map(|i| {
