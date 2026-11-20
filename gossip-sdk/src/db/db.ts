@@ -288,6 +288,11 @@ export interface Discussion {
    * the direct chat this device founds; null for the account's default.
    */
   directChatTimer: number | null;
+  /**
+   * When the session was last renewed because the server refused a send at
+   * a seeker it already held (409); null if never.
+   */
+  seekerConflictRenewedAt: Date | null;
 
   // Timestamps
   createdAt: Date;

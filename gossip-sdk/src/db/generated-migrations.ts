@@ -11,175 +11,178 @@ export interface EmbeddedMigration {
 
 export const MIGRATIONS: EmbeddedMigration[] = [
   {
-    "idx": 0,
-    "tag": "0000_nifty_molly_hayes",
-    "when": 1730000000000,
-    "digest": "fd923d7e049b0ea3c2d30f032f627914f907e2bd1ca717aec6d72bf5d7fa3870",
-    "statements": [
-      "CREATE TABLE `activeSeekers` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`seeker` blob NOT NULL\n);",
-      "CREATE INDEX `active_seekers_seeker_idx` ON `activeSeekers` (`seeker`);",
-      "CREATE TABLE `announcementCursors` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`counter` text NOT NULL\n);",
-      "CREATE TABLE `contacts` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`userId` text NOT NULL,\n\t`name` text NOT NULL,\n\t`avatar` text,\n\t`publicKeys` blob NOT NULL,\n\t`isOnline` integer NOT NULL,\n\t`lastSeen` integer NOT NULL,\n\t`createdAt` integer NOT NULL\n);",
-      "CREATE INDEX `contacts_owner_user_idx` ON `contacts` (`ownerUserId`,`userId`);",
-      "CREATE INDEX `contacts_owner_name_idx` ON `contacts` (`ownerUserId`,`name`);",
-      "CREATE TABLE `discussions` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`weAccepted` integer DEFAULT false NOT NULL,\n\t`sendAnnouncement` text,\n\t`direction` text NOT NULL,\n\t`nextSeeker` blob,\n\t`initiationAnnouncement` blob,\n\t`announcementMessage` text,\n\t`lastSyncTimestamp` integer,\n\t`customName` text,\n\t`lastMessageId` integer,\n\t`lastMessageContent` text,\n\t`lastMessageTimestamp` integer,\n\t`unreadCount` integer DEFAULT 0 NOT NULL,\n\t`killedNextRetryAt` integer,\n\t`saturatedRetryAt` integer,\n\t`saturatedRetryDone` integer DEFAULT 0 NOT NULL,\n\t`createdAt` integer NOT NULL,\n\t`updatedAt` integer NOT NULL\n);",
-      "CREATE UNIQUE INDEX `discussions_owner_contact_idx` ON `discussions` (`ownerUserId`,`contactUserId`);",
-      "CREATE TABLE `messages` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`messageId` blob,\n\t`content` text NOT NULL,\n\t`serializedContent` blob,\n\t`type` text NOT NULL,\n\t`direction` text NOT NULL,\n\t`status` text NOT NULL,\n\t`timestamp` integer NOT NULL,\n\t`metadata` text,\n\t`seeker` blob,\n\t`replyTo` text,\n\t`forwardOf` text,\n\t`deleteOf` text,\n\t`encryptedMessage` blob,\n\t`whenToSend` integer\n);",
-      "CREATE INDEX `messages_owner_contact_idx` ON `messages` (`ownerUserId`,`contactUserId`);",
-      "CREATE INDEX `messages_owner_status_idx` ON `messages` (`ownerUserId`,`status`);",
-      "CREATE INDEX `messages_owner_contact_status_idx` ON `messages` (`ownerUserId`,`contactUserId`,`status`);",
-      "CREATE INDEX `messages_owner_seeker_idx` ON `messages` (`ownerUserId`,`seeker`);",
-      "CREATE INDEX `messages_owner_contact_dir_idx` ON `messages` (`ownerUserId`,`contactUserId`,`direction`);",
-      "CREATE INDEX `messages_owner_dir_status_idx` ON `messages` (`ownerUserId`,`direction`,`status`);",
-      "CREATE INDEX `messages_timestamp_idx` ON `messages` (`timestamp`);",
-      "CREATE INDEX `messages_owner_contact_msgid_idx` ON `messages` (`ownerUserId`,`contactUserId`,`messageId`);",
-      "CREATE TABLE `pendingAnnouncements` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`announcement` blob NOT NULL,\n\t`fetchedAt` integer NOT NULL,\n\t`counter` text\n);",
-      "CREATE UNIQUE INDEX `pending_announcements_announcement_idx` ON `pendingAnnouncements` (`announcement`);",
-      "CREATE INDEX `pending_announcements_fetchedAt_idx` ON `pendingAnnouncements` (`fetchedAt`);",
-      "CREATE TABLE `pendingEncryptedMessages` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`seeker` blob NOT NULL,\n\t`ciphertext` blob NOT NULL,\n\t`fetchedAt` integer NOT NULL\n);",
-      "CREATE INDEX `pending_encrypted_seeker_idx` ON `pendingEncryptedMessages` (`seeker`);",
-      "CREATE INDEX `pending_encrypted_fetchedAt_idx` ON `pendingEncryptedMessages` (`fetchedAt`);",
-      "CREATE TABLE `userProfile` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`username` text NOT NULL,\n\t`avatar` text,\n\t`bio` text,\n\t`status` text NOT NULL,\n\t`lastSeen` integer NOT NULL,\n\t`createdAt` integer NOT NULL,\n\t`updatedAt` integer NOT NULL,\n\t`lastPublicKeyPush` integer,\n\t`security` text NOT NULL,\n\t`session` blob NOT NULL\n);",
-      "CREATE INDEX `userProfile_username_idx` ON `userProfile` (`username`);",
-      "CREATE INDEX `userProfile_status_idx` ON `userProfile` (`status`);"
-    ]
+    idx: 0,
+    tag: '0000_nifty_molly_hayes',
+    when: 1730000000000,
+    digest: 'fd923d7e049b0ea3c2d30f032f627914f907e2bd1ca717aec6d72bf5d7fa3870',
+    statements: [
+      'CREATE TABLE `activeSeekers` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`seeker` blob NOT NULL\n);',
+      'CREATE INDEX `active_seekers_seeker_idx` ON `activeSeekers` (`seeker`);',
+      'CREATE TABLE `announcementCursors` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`counter` text NOT NULL\n);',
+      'CREATE TABLE `contacts` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`userId` text NOT NULL,\n\t`name` text NOT NULL,\n\t`avatar` text,\n\t`publicKeys` blob NOT NULL,\n\t`isOnline` integer NOT NULL,\n\t`lastSeen` integer NOT NULL,\n\t`createdAt` integer NOT NULL\n);',
+      'CREATE INDEX `contacts_owner_user_idx` ON `contacts` (`ownerUserId`,`userId`);',
+      'CREATE INDEX `contacts_owner_name_idx` ON `contacts` (`ownerUserId`,`name`);',
+      'CREATE TABLE `discussions` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`weAccepted` integer DEFAULT false NOT NULL,\n\t`sendAnnouncement` text,\n\t`direction` text NOT NULL,\n\t`nextSeeker` blob,\n\t`initiationAnnouncement` blob,\n\t`announcementMessage` text,\n\t`lastSyncTimestamp` integer,\n\t`customName` text,\n\t`lastMessageId` integer,\n\t`lastMessageContent` text,\n\t`lastMessageTimestamp` integer,\n\t`unreadCount` integer DEFAULT 0 NOT NULL,\n\t`killedNextRetryAt` integer,\n\t`saturatedRetryAt` integer,\n\t`saturatedRetryDone` integer DEFAULT 0 NOT NULL,\n\t`createdAt` integer NOT NULL,\n\t`updatedAt` integer NOT NULL\n);',
+      'CREATE UNIQUE INDEX `discussions_owner_contact_idx` ON `discussions` (`ownerUserId`,`contactUserId`);',
+      'CREATE TABLE `messages` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`messageId` blob,\n\t`content` text NOT NULL,\n\t`serializedContent` blob,\n\t`type` text NOT NULL,\n\t`direction` text NOT NULL,\n\t`status` text NOT NULL,\n\t`timestamp` integer NOT NULL,\n\t`metadata` text,\n\t`seeker` blob,\n\t`replyTo` text,\n\t`forwardOf` text,\n\t`deleteOf` text,\n\t`encryptedMessage` blob,\n\t`whenToSend` integer\n);',
+      'CREATE INDEX `messages_owner_contact_idx` ON `messages` (`ownerUserId`,`contactUserId`);',
+      'CREATE INDEX `messages_owner_status_idx` ON `messages` (`ownerUserId`,`status`);',
+      'CREATE INDEX `messages_owner_contact_status_idx` ON `messages` (`ownerUserId`,`contactUserId`,`status`);',
+      'CREATE INDEX `messages_owner_seeker_idx` ON `messages` (`ownerUserId`,`seeker`);',
+      'CREATE INDEX `messages_owner_contact_dir_idx` ON `messages` (`ownerUserId`,`contactUserId`,`direction`);',
+      'CREATE INDEX `messages_owner_dir_status_idx` ON `messages` (`ownerUserId`,`direction`,`status`);',
+      'CREATE INDEX `messages_timestamp_idx` ON `messages` (`timestamp`);',
+      'CREATE INDEX `messages_owner_contact_msgid_idx` ON `messages` (`ownerUserId`,`contactUserId`,`messageId`);',
+      'CREATE TABLE `pendingAnnouncements` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`announcement` blob NOT NULL,\n\t`fetchedAt` integer NOT NULL,\n\t`counter` text\n);',
+      'CREATE UNIQUE INDEX `pending_announcements_announcement_idx` ON `pendingAnnouncements` (`announcement`);',
+      'CREATE INDEX `pending_announcements_fetchedAt_idx` ON `pendingAnnouncements` (`fetchedAt`);',
+      'CREATE TABLE `pendingEncryptedMessages` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`seeker` blob NOT NULL,\n\t`ciphertext` blob NOT NULL,\n\t`fetchedAt` integer NOT NULL\n);',
+      'CREATE INDEX `pending_encrypted_seeker_idx` ON `pendingEncryptedMessages` (`seeker`);',
+      'CREATE INDEX `pending_encrypted_fetchedAt_idx` ON `pendingEncryptedMessages` (`fetchedAt`);',
+      'CREATE TABLE `userProfile` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`username` text NOT NULL,\n\t`avatar` text,\n\t`bio` text,\n\t`status` text NOT NULL,\n\t`lastSeen` integer NOT NULL,\n\t`createdAt` integer NOT NULL,\n\t`updatedAt` integer NOT NULL,\n\t`lastPublicKeyPush` integer,\n\t`security` text NOT NULL,\n\t`session` blob NOT NULL\n);',
+      'CREATE INDEX `userProfile_username_idx` ON `userProfile` (`username`);',
+      'CREATE INDEX `userProfile_status_idx` ON `userProfile` (`status`);',
+    ],
   },
   {
-    "idx": 1,
-    "tag": "0001_messages_edit_of",
-    "when": 1740000000000,
-    "digest": "87b19f5fd0c63b859811cb1d208f415eeca388738e93ffc5699c8dc28d6c4e20",
-    "statements": [
-      "ALTER TABLE `messages` ADD COLUMN `editOf` text;"
-    ]
+    idx: 1,
+    tag: '0001_messages_edit_of',
+    when: 1740000000000,
+    digest: '87b19f5fd0c63b859811cb1d208f415eeca388738e93ffc5699c8dc28d6c4e20',
+    statements: ['ALTER TABLE `messages` ADD COLUMN `editOf` text;'],
   },
   {
-    "idx": 2,
-    "tag": "0002_discussions_pinned",
-    "when": 1741000000000,
-    "digest": "11703d7e0abf570b470db911caba648ad0af396a81b11ff925f286d4f5ef41d5",
-    "statements": [
-      "ALTER TABLE `discussions` ADD COLUMN `pinned` integer NOT NULL DEFAULT 0;"
-    ]
+    idx: 2,
+    tag: '0002_discussions_pinned',
+    when: 1741000000000,
+    digest: '11703d7e0abf570b470db911caba648ad0af396a81b11ff925f286d4f5ef41d5',
+    statements: [
+      'ALTER TABLE `discussions` ADD COLUMN `pinned` integer NOT NULL DEFAULT 0;',
+    ],
   },
   {
-    "idx": 3,
-    "tag": "0003_messages_reaction_of",
-    "when": 1742000000000,
-    "digest": "1a7e1bd05e8a6abedb8cde2e14748f130a423e64d50f39963eec5a187381f3e0",
-    "statements": [
-      "ALTER TABLE `messages` ADD COLUMN `reactionOf` text;"
-    ]
+    idx: 3,
+    tag: '0003_messages_reaction_of',
+    when: 1742000000000,
+    digest: '1a7e1bd05e8a6abedb8cde2e14748f130a423e64d50f39963eec5a187381f3e0',
+    statements: ['ALTER TABLE `messages` ADD COLUMN `reactionOf` text;'],
   },
   {
-    "idx": 4,
-    "tag": "0004_discussions_retention",
-    "when": 1743000000000,
-    "digest": "5f8754e0ef047ce40e5c31916794a13bdf08f76c17f3d0119fbf055f2aa7bb62",
-    "statements": [
-      "ALTER TABLE `discussions` ADD COLUMN `messageRetentionDuration` integer;",
-      "ALTER TABLE `discussions` ADD COLUMN `retentionPolicySetAt` integer;"
-    ]
+    idx: 4,
+    tag: '0004_discussions_retention',
+    when: 1743000000000,
+    digest: '5f8754e0ef047ce40e5c31916794a13bdf08f76c17f3d0119fbf055f2aa7bb62',
+    statements: [
+      'ALTER TABLE `discussions` ADD COLUMN `messageRetentionDuration` integer;',
+      'ALTER TABLE `discussions` ADD COLUMN `retentionPolicySetAt` integer;',
+    ],
   },
   {
-    "idx": 5,
-    "tag": "0005_discussions_muted",
-    "when": 1744000000000,
-    "digest": "6228606f146c11964ce136331170760847db7908115bb06ace9b78044160564c",
-    "statements": [
-      "ALTER TABLE `discussions` ADD COLUMN `mutedNotifications` integer NOT NULL DEFAULT 0;"
-    ]
+    idx: 5,
+    tag: '0005_discussions_muted',
+    when: 1744000000000,
+    digest: '6228606f146c11964ce136331170760847db7908115bb06ace9b78044160564c',
+    statements: [
+      'ALTER TABLE `discussions` ADD COLUMN `mutedNotifications` integer NOT NULL DEFAULT 0;',
+    ],
   },
   {
-    "idx": 6,
-    "tag": "0006_odd_titania",
-    "when": 1787602604377,
-    "digest": "821d55b096de5046d368b8a50307dea1981fff62d1c22a4a69f8b4567784313b",
-    "statements": [
-      "CREATE TABLE `accountSettings` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`formatVersion` integer DEFAULT 1 NOT NULL,\n\t`mnsEnabled` integer DEFAULT false NOT NULL,\n\t`defaultRetentionDuration` integer DEFAULT 2592000\n);"
-    ]
+    idx: 6,
+    tag: '0006_odd_titania',
+    when: 1787602604377,
+    digest: '821d55b096de5046d368b8a50307dea1981fff62d1c22a4a69f8b4567784313b',
+    statements: [
+      'CREATE TABLE `accountSettings` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`formatVersion` integer DEFAULT 1 NOT NULL,\n\t`mnsEnabled` integer DEFAULT false NOT NULL,\n\t`defaultRetentionDuration` integer DEFAULT 2592000\n);',
+    ],
   },
   {
-    "idx": 7,
-    "tag": "0007_odd_lenny_balinger",
-    "when": 1787775880997,
-    "digest": "b22c0168d66895a2490fd2d5a379bf54c24292c8dda14c380559f996dda42c28",
-    "statements": [
-      "CREATE TABLE `privateMigration` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`formatVersion` integer DEFAULT 1 NOT NULL,\n\t`installationEpoch` text NOT NULL,\n\t`completedPhase` integer DEFAULT 0 NOT NULL\n);"
-    ]
+    idx: 7,
+    tag: '0007_odd_lenny_balinger',
+    when: 1787775880997,
+    digest: 'b22c0168d66895a2490fd2d5a379bf54c24292c8dda14c380559f996dda42c28',
+    statements: [
+      'CREATE TABLE `privateMigration` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`formatVersion` integer DEFAULT 1 NOT NULL,\n\t`installationEpoch` text NOT NULL,\n\t`completedPhase` integer DEFAULT 0 NOT NULL\n);',
+    ],
   },
   {
-    "idx": 8,
-    "tag": "0008_jittery_warstar",
-    "when": 1792426638781,
-    "digest": "cce9a4661bf135b4784f3275f449f68389519c34b25c7384562cd2150e13cdaf",
-    "statements": [
-      "CREATE TABLE `discardedPeers` (\n\t`ownerUserId` text NOT NULL,\n\t`userId` text NOT NULL,\n\t`announcementFloorMillis` integer NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `userId`)\n);",
-      "CREATE TABLE `transportCursors` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`cursors` text NOT NULL\n);"
-    ]
+    idx: 8,
+    tag: '0008_jittery_warstar',
+    when: 1792426638781,
+    digest: 'cce9a4661bf135b4784f3275f449f68389519c34b25c7384562cd2150e13cdaf',
+    statements: [
+      'CREATE TABLE `discardedPeers` (\n\t`ownerUserId` text NOT NULL,\n\t`userId` text NOT NULL,\n\t`announcementFloorMillis` integer NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `userId`)\n);',
+      'CREATE TABLE `transportCursors` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`cursors` text NOT NULL\n);',
+    ],
   },
   {
-    "idx": 9,
-    "tag": "0009_lowercase_user_ids",
-    "when": 1794590816699,
-    "digest": "8c3e94f5050426ee048c2d9d6f3dc0519c31e4d8e32f3503a81292d6865f84a2",
-    "statements": [
-      "UPDATE `messages` SET `contactUserId` = lower(`contactUserId`) WHERE `contactUserId` <> lower(`contactUserId`);",
-      "UPDATE `discussions` SET `unreadCount` = (SELECT sum(`g`.`unreadCount`) FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`)) WHERE `id` = (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) AND `g`.`id` <> `discussions`.`id`);",
-      "UPDATE `discussions` SET (`lastMessageId`, `lastMessageContent`, `lastMessageTimestamp`) = (SELECT `g`.`lastMessageId`, `g`.`lastMessageContent`, `g`.`lastMessageTimestamp` FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY coalesce(`g`.`lastMessageTimestamp`, 0) DESC, (`g`.`contactUserId` = lower(`g`.`contactUserId`)) DESC, `g`.`id` ASC LIMIT 1) WHERE `id` = (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) AND `g`.`id` <> `discussions`.`id`);",
-      "DELETE FROM `discussions` WHERE `id` <> (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1);",
-      "UPDATE `discussions` SET `contactUserId` = lower(`contactUserId`) WHERE `contactUserId` <> lower(`contactUserId`);",
-      "DELETE FROM `contacts` WHERE `id` <> (SELECT `k`.`id` FROM `contacts` AS `k` WHERE `k`.`ownerUserId` = `contacts`.`ownerUserId` AND lower(`k`.`userId`) = lower(`contacts`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`id` ASC LIMIT 1);",
-      "UPDATE `contacts` SET `userId` = lower(`userId`) WHERE `userId` <> lower(`userId`);",
-      "UPDATE `discardedPeers` SET `announcementFloorMillis` = (SELECT max(`g`.`announcementFloorMillis`) FROM `discardedPeers` AS `g` WHERE `g`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`g`.`userId`) = lower(`discardedPeers`.`userId`)) WHERE `rowid` = (SELECT `k`.`rowid` FROM `discardedPeers` AS `k` WHERE `k`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`k`.`userId`) = lower(`discardedPeers`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`rowid` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discardedPeers` AS `g` WHERE `g`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`g`.`userId`) = lower(`discardedPeers`.`userId`) AND `g`.`rowid` <> `discardedPeers`.`rowid`);",
-      "DELETE FROM `discardedPeers` WHERE `rowid` <> (SELECT `k`.`rowid` FROM `discardedPeers` AS `k` WHERE `k`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`k`.`userId`) = lower(`discardedPeers`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`rowid` ASC LIMIT 1);",
-      "UPDATE `discardedPeers` SET `userId` = lower(`userId`) WHERE `userId` <> lower(`userId`);"
-    ]
+    idx: 9,
+    tag: '0009_lowercase_user_ids',
+    when: 1794590816699,
+    digest: '8c3e94f5050426ee048c2d9d6f3dc0519c31e4d8e32f3503a81292d6865f84a2',
+    statements: [
+      'UPDATE `messages` SET `contactUserId` = lower(`contactUserId`) WHERE `contactUserId` <> lower(`contactUserId`);',
+      'UPDATE `discussions` SET `unreadCount` = (SELECT sum(`g`.`unreadCount`) FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`)) WHERE `id` = (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) AND `g`.`id` <> `discussions`.`id`);',
+      'UPDATE `discussions` SET (`lastMessageId`, `lastMessageContent`, `lastMessageTimestamp`) = (SELECT `g`.`lastMessageId`, `g`.`lastMessageContent`, `g`.`lastMessageTimestamp` FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY coalesce(`g`.`lastMessageTimestamp`, 0) DESC, (`g`.`contactUserId` = lower(`g`.`contactUserId`)) DESC, `g`.`id` ASC LIMIT 1) WHERE `id` = (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) AND `g`.`id` <> `discussions`.`id`);',
+      'DELETE FROM `discussions` WHERE `id` <> (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1);',
+      'UPDATE `discussions` SET `contactUserId` = lower(`contactUserId`) WHERE `contactUserId` <> lower(`contactUserId`);',
+      'DELETE FROM `contacts` WHERE `id` <> (SELECT `k`.`id` FROM `contacts` AS `k` WHERE `k`.`ownerUserId` = `contacts`.`ownerUserId` AND lower(`k`.`userId`) = lower(`contacts`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`id` ASC LIMIT 1);',
+      'UPDATE `contacts` SET `userId` = lower(`userId`) WHERE `userId` <> lower(`userId`);',
+      'UPDATE `discardedPeers` SET `announcementFloorMillis` = (SELECT max(`g`.`announcementFloorMillis`) FROM `discardedPeers` AS `g` WHERE `g`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`g`.`userId`) = lower(`discardedPeers`.`userId`)) WHERE `rowid` = (SELECT `k`.`rowid` FROM `discardedPeers` AS `k` WHERE `k`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`k`.`userId`) = lower(`discardedPeers`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`rowid` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discardedPeers` AS `g` WHERE `g`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`g`.`userId`) = lower(`discardedPeers`.`userId`) AND `g`.`rowid` <> `discardedPeers`.`rowid`);',
+      'DELETE FROM `discardedPeers` WHERE `rowid` <> (SELECT `k`.`rowid` FROM `discardedPeers` AS `k` WHERE `k`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`k`.`userId`) = lower(`discardedPeers`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`rowid` ASC LIMIT 1);',
+      'UPDATE `discardedPeers` SET `userId` = lower(`userId`) WHERE `userId` <> lower(`userId`);',
+    ],
   },
   {
-    "idx": 10,
-    "tag": "0010_group_chats",
-    "when": 1795084958395,
-    "digest": "cb4c77c4bf42852b2641ef68a46ed73c523e3b4efec2e39b563d4b3e5cd851f9",
-    "statements": [
-      "CREATE TABLE `groupEdges` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`eventId` text NOT NULL,\n\t`parents` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `eventId`)\n);",
-      "CREATE TABLE `groupEventRows` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`eventId` text NOT NULL,\n\t`state` text NOT NULL,\n\t`fields` text,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `eventId`)\n);",
-      "CREATE TABLE `groupObjects` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`syncObjId` text NOT NULL,\n\t`fields` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `syncObjId`)\n);",
-      "CREATE TABLE `groupOutbox` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`seeker` blob NOT NULL,\n\t`ciphertext` blob NOT NULL,\n\t`whenToSend` integer NOT NULL\n);",
-      "CREATE INDEX `group_outbox_owner_idx` ON `groupOutbox` (`ownerUserId`);",
-      "CREATE TABLE `groupRecords` (\n\t`ownerUserId` text NOT NULL,\n\t`kind` text NOT NULL,\n\t`key` text NOT NULL,\n\t`fields` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `kind`, `key`)\n);"
-    ]
+    idx: 10,
+    tag: '0010_group_chats',
+    when: 1795084958395,
+    digest: 'cb4c77c4bf42852b2641ef68a46ed73c523e3b4efec2e39b563d4b3e5cd851f9',
+    statements: [
+      'CREATE TABLE `groupEdges` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`eventId` text NOT NULL,\n\t`parents` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `eventId`)\n);',
+      'CREATE TABLE `groupEventRows` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`eventId` text NOT NULL,\n\t`state` text NOT NULL,\n\t`fields` text,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `eventId`)\n);',
+      'CREATE TABLE `groupObjects` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`syncObjId` text NOT NULL,\n\t`fields` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `syncObjId`)\n);',
+      'CREATE TABLE `groupOutbox` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`seeker` blob NOT NULL,\n\t`ciphertext` blob NOT NULL,\n\t`whenToSend` integer NOT NULL\n);',
+      'CREATE INDEX `group_outbox_owner_idx` ON `groupOutbox` (`ownerUserId`);',
+      'CREATE TABLE `groupRecords` (\n\t`ownerUserId` text NOT NULL,\n\t`kind` text NOT NULL,\n\t`key` text NOT NULL,\n\t`fields` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `kind`, `key`)\n);',
+    ],
   },
   {
-    "idx": 11,
-    "tag": "0011_group_conversations",
-    "when": 1795113424155,
-    "digest": "d0ba434cbb789d75849613594b707d776b09cc07d524d64c4826bf38b452cf68",
-    "statements": [
+    idx: 11,
+    tag: '0011_group_conversations',
+    when: 1795113424155,
+    digest: 'd0ba434cbb789d75849613594b707d776b09cc07d524d64c4826bf38b452cf68',
+    statements: [
       "ALTER TABLE `contacts` ADD `connection` text DEFAULT 'accepted' NOT NULL;",
-      "ALTER TABLE `discussions` ADD `isArchive` integer DEFAULT false NOT NULL;",
-      "ALTER TABLE `discussions` ADD `archived` integer DEFAULT false NOT NULL;",
-      "ALTER TABLE `discussions` ADD `linkedGroupId` text;",
-      "ALTER TABLE `discussions` ADD `directChatOwed` integer DEFAULT false NOT NULL;",
-      "UPDATE `discussions` SET `isArchive` = 1 WHERE `contactUserId` <> '__self__';"
-    ]
+      'ALTER TABLE `discussions` ADD `isArchive` integer DEFAULT false NOT NULL;',
+      'ALTER TABLE `discussions` ADD `archived` integer DEFAULT false NOT NULL;',
+      'ALTER TABLE `discussions` ADD `linkedGroupId` text;',
+      'ALTER TABLE `discussions` ADD `directChatOwed` integer DEFAULT false NOT NULL;',
+      "UPDATE `discussions` SET `isArchive` = 1 WHERE `contactUserId` <> '__self__';",
+    ],
   },
   {
-    "idx": 12,
-    "tag": "0012_discussions_direct_chat_timer",
-    "when": 1795186445695,
-    "digest": "0d3057bbb4d0fbc7e996f4ae74f514b0895c9833a5f60650f308b0218c857f2c",
-    "statements": [
-      "ALTER TABLE `discussions` ADD `directChatTimer` integer;"
-    ]
+    idx: 12,
+    tag: '0012_discussions_direct_chat_timer',
+    when: 1795186445695,
+    digest: '0d3057bbb4d0fbc7e996f4ae74f514b0895c9833a5f60650f308b0218c857f2c',
+    statements: ['ALTER TABLE `discussions` ADD `directChatTimer` integer;'],
   },
   {
-    "idx": 13,
-    "tag": "0013_private_migration_session_reset",
-    "when": 1795190781560,
-    "digest": "fbc09b2d3106ca822208e6972940c55315b38f32365bd8f0c8fddea7eef4de56",
-    "statements": [
-      "ALTER TABLE `privateMigration` ADD `sessionReset` integer DEFAULT false NOT NULL;"
-    ]
-  }
+    idx: 13,
+    tag: '0013_private_migration_session_reset',
+    when: 1795190781560,
+    digest: 'fbc09b2d3106ca822208e6972940c55315b38f32365bd8f0c8fddea7eef4de56',
+    statements: [
+      'ALTER TABLE `privateMigration` ADD `sessionReset` integer DEFAULT false NOT NULL;',
+    ],
+  },
+  {
+    idx: 14,
+    tag: '0014_discussions_seeker_conflict',
+    when: 1795192149885,
+    digest: 'f9f7675bd86495c7cb3c527be944fec7764fb3f9b55c839b6d682894099bcfd6',
+    statements: [
+      'ALTER TABLE `discussions` ADD `seekerConflictRenewedAt` integer;',
+    ],
+  },
 ];
