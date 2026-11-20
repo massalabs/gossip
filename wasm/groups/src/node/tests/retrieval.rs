@@ -601,10 +601,11 @@ fn bytes_that_do_not_decode_are_an_invalid_answer() {
 }
 
 /// §11.2 (local policy): a peer already asked for an item, that answered "not available",
-/// goes behind every eligible member not yet asked for it, even when it announces the item
-/// again, before any re-ask.
+/// goes behind every eligible member not yet asked for it until it announces the item again:
+/// a new announcement is new evidence (§11.5), and puts it back in its tier.
 #[test]
-fn a_peer_that_answered_not_available_goes_behind_every_member_not_yet_asked() {
+fn a_peer_that_answered_not_available_goes_behind_the_members_not_yet_asked_until_it_announces_again()
+ {
     let mut net = Net::new(5, 1);
     let chat = net.chat();
     neighbors_of(&mut net, 0, &[1, 2]);
@@ -621,13 +622,14 @@ fn a_peer_that_answered_not_available_goes_behind_every_member_not_yet_asked() {
         }
         assert_eq!(q.len(), 1, "one peer at a time");
         order.push(index(&q[0].to));
-        // The announcer, already asked, announces the item again before the next answer.
+        // The announcer, already asked, announces the item again before the next answer: it
+        // is asked again next, before the members not yet asked.
         if order.len() == 2 {
             net.recv_frames(0, member(4), &[notice(chat, &[id])]);
         }
         answer(&mut net, 0, &q[0], na());
     }
-    assert_eq!(order, vec![4, 2, 1, 3, 4]);
+    assert_eq!(order, vec![4, 2, 4, 1, 3]);
 }
 
 /// §11.2 (local policy): a peer that let a request time out goes behind every eligible
@@ -657,4 +659,73 @@ fn a_peer_that_timed_out_goes_behind_every_member_not_yet_asked() {
         net.tick(0);
     }
     assert_eq!(order, vec![4, 2, 1, 3]);
+}
+
+/// Seven members: device 0 looks up an event that only member 1 holds and announces; members
+/// 2 to 5 stopped answering long ago; member 6 answers but does not hold it.
+fn one_holder_four_unresponsive(n: usize) -> (Net, EventId) {
+    let mut net = Net::new(n, 1);
+    let chat = net.chat();
+    for m in 2..=5 {
+        let now = net.now;
+        for _ in 0..crate::node::neighbors::NEIGHBOR_FAILURES {
+            net.devs[0].node.note_timeout(&member(m), now);
+        }
+        assert!(!net.devs[0].node.responsive(&member(m)));
+    }
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(1), &[notice(chat, &[id])]);
+    (net, id)
+}
+
+/// The lookups of device 0 for the next `ms`, minute by minute, each answered "not available"
+/// by a member other than 1, until one goes to member 1: who was asked, and when the lookup to
+/// member 1 went out, if one did.
+fn until_holder_asked(net: &mut Net, ms: u64) -> (Vec<usize>, Option<u64>) {
+    let end = net.now + ms;
+    let mut asked = Vec::new();
+    loop {
+        for s in sent_lookups(net, 0) {
+            asked.push(index(&s.to));
+            if s.to == member(1) {
+                return (asked, Some(s.sent_at));
+            }
+            answer(net, 0, &s, na());
+        }
+        if net.now >= end {
+            return (asked, None);
+        }
+        net.now += MIN.min(end - net.now).max(1);
+        net.tick(0);
+    }
+}
+
+/// §11.2, D.46: the only holder answers its first lookup `busy`. It is asked again about a
+/// minute later, before any member that stopped answering: `busy` is back-pressure, never a
+/// failure, and does not put it behind the members not yet asked.
+#[test]
+fn a_holder_that_answered_busy_is_asked_again_before_unresponsive_members() {
+    let (mut net, _) = one_holder_four_unresponsive(7);
+    let q = sent_lookups(&mut net, 0);
+    assert_eq!(q.len(), 1);
+    assert_eq!(q[0].to, member(1));
+    let busy_at = net.now;
+    answer(&mut net, 0, &q[0], ResponseResult::Status(Status::Busy));
+    let (asked, at) = until_holder_asked(&mut net, 10 * MIN);
+    assert_eq!(asked, vec![6, 1], "{asked:?}");
+    assert!(at.is_some_and(|t| t <= busy_at + 2 * MIN), "{at:?}");
+}
+
+/// §11.2: the only holder lets one lookup time out. Once its request has expired it is asked
+/// again, before any member that stopped answering: a peer that answers comes before every
+/// unresponsive one, whether or not it was asked already.
+#[test]
+fn a_holder_that_timed_out_once_is_asked_again_before_unresponsive_members() {
+    let (mut net, _) = one_holder_four_unresponsive(7);
+    let q = sent_lookups(&mut net, 0);
+    assert_eq!(q[0].to, member(1));
+    let sent = q[0].sent_at;
+    let (asked, at) = until_holder_asked(&mut net, 30 * MIN);
+    assert_eq!(asked, vec![6, 1], "{asked:?}");
+    assert!(at.is_some_and(|t| t <= sent + 8 * MIN), "{at:?}");
 }
