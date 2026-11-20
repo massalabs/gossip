@@ -3717,6 +3717,98 @@ fn an_unanswered_founding_root_joins_the_accepted_root_it_leads_to() {
     assert_eq!(groups[0].current, e2);
 }
 
+/// Device 2's state of the group of `g` that a root arrival order leaves: the current epoch,
+/// the epochs it holds as invitations, the invitations due now and after the prompt delay.
+fn arrival_state(net: &MNet, g: &ChatId) -> (Option<ChatId>, Vec<ChatId>, usize, usize) {
+    let n = &net.devs[2].node;
+    let invitations: Vec<ChatId> =
+        n.t.epochs
+            .iter()
+            .filter(|(_, r)| matches!(r.status, EpochStatus::Invitation(_)))
+            .map(|(c, _)| *c)
+            .collect();
+    (
+        net.current(2, g),
+        invitations,
+        n.invitations(net.now).len(),
+        n.invitations(net.now + crate::node::timing::PROMPT_DELAY_MS)
+            .len(),
+    )
+}
+
+/// §4.8, Fix 6 of the review of b51357e7 (simulation, `GROUPS_MEMBERS_SEED=56`): a root that
+/// continues, with its owner's authority, an epoch that installs only after the root arrived
+/// ends as if it had arrived after that epoch: adopted silently in an active group and in a
+/// waiting one, never prompted. Before, in a waiting group, it stayed an invitation and was
+/// prompted as an old epoch offered again.
+#[test]
+fn a_root_whose_parent_installs_later_ends_as_if_it_had_arrived_after_it() {
+    for waiting in [false, true] {
+        let mut states = Vec::new();
+        for parent_first in [true, false] {
+            let (mut net, g) = founded(4);
+            if waiting {
+                net.offline[0] = true;
+                let now = net.now;
+                let s = signer(2);
+                let dev = &mut net.devs[2];
+                dev.node
+                    .leave_group(
+                        &mut dev.store,
+                        &s,
+                        g,
+                        LeaveChoice::AskToBeKicked,
+                        now,
+                        &mut net.rng,
+                    )
+                    .unwrap();
+                net.run(MIN);
+                assert_eq!(net.summary(2, &g).unwrap().status, MyStatus::Waiting);
+                net.offline[0] = false;
+            }
+            // The owner renames twice while device 2 is away: P, then X continuing P.
+            net.offline[2] = true;
+            let rename = |net: &mut MNet, c: ChatId, name: &str| {
+                let x = net
+                    .change(
+                        0,
+                        c,
+                        GroupChange::Successor {
+                            add: vec![],
+                            remove: vec![],
+                            name: Some(name.into()),
+                        },
+                    )
+                    .unwrap();
+                net.exchange();
+                x
+            };
+            let p = rename(&mut net, g, "p");
+            let x = rename(&mut net, p, "x");
+            let push = |net: &mut MNet, c: ChatId| {
+                let root = net.devs[0].node.root(&c).unwrap();
+                let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+                net.recv_frames_m(2, 0, &[Frame::Event(blob)]);
+            };
+            if parent_first {
+                push(&mut net, p);
+                push(&mut net, x);
+            } else {
+                push(&mut net, x);
+                push(&mut net, p);
+            }
+            let state = arrival_state(&net, &g);
+            assert_eq!(
+                state,
+                (Some(x), Vec::new(), 0, 0),
+                "waiting {waiting}, parent first {parent_first}"
+            );
+            states.push(state);
+        }
+        assert_eq!(states[0], states[1], "waiting {waiting}");
+    }
+}
+
 /// Regression (simulation, code at 7e8da430, `GROUPS_MEMBERS_SEED=189`): a new owner's
 /// resolution named its own epoch and a former owner's epoch that this device held without
 /// the handover that gives the authority over it. The root failed as a whole (D.69), so the
