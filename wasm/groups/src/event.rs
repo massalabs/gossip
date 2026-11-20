@@ -748,6 +748,8 @@ impl MessageEvent {
             return Err(Error::SelfParent);
         }
         self.payload.check(self.event_id.timestamp())?;
+        // For an event created here. A received one was bounded as received, which is never
+        // shorter than this canonical length (see `wire::decode_event_blob`).
         if !wire::fits_empty_container(wire::event_blob_len(
             self.version,
             prost::Message::encoded_len(&self.to_proto()),

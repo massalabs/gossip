@@ -369,7 +369,9 @@ impl Root {
         if p.owner.is_empty() {
             return Err(Error::Missing("owner"));
         }
-        // §4.6: a root MUST fit one empty container.
+        // §4.6: a root MUST fit one empty container. A received root was bounded as received,
+        // which is never shorter (see `wire::decode_event_blob`); this guards a root built
+        // or converted here.
         if !wire::fits_empty_container(wire::event_blob_len(
             version,
             prost::Message::encoded_len(&p),

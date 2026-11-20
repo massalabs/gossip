@@ -202,6 +202,14 @@ pub fn decode_event_blob(blob: &[u8], plaintext_version: u64) -> Result<EventObj
     if version != EVENT_VERSION {
         return Err(Error::UnsupportedEventVersion(version));
     }
+    // The length that counts is that of the bytes as received (§13.10): a copy padded past
+    // the limit is malformed and counts against its sender, whatever it decodes to. Why the
+    // received length: it is what every receiver sees and can check before decoding, so two
+    // receivers of one copy always agree. Nothing is recorded for the event it carries, so a
+    // proper copy from another peer is still accepted. The canonical length checked later
+    // (`MessageEvent::check`, `Root::from_proto`) is never longer than this under the strict
+    // decoder (padding, repeats and default values only shrink), so it never refuses a
+    // received event; it stays for objects built locally.
     if !fits_empty_container(blob.len()) {
         return Err(Error::DoesNotFitContainer);
     }
