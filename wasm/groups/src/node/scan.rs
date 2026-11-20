@@ -302,6 +302,8 @@ impl Node {
                     // The responder is told of the anchor by a root notice (§12.1).
                     if chat != SHARED_SCAN {
                         let anchor = self.cur(&chat);
+                        // A root that adds the responder back goes with its kept leave.
+                        self.leaves_with_root(cx, anchor, peer);
                         self.queue_object_notice(peer, anchor, EntryItem::Root);
                         self.stats.anchor_notices += 1;
                     }
