@@ -590,6 +590,11 @@ impl Node {
             .copied()
             .collect();
         for k in tasks {
+            // A sync-object lookup the user asked for ends, not found, as one asked for in an
+            // inactive group does (§10.4); a closed group forgets its results anyway.
+            if matches!(k.target, Target::SyncObj(_)) {
+                self.complete_lookup(k, super::LookupResult::NotFound);
+            }
             self.t.tasks.remove(&k);
             self.reindex(k);
         }
