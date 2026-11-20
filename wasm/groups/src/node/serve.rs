@@ -79,9 +79,6 @@ impl Node {
             } else {
                 vec![match entry {
                     QueryEntry::Malformed(_) => AnswerOp::Status(Status::Malformed),
-                    QueryEntry::Op(
-                        QueryOp::Event { chat_id, .. } | QueryOp::SyncObj { chat_id, .. },
-                    ) if !self.serves(chat_id) => AnswerOp::Status(Status::NotAvailable),
                     QueryEntry::Op(QueryOp::Event { chat_id, event_id }) => AnswerOp::Event {
                         chat_id: *chat_id,
                         event_id: *event_id,
@@ -150,7 +147,8 @@ impl Node {
     }
 
     /// Whether an entry from `from` is answered at all (§13.7). Event and sync-object
-    /// lookups need an installed epoch of which `from` is a member; a tips scan is always
+    /// lookups need an installed epoch of which `from` is a member, in a group where this
+    /// device is active (see [`Node::answers_epoch`]); a tips scan is always
     /// answered, "not available" when this device does not hold the anchor (§12.1) and
     /// equally when `from` is not a member of the held anchor, so that a stranger cannot
     /// tell which epochs the device holds (§12.1 and §13.7 would ignore it silently); a
@@ -164,7 +162,7 @@ impl Node {
             QueryEntry::Malformed(_) => self.shares_epoch(&from),
             QueryEntry::Op(op) => match op {
                 QueryOp::Event { chat_id, .. } | QueryOp::SyncObj { chat_id, .. } => {
-                    member_of(self, chat_id)
+                    member_of(self, chat_id) && self.answers_epoch(chat_id)
                 }
                 QueryOp::TipsScan { .. } => from != self.me,
                 // No epoch context: a requester that shares an accepted epoch (§4.11, §12.7).
@@ -174,13 +172,20 @@ impl Node {
                 QueryOp::ChatById(_) | QueryOp::ChatByRef(_) | QueryOp::ChatByParent { .. } => {
                     from != self.me && (self.shares_epoch(&from) || self.shares_archive(&from))
                 }
-                // A member of the named epoch (§12.8).
-                QueryOp::SignedObject { chat_id, .. } | QueryOp::Removal { chat_id, .. } => {
+                // A member of the named epoch (§12.8). A dissolved group still serves its
+                // dissolve message and an archive the removed peers' own records (§5.8).
+                QueryOp::SignedObject { chat_id, kind, id } => {
                     member_of(self, chat_id)
+                        && (self.answers_epoch(chat_id)
+                            || self.signed_served_to(&(*chat_id, *kind, *id), &from))
+                }
+                QueryOp::Removal { chat_id, .. } => {
+                    member_of(self, chat_id) && self.answers_epoch(chat_id)
                 }
                 // The requester, the responder and the subject are all members (§12.9).
                 QueryOp::Keys { chat_id, gossip_id } => {
                     member_of(self, chat_id)
+                        && self.answers_epoch(chat_id)
                         && self
                             .epochs
                             .get(chat_id)
@@ -188,6 +193,19 @@ impl Node {
                 }
             },
         }
+    }
+
+    /// Whether this device answers the per-epoch lookups of `chat` at all: its group is
+    /// active there (D.74). A device that still holds the epoch but was kicked, left, waits
+    /// for a kick or saw the group dissolved stays silent, exactly as a device that does not
+    /// hold the epoch: no entry, no request token taken, the requester not marked as alive.
+    /// Why: "not available" would tell a member that this device kept the chat, where silence
+    /// cannot be told apart from a device that deleted it or is offline. The cost is one
+    /// timeout for the asker, only until it learns that this device is out. The exceptions
+    /// are stated where they are served: a dissolved group's roots and dissolve message, and
+    /// a removed peer's own kick or leave from an archive (§5.8, §5.6).
+    pub(crate) fn answers_epoch(&self, chat: &ChatId) -> bool {
+        self.serves(chat)
     }
 
     pub(crate) fn take_request_token(&mut self, peer: &GossipId, now: u64) -> bool {

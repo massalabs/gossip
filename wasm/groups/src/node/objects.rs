@@ -987,6 +987,19 @@ impl Node {
         if !removed && !kept_leave && self.handover_owed(&chat, &peer).is_none() {
             return;
         }
+        // A device no longer active in the group stays silent, as one that does not hold the
+        // epoch (D.74): no reply, no root, no lookup. An archive still gives a removed peer
+        // its own kick or leave (§5.6, see `signed_served_to`).
+        let archive = matches!(
+            self.group_status(&chat),
+            GroupStatus::Dissolved {
+                must_delete: false,
+                ..
+            }
+        );
+        if !self.serves(&chat) && !archive {
+            return;
+        }
         let now = cx.now;
         let mut r = self
             .t
