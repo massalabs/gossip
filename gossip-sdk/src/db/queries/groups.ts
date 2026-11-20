@@ -11,18 +11,29 @@ export interface GroupRowOut {
   fields?: string | null;
 }
 
-/** One batch committed by the group engine (`GroupsNode.take_batches`). */
+/**
+ * One batch committed by the group engine (`GroupsNode.take_batches`). The
+ * `removed…` lists delete one record each: a temporary-rejection marker, or
+ * what the message timer erases of a message (its object, the rows of its
+ * events and their parent edges). A key is never both written and removed by
+ * one batch.
+ */
 export interface GroupBatch {
   rows: GroupRowOut[];
   removedRows: { chatId: string; eventId: string }[];
   edges: { chatId: string; eventId: string; parents: string }[];
+  removedEdges: { chatId: string; eventId: string }[];
   objects: { chatId: string; syncObjId: string; fields: string }[];
+  removedObjects: { chatId: string; syncObjId: string }[];
   node: { kind: string; key: string; fields?: string | null }[];
   erase: string[];
 }
 
 /** Every stored record of an account, to open the engine from. */
-export type GroupSnapshot = Omit<GroupBatch, 'removedRows' | 'erase'>;
+export type GroupSnapshot = Omit<
+  GroupBatch,
+  'removedRows' | 'removedEdges' | 'removedObjects' | 'erase'
+>;
 
 export type GroupOutboxRow = typeof schema.groupOutbox.$inferSelect;
 
@@ -256,6 +267,17 @@ async function applyBatch(
         set: { parents: e.parents },
       });
   }
+  for (const k of b.removedEdges) {
+    await tx
+      .delete(t.groupEdges)
+      .where(
+        and(
+          eq(t.groupEdges.ownerUserId, owner),
+          eq(t.groupEdges.chatId, k.chatId),
+          eq(t.groupEdges.eventId, k.eventId)
+        )
+      );
+  }
   for (const o of b.objects) {
     await tx
       .insert(t.groupObjects)
@@ -268,6 +290,17 @@ async function applyBatch(
         ],
         set: { fields: o.fields },
       });
+  }
+  for (const k of b.removedObjects) {
+    await tx
+      .delete(t.groupObjects)
+      .where(
+        and(
+          eq(t.groupObjects.ownerUserId, owner),
+          eq(t.groupObjects.chatId, k.chatId),
+          eq(t.groupObjects.syncObjId, k.syncObjId)
+        )
+      );
   }
   if (b.erase.length > 0) {
     for (const table of [t.groupEventRows, t.groupEdges, t.groupObjects]) {
