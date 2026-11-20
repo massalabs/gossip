@@ -543,10 +543,19 @@ impl Payload {
         }
     }
 
-    /// `resultHash = H("gossip.groups.message.result.1", fullMessage)` (§6.2). Local only.
+    /// `resultHash = H("gossip.groups.message.result.1", chat_id, syncObjId, ...)` (§6.2):
+    /// the items of `fullMessage` poured directly into the hashed list, after the domain (the
+    /// flat form, D.22), never the list nested as one item. Every position is fixed: a content
+    /// result always has its nine items, a delete its three; no item is optional. Local only.
+    ///
+    /// Why flat: a pure convention, chosen so that every hash of the protocol is the domain
+    /// followed by its items.
     #[must_use]
     pub fn result_hash(&self, chat_id: &ChatId) -> [u8; 32] {
-        h(DOMAIN_RESULT, vec![self.full_message(chat_id)])
+        let Value::Array(items) = self.full_message(chat_id) else {
+            unreachable!("fullMessage is a list")
+        };
+        h(DOMAIN_RESULT, items)
     }
 
     /// Structural rules that need only the payload and the event timestamp `ts`: the body
