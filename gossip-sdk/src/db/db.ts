@@ -283,6 +283,11 @@ export interface Discussion {
   linkedGroupId: string | null;
   /** This device sent the contact request and founds the direct chat. */
   directChatOwed: boolean;
+  /**
+   * The message timer (ms, 0 = forever) chosen with the contact request, for
+   * the direct chat this device founds; null for the account's default.
+   */
+  directChatTimer: number | null;
 
   // Timestamps
   createdAt: Date;

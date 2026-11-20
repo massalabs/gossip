@@ -64,6 +64,13 @@ export const discussions = sqliteTable(
     directChatOwed: integer('directChatOwed', { mode: 'boolean' })
       .notNull()
       .default(false),
+    /**
+     * The message timer (§7.7, milliseconds, 0 keeps messages forever) the
+     * user chose when sending the contact request, for the direct chat this
+     * device founds once it is accepted. Null: the account's default at that
+     * time. Cleared when the chat is linked.
+     */
+    directChatTimer: integer('directChatTimer'),
     createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updatedAt', { mode: 'timestamp_ms' }).notNull(),
   },

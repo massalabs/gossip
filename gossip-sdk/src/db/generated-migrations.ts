@@ -160,4 +160,11 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       "UPDATE `discussions` SET `isArchive` = 1 WHERE `contactUserId` <> '__self__';",
     ],
   },
+  {
+    idx: 12,
+    tag: '0012_discussions_direct_chat_timer',
+    when: 1795186445695,
+    digest: '0d3057bbb4d0fbc7e996f4ae74f514b0895c9833a5f60650f308b0218c857f2c',
+    statements: ['ALTER TABLE `discussions` ADD `directChatTimer` integer;'],
+  },
 ];
