@@ -445,16 +445,17 @@ impl Root {
         if p.owner.is_empty() {
             return Err(Error::Missing("owner"));
         }
-        let settings = settings_map(core::mem::take(&mut p.settings))?;
-        // §4.6: a root MUST fit one empty container. A received root was bounded as received,
-        // which is never shorter (see `wire::decode_event_blob`); this guards a root built
-        // or converted here.
+        // §4.6: a root MUST fit one empty container, its settings map included, so it is
+        // measured before the map is taken out. A received root was bounded as received, which
+        // is never shorter (see `wire::decode_event_blob`); this guards a root built or
+        // converted here.
         if !wire::fits_empty_container(wire::event_blob_len(
             version,
             prost::Message::encoded_len(&p),
         )) {
             return Err(Error::DoesNotFitContainer);
         }
+        let settings = settings_map(core::mem::take(&mut p.settings))?;
 
         let chat_id = compute_chat_id(
             version,

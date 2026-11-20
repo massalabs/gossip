@@ -227,14 +227,14 @@ impl Node {
     /// Whether this device answers the per-epoch lookups of `chat` at all: its group is
     /// active there (D.74). A device that still holds the epoch but was kicked, left, waits
     /// for a kick or saw the group dissolved answers exactly as a device that does not hold
-    /// the epoch, query kind by query kind: a lookup gets silence (no entry, no request token
-    /// taken, the requester not marked as alive), and a tips scan "not available", as for an
-    /// anchor not held (D.51, see `serve_tips_scan`).
-    /// Why: "not available" would tell a member that this device kept the chat, where silence
-    /// cannot be told apart from a device that deleted it or is offline. The cost is one
-    /// timeout for the asker, only until it learns that this device is out. The exceptions
-    /// are stated where they are served: a dissolved group's roots and dissolve message, and
-    /// a removed peer's own kick or leave from an archive (§5.8, §5.6).
+    /// the epoch, query kind by query kind: a lookup gets "not available" from a peer that
+    /// shares an active chat with this device and silence from any other (see
+    /// `unservable_answered`), and a tips scan "not available", as for an anchor not held
+    /// (D.51, see `serve_tips_scan`).
+    /// Why: one answer for every case means a member cannot tell "kept the history" from
+    /// "deleted the chat", and nobody waits on silence. The exceptions are stated where they
+    /// are served: a dissolved group's roots and dissolve message, and a removed peer's own
+    /// kick or leave from an archive (§5.8, §5.6).
     pub(crate) fn answers_epoch(&self, chat: &ChatId) -> bool {
         self.serves(chat)
     }
@@ -655,7 +655,6 @@ impl Node {
     }
 }
 
-/// Whether `ops` answer with a kick naming `peer` or a leave `peer` signed.
 /// Whether `entry` is a lookup tied to an epoch: an event, sync-object, signed-object,
 /// removal or key lookup (§12.4, §12.5, §12.8, §12.9).
 fn epoch_lookup(entry: &QueryEntry) -> bool {
@@ -671,6 +670,7 @@ fn epoch_lookup(entry: &QueryEntry) -> bool {
     )
 }
 
+/// Whether `ops` answer with a kick naming `peer` or a leave `peer` signed.
 fn carries_own_removal(ops: &[AnswerOp], peer: &GossipId) -> bool {
     ops.iter().any(|op| match op {
         AnswerOp::Object {
@@ -982,7 +982,6 @@ impl Node {
     /// (`send_owed`); a chat lookup by ID for the last epoch that lists a removed peer is
     /// answered too ([`Node::removal_root`]).
     pub(crate) fn root_served_to(&self, chat: &ChatId, peer: &GossipId) -> bool {
-        // A dissolved group keeps its named root to announce the dissolve message (§5.8).
         // A dissolved group keeps its named root to announce the dissolve message (§5.8);
         // "Dissolve & Keep archived" keeps the whole line served (roots only, never
         // messages), so that a member that missed epochs reaches the dissolved one and

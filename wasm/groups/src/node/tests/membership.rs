@@ -2008,9 +2008,10 @@ fn epoch_lookups(chat: ChatId, e: &MessageEvent, other: usize) -> Vec<QueryOp> {
     ]
 }
 
-/// Asserts that device `d` answers `from` for the held epoch `chat` exactly as for an epoch it
-/// never held: the per-epoch lookups (silence) and a tips scan anchored there ("not
-/// available", D.51), the same response frames, whatever the query.
+/// Asserts that device `d` answers `from`, which shares no active chat with it, for the held
+/// epoch `chat` exactly as for an epoch it never held: the per-epoch lookups (silence) and a
+/// tips scan anchored there ("not available", D.51), the same response frames, whatever the
+/// query.
 fn answers_as_not_held(net: &mut MNet, d: usize, from: usize, chat: ChatId, e: &MessageEvent) {
     let unknown = ChatId::from_bytes([0xEE; 32]);
     let ops = |c: ChatId| {
@@ -2034,11 +2035,12 @@ fn answers_as_not_held(net: &mut MNet, d: usize, from: usize, chat: ChatId, e: &
 
 /// D.74, settled: a device that holds an epoch but is no longer active in its group (kicked,
 /// waiting for a kick, dissolved) answers a member exactly as a device that does not hold the
-/// epoch: per-epoch lookups get silence, no entry at all, and a tips scan "not available"
-/// (D.51), the same response frames in both cases. Before, the lookups were answered "not
-/// available", which told the member it still held the chat.
+/// epoch, the same response frames in both cases. Here the asker shares no active chat with it,
+/// so per-epoch lookups get silence, no entry at all, and a tips scan "not available" (D.51);
+/// an asker that shares an active chat gets "not available" to the lookups in every case (see
+/// `every_unservable_lookup_from_a_member_gets_the_same_not_available`).
 #[test]
-fn an_inactive_device_is_silent_like_one_that_does_not_hold_the_epoch() {
+fn an_inactive_device_answers_like_one_that_does_not_hold_the_epoch() {
     let unknown = ChatId::from_bytes([0xEE; 32]);
     // Kicked: device 3, asked by device 1, a member of the epoch it was kicked from.
     let (mut net, g) = founded(4);

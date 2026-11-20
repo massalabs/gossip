@@ -2038,8 +2038,10 @@ rule: nothing is ever sent because of it.
 moment = created_at + T
 ```
 
-- `created_at` is the creation date of the message's current result (§6.2); an edit keeps it
-  (§7.2), so editing never extends a message.
+- `created_at` is the creation date of the message's current result (§6.2); an honest edit keeps
+  it (§7.2), so an honest edit never extends a message. A version with another creation date (a
+  local-only change of the date and a Retry, or a hostile member) can move the moment; see the
+  known limits below.
 - `T` is the timer of the root of the epoch the message event belongs to. Each message keeps the
   timer of its own epoch: a later root with another timer changes nothing for the messages of
   earlier epochs.
