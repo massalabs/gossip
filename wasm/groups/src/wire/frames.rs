@@ -168,6 +168,10 @@ pub enum ResponseResult {
     Status(Status),
     /// `bincode(UserPublicKeys)`, checked with [`crate::check_key_answer`].
     Keys(Vec<u8>),
+    /// A received page that is malformed (an entry that cannot be read, a count or size out of
+    /// bounds, D.23). Kept with its `request_id` so that the scan it answers ends at once as
+    /// for an invalid page and its sender is penalised once; never sent.
+    InvalidPage,
 }
 
 /// A response status (§13.4). Code 1 is reserved and never sent.
@@ -287,6 +291,7 @@ impl fmt::Debug for ResponseResult {
                 .field(&redact::Bytes(blob.len()))
                 .finish(),
             ResponseResult::Page(p) => f.debug_tuple("Page").field(p).finish(),
+            ResponseResult::InvalidPage => f.write_str("InvalidPage"),
             ResponseResult::Status(s) => f.debug_tuple("Status").field(s).finish(),
             ResponseResult::Keys(k) => f
                 .debug_tuple("Keys")
@@ -653,9 +658,8 @@ impl Response {
         };
         let result = match p.result.ok_or(Error::Missing("response result"))? {
             proto::ResponseResult::Event(blob) => ResponseResult::Event(blob),
-            proto::ResponseResult::Page(page) => {
-                ResponseResult::Page(Page::from_proto(&page, received_page_len)?)
-            }
+            proto::ResponseResult::Page(page) => Page::from_proto(&page, received_page_len)
+                .map_or(ResponseResult::InvalidPage, ResponseResult::Page),
             proto::ResponseResult::Status(s) => ResponseResult::Status(Status::from_wire(s)?),
             proto::ResponseResult::Keys(k) => ResponseResult::Keys(k),
         };
@@ -695,6 +699,7 @@ impl Response {
                 ResponseResult::Page(page) => proto::ResponseResult::Page(page.to_proto()?),
                 ResponseResult::Status(s) => proto::ResponseResult::Status(s.to_wire()),
                 ResponseResult::Keys(k) => proto::ResponseResult::Keys(k.clone()),
+                ResponseResult::InvalidPage => return Err(Error::NotAllowed("invalid page")),
             }),
         })
     }

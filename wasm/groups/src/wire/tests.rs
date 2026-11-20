@@ -426,18 +426,22 @@ fn raw_page(entries: Vec<proto::Entry>, count: u64) -> Vec<u8> {
 #[test]
 fn page_rules() {
     let e = |i| entry(i).to_proto();
+    // A malformed page is kept as an invalid page with its `request_id` (D.23).
+    let invalid = |f: Result<Frame>| {
+        matches!(
+            f,
+            Ok(Frame::Response(Response {
+                result: ResponseResult::InvalidPage,
+                ..
+            }))
+        )
+    };
     // Valid empty end page.
     assert!(one_frame(raw_page(vec![], 0)).is_ok());
     // Empty page with a positive count.
-    assert_eq!(
-        one_frame(raw_page(vec![], 3)),
-        Err(Error::NotAllowed("page count"))
-    );
+    assert!(invalid(one_frame(raw_page(vec![], 3))));
     // Count below the number of entries.
-    assert_eq!(
-        one_frame(raw_page(vec![e(1), e(2)], 1)),
-        Err(Error::NotAllowed("page count"))
-    );
+    assert!(invalid(one_frame(raw_page(vec![e(1), e(2)], 1))));
     // A non-final page.
     let Ok(Frame::Response(Response {
         result: ResponseResult::Page(p),
@@ -468,7 +472,7 @@ fn page_rules() {
             entries: vec![],
         })),
     }));
-    assert!(matches!(one_frame(bad), Err(Error::BadLength { .. })));
+    assert!(invalid(one_frame(bad)));
     // The 16 KiB limit: entries made large by repeating a field (the last value wins).
     let mut fat = proto::Entry::default().encode_to_vec();
     for _ in 0..4 {
@@ -501,13 +505,7 @@ fn page_rules() {
     let mut frame = vec![0x1a];
     prost::encoding::encode_varint(response.len() as u64, &mut frame);
     frame.extend_from_slice(&response);
-    assert!(matches!(
-        one_frame(frame),
-        Err(Error::TooMany {
-            field: "page bytes",
-            ..
-        })
-    ));
+    assert!(invalid(one_frame(frame)));
 }
 
 fn raw_entry(kind: proto::ObjectKind, chat_len: usize, id_len: usize) -> proto::Entry {
@@ -569,10 +567,21 @@ fn an_unreadable_entry_makes_the_whole_notice_or_page_malformed() {
         one_frame(raw(vec![entry(1).to_proto(), unknown])),
         Err(Error::Malformed("unknown enum value"))
     );
-    // A page alike, whatever its count.
+    // A page alike, whatever its count: kept as an invalid page with its `request_id`, so
+    // that the scan it answers ends at once; it is never sent.
     for count in [2, 5] {
-        assert!(one_frame(raw_page(vec![entry(1).to_proto(), bad()], count)).is_err());
+        assert!(matches!(
+            one_frame(raw_page(vec![entry(1).to_proto(), bad()], count)),
+            Ok(Frame::Response(Response {
+                result: ResponseResult::InvalidPage,
+                ..
+            }))
+        ));
     }
+    assert_eq!(
+        encode_plaintext(&[response(ResponseResult::InvalidPage)]),
+        Err(Error::NotAllowed("invalid page"))
+    );
     assert!(one_frame(raw_page(vec![entry(1).to_proto(), entry(2).to_proto()], 2)).is_ok());
 }
 
