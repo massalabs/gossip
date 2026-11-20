@@ -13,6 +13,7 @@ mod retrieval;
 pub(crate) mod scans;
 mod storage;
 mod timeline;
+mod timer;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;

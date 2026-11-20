@@ -1127,7 +1127,8 @@ pub(crate) mod tests {
         .unwrap();
         let mut timed_projection = projection[..projection.len() - 2].to_vec();
         timed_projection.extend_from_slice(&[0x1a, 0x05, 0x26, 0x5c, 0x00]);
-        timed_projection.extend_from_slice(&[0xa2, 0x61, b'z', 0x41, 0x01, 0x62, b'a', b'a', 0x41, 0x02]);
+        timed_projection
+            .extend_from_slice(&[0xa2, 0x61, b'z', 0x41, 0x01, 0x62, b'a', b'a', 0x41, 0x02]);
         assert_eq!(
             timed.chat_id().as_bytes(),
             blake3::hash(&timed_projection).as_bytes()
@@ -1747,7 +1748,11 @@ pub(crate) mod tests {
             })
         ));
         assert!(modified(&root, |p| p.settings = vec![entry(&"k".repeat(64), b"")]).is_ok());
-        assert!(modified(&root, |p| p.settings = vec![entry(&"\u{e9}".repeat(32), b"")]).is_ok());
+        assert!(
+            modified(&root, |p| p.settings =
+                vec![entry(&"\u{e9}".repeat(32), b"")])
+            .is_ok()
+        );
         assert!(matches!(
             modified(&root, |p| p.settings = vec![entry(&"k".repeat(65), b"")]),
             Err(Error::TooMany {
