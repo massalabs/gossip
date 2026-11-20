@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use groups::node::{GroupChange, LeaveChoice, Node, NodeError, Outgoing};
+use groups::node::{GroupChange, LeaveChoice, LookupResult, Node, NodeError, Outgoing};
 use groups::{Body, ChatId, GossipId, IdentitySigner, LocalEdit, Published, Signer, SyncObjId};
 
 use super::codec::{Codec, R, hex};
@@ -538,6 +538,34 @@ impl Core {
     pub fn lookup_sync_object(&mut self, chat: ChatId, sync_obj_id: SyncObjId, now: u64) -> R<()> {
         self.node
             .lookup_sync_object(&mut self.store, chat, sync_obj_id, now, &mut rng)
+            .map_err(err)
+    }
+
+    /// The results of the sync-object lookups completed since the last call, in JSON:
+    /// `[{epoch, syncObjId, found}]`, `found` the event ID received or `null` (removing them
+    /// is itself a committed operation).
+    pub fn take_lookup_results(&mut self, now: u64) -> R<String> {
+        self.node
+            .take_lookup_results(&mut self.store, now, &mut rng)
+            .map(|results| {
+                J::Arr(
+                    results
+                        .into_iter()
+                        .map(|(chat, sync_obj_id, result)| {
+                            let found = match result {
+                                LookupResult::Found(event) => Some(event),
+                                LookupResult::NotFound => None,
+                            };
+                            J::Obj(vec![
+                                ("epoch".into(), chat.enc()),
+                                ("syncObjId".into(), sync_obj_id.enc()),
+                                ("found".into(), found.enc()),
+                            ])
+                        })
+                        .collect(),
+                )
+                .to_text()
+            })
             .map_err(err)
     }
 
