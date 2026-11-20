@@ -1093,9 +1093,9 @@ mod tests {
         };
         assert!(make(with(&[("m", 16_375)])).is_ok());
         assert_eq!(make(with(&[("m", 16_376)])), too_long("metadata", 16_385));
-        // The framing counts: 2,731 entries of a 2-byte key and no value are 6 bytes each,
-        // although their keys hold only 5,462 bytes.
-        let keys: Vec<String> = (0..2_731u16)
+        // The framing counts, and an empty value too (§13.10): 2,049 entries of a 2-byte key
+        // and no value are 8 bytes each, although their keys hold only 4,098 bytes.
+        let keys: Vec<String> = (0..2_049u16)
             .map(|i| {
                 format!(
                     "{}{}",
@@ -1105,8 +1105,8 @@ mod tests {
             })
             .collect();
         let small: Vec<(&str, usize)> = keys.iter().map(|k| (k.as_str(), 0)).collect();
-        assert!(make(with(&small[..2_730])).is_ok());
-        assert_eq!(make(with(&small)), too_long("metadata", 16_386));
+        assert!(make(with(&small[..2_048])).is_ok());
+        assert_eq!(make(with(&small)), too_long("metadata", 16_392));
         // Received events follow the same rules.
         let event = make(text(alice.id, "x")).unwrap();
         let received = |f: &dyn Fn(&mut proto::MessagePayload)| {

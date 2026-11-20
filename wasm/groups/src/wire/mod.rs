@@ -59,17 +59,26 @@ fn len_field(inner: usize) -> usize {
     1 + varint_len(inner as u64) + inner
 }
 
-/// Size of message metadata as [`crate::constants::MAX_METADATA_BYTES`] counts it: the
-/// `metadata` field of `MessagePayload` (number 10) in its canonical encoding, computed from
-/// the decoded map, so the same on every device whatever encoding was received.
+/// Size of message metadata as [`crate::constants::MAX_METADATA_BYTES`] counts it (§13.10):
+/// the `metadata` field of `MessagePayload` (number 10) with every map entry written in
+/// full, its key field and its value field both present even when empty. Per entry: 1 byte
+/// of field key, the varint length of the entry, then `1 + varint(len key) + key` and
+/// `1 + varint(len value) + value`. Computed from the decoded map, so the same on every
+/// device whatever encoding was received.
+///
+/// Why both fields always: some protobuf libraries write an empty key or value, others
+/// (prost) leave it out. Counting both gives the size of the largest standard encoding, an
+/// upper bound for every library, so two implementations agree on an event at the 16,384
+/// boundary and neither rejects and penalises what the other accepts.
 #[must_use]
 pub fn metadata_len(metadata: &BTreeMap<String, Vec<u8>>) -> usize {
-    prost::encoding::btree_map::encoded_len(
-        prost::encoding::string::encoded_len,
-        prost::encoding::bytes::encoded_len,
-        proto::METADATA_FIELD,
-        metadata,
-    )
+    metadata
+        .iter()
+        .map(|(k, v)| {
+            let entry = len_field(k.len()) + len_field(v.len());
+            len_field(entry)
+        })
+        .sum()
 }
 
 /// Size of an event blob whose `Event` holds one kind of `inner_len` encoded bytes.

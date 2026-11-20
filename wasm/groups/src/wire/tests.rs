@@ -1092,7 +1092,7 @@ fn oversized_event_blobs_are_refused() {
 }
 
 #[test]
-fn metadata_len_is_the_encoded_metadata_field() {
+fn metadata_len_bounds_the_encoded_metadata_field() {
     let maps = [
         BTreeMap::new(),
         BTreeMap::from([(String::new(), vec![])]),
@@ -1106,11 +1106,14 @@ fn metadata_len_is_the_encoded_metadata_field() {
     ];
     for metadata in maps {
         let len = metadata_len(&metadata);
+        // Prost leaves an empty key or value out; with none, the count is its encoding.
+        let full = metadata.iter().all(|(k, v)| !k.is_empty() && !v.is_empty());
         let p = proto::MessagePayload {
             metadata,
             ..Default::default()
         };
-        assert_eq!(len, p.encoded_len());
+        assert!(len >= p.encoded_len());
+        assert_eq!(len == p.encoded_len(), full);
     }
 }
 
@@ -1125,9 +1128,15 @@ fn metadata_len_counts_the_key_and_the_value_of_every_entry() {
     assert_eq!(metadata_len(&one("", 0)), 1 + 1 + 4);
     assert_eq!(metadata_len(&one("a", 0)), 1 + 1 + 5);
     assert_eq!(metadata_len(&one("", 1)), 1 + 1 + 5);
-    assert_eq!(metadata_len(&one("ab", 3)), 1 + 1 + (1 + 1 + 2) + (1 + 1 + 3));
+    assert_eq!(
+        metadata_len(&one("ab", 3)),
+        1 + 1 + (1 + 1 + 2) + (1 + 1 + 3)
+    );
     // A value of 200 bytes takes a 2-byte varint, the entry (206 bytes) too.
-    assert_eq!(metadata_len(&one("k", 200)), 1 + 2 + (1 + 1 + 1) + (1 + 2 + 200));
+    assert_eq!(
+        metadata_len(&one("k", 200)),
+        1 + 2 + (1 + 1 + 1) + (1 + 2 + 200)
+    );
     let two = BTreeMap::from([("a".to_owned(), vec![]), ("b".to_owned(), vec![1])]);
     assert_eq!(metadata_len(&two), 7 + 8);
 }
