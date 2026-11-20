@@ -53,7 +53,7 @@ impl Node {
             // case means a member still cannot tell "kept the history" from "deleted the
             // chat". A peer that shares no active chat gets silence, as before.
             let unservable = !self.authorize(from, entry);
-            if unservable && !(epoch_lookup(entry) && from != self.me && self.shares_epoch(&from)) {
+            if unservable && !self.unservable_answered(from, entry) {
                 continue;
             }
             // A query about the messages of a chat of two is taking part in it (§5.12).
@@ -173,7 +173,7 @@ impl Node {
     /// tell which epochs the device holds (§12.1 and §13.7 would ignore it silently); a
     /// malformed entry is answered `malformed` when `from` is a member of some installed
     /// epoch. The other operations are not handled yet.
-    fn authorize(&mut self, from: GossipId, entry: &QueryEntry) -> bool {
+    pub(crate) fn authorize(&mut self, from: GossipId, entry: &QueryEntry) -> bool {
         let member_of = |n: &Self, chat: &ChatId| {
             from != n.me && n.epochs.get(chat).is_some_and(|e| e.root.is_member(&from))
         };
@@ -215,6 +215,13 @@ impl Node {
                 }
             },
         }
+    }
+
+    /// Whether an entry that [`Node::authorize`] refuses is answered "not available" rather
+    /// than with silence: a lookup tied to an epoch from a peer that shares an active accepted
+    /// chat with this device (§13.7, D.74).
+    pub(crate) fn unservable_answered(&self, from: GossipId, entry: &QueryEntry) -> bool {
+        epoch_lookup(entry) && from != self.me && self.shares_epoch(&from)
     }
 
     /// Whether this device answers the per-epoch lookups of `chat` at all: its group is

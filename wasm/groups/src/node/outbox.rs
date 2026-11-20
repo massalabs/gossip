@@ -914,15 +914,43 @@ impl Node {
     ) -> Result<Option<Evaluated>, NodeError> {
         let late = !super::timing::may_answer(sent_at, ttl, cx.now);
         let status = |s| Some((Some(Category::Status), ResponseResult::Status(s), None));
-        let member =
-            |n: &Self, chat: &ChatId| n.epochs.get(chat).is_some_and(|e| e.root.is_member(peer));
+        // An event or sync-object lookup is decided again as on receipt (`handle_query`): the
+        // epoch may have been deleted, or its group gone inactive, in between. One that can no
+        // longer be served gets what a device that cannot serve it gives: "not available" to a
+        // peer that shares an active chat with this device, silence to any other (§13.7, D.74).
+        let lookup = match op {
+            AnswerOp::Event { chat_id, event_id } => {
+                Some(QueryEntry::Op(QueryOp::Event { chat_id, event_id }))
+            }
+            AnswerOp::SyncObj {
+                chat_id,
+                sync_obj_id,
+            } => Some(QueryEntry::Op(QueryOp::SyncObj {
+                chat_id,
+                sync_obj_id,
+            })),
+            _ => None,
+        };
+        if let Some(entry) = lookup
+            && !self.authorize(*peer, &entry)
+        {
+            if !self.unservable_answered(*peer, &entry) {
+                return Ok(None);
+            }
+            return Ok(status(if late {
+                Status::Expired
+            } else {
+                Status::NotAvailable
+            }));
+        }
         Ok(match op {
+            // A "not available" decided on receipt ages as content does: past the deadline it
+            // is `expired` too. Why: otherwise a late answer would tell a lookup this device
+            // could serve (`expired`) from one it could not ("not available").
+            AnswerOp::Status(Status::NotAvailable) if late => status(Status::Expired),
             AnswerOp::Status(s) => status(s),
             _ if late => status(Status::Expired),
             AnswerOp::Event { chat_id, event_id } => {
-                if !member(self, &chat_id) {
-                    return Ok(None);
-                }
                 match self.serve_event(cx, peer, &chat_id, &event_id)? {
                     Some(e) => Some(event_answer(e)),
                     None => status(Status::NotAvailable),
@@ -931,15 +959,10 @@ impl Node {
             AnswerOp::SyncObj {
                 chat_id,
                 sync_obj_id,
-            } => {
-                if !member(self, &chat_id) {
-                    return Ok(None);
-                }
-                match self.serve_sync(cx, peer, &chat_id, &sync_obj_id)? {
-                    Some(e) => Some(event_answer(e)),
-                    None => status(Status::NotAvailable),
-                }
-            }
+            } => match self.serve_sync(cx, peer, &chat_id, &sync_obj_id)? {
+                Some(e) => Some(event_answer(e)),
+                None => status(Status::NotAvailable),
+            },
             AnswerOp::Root { chat_id } | AnswerOp::Object { chat_id, .. } => {
                 let item = match op {
                     AnswerOp::Object { item, .. } => item,

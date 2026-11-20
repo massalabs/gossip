@@ -703,7 +703,7 @@ impl Node {
     /// (held, invited or waiting). The caller learns the keys of its contacts again through
     /// [`Node::learn_keys`].
     pub(crate) fn forget_closed(&mut self, epochs: &[ChatId], group: ChatId) {
-        use super::records::{AnswerOp, Purpose};
+        use super::records::{AnswerOp, Purpose, WorkKey};
         let names = |c: &ChatId| epochs.contains(c) || *c == group;
         let refs: Vec<_> = self
             .t
@@ -719,6 +719,47 @@ impl Node {
             .collect();
         for k in refs {
             self.t.requests.remove(&k);
+        }
+        // A queued answer to an event or sync-object lookup of these epochs becomes the answer
+        // of a device that does not hold them, decided as on receipt: "not available" to a peer
+        // that shares an active chat with this device, dropped for any other (§13.7, D.74).
+        // Why: the lookup was taken while this device held the epoch; dropping it would leave
+        // the asker with silence where a device that never held the epoch answers.
+        let lookups: Vec<(WorkKey, GossipId)> = self
+            .t
+            .queue
+            .iter()
+            .filter(|(_, w)| {
+                matches!(w, Work::Answer {
+                    op: AnswerOp::Event { chat_id, .. } | AnswerOp::SyncObj { chat_id, .. },
+                    ..
+                } if names(chat_id))
+            })
+            .map(|(k, _)| (*k, k.0))
+            .collect();
+        for (k, peer) in lookups {
+            if let Some(Work::Answer {
+                request_id,
+                idx,
+                sent_at,
+                ttl,
+                op: AnswerOp::Event { .. } | AnswerOp::SyncObj { .. },
+            }) = self.t.queue.get(&k).cloned()
+                && self.shares_epoch(&peer)
+            {
+                self.t.queue.insert(
+                    k,
+                    Work::Answer {
+                        request_id,
+                        idx,
+                        sent_at,
+                        ttl,
+                        op: AnswerOp::Status(crate::wire::Status::NotAvailable),
+                    },
+                );
+            } else {
+                self.remove_queued(&k);
+            }
         }
         let work: Vec<_> = self
             .t
