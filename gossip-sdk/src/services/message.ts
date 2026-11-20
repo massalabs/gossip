@@ -41,6 +41,8 @@ import { QueueManager } from '../utils/queue.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { GossipSqliteTx } from '../db/sqlite.js';
 import { POST_MESSAGE_TYPES } from '../utils/message.js';
+import { isSeekerConflict } from '../api/errors.js';
+import type { SeekerConflictHandler } from './seekerConflicts.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {
@@ -316,6 +318,35 @@ export class MessageService {
 
   setPersistFlusher(flusher: () => Promise<void>): void {
     this.persistFlusher = flusher;
+  }
+
+  /** Renews a session whose seekers the server already holds (409). */
+  private seekerConflicts?: SeekerConflictHandler;
+  setSeekerConflictHandler(handler: SeekerConflictHandler): void {
+    this.seekerConflicts = handler;
+  }
+
+  /**
+   * A message refused because the server holds another value at its seeker.
+   * Resolves `true` when the session was renewed: the peer's queue now waits
+   * for the new session (and the caller stops sending to it on the old
+   * one). Otherwise the message failed for good: it is never retried.
+   */
+  private async seekerConflict(
+    contactUserId: string,
+    messageId: number
+  ): Promise<boolean> {
+    if (await this.seekerConflicts?.handle(contactUserId)) return true;
+    const latest = await this.queries.messages.getById(messageId);
+    if (latest) {
+      await this.queries.messages.updateById(messageId, {
+        status: MessageStatus.FAILED,
+        encryptedMessage: null,
+        seeker: null,
+        whenToSend: null,
+      });
+    }
+    return false;
   }
 
   constructor(
@@ -1015,6 +1046,10 @@ export class MessageService {
               messageId: msg.id,
               error,
             });
+            if (isSeekerConflict(error)) {
+              if (await this.seekerConflict(contactUserId, msg.id)) break;
+              continue;
+            }
             await this.queries.messages.updateById(msg.id, {
               status: MessageStatus.READY,
               encryptedMessage,
@@ -1233,6 +1268,11 @@ export class MessageService {
               messageId: msg.id,
               error,
             });
+            if (isSeekerConflict(error)) {
+              // Retried as stored, it would be refused for ever.
+              if (await this.seekerConflict(contactUserId, msg.id)) break;
+              continue;
+            }
             const latestRow = await this.queries.messages.getById(msg.id);
             if (
               latestRow && // ensure the discussion has not been deleted
@@ -1269,8 +1309,9 @@ export class MessageService {
     let posted = 0;
     for (const row of rows) {
       if (!row.seeker || !row.encryptedMessage) continue;
-      // a 4xx but 429 is final: 409 means the server holds the seeker already
-      // (a bridge got there first), anything else that it never takes it
+      // a 4xx but 429 is final: the server never takes it. A 409 means it
+      // holds another value at the seeker (an identical one is accepted):
+      // the session is behind what was already published, and is renewed.
       let onServer = true;
       try {
         await this.messageProtocol.sendMessage(
@@ -1286,7 +1327,14 @@ export class MessageService {
           });
           break;
         }
-        onServer = reason.includes('HTTP 409');
+        onServer = false;
+        // Renewed: the message waits for the new session and is sent again.
+        if (
+          isSeekerConflict(error) &&
+          (await this.seekerConflicts?.handle(row.contactUserId))
+        ) {
+          continue;
+        }
       }
       const latest = await this.queries.messages.getById(row.id);
       if (!latest || latest.status !== MessageStatus.SENT) continue;

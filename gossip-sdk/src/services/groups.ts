@@ -43,6 +43,8 @@ import { serializeGroupPlaintext } from '../utils/messageSerialization.js';
 import { decodeUserId, encodeUserId } from '../utils/userId.js';
 import { Logger } from '../utils/logs.js';
 import { isFinalStatus } from '../api/restClient.js';
+import { isSeekerConflict } from '../api/errors.js';
+import type { SeekerConflictHandler } from './seekerConflicts.js';
 
 const logger = new Logger('GroupService');
 
@@ -827,6 +829,11 @@ export class GroupService {
     seeker: Uint8Array;
     ciphertext: Uint8Array;
   }[] = [];
+  /** Renews a session whose seekers the server already holds. */
+  private seekerConflicts?: SeekerConflictHandler;
+  setSeekerConflictHandler(handler: SeekerConflictHandler): void {
+    this.seekerConflicts = handler;
+  }
   /** The last session status reported for each peer. */
   private statuses = new Map<string, SessionStatus>();
   private readonly onSessionStatus = (p: {
@@ -1460,7 +1467,9 @@ export class GroupService {
         });
       } catch (error) {
         if (id !== null) {
-          await this.outboxFailed(id, error).catch(() => undefined);
+          await this.outboxFailed(id, encodeUserId(e.to), error).catch(
+            () => undefined
+          );
         }
         continue;
       }
@@ -1489,7 +1498,9 @@ export class GroupService {
           ciphertext: row.ciphertext,
         });
       } catch (error) {
-        await this.outboxFailed(row.id, error).catch(() => undefined);
+        await this.outboxFailed(row.id, row.contactUserId, error).catch(
+          () => undefined
+        );
         continue;
       }
       this.outboxFailures.delete(row.id);
@@ -1503,8 +1514,24 @@ export class GroupService {
    * engine records no delivery hint for it and its events stay to be
    * synchronised. Any other failure is retried, each wait twice the one
    * before, up to an hour.
+   *
+   * A seeker the server already holds (409) means the session with the peer
+   * is behind what was already published: it is renewed (at most once an
+   * hour), and the content is assembled again on the new one.
    */
-  private async outboxFailed(id: number, error: unknown): Promise<void> {
+  private async outboxFailed(
+    id: number,
+    contactUserId: string,
+    error: unknown
+  ): Promise<void> {
+    if (isSeekerConflict(error)) {
+      this.outboxFailures.delete(id);
+      await this.queries.groups.deleteOutbox(id);
+      // Not awaited: the renewal posts an announcement and tells this
+      // service, which must not wait for its own queue.
+      void this.seekerConflicts?.handle(contactUserId);
+      return;
+    }
     if (isFinalSendError(error)) {
       this.outboxFailures.delete(id);
       await this.queries.groups.deleteOutbox(id);

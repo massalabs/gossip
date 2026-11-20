@@ -67,6 +67,7 @@ import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
 import { GroupService } from './services/groups.js';
 import { ConversationService } from './services/conversations.js';
+import { SeekerConflictHandler } from './services/seekerConflicts.js';
 import {
   SELF_CONTACT_ID,
   SelfMessageService,
@@ -694,6 +695,15 @@ class GossipSdk {
       // setter rather than a constructor arg to avoid a circular
       // dependency on `this` during MessageService construction.
       this._message.setPersistFlusher(() => this.awaitPendingPersist());
+      // A send refused at a seeker the server already holds renews the
+      // session with that peer (one-to-one and group sends alike).
+      const seekerConflicts = new SeekerConflictHandler(
+        session,
+        queries,
+        this._discussion,
+        this.eventEmitter
+      );
+      this._message.setSeekerConflictHandler(seekerConflicts);
 
       // Same plumbing for the incoming-announcement path: forces the
       // session-blob persist between the Rust state mutation and the
@@ -757,6 +767,7 @@ class GossipSdk {
         config,
         () => this.persistSessionDurably()
       );
+      groups.setSeekerConflictHandler(seekerConflicts);
       try {
         await groups.open();
         this._groups = groups;
