@@ -342,7 +342,7 @@ It carries:
 | `type` | `successor` (0) or `handover` (1) (§4.7) |
 | `name` | the group name: UTF-8, 0 to 256 bytes (§5.11) |
 | `parents` | 1 to 32 parent commitments, 32 bytes each, distinct, sorted ascending (§4.5) |
-| `members` | 1 to 512 GossipIDs, distinct, sorted ascending by raw bytes (§4.4) |
+| `members` | 1 to 512 GossipIDs, distinct, nonzero, sorted ascending by raw bytes (§4.4) |
 | `group_secret` | 32 fresh random bytes |
 | `owner` | the owner's complete `UserPublicKeys`, serialized with bincode (§4.3) |
 | `epoch_challenge` | 32 fresh random bytes (§4.5) |
@@ -405,6 +405,10 @@ of later epochs.
 **Owner.** The root carries the owner's complete `UserPublicKeys`: the ML-DSA-65 verification key
 (1,952 bytes), the ML-KEM-768 key (1,184 bytes), the Massa key and the EVM key, about 3.2 KB,
 serialized with bincode as the identity code does.
+The field MUST be the canonical bincode encoding: a receiver parses it, encodes the parsed keys
+again and refuses the root when the two differ; a key answer (§12.9) is checked the same way.
+*Why:* otherwise the same keys with bytes appended would give a second root ID for the same
+content (D.15).
 A recipient hashes them to the owner's GossipID and verifies the signature with the ML-DSA-65 key.
 No lookup is needed to verify a root.
 The owner MUST be a member of the root.
@@ -1533,7 +1537,7 @@ A message event carries:
 | `type` | see the table below |
 | `author` | the claimed author's GossipID; MUST be a member of the epoch |
 | `created_at` | claimed creation time; display ordering key |
-| `last_modified_at` | claimed modification time; version ranking key |
+| `last_modified_at` | claimed modification time; version ranking key; MUST be present on every type except a deletion, or the event is malformed |
 | `body` | type-specific |
 | `edited` | claimed edited flag, independent of the timestamps |
 | `metadata` | map from text keys to byte values; empty when unused |
@@ -1566,8 +1570,40 @@ A delete projects to `[chat_id, syncObjId, 4]`, without its pending `last_modifi
 **Result hash** (local only, never stored or transmitted):
 
 ```text
-resultHash = H("gossip.groups.message.result.1", fullMessage)
+resultHash = H("gossip.groups.message.result.1", chat_id, syncObjId, type, author, created_at,
+               last_modified_at, body, edited, metadata)
 ```
+
+The items of `fullMessage` are poured directly into the hashed list after the domain (the flat
+form): the list hashed is `[domain, chat_id, syncObjId, type, author, created_at,
+last_modified_at, body, edited, metadata]`, ten items, never `[domain, fullMessage]`. For a delete
+it is `[domain, chat_id, syncObjId, 4]`, four items. No item is optional: every content result has
+the nine items in these positions (`metadata` is an empty map when unused, and `last_modified_at`
+is always present on such a result), and a delete never carries its pending `last_modified_at`.
+The list therefore reads one way only.
+*Why flat:* a pure convention, chosen so that every hash of the protocol is the domain followed by
+its items (D.22).
+
+Worked example: in epoch `chat_id = 0x11…11` (32 bytes), a text "hello" with `syncObjId =
+0x77…77`, author `0x22…22`, `created_at = T`, `last_modified_at = T + 1`, `edited` true and
+metadata `{"z": h'01', "aa": h'02'}` is hashed over the CBOR array
+
+```text
+8a                                  array of 10
+  78 1e "gossip.groups.message.result.1"
+  58 20 11…11                        chat_id
+  58 20 77…77                        syncObjId
+  00                                 type text
+  58 20 22…22                        author
+  1b <T, 8 bytes>                    created_at
+  1b <T + 1, 8 bytes>                last_modified_at
+  65 "hello"                         body
+  f5                                 edited
+  a2 61 "z" 41 01 62 "aa" 41 02      metadata, canonical key order
+```
+
+and with `T = 1,700,000,000,000` its BLAKE3 hash is
+`c338cd5ad15710a66cf559e7423d726988df5faeaadb86bd94d50da09c51f8c3`.
 
 The event ID, event timestamp, secret proof and parents are not part of the result.
 
@@ -1763,6 +1799,10 @@ Each target is a pair:
 where `ref_chat_id` is the reference of the target's epoch (§4.5), also when that epoch is the
 reply's own.
 A list with more than 32 targets is malformed.
+A `replyTo` entry that is present but holds no target, more than 32, or a target that does not
+decode makes the whole event malformed (D.21); "never rejected because of its references" applies
+to well-formed targets that cannot be resolved.
+*Why:* one single way to write each message.
 The limit bounds the list of one message; the number of messages that reply to one message is not
 bounded.
 
@@ -1818,7 +1858,10 @@ Members of the reply's epoch who are not in the target's epoch see an opaque val
 when two replies point to the same unknown epoch, nothing more.
 
 **Forwards** are content-only copies in the destination chat.
-Their body is `[content_type, content]`, a permitted copied content value.
+Their body is `[content_type, content]`, a permitted copied content value: `content_type` is `text`
+or `media`, never a forward, a reaction or a deletion; a forwarded text is valid UTF-8 of at most
+16,384 bytes, and forwarded media is the canonical encoding of a media body. Anything else makes the
+event malformed (D.20).
 They contain no source chat, source sync-object ID or reference, and no original author; the
 claimed author is the forwarder.
 Destination metadata is rebuilt from an allowlist of understood content-only fields.
@@ -3916,6 +3959,9 @@ The code refuses any input that does not equal the re-serialized keys.
   encoding, and that a receiver MUST refuse bytes that differ from the re-serialized keys.
 - **B:** leave the text as it is and rely on the implementation.
 
+*Settled:* choice A, as coded; §4.3 states it. Why: otherwise the same keys with trailing bytes
+give a second root for the same content.
+
 ### D.16 Nonzero GossipIDs in a member list (§4.1, §4.7)
 
 *Found during implementation.*
@@ -3928,6 +3974,8 @@ The code applies the rule of §4.7.
 
 - **A (recommended):** add "nonzero" to the `members` row of §4.1.
 - **B:** remove the requirement from §4.7.
+
+*Settled:* choice A, as coded; §4.1 states it: a member GossipID of all zeros is invalid.
 
 ### D.17 Signed-object IDs do not include a version (§5.3, §5.6, §5.8, §13.1)
 
@@ -3979,6 +4027,9 @@ The code refuses a non-deletion without it.
   present; an event without it is malformed.
 - **B:** an absent field reads as 0, as for other scalar fields.
 
+*Settled:* choice A, as coded; §6.2 states it. Why: read as 0, the version would silently lose to
+every other version.
+
 ### D.20 What a forward may carry (§6.2, §7.6)
 
 *Found during review of the implementation.*
@@ -3989,6 +4040,9 @@ is not valid UTF-8.
 
 - **A (recommended):** state the code's rule in §7.6.
 - **B:** any inner type and any bytes are accepted.
+
+*Settled:* choice A, as coded; §7.6 states it: text or media only, a text valid UTF-8 within 16,384
+bytes. Why: one single way to write each message.
 
 ### D.21 A `replyTo` list that is malformed (§7.6)
 
@@ -4006,6 +4060,8 @@ about a list that breaks the format.
 - **A (recommended):** the event is malformed, and §7.6 says so, including for an empty list.
 - **B:** the message is kept and the list is ignored.
 
+*Settled:* choice A, as coded; §7.6 states it. Why: one single way to write each message.
+
 ### D.22 The result hash projection (§6.2)
 
 *Found during review of the implementation.*
@@ -4016,6 +4072,9 @@ The code uses the nested form, which is the literal reading.
 
 - **A (recommended):** state the nested form.
 - **B:** the flat form, which changes the hash.
+
+*Settled:* choice B, the user's choice: a pure convention. §6.2 states the list exactly, with a
+worked example; the code and its vectors follow it.
 
 ### D.23 One invalid entry in a notice or a page (§13.5, §13.7)
 
