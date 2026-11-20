@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
-import { AlertTriangle, Shield } from 'react-feather';
+import { AlertTriangle, Clock, Shield } from 'react-feather';
 import {
   formatUserId,
   SessionStatus,
@@ -23,6 +23,7 @@ import { useAccountStore } from '../stores/accountStore';
 import { isolate } from '../utils/groupName';
 import { isAcceptedContact } from '../utils/conversations';
 import { ROUTES } from '../constants/routes';
+import { messageTimerSentence } from '../constants/messageTimer';
 
 const Section: React.FC<{
   title: string;
@@ -44,7 +45,8 @@ const Section: React.FC<{
  * The one invitation screen (§5.12): every invitation, a group's, a direct
  * chat's, a migration's or a contact request, is shown with the sections
  * that apply, in this order: who asks; adding them as a contact; the group,
- * its owner and members; the earlier conversation it continues; warnings
+ * its owner and members; its message timer (§7.7), which only its owner
+ * changes; the earlier conversation it continues; warnings
  * (§4.8, §5.11); the choices. A person who is no contact and asks for a chat
  * is shown once, as asking both to become a contact and to open the chat.
  *
@@ -224,6 +226,18 @@ const Invitation: React.FC = () => {
               </li>
             ))}
           </ul>
+        </Section>
+      )}
+
+      {invitation && (
+        <Section title={t('timer.label')} testId="invite-timer">
+          <p className="flex items-center gap-2 text-sm text-foreground">
+            <Clock className="w-4 h-4 shrink-0 text-muted-foreground" />
+            {messageTimerSentence(invitation.messageTimer, t)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t('timer.owner_only')}
+          </p>
         </Section>
       )}
 

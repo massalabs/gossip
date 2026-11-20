@@ -210,7 +210,7 @@
   "privacy": {
     "title": "隐私",
     "default_retention_title": "默认消息自动删除",
-    "default_retention_description": "新会话将自动应用此保留策略。"
+    "default_retention_description": "你新建的聊天使用此定时。新建聊天时可以另选。"
   },
   "web3": {
     "title": "Web3",

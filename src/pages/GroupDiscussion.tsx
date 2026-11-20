@@ -29,6 +29,8 @@ import EarlierChats from '../components/groups/EarlierChats';
 import ContinuationPrompt from '../components/groups/ContinuationPrompt';
 import { useDiscussionStore } from '../stores/discussionStore';
 import SafeName from '../components/groups/SafeName';
+import AutoDeleteChip from '../components/ui/AutoDeleteChip';
+import { messageTimerLabel } from '../constants/messageTimer';
 import { useGroupMemberName } from '../hooks/useGroupMemberName';
 import { useAccountStore } from '../stores/accountStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
@@ -279,6 +281,16 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
                 // the last epoch held, no longer the group's.
                 t(`details.status_${group.status}`)}
           </p>
+          {group.messageTimer > 0 && (
+            // The current timer (§7.7), as the earlier one-to-one header
+            // shows its retention.
+            <div className="flex min-w-0">
+              <AutoDeleteChip
+                duration={messageTimerLabel(group.messageTimer, t)}
+                testId="group-timer-chip"
+              />
+            </div>
+          )}
         </div>
         <button
           type="button"

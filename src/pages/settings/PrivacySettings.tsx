@@ -7,35 +7,38 @@ import PageHeader from '../../components/ui/PageHeader';
 import OptionBottomSheet from '../../components/ui/OptionBottomSheet';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
-import { RETENTION_OPTIONS } from '../../constants/retention';
+import {
+  MESSAGE_TIMER_OPTIONS,
+  messageTimerLabel,
+  timerToRetentionSeconds,
+} from '../../constants/messageTimer';
+import { useDefaultMessageTimer } from '../../hooks/useDefaultMessageTimer';
 
 const PrivacySettings: React.FC = () => {
-  const { t } = useTranslation(['settings', 'discussions']);
+  const { t } = useTranslation(['settings', 'discussions', 'groups']);
   const navigate = useNavigate();
-  const defaultRetentionDuration = useAppStore(s => s.defaultRetentionDuration);
+  // The default message timer of the chats this account founds (§7.7),
+  // stored in seconds; the earlier "1 month" reads as 28 days.
+  const defaultTimer = useDefaultMessageTimer();
   const setDefaultRetentionDuration = useAppStore(
     s => s.setDefaultRetentionDuration
   );
 
   const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
 
-  const handleRetentionChange = async (duration: number | null) => {
+  const handleRetentionChange = async (timer: number) => {
     try {
-      await setDefaultRetentionDuration(duration);
+      await setDefaultRetentionDuration(timerToRetentionSeconds(timer));
       setIsRetentionModalOpen(false);
     } catch (error) {
       logger.error('Failed to persist default retention setting:', error);
     }
   };
 
-  const retentionLabel = useMemo(() => {
-    const option = RETENTION_OPTIONS.find(
-      o => o.value === defaultRetentionDuration
-    );
-    return option
-      ? t(option.labelKey)
-      : t('discussions:settings.auto_delete_off');
-  }, [defaultRetentionDuration, t]);
+  const retentionLabel = useMemo(
+    () => messageTimerLabel(defaultTimer, t),
+    [defaultTimer, t]
+  );
 
   return (
     <PageLayout
@@ -64,19 +67,24 @@ const PrivacySettings: React.FC = () => {
           className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted px-4 py-3 transition-colors border-t border-border"
         >
           <span>{t('discussions:settings.auto_delete_current')}</span>
-          <span className="text-accent-soft-foreground">{retentionLabel}</span>
+          <span
+            className="text-accent-soft-foreground"
+            data-testid="default-timer-value"
+          >
+            {retentionLabel}
+          </span>
         </button>
       </div>
 
       <OptionBottomSheet
         isOpen={isRetentionModalOpen}
         title={t('privacy.default_retention_title')}
-        options={RETENTION_OPTIONS.map(o => ({
-          label: t(o.labelKey),
-          value: o.value,
+        options={MESSAGE_TIMER_OPTIONS.map(ms => ({
+          label: messageTimerLabel(ms, t),
+          value: ms,
         }))}
-        selectedValue={defaultRetentionDuration}
-        onSelect={value => void handleRetentionChange(value)}
+        selectedValue={defaultTimer}
+        onSelect={value => void handleRetentionChange(value ?? 0)}
         onClose={() => setIsRetentionModalOpen(false)}
       />
     </PageLayout>
