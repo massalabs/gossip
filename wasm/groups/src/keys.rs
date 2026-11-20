@@ -197,7 +197,7 @@ mod tests {
         bytes.push(0);
         assert_eq!(
             parse_user_public_keys(&bytes).map(|_| ()),
-            Err(Error::NonCanonicalKeys)
+            Err(Error::InvalidKeys)
         );
         assert_eq!(
             parse_user_public_keys(&[1, 2, 3]).map(|_| ()),
