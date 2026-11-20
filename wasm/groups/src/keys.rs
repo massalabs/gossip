@@ -14,10 +14,11 @@ use crate::ids::GossipId;
 
 /// Parses `bincode(UserPublicKeys)` and returns the keys with their GossipID.
 ///
-/// The bytes must be exactly the encoding `auth` produces for the keys: `auth`'s decoder
-/// accepts trailing bytes and other encodings of the same keys, whose hash would then differ
-/// from the GossipID (§3). Refusing them keeps one byte string per identity, so that the bytes
-/// hashed into a root ID are the bytes that hash to the owner's GossipID.
+/// The bytes must be exactly the encoding `auth` produces for the keys: trailing bytes or
+/// another encoding of the same keys would hash to another value than the GossipID (§3).
+/// Refusing them keeps one byte string per identity, so that the bytes hashed into a root ID
+/// are the bytes that hash to the owner's GossipID. `auth`'s decoder now enforces the same
+/// rule; the check here stays as a second line of defence.
 ///
 /// # Errors
 ///
