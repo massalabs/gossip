@@ -1057,9 +1057,10 @@ pub struct RefReply {
 }
 
 /// A reference named by replies this device holds, whose target it does not hold yet
-/// (§7.6, §12.7): the epoch is unknown and its root is looked up by reference, or it is an
-/// invitation not answered yet. Local, never sent; forgotten once no reply naming it is
-/// held.
+/// (§7.6, §12.7): the epoch is unknown and its root is looked up by reference, or the
+/// epoch is known (installed, or an invitation not answered yet) and the target is fetched
+/// once the device holds the epoch installed. Local, never sent; forgotten once no reply
+/// naming it is held.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefLookup {
     /// The replies that name it, by `(epoch of the reply, its sync object, the target's sync
