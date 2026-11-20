@@ -28,9 +28,9 @@ const Q: usize = 3;
 
 /// A = {0, 1, 2, 3} is active on R and Q. C = {0, 1, 3} is held by R, inactive the way given;
 /// D = {0, 1, 3} was deleted by R ("Delete", only markers left); E = {0, 3} was never held by R.
-/// Returns `(net, [C, D, E])`. With `before`, run on R while C is still active (for the pending
+/// Returns `(net, [C, D, E, A])`. With `before`, run on R while C is still active (for the pending
 /// lookups of the transition).
-fn setup(how: Inactive, before: impl FnOnce(&mut MNet, ChatId)) -> (MNet, [ChatId; 3]) {
+fn setup(how: Inactive, before: impl FnOnce(&mut MNet, ChatId)) -> (MNet, [ChatId; 4]) {
     let mut net = MNet::new(5, true);
     let a = net.create(0, &[1, 2, 3]);
     let c = net.create(0, &[1, 3]);
@@ -127,7 +127,7 @@ fn setup(how: Inactive, before: impl FnOnce(&mut MNet, ChatId)) -> (MNet, [ChatI
     assert_eq!(net.summary(R, &c).unwrap().status, want, "{how:?}");
     assert!(net.summary(R, &a).is_some(), "{how:?}: A stays active");
     assert!(net.summary(R, &e).is_none() && net.summary(Q, &e).is_some());
-    (net, [c, d, e])
+    (net, [c, d, e, a])
 }
 
 /// Everything R sends from now on for `hours`, delivered to nobody, ticking every minute: each
@@ -208,7 +208,7 @@ fn an_inactive_device_starts_nothing_for_a_notice_naming_its_epoch() {
     for how in ALL {
         for kind in KINDS {
             let probe = |target: &dyn Fn(ChatId, ChatId) -> ChatId| {
-                let (mut net, [c, d, _]) = setup(how, |_, _| {});
+                let (mut net, [c, d, ..]) = setup(how, |_, _| {});
                 let chat = target(c, d);
                 let n = Frame::Notice(Notice {
                     entries: vec![entry(kind, chat, net.now)],
@@ -436,4 +436,49 @@ fn an_inactive_device_applies_a_dissolve_silently() {
         wrong.is_empty(),
         "(status, must_delete, differs from): {wrong:?}"
     );
+}
+
+/// §12.1, §5.10, D.74: R links C, a group where it is no longer active, to A by hand (local,
+/// nothing is sent). Q, a member of both, scans R anchored in A. The page R gives is the one a
+/// device that deleted C after linking it gives: it lists no entry of C. Before, the tips of C
+/// were listed, so Q could tell R kept the history of a group it was kicked from or left.
+#[test]
+fn a_tips_scan_lists_nothing_of_a_linked_group_where_the_device_is_inactive() {
+    let mut wrong = Vec::new();
+    for how in [Inactive::Removed, Inactive::Left, Inactive::Dissolved] {
+        let probe = |delete: bool| {
+            let (mut net, [c, _, _, a]) = setup(how, |_, _| {});
+            let now = net.now;
+            let dev = &mut net.devs[R];
+            dev.node
+                .link_groups(&mut dev.store, a, c, true, now, &mut net.rng)
+                .unwrap();
+            if delete {
+                dev.node
+                    .delete_group(&mut dev.store, c, now, &mut net.rng)
+                    .unwrap();
+            }
+            let answers = super::membership::answers_of(
+                &mut net,
+                R,
+                Q,
+                vec![QueryOp::TipsScan {
+                    anchor: a,
+                    scan_id: scan_id(4),
+                    offset: 0,
+                }],
+            );
+            let names_c = answers.iter().any(|(_, r)| match r {
+                ResponseResult::Page(p) => p.entries.iter().any(|e| e.chat_id == c),
+                _ => false,
+            });
+            (answers, names_c)
+        };
+        let (kept, names_c) = probe(false);
+        let (deleted, _) = probe(true);
+        if names_c || kept != deleted {
+            wrong.push((how, names_c));
+        }
+    }
+    assert!(wrong.is_empty(), "(status, lists C): {wrong:?}");
 }
