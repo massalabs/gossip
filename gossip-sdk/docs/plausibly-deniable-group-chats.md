@@ -746,6 +746,16 @@ A first invitation and an invitation to rejoin are treated the same.
   (§5.10).
 - **Decline** opens the choices of §5.2.
 
+**A refused invitation.** When the user refuses an invitation, by a decline or by "Ignore and
+Delete" (§5.2), the roots the parent lookup fetched for it go with it, each leaving a closed-chat
+marker with its reference, as the invitation does (§14.2). A fetched parent that something else
+the device holds still names (another pending invitation, an installed epoch, a waiting group) is
+kept. A copy of a dropped parent announced again is then ignored, and a reply naming one is
+recognised without asking anyone (§7.6).
+*Why:* those roots are hidden records that nothing points to any more, and they hold the member
+lists and names of earlier epochs of a chat the user refused. "Ignore and Delete", the action meant
+to leave the least trace, must not leave them behind.
+
 Until an epoch is installed, frames for it other than its root are dropped without staging.
 The owner's own device installs a root as accepted when creating it.
 Other members are not told whether a member accepted.
@@ -902,7 +912,9 @@ The owner of a group gets a different popup (§5.8).
 The order and wording of the buttons are provisional.
 
 All three ways end with the group closed on the device and a closed-chat marker (§14.2); the
-owner-only request reaches that state only after its waiting state (§5.4).
+owner-only request reaches that state only after its waiting state (§5.4). On an invitation not
+answered yet, a decline and "Ignore and Delete" also drop the roots fetched as its parents, each
+with its own marker (§4.8): the earlier epochs' member lists do not stay behind.
 
 *Why "invited again" in choice 3:* nobody removed the user, who therefore stays in the member list.
 The device rejects each new root by itself while it can match it to an epoch it closed (§4.8); if
@@ -2239,8 +2251,68 @@ lookup finds no event carrying it.
   are looked up when a child is first accepted (§6.3, §11.1), never for a child already held. The
   tips and the cycle frontier do not change: they are computed from the available events, and an
   erased event was not available any more (§6.1, §12.1, D.27). The child goes at its own moment.
-- A message deleted by a deletion event, or by hand, before its moment keeps its tombstone as
-  without a timer (§7.1, §9.2). The timer only erases what it deleted itself.
+
+**A message deleted before its moment.** A message deleted by a deletion event (from anyone, or
+published by this device) or by a local-only deletion (§9.2), after the device processed it, keeps
+its tombstone, its deletion events, the stubs of its events and their parent links until its
+moment rounded up, and is then erased like a message the timer deleted:
+
+```text
+erase_at = ceil((created_at + T) / step) × step
+```
+
+| `T` | `step` |
+| --- | --- |
+| `T` ≤ 1 hour | 5 minutes |
+| 1 hour < `T` ≤ 1 day | 1 hour |
+| 1 day < `T` ≤ 1 week | 1 day (24 hours) |
+| `T` > 1 week | 1 week (7 × 24 hours) |
+
+- The multiples are counted from the Unix origin in milliseconds: plain arithmetic, no calendar,
+  no time zone. The arithmetic is exact (§1): a rounded date past the top of the integer range
+  never comes, and the tombstone is then kept as long as the group.
+- When the versions of the message carry different creation dates, the latest moment among them
+  counts (below), then it is rounded. A later version that the tombstone absorbs counts too.
+- The rounding applies only to the date kept beside a deleted message. A message nobody deleted
+  is erased at its exact moment.
+- Until `erase_at` the tombstone does its job: the message cannot come back. After it, a copy
+  offered late is refused by its own dates, as for any erased message.
+- `T = 0`: nothing changes; the tombstone is kept as long as the group (§7.1).
+
+*Why:* deleting a message by hand must not leave more trace than letting the timer run. Kept as
+without a timer, the tombstone would say, for as long as the group is kept, that a message
+existed. *Why rounded:* the exact moment would keep the exact creation date of the message beside
+its tombstone. *Cost:* the device keeps one coarse date beside the tombstone until then.
+
+**A deletion for a message the device never processed.** A deletion carries no date, so a device
+that receives one for a message it never processed (erased already, never received, or not yet
+received) cannot know the message's moment. In an epoch with a timer:
+
+- the record the deletion creates is **quiet**: the device keeps it to itself. It never announces
+  its events (§10.2) and never lists them in a tips scan (§12.1). It still answers a direct request
+  for one of them (an event lookup or a sync-object lookup).
+- It is erased, with every record of it, at the time the deletion was processed plus `T`, rounded
+  up with the table above. Another deletion of the same message while the record exists changes
+  nothing.
+- The first time any version of the message itself is processed for that record, even a copy the
+  tombstone blocks on arrival, the record becomes **shareable** again: `erase_at` is computed from
+  the message's creation date by the rule above, and the device offers the deletion normally from
+  then on. A copy refused by its dates (past its moment) is not processed and changes nothing.
+- `T = 0`: every record is shareable, and behaves as without a timer.
+
+This is the local field `shareable` of the current object (§14.1). It is written at exactly three
+moments: every record starts `true`; a deletion that creates a record for a message never
+processed, in an epoch with a timer, sets it `false`; the first version of the message processed
+for that record sets it back to `true`. While it is `false` the device never announces nor lists
+the record's events, and always answers a direct request for them.
+
+*Why the processing time plus `T`:* it is a safe bound, because an honest message is never created
+after its own deletion. *Why quiet:* that deadline restarts whenever the deletion is received
+anew. If devices in this state offered it to each other, they would renew each other's copies
+forever: one device that was offline is enough to stagger the deadlines. A device that holds the
+message has a fixed deadline, the same on every device, so offering is safe there. *Why a direct
+request is still answered:* a peer asks only when something finite gave it the ID (a child event
+or a reply, each with its own moment), so answering cannot keep the deletion alive.
 
 **When the versions disagree.** Honest versions of a message share one creation date, so its
 moment is that of each version. When versions carry different creation dates (the known limit
@@ -2299,9 +2371,9 @@ Known limits:
   moment. The same holds on a device that never held the target.
 - A pending scheduled deletion is erased with its message. A peer whose clock is behind may still
   serve it for a while, and a device that fetches it then stores it as the deletion of a message
-  it does not hold, which leaves a tombstone, as without a timer; from there it can spread to the
-  other devices by tip scans. The same holds for a deletion event that arrives after the moment of
-  its message. A deletion carries no date that would let a device refuse it safely: its target's
+  it never processed: a quiet record, kept for `T` after it was processed, rounded up, and offered
+  to no one (above). The same holds for a deletion event that arrives after the moment of its
+  message. A deletion carries no date that would let a device refuse it safely: its target's
   creation date is not in it.
 - A notice of an event, sent just before its moment and received just after, makes the receiver
   fetch it; the sender answers "not available" and gets the small penalty of an announcement it
@@ -2472,6 +2544,8 @@ objects §4.6 and §5).
 - Query answers and the owner's deliveries of a root do not trigger extra recipients.
 - A device MUST NOT announce an event, a root or a signed object unless it currently holds its full
   content and may serve it.
+- A device MUST NOT announce an event of a quiet record (`shareable = false`, §7.7, §14.1); it
+  still answers a direct request for it.
   Receiving a notice never makes an item announceable; it must first be fetched, validated,
   processed and still be available.
 
@@ -2843,6 +2917,9 @@ epoch each entry belongs to.
   object of it.
 - An epoch with no retained events has no tips, so the size of a scan follows what is pending, not
   the number of membership changes.
+- The events of a quiet record (`shareable = false`, §7.7, §14.1) are never listed: the tips of
+  the list are computed without them, so that an event they name as a parent is listed if nothing
+  else names it. A direct request for one of them is still answered.
 - An entry whose `chat_id` the requester does not hold is handled as a root notice (§4.6); it is
   ignored if it matches a closed-chat marker.
 
@@ -3495,7 +3572,26 @@ Physical layout is an implementation detail.
 - **Parent edges.**
 - **Current objects** keyed by `(chat_id, syncObjId)`, with their current result, the moment of
   the message timer (§7.7), when the timer erases the object with the stubs of its events it
-  erases then (in an epoch with a timer only), and pending versions.
+  erases then (in an epoch with a timer only; for a deleted message, its moment rounded up, §7.7),
+  pending versions, and **`shareable`**.
+  - `shareable` says whether the device may offer the record's events on its own initiative.
+    `true`: it announces them and lists them in tips scans; the normal state of every record.
+    `false` (a **quiet** record): it neither announces them nor lists them, and still answers a
+    direct request (a lookup by ID) for them.
+  - It is written at exactly three moments: (1) every record starts `true`; (2) it is set to
+    `false` when a deletion event creates the record for a message the device has never
+    processed, in an epoch with a timer, and the record is then erased at the time the deletion
+    was processed plus `T`, rounded up; (3) it is set back to `true` the first time any version of
+    the message itself is processed for that record, even a copy the tombstone blocks, and the
+    erasure is then computed from the message's creation date. With no timer it is always `true`.
+  - It has no default: every place that creates or writes a record states it, so that no write
+    can forget it. A forgotten `false` would let a quiet deletion be renewed between devices
+    forever (§7.7).
+  - *Why:* a deletion carries no date, so a device without the message bounds its moment by the
+    processing time plus `T`. That bound restarts whenever the deletion is received anew, so
+    devices in this state must not offer it to each other; a device holding the message has a
+    fixed deadline, the same everywhere, and may. A direct request is answered because a peer
+    asks only when something finite gave it the ID (§7.7).
   The stored fields of each available event are the only stored copy of that event's content.
 - **Retrieval tasks** with per-peer candidate rows: trigger kind and time, attempts, outstanding
   and N/A state; the per-peer waiting lists and pauses of §11.8.
@@ -3524,8 +3620,11 @@ except what the message timer erases (§7.7).
   The UI warns that recovery obligations and deletion knowledge are lost.
 - A group is closed by "Ignore and Delete", by a signed leave or decline once it is sent, by the
   end of the waiting state (§5.2, §5.4) and by **Delete** on a kicked or dissolved group.
-  An invitation deleted before it is answered leaves a marker as one declined does, and so does
-  each root fetched as a parent of an invitation that is declined (§4.8).
+  An invitation deleted before it is answered ("Ignore and Delete") leaves a marker as one declined
+  does, and so does each root fetched as a parent of an invitation that is declined or deleted,
+  unless something else the device holds still names it (§4.8).
+  *Why:* the action meant to leave the least trace must not leave the earlier epochs' member lists
+  behind.
 - **Closed-chat marker.** A root that continues a closed epoch is rejected automatically and
   recorded as closed too (§4.8).
   The device drops every frame for a closed epoch silently, except its root delivered in full by a
@@ -5724,11 +5823,13 @@ decided:
 - **Which moment, when versions disagree.** The latest moment of the versions the device knows.
   An earlier one would let a version with a later creation date come back and be shown.
 - **Pending scheduled deletions.** Erased with the message. A late peer can bring one back; the
-  device then keeps a tombstone, as without a timer (§7.7, known limits). Refusing a deletion by
-  its dates was considered and not done: a deletion does not carry its target's creation date, so
-  any such rule could keep a deleted scheduled message alive.
-- **A message deleted by hand or by a deletion event before its moment.** Kept as without a
-  timer: its tombstone rules are unchanged.
+  device then keeps it as a quiet record, offered to no one and erased `T` after it was processed,
+  rounded up (§7.7, §14.1; this replaces "a tombstone, as without a timer"). Refusing a deletion
+  by its dates was considered and not done: a deletion does not carry its target's creation date,
+  so any such rule could keep a deleted scheduled message alive.
+- **A message deleted by hand or by a deletion event before its moment.** *Revised:* erased with
+  its tombstone at its moment rounded up to a step of the timer (§7.7), so that deleting by hand
+  leaves no more trace than letting the timer run. The earlier text kept it as without a timer.
 - **The storage contract.** A change set now deletes rows, parent edges and objects, besides
   writing them; the bindings carry `removedRows`, `removedEdges` and `removedObjects`, and the SDK
   deletes each record in the same transaction. A stored object written before this change has no
