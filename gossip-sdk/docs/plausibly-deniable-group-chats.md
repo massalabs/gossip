@@ -677,9 +677,12 @@ The first matching case applies.
    marker.
    The root is rejected with no prompt and its own ID is recorded as closed, so that the next root
    down the line is rejected too.
-4. **Kicked, dissolved or waiting.** A parent is an epoch the device holds in one of these states:
-   - *kicked* (§5.6) or *dissolved and kept* (§5.8): the root is an **invitation**;
-   - *waiting for a kick* (§5.4): the root is kept without a prompt, under the rules of §5.4.
+4. **Kicked, left, dissolved, waiting or superseded.** A parent is an epoch the device holds in one
+   of these states (judged by the group of the first such parent):
+   - *kicked* (§5.6), *left and kept read-only* (D.2) or *dissolved and kept* (§5.8): the root is
+     an **invitation** to rejoin that group;
+   - *waiting for a kick* (§5.4), or a *superseded chat of two* (§5.12): the root is adopted
+     without a prompt and announced to no one, so that the current epoch names the right owner.
 5. **No parent matched.** The root is an **invitation**, after the parent lookup below.
 
 *Why case 2 has no prompt:* the owner is the party trusted with membership and the continuation is
