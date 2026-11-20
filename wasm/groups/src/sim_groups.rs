@@ -2603,8 +2603,12 @@ impl Sim {
                         .root(c)
                         .is_some_and(|r| r.message_timer() > 0)
                 };
-                let a = results(&self.devs[d].store, &s.current, timed(&s.current));
-                let b = results(&self.devs[devices[0]].store, &s.current, timed(&s.current));
+                let (a, b) = compared_results(
+                    &self.devs[d].store,
+                    &self.devs[devices[0]].store,
+                    &s.current,
+                    timed(&s.current),
+                );
                 assert_eq!(
                     a, b,
                     "messages of the current epoch: device {d} against {}",
@@ -2627,8 +2631,12 @@ impl Sim {
                     .collect();
                 for (c, r) in self.node(devices[0]).tables().epochs.iter() {
                     if r.status == EpochStatus::Installed && mine.contains(c) && *c != s.current {
-                        let a = results(&self.devs[d].store, c, timed(c));
-                        let b = results(&self.devs[devices[0]].store, c, timed(c));
+                        let (a, b) = compared_results(
+                            &self.devs[d].store,
+                            &self.devs[devices[0]].store,
+                            c,
+                            timed(c),
+                        );
                         if a != b {
                             // Differences the rules make, from the script:
                             // - the epoch is in another conversation than the current one on
@@ -2744,6 +2752,33 @@ impl Sim {
             self.counters.removed_without_kick += s.removed_without_kick + e.4;
         }
     }
+}
+
+/// The results of the epoch `chat` on two devices, as compared: without the objects that are
+/// quiet on either (§7.7, §14.1), a deletion for a message that device never processed. Such
+/// a device keeps it to itself, so which devices hold it, and until when, depends on arrival
+/// order.
+fn compared_results(
+    a: &MemoryStorage,
+    b: &MemoryStorage,
+    chat: &ChatId,
+    timed: bool,
+) -> (
+    BTreeMap<crate::ids::SyncObjId, Option<StoredResult>>,
+    BTreeMap<crate::ids::SyncObjId, Option<StoredResult>>,
+) {
+    let quiet: BTreeSet<crate::ids::SyncObjId> = [a, b]
+        .iter()
+        .flat_map(|s| s.objects(chat).unwrap())
+        .filter(|o| !o.shareable)
+        .map(|o| o.sync_obj_id)
+        .collect();
+    let keep = |m: BTreeMap<_, _>| {
+        m.into_iter()
+            .filter(|(k, _)| !quiet.contains(k))
+            .collect::<BTreeMap<_, _>>()
+    };
+    (keep(results(a, chat, timed)), keep(results(b, chat, timed)))
 }
 
 /// The results of the epoch `chat`. Under a message timer (§7.7) a tombstone or an empty
