@@ -306,7 +306,20 @@ fn a_busy_peer_is_asked_again_a_minute_later_whatever_the_stage() {
     }
     net.now += 2 * MIN;
     net.tick(0);
-    let q = super::retrieval::sent_lookups(&mut net, 0);
+    // A member whose earlier request has since expired may be asked first (it was asked
+    // before, as the busy member was); it says it does not have the event either. The busy
+    // member is asked then, two minutes after its `busy`, not a stage later.
+    let mut q = super::retrieval::sent_lookups(&mut net, 0);
+    while let Some(s) = q.first().filter(|s| s.to != member(1)) {
+        let s = s.clone();
+        super::retrieval::answer(
+            &mut net,
+            0,
+            &s,
+            ResponseResult::Status(Status::NotAvailable),
+        );
+        q = super::retrieval::sent_lookups(&mut net, 0);
+    }
     assert_eq!(q.len(), 1);
     assert_eq!(q[0].to, member(1));
 }
