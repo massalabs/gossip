@@ -910,14 +910,22 @@ impl Node {
                 stack.extend(children.iter().copied());
             }
         }
-        // A root between them with a parent this device does not hold may continue an epoch
-        // that left the member out: the device cannot check condition 3, and the leave is not
-        // live for it (§5.3). Why: a member added back holds the epoch it left and the root
-        // that adds it back, never the epoch between that dropped it; its own old leave would
-        // otherwise look live again and make it read-only in the group it was added back to.
+        // This device's own leave is not live across a root between them with a parent the
+        // device does not hold: that parent may be the epoch that left it out (§5.3). Why: a
+        // member added back holds the epoch it left and the root that adds it back, never the
+        // epoch between that dropped it; its own old leave would otherwise look live again and
+        // make it read-only in the group it was added back to.
+        // Another member's leave is judged on the epochs held only, as condition 3 reads. Why:
+        // otherwise liveness depended on which parents a device holds, and an owner with such
+        // a gap (added back itself, or on one side only of a resolved fork) never acted on a
+        // late leaver's leave naming an earlier epoch: the leaver stayed listed and no
+        // successor came. Known cost: such an owner can apply an old leave of a member added
+        // back since and remove it again, which is visible, and the member can be added back.
+        let own = *member == self.me;
         between.iter().all(|c| {
             member_of(c)
                 && (c == chat
+                    || !own
                     || self
                         .t
                         .epochs

@@ -931,13 +931,21 @@ epoch is C when all three hold:
 3. M is a member of **every** epoch the device holds between E and C: once any epoch in between
    left M out, the leave is used up, whatever later root lists M again.
 
-A device that holds E and C but not every root between them cannot check condition 3; the leave is
-then not live for it.
+A device that holds E and C but not every root between them cannot check condition 3. For **its
+own** leave, the leave is then not live for it; for any other member's leave, condition 3 is judged
+on the epochs the device holds, and the leave is live.
 A device knows a root between is missing when a root on the line from E to C names a parent it does
 not hold.
-*Why:* a member added back holds the epoch it left and the root that adds it back, never the epoch
-between that dropped it. Without this rule its own old leave would look live again on its own
-device, and make it read-only in the group it was just added back to.
+*Why for its own leave:* a member added back holds the epoch it left and the root that adds it back,
+never the epoch between that dropped it. Without this rule its own old leave would look live again
+on its own device, and make it read-only in the group it was just added back to.
+*Why only for its own leave:* applied to every leave, the rule made liveness depend on which
+parents a device holds. An owner with such a gap (a member added back, or one that was on one side
+only of a resolved fork) never acted on a late leaver's leave naming an earlier epoch: the leaver
+stayed listed, the others waited for a successor that never came, and such devices stopped relaying
+the leave.
+*Known cost:* an owner with a gap can apply an old leave of a member that was added back since, and
+remove that member again. This is visible to everyone, and the owner can add the member back.
 
 - While a leave is live, a device announces it (§10.2), lists it in tip scans (§12.1) and fetches
   it when it is announced.
