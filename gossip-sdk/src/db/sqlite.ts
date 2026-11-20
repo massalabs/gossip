@@ -224,17 +224,31 @@ async function isNativePlatform(): Promise<boolean> {
   }
 }
 
+/**
+ * Deleted content is overwritten with zeros, not left in the free space of
+ * the database: a message the group timer erases, or any deleted row, must
+ * not be recoverable from the file by someone who opens it (a user forced to
+ * unlock). `ON`, not `FAST`: `FAST` does not zero the pages a deletion frees
+ * whole (overflow pages of a long message, emptied leaves), which keep the
+ * old content. A per-connection setting: every connection sets it when it
+ * opens (secure storage in `finalize`). Content deleted before it was set
+ * stays in the free space until SQLite reuses those pages.
+ */
+const SECURE_DELETE = 'PRAGMA secure_delete = ON;';
+
 /** PRAGMAs applied before migrations (in-memory / browser worker). */
 const PRAGMAS = `
   PRAGMA journal_mode=MEMORY;
   PRAGMA temp_store=MEMORY;
   PRAGMA busy_timeout = 10000;
+  ${SECURE_DELETE}
 `;
 
 /** PRAGMAs for file-based persistence (Node.js). WAL gives crash recovery. */
 const PRAGMAS_FILE = `
   PRAGMA journal_mode=WAL;
   PRAGMA temp_store=MEMORY;
+  ${SECURE_DELETE}
 `;
 
 // ---------------------------------------------------------------------------
@@ -733,6 +747,11 @@ export class DatabaseConnection {
    * "database not open" error.
    */
   private async finalize(): Promise<void> {
+    // The secure-storage database is opened by the worker or the native
+    // plugin, with their own PRAGMAs; secure_delete is set here, on the
+    // connection they opened, before anything is written (one statement:
+    // both bridges take a single statement per call).
+    await this.execRaw(SECURE_DELETE);
     await runMigrations(
       (sql, params) => this.execRaw(sql, params),
       fn => {
