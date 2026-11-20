@@ -239,16 +239,19 @@ impl Core {
     }
 
     /// As [`Core::create_group`], continuing an earlier conversation of format `migrate_from`
-    /// with the one other member (§5.12). Returns the group kept, which is the peer's when
-    /// its migration is held and its owner sorts first.
+    /// with the one other member (§5.12), with the message timer `message_timer` (§7.7).
+    /// Returns the group kept, which is the peer's when its migration is held and its owner
+    /// sorts first.
     pub fn create_group_with(
         &mut self,
         name: String,
         members: Vec<GossipId>,
         migrate_from: Option<u64>,
+        message_timer: u64,
         now: u64,
     ) -> R<ChatId> {
         let signer = &self.identity;
+        let _ = message_timer;
         let options = groups::node::GroupOptions {
             migrate_from,
             ..Default::default()

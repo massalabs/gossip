@@ -626,11 +626,11 @@ fn crossing_migrations_consents_and_connections() {
     );
     let a = net.peers[0]
         .core
-        .create_group_with("a".into(), vec![ids[1]], Some(0), now)
+        .create_group_with("a".into(), vec![ids[1]], Some(0), 0, now)
         .unwrap();
     let b = net.peers[1]
         .core
-        .create_group_with("b".into(), vec![ids[0]], Some(0), now)
+        .create_group_with("b".into(), vec![ids[0]], Some(0), 0, now)
         .unwrap();
     for p in &mut net.peers {
         p.persist();
@@ -698,7 +698,7 @@ fn crossing_migrations_consents_and_connections() {
     );
     let c = net.peers[0]
         .core
-        .create_group_with("c".into(), vec![ids[2]], Some(0), now)
+        .create_group_with("c".into(), vec![ids[2]], Some(0), 0, now)
         .unwrap();
     net.peers[0].persist();
     net.settle(1_000);
@@ -936,4 +936,96 @@ fn records_that_no_longer_decode_are_refused_as_undecodable() {
         .err()
         .expect("refused");
     assert!(error.starts_with("groups:undecodable: "), "{error}");
+}
+
+/// §4.1, §7.7: a group founded with a message timer through the bindings: the invitation,
+/// the summary and the epochs show it; the root is stored by its fields with the timer and
+/// the settings map, and an object with the moment of its message; the owner changes the
+/// timer; the message is deleted at its moment, also after reopening from the tables.
+#[test]
+fn a_message_timer_through_the_bindings() {
+    const HOUR: u64 = 3_600_000;
+    let mut net = Net::new(2);
+    let b = net.peers[1].id();
+    let now = net.now;
+    let group = net.peers[0]
+        .core
+        .create_group_with("Brief".into(), vec![b], None, HOUR, now)
+        .unwrap();
+    net.peers[0].persist();
+    net.settle(1_000);
+    let inv = J::parse(&net.peers[1].core.invitations(net.now)).unwrap();
+    let inv = &inv.as_arr().unwrap()[0];
+    assert_eq!(
+        inv.field("message_timer")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap(),
+        HOUR
+    );
+    net.peers[1].core.accept_invitation(group, net.now).unwrap();
+    net.peers[1].persist();
+    net.settle(1_000);
+    let sent = net.now;
+    net.peers[0]
+        .core
+        .publish_message(group, &text("brief"), "[]", None, sent)
+        .unwrap();
+    net.peers[0].persist();
+    net.settle(1_000);
+    for i in 0..2 {
+        net.peers[i].reopen();
+        assert_eq!(net.timeline_texts(i, group), vec!["brief"], "peer {i}");
+        let g = group_json(&net.peers[i], group);
+        assert_eq!(
+            g.field("message_timer")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap(),
+            HOUR
+        );
+        let timers = g.field("timers").unwrap().as_arr().unwrap().clone();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(
+            timers[0]
+                .field("message_timer")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap(),
+            HOUR
+        );
+        for field in ["expiresAt", "message_timer", "settings"] {
+            assert!(net.peers[i].db.mentions(field), "peer {i}: {field}");
+        }
+    }
+    let e2 = net.peers[0]
+        .core
+        .change_group(group, r#"{"t":"MessageTimer","timer":0}"#, net.now)
+        .unwrap();
+    net.peers[0].persist();
+    net.settle(1_000);
+    net.now = sent + HOUR;
+    for i in 0..2 {
+        net.peers[i].core.tick(net.now).unwrap();
+        net.peers[i].reopen();
+        assert!(net.timeline_texts(i, group).is_empty(), "peer {i}");
+        let g = group_json(&net.peers[i], group);
+        assert_eq!(
+            g.field("message_timer")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap(),
+            0
+        );
+        let current: ChatId = Codec::dec(g.field("current").unwrap()).unwrap();
+        assert_eq!(current, e2);
+    }
 }
