@@ -189,18 +189,59 @@ impl UserSecretKeys {
     }
 }
 
-/// Decodes the public keys behind [`UserPublicKeys::from_bytes`].
+/// Decodes the public keys behind [`UserPublicKeys::from_bytes`]: `auth` accepts only their
+/// exact encoding.
 fn public_keys_from_bytes(
     bytes: &[u8],
 ) -> Result<auth::UserPublicKeys, bincode::error::DecodeError> {
-    bincode::serde::decode_from_slice(bytes, bincode::config::standard()).map(|(keys, _)| keys)
+    auth::UserPublicKeys::from_bytes(bytes)
 }
 
-/// Decodes the secret keys behind [`UserSecretKeys::from_bytes`].
+/// Decodes the secret keys behind [`UserSecretKeys::from_bytes`], only from their exact
+/// encoding, as `auth` does for public keys: every byte must be read and the keys must encode
+/// back to the same bytes. `auth` has no decoder for secret keys, so the rule is kept here.
 fn secret_keys_from_bytes(
     bytes: &[u8],
 ) -> Result<auth::UserSecretKeys, bincode::error::DecodeError> {
-    bincode::serde::decode_from_slice(bytes, bincode::config::standard()).map(|(keys, _)| keys)
+    let (keys, read): (auth::UserSecretKeys, usize) =
+        bincode::serde::decode_from_slice(bytes, bincode::config::standard())?;
+    let mut check = SameBytes {
+        expected: bytes,
+        at: 0,
+        diff: 0,
+    };
+    let encoded =
+        bincode::serde::encode_into_writer(&keys, &mut check, bincode::config::standard());
+    if read != bytes.len() || encoded.is_err() || check.at != bytes.len() || check.diff != 0 {
+        return Err(bincode::error::DecodeError::Other(
+            "secret keys are not in their canonical encoding",
+        ));
+    }
+    Ok(keys)
+}
+
+/// A bincode writer that compares what is written with `expected` instead of keeping it, so
+/// that no copy of the secret keys is made; every byte is compared, without stopping at the
+/// first difference.
+struct SameBytes<'a> {
+    expected: &'a [u8],
+    at: usize,
+    diff: u8,
+}
+
+impl bincode::enc::write::Writer for SameBytes<'_> {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), bincode::error::EncodeError> {
+        let end = self.at + bytes.len();
+        let Some(expected) = self.expected.get(self.at..end) else {
+            return Err(bincode::error::EncodeError::Other("longer than the input"));
+        };
+        self.diff |= expected
+            .iter()
+            .zip(bytes)
+            .fold(0, |acc, (a, b)| acc | (a ^ b));
+        self.at = end;
+        Ok(())
+    }
 }
 
 /// User keypair containing both public and secret keys.
