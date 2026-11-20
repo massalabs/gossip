@@ -4800,3 +4800,83 @@ fn a_dissolve_with_deletion_erases_the_archive_of_a_kicked_or_left_device() {
         assert!(net.texts(3, &g).is_empty(), "left={left}: erased");
     }
 }
+
+/// §12.7, the responder of a chat lookup by reference (D.68, last point): a member of the
+/// epoch gets its root; a requester that is not a member of it, or asks for a reference
+/// nobody holds, gets "not available"; a peer that shares no accepted epoch gets silence; a
+/// device no longer active in the group answers exactly as one that does not hold the epoch
+/// (D.74); a removed peer gets "not available" (§10.4).
+#[test]
+fn a_chat_lookup_by_reference_is_answered_by_the_rules() {
+    let (mut net, g) = founded(4);
+    // A second group of owner 0 with devices 1 and 2 only.
+    let h = net.create(0, &[1, 2]);
+    net.exchange();
+    for d in 1..3 {
+        net.accept_all(d);
+    }
+    net.run(MIN);
+    let reference = |net: &MNet, c: &ChatId| net.devs[0].node.root(c).unwrap().ref_chat_id();
+    let (rg, rh) = (reference(&net, &g), reference(&net, &h));
+    let unknown = crate::RefChatId::from_bytes([0x5a; 32]);
+    let root_of = |a: &[(u32, ResponseResult)], c: &ChatId| {
+        matches!(a, [(0, ResponseResult::Event(b))]
+            if matches!(wire::decode_event_blob(b, 1), Ok(EventObject::Root(r)) if r.chat_id() == *c))
+    };
+    let na = vec![(0, ResponseResult::Status(Status::NotAvailable))];
+    // A member gets the root.
+    let a = answers_of(&mut net, 1, 2, vec![QueryOp::ChatByRef(rh)]);
+    assert!(root_of(&a, &h), "member: {a:?}");
+    // Not a member of that root, though it shares another epoch.
+    assert_eq!(
+        answers_of(&mut net, 1, 3, vec![QueryOp::ChatByRef(rh)]),
+        na,
+        "non-member"
+    );
+    // A reference nobody holds.
+    assert_eq!(
+        answers_of(&mut net, 1, 2, vec![QueryOp::ChatByRef(unknown)]),
+        na,
+        "unknown"
+    );
+    // Device 2 kicked from g, still holding it, still active in h: as if it did not hold g.
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    assert_eq!(net.summary(2, &g).unwrap().status, MyStatus::Removed);
+    let held = answers_of(&mut net, 2, 1, vec![QueryOp::ChatByRef(rg)]);
+    let not_held = answers_of(&mut net, 2, 1, vec![QueryOp::ChatByRef(unknown)]);
+    assert_eq!(held, not_held, "inactive responder");
+    assert_eq!(held, na);
+    // Device 2 is now a removed peer of g for device 1.
+    assert_eq!(
+        answers_of(&mut net, 1, 2, vec![QueryOp::ChatByRef(rg)]),
+        na,
+        "removed peer"
+    );
+    // A peer that shares no accepted epoch with the responder gets silence: device 3, kicked
+    // from g, asked by device 1, which shares nothing with it any more.
+    net.change(
+        0,
+        net.current(0, &g).unwrap(),
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(3)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    assert!(
+        answers_of(&mut net, 3, 1, vec![QueryOp::ChatByRef(rg)]).is_empty(),
+        "stranger"
+    );
+}
