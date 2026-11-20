@@ -137,9 +137,8 @@ impl UserPublicKeys {
 
     /// Deserializes public keys from bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<UserPublicKeys, JsValue> {
-        let inner = bincode::serde::decode_from_slice(bytes, bincode::config::standard())
-            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {}", e)))?
-            .0;
+        let inner = public_keys_from_bytes(bytes)
+            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {}", e)))?;
         Ok(UserPublicKeys { inner })
     }
 }
@@ -160,9 +159,8 @@ impl UserSecretKeys {
 
     /// Deserializes secret keys from bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<UserSecretKeys, JsValue> {
-        let inner = bincode::serde::decode_from_slice(bytes, bincode::config::standard())
-            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {}", e)))?
-            .0;
+        let inner = secret_keys_from_bytes(bytes)
+            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {}", e)))?;
         Ok(UserSecretKeys { inner })
     }
 
@@ -189,6 +187,20 @@ impl UserSecretKeys {
     pub fn evm_secret_key(&self) -> Vec<u8> {
         self.inner.evm_secret_key.to_vec()
     }
+}
+
+/// Decodes the public keys behind [`UserPublicKeys::from_bytes`].
+fn public_keys_from_bytes(
+    bytes: &[u8],
+) -> Result<auth::UserPublicKeys, bincode::error::DecodeError> {
+    bincode::serde::decode_from_slice(bytes, bincode::config::standard()).map(|(keys, _)| keys)
+}
+
+/// Decodes the secret keys behind [`UserSecretKeys::from_bytes`].
+fn secret_keys_from_bytes(
+    bytes: &[u8],
+) -> Result<auth::UserSecretKeys, bincode::error::DecodeError> {
+    bincode::serde::decode_from_slice(bytes, bincode::config::standard()).map(|(keys, _)| keys)
 }
 
 /// User keypair containing both public and secret keys.
@@ -892,5 +904,55 @@ mod tests {
         // a message delayed up to the age window must still find its session
         let config = SessionConfig::new_default().inner;
         assert!(config.max_session_inactivity_millis >= config.max_incoming_message_age_millis);
+    }
+
+    fn key_bytes() -> (Vec<u8>, Vec<u8>) {
+        let keys = generate_user_keys("binding key bytes").unwrap();
+        (
+            keys.public_keys_bytes.clone(),
+            keys.secret_keys_bytes.clone(),
+        )
+    }
+
+    /// The exact encoding, one and many trailing bytes, cut by one byte, in the middle
+    /// and to nothing, and the first length written with a wider varint than needed.
+    fn variants(bytes: &[u8]) -> Vec<(&'static str, Vec<u8>)> {
+        let mut wider = vec![252, bytes[1], bytes[2], 0, 0];
+        assert_eq!(
+            bytes[0], 251,
+            "the first length is written as 251 then a u16"
+        );
+        wider.extend_from_slice(&bytes[3..]);
+        vec![
+            ("one trailing byte", [bytes, &[0]].concat()),
+            ("many trailing bytes", [bytes, &[0xff; 64]].concat()),
+            ("cut by one byte", bytes[..bytes.len() - 1].to_vec()),
+            ("cut in the middle", bytes[..bytes.len() / 2].to_vec()),
+            ("empty", Vec::new()),
+            ("wider length prefix", wider),
+        ]
+    }
+
+    #[test]
+    fn public_keys_decode_only_from_their_exact_encoding() {
+        let (bytes, _) = key_bytes();
+        let keys = public_keys_from_bytes(&bytes).expect("exact encoding is accepted");
+        assert_eq!(keys.to_bytes(), bytes);
+        assert!(UserPublicKeys::from_bytes(&bytes).is_ok());
+        for (name, variant) in variants(&bytes) {
+            assert!(public_keys_from_bytes(&variant).is_err(), "{name} accepted");
+        }
+    }
+
+    #[test]
+    fn secret_keys_decode_only_from_their_exact_encoding() {
+        let (_, bytes) = key_bytes();
+        let keys = secret_keys_from_bytes(&bytes).expect("exact encoding is accepted");
+        let again = bincode::serde::encode_to_vec(&keys, bincode::config::standard()).unwrap();
+        assert_eq!(again, bytes);
+        assert!(UserSecretKeys::from_bytes(&bytes).is_ok());
+        for (name, variant) in variants(&bytes) {
+            assert!(secret_keys_from_bytes(&variant).is_err(), "{name} accepted");
+        }
     }
 }
