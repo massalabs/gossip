@@ -712,6 +712,9 @@ fn a_page_with_an_unreadable_entry_is_malformed_whole() {
     assert!(net.devs[0].node.score(&member(1)) < 500_000);
     assert_eq!(net.devs[0].node.t.tasks.len(), 0, "nothing of it is used");
     assert_eq!(net.devs[0].node.stats.scans_completed, 0);
-    assert_eq!(net.devs[0].node.stats.scans_ended, 1, "the scan ends at once");
+    assert_eq!(
+        net.devs[0].node.stats.scans_ended, 1,
+        "the scan ends at once"
+    );
     assert_eq!(net.devs[0].node.stats.invalid, 1, "penalised once");
 }

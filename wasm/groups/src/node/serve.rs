@@ -13,7 +13,7 @@ use super::timing::{
     EXPIRED_SKEW_MS, QUEUED_ANSWERS_PER_PEER, REQUEST_BURST, REQUEST_REFILL_PER_MIN,
     VERSION_NOTICE_INTERVAL_MS, VERSION_NOTICES_PER_PEER, deadline, ignored_query, may_answer,
 };
-use super::{Cx, Node, NodeError, PENALTY_KEY_ANSWER};
+use super::{Cx, Node, NodeError, PENALTY_KEY_ANSWER, PENALTY_MALFORMED};
 use crate::event::{MessageEvent, Payload};
 use crate::ids::{ChatId, EventId, GossipId, SyncObjId};
 use crate::wire::{
@@ -336,6 +336,11 @@ impl Node {
             && let Ok(EventObject::Message(e)) = wire::decode_event_blob(blob, version)
         {
             self.receive_event(cx, from, e)?;
+        }
+        // A malformed page counts against its sender even when it answers nothing (D.23).
+        if *result == ResponseResult::InvalidPage && self.shares_epoch(&from) {
+            self.stats.invalid += 1;
+            self.penalize(&from, PENALTY_MALFORMED);
         }
         Ok(())
     }
