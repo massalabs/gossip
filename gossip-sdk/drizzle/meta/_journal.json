@@ -85,6 +85,13 @@
       "when": 1795113424155,
       "tag": "0011_group_conversations",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795186445695,
+      "tag": "0012_discussions_direct_chat_timer",
+      "breakpoints": true
     }
   ]
 }
