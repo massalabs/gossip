@@ -793,6 +793,8 @@ impl Codec for Root {
                 Ok(v) => Codec::dec(v)?,
                 Err(_) => None,
             },
+            0,
+            &std::collections::BTreeMap::new(),
             &sig(j)?,
         )
         .map_err(|e| format!("root: {e}"))
@@ -957,6 +959,8 @@ mod tests {
                     epoch_challenge: Challenge::from_bytes([2; 32]),
                     ref_chat_id_challenge: Challenge::from_bytes([3; 32]),
                     created_at: 4,
+                    message_timer: 0,
+                    settings: std::collections::BTreeMap::new(),
                 },
                 ChatId::from_bytes([5; 32]),
                 migrate_from,

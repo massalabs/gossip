@@ -766,6 +766,8 @@ fn a_forged_root_is_refused_and_penalised() {
         epoch_challenge: crate::ids::Challenge::from_bytes([8; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([7; 32]),
         created_at: net.now,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     // A root of member 2 as owner continuing the group: valid signature, no authority.
     let own =
@@ -2482,6 +2484,8 @@ fn a_new_owner_cannot_take_over_another_group_of_the_former_owner() {
         epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
         created_at: net.now,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let r = Root::create_successor(params, &[h, g2], &ident(1).secret.dsa_signing_key, [1; 32])
         .unwrap();
@@ -2617,6 +2621,8 @@ fn a_root_adding_back_a_member_beside_a_closed_epoch_held_again_is_an_invitation
         epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
         created_at: net.now,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let z_root =
         Root::create_successor(params, &[y, u], &ident(0).secret.dsa_signing_key, [1; 32]).unwrap();
@@ -2753,6 +2759,8 @@ fn a_former_owner_cannot_mute_or_freeze_the_new_owner() {
         epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
         created_at: u64::MAX,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let a =
         Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [1; 32]).unwrap();
@@ -2809,6 +2817,8 @@ fn a_stranger_cannot_make_a_device_keep_unbounded_records() {
             epoch_challenge: crate::ids::Challenge::from_bytes([i; 32]),
             ref_chat_id_challenge: crate::ids::Challenge::from_bytes([i.wrapping_add(1); 32]),
             created_at: net.now,
+            message_timer: 0,
+            settings: std::collections::BTreeMap::new(),
         };
         let parents: Vec<ChatId> = (0..32u8)
             .map(|p| {
@@ -3048,6 +3058,8 @@ fn unverified_handover_roots_are_bounded_per_sender_and_asked_of_their_sender() 
             epoch_challenge: crate::ids::Challenge::from_bytes([seed.wrapping_add(1); 32]),
             ref_chat_id_challenge: crate::ids::Challenge::from_bytes([seed.wrapping_add(2); 32]),
             created_at: net.now,
+            message_timer: 0,
+            settings: std::collections::BTreeMap::new(),
         };
         let parent = Root::create_successor(
             params(&stranger.public, i),
@@ -3444,6 +3456,8 @@ fn a_held_handover_always_moves_the_line_followed() {
         epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
         created_at: u64::MAX,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let r = Root::create_successor(params, &[g], &a.secret.dsa_signing_key, [1; 32]).unwrap();
     net.recv_frames_m(
@@ -3726,6 +3740,8 @@ fn a_root_continues_its_owners_epoch_beside_a_parent_it_has_no_authority_over() 
         epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
         created_at: net.now,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let r = Root::create_successor(params, &[g1, g2], &ident(1).secret.dsa_signing_key, [1; 32])
         .unwrap();
@@ -3763,6 +3779,8 @@ fn a_former_owners_root_does_not_date_the_new_owners_roots() {
         epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
         created_at: u64::MAX,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let a =
         Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [1; 32]).unwrap();
@@ -3914,6 +3932,8 @@ fn a_former_owners_branch_left_by_dissolve_and_delete_never_reactivates_the_grou
         epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
         created_at: net.now,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let a =
         Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [1; 32]).unwrap();
@@ -4225,6 +4245,8 @@ fn adding_back_names_the_last_epoch_of_the_owners_line_not_a_former_owners_branc
         epoch_challenge: crate::ids::Challenge::from_bytes([8; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([9; 32]),
         created_at: u64::MAX,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let back =
         Root::create_successor(params, &[g], &ident(0).secret.dsa_signing_key, [2; 32]).unwrap();

@@ -1770,6 +1770,8 @@ impl Sim {
                     epoch_challenge: Challenge::from_bytes(bytes(&mut self.rng)),
                     ref_chat_id_challenge: Challenge::from_bytes(bytes(&mut self.rng)),
                     created_at: self.now,
+                    message_timer: 0,
+                    settings: std::collections::BTreeMap::new(),
                 };
                 let Ok(r) = Root::create_successor(
                     params,
@@ -1943,6 +1945,8 @@ impl Sim {
                 epoch_challenge: Challenge::from_bytes(bytes(&mut self.rng)),
                 ref_chat_id_challenge: Challenge::from_bytes(bytes(&mut self.rng)),
                 created_at: self.now,
+                message_timer: 0,
+                settings: std::collections::BTreeMap::new(),
             };
             let parents: Vec<ChatId> = (0..4)
                 .map(|_| ChatId::from_bytes(bytes(&mut self.rng)))
@@ -2025,6 +2029,8 @@ impl Sim {
                 created_at: self.now,
                 signature: vec![0; crypto_dsa::SIGNATURE_SIZE],
                 migrate_from: None,
+                message_timer: parent.message_timer(),
+                settings: Vec::new(),
             };
             let r = Root::forge_unchecked(unsigned, &ident(o).secret.dsa_signing_key);
             self.forged.insert(r.chat_id());
@@ -2071,6 +2077,8 @@ impl Sim {
                 epoch_challenge: Challenge::from_bytes(bytes(rng)),
                 ref_chat_id_challenge: Challenge::from_bytes(bytes(rng)),
                 created_at: at,
+                message_timer: 0,
+                settings: std::collections::BTreeMap::new(),
             };
         let a = ident(o);
         let mut p = params(&a.public, &mut self.rng, u64::MAX, "back");

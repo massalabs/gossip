@@ -32,7 +32,7 @@ use zeroize::Zeroize;
 use super::strict::{Kind, Limit, Schema};
 use crate::constants::{
     MAX_EVENT_PARENTS, MAX_MEMBERS, MAX_NEIGHBOR_SUGGESTIONS, MAX_NOTICE_ENTRIES, MAX_PAGE_ENTRIES,
-    MAX_QUERY_ENTRIES, MAX_REPLY_TARGETS, MAX_ROOT_PARENTS,
+    MAX_QUERY_ENTRIES, MAX_REPLY_TARGETS, MAX_ROOT_PARENTS, MAX_SETTINGS_ENTRIES,
 };
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -121,6 +121,23 @@ pub struct GroupRoot {
     pub signature: Vec<u8>,
     #[prost(uint64, optional, tag = "11")]
     pub migrate_from: Option<u64>,
+    /// The message timer, in milliseconds; 0 (absent on the wire) keeps messages forever.
+    #[prost(uint64, tag = "12")]
+    pub message_timer: u64,
+    /// The settings map, `map<string, bytes>` in Appendix C. It is read as its entries, which
+    /// have the same encoding, so that a key given twice is seen and refused (§4.1).
+    #[prost(message, repeated, tag = "13")]
+    pub settings: Vec<SettingsEntry>,
+}
+
+/// An entry of the settings map of a root: the implicit entry message of `map<string, bytes>`.
+#[derive(Clone, PartialEq, ::prost::Message)]
+#[prost(skip_debug)]
+pub struct SettingsEntry {
+    #[prost(string, tag = "1")]
+    pub key: String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub value: Vec<u8>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -534,6 +551,8 @@ impl fmt::Debug for GroupRoot {
             .field("owner", &redact::Bytes(self.owner.len()))
             .field("created_at", &self.created_at)
             .field("migrate_from", &self.migrate_from)
+            .field("message_timer", &self.message_timer)
+            .field("settings", &redact::Entries(self.settings.len()))
             .finish_non_exhaustive()
     }
 }
@@ -563,6 +582,15 @@ impl Drop for Frame {
 impl Drop for GroupRoot {
     fn drop(&mut self) {
         self.group_secret.zeroize();
+    }
+}
+
+impl fmt::Debug for SettingsEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SettingsEntry")
+            .field("key", &self.key)
+            .field("value", &redact::Bytes(self.value.len()))
+            .finish()
     }
 }
 
@@ -890,6 +918,14 @@ static GROUP_ROOT: Schema = Schema {
     ],
 };
 
+/// The implicit entry message of the settings map, `map<string, bytes>`.
+static SETTINGS_ENTRY: Schema = Schema {
+    name: "SettingsEntry",
+    fields: &[(1, Kind::Str), (2, Kind::Bytes)],
+    oneofs: &[],
+    limits: &[],
+};
+
 /// `Leave` and `Kick` have the same fields.
 static SIGNED_OBJECT: Schema = Schema {
     name: "Leave/Kick",
@@ -1039,6 +1075,7 @@ mod pinned {
             &REPLY_TARGET,
             &EVENT,
             &GROUP_ROOT,
+            &SETTINGS_ENTRY,
             &SIGNED_OBJECT,
             &DISSOLVE,
             &GROUP_MESSAGE_EVENT,
@@ -1069,7 +1106,8 @@ mod pinned {
             "ReplyTo [1=rep:ReplyTarget] oneofs[] limits[1<=32]",
             "ReplyTarget [1=bytes,2=bytes] oneofs[] limits[]",
             "Event [1=msg:GroupRoot,2=msg:GroupMessageEvent,3=msg:Leave/Kick,4=msg:Leave/Kick,5=msg:Dissolve] oneofs[[1, 2, 3, 4, 5]] limits[]",
-            "GroupRoot [1=enum[0, 1],2=str,3=bytes,4=bytes,5=bytes,6=bytes,7=bytes,8=bytes,9=u64,10=bytes,11=u64] oneofs[] limits[3<=32,4<=512]",
+            "GroupRoot [1=enum[0, 1],2=str,3=bytes,4=bytes,5=bytes,6=bytes,7=bytes,8=bytes,9=u64,10=bytes,11=u64,12=u64,13=rep:SettingsEntry] oneofs[] limits[3<=32,4<=512,13<=128]",
+            "SettingsEntry [1=str,2=bytes] oneofs[] limits[]",
             "Leave/Kick [1=bytes,2=bytes,3=bytes] oneofs[] limits[]",
             "Dissolve [1=bytes,2=bool,3=bytes] oneofs[] limits[]",
             "GroupMessageEvent [1=bytes,2=bytes,3=bytes,4=bytes,5=msg:MessagePayload] oneofs[] limits[4<=16]",

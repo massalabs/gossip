@@ -741,6 +741,8 @@ impl Node {
             epoch_challenge: Challenge::from_bytes(bytes(cx.rng)),
             ref_chat_id_challenge: Challenge::from_bytes(bytes(cx.rng)),
             created_at,
+            message_timer: 0,
+            settings: std::collections::BTreeMap::new(),
         };
         let root = match handover {
             Some(_) => Root::create_handover(params, &cur_root, signer, bytes(cx.rng)),
