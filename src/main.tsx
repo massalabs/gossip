@@ -23,6 +23,8 @@ import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
 import secureStorageWasmUrl from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
 import UnsupportedStorageReset from './components/UnsupportedStorageReset';
+import OpenElsewhere from './components/OpenElsewhere';
+import { runSingleInstance } from './services/instanceLock';
 import {
   isUnsupportedStorageResetRequested,
   isUnsupportedStorageVersionError,
@@ -118,7 +120,24 @@ const renderUnsupportedStorageReset = () => {
   );
 };
 
+const renderOpenElsewhere = () => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <OpenElsewhere />
+    </StrictMode>
+  );
+};
+
 async function start() {
+  // One tab of the web app at a time, decided before any storage is opened.
+  if (!isNative) {
+    await runSingleInstance(startApp, renderOpenElsewhere);
+    return;
+  }
+  await startApp();
+}
+
+async function startApp() {
   if (isUnsupportedStorageResetRequested()) {
     renderUnsupportedStorageReset();
     return;
