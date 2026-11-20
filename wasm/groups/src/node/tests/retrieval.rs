@@ -599,3 +599,62 @@ fn bytes_that_do_not_decode_are_an_invalid_answer() {
     assert!(net.devs[0].node.score(&member(1)) < 500_000);
     assert_eq!(sent_lookups(&mut net, 0)[0].to, member(2));
 }
+
+/// §11.2 (local policy): a peer already asked for an item, that answered "not available",
+/// goes behind every eligible member not yet asked for it, even when it announces the item
+/// again, before any re-ask.
+#[test]
+fn a_peer_that_answered_not_available_goes_behind_every_member_not_yet_asked() {
+    let mut net = Net::new(5, 1);
+    let chat = net.chat();
+    neighbors_of(&mut net, 0, &[1, 2]);
+    for _ in 0..5 {
+        net.devs[0].node.reward(&member(2));
+    }
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(4), &[notice(chat, &[id])]);
+    let mut order = Vec::new();
+    loop {
+        let q = sent_queries(&mut net, 0);
+        if q.is_empty() {
+            break;
+        }
+        assert_eq!(q.len(), 1, "one peer at a time");
+        order.push(index(&q[0].to));
+        // The announcer, already asked, announces the item again before the next answer.
+        if order.len() == 2 {
+            net.recv_frames(0, member(4), &[notice(chat, &[id])]);
+        }
+        answer(&mut net, 0, &q[0], na());
+    }
+    assert_eq!(order, vec![4, 2, 1, 3, 4]);
+}
+
+/// §11.2 (local policy): a peer that let a request time out goes behind every eligible
+/// member not yet asked for the item: when it is free again, the members not yet asked come
+/// first.
+#[test]
+fn a_peer_that_timed_out_goes_behind_every_member_not_yet_asked() {
+    let mut net = Net::new(5, 1);
+    let chat = net.chat();
+    neighbors_of(&mut net, 0, &[1, 2]);
+    for _ in 0..5 {
+        net.devs[0].node.reward(&member(2));
+    }
+    let id = EventId::new(T0, [5; 16]);
+    net.recv_frames(0, member(4), &[notice(chat, &[id])]);
+    let mut order = Vec::new();
+    while order.len() < 4 {
+        let q = sent_lookups(&mut net, 0);
+        if let [q] = &q[..] {
+            order.push(index(&q.to));
+            // Nobody answers: the next stage starts at the end of this one's local wait.
+            net.now = q.sent_at + q.ttl * 105 / 100;
+        } else {
+            assert!(q.is_empty(), "{q:?}");
+            net.now += MIN;
+        }
+        net.tick(0);
+    }
+    assert_eq!(order, vec![4, 2, 1, 3]);
+}
