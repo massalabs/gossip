@@ -13,6 +13,8 @@ use crate::ids::{ChatId, EventId, SyncObjId};
 pub(crate) struct Tx<'s, S: StorageRead + ?Sized> {
     store: &'s S,
     changes: Changes,
+    /// The message timer of the epoch (§7.7); 0 for a transaction that only stores.
+    message_timer: u64,
 }
 
 impl<'s, S: StorageRead + ?Sized> Tx<'s, S> {
@@ -20,11 +22,22 @@ impl<'s, S: StorageRead + ?Sized> Tx<'s, S> {
         Self {
             store,
             changes: Changes::new(chat_id),
+            message_timer: 0,
         }
+    }
+
+    /// The same transaction, for an epoch whose root has the message timer `timer`.
+    pub(crate) fn with_timer(mut self, timer: u64) -> Self {
+        self.message_timer = timer;
+        self
     }
 
     pub(crate) fn chat_id(&self) -> ChatId {
         self.changes.chat_id
+    }
+
+    pub(crate) fn message_timer(&self) -> u64 {
+        self.message_timer
     }
 
     pub(crate) fn row(&self, id: &EventId) -> Result<Option<EventRow>, StorageError> {

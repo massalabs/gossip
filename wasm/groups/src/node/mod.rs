@@ -1244,6 +1244,13 @@ impl Node {
                 self.stats.temporarily_invalid += 1;
                 Ok(retrieval::Answer::TemporarilyInvalid)
             }
+            // A valid message past the moment of the message timer (§7.7): the peer supplied
+            // what was asked, but nothing about the event is kept, not even a hint naming it.
+            Outcome::Expired => {
+                self.answered(&from);
+                self.supplied(&from, chat, Target::Event(id));
+                Ok(retrieval::Answer::Supplied)
+            }
             outcome => {
                 // `from` holds E in full (§10.3), and is responsive (§10.1).
                 self.answered(&from);

@@ -83,6 +83,15 @@ impl EpochRecords {
             }
             self.pending.extend(after.difference(before).map(key(kind)));
         }
+        if old.expires_at != obj.expires_at {
+            let expiry = |due| (due, super::EXPIRY_EVENT_ID, PendingKind::Expiry, sync);
+            if let Some(due) = old.expires_at {
+                self.pending.remove(&expiry(due));
+            }
+            if let Some(due) = obj.expires_at {
+                self.pending.insert(expiry(due));
+            }
+        }
         self.objects.insert(sync, obj);
     }
 }
