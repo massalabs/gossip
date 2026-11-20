@@ -529,8 +529,10 @@ fn notice_of(frame: Result<Frame>) -> Notice {
     }
 }
 
+/// D.23 and D.37, settled: one entry of a notice or a scan page that cannot be read (an ID of
+/// the wrong length) makes the whole notice or page malformed; nothing of it is used.
 #[test]
-fn invalid_entries_are_skipped() {
+fn an_unreadable_entry_makes_the_whole_notice_or_page_malformed() {
     let raw = |entries: Vec<proto::Entry>| {
         frame_bytes(proto::FrameKind::Notice(proto::Notice { entries }))
     };
@@ -542,27 +544,28 @@ fn invalid_entries_are_skipped() {
         (proto::ObjectKind::Dissolve, 32),
     ] {
         let n = notice_of(one_frame(raw(vec![raw_entry(kind, 32, len)])));
-        assert_eq!((n.entries.len(), n.skipped), (1, 0));
-        // One byte more, one less, or a chat ID of the wrong length: skipped.
-        let n = notice_of(one_frame(raw(vec![
-            raw_entry(kind, 32, len + 1),
-            raw_entry(kind, 32, len),
-            raw_entry(kind, 31, len),
-        ])));
-        assert_eq!((n.entries.len(), n.skipped), (1, 2));
+        assert_eq!(n.entries.len(), 1);
+        // One byte more, one less, or a chat ID of the wrong length, beside a valid entry.
+        assert!(
+            one_frame(raw(vec![
+                raw_entry(kind, 32, len + 1),
+                raw_entry(kind, 32, len)
+            ]))
+            .is_err()
+        );
+        assert!(
+            one_frame(raw(vec![
+                raw_entry(kind, 32, len),
+                raw_entry(kind, 31, len)
+            ]))
+            .is_err()
+        );
         if len > 0 {
-            let n = notice_of(one_frame(raw(vec![raw_entry(kind, 32, len - 1)])));
-            assert_eq!((n.entries.len(), n.skipped), (0, 1));
+            assert!(one_frame(raw(vec![raw_entry(kind, 32, len - 1)])).is_err());
         }
     }
-    // The valid entries are kept in order around the invalid ones.
-    let n = notice_of(one_frame(raw(vec![
-        entry(1).to_proto(),
-        raw_entry(proto::ObjectKind::Event, 32, 32),
-        entry(2).to_proto(),
-    ])));
-    assert_eq!(n.entries, vec![entry(1), entry(2)]);
-    assert_eq!(n.skipped, 1);
+    let bad = || raw_entry(proto::ObjectKind::Event, 32, 32);
+    assert!(one_frame(raw(vec![entry(1).to_proto(), bad(), entry(2).to_proto()])).is_err());
     // An unknown kind is an unknown enum value, which rejects the whole frame (§1).
     let mut unknown = raw_entry(proto::ObjectKind::Event, 32, 24);
     unknown.kind = 5;
@@ -570,55 +573,11 @@ fn invalid_entries_are_skipped() {
         one_frame(raw(vec![entry(1).to_proto(), unknown])),
         Err(Error::Malformed("unknown enum value"))
     );
-    // The entry limit counts the skipped entries.
-    let mut many = vec![raw_entry(proto::ObjectKind::Event, 32, 0); 128];
-    many.push(entry(1).to_proto());
-    assert!(matches!(
-        one_frame(raw(many)),
-        Err(Error::TooMany {
-            field: "notice entries",
-            got: 129,
-            ..
-        })
-    ));
-    // A notice or page with skipped entries is never sent.
-    assert_eq!(
-        encode_plaintext(&[Frame::Notice(Notice {
-            entries: vec![entry(1)],
-            skipped: 1,
-        })]),
-        Err(Error::NotAllowed("skipped entries"))
-    );
-}
-
-#[test]
-fn page_counts_include_skipped_entries() {
-    let bad = || raw_entry(proto::ObjectKind::Event, 32, 23);
-    let page = |frame: Result<Frame>| match frame {
-        Ok(Frame::Response(Response {
-            result: ResponseResult::Page(p),
-            ..
-        })) => p,
-        other => panic!("{other:?}"),
-    };
-    // Two entries received, one skipped: final when count is 2.
-    let p = page(one_frame(raw_page(vec![entry(1).to_proto(), bad()], 2)));
-    assert_eq!(
-        (p.entries.clone(), p.skipped, p.received()),
-        (vec![entry(1)], 1, 2)
-    );
-    assert!(p.is_final());
-    let p = page(one_frame(raw_page(vec![entry(1).to_proto(), bad()], 5)));
-    assert!(!p.is_final());
-    // Every entry skipped: the page is not an empty page with a positive count.
-    let p = page(one_frame(raw_page(vec![bad(), bad()], 2)));
-    assert_eq!((p.entries.len(), p.skipped), (0, 2));
-    assert!(p.is_final());
-    // A count below the entries received is still invalid.
-    assert_eq!(
-        one_frame(raw_page(vec![entry(1).to_proto(), bad()], 1)),
-        Err(Error::NotAllowed("page count"))
-    );
+    // A page alike, whatever its count.
+    for count in [2, 5] {
+        assert!(one_frame(raw_page(vec![entry(1).to_proto(), bad()], count)).is_err());
+    }
+    assert!(one_frame(raw_page(vec![entry(1).to_proto(), entry(2).to_proto()], 2)).is_ok());
 }
 
 #[test]
