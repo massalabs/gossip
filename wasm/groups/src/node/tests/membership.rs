@@ -1983,6 +1983,172 @@ fn removed_peers_and_removed_devices_answer_not_available() {
     }
 }
 
+/// The per-epoch lookups of `chat` a member sends, with a member `other` named where a lookup
+/// names one.
+fn epoch_lookups(chat: ChatId, e: &MessageEvent, other: usize) -> Vec<QueryOp> {
+    vec![
+        QueryOp::Event {
+            chat_id: chat,
+            event_id: e.event_id(),
+        },
+        QueryOp::SyncObj {
+            chat_id: chat,
+            sync_obj_id: e.payload().sync_obj_id(),
+        },
+        QueryOp::SignedObject {
+            chat_id: chat,
+            kind: crate::wire::SignedKind::Kick,
+            id: *crate::hash::kick_id(&chat, &gid(other)).as_bytes(),
+        },
+        QueryOp::Removal {
+            chat_id: chat,
+            gossip_id: gid(other),
+        },
+        QueryOp::Keys {
+            chat_id: chat,
+            gossip_id: gid(other),
+        },
+    ]
+}
+
+/// D.74, settled: a device that holds an epoch but is no longer active in its group (kicked,
+/// waiting for a kick, dissolved) answers a member's per-epoch lookups exactly as a device
+/// that does not hold the epoch: with silence, no entry at all. Before, it answered "not
+/// available", which told the member it still held the chat.
+#[test]
+fn an_inactive_device_is_silent_like_one_that_does_not_hold_the_epoch() {
+    let unknown = ChatId::from_bytes([0xEE; 32]);
+    // Kicked: device 3, asked by device 1, a member of the epoch it was kicked from.
+    let (mut net, g) = founded(4);
+    let e = net.say(1, &g, "before");
+    net.run(MIN);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(3)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
+    let not_held = answers_of(&mut net, 3, 1, epoch_lookups(unknown, &e, 2));
+    assert!(not_held.is_empty(), "{not_held:?}");
+    let kicked = answers_of(&mut net, 3, 1, epoch_lookups(g, &e, 2));
+    assert!(kicked.is_empty(), "kicked: {kicked:?}");
+    // Kicked in its turn, a device sends a member removed before it nothing either when that
+    // member acts in an epoch it was removed from: no kick, no root, no lookup. Device 3 is
+    // offline through a rename and its removal, so it is behind; device 2 is kicked next.
+    let (mut net, g) = founded(4);
+    net.offline[3] = true;
+    let renamed = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("x".into()),
+            },
+        )
+        .unwrap();
+    net.exchange();
+    let without_3 = net
+        .change(
+            0,
+            renamed,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![gid(3)],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    net.change(
+        0,
+        without_3,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.exchange();
+    assert_eq!(net.summary(2, &g).unwrap().status, MyStatus::Removed);
+    net.offline[3] = false;
+    let e = net.say(3, &g, "still here?");
+    net.recv_frames_m(2, 3, &[notice(g, &[e.event_id()])]);
+    let now = net.now;
+    let dev = &mut net.devs[2];
+    let out = dev
+        .node
+        .poll_outbox(&mut dev.store, now, &mut net.rng)
+        .unwrap();
+    assert!(
+        out.is_empty(),
+        "a kicked device answers a removed peer: {:?}",
+        out.iter().map(|o| o.to).collect::<Vec<_>>()
+    );
+    // Waiting for a kick: device 2 asked while the owner is offline.
+    let (mut net, g) = founded(4);
+    let e = net.say(1, &g, "before");
+    net.run(MIN);
+    net.offline[0] = true;
+    let now = net.now;
+    let s = signer(2);
+    let dev = &mut net.devs[2];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            g,
+            LeaveChoice::AskToBeKicked,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.run(MIN);
+    assert_eq!(net.summary(2, &g).unwrap().status, MyStatus::Waiting);
+    let waiting = answers_of(&mut net, 2, 1, epoch_lookups(g, &e, 3));
+    assert!(waiting.is_empty(), "waiting: {waiting:?}");
+    // Dissolved and kept as an archive: messages and other members' records are not served;
+    // its dissolve message still is (§5.8).
+    let (mut net, g) = founded(4);
+    let e = net.say(1, &g, "kept");
+    net.run(MIN);
+    let now = net.now;
+    let s = signer(0);
+    let dev = &mut net.devs[0];
+    dev.node
+        .dissolve_group(&mut dev.store, &s, g, false, now, &mut net.rng)
+        .unwrap();
+    net.exchange();
+    assert_eq!(
+        net.summary(1, &g).unwrap().status,
+        MyStatus::Dissolved { deleted: false }
+    );
+    let archived = answers_of(&mut net, 1, 2, epoch_lookups(g, &e, 3));
+    assert!(archived.is_empty(), "archive: {archived:?}");
+    let dissolve = answers_of(
+        &mut net,
+        1,
+        2,
+        vec![QueryOp::SignedObject {
+            chat_id: g,
+            kind: crate::wire::SignedKind::Dissolve,
+            id: *crate::hash::dissolve_id(&g, false).as_bytes(),
+        }],
+    );
+    assert!(
+        matches!(&dissolve[..], [(0, ResponseResult::Event(_))]),
+        "{dissolve:?}"
+    );
+}
+
 /// Finding 3 of the review of 54711780: after a handover from A to B in one group, a root of
 /// B naming the current epochs of that group and of another group of A was adopted, and
 /// merged A's other group under B: the handover gave B authority over every epoch of A.
