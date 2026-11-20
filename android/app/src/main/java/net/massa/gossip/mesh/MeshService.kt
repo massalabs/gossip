@@ -10,7 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
+import net.massa.gossip.DebugLog
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -47,7 +47,7 @@ class MeshService : Service() {
             )
         } catch (e: RuntimeException) {
             // Android 14+ refuses a connectedDevice service without a granted Bluetooth permission.
-            Log.w(TAG, "Cannot run the mesh in the foreground", e)
+            DebugLog.w(TAG, "Cannot run the mesh in the foreground", e)
             stopSelf()
             return START_NOT_STICKY
         }

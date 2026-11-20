@@ -9,7 +9,6 @@ import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.WindowManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebView;
@@ -165,7 +164,7 @@ public class MainActivity extends BridgeActivity {
                             "CapacitorStorage", Context.MODE_PRIVATE);
                     prefs.edit().putString("pendingGossipShareUrl", gossipUrl).apply();
                 } catch (Exception e) {
-                    Log.e("GossipShare", "Failed to store shared content URL", e);
+                    DebugLog.e("GossipShare", "Failed to store shared content URL", e);
                 }
             }
         }

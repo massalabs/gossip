@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.UserManager;
-import android.util.Log;
 import net.massa.gossip.mesh.MeshService;
 
 /**
@@ -40,7 +39,7 @@ public class BootReceiver extends BroadcastReceiver {
         }
 
         String action = intent.getAction();
-        Log.d(TAG, "Received broadcast: " + action);
+        DebugLog.d(TAG, "Received broadcast: " + action);
 
         switch (action) {
             case Intent.ACTION_BOOT_COMPLETED:
@@ -50,7 +49,7 @@ public class BootReceiver extends BroadcastReceiver {
                 handleBoot(context, action);
                 break;
             default:
-                Log.d(TAG, "Ignoring action: " + action);
+                DebugLog.d(TAG, "Ignoring action: " + action);
                 break;
         }
     }
@@ -64,12 +63,12 @@ public class BootReceiver extends BroadcastReceiver {
      * The sync will be scheduled when BOOT_COMPLETED fires after unlock.
      */
     private void handleBoot(Context context, String action) {
-        Log.d(TAG, "Device booted - checking if sync can be scheduled");
+        DebugLog.d(TAG, "Device booted - checking if sync can be scheduled");
         
         // For Direct Boot, check if credential-protected storage is available
         if (Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)) {
             if (!isUserUnlocked(context)) {
-                Log.d(TAG, "Device is locked (Direct Boot) - skipping sync, will wait for BOOT_COMPLETED");
+                DebugLog.d(TAG, "Device is locked (Direct Boot) - skipping sync, will wait for BOOT_COMPLETED");
                 return;
             }
         }
@@ -78,20 +77,20 @@ public class BootReceiver extends BroadcastReceiver {
             // Schedule a delayed sync to run after the system has stabilized
             BackgroundSyncWorker.scheduleDelayedSync(context, BOOT_SYNC_DELAY_MINUTES);
 
-            Log.d(TAG, "Background sync scheduled for " + BOOT_SYNC_DELAY_MINUTES + " minutes after boot");
+            DebugLog.d(TAG, "Background sync scheduled for " + BOOT_SYNC_DELAY_MINUTES + " minutes after boot");
 
             if (GossipForegroundSyncService.isEnabled(context)) {
                 GossipForegroundSyncService.start(context);
-                Log.d(TAG, "High-reliability foreground sync restarted after boot");
+                DebugLog.d(TAG, "High-reliability foreground sync restarted after boot");
             }
 
             // The offline mesh relays without the app: bring it back if it was on.
             if (MeshService.isEnabled(context)) {
                 MeshService.restart(context);
-                Log.d(TAG, "Offline mesh restarted after boot");
+                DebugLog.d(TAG, "Offline mesh restarted after boot");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to schedule background sync after boot", e);
+            DebugLog.e(TAG, "Failed to schedule background sync after boot", e);
         }
     }
     

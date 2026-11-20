@@ -6,7 +6,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
-import android.util.Log;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -159,10 +158,10 @@ public class BackgroundRunnerStoragePlugin extends Plugin {
                 }
             }
 
-            Log.d(TAG, "Stored to BackgroundRunner storage: " + key);
+            DebugLog.d(TAG, "Stored to BackgroundRunner storage: " + key);
             call.resolve();
         } catch (Exception e) {
-            Log.e(TAG, "Failed to write to BackgroundRunner storage", e);
+            DebugLog.e(TAG, "Failed to write to BackgroundRunner storage", e);
             call.reject("Failed to write to BackgroundRunner storage", e);
         }
     }

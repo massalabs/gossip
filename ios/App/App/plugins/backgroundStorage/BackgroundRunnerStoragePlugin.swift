@@ -26,7 +26,9 @@ public class BackgroundRunnerStoragePlugin: CAPPlugin, CAPBridgedPlugin {
     ]
     
     private static let accountOutputMonitor = NSLock()
+    #if DEBUG
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "net.massa.gossip", category: "BackgroundRunnerStorage")
+    #endif
     
     @objc func get(_ call: CAPPluginCall) {
         guard let key = call.getString("key") else {
@@ -92,7 +94,9 @@ public class BackgroundRunnerStoragePlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Failed to durably write BackgroundRunner storage")
             return
         }
+        #if DEBUG
         logger.debug("Stored to BackgroundRunner storage: \(key)")
+        #endif
         call.resolve()
     }
 }

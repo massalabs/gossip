@@ -3,7 +3,6 @@ package net.massa.gossip;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.util.Log;
 
 /**
  * Broadcast receiver that triggers when the app is updated.
@@ -37,14 +36,14 @@ public class AppUpdateReceiver extends BroadcastReceiver {
             // Schedule an immediate sync after app update
             boolean scheduled = BackgroundSyncWorker.scheduleBackgroundRunnerSync(context);
             if (!scheduled) {
-                Log.w(TAG, "Background sync could not be scheduled after update (lock may be held)");
+                DebugLog.w(TAG, "Background sync could not be scheduled after update (lock may be held)");
             }
             if (GossipForegroundSyncService.isEnabled(context)) {
                 GossipForegroundSyncService.start(context);
-                Log.d(TAG, "High-reliability foreground sync restarted after update");
+                DebugLog.d(TAG, "High-reliability foreground sync restarted after update");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to schedule background sync after update", e);
+            DebugLog.e(TAG, "Failed to schedule background sync after update", e);
         }
     }
 }

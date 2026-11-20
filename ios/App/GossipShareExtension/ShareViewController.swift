@@ -27,7 +27,11 @@ class ShareViewController: SLComposeServiceViewController {
             if itemProvider.hasItemConformingToTypeIdentifier(kUTTypeText as String) {
                 itemProvider.loadItem(forTypeIdentifier: kUTTypeText as String, options: nil) { (item, error) in
                     if let error = error {
+                        #if DEBUG
                         NSLog("GossipShareExtension: Failed to load shared text: \(error.localizedDescription)")
+                        #else
+                        _ = error
+                        #endif
                     } else if let text = item as? String {
                         self.handleSharedText(text)
                     }
@@ -36,7 +40,11 @@ class ShareViewController: SLComposeServiceViewController {
             } else if itemProvider.hasItemConformingToTypeIdentifier(kUTTypeURL as String) {
                 itemProvider.loadItem(forTypeIdentifier: kUTTypeURL as String, options: nil) { (item, error) in
                     if let error = error {
+                        #if DEBUG
                         NSLog("GossipShareExtension: Failed to load shared URL: \(error.localizedDescription)")
+                        #else
+                        _ = error
+                        #endif
                     } else if let url = item as? URL {
                         self.handleSharedText(url.absoluteString)
                     }

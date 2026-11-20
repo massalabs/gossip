@@ -1,6 +1,5 @@
 package net.massa.gossip
 
-import android.util.Log
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
@@ -51,7 +50,7 @@ class SecureStoragePlugin : Plugin() {
                 if (method == "initSecureStorage") {
                     try {
                         val n = nativeCall("rayonThreadCount", "{}")
-                        Log.i("SecureStorageNative", "rayon pool: $n threads")
+                        DebugLog.i("SecureStorageNative", "rayon pool: $n threads")
                     } catch (_: Exception) { /* best-effort diag */ }
                 }
             } catch (e: SecureStorageException.Exception) {
@@ -101,7 +100,7 @@ class SecureStoragePlugin : Plugin() {
                 nativeCall("lockSession", "{}")
             } catch (e: Throwable) {
                 // not unlocked, or a build without the native store
-                Log.w("SecureStorageNative", "native lock failed", e)
+                DebugLog.w("SecureStorageNative", "native lock failed", e)
             }
         }
     }

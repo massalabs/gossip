@@ -10,7 +10,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Log
 import net.massa.gossip.mesh.MeshNodeBridge
 
 /**
@@ -69,7 +68,7 @@ object AppLock {
                 alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, due, pending)
             }
         } catch (e: SecurityException) {
-            Log.w(TAG, "cannot arm the auto-lock alarm", e)
+            DebugLog.w(TAG, "cannot arm the auto-lock alarm", e)
             alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, due, pending)
         }
     }

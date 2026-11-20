@@ -31,7 +31,9 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "releaseWakeLock", returnType: CAPPluginReturnPromise)
     ]
     
+    #if DEBUG
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "net.massa.gossip", category: "NetworkObserver")
+    #endif
 
     // Background task identifier (must match Info.plist BGTaskSchedulerPermittedIdentifiers)
     private static let backgroundTaskIdentifier = "\(Bundle.main.bundleIdentifier ?? "net.massa.gossip").background.sync"
@@ -78,7 +80,9 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         pathMonitor?.start(queue: monitorQueue!)
         isObserving = true
         
+        #if DEBUG
         logger.info("Started observing network changes")
+        #endif
         call.resolve()
     }
     
@@ -141,7 +145,9 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
             hasReceivedInitialState = true
             wasOnline = isOnline
             previousNetworkType = networkType
+            #if DEBUG
             logger.debug("Initial state: online=\(isOnline), type=\(networkType)")
+            #endif
             return
         }
 
@@ -150,16 +156,24 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
                 networkType != previousNetworkType &&
                 previousNetworkType != "none"
 
+        #if DEBUG
         logger.debug("Network update: online=\(isOnline), type=\(networkType), wasOnline=\(self.wasOnline), previousType=\(self.previousNetworkType)")
+        #endif
 
         if becameOnline {
+            #if DEBUG
             logger.info("Network became available (\(networkType)), triggering sync")
+            #endif
             triggerSyncWithBackgroundTask(reason: "connected", networkType: networkType)
         } else if networkTypeChanged {
+            #if DEBUG
             logger.info("Network type changed (\(self.previousNetworkType) → \(networkType)), triggering sync")
+            #endif
             triggerSyncWithBackgroundTask(reason: "type_changed", networkType: networkType)
         } else if !isOnline && wasOnline {
+            #if DEBUG
             logger.info("Network became unavailable")
+            #endif
             DispatchQueue.main.async { [weak self] in
                 self?.notifyListeners("networkLost", data: [:])
             }
@@ -195,7 +209,9 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
                 request.earliestBeginDate = Date() // As soon as possible
                 try BGTaskScheduler.shared.submit(request)
             } catch {
+                #if DEBUG
                 logger.error("Failed to schedule BGAppRefreshTask: \(error.localizedDescription)")
+                #endif
             }
         }
     }
@@ -211,7 +227,9 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         hasReceivedInitialState = false
         endBackgroundTask()
         
+        #if DEBUG
         logger.info("Stopped observing network changes")
+        #endif
     }
     
     /**
@@ -222,12 +240,16 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         endBackgroundTask()
         
         backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "GossipNetworkSync") { [weak self] in
+            #if DEBUG
             self?.logger.warning("Background task expired")
+            #endif
             self?.endBackgroundTask()
         }
         
         if backgroundTaskID != .invalid {
+            #if DEBUG
             logger.info("Background task started (ID: \(self.backgroundTaskID.rawValue))")
+            #endif
             
             // Auto-end after timeout (only if task hasn't been expired by iOS)
             let taskID = backgroundTaskID
@@ -238,7 +260,9 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
             }
         } else {
+            #if DEBUG
             logger.warning("Failed to start background task")
+            #endif
         }
     }
     
@@ -247,7 +271,9 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
      */
     private func endBackgroundTask() {
         if backgroundTaskID != .invalid {
+            #if DEBUG
             logger.info("Ending background task (ID: \(self.backgroundTaskID.rawValue))")
+            #endif
             UIApplication.shared.endBackgroundTask(backgroundTaskID)
             backgroundTaskID = .invalid
         }
