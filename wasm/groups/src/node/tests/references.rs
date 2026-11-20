@@ -830,6 +830,173 @@ fn declining_an_invitation_leaves_markers_for_the_parents_fetched_for_it() {
     );
 }
 
+/// Device 3, offline while owner 0 adds it to `g` (epoch `e2`) and renames it (`e3`),
+/// receives only the last root: an invitation whose parent `e2` it fetches and keeps hidden.
+/// With `fork`, the owner also restores a backup taken before `e3` and makes another
+/// successor of `e2` (`e4`), which device 3 receives too: a second pending invitation that
+/// names the same parent. Returns `(net, h, e2, e3, e4, m)`, `h` a group of 1, 2 and 3, `m` a
+/// message of `e2`.
+fn hidden_parent(fork: bool) -> (MNet, ChatId, ChatId, ChatId, Option<ChatId>, MessageEvent) {
+    let mut net = MNet::new(4, true);
+    net.set_ref_lookups(true);
+    let g = net.create(0, &[1, 2]);
+    let h = net.create(1, &[2, 3]);
+    net.exchange();
+    for d in 1..4 {
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    net.offline[3] = true;
+    let e2 = net
+        .change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![gid(3)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    let m = net.say(1, &g, "before you came");
+    net.exchange();
+    let backup = net.devs[0].store.clone();
+    let rename = |net: &mut MNet, name: &str| {
+        net.change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some(name.into()),
+            },
+        )
+        .unwrap()
+    };
+    let e3 = rename(&mut net, "y");
+    net.exchange();
+    let e4 = fork.then(|| {
+        net.devs[0].store = backup;
+        net.restart(0);
+        let e4 = rename(&mut net, "z");
+        net.exchange();
+        e4
+    });
+    net.offline[3] = false;
+    net.dropped.clear();
+    give_root(&mut net, 3, e3);
+    if let Some(e4) = e4 {
+        give_root(&mut net, 3, e4);
+    }
+    net.run(crate::node::timing::PROMPT_DELAY_MS + MIN);
+    assert!(
+        net.devs[3].node.root(&e2).is_some(),
+        "the parent was fetched"
+    );
+    (net, h, e2, e3, e4, m)
+}
+
+/// Device 3 receives the root `chat` in full from device 1.
+fn give_root(net: &mut MNet, d: usize, chat: ChatId) {
+    let root = net.devs[1].node.root(&chat).unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+    net.recv_frames_m(d, 1, &[Frame::Event(blob)]);
+}
+
+/// "Ignore and Delete" on an unanswered invitation (`delete_group`) drops the roots fetched
+/// as its parents, as declining it does, each with a closed-chat marker and its reference.
+/// Why: the action meant to leave the least trace must not leave the member lists and names
+/// of earlier epochs of a chat the user refused. Storage then holds no root of that chat,
+/// only markers; a copy of the invitation or of a parent offered again is refused silently
+/// and prompts nothing; and what the device answers is what a device that never received
+/// the invitation answers.
+#[test]
+fn ignore_and_delete_drops_the_parents_fetched_for_the_invitation() {
+    let (mut net, h, e2, e3, _, m) = hidden_parent(false);
+    let (r2, r3) = (reference(&net, 1, &e2), reference(&net, 1, &e3));
+    let now = net.now;
+    let dev = &mut net.devs[3];
+    dev.node
+        .delete_group(&mut dev.store, e3, now, &mut net.rng)
+        .unwrap();
+    for (c, r) in [(e2, r2), (e3, r3)] {
+        assert!(net.devs[3].node.root(&c).is_none(), "{c:?}");
+        assert!(!net.devs[3].node.t.epochs.contains(&c), "{c:?}");
+        assert_eq!(
+            marker(&net, &c),
+            Some(Marker {
+                kind: MarkerKind::Closed,
+                reference: Some(r),
+            })
+        );
+        assert_eq!(net.devs[3].node.placed(&r), Some(Placed::Closed));
+    }
+    // A copy of the parent or of the invitation announced again is refused silently: not
+    // fetched, no prompt.
+    for c in [e2, e3] {
+        root_notice(&mut net, 1, c);
+        let mut log = exchange_log(&mut net);
+        log.extend(run_log(
+            &mut net,
+            crate::node::timing::PROMPT_DELAY_MS + MIN,
+        ));
+        assert!(
+            !ops(&log)
+                .iter()
+                .any(|(f, _, op)| *f == 3 && *op == QueryOp::ChatById(c))
+        );
+        assert!(net.devs[3].node.invitations(net.now).is_empty());
+        assert!(net.devs[3].node.root(&c).is_none());
+    }
+    // A reply naming the parent asks nothing.
+    reply(&mut net, 1, &h, &[(r2, sync(&m))]);
+    let mut log = exchange_log(&mut net);
+    log.extend(run_log(&mut net, 5 * MIN));
+    log.extend(jump(&mut net, WEEK + HOUR));
+    assert!(by_ref(&log, r2).is_empty());
+    // Asked about either, it answers as about an epoch it never held.
+    let never = net.create(0, &[1]);
+    net.run(MIN);
+    let rn = reference(&net, 0, &never);
+    let unheld = answers_of(
+        &mut net,
+        3,
+        2,
+        vec![QueryOp::ChatById(never), QueryOp::ChatByRef(rn)],
+    );
+    assert_eq!(unheld.len(), 2);
+    for (c, r) in [(e2, r2), (e3, r3)] {
+        assert_eq!(answers_about(&mut net, 3, c, r), unheld, "{c:?}");
+    }
+}
+
+/// "Ignore and Delete" keeps a fetched parent that something else the device holds still
+/// needs: here another pending invitation that names it (a fork of the owner). The same
+/// rule as declining.
+#[test]
+fn ignore_and_delete_keeps_a_fetched_parent_another_invitation_needs() {
+    let (mut net, _h, e2, e3, e4, _m) = hidden_parent(true);
+    let e4 = e4.unwrap();
+    let pending = |net: &MNet| -> Vec<ChatId> {
+        net.devs[3]
+            .node
+            .invitations(net.now)
+            .iter()
+            .map(|i| i.chat_id)
+            .collect()
+    };
+    assert_eq!(pending(&net).len(), 2, "both ends are invitations");
+    let now = net.now;
+    let dev = &mut net.devs[3];
+    dev.node
+        .delete_group(&mut dev.store, e3, now, &mut net.rng)
+        .unwrap();
+    assert!(net.devs[3].node.root(&e3).is_none());
+    assert!(net.devs[3].node.root(&e2).is_some(), "still needed by e4");
+    assert_eq!(marker(&net, &e2), None);
+    assert_eq!(pending(&net), vec![e4]);
+}
+
 /// A marker stored before markers kept a reference has none: a reply naming its epoch then
 /// made the device ask, and the root came back to be refused. The refused root now gives
 /// the marker its reference, so that the device does not ask again. The same for a
