@@ -133,10 +133,17 @@ pub const INHERITED_MARKERS_PER_SENDER: usize = 64;
 /// See [`INHERITED_MARKERS_PER_SENDER`].
 pub const INHERITED_MARKERS_PER_DEVICE: usize = 4_096;
 /// Handover roots kept unverified while their parent is looked up, per delivering peer and
-/// in total (provisional, §4.7).
-pub const HELD_ROOTS_PER_SENDER: usize = 4;
+/// in total (§4.7, §17.4). Local policy, which any release may change.
+///
+/// Per sender is a total across every chat: the chat a handover root belongs to cannot be
+/// known before its parent is held. A root is at most about 24 KB at 512 members and at most
+/// the 57,307-byte event blob, so the worst case is about 22 MB kept (59 MB at the container
+/// ceiling). Each kept root also starts one parent lookup, asked of its sender only, within
+/// the lookup limits of §17.4. Rebuilding the index of held roots on a restart compares every
+/// pair of roots (about a million parent commitments at 1,024, under a second natively).
+pub const HELD_ROOTS_PER_SENDER: usize = 64;
 /// See [`HELD_ROOTS_PER_SENDER`].
-pub const HELD_ROOTS_PER_DEVICE: usize = 64;
+pub const HELD_ROOTS_PER_DEVICE: usize = 1_024;
 /// Signed leaves kept while their leaver's keys are fetched, per delivering peer
 /// (provisional).
 pub const UNVERIFIED_LEAVES_PER_SENDER: usize = 32;
