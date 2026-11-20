@@ -4931,10 +4931,11 @@ fn a_former_owner_restored_on_its_other_fork_end_learns_that_it_left() {
     let _ = b;
 }
 
-/// §5.6 and §10.4, settled: a device kicked from an epoch, or that left it and keeps it
-/// read-only, still verifies and stores a dissolve naming that epoch, and applies it: "Dissolve
-/// & Delete" erases its archive, as on every device that holds the epoch. Known drawback: the
-/// owner can erase the copy of a member it removed, of an epoch that member holds.
+/// §5.6, §5.8 and §10.4, settled: a device kicked from an epoch, or that left it and keeps it
+/// read-only, still verifies and stores a dissolve naming that epoch, and applies it silently:
+/// "Dissolve & Delete" erases its archive, as on every device that holds the epoch, and the group
+/// stays shown as removed or left, not dissolved (it serves nothing of it, D.74). Known
+/// drawback: the owner can erase the copy of a member it removed, of an epoch that member holds.
 #[test]
 fn a_dissolve_with_deletion_erases_the_archive_of_a_kicked_or_left_device() {
     for left in [false, true] {
@@ -4996,7 +4997,11 @@ fn a_dissolve_with_deletion_erases_the_archive_of_a_kicked_or_left_device() {
         );
         assert_eq!(
             net.summary(3, &g).unwrap().status,
-            MyStatus::Dissolved { deleted: true },
+            if left {
+                MyStatus::Left
+            } else {
+                MyStatus::Removed
+            },
             "left={left}"
         );
         assert!(net.texts(3, &g).is_empty(), "left={left}: erased");

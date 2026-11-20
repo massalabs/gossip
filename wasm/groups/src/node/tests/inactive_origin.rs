@@ -364,3 +364,63 @@ fn an_inactive_device_relays_nothing_pushed_to_it_for_its_epoch() {
         "(status, pushed, differs from): {wrong:?}"
     );
 }
+
+/// §5.8, §10.4, D.74: the owner pushes R a dissolve naming C, an epoch R holds in a group where
+/// it is already no longer active (kicked, left, waiting for a kick), with or without deletion.
+/// R applies it silently: everything it then sends, for three hours, and what it answers Q's
+/// chat, dissolve and tips lookups of that epoch, are the same as for a dissolve naming D, which
+/// R deleted, or E, which R never held. Before, R announced the dissolve to the members and from
+/// then on served the root and a page, which a device that deleted its copy never does.
+#[test]
+fn an_inactive_device_applies_a_dissolve_silently() {
+    let mut wrong = Vec::new();
+    for how in [Inactive::Removed, Inactive::Left, Inactive::Waiting] {
+        for must_delete in [false, true] {
+            let probe = |pick: usize| {
+                let (mut net, chats) = setup(how, |_, _| {});
+                let chat = chats[pick];
+                let root = net.devs[0].node.root(&chat).unwrap();
+                let d = crate::Dissolve::sign(
+                    &root,
+                    must_delete,
+                    &super::membership::ident(0).secret.dsa_signing_key,
+                    [9; 32],
+                )
+                .unwrap();
+                let id = *crate::hash::dissolve_id(&chat, must_delete).as_bytes();
+                let blob = wire::encode_event_blob(&EventObject::Dissolve(d)).unwrap();
+                net.recv_frames_m(R, 0, &[Frame::Event(blob)]);
+                let sent = sent_by_r(&mut net, chat, 3);
+                let answers = super::membership::answers_of(
+                    &mut net,
+                    R,
+                    Q,
+                    vec![
+                        QueryOp::ChatById(chat),
+                        QueryOp::SignedObject {
+                            chat_id: chat,
+                            kind: crate::wire::SignedKind::Dissolve,
+                            id,
+                        },
+                        QueryOp::TipsScan {
+                            anchor: chat,
+                            scan_id: scan_id(4),
+                            offset: 0,
+                        },
+                    ],
+                );
+                (sent, answers)
+            };
+            let inactive = probe(0);
+            for (pick, name) in [(1, "deleted"), (2, "never held")] {
+                if inactive != probe(pick) {
+                    wrong.push((how, must_delete, name));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "(status, must_delete, differs from): {wrong:?}"
+    );
+}
