@@ -147,8 +147,10 @@ impl Node {
         if let Some((peer, kind)) = from.filter(|_| eligible) {
             let c = task.candidates.entry(peer).or_insert_with(Candidate::new);
             c.trigger = Some(Trigger { kind, at: now });
-            // The peer now claims to hold the item: new evidence for this run.
+            // The peer now claims to hold the item: new evidence for this run, which also
+            // takes it out of the place behind the members not yet asked (see `select`).
             c.state = CandidateState::Untried;
+            c.attempts = 0;
         }
         if task.run == Run::Paused && (eligible || from.is_none()) {
             task.run = fresh_run(cx.rng);
@@ -418,6 +420,7 @@ impl Node {
             Answer::NotAvailable => {
                 cand.state = CandidateState::NotAvailable;
                 cand.outstanding_until = None;
+                cand.attempts = cand.attempts.saturating_add(1);
                 let announced = cand.announced();
                 // Any valid answer resets the progression (§11.4).
                 if let Run::Active { attempt, .. } = task.run {
@@ -714,7 +717,8 @@ impl Node {
     /// retrieval of what others can supply. Responsive peers come before every unresponsive
     /// one, whatever the tier, and the task waits for a responsive peer that is outstanding
     /// or at its limit rather than ask an unresponsive one (a departure from the tier order
-    /// of §11.2).
+    /// of §11.2). Among responsive peers, those not yet asked come before those already asked
+    /// (§11.2, local policy).
     fn select(
         &mut self,
         cx: &mut Cx<'_>,
@@ -770,13 +774,17 @@ impl Node {
             let at = c.trigger.map_or(0, |t| t.at);
             ranked.push((
                 (
-                    // A peer already asked for this item, which let the request time out or
-                    // answered "not available" (and may have announced it again since), goes
-                    // behind every member not yet asked for it (local policy, §11.2). Why: a
-                    // peer that went inactive or never held the item answers "not available"
-                    // or nothing every time, while a member not yet asked may hold it.
-                    u8::from(c.attempts > 0),
                     u8::from(!responsive),
+                    // Among the peers that answer, one already asked for this item, which let
+                    // a request time out or answered "not available" since it last announced
+                    // it, goes behind every member not yet asked for it (local policy, §11.2).
+                    // Why: a peer that never held the item gives the same answer every time,
+                    // while a member not yet asked may hold it. A peer that answers still
+                    // comes before every unresponsive one, so that a holder that let one
+                    // request time out is not left waiting behind each member that stopped
+                    // answering, one stage each; `busy` and `expired` say nothing of the item
+                    // and do not count (D.46).
+                    u8::from(c.attempts > 0),
                     tier,
                     u64::MAX - self.score(&peer),
                     u64::MAX - at,
@@ -802,7 +810,7 @@ impl Node {
         // Rather than a member that stopped answering, for a stage of up to a day, wait for
         // a responsive one that is outstanding or at its limit: it answers or frees a slot
         // in minutes when it is online. A free responsive member of any tier comes first.
-        if best.1 == 1 && (!responsive_later.is_empty() || responsive_until != u64::MAX) {
+        if best.0 == 1 && (!responsive_later.is_empty() || responsive_until != u64::MAX) {
             return Selection::Wait(Blocked {
                 peers: responsive_later,
                 until: responsive_until.min(until),
@@ -838,7 +846,6 @@ impl Node {
         }
         let c = task.candidates.entry(peer).or_insert_with(Candidate::new);
         c.outstanding_until = Some(super::timing::deadline(sent_at, ttl));
-        c.attempts = c.attempts.saturating_add(1);
     }
 
     /// A queued query of `key` for `peer` was dropped before it was sent (the peer is no
@@ -903,6 +910,14 @@ impl Node {
             };
             self.stats.timeouts += 1;
             self.note_query_timeout(&peer, sent_at, cx.now);
+            if let Some(c) = self
+                .t
+                .tasks
+                .get_mut(&key)
+                .and_then(|t| t.candidates.get_mut(&peer))
+            {
+                c.attempts = c.attempts.saturating_add(1);
+            }
             self.next_stage(cx, key);
         }
     }
@@ -961,8 +976,8 @@ impl Node {
     }
 }
 
-/// The rank of a candidate, smaller first: unresponsive, tier, inverse score, inverse
-/// receipt time of its trigger.
+/// The rank of a candidate, smaller first: unresponsive, already asked, tier, inverse score,
+/// inverse receipt time of its trigger.
 type Rank = (u8, u8, u8, u64, u64);
 
 enum Selection {

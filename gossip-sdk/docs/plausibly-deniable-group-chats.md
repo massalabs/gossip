@@ -2420,12 +2420,19 @@ pruned, and never transmitted.
 A peer with an outstanding request for the task is not reselected until it answers or its request
 expires.
 A peer that already supplied the event is not asked again.
-A peer already asked for the item, that let the request time out or answered "not available",
-goes behind every eligible member not yet asked for it, before any re-ask, even when it announces
-the item again (local policy, §2.2).
+A peer that answers comes before every peer that stopped answering, whatever the tier.
+Among the peers that answer, a peer already asked for the item, that let a request time out or
+answered "not available" since it last announced the item, goes behind every eligible member not
+yet asked for it, before any re-ask (local policy, §2.2).
+A new announcement of the item by that peer puts it back in its tier: it is new evidence (§11.5).
+A `busy` or an `expired` answer does not count: a `busy` peer is asked again about a minute later
+(D.46).
 *Why:* a peer that went inactive in the group, or never held the item, gives the same answer every
 time, while a member not yet asked may hold it; a simulated device kept asking such peers for a day
-and hardly asked the member that held the events.
+and hardly asked the member that held the events. The order keeps responsive peers first, so that a
+holder that was busy once, or let one request time out, is not asked again only after each member
+that stopped answering, one stage each, which took the simulated device most of an hour per
+offline member.
 
 ### 11.3 Query timing
 
@@ -4691,9 +4698,10 @@ they can be confirmed or changed.*
 - Neighbors: pending requests count against capacity; requests and declines expire after 24
   hours; a removed peer is neither suggested nor accepted; a neighbor is replaced once its queries
   have waited 2 days in total without an answer, and candidates rank responsive members first.
-- Candidate order: responsive members before unresponsive ones; then peers that triggered the
-  task, then neighbors, then members with a session, then others; then score, then trigger time.
-  §11.2 gives the tiers only.
+- Candidate order: responsive members before unresponsive ones; then members not yet asked
+  before those that timed out or answered "not available" since they last announced the item
+  (§11.2); then peers that triggered the task, then neighbors, then members with a session, then
+  others; then score, then trigger time. §11.2 gives the tiers only.
 - Dissemination: "own message" means a deletion or a message this device authored; an edit or
   retry of another member's message goes out as notices.
 - A sync-object lookup goes on after "not available" and ends "not found" when no candidate is
