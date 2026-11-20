@@ -17,14 +17,14 @@ export const MESSAGE_TIMER_MONTH_MS = 28 * DAY;
 export const MESSAGE_TIMER_FOREVER = 0;
 
 /**
- * The values the app offers, in the order shown. 7 days is the same value
- * as 1 week, offered once, as "1 week".
+ * The values the app offers, in the order shown, for a group and for the
+ * account's default: 5, 15, 30 minutes; 1, 2, 4, 8, 12 hours; 1 to 6 days;
+ * 1, 2, 3 weeks; 1 month; forever. 7 days is the same value as 1 week,
+ * offered once, as "1 week".
  */
 export const MESSAGE_TIMER_OPTIONS: number[] = [
-  5 * MINUTE,
-  HOUR,
-  8 * HOUR,
-  12 * HOUR,
+  ...[5, 15, 30].map(n => n * MINUTE),
+  ...[1, 2, 4, 8, 12].map(n => n * HOUR),
   ...[1, 2, 3, 4, 5, 6].map(n => n * DAY),
   ...[1, 2, 3].map(n => n * WEEK),
   MESSAGE_TIMER_MONTH_MS,
