@@ -40,6 +40,7 @@ vi.mock('react-router-dom', () => ({
 }));
 
 const mockMigrate = vi.fn().mockResolvedValue('g1');
+const mockMigrationTimer = vi.fn().mockResolvedValue(0);
 const mockAcceptInvitation = vi.fn().mockResolvedValue('g1');
 let mockInvitations: unknown[] = [];
 
@@ -65,6 +66,7 @@ vi.mock('../../src/hooks/useGossipSdk', () => ({
     },
     conversations: {
       migrate: mockMigrate,
+      migrationTimer: mockMigrationTimer,
       acceptInvitation: mockAcceptInvitation,
       setArchived: vi.fn().mockResolvedValue(undefined),
       declineInvitation: vi.fn().mockResolvedValue(undefined),
@@ -236,8 +238,16 @@ describe('Discussion: an archive (§5.12)', () => {
     await userEvent.click(
       page.getByRole('button', { name: 'archive.migrate' })
     );
+    // The confirmation shows the conversation's timer, pre-selected.
     await vi.waitFor(() =>
-      expect(mockMigrate).toHaveBeenCalledWith('contact-1')
+      expect(mockMigrationTimer).toHaveBeenCalledWith('contact-1')
+    );
+    expect(mockMigrate).not.toHaveBeenCalled();
+    await userEvent.click(page.getByTestId('archive-migrate-confirm'));
+    await vi.waitFor(() =>
+      expect(mockMigrate).toHaveBeenCalledWith('contact-1', {
+        messageTimer: 0,
+      })
     );
     await vi.waitFor(() =>
       expect(mockNavigate).toHaveBeenCalledWith('/group/g1', {
