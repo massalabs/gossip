@@ -85,6 +85,11 @@ const START: u64 = 1_700_000_000_000;
 const SECOND: u64 = 1_000;
 const MINUTE: u64 = 60 * SECOND;
 const HOUR: u64 = 60 * MINUTE;
+/// The message timer of the group in timed seeds: its first messages are deleted during the
+/// final period.
+const TIMER: u64 = 30 * HOUR;
+/// The timer the owner sets later: messages after the change are deleted during the run.
+const CHANGED_TIMER: u64 = 3 * HOUR;
 /// The interval between two steps of the owner's script.
 const STEP: u64 = 40 * MINUTE;
 
@@ -195,6 +200,10 @@ struct Counters {
     /// Members only on a former owner's branch that a new owner's resolution dropped: no kick
     /// can be signed for them, and they are not told (a known limit; reported).
     removed_without_kick: u64,
+    /// Groups founded with a message timer (§7.7).
+    timed_groups: u64,
+    /// Changes of the message timer by the owner.
+    timer_changes: u64,
 }
 
 impl Counters {
@@ -265,7 +274,9 @@ impl Counters {
             former_owner_rollbacks,
             former_owners_relearnt,
             handover_replies,
-            removed_without_kick
+            removed_without_kick,
+            timed_groups,
+            timer_changes
         );
         self.max_plaintexts_hour = self.max_plaintexts_hour.max(o.max_plaintexts_hour);
         self.max_bytes_hour = self.max_bytes_hour.max(o.max_bytes_hour);
@@ -332,6 +343,8 @@ impl Counters {
             ("former_owner_rollbacks", self.former_owner_rollbacks),
             ("former_owners_relearnt", self.former_owners_relearnt),
             ("handover_replies", self.handover_replies),
+            ("timed_groups", self.timed_groups),
+            ("timer_changes", self.timer_changes),
         ];
         all.iter()
             .filter(|(_, n)| *n == 0)
@@ -413,6 +426,7 @@ enum Step {
     DoubleHandover,
     FormerOwnerRollback,
     Dissolve,
+    Timer,
 }
 
 struct Sim {
@@ -569,6 +583,13 @@ impl Sim {
         if seed % 4 == 3 {
             script.push((at(&mut rng, 14), Step::Dissolve));
         }
+        // In some seeds the group has a message timer (§7.7), which the owner changes later:
+        // the messages of the first epochs are deleted during the final period, those of the
+        // epochs after the change during the run.
+        let timed = seed % 4 == 1;
+        if timed {
+            script.push((at(&mut rng, 7), Step::Timer));
+        }
         let mut sim = Self {
             rng,
             now: START,
@@ -639,15 +660,22 @@ impl Sim {
             .node
             .as_mut()
             .unwrap()
-            .create_group(
+            .create_group_with(
                 &mut dev.store,
                 &s,
                 "Team".into(),
                 members,
+                crate::node::GroupOptions {
+                    message_timer: if timed { TIMER } else { 0 },
+                    ..crate::node::GroupOptions::default()
+                },
                 START,
                 &mut sim.rng,
             )
             .unwrap();
+        if timed {
+            sim.counters.timed_groups += 1;
+        }
         sim.legit.insert(g);
         sim.owners.insert(ident(0).id);
         sim.group = Some(g);
@@ -1513,6 +1541,19 @@ impl Sim {
                     }
                     if made > 0 {
                         self.counters.long_chains += 1;
+                    }
+                }
+                Step::Timer => {
+                    if self
+                        .change(
+                            o,
+                            GroupChange::MessageTimer {
+                                timer: CHANGED_TIMER,
+                            },
+                        )
+                        .is_some()
+                    {
+                        self.counters.timer_changes += 1;
                     }
                 }
                 Step::Rename => {
@@ -2557,8 +2598,13 @@ impl Sim {
                 assert_eq!(s.members, reference.members);
                 assert_eq!(s.owner, reference.owner);
                 assert_eq!(s.name, reference.name);
-                let a = results(&self.devs[d].store, &s.current);
-                let b = results(&self.devs[devices[0]].store, &s.current);
+                let timed = |c: &ChatId| {
+                    self.node(devices[0])
+                        .root(c)
+                        .is_some_and(|r| r.message_timer() > 0)
+                };
+                let a = results(&self.devs[d].store, &s.current, timed(&s.current));
+                let b = results(&self.devs[devices[0]].store, &s.current, timed(&s.current));
                 assert_eq!(
                     a, b,
                     "messages of the current epoch: device {d} against {}",
@@ -2581,8 +2627,8 @@ impl Sim {
                     .collect();
                 for (c, r) in self.node(devices[0]).tables().epochs.iter() {
                     if r.status == EpochStatus::Installed && mine.contains(c) && *c != s.current {
-                        let a = results(&self.devs[d].store, c);
-                        let b = results(&self.devs[devices[0]].store, c);
+                        let a = results(&self.devs[d].store, c, timed(c));
+                        let b = results(&self.devs[devices[0]].store, c, timed(c));
                         if a != b {
                             // Differences the rules make, from the script:
                             // - the epoch is in another conversation than the current one on
@@ -2700,14 +2746,25 @@ impl Sim {
     }
 }
 
+/// The results of the epoch `chat`. Under a message timer (§7.7) what the timer leaves of a
+/// message (a tombstone or no result, with no event) is left out: a device that received
+/// the message only after its moment holds nothing for it, by design.
 fn results(
     store: &MemoryStorage,
     chat: &ChatId,
+    timed: bool,
 ) -> BTreeMap<crate::ids::SyncObjId, Option<StoredResult>> {
     store
         .objects(chat)
         .unwrap()
         .into_iter()
+        .filter(|o| {
+            !(timed
+                && !matches!(o.current, Some(StoredResult::Content(_)))
+                && o.current_events.is_empty()
+                && o.pending_versions.is_empty()
+                && o.pending_deletions.is_empty())
+        })
         .map(|o| (o.sync_obj_id, o.current))
         .collect()
 }

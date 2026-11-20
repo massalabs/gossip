@@ -55,6 +55,11 @@ pub(crate) fn member(i: usize) -> GossipId {
 
 /// An epoch of `n` members (owned by member 0), with secret seed `seed`.
 pub(crate) fn epoch_root(n: usize, seed: u8) -> Root {
+    epoch_root_with_timer(n, seed, 0)
+}
+
+/// As [`epoch_root`], with the message timer `timer` (§7.7).
+pub(crate) fn epoch_root_with_timer(n: usize, seed: u8, timer: u64) -> Root {
     let params = RootParams {
         name: "Group".to_owned(),
         members: (0..n).map(member).collect(),
@@ -63,7 +68,7 @@ pub(crate) fn epoch_root(n: usize, seed: u8) -> Root {
         epoch_challenge: Challenge::from_bytes([seed.wrapping_add(1); 32]),
         ref_chat_id_challenge: Challenge::from_bytes([seed.wrapping_add(2); 32]),
         created_at: T0,
-        message_timer: 0,
+        message_timer: timer,
         settings: std::collections::BTreeMap::new(),
     };
     Root::create_successor(
