@@ -4728,3 +4728,75 @@ fn a_former_owner_restored_on_its_other_fork_end_learns_that_it_left() {
     assert_ne!(s.status, MyStatus::Member, "{s:?}");
     let _ = b;
 }
+
+/// §5.6 and §10.4, settled: a device kicked from an epoch, or that left it and keeps it
+/// read-only, still verifies and stores a dissolve naming that epoch, and applies it: "Dissolve
+/// & Delete" erases its archive, as on every device that holds the epoch. Known drawback: the
+/// owner can erase the copy of a member it removed, of an epoch that member holds.
+#[test]
+fn a_dissolve_with_deletion_erases_the_archive_of_a_kicked_or_left_device() {
+    for left in [false, true] {
+        let (mut net, g) = founded(4);
+        net.say(1, &g, "kept");
+        net.run(MIN);
+        if left {
+            // Restored from a backup made before its leave, it learns it and keeps the group
+            // read-only.
+            let backup = net.devs[3].store.clone();
+            let now = net.now;
+            let s = signer(3);
+            let dev = &mut net.devs[3];
+            dev.node
+                .leave_group(
+                    &mut dev.store,
+                    &s,
+                    g,
+                    LeaveChoice::Signed,
+                    now,
+                    &mut net.rng,
+                )
+                .unwrap();
+            net.run(2 * MIN);
+            net.devs[3].store = backup;
+            net.restart(3);
+            net.say(3, &g, "back");
+            net.run(2 * MIN);
+            assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Left);
+        } else {
+            net.change(
+                0,
+                g,
+                GroupChange::Successor {
+                    add: vec![],
+                    remove: vec![gid(3)],
+                    name: None,
+                },
+            )
+            .unwrap();
+            net.exchange();
+            assert_eq!(net.summary(3, &g).unwrap().status, MyStatus::Removed);
+        }
+        assert!(net.texts(3, &g).contains(&"kept".to_owned()), "left={left}");
+        // The owner signs a dissolve with deletion naming the epoch device 3 holds.
+        let root = net.devs[0].node.root(&g).unwrap();
+        let d =
+            crate::Dissolve::sign(&root, true, &ident(0).secret.dsa_signing_key, [9; 32]).unwrap();
+        let blob = wire::encode_event_blob(&EventObject::Dissolve(d)).unwrap();
+        net.recv_frames_m(3, 0, &[Frame::Event(blob)]);
+        assert!(
+            net.devs[3]
+                .node
+                .t
+                .signed
+                .iter()
+                .any(|(k, _)| k.0 == g && k.1 == crate::wire::SignedKind::Dissolve),
+            "left={left}: stored"
+        );
+        assert_eq!(
+            net.summary(3, &g).unwrap().status,
+            MyStatus::Dissolved { deleted: true },
+            "left={left}"
+        );
+        assert!(net.texts(3, &g).is_empty(), "left={left}: erased");
+    }
+}
