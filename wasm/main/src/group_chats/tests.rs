@@ -8,7 +8,7 @@ use super::codec::{Codec, hex};
 use super::engine::{Core, IdentityKey};
 use super::json::J;
 use super::store::BatchOut;
-use groups::{ChatId, GossipId};
+use groups::{ChatId, GossipId, SyncObjId};
 
 /// The SDK's tables, keyed as their primary keys.
 #[derive(Default, Clone)]
@@ -1086,4 +1086,60 @@ fn a_message_timer_through_the_bindings() {
         let current: ChatId = Codec::dec(g.field("current").unwrap()).unwrap();
         assert_eq!(current, e2);
     }
+}
+
+#[test]
+fn lookup_results_are_taken_once_and_the_taking_is_persisted() {
+    let mut net = Net::new(2);
+    let b = net.peers[1].id();
+    let group = net.peers[0]
+        .core
+        .create_group("G".into(), vec![b], net.now)
+        .unwrap();
+    net.peers[0].persist();
+    net.settle(1_000);
+    let inv: ChatId = net.peers[1].core.accept_invitation(group, net.now).unwrap();
+    assert_eq!(inv, group);
+    net.peers[1].persist();
+    net.settle(1_000);
+    assert_eq!(
+        net.peers[0].core.take_lookup_results(net.now).unwrap(),
+        "[]"
+    );
+
+    // An object nobody holds: the lookup ends without it.
+    let missing = SyncObjId::from_bytes([7; 32]);
+    net.peers[0]
+        .core
+        .lookup_sync_object(group, missing, net.now)
+        .unwrap();
+    net.peers[0].persist();
+    let mut taken = "[]".to_owned();
+    for _ in 0..2_000 {
+        net.settle(1_000);
+        net.now += 60 * 60 * 1_000;
+        net.peers[0].core.tick(net.now).unwrap();
+        net.peers[0].persist();
+        // Reported across a restart until taken.
+        net.peers[0].reopen();
+        taken = net.peers[0].core.take_lookup_results(net.now).unwrap();
+        if taken != "[]" {
+            break;
+        }
+    }
+    assert_eq!(
+        taken,
+        format!(
+            r#"[{{"epoch":"{}","syncObjId":"{}","found":null}}]"#,
+            hex(group.as_bytes()),
+            hex(missing.as_bytes())
+        )
+    );
+    // Taking them is committed: they are not reported again, after a restart either.
+    assert!(net.peers[0].core.pending_batches() > 0);
+    net.peers[0].reopen();
+    assert_eq!(
+        net.peers[0].core.take_lookup_results(net.now).unwrap(),
+        "[]"
+    );
 }
