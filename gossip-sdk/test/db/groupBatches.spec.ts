@@ -16,15 +16,19 @@ function changes(chats: string[], n: number, nextSeq: number): GroupBatch {
     rows: [],
     removedRows: [],
     edges: [],
+    removedEdges: [],
     objects: chats.map(chatId => ({
       chatId,
       syncObjId: object(n),
       fields: '{}',
     })),
+    removedObjects: [],
     node: [{ kind: 'meta', key: 'null', fields: `{"next_seq":${nextSeq}}` }],
     erase: [],
   };
 }
+
+const event = (n: number) => 'e'.repeat(46) + n.toString(16).padStart(2, '0');
 
 describe('group batches on SQLite (engine conformance)', () => {
   it('applies a batch with an erase all or nothing, in the order of the trait', async () => {
@@ -62,6 +66,54 @@ describe('group batches on SQLite (engine conformance)', () => {
     ]);
     // Another account's records are untouched by either batch.
     expect((await q.loadSnapshot('other')).objects).toEqual([]);
+    await conn.close();
+  });
+
+  it('deletes the rows, edges and objects the message timer erases, and only those', async () => {
+    const conn = await DatabaseConnection.create({
+      storage: getTestStorageConfig(),
+    });
+    const q = new GroupQueries(conn);
+    const owner = 'owner';
+    const written: GroupBatch = {
+      ...changes([a], 1, 1),
+      rows: [1, 2, 3].map(n => ({
+        chatId: a,
+        eventId: event(n),
+        state: 'pruned',
+        fields: null,
+      })),
+      edges: [1, 2, 3].map(n => ({
+        chatId: a,
+        eventId: event(n),
+        parents: '[]',
+      })),
+      objects: [1, 2, 3].map(n => ({
+        chatId: a,
+        syncObjId: object(n),
+        fields: '{}',
+      })),
+    };
+    await q.applyBatches(owner, [written]);
+    // Another account holds the same keys.
+    await q.applyBatches('other', [written]);
+    const erased: GroupBatch = {
+      ...changes([], 0, 2),
+      removedRows: [1, 2].map(n => ({ chatId: a, eventId: event(n) })),
+      removedEdges: [1, 2].map(n => ({ chatId: a, eventId: event(n) })),
+      removedObjects: [1, 2].map(n => ({ chatId: a, syncObjId: object(n) })),
+    };
+    await q.applyBatches(owner, [erased]);
+    const snap = await q.loadSnapshot(owner);
+    expect(snap.rows.map(r => r.eventId)).toEqual([event(3)]);
+    expect(snap.edges.map(e => e.eventId)).toEqual([event(3)]);
+    expect(snap.objects.map(o => o.syncObjId)).toEqual([object(3)]);
+    const other = await q.loadSnapshot('other');
+    expect([
+      other.rows.length,
+      other.edges.length,
+      other.objects.length,
+    ]).toEqual([3, 3, 3]);
     await conn.close();
   });
 });

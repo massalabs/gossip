@@ -266,7 +266,13 @@ describe('Group reactions and media', { timeout: 180_000 }, () => {
     await i.close();
     await i.queries.groups.resetEngine(i.owner);
     await i.queries.groups.applyBatches(i.owner, [
-      { ...backup, removedRows: [], erase: [] },
+      {
+        ...backup,
+        removedRows: [],
+        removedEdges: [],
+        removedObjects: [],
+        erase: [],
+      },
     ]);
     await i.open();
     expect(await reactionsOn(alice)).toEqual([]);
