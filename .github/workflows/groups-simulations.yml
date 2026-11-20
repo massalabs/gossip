@@ -1,0 +1,132 @@
+name: Group chat simulations
+
+# The three seeded simulations of the group engine (wasm/groups/src/sim*.rs), ignored by
+# `cargo test` and run here instead. This job never turns a pull request red because a
+# simulation failed: each simulation step continues on error, and the last step writes a
+# report (one row per simulation, then every failing seed with its reason) to the job summary
+# and raises a warning per simulation with failures. Only a build error fails the job.
+#
+# Default seed counts keep the simulations near 5 minutes on a 2-core runner about 3 times
+# slower per core than a recent desktop, after a cold release build of about 5 minutes:
+# membership seeds 0-59, network seeds 0-19, merge seeds 0-199. The known failing membership
+# seeds 63 and 273 are outside the default range; a manual run with more seeds shows them.
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+    inputs:
+      membership_seeds:
+        description: 'Membership simulation: number of seeds, from 0'
+        required: false
+        default: '60'
+      network_seeds:
+        description: 'Network simulation: number of seeds, from 0'
+        required: false
+        default: '20'
+      merge_seeds:
+        description: 'Merge simulation: number of seeds, from 0'
+        required: false
+        default: '200'
+
+jobs:
+  simulations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        # bash -eo pipefail: a simulation that fails marks its step as failed despite `tee`.
+        shell: bash
+    env:
+      GROUPS_MEMBERS_SEEDS: ${{ inputs.membership_seeds || '60' }}
+      GROUPS_NET_SEEDS: ${{ inputs.network_seeds || '20' }}
+      GROUPS_SIM_SEEDS: ${{ inputs.merge_seeds || '200' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wasm/target
+          key: ${{ runner.os }}-cargo-groups-sims-${{ hashFiles('wasm/Cargo.lock') }}
+
+      - name: Build the groups test binary (release)
+        run: cargo test --release --manifest-path wasm/Cargo.toml -p groups --lib --no-run
+
+      - name: Merge simulation
+        continue-on-error: true
+        run: |
+          mkdir -p sim-logs
+          cargo test --release --manifest-path wasm/Cargo.toml -p groups --lib \
+            -- --ignored --exact sim::simulation --nocapture 2>&1 | tee sim-logs/merge.log
+
+      - name: Network simulation
+        continue-on-error: true
+        run: |
+          mkdir -p sim-logs
+          cargo test --release --manifest-path wasm/Cargo.toml -p groups --lib \
+            -- --ignored --exact sim_net::network_simulation --nocapture 2>&1 | tee sim-logs/network.log
+
+      - name: Membership simulation
+        continue-on-error: true
+        run: |
+          mkdir -p sim-logs
+          cargo test --release --manifest-path wasm/Cargo.toml -p groups --lib \
+            -- --ignored --exact sim_groups::membership_simulation --nocapture 2>&1 | tee sim-logs/membership.log
+
+      - name: Report
+        if: always()
+        run: |
+          mkdir -p sim-logs
+          {
+            echo '## Group chat simulations'
+            echo
+            echo '| Simulation | Seeds run | Failed | Result |'
+            echo '| --- | --- | --- | --- |'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for sim in merge network membership; do
+            log="sim-logs/$sim.log"
+            line=$(grep -h "^SIM-SUMMARY $sim " "$log" 2>/dev/null | tail -n 1 || true)
+            if [ -z "$line" ]; then
+              echo "| $sim | - | - | did not finish (no summary line; see the log) |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning title=$sim simulation::the $sim simulation did not finish; see its log"
+              continue
+            fi
+            seeds=$(echo "$line" | sed -n 's/.* seeds=\([0-9]*\).*/\1/p')
+            failed=$(echo "$line" | sed -n 's/.* failed=\([0-9]*\).*/\1/p')
+            coverage=$(echo "$line" | sed -n 's/.* coverage=\([a-z]*\).*/\1/p')
+            if [ "$failed" = 0 ] && [ "$coverage" != missing ]; then
+              result=pass
+            else
+              result=fail
+              list=$(grep -h "^SIM-FAIL $sim seed=" "$log" | sed -n 's/.* seed=\([0-9]*\) .*/\1/p' | paste -sd, - || true)
+              msg="$failed of $seeds seeds failed${list:+: $list}"
+              if [ "$coverage" = missing ]; then msg="$msg; some situations never exercised"; fi
+              echo "::warning title=$sim simulation::$msg"
+            fi
+            echo "| $sim | $seeds | $failed | $result (coverage: $coverage) |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          fails=$(grep -h '^SIM-FAIL ' sim-logs/*.log 2>/dev/null || true)
+          {
+            echo
+            if [ -n "$fails" ]; then
+              echo '### Failures'
+              echo
+              echo "$fails" | sed 's/^SIM-FAIL \([a-z]*\) /- **\1** /'
+            else
+              echo 'No failing seed.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the simulation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: group-simulation-logs
+          path: sim-logs/
+          if-no-files-found: warn
