@@ -111,8 +111,11 @@ fn the_request_budget_answers_busy_beyond_its_burst() {
     assert!(r.iter().all(|r| status(r) == Some(Status::NotAvailable)));
 }
 
+/// A query from a peer that shares no chat is dropped silently; a lookup for an epoch this
+/// device does not hold, from a member of one it holds, is answered "not available" (§13.7,
+/// D.74).
 #[test]
-fn queries_from_non_members_and_for_unknown_epochs_are_dropped_silently() {
+fn queries_from_non_members_are_dropped_and_unknown_epochs_answered_not_available() {
     let mut net = Net::new(3, 1);
     let chat = net.chat();
     let id = EventId::new(T0, [5; 16]);
@@ -129,7 +132,11 @@ fn queries_from_non_members_and_for_unknown_epochs_are_dropped_silently() {
             vec![lookup(ChatId::from_bytes([9; 32]), id)],
         )],
     );
-    assert!(net.poll(0).is_empty());
+    let r = answers_to(&mut net, 0, 1);
+    assert!(
+        r.len() == 1 && status(&r[0]) == Some(Status::NotAvailable),
+        "{r:?}"
+    );
     // Nothing was allocated for them.
     assert!(net.devs[0].node.t.peers.get(&outsider).is_none());
 }
