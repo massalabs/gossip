@@ -2334,6 +2334,10 @@ Each entry of the list is a pair `[chat_id, id]` with its kind (§13.5), so the 
 epoch each entry belongs to.
 
 - For an epoch from which the requester is a removed peer, only deletion events are listed (§10.4).
+- A leave or a dissolve message is listed only when the requester is a member of the epoch it
+  names.
+  *Why:* it is a membership fact of that epoch, which only its members may learn, like every other
+  object of it.
 - An epoch with no retained events has no tips, so the size of a scan follows what is pending, not
   the number of membership changes.
 - An entry whose `chat_id` the requester does not hold is handled as a root notice (§4.6); it is
@@ -2371,7 +2375,15 @@ needed, but new content is never starved behind a long run of deletions.
   carries.
 - A valid empty end page is `count = 0, entries = []`.
 - An empty page with a positive count is invalid.
-- Out-of-range offsets are rejected.
+- A request whose offset is past the end of the frozen list is answered `malformed`.
+  *Why:* an empty last page or `restart` would hide the requester's own bug, which only it can fix.
+- A page with one entry that cannot be read (an ID of the wrong length) is malformed as a whole
+  (§13.5): nothing of it is used, its sender is penalised once, and the scan ends as for any
+  invalid page.
+- The requester treats a page whose `offset + count` differs from the total implied by an earlier
+  page of the same scan as malformed: the scan ends and the sender is penalised.
+  *Why:* the list is frozen, so a moving total means entries skipped or repeated; an honest
+  responder whose list is gone answers `restart` instead.
 - Any in-range offset is accepted; pages need not align to 128, since byte limits may shorten them.
 - Pages carry IDs only; the requester fetches the unknown items.
 - The requester MUST reject a page whose `scanId` or `offset` differs from the correlated request
@@ -2740,6 +2752,13 @@ Each entry is `[chat_id, kind, id]`:
 Entries may mix epochs, and each is authorized independently.
 Page entries of a tips scan (§12.1) use the same form.
 
+One entry that cannot be read (an ID of the wrong length for its kind, a `chat_id` that is not 32
+bytes) makes the whole notice or page malformed: nothing of it is used, and the sender is penalised
+once, as for one malformed item.
+*Why:* version-1 input that is not valid is rejected and counts against its sender. An honest
+device builds these lists from identifiers it already checked, so it never sends such an entry and
+cannot be framed by one; a spoiled list gives a hostile peer nothing more than sending no list.
+
 ### 13.6 Neighbor and leave-request frames
 
 ```text
@@ -2768,9 +2787,10 @@ it; it is never relayed and never answered.
 - Frames for unknown, unaccepted or closed epochs are dropped without staging.
   Three things are exempt and follow their own paths: a root (§4.7, §4.8), a root notice (§4.6) and
   a page entry of an unknown epoch (§12.1).
-- An unparseable container or frame is rejected entirely.
-  Otherwise, invalid entries are isolated, answered with a permitted status after authorization,
-  and the other entries are processed without renumbering.
+- An unparseable container or frame is rejected entirely, and so is a notice or a page with one
+  entry that cannot be read (§13.5).
+  The entries of a query are isolated instead: an invalid entry is answered `malformed` after
+  authorization, and the other entries get their normal answers, without renumbering.
 
 ### 13.8 Versions and extensions
 
@@ -3604,6 +3624,10 @@ listing them would only spend page space.
 - **B:** also list kicks, after the leaves.
 - **C:** list live leaves only; the dissolve message spreads by notices alone.
 
+*Settled:* choice A, frozen as coded. §12.1 also states the two rules that were in the code only:
+a leave or dissolve is listed only for a requester that is a member of the epoch it names, and a
+page whose total moves is malformed.
+
 ### D.2 What a device does when it receives its own signed leave (§5.3)
 
 *Current text:* none.
@@ -3941,24 +3965,36 @@ The code uses the nested form, which is the literal reading.
 
 *Found during review of the implementation.*
 
-*Current text:* §13.7 says invalid entries are isolated, which is clear for query entries only.
-The code refuses a whole notice or page when one entry has an ID of the wrong length.
+*Current text (before this was settled):* §13.7 said invalid entries are isolated, which is clear
+for query entries only. The code skipped an entry with an ID of the wrong length and used the
+others.
 
-- **A (recommended):** the invalid entry is skipped and the others are used; the sender is
-  penalised as for one malformed item.
+- **A:** the invalid entry is skipped and the others are used; the sender is penalised as for one
+  malformed item.
 - **B:** the whole frame is refused.
+
+*Settled:* choice B for notices and pages (§13.5, §13.7, §12.1): nothing of the list is used, the
+sender is penalised once, a scan in progress ends as for an invalid page. Why: version-1 input that
+is not valid is rejected and counts against its sender; an honest device builds these lists from
+identifiers it already checked, so it never sends one and cannot be framed; a spoiled list gives a
+hostile peer nothing more than sending no list. A query is unchanged: an entry that cannot be read
+gets `malformed`, the others their normal answers.
 
 ### D.24 A frame that holds two kinds (§13.1)
 
 *Found during review of the implementation.*
 
-*Current text:* "each frame holds exactly one kind".
+*Current text (before this was settled):* "each frame holds exactly one kind".
 Protobuf lets an encoder write two cases of one `oneof`, and decoders keep the last.
-The code accepts this and keeps the last.
+The code now refuses it at every level, as choice A says.
 
 - **A (recommended):** a second, different case of the same `oneof` makes the message malformed,
   for every `oneof` of the schema.
 - **B:** the last case wins, and §1 says so.
+
+*Settled:* choice A, as coded. Why: a stock protobuf decoder keeps the last case and another
+decoder may keep the first, so two implementations could read different messages from the same
+bytes.
 
 ### D.25 Arithmetic near the top of the integer range (§1, §7.2)
 
@@ -3971,6 +4007,9 @@ for good, or temporarily invalid.
 - **A (recommended):** widened arithmetic is required for time bounds, so the outcome is the same
   everywhere.
 - **B:** leave the text as it is; the values concerned are not reachable in practice.
+
+*Settled:* choice A, as coded: time bounds use exact 128-bit arithmetic, so every device reaches the
+same outcome at the top of the range.
 
 ### D.26 Several scheduled deletions of one message (§7.4)
 
@@ -4169,6 +4208,9 @@ only an ID of the wrong length is skipped.
 
 - **A (recommended):** "entries it carries" means entries as received, skipped ones included.
 - **B:** a page with any invalid entry is refused whole (D.23, choice B).
+
+*Settled:* choice B, with D.23: no entry is ever skipped, so the question no longer arises, and the
+count of skipped entries is gone.
 
 
 ### D.38 A lane that is still scanning at its turn (§12.3)
@@ -4401,6 +4443,9 @@ silent toward a peer that is not a member of a held epoch.
   for an unheld anchor. The code does this.
 - **B:** silence in both cases (an honest member then cannot tell "not held" from a lost message).
 
+*Settled:* choice A, as coded. A device no longer active in the group answers a tips scan the same
+way (D.74).
+
 ### D.52 `busy` without a bound (§11.4, §13.4, §17.4)
 
 *Found during review of the implementation.*
@@ -4576,6 +4621,8 @@ events, because a tip list of the older epoch names none.
 - **A (recommended):** a tip list carries a root entry for the responder's current epoch when the
   requester is a member of that epoch and it is not the anchor. The code does this.
 - **B:** rely on root notices and shared-chats scans.
+
+*Settled:* choice A, as coded.
 
 ### D.65 A kick or dissolve held before its epoch is current (§5.4, §5.8)
 
