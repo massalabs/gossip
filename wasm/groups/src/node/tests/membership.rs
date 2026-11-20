@@ -5015,3 +5015,49 @@ fn an_archive_answers_a_chat_lookup_by_reference_as_by_id() {
     );
     assert_eq!(by_ref, by_id);
 }
+
+/// §12.1, §5.8, D.74: a device whose group is dissolved, in either form, answers a member's
+/// tips scan with a page that lists only the dissolve message (and the root of its current
+/// epoch when it is not the anchor): no message event, which nobody will give any more.
+#[test]
+fn a_dissolved_group_answers_a_tips_scan_with_its_dissolve_only() {
+    for must_delete in [false, true] {
+        let (mut net, g) = founded(3);
+        net.say(1, &g, "before");
+        net.run(MIN);
+        net.offline[2] = true;
+        let now = net.now;
+        let s = signer(0);
+        let dev = &mut net.devs[0];
+        dev.node
+            .dissolve_group(&mut dev.store, &s, g, must_delete, now, &mut net.rng)
+            .unwrap();
+        net.run(MIN);
+        assert!(
+            matches!(
+                net.summary(1, &g).map(|s| s.status),
+                Some(MyStatus::Dissolved { .. })
+            ),
+            "must_delete {must_delete}"
+        );
+        net.offline[2] = false;
+        let answers = answers_of(
+            &mut net,
+            1,
+            2,
+            vec![QueryOp::TipsScan {
+                anchor: g,
+                scan_id: crate::ids::ScanId::from_bytes([4; 32]),
+                offset: 0,
+            }],
+        );
+        let [(0, ResponseResult::Page(page))] = &answers[..] else {
+            panic!("must_delete {must_delete}: {answers:?}");
+        };
+        let kinds: Vec<EntryItem> = page.entries.iter().map(|e| e.item).collect();
+        assert!(
+            matches!(&kinds[..], [EntryItem::Dissolve(_)]),
+            "must_delete {must_delete}: {kinds:?}"
+        );
+    }
+}
