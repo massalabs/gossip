@@ -236,6 +236,12 @@ impl Node {
             Target::Removal(m) if m == self.me && !self.installed(&key.chat_id) => self
                 .held_root(&key.chat_id)
                 .is_some_and(|r| r.is_member(peer)),
+            // A signed object may be asked of a removed peer of its epoch that announced it
+            // (§10.4): the object proves itself whoever carries it (see `receive_signed`).
+            Target::Object(..) => self
+                .epochs
+                .get(&key.chat_id)
+                .is_some_and(|e| e.root.is_member(peer)),
             _ => self.may_receive(&key.chat_id, peer, false),
         }
     }
@@ -279,6 +285,19 @@ impl Node {
                         .collect()
                 })
                 .unwrap_or_default(),
+            // The members that may receive anything of the epoch, and a removed peer that
+            // announced the object (see `task_candidate_ok`).
+            Target::Object(..) => {
+                let mut pool = self.eligible(&key.chat_id);
+                let announcers: Vec<GossipId> = task
+                    .candidates
+                    .iter()
+                    .filter(|(p, c)| c.trigger.is_some() && !pool.contains(p))
+                    .map(|(p, _)| *p)
+                    .collect();
+                pool.extend(announcers);
+                pool
+            }
             _ => self.eligible(&key.chat_id),
         }
     }
