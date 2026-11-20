@@ -4551,6 +4551,8 @@ GossipID serializes the parsed keys again.
 Bytes that are not the canonical encoding therefore pass the check, and the same owner keys could
 give several root IDs.
 The code refuses any input that does not equal the re-serialized keys.
+The `auth` parser no longer accepts extra bytes or another encoding of the keys either; the check
+of the groups crate stays as a second line of defence.
 
 - **A (recommended):** state that the owner field and key answers MUST be the canonical bincode
   encoding, and that a receiver MUST refuse bytes that differ from the re-serialized keys.
