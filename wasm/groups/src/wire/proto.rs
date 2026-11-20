@@ -902,6 +902,8 @@ static GROUP_ROOT: Schema = Schema {
         (9, Kind::Uint64),
         (10, Kind::Bytes),
         (11, Kind::Uint64),
+        (12, Kind::Uint64),
+        (13, Kind::RepeatedMsg(&SETTINGS_ENTRY)),
     ],
     oneofs: &[],
     limits: &[
@@ -914,6 +916,11 @@ static GROUP_ROOT: Schema = Schema {
             field: 4,
             max: MAX_MEMBERS,
             name: "members",
+        },
+        Limit {
+            field: 13,
+            max: MAX_SETTINGS_ENTRIES,
+            name: "settings",
         },
     ],
 };
