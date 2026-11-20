@@ -1341,6 +1341,34 @@ impl Node {
         Ok(())
     }
 
+    /// The group `group` is active again: each invitation that rejoins it is decided again
+    /// by `continuation`, as a root arriving now would be (§4.8, §5.10). Why: two roots that
+    /// both continue the epoch the device was kicked from are both invitations that rejoin
+    /// it; once the user accepts one, the other continues an active group, and a root that
+    /// arrives after the accept is adopted and announced. Left an invitation, it stayed one
+    /// for good, so the order of arrival decided the end state.
+    pub(crate) fn reconsider_rejoins(&mut self, group: ChatId) {
+        let group = self.group_of(&group);
+        let rejoining: Vec<ChatId> = self
+            .t
+            .epochs
+            .iter()
+            .filter(|(_, r)| {
+                matches!(&r.status, EpochStatus::Invitation(i)
+                    if i.rejoins.is_some_and(|g| self.group_of(&g) == group))
+            })
+            .map(|(c, _)| *c)
+            .collect();
+        for c in rejoining {
+            if let Some(r) = self.t.epochs.get_mut(&c)
+                && let EpochStatus::Invitation(i) = &mut r.status
+            {
+                i.rejoins = None;
+            }
+            self.ri.dirty.insert(c);
+        }
+    }
+
     fn try_adopt_invitation(
         &mut self,
         cx: &mut Cx<'_>,

@@ -709,6 +709,12 @@ Before prompting, it therefore looks up the unmatched parents (§12.7):
   *Why:* the same root in the same group state must end the same way whatever the order in which
   roots arrive; otherwise a waiting device that got the child before its parent prompted the user
   with an old epoch it would have kept silently in the other order;
+- whenever a group the device was no longer active in becomes active again (the user accepts an
+  invitation to rejoin it, or a later root), each other invitation to rejoin that group is decided
+  again the same way: it now continues an active group, so it is adopted under case 2.
+  *Why:* two roots that both continue the epoch the device was kicked from are both invitations to
+  rejoin; a root that arrives after the user accepted one of them is adopted under case 2, so one
+  that arrived before must end the same way rather than stay an invitation for good;
 - during the first `PROMPT_DELAY` (five minutes) after receiving the root, the invitation prompt is
   shown only on an explicit answer: the **owner** of the root answers "not available", or three
   distinct members do;

@@ -621,8 +621,10 @@ impl Node {
     }
 
     /// The group `group` is active again: its lookups that waited are ranked again (see
-    /// `schedule`).
+    /// `schedule`), and the invitations that rejoin it are decided again (see
+    /// `group::reconsider`).
     pub(crate) fn resume_lookups(&mut self, group: ChatId) {
+        self.reconsider_rejoins(group);
         let keys: Vec<TaskKey> = self
             .t
             .tasks
