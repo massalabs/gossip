@@ -827,16 +827,26 @@ export class GroupService {
     seeker: Uint8Array;
     ciphertext: Uint8Array;
   }[] = [];
+  /** The last session status reported for each peer. */
+  private statuses = new Map<string, SessionStatus>();
   private readonly onSessionStatus = (p: {
     contactUserId: string;
     status: SessionStatus;
   }) => {
-    // Only the session state: a renewal is reported by SESSION_RENEWED.
+    const before = this.statuses.get(p.contactUserId);
+    this.statuses.set(p.contactUserId, p.status);
+    // A peer whose session becomes active again after it was not (answered
+    // after a reset of ours, such as one restored from a backup) is scanned
+    // at once, as after a renewal: what each side missed meanwhile is found.
+    // A renewal of an active session is reported by SESSION_RENEWED.
+    const reconnected =
+      p.status === SessionStatus.Active &&
+      before !== undefined &&
+      before !== SessionStatus.Active;
     void this.run(node => {
-      node.set_session(
-        decodeUserId(p.contactUserId),
-        p.status === SessionStatus.Active
-      );
+      const peer = decodeUserId(p.contactUserId);
+      node.set_session(peer, p.status === SessionStatus.Active);
+      if (reconnected) node.peer_reconnected(peer, this.now());
     }).catch(() => logger.error('session status not applied'));
   };
   private readonly onSessionRenewed = (d: { contactUserId: string }) => {
