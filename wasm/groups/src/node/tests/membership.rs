@@ -2324,6 +2324,88 @@ fn a_removed_peer_is_told_of_its_removal_by_any_query_notice_or_event_naming_the
     assert!(wrong.is_empty(), "(case, kicks sent, expected): {wrong:?}");
 }
 
+/// §10.4, settled: a removed peer's message events are dropped, but the signed objects it
+/// sends and announces are accepted, and the device fetches from it what it announced. Carol
+/// (1) misses the kick of Dave (2) from the first epoch; Bob (3) holds it, is removed in the
+/// third epoch without learning it, and is the only one online to give it.
+#[test]
+fn a_signed_object_from_a_removed_peer_is_accepted_and_fetched_from_it() {
+    let setup = || {
+        let (mut net, g) = founded(4);
+        net.offline[1] = true;
+        let e2 = net
+            .change(
+                0,
+                g,
+                GroupChange::Successor {
+                    add: vec![],
+                    remove: vec![gid(2)],
+                    name: None,
+                },
+            )
+            .unwrap();
+        net.exchange();
+        net.offline[3] = true;
+        let e3 = net
+            .change(
+                0,
+                e2,
+                GroupChange::Successor {
+                    add: vec![],
+                    remove: vec![gid(3)],
+                    name: None,
+                },
+            )
+            .unwrap();
+        net.exchange();
+        // Carol gets the two roots alone, from the owner.
+        for c in [e2, e3] {
+            let root = net.devs[0].node.root(&c).unwrap();
+            let blob = wire::encode_event_blob(&EventObject::Root(Box::new(root))).unwrap();
+            net.recv_frames_m(1, 0, &[Frame::Event(blob)]);
+        }
+        assert_eq!(net.current(1, &g), Some(e3));
+        assert_eq!(net.current(3, &g), Some(e2), "Bob does not know");
+        net.offline = vec![true, false, true, false];
+        let key = (
+            g,
+            crate::wire::SignedKind::Kick,
+            *crate::hash::kick_id(&g, &gid(2)).as_bytes(),
+        );
+        assert!(!net.devs[1].node.t.signed.contains(&key));
+        assert!(net.devs[3].node.t.signed.contains(&key));
+        (net, g, key)
+    };
+    // Announced by Bob and fetched from Bob.
+    let (mut net, g, key) = setup();
+    net.recv_frames_m(
+        1,
+        3,
+        &[Frame::Notice(Notice {
+            entries: vec![Entry {
+                chat_id: g,
+                item: EntryItem::Kick(crate::hash::kick_id(&g, &gid(2))),
+            }],
+            skipped: 0,
+        })],
+    );
+    net.run(2 * MIN);
+    assert!(net.devs[1].node.t.signed.contains(&key), "fetched from Bob");
+    // Pushed in full by Bob.
+    let (mut net, _, key) = setup();
+    let blob = net.devs[3]
+        .node
+        .t
+        .signed
+        .get(&key)
+        .unwrap()
+        .object
+        .to_event_object();
+    let blob = wire::encode_event_blob(&blob).unwrap();
+    net.recv_frames_m(1, 3, &[Frame::Event(blob)]);
+    assert!(net.devs[1].node.t.signed.contains(&key), "pushed by Bob");
+}
+
 /// Points `op` at `chat`, recomputing an ID derived from the epoch.
 fn set_chat(op: &mut QueryOp, chat: ChatId) {
     match op {
