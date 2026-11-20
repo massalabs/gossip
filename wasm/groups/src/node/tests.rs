@@ -8,6 +8,7 @@ pub(crate) mod membership;
 mod neighbors;
 mod packing;
 mod queries;
+mod references;
 mod regressions;
 mod removal_scan;
 mod retrieval;
