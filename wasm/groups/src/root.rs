@@ -1335,7 +1335,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             modified(&root, |p| p.owner.push(0)).map(|_| ()),
-            Err(Error::NonCanonicalKeys)
+            Err(Error::InvalidKeys)
         );
         assert_eq!(
             modified(&root, |p| p.owner.truncate(100)).map(|_| ()),
