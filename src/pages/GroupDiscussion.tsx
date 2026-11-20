@@ -389,10 +389,15 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
               message={item}
               isOutgoing={item.author === me}
               authorName={memberName(item.author)}
+              // The target as the SDK read it from its own timeline, in this
+              // chat or another; shown once the device holds it, never asked
+              // for because it is displayed.
               replyPreviews={item.replyTo.map(r => {
-                const m = r.epochId
-                  ? byKey.get(`${r.epochId}:${r.syncObjId}`)
-                  : undefined;
+                const m =
+                  r.message ??
+                  (r.epochId
+                    ? byKey.get(`${r.epochId}:${r.syncObjId}`)
+                    : undefined);
                 return m ? messageText(m, t) : null;
               })}
               canWrite={canWrite}
