@@ -1506,6 +1506,20 @@ impl Node {
     /// Removes the roots fetched as parents for the invitation `top` (§4.8), with their
     /// tasks, unless another held root still names them. Returns those removed, with the
     /// reference of each.
+    /// Drops the roots fetched as parents of the invitation `top`, which the user refused
+    /// (declined, or "Ignore and Delete"), each leaving a closed-chat marker with its
+    /// reference, as the invitation does (§4.8, §5.2, §14.2): a copy of one is refused, and a
+    /// reply naming one is placed (§7.6) as while the invitation was not answered. A parent
+    /// that something else the device holds still names is kept ([`Node::drop_fetched_for`]).
+    ///
+    /// Why: the member lists and names of the earlier epochs of a chat the user refused must
+    /// not stay on the device as hidden records that nothing points to.
+    pub(crate) fn drop_refused_parents(&mut self, top: ChatId) {
+        for (parent, reference) in self.drop_fetched_for(top) {
+            self.put_marker(parent, MarkerKind::Closed, Some(reference));
+        }
+    }
+
     pub(crate) fn drop_fetched_for(&mut self, top: ChatId) -> Vec<(ChatId, RefChatId)> {
         let fetched: BTreeSet<ChatId> = self
             .t

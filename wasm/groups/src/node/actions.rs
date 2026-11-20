@@ -271,6 +271,18 @@ impl Node {
                 return Err(NodeError::UnknownEpoch);
             }
             let g = n.group_of(&group);
+            // "Ignore and Delete" on an invitation not answered: the roots fetched as its
+            // parents go too, as on a decline (§4.8, §14.2). Why: the action meant to leave the
+            // least trace must not leave the earlier epochs' member lists behind.
+            let invitations: Vec<ChatId> =
+                n.t.epochs
+                    .iter()
+                    .filter(|(_, r)| r.group == g && matches!(r.status, EpochStatus::Invitation(_)))
+                    .map(|(c, _)| *c)
+                    .collect();
+            for top in invitations {
+                n.drop_refused_parents(top);
+            }
             n.close_group(cx, g, true);
             Ok(())
         })
@@ -386,11 +398,8 @@ impl Node {
             n.t.events.remove(&(chat, ChangeKind::Invitation));
             n.drop_tasks_of(&[chat]);
             // The roots fetched as its parents go with it, each leaving a closed-chat marker
-            // with its reference, as the invitation does: a copy of one is refused, and a
-            // reply naming one is placed (§7.6) as while the invitation was not answered.
-            for (parent, reference) in n.drop_fetched_for(chat) {
-                n.put_marker(parent, MarkerKind::Closed, Some(reference));
-            }
+            // with its reference, as the invitation does.
+            n.drop_refused_parents(chat);
             match choice {
                 LeaveChoice::Signed => {
                     n.send_leave(cx, signer, &rec.root)?;
