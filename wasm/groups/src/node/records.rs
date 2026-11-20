@@ -993,7 +993,7 @@ pub struct SignedRecord {
 /// A closed-chat or dissolved marker (§14.2): kept under the chat ID, with the reference of
 /// the root it closes, computed when it was recorded while the root was still held (32
 /// bytes, local only). A marker stored before the reference was kept has none and stays
-/// valid.
+/// valid; it takes the reference of the first root it refuses (the chat ID binds it).
 ///
 /// Why the reference: with the chat ID only, a reply naming that chat made the device look
 /// the reference up (§7.6, §12.7); the root came back and was dropped, and the next reply

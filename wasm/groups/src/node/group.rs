@@ -459,8 +459,12 @@ impl Node {
     ) -> Result<Answer, NodeError> {
         let id = root.chat_id();
         match self.marker_kind(&id) {
-            Some(MarkerKind::Dissolved) => return Ok(Answer::Refused),
+            Some(MarkerKind::Dissolved) => {
+                self.marker_reference(&id, root.ref_chat_id());
+                return Ok(Answer::Refused);
+            }
             Some(MarkerKind::Closed | MarkerKind::ClosedFrom(_)) if via != Via::Direct => {
+                self.marker_reference(&id, root.ref_chat_id());
                 return Ok(Answer::Refused);
             }
             _ => {}
@@ -1500,8 +1504,9 @@ impl Node {
     }
 
     /// Removes the roots fetched as parents for the invitation `top` (§4.8), with their
-    /// tasks, unless another held root still names them.
-    pub(crate) fn drop_fetched_for(&mut self, top: ChatId) {
+    /// tasks, unless another held root still names them. Returns those removed, with the
+    /// reference of each.
+    pub(crate) fn drop_fetched_for(&mut self, top: ChatId) -> Vec<(ChatId, RefChatId)> {
         let fetched: BTreeSet<ChatId> = self
             .t
             .epochs
@@ -1511,17 +1516,19 @@ impl Node {
             })
             .map(|(c, _)| *c)
             .collect();
+        let mut dropped = Vec::new();
         for c in &fetched {
             let needed = self
                 .named_by_of(c)
                 .iter()
                 .any(|x| *x != top && !fetched.contains(x));
-            if !needed {
-                self.take_record(c);
+            if !needed && let Some(rec) = self.take_record(c) {
                 self.t.events.remove(&(*c, ChangeKind::Invitation));
                 self.drop_tasks_of(&[*c]);
+                dropped.push((*c, rec.root.ref_chat_id()));
             }
         }
+        dropped
     }
 
     /// Drops the retrieval tasks keyed by the given epochs.

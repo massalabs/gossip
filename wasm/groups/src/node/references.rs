@@ -100,6 +100,17 @@ impl Node {
         self.t.markers.insert(chat, Marker { kind, reference });
     }
 
+    /// A root was refused for the marker of `chat`: a marker stored before markers kept a
+    /// reference takes the one of that root (its chat ID binds it, §4.5).
+    pub(crate) fn marker_reference(&mut self, chat: &ChatId, reference: RefChatId) {
+        let Some(m) = self.t.markers.get(chat).copied() else {
+            return;
+        };
+        if m.reference.is_none() {
+            self.put_marker(*chat, m.kind, Some(reference));
+        }
+    }
+
     /// Removes the marker of `chat`.
     pub(crate) fn take_marker(&mut self, chat: &ChatId) -> Option<Marker> {
         let m = self.t.markers.remove(chat)?;
