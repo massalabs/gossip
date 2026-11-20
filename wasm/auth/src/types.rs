@@ -558,4 +558,53 @@ mod tests {
         );
         assert_eq!(pub_keys.evm_public_key, deserialized.evm_public_key);
     }
+
+    fn canonical_public_key_bytes() -> Vec<u8> {
+        let root_secret = StaticRootSecret::from_passphrase(b"canonical public keys");
+        let (pub_keys, _) = derive_keys_from_static_root_secret(&root_secret);
+        pub_keys.to_bytes()
+    }
+
+    #[test]
+    fn test_user_public_keys_from_bytes_accepts_exact_encoding() {
+        let bytes = canonical_public_key_bytes();
+        let keys = UserPublicKeys::from_bytes(&bytes).expect("exact encoding is accepted");
+        assert_eq!(keys.to_bytes(), bytes);
+    }
+
+    #[test]
+    fn test_user_public_keys_from_bytes_refuses_trailing_bytes() {
+        let bytes = canonical_public_key_bytes();
+        for extra in [&[0u8][..], &[0xffu8; 64][..]] {
+            let mut padded = bytes.clone();
+            padded.extend_from_slice(extra);
+            assert!(
+                UserPublicKeys::from_bytes(&padded).is_err(),
+                "{} trailing bytes accepted",
+                extra.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_user_public_keys_from_bytes_refuses_truncated_bytes() {
+        let bytes = canonical_public_key_bytes();
+        for cut in [bytes.len() - 1, bytes.len() / 2, 0] {
+            assert!(
+                UserPublicKeys::from_bytes(&bytes[..cut]).is_err(),
+                "bundle cut to {cut} bytes accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn test_user_public_keys_from_bytes_refuses_wider_length_prefix() {
+        // the DSA key's length 1952 is written as 251 then a u16; bincode also reads
+        // it written as 252 then a u32, an encoding of the same keys with other bytes
+        let bytes = canonical_public_key_bytes();
+        assert_eq!(&bytes[..3], &[251, 0xa0, 0x07]);
+        let mut wider = vec![252, 0xa0, 0x07, 0, 0];
+        wider.extend_from_slice(&bytes[3..]);
+        assert!(UserPublicKeys::from_bytes(&wider).is_err());
+    }
 }
