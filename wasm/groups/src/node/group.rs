@@ -509,8 +509,10 @@ impl Node {
             self.failed_announcement(cx, &from);
             return Ok(Answer::Invalid);
         }
-        // Step 6: the held roots and closed-chat markers its commitments name.
-        let candidates: Vec<ChatId> = self
+        // Step 6: the held roots and closed-chat markers its commitments name, each once: a
+        // closed epoch delivered again in full is held as an invitation beside its marker,
+        // and counted twice it would make case 3 below take one closed parent for two.
+        let candidates: BTreeSet<ChatId> = self
             .t
             .epochs
             .keys()
