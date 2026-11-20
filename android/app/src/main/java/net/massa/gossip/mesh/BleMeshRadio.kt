@@ -29,7 +29,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.ParcelUuid
 import android.os.SystemClock
-import android.util.Log
+import net.massa.gossip.DebugLog
 import androidx.core.content.ContextCompat
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -158,7 +158,7 @@ class BleMeshRadio(
 
     private fun startRadio() {
         if (!isAdapterOn()) {
-            Log.i(TAG, "Bluetooth is off; waiting for it")
+            DebugLog.i(TAG, "Bluetooth is off; waiting for it")
             return
         }
         try {
@@ -168,7 +168,7 @@ class BleMeshRadio(
             scheduleRotation()
             handler.postDelayed(watchdog, WATCHDOG_INTERVAL_MS)
         } catch (e: SecurityException) {
-            Log.w(TAG, "Bluetooth permission missing", e)
+            DebugLog.w(TAG, "Bluetooth permission missing", e)
             stopRadio()
         }
     }
@@ -190,7 +190,7 @@ class BleMeshRadio(
             pendingPeripheral.clear()
             gattServer?.close()
         } catch (e: SecurityException) {
-            Log.w(TAG, "Bluetooth permission missing while stopping", e)
+            DebugLog.w(TAG, "Bluetooth permission missing while stopping", e)
         }
         gattServer = null
         serverCharacteristic = null
@@ -251,7 +251,7 @@ class BleMeshRadio(
 
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartFailure(errorCode: Int) {
-            Log.w(TAG, "Advertising failed: $errorCode")
+            DebugLog.w(TAG, "Advertising failed: $errorCode")
             handler.post { advertising = false }
         }
     }
@@ -412,7 +412,7 @@ class BleMeshRadio(
         }
 
         override fun onScanFailed(errorCode: Int) {
-            Log.w(TAG, "Scan failed: $errorCode")
+            DebugLog.w(TAG, "Scan failed: $errorCode")
             handler.post { scanning = false }
         }
     }
@@ -480,7 +480,7 @@ class BleMeshRadio(
                 pendingCentral[address] = Pending(SystemClock.elapsedRealtime(), gatt)
             } catch (e: IllegalArgumentException) {
                 // the exception message holds the address: not logged
-                Log.w(TAG, "Bad address from scan")
+                DebugLog.w(TAG, "Bad address from scan")
             }
         }
     }
@@ -757,7 +757,7 @@ class BleMeshRadio(
                     try {
                         bluetoothManager?.adapter?.getRemoteDevice(address)?.let { gattServer?.cancelConnection(it) }
                     } catch (e: IllegalArgumentException) {
-                        Log.w(TAG, "Bad pending address")
+                        DebugLog.w(TAG, "Bad pending address")
                     }
                 }
             }

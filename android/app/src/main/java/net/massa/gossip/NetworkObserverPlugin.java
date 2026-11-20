@@ -6,7 +6,6 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.os.PowerManager;
-import android.util.Log;
 
 import androidx.annotation.NonNull;
 
@@ -115,10 +114,10 @@ public class NetworkObserverPlugin extends Plugin {
             connectivityManager.registerNetworkCallback(request, networkCallback);
             isObserving = true;
             
-            Log.d(TAG, "Started observing network changes");
+            DebugLog.d(TAG, "Started observing network changes");
             call.resolve();
         } catch (Exception e) {
-            Log.e(TAG, "Failed to start network observer", e);
+            DebugLog.e(TAG, "Failed to start network observer", e);
             call.reject("Failed to start network observer", e);
         }
     }
@@ -139,10 +138,10 @@ public class NetworkObserverPlugin extends Plugin {
             isObserving = false;
             releaseWakeLock();
             
-            Log.d(TAG, "Stopped observing network changes");
+            DebugLog.d(TAG, "Stopped observing network changes");
             call.resolve();
         } catch (Exception e) {
-            Log.e(TAG, "Failed to stop network observer", e);
+            DebugLog.e(TAG, "Failed to stop network observer", e);
             call.reject("Failed to stop network observer", e);
         }
     }
@@ -158,7 +157,7 @@ public class NetworkObserverPlugin extends Plugin {
             scheduleBackgroundSync();
             call.resolve();
         } catch (Exception e) {
-            Log.e(TAG, "Failed to trigger background sync", e);
+            DebugLog.e(TAG, "Failed to trigger background sync", e);
             call.reject("Failed to trigger background sync", e);
         }
     }
@@ -172,7 +171,7 @@ public class NetworkObserverPlugin extends Plugin {
             acquireWakeLock();
             call.resolve();
         } catch (Exception e) {
-            Log.e(TAG, "Failed to acquire wake lock", e);
+            DebugLog.e(TAG, "Failed to acquire wake lock", e);
             call.reject("Failed to acquire wake lock", e);
         }
     }
@@ -246,10 +245,10 @@ public class NetworkObserverPlugin extends Plugin {
             // with the required input data (label, src, event)
             boolean scheduled = BackgroundSyncWorker.scheduleBackgroundRunnerSync(getContext());
             if (!scheduled) {
-                Log.w(TAG, "Background sync could not be scheduled (lock may be held)");
+                DebugLog.w(TAG, "Background sync could not be scheduled (lock may be held)");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to schedule background sync", e);
+            DebugLog.e(TAG, "Failed to schedule background sync", e);
         }
     }
 
@@ -316,7 +315,7 @@ public class NetworkObserverPlugin extends Plugin {
                 wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to acquire wake lock", e);
+            DebugLog.e(TAG, "Failed to acquire wake lock", e);
         }
     }
 
@@ -330,7 +329,7 @@ public class NetworkObserverPlugin extends Plugin {
             }
             wakeLock = null;
         } catch (Exception e) {
-            Log.e(TAG, "Failed to release wake lock", e);
+            DebugLog.e(TAG, "Failed to release wake lock", e);
         }
     }
 
@@ -341,7 +340,7 @@ public class NetworkObserverPlugin extends Plugin {
             try {
                 connectivityManager.unregisterNetworkCallback(networkCallback);
             } catch (Exception e) {
-                Log.e(TAG, "Error unregistering network callback on destroy", e);
+                DebugLog.e(TAG, "Error unregistering network callback on destroy", e);
             }
         }
         releaseWakeLock();

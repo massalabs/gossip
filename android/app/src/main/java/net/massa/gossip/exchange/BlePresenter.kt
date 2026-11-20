@@ -18,7 +18,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.ParcelUuid
-import android.util.Log
+import net.massa.gossip.DebugLog
 import java.util.UUID
 
 /**
@@ -114,7 +114,7 @@ class BlePresenter(
                 }
                 handler.postDelayed(timeout, timeoutMs)
             } catch (e: SecurityException) {
-                Log.w(TAG, "Bluetooth permission missing", e)
+                DebugLog.w(TAG, "Bluetooth permission missing", e)
                 pendingStart = null
                 stopNow()
                 done("PERMISSION_DENIED")
@@ -153,7 +153,7 @@ class BlePresenter(
             // mesh may share the same link with a phone, so none is cancelled.
             server?.close()
         } catch (e: SecurityException) {
-            Log.w(TAG, "Bluetooth permission missing while stopping", e)
+            DebugLog.w(TAG, "Bluetooth permission missing while stopping", e)
         } catch (e: IllegalStateException) {
             // Bluetooth turned off meanwhile: nothing left to stop.
         }
@@ -206,7 +206,7 @@ class BlePresenter(
         }
 
         override fun onStartFailure(errorCode: Int) {
-            Log.w(TAG, "Advertising failed: $errorCode")
+            DebugLog.w(TAG, "Advertising failed: $errorCode")
             handler.post { finishStart("ADVERTISE_FAILED") }
         }
     }
