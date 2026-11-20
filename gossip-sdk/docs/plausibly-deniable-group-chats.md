@@ -865,6 +865,11 @@ epoch is C when all three hold:
 
 A device that holds E and C but not every root between them cannot check condition 3; the leave is
 then not live for it.
+A device knows a root between is missing when a root on the line from E to C names a parent it does
+not hold.
+*Why:* a member added back holds the epoch it left and the root that adds it back, never the epoch
+between that dropped it. Without this rule its own old leave would look live again on its own
+device, and make it read-only in the group it was just added back to.
 
 - While a leave is live, a device announces it (§10.2), lists it in tip scans (§12.1) and fetches
   it when it is announced.
@@ -878,8 +883,24 @@ then not live for it.
 and deletes both together, whether or not the leave is live.
 A leave that is kept but not live has two uses only:
 
-- it is sent in full to the leaver when that leaver contacts the device in that epoch (§10.4);
+- it is sent in full to the leaver when that leaver contacts the device in that epoch (§5.6, §10.4),
+  under the same rules and daily limit as a kick, **even when the leaver was added back since** and
+  is a member of the current epoch;
 - it is returned to a removal lookup (§12.8) from a member of that epoch.
+
+When a device answers a member's tips scan "not available" and is about to tell it of its current
+epoch by a root notice (§12.1), and that root adds the member back after a leave the device keeps,
+it first sends the leave in full, then the root in full, in that order.
+
+*Why send it to a member added back:* a device of that member restored from a backup made before
+the leave still acts as a member of the epoch it left. Given the root that adds it back first, it
+would take that root as the next epoch of its group, silently, as if it had never left. With its
+leave first, it shows the group as left, the root then comes as an invitation joined to the same
+conversation (§4.8 case 4, §5.10), and the user accepts it again. Both go as full objects because
+full objects are carried after the answers of a plaintext, in the order they were queued: a root
+given as a lookup answer would be read before the leave. The same member, up to date, also gets its
+leave back when it looks up history of the epoch it left; it already holds it, so the cost is a few
+repeated sends a day at most.
 
 *Why keep it:* a leaver whose device was restored from an earlier backup does not know it left.
 It still acts as a member of that epoch, and the kept leave, which it can verify with its own key,
@@ -1028,13 +1049,32 @@ owner drops when merging that branch, cannot be sent a kick they could check, an
 - A member that holds a kick announces it by notice `[chat_id, kickId]` like any relayed object
   (§10.2), to members of the new epoch who were in the parent.
   A member that missed the owner's send fetches it by signed-object lookup (§12.8).
-- When a peer that was removed from an epoch sends a retained member any frame for that epoch, the
-  retained member answers with the full kick naming that peer, or with that peer's signed leave
-  (§5.3), whichever it holds (§10.4).
+- When a peer that was removed from an epoch sends a retained member a query, a notice or a
+  message event that names that epoch, the retained member answers with the full kick naming that
+  peer, or with that peer's signed leave (§5.3), whichever it holds (§10.4).
+  - The frames that count: every query that names the epoch (event, sync-object and tips scan,
+    and the three membership lookups: signed object, removal and keys, §12.8, §12.9), every notice
+    entry that names it (of an event, a root or a signed object), a message event in an event
+    frame, and a neighbor request.
+  - Never a response: it answers the retained member's own question, and answering it could start
+    a loop.
+  - Never a frame that names no epoch: a shared-chats scan or a chat lookup (the exception of
+    §4.11 for the last epoch that lists the peer stays).
+  - A lookup whose answer already carries the peer's own kick or leave does not send it a second
+    time.
+  - Only a member active in the group answers this way; a device that is kicked, left, waiting or
+    dissolved sends nothing (§10.4), except that an archive ("Dissolve & Keep archived") still
+    gives a removed peer its own kick or leave.
   It sends this answer at most three times per removed peer per day and per epoch; each retained
   member counts on its own.
+  This daily limit is local policy; the list of frames that count is fixed.
   If it holds neither, it first sends other members a removal lookup (§12.8) and forwards what it
   receives.
+
+  *Why one wide rule:* which frames a later client sends first is local policy and may change,
+  while this list is fixed for the wire version; with every frame that names the epoch counted, a
+  removed peer is always told whatever it sends first. A pushed record is not a question, so it
+  starts no loop.
 
 Retained members stop serving a removed member because of the new root (§10.4), not because of the
 kick; the kick exists to tell the removed member.
@@ -1054,7 +1094,8 @@ epoch has this effect:
   neighbor upkeep;
 - it still applies deletion events for that epoch (§10.4) and drops everything else it receives
   there;
-- it answers queries about that epoch "not available";
+- it answers queries about that epoch exactly as a device that does not hold it would (§10.4):
+  silence to a lookup, "not available" to a tips scan;
 - from then on, every root that lists the device is an **invitation** (§4.8), whatever its parents.
 
 A kick that names an epoch which is not the device's current epoch is ignored, except in the
@@ -1245,6 +1286,14 @@ The device then treats them as one group, with the newer line holding the curren
 - the line "\<owner\> added you back", followed by the new messages.
 
 The read-only state ends and the composer is enabled again.
+
+**History of the earlier epochs.** A member added back fetches the history of the earlier epochs of
+the group that list it, by the ordinary scans and lookups of its group (§12.1, §11.1), and the
+other members serve it, since it is a member of their current epoch (§10.4). It never gets the
+epochs between that left it out: it holds neither their roots nor their secrets.
+*Why:* those epochs are part of its conversation; a device restored from a backup made before it
+left, for example, misses the messages sent in the epoch it left between the backup and the leave.
+*Known limit:* a message it processed and dropped while it was removed is not fetched again (D.79).
 
 ### 5.11 Group name
 
@@ -1438,6 +1487,8 @@ become a contact and to open the chat.
 - An event is not rejected because its known ancestry contains a cycle.
   Traversal collapses strongly connected components into an acyclic condensation; a source
   component with no available child outside it exposes its available members as discovery frontier.
+- A tip is an available event that no available event references as a parent; a pruned child does
+  not hide its parent (§12.1, D.27).
 
 *Why:* bounded parents keep events small while still recording causal context for recovery.
 
@@ -2048,14 +2099,23 @@ There is no exception for messages sent before the removal.
 The device also answers the removed peer with the kick that names it or with that peer's signed
 leave, at most three times per day (§5.6).
 
-**Accepting from a removed peer.** A device drops everything a removed peer sends in the superseded
-epoch: new messages, edits and deletions alike, including deletions of that peer's own messages.
+**Accepting from a removed peer.** A device drops every message event a removed peer sends in the
+superseded epoch: new messages, edits and deletions alike, including deletions of that peer's own
+messages.
 The filter is on the delivering peer, so an event relayed by a member that has not adopted the
 successor yet is still accepted.
 
 *Why:* a removed member must not be able to affect the group any more than it already has, even
 where that costs convergence between devices that had processed different events before adopting
 the successor.
+
+Signed objects are the exception: a root, a kick, a leave or a dissolve message that a removed peer
+sends in full is accepted when valid, its notices of them are acted on, and the device may fetch
+from that peer what it announced.
+*Why:* a signed object proves itself, whoever carries it, and a removed peer cannot forge one.
+Refusing it would lose a membership fact when that peer is the only device online that holds it,
+and would refuse its own leave coming from it. The cost is that a lookup tells that peer this device
+lacked one membership object, which says nothing about messages or about who wrote them.
 
 **Reaching the right peers in an older epoch.** Neighbors are chosen in the current epoch (§10.1).
 
@@ -2076,6 +2136,16 @@ A notice would save nothing.
 applies deletion events for that epoch and drops every other incoming event.
 A device in the waiting state (§5.4), and a device whose group was dissolved (§5.8), drop every
 incoming event.
+
+A device that holds an epoch but is no longer active in its group (kicked, left, waiting for a
+kick, dissolved) answers a member exactly as a device that does not hold the epoch would, query by
+query: silence to an event, sync-object, signed-object, removal or key lookup (no entry at all),
+"not available" to a tips scan (§12.1). It sends a removed peer nothing either (§5.6).
+The exceptions: a dissolved group still serves its roots and its dissolve message (§5.8), and an
+archive ("Dissolve & Keep archived") gives a removed peer its own kick or leave (§12.8).
+*Why:* "not available" would tell a member that this device kept the chat. Silence cannot be told
+apart from a device that deleted the chat or is offline. The cost is one timeout for the asker,
+only until it learns that this device is out.
 
 **Limits.**
 
@@ -2269,8 +2339,14 @@ epoch each entry belongs to.
 - An entry whose `chat_id` the requester does not hold is handled as a root notice (§4.6); it is
   ignored if it matches a closed-chat marker.
 
-**Tips.** A tip is an available event that no known accepted event references as a parent (plus the
+**Tips.** A tip is an available event that no **available** event references as a parent (plus the
 cycle frontier entries of §6.1).
+*Why "available" and not "accepted":* a pruned event answers "not available", so its parent links
+cannot be learned from anyone. Example: E1 creates message 1; X1 creates message 2 with parent E1;
+X2 edits message 2 with parent X1, and every device prunes X1 as superseded. If X1 still hid E1, the
+only tip would be X2; a device that was offline fetches X2, asks for X1, gets "not available"
+everywhere, and never learns E1, which still carries a current message. With "available", E1 is a
+tip again once X1 is pruned (D.27).
 
 **Order.** The responder builds the list before freezing it:
 
@@ -2442,10 +2518,17 @@ that epoch: the answer is the kick, the leave, or both, each as its own response
 or "not available" when the responder holds neither.
 A device uses it when it must answer a removed peer and holds no record for it (§5.6).
 
-- The responder answers only a requester that is a member of the named epoch; other requests are
-  dropped silently.
+- The responder answers only a requester that is a member of the named epoch, and only while its
+  group is active there; other requests are dropped silently, as for an epoch it does not hold
+  (§10.4).
 - It returns the full signed object if it holds it and still serves it (§5.3, §5.6, §5.8), and "not
   available" otherwise.
+- An archive ("Dissolve & Keep archived") answers a removed peer's removal lookup of its **own**
+  record with its kick or leave, as it answers the signed-object lookup of the same record; a lookup
+  of another member's record gets silence.
+  *Why:* the same record gets the same answer whichever way it is asked. The dissolve names a later
+  epoch the removed peer is not in, so nothing else would ever end its membership of the epoch it
+  was removed from. Only its own record is given, so nothing leaks.
 - A returned object MUST hash to the requested ID and pass verification; otherwise it is an invalid
   answer (§11.4).
 
@@ -2453,8 +2536,9 @@ A device uses it when it must answer a removed peer and holds no record for it (
 
 A key query asks for the `UserPublicKeys` of a GossipID, as `[chat_id, gossipId]`.
 
-- The responder answers only if it holds the named epoch and the requester, the responder and the
-  subject are all members of it; other requests are dropped silently.
+- The responder answers only if it holds the named epoch, its group is active there (§10.4), and
+  the requester, the responder and the subject are all members of it; other requests are dropped
+  silently.
 - It returns the keys it holds for that identity, or "not available".
 - The requester MUST check that the returned keys hash to the requested GossipID.
   An answer that does not is invalid, and gets the heaviest penalty of the peer score (§11.8).
@@ -2776,6 +2860,14 @@ Each requested ID consumes one slot when issued.
 | Reply targets per message | 32 (§7.6) |
 
 Every complete frame and every single event, root or signed object MUST fit an empty container.
+For an event, root or signed object this means an event blob of at most 57,307 bytes (D.50), and
+the length compared is that of the blob **as received**. A copy over the limit is malformed and
+counts against the peer that sent it; it names no event to the receiver, so a proper copy of the
+same event from another peer is still accepted.
+*Why the received length:* every receiver sees it and can check it before decoding, so all
+receivers of one copy agree. The canonical length is never longer than the received one, since
+padding, repeated fields and written default values only lengthen an encoding; checking it as well
+refuses nothing more.
 A send is rejected before encryption if either limit would be exceeded.
 Oversized items are rejected by both sender and receiver, never fragmented.
 Size checks use encoded bytes, not characters.
@@ -2792,8 +2884,21 @@ are fixed.
   leaves about 4.5 KiB under the packet ceiling for future growth of the session layer.
 - **Text and metadata** are limits on one message version, checked on creation, on reception and
   on every edit, local-only edits included. An event over either limit is malformed.
-  Metadata is measured as the size of the metadata field in its canonical protobuf encoding,
-  computed from the decoded entries, so that every device obtains the same number.
+  Metadata is measured from the decoded entries, so that every device obtains the same number,
+  as the metadata field with every map entry written in full, its key field and its value field
+  both counted even when empty. For each entry:
+
+  ```text
+  1 + varint(L) + L,   where   L = (1 + varint(len key) + len key) + (1 + varint(len value) + len value)
+  ```
+
+  (one byte of field key, the varint length of the entry, then the key as field 1 and the value as
+  field 2, each with one byte of field key and a varint length); the metadata size is the sum over
+  the entries.
+  *Why both fields always:* some protobuf libraries write an empty key or value and others leave it
+  out. Counting both gives the size of the largest standard encoding, an upper bound for every
+  library, so two implementations agree on an event at the 16,384-byte boundary and neither
+  rejects and penalises what the other accepts.
   A message with both at their limits, 16 parents and 32 reply targets is 33,383 bytes.
 
 Every limit in the table above is fixed for wire version 1 (§2.2): a receiver rejects what exceeds
@@ -3891,6 +3996,8 @@ The cost is a few more events that hold no content.
 
 ### D.27 "Available child" or "accepted child" for tips and the cycle frontier (§6.1, §12.1)
 
+*Settled:* choice B; §6.1 and §12.1 now state it, with the example below as the reason.
+
 *Found during implementation; the recommendation was changed after review.*
 
 *Current text:* the cycle-frontier rule of §6.1 speaks of a component with "no available child"
@@ -4260,6 +4367,11 @@ forever, and one honest device never got an edit the others held.
 
 ### D.50 Largest event against the frame that carries it (§13.10)
 
+*Settled:* choice A. The length compared with 57,307 bytes is that of the event blob as received; a
+copy over it is malformed and counts against its sender, and a proper copy of the same event from
+another peer is still accepted. The canonical length is never longer, so checking it too refuses
+nothing more (§13.10).
+
 *Found during review of the implementation.*
 
 *Current text:* an event is admitted if it fits an empty container as an event frame.
@@ -4422,6 +4534,13 @@ a backup is never told.
 - **B:** the owner also creates a kick for the current epoch.
 
 ### D.62 A member removed while several epochs behind (§5.6)
+
+*Settled:* choice A. The same push serves a member that left and was added back, whose device is
+restored from a backup made before it left: it is sent its kept leave, and, when a member is about
+to tell it of the root that adds it back by a root notice, the leave first and then that root, both
+in full (§5.3 "Keeping"). Why: given the root first, the restored device would take it as its next
+epoch, silently, as if it had never left; with its leave first it shows the group as left and gets
+the root as an invitation to accept again.
 
 *Found by simulation of the implementation.*
 
@@ -4608,6 +4727,25 @@ closed that epoch: silence means yes, a lookup means no.
 
 ### D.74 Removal records and removed peers (§10.4, §12.8, §5.6, §4.11)
 
+*Settled, for inactive devices and removed peers:*
+
+- A device that holds an epoch but is no longer active in its group (kicked, left, waiting,
+  dissolved) answers a member exactly as a device that does not hold the epoch would, query by
+  query: silence to lookups, "not available" to a tips scan; it sends a removed peer nothing.
+  Why: a member must not be able to tell "kept the history" from "deleted the chat" or "offline";
+  the cost is one timeout for the asker, until it learns the device is out. The exceptions stay: a
+  dissolved group serves its roots and its dissolve message; an archive gives a removed peer its own
+  kick or leave; the shared-chats scan rules below.
+- Any query, notice or message event from a removed peer that names the epoch makes a retained
+  member send it its kick or leave, the three membership lookups included; never a response, never a
+  frame that names no epoch; a lookup that already returns the peer's own record does not send it
+  twice; the daily limit is local policy (§5.6). Why: one simple rule, fixed for the wire version,
+  that keeps a removed peer informed whatever frame a later client sends first; a pushed record is
+  no question, so no loop can start.
+- Signed objects and their notices from a removed peer are accepted, and may be fetched from it;
+  only its message events are dropped (§10.4). Why: a signed object proves itself whoever carries
+  it; refusing it would lose a membership fact when that peer is the only one online that holds it.
+
 *Settled, for the shared-chats scan:* the scan lists, for a chat the asker is no longer in, the
 last epoch in which the asker is listed, whether it was removed from it or left it. A lookup of
 that root by that asker is answered, since it was a member of that epoch, and the kick or the kept
@@ -4738,6 +4876,14 @@ they are settled with the rest.*
 - **A (recommended):** state the first three as rules (the code follows them) and the last two as
   known limits.
 - **B:** for the fourth, let a member added back fetch again what it dropped.
+
+*Settled:* choice A. For the third point, an archive gives a removed peer its own kick or leave to a
+removal lookup too, as to a signed-object lookup (§12.8): the same record gets the same answer
+whichever way it is asked, and nothing else would ever end that peer's membership of the epoch it
+was removed from. A member added back fetches the history of the earlier epochs that list it
+(§5.10): what it never processed, such as the messages a device restored from an old backup
+missed, is fetched like any missing event. The fourth point stays a known limit: what it processed
+and dropped while removed is not fetched again.
 
 ### D.80 Points from the first runs of the app (§14.2, §4.8, §5.10, §7.5)
 
