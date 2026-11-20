@@ -20,6 +20,7 @@ CREATE TABLE `groupObjects` (
 	`chatId` text NOT NULL,
 	`syncObjId` text NOT NULL,
 	`fields` text NOT NULL,
+	`shareable` integer NOT NULL,
 	PRIMARY KEY(`ownerUserId`, `chatId`, `syncObjId`)
 );
 --> statement-breakpoint

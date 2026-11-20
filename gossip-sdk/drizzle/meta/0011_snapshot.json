@@ -592,6 +592,13 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "shareable": {
+          "name": "shareable",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         }
       },
       "indexes": {},

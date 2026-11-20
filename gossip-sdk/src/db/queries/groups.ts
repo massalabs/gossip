@@ -23,7 +23,16 @@ export interface GroupBatch {
   removedRows: { chatId: string; eventId: string }[];
   edges: { chatId: string; eventId: string; parents: string }[];
   removedEdges: { chatId: string; eventId: string }[];
-  objects: { chatId: string; syncObjId: string; fields: string }[];
+  /**
+   * `shareable`: whether the device may offer the record's events on its own
+   * initiative (§7.7, §14.1). Always stated: its column has no default.
+   */
+  objects: {
+    chatId: string;
+    syncObjId: string;
+    fields: string;
+    shareable: boolean;
+  }[];
   removedObjects: { chatId: string; syncObjId: string }[];
   node: { kind: string; key: string; fields?: string | null }[];
   erase: string[];
@@ -78,6 +87,7 @@ export class GroupQueries {
         chatId: o.chatId,
         syncObjId: o.syncObjId,
         fields: o.fields,
+        shareable: o.shareable,
       })),
       node: node.map(n => ({ kind: n.kind, key: n.key, fields: n.fields })),
     };
@@ -297,16 +307,24 @@ async function applyBatch(
       );
   }
   for (const o of b.objects) {
+    // Every write states `shareable`, insert and update alike: the column has
+    // no default (§14.1).
     await tx
       .insert(t.groupObjects)
-      .values({ ownerUserId: owner, ...o })
+      .values({
+        ownerUserId: owner,
+        chatId: o.chatId,
+        syncObjId: o.syncObjId,
+        fields: o.fields,
+        shareable: o.shareable,
+      })
       .onConflictDoUpdate({
         target: [
           t.groupObjects.ownerUserId,
           t.groupObjects.chatId,
           t.groupObjects.syncObjId,
         ],
-        set: { fields: o.fields },
+        set: { fields: o.fields, shareable: o.shareable },
       });
   }
   for (const k of b.removedObjects) {
