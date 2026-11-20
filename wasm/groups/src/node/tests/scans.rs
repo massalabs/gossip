@@ -358,7 +358,6 @@ fn the_requester_pages_through_and_fetches_the_listed_events() {
             offset: 0,
             count: 130,
             entries: entries[..128].to_vec(),
-            skipped: 0,
         }),
     );
     let q = sent_queries(&mut net, 0);
@@ -384,7 +383,6 @@ fn the_requester_pages_through_and_fetches_the_listed_events() {
             offset: 128,
             count: 2,
             entries: entries[128..].to_vec(),
-            skipped: 0,
         }),
     );
     assert_eq!(net.devs[0].node.stats.scans_completed, 1);
@@ -405,7 +403,6 @@ fn the_requester_rejects_a_page_of_another_scan_or_offset() {
             offset: 0,
             count: 0,
             entries: vec![],
-            skipped: 0,
         }),
     );
     assert!(net.devs[0].node.score(&member(1)) < 500_000);
@@ -429,7 +426,6 @@ fn the_requester_rejects_a_page_of_another_scan_or_offset() {
             offset: 0,
             count: 3,
             entries: vec![e(1)],
-            skipped: 0,
         }),
     );
     let next = sent_queries(&mut net, 0)
@@ -446,7 +442,6 @@ fn the_requester_rejects_a_page_of_another_scan_or_offset() {
             offset: 1,
             count: 4,
             entries: vec![e(2)],
-            skipped: 0,
         }),
     );
     assert_eq!(net.devs[0].node.stats.scans_ended, 1);
@@ -606,7 +601,6 @@ fn a_random_lane_with_no_non_neighbor_is_skipped_and_a_lane_waits_a_day_after_co
             offset: 0,
             count: 0,
             entries: vec![],
-            skipped: 0,
         }),
     );
     let done = net.now;

@@ -494,7 +494,6 @@ fn a_notice_of_a_held_root_or_an_unknown_leave_fetches_nothing() {
                     item: EntryItem::Leave(crate::LeaveId::from_bytes([1; 32])),
                 },
             ],
-            skipped: 0,
         })],
     );
     assert_eq!(net.devs[0].node.t.tasks.len(), 0);
@@ -508,7 +507,6 @@ fn a_notice_of_a_held_root_or_an_unknown_leave_fetches_nothing() {
                 chat_id: other,
                 item: EntryItem::Root,
             }],
-            skipped: 0,
         })],
     );
     let sent = net.poll_frames(0);

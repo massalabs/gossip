@@ -1456,8 +1456,9 @@ impl Node {
 pub const PENALTY_KEY_ANSWER: u32 = 64;
 /// Penalty of a failed root announcement: large (§11.8, 2). Unused until roots exist.
 pub const PENALTY_ROOT_ANNOUNCEMENT: u32 = 16;
-/// Penalty of an invalid answer or frame, or of skipped entries (§11.4, D.23). Not ranked
-/// by §11.8; placed between a failed root announcement and an unavailable event.
+/// Penalty of an invalid answer or frame, such as a notice or page with an unreadable entry
+/// (§11.4, D.23). Not ranked by §11.8; placed between a failed root announcement and an
+/// unavailable event.
 pub const PENALTY_MALFORMED: u32 = 4;
 /// Penalty of an announced event that is then "not available": small (§11.8, 3).
 pub const PENALTY_UNAVAILABLE: u32 = 1;

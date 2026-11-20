@@ -115,7 +115,6 @@ fn a_lane_pending_with_a_silent_member_does_not_stop_the_other_lanes() {
                     offset,
                     count: 0,
                     entries: vec![],
-                    skipped: 0,
                 };
                 super::retrieval::answer(&mut net, 0, &s, ResponseResult::Page(page));
             }
@@ -946,7 +945,6 @@ fn the_score_does_not_overpunish_honest_answers() {
             chat_id: chat,
             item: EntryItem::Event(c),
         }],
-        skipped: 0,
     };
     super::retrieval::answer(&mut net, 0, s, ResponseResult::Page(page));
     for _ in 0..4 {
@@ -1292,7 +1290,6 @@ fn a_page_that_makes_progress_resets_the_restart_count() {
                 chat_id: chat,
                 item: EntryItem::Event(EventId::new(T0, [round; 16])),
             }],
-            skipped: 0,
         };
         super::retrieval::answer(&mut net, 0, &s, ResponseResult::Page(page));
         s = next(&mut net).expect("next page");

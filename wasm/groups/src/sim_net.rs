@@ -1051,7 +1051,6 @@ impl Sim {
                     item: EntryItem::Event(id),
                 })
                 .collect(),
-            skipped: 0,
         });
         let pt = wire::encode_plaintext(&[n]).expect("notice");
         self.transmit(d, target, pt);
@@ -1077,7 +1076,6 @@ impl Sim {
                             bytes(&mut self.rng),
                         )),
                     }],
-                    skipped: 0,
                 })
             }
             QueryEntry::Op(QueryOp::TipsScan { offset, .. }) => ResponseResult::Page(Page {
@@ -1085,7 +1083,6 @@ impl Sim {
                 offset: *offset,
                 count: 0,
                 entries: Vec::new(),
-                skipped: 0,
             }),
             _ => match self.devs[d].seen.first() {
                 Some(b) if chance(&mut self.rng, 70) => ResponseResult::Event(b.clone()),
@@ -1630,7 +1627,6 @@ fn stubborn_answers(rng: &mut TestRng, chat: &ChatId, plaintext: &[u8]) -> Vec<F
                         chat_id: *chat,
                         item: EntryItem::Event(EventId::new(START, bytes(rng))),
                     }],
-                    skipped: 0,
                 }),
                 QueryEntry::Op(QueryOp::TipsScan { .. }) if roll == 2 => {
                     ResponseResult::Status(Status::Restart)

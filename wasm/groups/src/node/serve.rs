@@ -13,7 +13,7 @@ use super::timing::{
     EXPIRED_SKEW_MS, QUEUED_ANSWERS_PER_PEER, REQUEST_BURST, REQUEST_REFILL_PER_MIN,
     VERSION_NOTICE_INTERVAL_MS, VERSION_NOTICES_PER_PEER, deadline, ignored_query, may_answer,
 };
-use super::{Cx, Node, NodeError, PENALTY_KEY_ANSWER, PENALTY_MALFORMED};
+use super::{Cx, Node, NodeError, PENALTY_KEY_ANSWER};
 use crate::event::{MessageEvent, Payload};
 use crate::ids::{ChatId, EventId, GossipId, SyncObjId};
 use crate::wire::{
@@ -481,10 +481,6 @@ impl Node {
         from: GossipId,
         n: Notice,
     ) -> Result<(), NodeError> {
-        if n.skipped > 0 && self.shares_epoch(&from) {
-            self.stats.invalid += 1;
-            self.penalize(&from, PENALTY_MALFORMED);
-        }
         for e in n.entries {
             let chat = e.chat_id;
             // A removed peer is told of its removal, a former owner of its handover (§5.6),

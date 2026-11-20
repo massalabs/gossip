@@ -794,7 +794,6 @@ impl Node {
         }
         let mut notice = Notice {
             entries: Vec::new(),
-            skipped: 0,
         };
         let mut notice_keys = Vec::new();
         let flush = |notice: &mut Notice,
@@ -817,7 +816,6 @@ impl Node {
                     notice,
                     Notice {
                         entries: Vec::new(),
-                        skipped: 0,
                     },
                 )),
                 core::mem::take(keys),
