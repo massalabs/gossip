@@ -955,6 +955,10 @@ stayed listed, the others waited for a successor that never came, and such devic
 the leave.
 *Known cost:* an owner with a gap can apply an old leave of a member that was added back since, and
 remove that member again. This is visible to everyone, and the owner can add the member back.
+That adding back links the member's device to its conversation only through an epoch over which
+the owner's authority can be verified there (§5.10): the owner of a gap is often a new owner holding
+a former owner's branch, which lists the member latest but which the member's device cannot verify,
+and naming that branch started a second conversation on the member's device.
 
 - While a leave is live, a device announces it (§10.2), lists it in tip scans (§12.1) and fetches
   it when it is announced.
@@ -1392,7 +1396,21 @@ an epoch M never held, and M cannot be given the roots in between: they hold the
 secrets of epochs M was not in.
 
 **The extra parent.** When the owner's device adds back someone who was a member before, it adds
-one more parent commitment to the new root: the last epoch that person was a member of.
+one more parent commitment to the new root: the last epoch that person was a member of over which
+the owner has authority as that person's device judges it (§4.7, D.69): an epoch of the owner
+itself, or of a previous owner whose handover root is among that epoch's own ancestors.
+Among the epochs of the line the new root continues that list the person and meet that condition,
+it is one that no later such epoch continues; of several, the latest by `created_at`, then by chat
+ID.
+If none does, no extra parent is named for that person, and the new root reaches it as an ordinary
+invitation.
+*Why authority:* the person's device links the new root only through a parent over which it can
+verify the owner's authority, and it does not hold the roots between (the new owner's own root that
+resolved a former owner's branch, for instance). A former owner's branch resolved into the new
+owner's line lists the person, but no handover leads to it: named, it left the new root with no
+parent the person could match, and the root started a second conversation on its device
+(membership simulation, seed 22). An epoch from before a handover the person does not hold fails
+the same test on its device, so naming it would link nothing either.
 
 - On M's device, Z then has a parent it holds, so the invitation, once accepted, continues the same
   conversation (§4.8).
@@ -1401,8 +1419,10 @@ one more parent commitment to the new root: the last epoch that person was a mem
 - One extra parent is needed per distinct last epoch among the people added back, within the limit
   of 32 parents.
 
-**Blind spot.** The owner's device must hold X to commit to it.
-An owner who joined the group after M was removed, or who no longer holds X, cannot make the link.
+**Blind spot.** The owner's device must hold X to commit to it, and must have authority over it as
+above.
+An owner who joined the group after M was removed, who no longer holds X, or who received the group
+by a handover after M was removed, cannot make the link.
 M's device then shows two separate groups.
 The same happens when M's device cannot verify the new owner's authority over X (§4.8).
 This is a known limit of the linking mechanism.
