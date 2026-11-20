@@ -1337,7 +1337,14 @@ impl Node {
                     for parent in event.parents().iter().filter(|_| fetches) {
                         self.want_event(cx, chat, *parent, Some(from), TriggerKind::Child)?;
                     }
+                    // A quiet record's events are never announced: the device keeps them to
+                    // itself and only answers a direct request (§7.7, §14.1).
+                    let shareable = cx
+                        .ov
+                        .object(&chat, &event.payload().sync_obj_id())?
+                        .is_some_and(|o| o.shareable);
                     if relays
+                        && shareable
                         && merge != Merge::Lost
                         && entry.epoch().serve(cx.ov, &id, cx.now)?.is_some()
                     {

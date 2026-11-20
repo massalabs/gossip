@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 
 use crate::constants::MAX_EVENT_PARENTS;
-use crate::ids::{ChatId, EventId};
+use crate::ids::{ChatId, EventId, SyncObjId};
 use crate::rng::{Randomness, uniform_below};
 use crate::store::{StorageError, StorageRead, in_window};
 
@@ -45,6 +45,60 @@ pub fn tips<R: StorageRead + ?Sized>(
         .into_iter()
         .filter(|id| in_window(id, now))
         .collect();
+    tips_among(store, chat_id, nodes)
+}
+
+/// The tips this device offers on its own initiative at `now`, in a tips scan (§12.1,
+/// §14.1): the tips of the available events whose record is shareable
+/// ([`crate::store::ObjectRecord::shareable`]), ascending.
+///
+/// An event of a quiet record is left out of the graph, not only of the list: an event it
+/// names as a parent then counts as a tip if nothing else names it, so that a scan still
+/// reaches everything else this device offers.
+///
+/// # Errors
+///
+/// A storage failure.
+pub fn shareable_tips<R: StorageRead + ?Sized>(
+    store: &R,
+    chat_id: &ChatId,
+    now: u64,
+) -> Result<Vec<EventId>, StorageError> {
+    let mut shareable: BTreeMap<SyncObjId, bool> = BTreeMap::new();
+    let mut nodes = Vec::new();
+    for id in store.held_ids(chat_id)? {
+        if !in_window(&id, now) {
+            continue;
+        }
+        let Some(event) = store
+            .event_row(chat_id, &id)?
+            .and_then(|r| r.event().cloned())
+        else {
+            continue;
+        };
+        let sync = event.payload().sync_obj_id();
+        let offered = match shareable.get(&sync) {
+            Some(s) => *s,
+            None => {
+                // Reads the flag: a quiet record's events are never listed (§14.1).
+                let s = store.object(chat_id, &sync)?.is_none_or(|o| o.shareable);
+                shareable.insert(sync, s);
+                s
+            }
+        };
+        if offered {
+            nodes.push(id);
+        }
+    }
+    tips_among(store, chat_id, nodes)
+}
+
+/// The tips among `nodes`, the available events considered, ascending.
+fn tips_among<R: StorageRead + ?Sized>(
+    store: &R,
+    chat_id: &ChatId,
+    nodes: Vec<EventId>,
+) -> Result<Vec<EventId>, StorageError> {
     let mut parents = Vec::with_capacity(nodes.len());
     for id in &nodes {
         parents.push(store.parents(chat_id, id)?.unwrap_or_default());

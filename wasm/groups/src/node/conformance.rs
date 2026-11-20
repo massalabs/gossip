@@ -6,7 +6,7 @@ use crate::ids::{ChatId, SyncObjId};
 use crate::store::{Changes, ObjectRecord, StorageRead};
 
 fn object(n: u8) -> ObjectRecord {
-    ObjectRecord::empty(SyncObjId::from_bytes([n; 32]))
+    ObjectRecord::empty(SyncObjId::from_bytes([n; 32]), true)
 }
 
 fn changes(chat: ChatId, n: u8) -> Changes {

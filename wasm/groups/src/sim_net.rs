@@ -1350,12 +1350,28 @@ fn timer_remnant(o: &ObjectRecord) -> bool {
         && o.pending_deletions.is_empty()
 }
 
-fn retained(store: &Store, chat: &ChatId, timed: bool) -> Retained {
+/// The objects that are quiet on some honest device (§7.7, §14.1): a deletion for a message
+/// that device never processed. It keeps them to itself, so which devices hold such a
+/// deletion, and until when, depends on arrival order; they are not compared.
+fn quiet_objects(sim: &Sim, chat: &ChatId) -> BTreeSet<SyncObjId> {
+    sim.honest()
+        .iter()
+        .flat_map(|d| sim.devs[*d].store.objects(chat).unwrap())
+        .filter(|o| !o.shareable)
+        .map(|o| o.sync_obj_id)
+        .collect()
+}
+
+fn retained(store: &Store, chat: &ChatId, timed: bool, quiet: &BTreeSet<SyncObjId>) -> Retained {
     let rows: Vec<EventRow> = store
         .event_rows(chat)
         .unwrap()
         .into_iter()
         .filter(|r| matches!(r.state, RowState::Held { .. }))
+        .filter(|r| {
+            r.event()
+                .is_none_or(|e| !quiet.contains(&e.payload().sync_obj_id()))
+        })
         .collect();
     let held: BTreeSet<EventId> = rows.iter().map(|r| r.event_id).collect();
     let edges = store
@@ -1370,7 +1386,7 @@ fn retained(store: &Store, chat: &ChatId, timed: bool) -> Retained {
         .objects(chat)
         .unwrap()
         .into_iter()
-        .filter(|o| !(timed && timer_remnant(o)))
+        .filter(|o| !(timed && timer_remnant(o)) && !quiet.contains(&o.sync_obj_id))
         .map(|mut o| {
             o.stubs.clear();
             o
@@ -1379,12 +1395,17 @@ fn retained(store: &Store, chat: &ChatId, timed: bool) -> Retained {
     (rows, edges, objects)
 }
 
-fn results(store: &Store, chat: &ChatId, timed: bool) -> BTreeMap<SyncObjId, Option<StoredResult>> {
+fn results(
+    store: &Store,
+    chat: &ChatId,
+    timed: bool,
+    quiet: &BTreeSet<SyncObjId>,
+) -> BTreeMap<SyncObjId, Option<StoredResult>> {
     store
         .objects(chat)
         .unwrap()
         .into_iter()
-        .filter(|o| !(timed && timer_remnant(o)))
+        .filter(|o| !(timed && timer_remnant(o)) && !quiet.contains(&o.sync_obj_id))
         .map(|o| (o.sync_obj_id, o.current))
         .collect()
 }
@@ -1466,14 +1487,15 @@ fn run(seed: u64, hours: u64) -> Counters {
             sim.counters.timer_deletions += dev.stats_before.erased + node.stats().erased;
         }
     }
-    let reference = retained(&sim.devs[clean[0]].store, &chat, timed);
-    let reference_results = results(&sim.devs[clean[0]].store, &chat, timed);
+    let quiet = quiet_objects(&sim, &chat);
+    let reference = retained(&sim.devs[clean[0]].store, &chat, timed, &quiet);
+    let reference_results = results(&sim.devs[clean[0]].store, &chat, timed, &quiet);
     for &d in &honest {
         if sim.devs[d].local_changes {
             // Its own alterations differ on purpose; every other message converges.
             continue;
         }
-        let mine = retained(&sim.devs[d].store, &chat, timed);
+        let mine = retained(&sim.devs[d].store, &chat, timed, &quiet);
         if mine != reference && std::env::var("GROUPS_NET_DEBUG").is_ok() {
             sim.debug(&mine, &reference, at);
         }
@@ -1486,14 +1508,19 @@ fn run(seed: u64, hours: u64) -> Counters {
                 &format!("device {d} against device {}", clean[0])
             )
         );
-        assert_eq!(results(&sim.devs[d].store, &chat, timed), reference_results);
+        assert_eq!(
+            results(&sim.devs[d].store, &chat, timed, &quiet),
+            reference_results
+        );
     }
     // (b) The sleeper holds the current messages that were behind pruned events.
     if let Some(s) = sim.sleeper_back
         && !sim.devs[s].local_changes
     {
         for (sync, id) in &sim.behind {
-            let remnant = |o: Option<ObjectRecord>| o.filter(|o| !(timed && timer_remnant(o)));
+            let remnant = |o: Option<ObjectRecord>| {
+                o.filter(|o| !(timed && timer_remnant(o)) && !quiet.contains(&o.sync_obj_id))
+            };
             let obj = remnant(sim.devs[s].store.object(&chat, sync).unwrap());
             let cur = remnant(sim.devs[clean[0]].store.object(&chat, sync).unwrap());
             assert_eq!(

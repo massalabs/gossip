@@ -320,6 +320,12 @@ impl Epoch<'_> {
     ) -> Result<Published, ChangeError> {
         self.publish(store, now, rng, |tx| {
             let obj = object(tx, &sync_obj_id)?;
+            // A quiet record is never offered on the device's own initiative (§14.1): it
+            // holds a deletion for a message this device never had, so there is nothing to
+            // retry.
+            if !obj.shareable {
+                return Err(ChangeError::UnknownMessage);
+            }
             let current = obj.current.as_ref().ok_or(ChangeError::NoCurrentResult)?;
             Ok(current.to_payload(sync_obj_id))
         })
