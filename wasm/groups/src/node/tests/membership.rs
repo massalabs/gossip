@@ -4470,6 +4470,11 @@ fn a_root_whose_parent_turns_out_closed_is_no_invitation() {
 /// the former owner's root of its old epoch, dated at the end of time (D.72). The member
 /// held that root but could not verify the new owner's authority over it (no handover leads
 /// to it), so the root was an invitation that started a second conversation of the group.
+///
+/// The first epoch, the last one that lists device 2, is the former owner's from before the
+/// handover, which device 2 does not hold: the new owner has no authority over it as device 2
+/// judges it either (§4.7, D.69), so no extra parent is named, and the root reaches device 2
+/// as an ordinary invitation (§5.10).
 #[test]
 fn adding_back_names_the_last_epoch_of_the_owners_line_not_a_former_owners_branch() {
     let (mut net, g) = founded(3);
@@ -4526,10 +4531,11 @@ fn adding_back_names_the_last_epoch_of_the_owners_line_not_a_former_owners_branc
         .unwrap();
     let root = net.devs[1].node.root(&z).unwrap();
     assert!(
-        root.names_parent(&g),
-        "the last epoch of the line listing it"
+        !root.names_parent(&g),
+        "an epoch the new owner has no authority over on device 2"
     );
     assert!(!root.names_parent(&back.chat_id()));
+    assert_eq!(root.parents().len(), 1, "no extra parent");
 }
 
 /// A handover root keeps the parent's members exactly, but for its signer (§4.7): one that
@@ -4808,29 +4814,32 @@ fn a_member_only_on_a_former_owners_branch_is_dropped_without_a_kick() {
     assert_eq!(net.current(4, &a), Some(a));
 }
 
-/// A member added back by a new owner makes the last epoch it was in, the former owner's, a
-/// parent of the new root (§5.10). Members that epoch lists and the new root does not were
-/// removed long ago: they are no members dropped without a kick.
+/// A member added back by a new owner makes the last epoch it was in, the handover root that
+/// made it owner, a parent of the new root (§5.10). Members that epoch lists and the new root
+/// does not were removed long ago: they are no members dropped without a kick. (The epoch is
+/// no longer one of the former owner's from before the handover: the new owner has no
+/// authority over such an epoch as the member's device judges it, and names none, §4.7, D.69.)
 #[test]
 fn adding_back_over_a_former_owners_epoch_drops_no_one_without_a_kick() {
     let (mut net, g) = founded(4);
+    let h = net
+        .change(
+            0,
+            g,
+            GroupChange::Handover {
+                new_owner: gid(1),
+                leave: false,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(MIN);
     net.change(
-        0,
+        1,
         g,
         GroupChange::Successor {
             add: vec![],
             remove: vec![gid(2), gid(3)],
-            name: None,
-        },
-    )
-    .unwrap();
-    net.run(MIN);
-    net.change(
-        0,
-        g,
-        GroupChange::Handover {
-            new_owner: gid(1),
-            leave: false,
             name: None,
         },
     )
@@ -4847,7 +4856,7 @@ fn adding_back_over_a_former_owners_epoch_drops_no_one_without_a_kick() {
             },
         )
         .unwrap();
-    assert!(net.devs[1].node.root(&r).unwrap().names_parent(&g));
+    assert!(net.devs[1].node.root(&r).unwrap().names_parent(&h));
     assert_eq!(net.devs[1].node.stats().removed_without_kick, 0);
 }
 

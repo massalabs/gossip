@@ -676,8 +676,10 @@ impl Node {
         }
         // §5.10: one more parent per distinct last epoch of the members added back: among
         // the epochs of the line the new root continues (the held ancestors of its parents)
-        // that list the member, one that no later epoch of the line listing it continues.
-        // Not the latest by date: a former owner's root continuing its old epoch, dated at
+        // that list the member and that this owner has authority over, one that no later such
+        // epoch continues (the latest by date of those, then by chat ID); none if no epoch
+        // qualifies, and the root then reaches the member as an ordinary invitation. Not
+        // simply the latest by date: a former owner's root continuing its old epoch, dated at
         // the end of time (D.72), is latest by date whether a side branch or resolved into the
         // line, and the member, which holds no handover leading to it, could not verify the
         // new owner's authority over it and would not be joined.
@@ -702,9 +704,22 @@ impl Node {
                 {
                     continue;
                 }
+                // Only an epoch this owner has authority over as a receiver judges it, from
+                // that epoch's own held ancestors (§4.7, D.69): its owner, or a previous owner
+                // in its line. A former owner's branch resolved into the line does not
+                // qualify: the member, which does not hold the resolution root, cannot verify
+                // the authority over it, and would see the new root start a second
+                // conversation (membership simulation, seed 22).
                 let listing: Vec<ChatId> = line
                     .iter()
-                    .filter(|c| self.t.epochs.get(c).is_some_and(|r| r.root.is_member(m)))
+                    .filter(|c| {
+                        self.t.epochs.get(c).is_some_and(|r| {
+                            r.root.is_member(m)
+                                && self
+                                    .line_authority(self.me, &[**c])
+                                    .contains(&r.root.owner_id())
+                        })
+                    })
                     .copied()
                     .collect();
                 let continued: BTreeSet<ChatId> = listing
