@@ -58,6 +58,15 @@ pub(crate) struct RootIndex {
 /// the next operations, each committing its progress. Provisional.
 pub(crate) const RECONSIDER_STEPS: usize = 64;
 
+/// What becomes of a root that continues installed epochs (see `Node::continuation`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Continuation {
+    /// Adopted; announced by root notice when `relay`.
+    Adopt { relay: bool },
+    /// An invitation that rejoins the group of this installed parent.
+    Rejoin(ChatId),
+}
+
 /// How a root reached this device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Via {
@@ -563,13 +572,9 @@ impl Node {
             self.invite(cx, from, root, Vec::new(), true, None, via);
             return Ok(Answer::Supplied);
         }
-        // Case 2: a retained member.
-        let retained: Vec<ChatId> = installed
-            .iter()
-            .filter(|c| self.group_status(c) == GroupStatus::Active)
-            .copied()
-            .collect();
-        if !retained.is_empty() {
+        // Case 2: a retained member (see `continuation`).
+        let continuation = self.continuation(&installed);
+        if let Some(Continuation::Adopt { relay: true }) = continuation {
             self.adopt(cx, root, from, installed, true)?;
             return Ok(Answer::Supplied);
         }
@@ -586,19 +591,17 @@ impl Node {
             }
             return Ok(Answer::Supplied);
         }
-        // Case 4: kicked, dissolved or waiting.
-        if let Some(p) = installed.first().copied() {
-            match self.group_status(&p) {
-                // A superseded chat of two keeps what comes for it, without a prompt and
-                // read-only (§5.12).
-                GroupStatus::Waiting { .. } | GroupStatus::Superseded { .. } => {
-                    // Kept without a prompt, so that the current epoch names the right owner
-                    // (§5.4).
-                    self.adopt(cx, root, from, installed, false)?;
-                }
-                _ => self.invite(cx, from, root, Vec::new(), false, Some(p), via),
+        // Case 4: kicked, dissolved or waiting (see `continuation`).
+        match continuation {
+            Some(Continuation::Adopt { relay }) => {
+                self.adopt(cx, root, from, installed, relay)?;
+                return Ok(Answer::Supplied);
             }
-            return Ok(Answer::Supplied);
+            Some(Continuation::Rejoin(p)) => {
+                self.invite(cx, from, root, Vec::new(), false, Some(p), via);
+                return Ok(Answer::Supplied);
+            }
+            None => {}
         }
         // Case 5: no parent matched; the unmatched ones are looked up first, except for a
         // migration this device acts on (§5.12): it continues no epoch, and a parent found
@@ -615,6 +618,34 @@ impl Node {
             .collect();
         self.invite(cx, from, root, unmatched, false, None, via);
         Ok(Answer::Supplied)
+    }
+
+    /// What becomes of a root that continues, with its owner's authority, the installed epochs
+    /// `installed` (§4.8 cases 2 and 4): the one decision for a root that arrives after its
+    /// parent and for an invitation whose parent is installed later (`try_adopt_invitation`).
+    /// Why one decision: the same root in the same group state must end the same way whatever
+    /// the order in which roots arrive; otherwise a device that got the child first showed it
+    /// as an invitation that the other order adopts silently.
+    ///
+    /// - A parent in an active group: adopted and announced (case 2).
+    /// - Otherwise, the group of the first parent waits for a kick, or is a superseded chat of
+    ///   two: adopted without a prompt and announced to no one, so that the current epoch names
+    ///   the right owner (§5.4, §5.12).
+    /// - Otherwise (kicked, left, dissolved): an invitation that rejoins that group (§5.10).
+    fn continuation(&self, installed: &[ChatId]) -> Option<Continuation> {
+        let first = installed.first()?;
+        if installed
+            .iter()
+            .any(|c| self.group_status(c) == GroupStatus::Active)
+        {
+            return Some(Continuation::Adopt { relay: true });
+        }
+        Some(match self.group_status(first) {
+            GroupStatus::Waiting { .. } | GroupStatus::Superseded { .. } => {
+                Continuation::Adopt { relay: false }
+            }
+            _ => Continuation::Rejoin(*first),
+        })
     }
 
     /// Records `id`, a root rejected because it continues a closed epoch, as closed too
@@ -1325,13 +1356,35 @@ impl Node {
         let Some(root) = self.t.epochs.get(&chat).map(|r| r.root.clone()) else {
             return Ok(());
         };
-        let ok: Vec<ChatId> = if held.is_empty() || (inv.rejoins.is_some() && !ancestor) {
+        let installed = if held.is_empty() {
             Vec::new()
         } else {
             self.authorized_parents(&root, &held)
-                .into_iter()
-                .filter(|c| ancestor || self.group_status(c) == GroupStatus::Active)
-                .collect()
+        };
+        // An ancestor of a root the user accepted is joined to it whatever the state of its
+        // parents' group (§4.8). Otherwise the root ends as it would have, had it arrived after
+        // its parent (`continuation`): a root the user closed before (case 1), or already an
+        // invitation that rejoins its group, stays what it is.
+        let (ok, relay) = if installed.is_empty() {
+            (Vec::new(), true)
+        } else if ancestor {
+            (installed, true)
+        } else if inv.closed_before || inv.rejoins.is_some() {
+            (Vec::new(), true)
+        } else {
+            match self.continuation(&installed) {
+                Some(Continuation::Adopt { relay }) => (installed, relay),
+                Some(Continuation::Rejoin(p)) => {
+                    let group = self.group_of(&p);
+                    if let Some(r) = self.t.epochs.get_mut(&chat)
+                        && let EpochStatus::Invitation(i) = &mut r.status
+                    {
+                        i.rejoins = Some(group);
+                    }
+                    (Vec::new(), true)
+                }
+                None => (Vec::new(), true),
+            }
         };
         if ok.is_empty() {
             return self.join_ancestor(cx, chat, &root);
@@ -1341,7 +1394,7 @@ impl Node {
         };
         self.t.events.remove(&(chat, ChangeKind::Invitation));
         self.drop_tasks_of(&[chat]);
-        self.adopt(cx, rec.root, rec.from, ok, true)
+        self.adopt(cx, rec.root, rec.from, ok, relay)
     }
 
     /// D.66: an invitation that an installed root continues with authority is part of that

@@ -701,6 +701,14 @@ Before prompting, it therefore looks up the unmatched parents (§12.7):
 - when a parent arrives, it is verified and matched in turn, and the lookup is repeated up the
   chain until it reaches an epoch the device holds; the device then adopts the whole chain under
   case 2;
+- whenever a parent of an invitation becomes installed, by a lookup or any other way, the
+  invitation ends exactly as the root would have, had it arrived after that parent: adopted under
+  case 2, kept without a prompt under case 4 for a group waiting for a kick, an invitation to rejoin
+  under case 4 for a kicked or dissolved group. A root the user closed before (case 1) stays an
+  invitation.
+  *Why:* the same root in the same group state must end the same way whatever the order in which
+  roots arrive; otherwise a waiting device that got the child before its parent prompted the user
+  with an old epoch it would have kept silently in the other order;
 - during the first `PROMPT_DELAY` (five minutes) after receiving the root, the invitation prompt is
   shown only on an explicit answer: the **owner** of the root answers "not available", or three
   distinct members do;
