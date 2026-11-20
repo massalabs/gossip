@@ -181,32 +181,9 @@ function debugString(val) {
     // TODO we could test for more things here, like `Set`s and `Map`s.
     return className;
 }
-/**
- * The largest group plaintext, in bytes (§13.10).
- * @returns {number}
- */
-export function group_max_plaintext_bytes() {
-    const ret = wasm.group_max_plaintext_bytes();
-    return ret >>> 0;
-}
 
-/**
- * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
- * forward of text. A longer one is refused by the engine and by every receiver.
- * @returns {number}
- */
-export function group_max_text_bytes() {
-    const ret = wasm.group_max_metadata_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
- * @returns {number}
- */
-export function group_max_metadata_bytes() {
-    const ret = wasm.group_max_metadata_bytes();
-    return ret >>> 0;
+export function start() {
+    wasm.start();
 }
 
 function takeFromExternrefTable0(idx) {
@@ -214,39 +191,6 @@ function takeFromExternrefTable0(idx) {
     wasm.__externref_table_dealloc(idx);
     return value;
 }
-/**
- * The size of message metadata, given as `publish_message` takes it (a list of
- * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
- * @param {string} metadata
- * @returns {number}
- */
-export function group_metadata_bytes(metadata) {
-    const ptr0 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.group_metadata_bytes(ptr0, len0);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return ret[0] >>> 0;
-}
-
-function passArray8ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 1, 1) >>> 0;
-    getUint8ArrayMemory0().set(arg, ptr / 1);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
-
-function _assertClass(instance, klass) {
-    if (!(instance instanceof klass)) {
-        throw new Error(`expected instance of ${klass.name}`);
-    }
-}
-
-export function start() {
-    wasm.start();
-}
-
 /**
  * Generates user keys from a passphrase.
  *
@@ -265,6 +209,18 @@ export function generate_user_keys(passphrase) {
     return UserKeys.__wrap(ret[0]);
 }
 
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
@@ -367,6 +323,50 @@ export function aead_decrypt(key, nonce, ciphertext, aad) {
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     }
     return v3;
+}
+
+/**
+ * The largest group plaintext, in bytes (§13.10).
+ * @returns {number}
+ */
+export function group_max_plaintext_bytes() {
+    const ret = wasm.group_max_plaintext_bytes();
+    return ret >>> 0;
+}
+
+/**
+ * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
+ * forward of text. A longer one is refused by the engine and by every receiver.
+ * @returns {number}
+ */
+export function group_max_text_bytes() {
+    const ret = wasm.group_max_metadata_bytes();
+    return ret >>> 0;
+}
+
+/**
+ * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
+ * @returns {number}
+ */
+export function group_max_metadata_bytes() {
+    const ret = wasm.group_max_metadata_bytes();
+    return ret >>> 0;
+}
+
+/**
+ * The size of message metadata, given as `publish_message` takes it (a list of
+ * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
+ * @param {string} metadata
+ * @returns {number}
+ */
+export function group_metadata_bytes(metadata) {
+    const ptr0 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.group_metadata_bytes(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] >>> 0;
 }
 
 /**
@@ -818,8 +818,9 @@ export class GroupsNode {
     }
     /**
      * `change`: `{"t":"Successor","add":[hex],"remove":[hex],"name":null|string}`,
-     * `{"t":"Handover","new_owner":hex,"leave":bool,"name":…}` or
-     * `{"t":"Resolve","members":[hex],"name":…}`. Returns the new epoch.
+     * `{"t":"Handover","new_owner":hex,"leave":bool,"name":…}`,
+     * `{"t":"MessageTimer","timer":ms}` or `{"t":"Resolve","members":[hex],"name":…}`.
+     * Returns the new epoch.
      * @param {Uint8Array} group
      * @param {string} change
      * @param {number} now
@@ -955,7 +956,8 @@ export class GroupsNode {
     }
     /**
      * The batches committed since the last call, oldest first: an array of
-     * `{rows, removedRows, edges, objects, node, erase}`, to apply in order.
+     * `{rows, removedRows, edges, removedEdges, objects, removedObjects, node, erase}`, to
+     * apply in order.
      * @returns {any}
      */
     take_batches() {
@@ -1348,6 +1350,31 @@ export class GroupsNode {
         }
     }
     /**
+     * The results of the sync-object lookups completed since the last call, in JSON:
+     * `[{epoch, syncObjId, found}]`, `found` the event ID received or `null`. Removing them
+     * is a committed operation: take the batches after it.
+     * @param {number} now
+     * @returns {string}
+     */
+    take_lookup_results(now) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.groupsnode_take_lookup_results(this.__wbg_ptr, now);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * The consents not used yet, in JSON: `[["<peer hex>", "<expires at>"], …]`.
      * @returns {string}
      */
@@ -1427,6 +1454,31 @@ export class GroupsNode {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * As `create_group_with`, with the message timer of the group in milliseconds (§7.7):
+     * each message is deleted on every device at its creation date plus the timer; 0 keeps
+     * messages forever. The owner changes it later with `change_group`
+     * (`{"t":"MessageTimer","timer":ms}`).
+     * @param {string} name
+     * @param {Uint8Array} members
+     * @param {number | null | undefined} migrate_from
+     * @param {number} message_timer
+     * @param {number} now
+     * @returns {Uint8Array}
+     */
+    create_group_with_timer(name, members, migrate_from, message_timer, now) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(members, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.groupsnode_create_group_with_timer(this.__wbg_ptr, ptr0, len0, ptr1, len1, !isLikeNone(migrate_from), isLikeNone(migrate_from) ? 0 : migrate_from, message_timer, now);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
     }
     /**
      * The members of accepted groups with which no session is reported (`set_session`):
