@@ -34,9 +34,16 @@ impl Db {
             self.edges
                 .insert((e.chat_id.clone(), e.event_id.clone()), e.parents.clone());
         }
+        for k in &b.removed_edges {
+            self.edges.remove(&(k.chat_id.clone(), k.event_id.clone()));
+        }
         for o in &b.objects {
             self.objects
                 .insert((o.chat_id.clone(), o.sync_obj_id.clone()), o.fields.clone());
+        }
+        for k in &b.removed_objects {
+            self.objects
+                .remove(&(k.chat_id.clone(), k.sync_obj_id.clone()));
         }
         for c in &b.erase {
             self.rows.retain(|(chat, _), _| chat != c);
@@ -565,6 +572,9 @@ mod db_store {
         fn first_pending(&self, c: &ChatId) -> R<Option<PendingItem>> {
             self.mem().first_pending(c)
         }
+        fn reactions_to(&self, c: &ChatId, t: &SyncObjId) -> R<Vec<SyncObjId>> {
+            self.mem().reactions_to(c, t)
+        }
     }
 
     impl Storage for DbStore {
@@ -598,6 +608,13 @@ fn the_table_model_passes_the_engine_conformance_check() {
     };
     groups::node::conformance::check_batch_with_erase(&mut store, &mut |s, fail| s.fail = fail)
         .unwrap();
+    // What the message timer erases is deleted from the tables, and from the indexes rebuilt
+    // from them (§7.7).
+    let mut store = DbStore {
+        db: Db::default(),
+        fail: false,
+    };
+    groups::node::conformance::check_removals(&mut store).unwrap();
 }
 
 /// §5.12 through the bindings: two devices migrate their earlier conversation at once, the
