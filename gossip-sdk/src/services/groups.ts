@@ -191,10 +191,17 @@ export interface GroupMessage {
   body: GroupMessageContent;
   metadata: Record<string, Uint8Array>;
   /**
-   * The messages it replies to (§7.6). `epochId` is null when the target's
-   * epoch is not one this device holds in the timeline.
+   * The messages it replies to (§7.6), in this group or another. `epochId`
+   * is null when the target's epoch is not one this device holds; `message`
+   * is the target as its own timeline shows it, null while this device does
+   * not hold it (the engine fetches a missing target by itself, never on
+   * display, and the preview appears with the change that brings it).
    */
-  replyTo: { epochId: GroupId | null; syncObjId: GroupId }[];
+  replyTo: {
+    epochId: GroupId | null;
+    syncObjId: GroupId;
+    message: GroupMessage | null;
+  }[];
   /** Its reactions, one entry per emoji, in the order the engine lists them. */
   reactions: GroupReaction[];
 }
@@ -2213,19 +2220,81 @@ export class GroupService {
       const reference = node.ref_chat_id(hexToBytes(e));
       if (reference) byReference.set(bytesToHex(reference), e);
     }
+    const replies: [
+      GroupMessage,
+      { ref_chat_id: string; sync_obj_id: string }[],
+    ][] = [];
     for (const i of items) {
       if (i.kind !== 'message' || !i.metadata.replyTo) continue;
       try {
-        const targets = JSON.parse(
-          node.decode_reply_to(i.metadata.replyTo)
-        ) as { ref_chat_id: string; sync_obj_id: string }[];
-        i.replyTo = targets.map(t => ({
-          epochId: byReference.get(t.ref_chat_id) ?? null,
-          syncObjId: t.sync_obj_id,
-        }));
+        replies.push([
+          i,
+          JSON.parse(node.decode_reply_to(i.metadata.replyTo)) as {
+            ref_chat_id: string;
+            sync_obj_id: string;
+          }[],
+        ]);
       } catch {
         // A malformed list is shown without its targets (§7.6, D.21).
       }
+    }
+    if (replies.length === 0) return items;
+    // A target in an epoch of another group held here (a reply that quotes
+    // another chat): every held epoch, looked up only when needed.
+    if (
+      replies.some(([, ts]) => ts.some(t => !byReference.has(t.ref_chat_id)))
+    ) {
+      for (const g of JSON.parse(node.groups()) as Raw[]) {
+        for (const t of (g.timers as Raw[] | undefined) ?? []) {
+          const e = t.epoch as string;
+          if (epochs.has(e)) continue;
+          const reference = node.ref_chat_id(hexToBytes(e));
+          if (reference) byReference.set(bytesToHex(reference), e);
+        }
+      }
+    }
+    // The targets as their own timelines show them: this one, and those of
+    // the other groups named, each read once (a local read, nothing sent).
+    const shown = new Map<string, GroupMessage>();
+    const add = (list: GroupTimelineItem[]) => {
+      for (const m of list) {
+        if (m.kind === 'message') shown.set(`${m.epochId}:${m.syncObjId}`, m);
+      }
+    };
+    add(items);
+    const read = new Set<string>([groupId]);
+    for (const [, targets] of replies) {
+      for (const t of targets) {
+        const e = byReference.get(t.ref_chat_id);
+        if (!e || shown.has(`${e}:${t.sync_obj_id}`)) continue;
+        const other = JSON.parse(node.group(hexToBytes(e))) as Raw | null;
+        const key = (other?.group as string | undefined) ?? e;
+        if (read.has(key)) continue;
+        read.add(key);
+        try {
+          add(
+            (
+              JSON.parse(
+                node.timeline(hexToBytes(key), this.now())
+              ) as unknown[]
+            ).map(r => timelineItem(r, me))
+          );
+        } catch {
+          // Not a timeline this device shows: its targets stay unknown.
+        }
+      }
+    }
+    for (const [i, targets] of replies) {
+      i.replyTo = targets.map(t => {
+        const epochId = byReference.get(t.ref_chat_id) ?? null;
+        return {
+          epochId,
+          syncObjId: t.sync_obj_id,
+          message: epochId
+            ? (shown.get(`${epochId}:${t.sync_obj_id}`) ?? null)
+            : null,
+        };
+      });
     }
     return items;
   }
