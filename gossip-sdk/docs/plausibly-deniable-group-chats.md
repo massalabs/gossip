@@ -2049,6 +2049,8 @@ The person reacting is the event's `author` field.
   Whether the text is an emoji is not checked: that changes with each Unicode release, and devices
   must agree on validity. Whether the target exists is not checked either.
 - **What a device may keep.** After a *remove*, the `syncObjId` and the date are enough.
+- **Message timer.** In an epoch with a message timer, a reaction is erased by the timer, record
+  included (§7.7).
 - **Display.** A reaction is shown on its target while its current version is an *add*. The author
   is a claim, like every author here; a device shows at most one reaction per author and emoji
   because the identity allows only one. A reaction whose target is not shown is not shown.
@@ -2105,28 +2107,76 @@ moment = created_at + T
   *Why:* applying a newer timer to older messages was rejected, because one change of the timer
   could then delete a whole chat by accident.
 - `T = 0`: never. The sum is exact (§1); a moment past the top of the integer range never comes.
-- A reaction is not deleted by the timer, and neither is a deletion event. A reaction to a deleted
-  message is not shown (§7.6), as for any deleted target.
+- A deletion event has no moment of its own: it goes with the message it deletes (below).
+- A reaction has a moment of its own, `created_at + T` of its epoch; see "Reactions" below.
 
-**At the moment** the device deletes the message as a local-only deletion (§9.2, §9.3): the
-tombstone replaces the result, every event of the message is pruned to a stub, pending versions
-are pruned, and pending scheduled deletions stay as they are (D.31). The moment is kept in the
-durable time-sorted index of §7.4 and wakes the device like a scheduled deletion; the view hides
-the message from its moment even before that runs.
+**At the moment** the device erases the message. Nothing about it remains on the device: no
+result, no tombstone, no stub of any of its events, no parent link of them, no pending version, no
+pending scheduled deletion, and no peer-knowledge hint that names one of its events. Every record
+goes in the same commit (§15.2). The moment is kept in the durable time-sorted index of §7.4 and
+wakes the device like a scheduled deletion; the view hides the message from its moment even
+before that runs.
 
 *Why local:* every device computes the same moment from the same dates, so all converge with no
 exchange: devices that were offline, read-only groups (kicked, left, superseded) and archives of
-dissolved groups included. *Why as a local-only deletion:* what a peer can see afterwards is what
-§9.3 already allows. A lookup of one of its events is answered "not available", as for a pruned
-event; it is no tip; a sync-object lookup finds no event carrying it.
+dissolved groups included. *Why erased rather than kept as a tombstone:* a stub, a parent link or
+a tombstone would show, on an unlocked device, that a message existed and when, for as long as the
+group is kept; the timer is there so that nothing is left. *Why this is safe:* stubs and
+tombstones exist so that a deleted event is not fetched again and a deleted message does not come
+back; under the timer the dates do that job, since every copy offered after the moment is refused
+by its own dates (below), whether the device held it or not. What a peer can see is what §9.3
+allows: a lookup of one of its events is answered "not available"; it is no tip; a sync-object
+lookup finds no event carrying it.
 
-**A message that arrives after its moment** (or a pending version that takes effect after it) is
-dropped at once and never shown. Nothing about it is stored: no row, no stub, no parent link, and
-its parents are not looked up. Offered again by a late peer, it is refused again the same way,
-from its dates alone, whether or not the device ever held it. The lookup that fetched it is
-complete, without penalty for the peer that supplied it.
+**What erasure leaves alone, and why.**
+
+- An event still held that names an erased event as a parent keeps its own parent links: they are
+  its record, served with it (D.33). They do not make the device look the erased event up: parents
+  are looked up when a child is first accepted (§6.3, §11.1), never for a child already held. The
+  tips and the cycle frontier do not change: they are computed from the available events, and an
+  erased event was not available any more (§6.1, §12.1, D.27). The child goes at its own moment.
+- A message deleted by a deletion event, or by hand, before its moment keeps its tombstone as
+  without a timer (§7.1, §9.2). The timer only erases what it deleted itself.
+
+**When the versions disagree.** Honest versions of a message share one creation date, so its
+moment is that of each version. When versions carry different creation dates (the known limit
+below), the device deletes the message at the moment of its current result, as a local-only
+deletion (§9.2, §9.3), and erases it once every version it knows is past its own moment. *Why:* an
+erased event is unknown again; a version offered later is then refused only if its own moment has
+passed. Erasing at the earlier moment would let a version with a later creation date come back and
+be shown.
+
+**Reactions.** A reaction is erased, record included, at whichever comes first:
+
+- the moment its target is erased by the timer on this device;
+- its own moment, `created_at + T` of its epoch, in any case.
+
+Removing and adding a reaction again keeps its creation date while its record exists (§7.6), so
+toggling never extends its life; once it is erased, adding it again starts a new life. *Why:* a
+reaction's `syncObjId = H(target, author, emoji)` can be checked by anyone who guesses the three
+values, so a kept record says who reacted to what with which emoji, long after the target is gone.
+*Why its own moment as well:* a device that does not hold the target cannot know the target's
+moment; the reaction's own date bounds it, since a reaction is made after its target exists.
+
+**A message or reaction that arrives after its moment** (or a pending version that takes effect
+after it) is dropped at once and never shown. Nothing about it is stored: no row, no stub, no
+parent link, and its parents are not looked up. Offered again by a late peer, it is refused again
+the same way, from its dates alone, whether or not the device ever held it. The lookup that fetched
+it is complete, without penalty for the peer that supplied it, and the device neither relays it
+nor records a hint for it, so two devices never pass it back and forth.
 *Why nothing is stored:* a record of an expired message would be a trace of it; and since the
 refusal depends only on the dates, every arrival gets the same answer.
+
+**What an erased event still costs.** An erased ID is unknown again, so the rule that a known
+pruned ID is never fetched (§11.7) no longer covers it:
+
+- a notice or a tip page from a peer whose clock is behind, which still holds the event, makes the
+  device fetch it once per offer, until that peer's clock reaches the moment;
+- a child that arrives after the moment and names it, made by a peer before the moment, starts one
+  lookup task, which asks each member at most once (every honest device erased the event at the
+  same moment, so each answers "not available") and then pauses until new evidence (§11.2, §11.5),
+  and ends at the lookup deadline (§11.6). This is what a device that never held the event already
+  did before erasure existed.
 
 **Changing the timer.** Only the owner changes it, by a successor root that keeps the members, the
 name and the settings (§4.1, §4.6), like a rename. The interface shows each epoch's timer and when
@@ -2140,8 +2190,20 @@ Known limits:
   of the date and a Retry, §9.1, §9.4, or from a hostile member), a device that receives the
   winning version only after its moment may show another version until that version's own moment.
   Every device ends without the message at the latest moment of its versions.
-- A reaction to a deleted message is still served until the end of its retention window (§8.1),
-  as after any deletion.
+- A reaction that a device receives after its target was erased there, but before the reaction's
+  own moment, is stored again until that moment, hidden: the device no longer knows its target's
+  moment. The same holds on a device that never held the target.
+- A pending scheduled deletion is erased with its message. A peer whose clock is behind may still
+  serve it for a while, and a device that fetches it then stores it as the deletion of a message
+  it does not hold, which leaves a tombstone, as without a timer; from there it can spread to the
+  other devices by tip scans. The same holds for a deletion event that arrives after the moment of
+  its message. A deletion carries no date that would let a device refuse it safely: its target's
+  creation date is not in it.
+- A notice of an event, sent just before its moment and received just after, makes the receiver
+  fetch it; the sender answers "not available" and gets the small penalty of an announcement it
+  did not supply (§11.8).
+- Erased records leave the logical records of §14.1. Whether the storage below keeps freed bytes
+  (free pages of a database, a journal) is a property of that storage, as for any deletion (§16.3).
 - Copies outside the protocol (backups, screenshots, unofficial clients) are out of reach (§16).
 
 ## 8. Retention
@@ -2596,6 +2658,7 @@ serves the event any more and further requests would be wasted traffic.
 
 A known pruned ID is never actively requested again, whether it appears in a notice, a parent
 reference, a tip page or any other discovery.
+An ID that the message timer erased is unknown again; §7.7 says what that costs.
 Only unknown IDs enter retrieval.
 A full event that arrives independently is still handled under §9.5.
 Temporarily invalid events are not pruned and stay recoverable (§9.6).
@@ -3324,8 +3387,8 @@ Physical layout is an implementation detail.
   Message rows keep only a stub after pruning.
 - **Parent edges.**
 - **Current objects** keyed by `(chat_id, syncObjId)`, with their current result, the moment of
-  the message timer (§7.7) and pending
-  versions.
+  the message timer (§7.7), when the timer erases the object with the stubs of its events it
+  erases then (in an epoch with a timer only), and pending versions.
   The stored fields of each available event are the only stored copy of that event's content.
 - **Retrieval tasks** with per-peer candidate rows: trigger kind and time, attempts, outstanding
   and N/A state; the per-peer waiting lists and pauses of §11.8.
@@ -3336,7 +3399,8 @@ Physical layout is an implementation detail.
 
 Local fields are never transmitted or hashed.
 Only explicit protocol projections are serialized, never a whole stored record.
-Known pruned IDs, processed facts and needed parent links are kept until the group is closed.
+Known pruned IDs, processed facts and needed parent links are kept until the group is closed,
+except what the message timer erases (§7.7).
 
 ### 14.2 Hiding, deleting and closing
 
@@ -3604,6 +3668,8 @@ Cover:
 - supersession;
 - age and capacity pruning;
 - future activation and date erasure;
+- erasure by the message timer (§7.7), with and without children still held, of reactions, and a
+  crash during it;
 - duplicate and late restorations;
 - declined, left and deleted (closed) groups;
 - kicked, dissolved and waiting groups, and the markers and roots they leave;
@@ -5496,11 +5562,44 @@ afterwards.*
   could not check it.
 - **A resolution root copies from the current epoch.** When competing ends carry different
   timers or settings, the owner's resolution root copies those of its current epoch (§4.9).
-- **Reactions are not deleted by the timer.** A reaction to a deleted message is hidden, as for
-  any deleted target (§7.6), but its own events are served until their retention ends and its
-  stored result stays: who reacted, with which emoji, to which identifier. Choices: **A** keep
-  this (the code does); **B** delete a reaction at its own moment too, which needs a state that
-  is not the absorbing tombstone, since a reaction may be added again (§7.6).
+- **Reactions and the timer.** *Settled, choice B, in this form:* a reaction is erased, record
+  included, when the timer erases its target or at its own moment, whichever comes first (§7.7).
+  The state that is not the absorbing tombstone is no state at all: the record goes, and a copy
+  offered after the reaction's own moment is refused by its dates. Why: a kept reaction says who
+  reacted to what with which emoji, and its identity can be checked by anyone who guesses them.
 - **A key given twice.** *Settled, choice B:* a key given twice makes a message malformed, as it
   makes a root malformed in the settings map (§4.1, §6.2). Why: one single way to write each
   message, so that every implementation reads the same content from the same bytes.
+
+### D.85 What the message timer erases (§7.7, §14.1, §11.7)
+
+*Found while making the timer leave nothing.*
+
+*Earlier text:* at the moment the device deleted the message as a local-only deletion, and kept,
+until the group was closed, the tombstone, a stub of every event of the message, their parent
+links and pending scheduled deletions.
+
+*Settled:* the message is erased with every record of it (§7.7). The points that had to be
+decided:
+
+- **Erase at the moment, or keep a stub while a child still held names it.** Erase at the moment.
+  A child already held never makes its device look a parent up (§11.1), and the tips are computed
+  from the available events only (§12.1), so a stub kept for the child would protect nothing. The
+  child keeps its own parent links, which are its record.
+- **Which moment, when versions disagree.** The latest moment of the versions the device knows.
+  An earlier one would let a version with a later creation date come back and be shown.
+- **Pending scheduled deletions.** Erased with the message. A late peer can bring one back; the
+  device then keeps a tombstone, as without a timer (§7.7, known limits). Refusing a deletion by
+  its dates was considered and not done: a deletion does not carry its target's creation date, so
+  any such rule could keep a deleted scheduled message alive.
+- **A message deleted by hand or by a deletion event before its moment.** Kept as without a
+  timer: its tombstone rules are unchanged.
+- **The storage contract.** A change set now deletes rows, parent edges and objects, besides
+  writing them; the bindings carry `removedRows`, `removedEdges` and `removedObjects`, and the SDK
+  deletes each record in the same transaction. A stored object written before this change has no
+  erasure date: the timer deletes it as it did and never erases it.
+- **Peer-knowledge hints.** Those naming an erased event are dropped with it: a hint says that a
+  peer saw that event.
+- **What is left for a short time.** A frozen tip list that named an erased event keeps naming it
+  until it is dropped, at most 10 minutes later (§12.2); a request correlation reference lives
+  until its deadline. Both are references only, with no content.
