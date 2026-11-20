@@ -25,7 +25,6 @@
 #![allow(missing_docs)]
 
 use core::fmt;
-use std::collections::BTreeMap;
 
 use zeroize::Zeroize;
 
@@ -213,8 +212,21 @@ pub struct MessagePayload {
     /// and never reused ([`RESERVED_PAYLOAD_FIELDS`]).
     #[prost(oneof = "Body", tags = "7, 8, 11, 12")]
     pub body: Option<Body>,
-    #[prost(btree_map = "string, bytes", tag = "10")]
-    pub metadata: BTreeMap<String, Vec<u8>>,
+    /// The metadata map, `map<string, bytes>` in Appendix C. It is read as its entries, which
+    /// have the same encoding, so that a key given twice is seen and refused (§6.2).
+    #[prost(message, repeated, tag = "10")]
+    pub metadata: Vec<MetadataEntry>,
+}
+
+/// An entry of the metadata map of a message: the implicit entry message of
+/// `map<string, bytes>`.
+#[derive(Clone, PartialEq, ::prost::Message)]
+#[prost(skip_debug)]
+pub struct MetadataEntry {
+    #[prost(string, tag = "1")]
+    pub key: String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub value: Vec<u8>,
 }
 
 /// Field numbers of `MessagePayload` that are reserved: never used again in wire version 1,
@@ -589,6 +601,15 @@ impl fmt::Debug for SettingsEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SettingsEntry")
             .field("key", &self.key)
+            .field("value", &redact::Bytes(self.value.len()))
+            .finish()
+    }
+}
+
+impl fmt::Debug for MetadataEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MetadataEntry")
+            .field("key", &redact::Bytes(self.key.len()))
             .field("value", &redact::Bytes(self.value.len()))
             .finish()
     }

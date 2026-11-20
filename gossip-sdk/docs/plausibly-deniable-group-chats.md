@@ -1647,7 +1647,7 @@ A message event carries:
 | `last_modified_at` | claimed modification time; version ranking key; MUST be present on every type except a deletion, or the event is malformed |
 | `body` | type-specific |
 | `edited` | claimed edited flag, independent of the timestamps |
-| `metadata` | map from text keys to byte values; empty when unused |
+| `metadata` | map from text keys to byte values; empty when unused; a key given twice makes the event malformed |
 
 | Tag | Type | Body |
 | --- | --- | --- |
@@ -1720,6 +1720,12 @@ It is part of the result hash.
 Within a protocol version, new fields are added to metadata; new payload fields require a new
 protocol version (§13.8).
 Each metadata key defines the encoding of its value.
+A key given twice in the metadata of one payload makes the event malformed, exactly as in the
+settings map of a root (§4.1), with the same penalty as any malformed event.
+*Why:* one single way to write each message, so that every implementation reads the same content
+from the same bytes. Protobuf keeps the last value of a repeated map key; an implementation keeping
+the first would read a different message. An honest device writes metadata from a map and never
+repeats a key.
 Metadata conveys no membership authority.
 
 **Claimed authors.** The claimed author MUST be a member of the epoch; others are rejected.
@@ -5434,6 +5440,6 @@ afterwards.*
   stored result stays: who reacted, with which emoji, to which identifier. Choices: **A** keep
   this (the code does); **B** delete a reaction at its own moment too, which needs a state that
   is not the absorbing tombstone, since a reaction may be added again (§7.6).
-- **A key given twice.** The settings map refuses it (§4.1); a message's metadata still takes
-  the last value of a repeated key, as protobuf does. Choices: **A** keep the difference;
-  **B** refuse a repeated metadata key too, which changes what a message accepts.
+- **A key given twice.** *Settled, choice B:* a key given twice makes a message malformed, as it
+  makes a root malformed in the settings map (§4.1, §6.2). Why: one single way to write each
+  message, so that every implementation reads the same content from the same bytes.

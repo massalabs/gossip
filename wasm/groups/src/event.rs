@@ -655,7 +655,7 @@ impl Payload {
             last_modified_at,
             body,
             edited: p.edited,
-            metadata: p.metadata,
+            metadata: metadata_map(p.metadata)?,
         }))
     }
 
@@ -689,10 +689,32 @@ impl Payload {
                     Body::Reaction(r) => proto::Body::Reaction(r.to_proto()),
                     Body::Media(m) => proto::Body::Media(m.to_proto()),
                 }),
-                metadata: c.metadata.clone(),
+                metadata: c
+                    .metadata
+                    .iter()
+                    .map(|(key, value)| proto::MetadataEntry {
+                        key: key.clone(),
+                        value: value.clone(),
+                    })
+                    .collect(),
             },
         }
     }
+}
+
+/// The metadata map of a message from its entries (§6.2): a key given twice makes the message
+/// malformed, as in a root's settings map (§4.1). Why: one single way to write each message, so
+/// that every implementation reads the same content from the same bytes; protobuf keeps the
+/// last value of a repeated key, another decoder could keep the first. An honest device writes
+/// metadata from a map and never repeats a key.
+fn metadata_map(entries: Vec<proto::MetadataEntry>) -> Result<BTreeMap<String, Vec<u8>>> {
+    let mut map = BTreeMap::new();
+    for e in entries {
+        if map.insert(e.key, e.value).is_some() {
+            return Err(Error::Duplicate("metadata"));
+        }
+    }
+    Ok(map)
 }
 
 /// A structurally valid message event (§6.1, §6.2).
@@ -1149,13 +1171,19 @@ mod tests {
         );
         assert_eq!(
             received(&|p| {
-                p.metadata.insert("m".to_owned(), vec![0; 16_376]);
+                p.metadata.push(proto::MetadataEntry {
+                    key: "m".to_owned(),
+                    value: vec![0; 16_376],
+                });
             }),
             too_long("metadata", 16_385)
         );
         assert!(
             received(&|p| {
-                p.metadata.insert("m".to_owned(), vec![0; 16_375]);
+                p.metadata.push(proto::MetadataEntry {
+                    key: "m".to_owned(),
+                    value: vec![0; 16_375],
+                });
             })
             .is_ok()
         );
@@ -1264,7 +1292,10 @@ mod tests {
         );
         assert_eq!(
             reject(&|p| {
-                p.metadata.insert("k".into(), vec![]);
+                p.metadata.push(proto::MetadataEntry {
+                    key: "k".into(),
+                    value: vec![],
+                });
             }),
             Err(Error::MustBeAbsent("metadata"))
         );
