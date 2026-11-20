@@ -5113,3 +5113,89 @@ fn a_deleted_dissolve_keeps_serving_its_root_and_message_to_a_member_sharing_not
     let answers = answers_of(&mut net, 1, 2, ops());
     assert!(answers.is_empty(), "{answers:?}");
 }
+
+/// As for a kept leave (§5.3 "Keeping"), for a kick (§5.6): a member in X is saved to a
+/// backup; messages are sent in X (the gap); the owner removes it in Y, then adds it back in
+/// Z (parents Y and X, §5.10), and it accepts. Its device is then restored from the backup and
+/// believes it is an active member of X. It must (a) receive its own kick and show the group
+/// as removed; (b) get Z as an invitation attached to the same group; (c) once it accepts,
+/// hold one active conversation with every message of X, the gap included, and of Z, never
+/// those of Y. The old kick does not remove it from Z: a kick applies only to the epoch it
+/// names.
+#[test]
+fn a_member_added_back_and_restored_before_its_kick_learns_it_and_gets_its_history() {
+    let (mut net, x) = founded(4);
+    let bob = 3;
+    net.say(1, &x, "x before");
+    net.run(MIN);
+    let backup = net.devs[bob].store.clone();
+    net.say(bob, &x, "x gap from bob");
+    net.say(2, &x, "x gap from dave");
+    net.run(MIN);
+    let y = net
+        .change(
+            0,
+            x,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![gid(bob)],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.summary(bob, &x).unwrap().status, MyStatus::Removed);
+    net.say(1, &x, "y secret");
+    net.run(MIN);
+    let z = net
+        .change(
+            0,
+            x,
+            GroupChange::Successor {
+                add: vec![gid(bob)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    assert_ne!(z, y);
+    net.run(2 * MIN);
+    assert_eq!(net.accept_all(bob), vec![x]);
+    net.run(2 * MIN);
+    assert_eq!(net.current(bob, &x), Some(z));
+    net.say(0, &x, "z hello");
+    net.run(MIN);
+    // Restored from the backup: an active member of X, holding nothing later.
+    net.devs[bob].store = backup;
+    net.restart(bob);
+    assert_eq!(net.current(bob, &x), Some(x));
+    assert_eq!(net.summary(bob, &x).unwrap().status, MyStatus::Member);
+    net.run(DAY);
+    // (a) Its own kick comes back.
+    let s = net.summary(bob, &x).unwrap();
+    assert_eq!(s.status, MyStatus::Removed, "(a) {s:?}");
+    assert!(net.lines(bob, &x).contains(&TimelineLine::YouWereRemoved));
+    // (b) Z is an invitation that rejoins the same group.
+    let inv = net.devs[bob].node.invitations(net.now);
+    assert!(
+        inv.iter().any(|i| i.chat_id == z && i.rejoins == Some(x)),
+        "(b) {inv:?}"
+    );
+    // (c) Accepted, it is one active conversation with the whole history of X and Z.
+    assert_eq!(net.accept(bob, z), x);
+    net.run(10 * MIN);
+    let s = net.summary(bob, &x).unwrap();
+    assert_eq!(s.status, MyStatus::Member, "(c) {s:?}");
+    assert_eq!(s.current, z);
+    assert_eq!(net.devs[bob].node.groups().len(), 1, "one conversation");
+    let texts = net.texts(bob, &x);
+    for t in ["x before", "x gap from bob", "x gap from dave", "z hello"] {
+        assert!(texts.contains(&t.to_owned()), "(c) {t}: {texts:?}");
+    }
+    assert!(!texts.contains(&"y secret".to_owned()), "(c) never Y");
+    // The old kick did not remove it from Z, on any device.
+    net.run(5 * MIN);
+    assert!(net.summary(0, &x).unwrap().members.contains(&gid(bob)));
+    assert_eq!(net.current(0, &x), Some(z));
+    assert_eq!(net.summary(bob, &x).unwrap().status, MyStatus::Member);
+}
