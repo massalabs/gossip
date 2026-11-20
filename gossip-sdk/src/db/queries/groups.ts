@@ -138,6 +138,24 @@ export class GroupQueries {
     return row?.at ?? null;
   }
 
+  /** Whether a ciphertext waits in the outbox for a contact. */
+  async hasOutboxFor(
+    ownerUserId: string,
+    contactUserId: string
+  ): Promise<boolean> {
+    const [row] = await this.conn.db
+      .select({ id: schema.groupOutbox.id })
+      .from(schema.groupOutbox)
+      .where(
+        and(
+          eq(schema.groupOutbox.ownerUserId, ownerUserId),
+          eq(schema.groupOutbox.contactUserId, contactUserId)
+        )
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
   /** Deletes the ciphertexts waiting for a contact (when it is deleted). */
   async deleteOutboxByContact(
     ownerUserId: string,

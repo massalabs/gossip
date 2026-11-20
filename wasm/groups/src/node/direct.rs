@@ -705,12 +705,31 @@ impl Node {
             .collect()
     }
 
-    /// Among `candidates`, the peers whose automatic connection may be revoked (§5.12): they
-    /// share no group with this device and no root it holds lists them, as a member or a
-    /// removed peer, an invitation's, a read-only group's and a handover kept for its parent
-    /// included (the replies owed to a removed member, §5.6, and the deletions still served
-    /// to it, §10.4, keep working until then). The caller never revokes a peer its user
+    /// Among `candidates`, the peers whose automatic connection may be revoked (§5.12, D.86):
+    /// no chat that keeps connections lists them, as a member or a removed peer, and nothing
+    /// pushed whole is still queued for them. The caller never revokes a peer its user
     /// accepted.
+    ///
+    /// The chats that keep connections: an active group (the replies owed to a member it
+    /// removed, §5.6, and the deletions still served to it, §10.4, keep working), the waiting
+    /// state (the kick can come from any member), the archive of a group dissolved while
+    /// active, an invitation, and a handover root kept for its parent. A group the device is
+    /// out of keeps none, whether the user keeps its history read-only or deletes it: kicked,
+    /// left, or superseded.
+    ///
+    /// Why: a member that shares nothing else with this device sees its keep-alives stop when
+    /// the chat is deleted; were they kept with the read-only history, that member could tell
+    /// the two apart. The cost: a kept history no longer receives the later deletions or a
+    /// "Dissolve & Delete" from such members, as a deleted chat does not.
+    ///
+    /// The waiting state ends with the kick or, after two weeks without one
+    /// ([`super::objects::WAITING_MS`]), with the device leaving quietly as "Ignore and Delete"
+    /// does (roots deleted, the entry gone, the user still in the member list for the
+    /// others); either way the chat is closed and its connections go then.
+    ///
+    /// A visible leave closes the chat, and its signed leave is pushed whole to each member
+    /// afterwards (a queued blob): a peer is not revocable until it was handed off for it, or
+    /// revoking the session would lose it.
     #[must_use]
     pub fn connections_to_revoke(&self, candidates: &[GossipId]) -> Vec<GossipId> {
         let view = self.connection_view();
@@ -733,15 +752,35 @@ impl Node {
         }
         co_members.remove(&self.me);
         let mut listed = co_members.clone();
-        for (_, r) in self.t.epochs.iter() {
+        for (c, r) in self.t.epochs.iter() {
+            if r.status == EpochStatus::Installed && !self.keeps_connections(c) {
+                continue;
+            }
             listed.extend(r.root.members().iter().copied());
             listed.extend(r.removed_override.iter().copied());
         }
         for (_, h) in self.t.held_roots.iter() {
             listed.extend(h.root.members().iter().copied());
         }
+        // What is pushed whole after a close (a signed leave, the roots and objects of a
+        // leaving owner) is owed until handed off.
+        for (k, w) in self.t.queue.iter() {
+            if matches!(w, super::records::Work::Blob(_)) {
+                listed.insert(k.0);
+            }
+        }
         listed.remove(&self.me);
         ConnectionView { co_members, listed }
+    }
+
+    /// Whether the installed epoch `chat` keeps the connections with its members (see
+    /// [`Node::connections_to_revoke`]): not once the device is out of its group, kicked,
+    /// left or superseded, whether the history is kept or not.
+    fn keeps_connections(&self, chat: &ChatId) -> bool {
+        !matches!(
+            self.group_status(chat),
+            GroupStatus::Removed { .. } | GroupStatus::Left { .. } | GroupStatus::Superseded { .. }
+        )
     }
 
     /// Reports [`ChangeKind::Connections`] when what the connection queries answer changed
@@ -750,6 +789,7 @@ impl Node {
         if self.t.epochs.dirty_keys().is_empty()
             && self.t.group_recs.dirty_keys().is_empty()
             && self.t.held_roots.dirty_keys().is_empty()
+            && self.t.queue.dirty_keys().is_empty()
         {
             return;
         }
