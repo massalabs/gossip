@@ -49,6 +49,14 @@ pub struct EdgeOut {
     pub parents: String,
 }
 
+/// The key of a current object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectKey {
+    pub chat_id: String,
+    pub sync_obj_id: String,
+}
+
 /// A current object.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,8 +76,12 @@ pub struct NodeOut {
 }
 
 /// One engine batch, to apply in one transaction in this order: `rows` (upserts),
-/// `removedRows`, `edges`, `objects`, `node` (upserts and deletions), then `erase`: every
-/// row, edge and object of these epochs is deleted.
+/// `removedRows`, `edges`, `removedEdges`, `objects`, `removedObjects`, `node` (upserts and
+/// deletions), then `erase`: every row, edge and object of these epochs is deleted.
+///
+/// `removedRows`, `removedEdges` and `removedObjects` delete one record each: a
+/// temporary-rejection marker, or what the message timer erases of a message (§7.7). A key
+/// is never both written and deleted by one batch.
 ///
 /// The same shape, without deletions, is the snapshot the node opens from.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,7 +91,11 @@ pub struct BatchOut {
     #[serde(default)]
     pub removed_rows: Vec<RowKey>,
     pub edges: Vec<EdgeOut>,
+    #[serde(default)]
+    pub removed_edges: Vec<RowKey>,
     pub objects: Vec<ObjectOut>,
+    #[serde(default)]
+    pub removed_objects: Vec<ObjectKey>,
     pub node: Vec<NodeOut>,
     #[serde(default)]
     pub erase: Vec<String>,
@@ -168,11 +184,23 @@ fn encode_changes(c: &Changes, out: &mut BatchOut) {
             parents: text(parents),
         });
     }
+    for id in &c.removed_edges {
+        out.removed_edges.push(RowKey {
+            chat_id: chat.clone(),
+            event_id: text(id),
+        });
+    }
     for obj in c.objects.values() {
         out.objects.push(ObjectOut {
             chat_id: chat.clone(),
             sync_obj_id: text(&obj.sync_obj_id),
             fields: object_fields(obj),
+        });
+    }
+    for sync in &c.removed_objects {
+        out.removed_objects.push(ObjectKey {
+            chat_id: chat.clone(),
+            sync_obj_id: text(sync),
         });
     }
 }
@@ -422,6 +450,9 @@ impl StorageRead for Store {
     }
     fn first_pending(&self, c: &ChatId) -> Result<Option<PendingItem>, StorageError> {
         self.mem.first_pending(c)
+    }
+    fn reactions_to(&self, c: &ChatId, t: &SyncObjId) -> Result<Vec<SyncObjId>, StorageError> {
+        self.mem.reactions_to(c, t)
     }
 }
 

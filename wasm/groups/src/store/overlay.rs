@@ -55,8 +55,14 @@ impl<S: StorageRead> Storage for Overlay<'_, S> {
         for (child, parents) in changes.edges {
             tx.put_edges(child, parents);
         }
+        for id in changes.removed_edges {
+            tx.erase_edges(id);
+        }
         for obj in changes.objects.into_values() {
             tx.put_object(obj);
+        }
+        for sync in changes.removed_objects {
+            tx.erase_object(sync);
         }
         Ok(())
     }
@@ -95,6 +101,9 @@ impl<S: StorageRead> StorageRead for Overlay<'_, S> {
     }
     fn first_pending(&self, c: &ChatId) -> Result<Option<PendingItem>, StorageError> {
         self.read(c).first_pending(c)
+    }
+    fn reactions_to(&self, c: &ChatId, t: &SyncObjId) -> Result<Vec<SyncObjId>, StorageError> {
+        self.read(c).reactions_to(c, t)
     }
 }
 

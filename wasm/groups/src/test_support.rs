@@ -102,6 +102,10 @@ mod instrumented {
             let v = self.inner.first_pending(c)?;
             Ok(self.count(1, v))
         }
+        fn reactions_to(&self, c: &ChatId, t: &SyncObjId) -> R<Vec<SyncObjId>> {
+            let v = self.inner.reactions_to(c, t)?;
+            Ok(self.count(v.len().max(1), v))
+        }
     }
 
     impl<S: Storage> Storage for Instrumented<S> {
