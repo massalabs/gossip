@@ -990,8 +990,9 @@ impl Node {
     /// restored from a backup made before the handover learns that it handed over, and
     /// left if it did.
     ///
-    /// A member that left `chat` and was added back later is no removed peer, but its kept
-    /// leave naming `chat` is sent to it in the same way (§5.3 "Keeping"). Why: a device of
+    /// A member that left `chat`, or was removed from it, and was added back later is no
+    /// removed peer, but its kept leave or kick naming `chat` is sent to it in the same way
+    /// (§5.3 "Keeping", §5.6). Why: a device of
     /// that member restored from a backup made before it left still acts in `chat` and would
     /// otherwise adopt the later root silently, as if it had never left; with its leave it
     /// shows the group as left and gets the root that adds it back as an invitation. The
@@ -999,11 +1000,8 @@ impl Node {
     /// already holds it, so the cost is a few repeated sends a day, under the same limit.
     pub(crate) fn removed_contact(&mut self, cx: &mut Cx<'_>, chat: ChatId, peer: GossipId) {
         let removed = self.removed_peer(&chat, &peer);
-        let kept_leave =
-            self.t
-                .signed
-                .contains(&(chat, SignedKind::Leave, *leave_id(&chat, &peer).as_bytes()));
-        if !removed && !kept_leave && self.handover_owed(&chat, &peer).is_none() {
+        let kept_record = self.kept_removal(chat, peer).is_some();
+        if !removed && !kept_record && self.handover_owed(&chat, &peer).is_none() {
             return;
         }
         // A device no longer active in the group stays silent, as one that does not hold the
@@ -1048,21 +1046,38 @@ impl Node {
         }
     }
 
+    /// The kick naming `peer` in `chat`, or the leave it signed for `chat`, when this device
+    /// keeps one (§5.3, §5.6): the kick first, as [`Node::send_owed`] sends it.
+    fn kept_removal(&self, chat: ChatId, peer: GossipId) -> Option<SignedKey> {
+        let kick = (
+            chat,
+            SignedKind::Kick,
+            *crate::hash::kick_id(&chat, &peer).as_bytes(),
+        );
+        let leave = (chat, SignedKind::Leave, *leave_id(&chat, &peer).as_bytes());
+        [kick, leave]
+            .into_iter()
+            .find(|k| self.t.signed.contains(k))
+    }
+
     /// `peer` answered a scan of `chat`, this device's current epoch, "not available", and is
     /// about to be told of that root by a root notice (§12.1). When this device keeps the
-    /// leave `peer` signed for a parent of `chat`, it first sends that leave in full, as a
-    /// reply of [`Node::removed_contact`] to a contact in that parent, and then the root of
-    /// `chat` in full, in that order (§5.3 "Keeping", §5.10).
+    /// kick naming `peer` in a parent of `chat`, or the leave `peer` signed for it, it first
+    /// sends that record in full, as a reply of [`Node::removed_contact`] to a contact in that
+    /// parent, and then the root of `chat` in full, in that order (§5.3 "Keeping", §5.6,
+    /// §5.10). One rule for both ways of going out of a group.
     ///
-    /// Why: such a root adds `peer` back after it left. A device of `peer` restored from a
-    /// backup made before it left still acts in the parent; given the root first, it would
-    /// take it as the next epoch of its group, as if it had never left. With the leave first
-    /// the group shows as left, and the root then comes as an invitation, which the user
-    /// accepts again. Both go as full objects because full objects are carried in the order
+    /// Why: such a root adds `peer` back after it left or was removed. A device of `peer`
+    /// restored from a backup made before that still acts in the parent; given the root
+    /// first, it would take it as the next epoch of its group, silently, without the prompt
+    /// every other member added back gets, and its history would not match what the others
+    /// saw. With its record first the group shows as left or removed, and the root then
+    /// comes as an invitation, which the user accepts again. A kick applies only to the epoch
+    /// it names, so it never removes `peer` from the root that adds it back. Both go as full objects because full objects are carried in the order
     /// they were queued, after the answers of the same plaintext; a root answered to a lookup
     /// would be read before the leave. A device of `peer` that does not hold the parent
     /// cannot check the leave and drops it; one that holds the root already ignores it.
-    pub(crate) fn leaves_with_root(&mut self, cx: &mut Cx<'_>, chat: ChatId, peer: GossipId) {
+    pub(crate) fn removal_with_root(&mut self, cx: &mut Cx<'_>, chat: ChatId, peer: GossipId) {
         let parents = self
             .t
             .epochs
@@ -1071,8 +1086,7 @@ impl Node {
             .unwrap_or_default();
         let mut sent = false;
         for p in parents {
-            let key = (p, SignedKind::Leave, *leave_id(&p, &peer).as_bytes());
-            if self.t.signed.contains(&key) {
+            if let Some(key) = self.kept_removal(p, peer) {
                 self.removed_contact(cx, p, peer);
                 sent |= self.object_queued(peer, p, key_item(&key));
             }
