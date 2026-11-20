@@ -2461,12 +2461,19 @@ A peer with an outstanding request for the task is not reselected until it answe
 expires.
 A peer that already supplied the event is not asked again.
 A peer that answers comes before every peer that stopped answering, whatever the tier.
-Among the peers that answer, a peer already asked for the item, that let a request time out or
-answered "not available" since it last announced the item, goes behind every eligible member not
-yet asked for it, before any re-ask (local policy, §2.2).
+Among the peers that answer, a peer already asked for the item goes behind every eligible member
+not yet asked for it, before any re-ask (local policy, §2.2), when it answered "not available"
+since it last announced the item, or let a request time out without having announced it or
+delivered a child naming it.
 A new announcement of the item by that peer puts it back in its tier: it is new evidence (§11.5).
 A `busy` or an `expired` answer does not count: a `busy` peer is asked again about a minute later
 (D.46).
+A timeout does not move a peer that announced the item: it is asked again once its request has
+expired, until three timeouts in a row make it a peer that stopped answering.
+*Why a timeout does not count for an announcer:* a timeout says nothing of the item, while the
+announcement still stands. Moved behind the members not yet asked, the only holder waited behind
+every member never measured (each offline one costing a full stage), and the task could pause after
+its last stage without asking it again.
 *Why:* a peer that went inactive in the group, or never held the item, gives the same answer every
 time, while a member not yet asked may hold it; a simulated device kept asking such peers for a day
 and hardly asked the member that held the events. The order keeps responsive peers first, so that a
@@ -4750,8 +4757,8 @@ they can be confirmed or changed.*
   hours; a removed peer is neither suggested nor accepted; a neighbor is replaced once its queries
   have waited 2 days in total without an answer, and candidates rank responsive members first.
 - Candidate order: responsive members before unresponsive ones; then members not yet asked
-  before those that timed out or answered "not available" since they last announced the item
-  (§11.2); then peers that triggered the task, then neighbors, then members with a session, then
+  before those that answered "not available" since they last announced the item, or let a request
+  time out without having announced it (§11.2); then peers that triggered the task, then neighbors, then members with a session, then
   others; then score, then trigger time. §11.2 gives the tiers only.
 - Dissemination: "own message" means a deletion or a message this device authored; an edit or
   retry of another member's message goes out as notices.

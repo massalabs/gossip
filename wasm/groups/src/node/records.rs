@@ -110,8 +110,9 @@ pub struct Candidate {
     /// Until when a request sent to it stays valid (its correlation deadline); it is not
     /// reselected before (§11.2).
     pub outstanding_until: Option<u64>,
-    /// Requests to it for this task that timed out or were answered "not available" since it
-    /// last announced the item (§11.2): not `busy` or `expired`.
+    /// Requests to it for this task that were answered "not available" since it last
+    /// announced the item, or timed out while it has no trigger (§11.2): not `busy` or
+    /// `expired`.
     pub attempts: u32,
     /// Kept for the stored record; `busy` is back-pressure per peer now (`node::backoff`)
     /// and leaves it at 0.

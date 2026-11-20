@@ -632,11 +632,12 @@ fn a_peer_that_answered_not_available_goes_behind_the_members_not_yet_asked_unti
     assert_eq!(order, vec![4, 2, 4, 1, 3]);
 }
 
-/// §11.2 (local policy): a peer that let a request time out goes behind every eligible
-/// member not yet asked for the item: when it is free again, the members not yet asked come
-/// first.
+/// §11.2 (local policy): a peer that did not announce the item and let a request time out
+/// goes behind every eligible member not yet asked for it: when it is free again, the members
+/// not yet asked come first. Member 4, the announcer, answers "not available"; neighbor 2,
+/// asked next, never answers.
 #[test]
-fn a_peer_that_timed_out_goes_behind_every_member_not_yet_asked() {
+fn a_peer_that_did_not_announce_the_item_and_timed_out_goes_behind_every_member_not_yet_asked() {
     let mut net = Net::new(5, 1);
     let chat = net.chat();
     neighbors_of(&mut net, 0, &[1, 2]);
@@ -650,7 +651,11 @@ fn a_peer_that_timed_out_goes_behind_every_member_not_yet_asked() {
         let q = sent_lookups(&mut net, 0);
         if let [q] = &q[..] {
             order.push(index(&q.to));
-            // Nobody answers: the next stage starts at the end of this one's local wait.
+            if q.to == member(4) {
+                answer(&mut net, 0, q, na());
+                continue;
+            }
+            // Nobody else answers: the next stage starts at the end of this one's local wait.
             net.now = q.sent_at + q.ttl * 105 / 100;
         } else {
             assert!(q.is_empty(), "{q:?}");
