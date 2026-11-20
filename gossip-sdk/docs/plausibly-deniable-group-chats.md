@@ -351,6 +351,8 @@ It carries:
 | `ref_chat_id_challenge` | 32 fresh random bytes (§4.5) |
 | `created_at` | the creator's clock at creation, u64 Unix milliseconds; a claim |
 | `migrate_from` | optional: the protocol version of the conversation this group continues (§5.12, Appendix A); `0` is the earlier one-to-one format |
+| `message_timer` | the message timer: u64 milliseconds; `0`, absent on the wire, keeps messages forever |
+| `settings` | the settings map: text keys to byte values, at most 128 entries, empty when unused (below) |
 | `signature` | an ML-DSA-65 signature over the root ID (below) |
 
 The root has no event ID, no parents in the DAG sense and no payload.
@@ -359,13 +361,16 @@ Its only identifier is the **root ID**, which is also the epoch's `chat_id`:
 ```text
 chat_id = H("gossip.groups.root.1",
             version, type, name, parents, members, group_secret, owner,
-            epoch_challenge, ref_chat_id_challenge, created_at, migrate_from)
+            epoch_challenge, ref_chat_id_challenge, created_at, migrate_from,
+            message_timer, settings)
 ```
 
-In this projection `version`, `type` and `created_at` are unsigned integers, `name` is a text
-string, `parents` and `members` are arrays of byte strings in their sorted order, `migrate_from`
-is an array holding its one unsigned integer when the field is present and the empty array when it
-is absent, and the other fields are byte strings.
+In this projection `version`, `type`, `created_at` and `message_timer` are unsigned integers,
+`name` is a text string, `parents` and `members` are arrays of byte strings in their sorted order,
+`migrate_from` is an array holding its one unsigned integer when the field is present and the
+empty array when it is absent, `settings` is a CBOR map from text strings to byte strings in the
+canonical key order (§1.2), as a message's metadata (§6.2), and the other fields are byte strings.
+`message_timer` is hashed as `0` when it is absent, and `settings` as the empty map.
 The signature and the ID itself are not hashed.
 
 The **signature** is computed over the 32 bytes of the root ID, with the ML-DSA-65 signing context
@@ -373,8 +378,39 @@ The **signature** is computed over the 32 bytes of the root ID, with the ML-DSA-
 Who signs depends on the root's type (§4.7).
 The signature travels with the root and is checked by every device that receives it.
 
-The member list, the name and the owner are fixed for the epoch's lifetime.
+The member list, the name, the owner, the message timer and the settings map are fixed for the
+epoch's lifetime.
 Changing any of them means creating a new root.
+
+**The message timer** has one single form: a plain proto3 integer, absent on the wire when it is
+`0`, read as `0` when absent, and always hashed as an unsigned integer. Every value is valid: a
+root is never invalid because of its timer. What it does is in §7.7.
+*Why one form:* two forms of "no timer" would give two root IDs for the same content.
+
+**The settings map** is handled exactly as a message's metadata map: the same hash form and key
+order, and the same size measure (§13.10, every entry counting its key field and its value field).
+Its limits decide validity:
+
+- at most 128 entries, and at most 16,384 bytes by that measure;
+- each key is valid UTF-8 of 1 to 64 bytes;
+- a key given twice makes the root malformed;
+- absent and empty are the same thing.
+
+Version 1 knows no key. A device keeps and hashes every entry, relays it unchanged, and never acts
+on one; an unknown key never makes a root invalid.
+*Why:* only the owner can set or change a future group setting, because the map is hashed and
+signed with the root. Unknown keys are kept so that a later release can define settings without a
+new wire version. A key given twice is refused because protobuf decoders differ on which value
+they keep, and the two would hash different maps.
+
+**Carried forward.** When the owner's device builds the next root (a member change, a rename, a
+handover, the automatic successor after a leave or a request, a fork resolution), it copies the
+message timer and the whole settings map of its current epoch unchanged, entries it does not
+understand included, unless the owner changes the timer in that action (§7.7).
+*Why:* an owner on an older release must not silently erase settings made by a newer one.
+A receiver puts no validity rule between a root's timer or settings and those of its parents.
+*Why:* such a rule could not be checked by a member that lacks the parents (§4.5), and two
+members would then judge the same root differently.
 
 *Why:* hashing every field into the ID means that two different member lists, names, secrets,
 owners or parents can never claim the same epoch, that a relayer cannot alter a field under a valid
@@ -451,6 +487,9 @@ It is not set by the container: the fixed part of a root (owner keys, signature,
 challenges, time and wrappers) is about 6.7 KB, and each member costs 34 encoded bytes, so about
 1,490 members would fit one empty 57,344-byte container (§13.10).
 At 512 members a root is about 24 KB (25,417 bytes with 32 parents and the longest name).
+With a full settings map, the longest timer and `migrate_from`, the largest root is a 41,823-byte
+event blob: 41,832 bytes pushed alone in a plaintext and 41,860 bytes as the answer to a chat
+lookup, which leaves 15,484 bytes of the container unused.
 
 *Why:* with GossipIDs only, the cost of a large group is no longer the root but the keys.
 At 512 members a new member downloads about 1.6 MB of keys, and the backend holds about 840 MB of
@@ -517,7 +556,8 @@ It MUST NOT build a root on an older epoch.
 
 To create a root, the owner's device:
 
-1. chooses the member list, which includes the owner, and the name;
+1. chooses the member list, which includes the owner, and the name, and keeps the message timer
+   and the settings map (§4.1 "Carried forward");
 2. generates the group secret and the two challenges;
 3. computes the parent commitments (§4.5, §5.10);
 4. sets `created_at = max(now, L + 1)`, where `L` is the greatest `created_at` among all the roots
@@ -568,8 +608,8 @@ for the other.
 On receiving a root, a device MUST, in order:
 
 1. validate the encoding, the type, the name (valid UTF-8, at most 256 bytes), the parents (1 to 32
-   distinct 32-byte commitments, sorted) and the members (1 to 512 distinct nonzero 32-byte
-   GossipIDs, sorted);
+   distinct 32-byte commitments, sorted), the members (1 to 512 distinct nonzero 32-byte
+   GossipIDs, sorted) and the settings map (§4.1);
 2. compute the root ID and, if the root was fetched after a notice, a page entry or a lookup, check
    that it equals the announced `chat_id`;
 3. parse the owner keys, hash them to the owner's GossipID and check that the owner is a member;
@@ -2747,6 +2787,8 @@ They are laid out as:
 [ref_chat_id_challenge]
 [created_at]
 [migrate_from: optional, the protocol version of the conversation it continues]
+[message_timer: u64 milliseconds, absent when 0]
+[settings: text keys to byte values, at most 128 entries]
 [signature]
 ```
 
@@ -2921,8 +2963,8 @@ it; it is never relayed and never answered.
   stored, relayed or used as a parent.
 - New message types, frame kinds, query operations, fields or status codes require a new protocol
   version.
-  The only extension point within a version is message metadata, whose unknown entries are
-  preserved (§6.2).
+  The only extension points within a version are message metadata and the settings map of a
+  root, whose unknown entries are preserved (§6.2, §4.1).
 - This protocol is not compatible with earlier draft group designs.
   The earlier one-to-one conversation format is not part of it: its conversations are archived and
   may be continued as groups (§5.12).
@@ -2960,6 +3002,7 @@ Each requested ID consumes one slot when issued.
 | Encrypted binary packet, as stored under a seeker | 65,536 bytes |
 | Message text (also the content of a forwarded text) | 16,384 bytes of UTF-8 |
 | Message metadata, all entries together, as encoded | 16,384 bytes |
+| Settings map of a root, measured as metadata | 128 entries and 16,384 bytes; keys of 1 to 64 bytes (§4.1) |
 | Entries per query frame | 16 |
 | Entries per logical response allocation | 128 |
 | Notice | 128 entries and 16 KiB |
@@ -3405,7 +3448,8 @@ It never marks events invalid or pruned.
 - Optional proactive neighbor rotation.
 - Score-weighted choice of extra dissemination recipients.
 - A direct-evidence-only fallback for hints, if ancestor inference proves impractical.
-- Shared mutable group settings, including configurable retention.
+- Shared mutable group settings, including configurable retention. They go in the settings map of
+  the root (§4.1), which version 1 already carries and keeps.
 - Groups larger than 512 members.
 - Untrusted groups: an admin list in the root (admins must be members), permission checks on every
   change, and author fields on deletions.
@@ -3550,6 +3594,9 @@ message GroupRoot {
   uint64 created_at = 9;
   bytes signature = 10;            // ML-DSA-65 over the root ID; not hashed
   optional uint64 migrate_from = 11; // only on a root that creates a group of two (§5.12)
+  uint64 message_timer = 12;       // milliseconds; 0 (absent) keeps messages forever (§4.1, §7.7)
+  map<string, bytes> settings = 13; // at most 128 entries and 16,384 bytes; keys 1..64 bytes;
+                                    // a key given twice is malformed (§4.1)
 }
 
 message Leave {
