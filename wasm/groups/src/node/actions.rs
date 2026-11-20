@@ -601,6 +601,7 @@ impl Node {
         let fork = self.fork_to_resolve(&group);
         let my_keys = signer.public_keys().clone();
         let leavers = self.live_leavers(&cur);
+        let mut message_timer = cur_root.message_timer();
         let (mut parents, mut members, name, handover) = match &change {
             GroupChange::Successor { add, remove, name } => {
                 if !fork.is_empty() {
@@ -613,7 +614,14 @@ impl Node {
                 }
                 (vec![cur], m, name.clone(), None)
             }
-            GroupChange::MessageTimer { .. } => return Err(NodeError::NotAllowed),
+            GroupChange::MessageTimer { timer } => {
+                if !fork.is_empty() {
+                    return Err(NodeError::Fork);
+                }
+                message_timer = *timer;
+                let m: BTreeSet<GossipId> = cur_root.members().iter().copied().collect();
+                (vec![cur], m, None, None)
+            }
             GroupChange::Handover {
                 new_owner,
                 leave,
@@ -753,7 +761,7 @@ impl Node {
             // epoch, entries this release does not understand included, so that an owner on
             // an older release never erases what a newer one set. Receivers put no rule
             // between a root's timer or settings and its parents'.
-            message_timer: cur_root.message_timer(),
+            message_timer,
             settings: cur_root.settings().clone(),
         };
         let root = match handover {

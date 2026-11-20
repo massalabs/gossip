@@ -299,10 +299,26 @@ impl Node {
                 took_part: self
                     .own_direct_chat(group)
                     .then(|| g.is_some_and(|g| g.took_part)),
-                message_timer: 0,
-                timers: Vec::new(),
+                message_timer: rec.root.message_timer(),
+                timers: self.epoch_timers(group),
             });
         }
+        out
+    }
+
+    /// Every epoch of `group` with its message timer, in the order they started (§7.7).
+    fn epoch_timers(&self, group: &ChatId) -> Vec<EpochTimer> {
+        let mut out: Vec<EpochTimer> = self
+            .group_epochs(group)
+            .iter()
+            .filter_map(|e| self.t.epochs.get(e))
+            .map(|r| EpochTimer {
+                epoch: r.root.chat_id(),
+                message_timer: r.root.message_timer(),
+                started_at: r.line_time.unwrap_or(r.received_at),
+            })
+            .collect();
+        out.sort_by_key(|t| (t.started_at, t.epoch));
         out
     }
 
@@ -335,7 +351,7 @@ impl Node {
                         .filter(|_| self.direct_owner(&r.root, inv.rejoins.is_some()).is_some()),
                     migration_of: self.migration_of(c),
                     continues: self.continued_by(&r.root, inv.rejoins.is_some()),
-                    message_timer: 0,
+                    message_timer: r.root.message_timer(),
                 }),
                 EpochStatus::Installed => None,
             })

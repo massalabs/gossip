@@ -816,7 +816,7 @@ impl Node {
             epoch_challenge: Challenge::from_bytes(bytes(cx.rng)),
             ref_chat_id_challenge: Challenge::from_bytes(bytes(cx.rng)),
             created_at: cx.now,
-            message_timer: 0,
+            message_timer: options.message_timer,
             settings: std::collections::BTreeMap::new(),
         };
         let root =
