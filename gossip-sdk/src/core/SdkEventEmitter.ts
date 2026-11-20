@@ -31,6 +31,12 @@ export enum SdkEventType {
    * one kept, and whether messages written in the closed one were lost.
    */
   DIRECT_CHAT_SUPERSEDED = 'directChatSuperseded',
+  /**
+   * The server refused a send at a seeker it already held (409): the session
+   * with the peer was renewed, or, when it was renewed for this less than an
+   * hour ago, nothing was and the ciphertext was dropped (a warning).
+   */
+  SEEKER_CONFLICT = 'seekerConflict',
   ERROR = 'error',
 }
 
@@ -68,6 +74,7 @@ export type SdkEvents = {
     by: string;
     hasMessages: boolean;
   };
+  [SdkEventType.SEEKER_CONFLICT]: { contactUserId: string; renewed: boolean };
   [SdkEventType.ERROR]: { error: Error; context: string };
 };
 

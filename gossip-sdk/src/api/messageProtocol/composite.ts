@@ -6,6 +6,7 @@
  * do not care which path a message took.
  */
 
+import { isSeekerConflict } from '../errors.js';
 import {
   BulletinItem,
   EncryptedMessage,
@@ -174,6 +175,13 @@ export class CompositeMessageProtocol implements IMessageProtocol {
     if (!results.some(r => r.status === 'fulfilled')) {
       throw (results[0] as PromiseRejectedResult).reason;
     }
+    // A server that holds another value at this seeker refuses it for good,
+    // even if a mesh took it: the session that produced it is behind what
+    // was already published, and the peer reads the server's value.
+    const conflict = results.find(
+      r => r.status === 'rejected' && isSeekerConflict(r.reason)
+    ) as PromiseRejectedResult | undefined;
+    if (conflict) throw conflict.reason;
     const key = encodeToBase64(message.seeker);
     this.accepted.delete(key);
     this.accepted.set(

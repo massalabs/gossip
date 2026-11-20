@@ -15,3 +15,4 @@ export {
   type TransportConnectivity,
   type MessageRouting,
 } from './messageProtocol/index.js';
+export { HttpStatusError, isSeekerConflict } from './errors.js';
