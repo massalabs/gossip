@@ -793,3 +793,30 @@ fn work_for_the_epoch_queued_or_assembled_before_it_goes_inactive_is_not_sent() 
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// §10.4, §12.5: the user asked for a sync object of C that no one has answered yet when R
+/// stops being active in C. The lookup ends at once, not found, as one asked for then does;
+/// before, it was parked and never reported.
+#[test]
+fn a_sync_object_lookup_in_progress_ends_not_found_when_the_group_goes_inactive() {
+    for how in ALL {
+        let (mut net, _, c) = active();
+        net.offline[Q] = true;
+        net.offline[0] = true;
+        let sync = SyncObjId::from_bytes([0x5A; 32]);
+        let now = net.now;
+        let dev = &mut net.devs[R];
+        dev.node
+            .lookup_sync_object(&mut dev.store, c, sync, now, &mut net.rng)
+            .unwrap();
+        drain(&mut net);
+        go_inactive(&mut net, Some(how), c);
+        let now = net.now;
+        let dev = &mut net.devs[R];
+        let results = dev
+            .node
+            .take_lookup_results(&mut dev.store, now, &mut net.rng)
+            .unwrap();
+        assert_eq!(results, vec![(c, sync, LookupResult::NotFound)], "{how:?}");
+    }
+}
