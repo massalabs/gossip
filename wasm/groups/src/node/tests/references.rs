@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use super::membership::{MNet, gid};
+use super::membership::{MNet, gid, signer};
 use super::*;
 use crate::event::{ReplyTarget, encode_reply_to};
 use crate::ids::RefChatId;
@@ -532,4 +532,69 @@ fn a_quoted_message_missing_from_a_held_epoch_is_fetched() {
     assert!(ops(&log).iter().any(|(f, _, op)| *f == 3 && *op == fetch));
     assert!(by_ref(&log, r).is_empty());
     assert!(holds(&net, 3, &g, &m));
+}
+
+/// A chat the user closed is never asked for, whether it was an invitation ignored and
+/// deleted or a group left silently: the closed-chat marker keeps the reference of the root it
+/// closes (§14.2). Why: with the chat ID only, a reply naming that chat made the device ask,
+/// the root came back and was dropped, and the next reply made it ask again, so a peer could
+/// see the device throw the root away; now it never asks, as a device that has not answered
+/// the invitation yet.
+#[test]
+fn nothing_is_asked_for_a_chat_the_user_closed() {
+    for installed in [false, true] {
+        let mut net = MNet::new(6, true);
+        let g = net.create(0, &[1, 2, 3]);
+        let h = net.create(4, &[1, 2, 3, 5]);
+        net.exchange();
+        for d in 1..6 {
+            let due: Vec<ChatId> = net.devs[d]
+                .node
+                .invitations(net.now)
+                .iter()
+                .map(|i| i.chat_id)
+                .filter(|c| installed || d != 3 || *c != g)
+                .collect();
+            for c in due {
+                net.accept(d, c);
+            }
+        }
+        net.run(2 * MIN);
+        let m = net.say(0, &g, "quoted");
+        net.run(MIN);
+        let r = reference(&net, 0, &g);
+        let now = net.now;
+        let s = signer(3);
+        let dev = &mut net.devs[3];
+        if installed {
+            dev.node
+                .leave_group(
+                    &mut dev.store,
+                    &s,
+                    g,
+                    LeaveChoice::Silent,
+                    now,
+                    &mut net.rng,
+                )
+                .unwrap();
+        } else {
+            dev.node
+                .decline_invitation(
+                    &mut dev.store,
+                    &s,
+                    g,
+                    LeaveChoice::Silent,
+                    now,
+                    &mut net.rng,
+                )
+                .unwrap();
+        }
+        net.run(MIN);
+        assert!(net.devs[3].node.root(&g).is_none());
+        reply_via(&mut net, 1, 2, 3, &h, &[(r, sync(&m))]);
+        let mut log = run_log(&mut net, 5 * MIN);
+        log.extend(jump(&mut net, WEEK + HOUR));
+        assert!(by_ref(&log, r).is_empty(), "installed={installed}");
+        assert!(net.devs[3].node.root(&g).is_none());
+    }
 }
