@@ -534,7 +534,9 @@ ref_chat_id = H("gossip.groups.reference.1", ref_chat_id_challenge, chat_id)
 ```
 
 with the challenge of the epoch being referenced.
-A device computes and stores `ref_chat_id → chat_id` when it installs a root.
+A device computes and stores `ref_chat_id → chat_id` for every root it holds, installed or as an
+invitation not answered yet, and keeps the reference in the closed-chat marker when it closes the
+epoch (§14.2).
 Replies use it to name the epoch of their target (§7.6).
 It hides the epoch ID from anyone who is not a member of that epoch, but it is linkable: all
 references to one epoch are equal.
@@ -1968,11 +1970,48 @@ It carries no quote: every preview is built from the reader's own copy of the ta
   A reference it cannot resolve may name an epoch it was never in, and validity must not depend on
   which roots a device holds.
 
-**Resolving a reference.** A device resolves a reference against the roots it holds (§4.5).
-If none matches, it MAY send a chat lookup by `ref_chat_id` (§12.7), which returns the root only to
-a member of that epoch.
-To load a resolved target, the device performs a sync-object lookup in the target's epoch (§12.5),
-subject to §10.4.
+**Resolving a reference.** A device resolves a reference against what it holds (§4.5): the
+roots it installed, the invitations it has not answered, and its closed-chat markers (§14.2).
+
+- **An installed epoch.** To load a target it lacks, the device performs a sync-object lookup in
+  the target's epoch (§12.5), subject to §10.4. Nothing is fetched in a read-only group.
+- **An invitation not answered yet.** Nothing is sent. The target is fetched as above once the
+  user accepts. *Why:* nothing is sent in an epoch the user has not accepted (§4.8).
+- **A closed chat**, whatever closed it, "Ignore and Delete" included. Nothing is sent, ever.
+- **No match.** The device sends a chat lookup by `ref_chat_id` (§12.7), which returns the root
+  only to a member of that epoch.
+
+*Why never ask for a closed chat:* when the marker kept the chat ID only, a reply naming that chat
+made the device ask, the root came back and was dropped, and the next reply made it ask again. A
+peer could see the device throw the root away. With the reference kept in the marker the device
+never asks, which is exactly what a device holding an unanswered invitation does: "ignored and
+deleted" and "not answered yet" look the same.
+
+**When.** Only on receipt of the reply, after a short random wait; never on display or reading.
+No action of the interface starts a lookup or a fetch of a target.
+*Why:* a lookup made when the user opens the message would tell a peer when it was read.
+
+**Whom.** At most three peers per round, among the members of the reply's epoch that may receive
+anything of it (§10.4), this device excluded, in this order:
+
+1. the peer that delivered the reply to this device;
+2. the reply's author, when that is another peer: the author field is an unsigned claim, used only
+   for this order;
+3. the other members, those with a session first, each drawn by score (§11.8).
+
+**How often.** With no root back, the device tries again at most once a week, four rounds in all
+for one reference, and only while it holds a reply naming that reference. Once no such reply is
+held (deleted, or past its moment, §7.7), it stops and forgets the reference. After the fourth
+round it stops for good: a new reply naming the same reference does not start the count again.
+"Not available" carries no penalty (§11.8). These numbers, and the bounds on the references looked
+up at once, are local policy (§2.2, §17.4).
+
+**What comes back.** A returned root must have the reference asked: the device computes it again,
+and any other root is an invalid answer (§11.4, §13.4). A root that matches goes through the normal
+reception of §4.8, with no special case: a skipped epoch of a group the device is in joins that
+group's history without a prompt (case 2); the root of a group the user was added to, whose
+invitation never arrived, is an invitation, prompted as any other (case 5). A closed chat cannot
+come back this way, since it is never asked for.
 
 **Display.** A preview has two lines: "\<author\> in \<group name\>", then the shortened, wrapped
 content.
@@ -1983,11 +2022,11 @@ content.
   Both use the same component.
 - A preview is shown whenever the reader holds the target, whatever its group.
   Selecting it opens that conversation at that message.
-- If the reference matches no root the device holds, nothing is shown, and the preview appears if a
-  lookup later succeeds.
+- Until the device holds the target's epoch, installed, nothing is shown; the preview appears once
+  the device holds the target's epoch and the target.
   "Message unavailable" is never displayed.
-- If the root is held but the target is not loaded, the preview shows a loading state with the
-  retry progress (stage n of 20, §11.4), then a failed state.
+- If the epoch is installed but the target is not loaded, the preview shows a loading state with
+  the retry progress (stage n of 20, §11.4), then a failed state.
   There is no retry button; a later notice, scan result or reconnection can restart the retrieval
   (§11.5).
 - If the target is in a group the user has hidden, nothing is shown.
@@ -2004,6 +2043,17 @@ asking every peer.
 Caveat: a reference is the same value everywhere.
 Members of the reply's epoch who are not in the target's epoch see an opaque value and can tell
 when two replies point to the same unknown epoch, nothing more.
+
+Known limits of resolving references:
+
+- An invitation can appear because of a reply: the root fetched by reference may be that of a
+  group the user was added to whose invitation never arrived.
+- The quote of a message in a chat not accepted yet appears only after accepting.
+- A skipped epoch fetched this way joins its group like any adopted epoch and is then synced in
+  full (§12.3), not only the quoted message.
+- What a peer learns from being asked: only that this device does not hold the epoch behind a
+  value that peer already saw in the reply. A peer that is in that epoch already knows whether the
+  asker is a member.
 
 **Forwards** are content-only copies in the destination chat.
 Their body is `[content_type, content]`, a permitted copied content value: `content_type` is `text`
@@ -2914,6 +2964,7 @@ It has three forms:
   serves its roots both ways, and a device no longer active in the group answers "not available",
   as for a reference it does not hold (§10.4).
   *Why:* the same root gets the same answer whichever way it is asked.
+  When a requester sends it, to whom, how often, and what it never asks for: §7.6.
 - **By parent:** `chat_id` names a root that both peers must be members of; the responder looks,
   among the roots it holds, for the one whose commitment under that root's `epoch_challenge` equals
   `parentCommitment`.
@@ -3408,7 +3459,9 @@ except what the message timer erases (§7.7).
   Synchronization, sharing and keys continue; notifications follow the separate mute setting.
 - **Closing a group.** The device removes the roots, the group secrets, message state, stubs,
   signed objects, pending tasks, hints and links of that group, and keeps only a minimal non-secret
-  **closed-chat marker** for each of its ends (the chat ID).
+  **closed-chat marker** for each of its ends: the chat ID, and the reference of its root (§4.5),
+  computed when closing while the root is still held.
+  A marker recorded before the reference was kept has the chat ID only and stays valid.
   Other groups, shared sessions and sequence-dependent ciphertext are kept.
   The UI warns that recovery obligations and deletion knowledge are lost.
 - A group is closed by "Ignore and Delete", by a signed leave or decline once it is sent, by the
@@ -3421,12 +3474,15 @@ except what the message timer erases (§7.7).
   The prompt says that this group was closed on this device before and warns that deleted content
   may reappear because local deletion memory is gone.
   Accept clears the marker and installs the epoch as a first Accept would.
-- **Dissolved marker.** It is left by "Dissolve & Delete" (§5.8).
+- **Dissolved marker.** It is left by "Dissolve & Delete" (§5.8), with the chat ID and the
+  reference of the root.
   The device drops every frame for that epoch, its root included.
   It does not reject successors: a later root that lists the device is an invitation.
 
-*Why markers:* keeping nothing but a chat ID leaves no member list or secret behind, while frames
-of that epoch are dropped instead of silently recreating the group.
+*Why markers:* keeping nothing but a chat ID and a reference leaves no member list or secret
+behind, while frames of that epoch are dropped instead of silently recreating the group.
+*Why the reference:* a reply naming the closed epoch is then recognised without asking anyone for
+it (§7.6); asking would let a peer see the device drop the root it gets back.
 
 **Emergency wipe.** Wiping the device or the application's data is never blocked or delayed by any
 rule of this document, for an owner or for anyone else.
@@ -3437,7 +3493,8 @@ the root from a member, or after restoring a backup.
 
 Caveats:
 
-- A marker shows, on an unlocked device, that a declined, left, deleted or dissolved group existed.
+- A marker shows, on an unlocked device, that a declined, left, deleted or dissolved group existed,
+  and its reference shows which held replies point to it.
 - While a group waits for a kick, and for two weeks after "Dissolve & Delete", its roots, which
   hold member lists but no message, stay on the device (§5.4, §5.8).
 - A local name is never sent, but it is stored on the device (§5.11).
@@ -3855,6 +3912,7 @@ accept and relay such a root unchanged.
 | Waiting for a kick | at most 2 weeks (§5.4) |
 | Root and dissolve message kept after "Dissolve & Delete" | 2 weeks (§5.8) |
 | Failed announcements before a pause (provisional) | 3 within 24 h; pause 1 h, doubling, at most 24 h |
+| Chat lookup by reference (local policy) | after a wait of up to 1 min from the reply's receipt; at most 3 peers per round; one round per week; 4 rounds per reference (§7.6) |
 
 ## Appendix C: Protobuf schema
 
@@ -5204,7 +5262,9 @@ not counted against the member that relayed it.
 - A leave that is no longer live is served only to its leaver and to removal lookups; a
   signed-object lookup for it gets "not available".
 - "Ask to be kicked" on an invitation installs that root as a group in the waiting state.
-- The requester side of a chat lookup by reference is not built yet.
+- *Settled:* the requester side of a chat lookup by reference is built as §7.6 states: on receipt
+  of a reply only, three peers per round at most, once a week, four rounds at most, never for an
+  epoch the device can place (installed, an invitation not answered yet, or closed).
 
 - **A (recommended):** confirm them one by one.
 - **B:** leave them to implementations.
