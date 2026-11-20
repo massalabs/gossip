@@ -9,7 +9,10 @@
  * - a new contact gets one direct chat without a second prompt, crossing
  *   requests included;
  * - a member of a group who is not a contact is connected automatically,
- *   without a prompt or a conversation, and revoked once no group needs it.
+ *   without a prompt or a conversation, and revoked once no group needs it;
+ * - a contact who announces itself anew, such as an account restored from
+ *   its recovery phrase, is answered without a prompt, once in ten minutes;
+ *   a first request still waits for the user.
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { MockMessageProtocol } from '../mocks';
@@ -34,11 +37,17 @@ import { bytesToHex } from '@noble/hashes/utils';
 /** One clock for every SDK, advanced by the test. */
 let clock = 1_800_000_000_000;
 
-async function openPeer(net: MockMessageProtocol): Promise<GossipSdk> {
+/** The recovery phrase of each peer, to restore it on an empty device. */
+const mnemonics = new WeakMap<GossipSdk, string>();
+
+async function openPeer(
+  net: MockMessageProtocol,
+  mnemonic = generateMnemonic()
+): Promise<GossipSdk> {
   const sdk = new GossipSdk();
   await sdk.init({ storage: getTestStorageConfig(), messageProtocol: net });
   await sdk.openSession({
-    mnemonic: generateMnemonic(),
+    mnemonic,
     encryptionKey: await generateEncryptionKey(),
     onPersist: async () => {},
     autoStartPolling: false,
@@ -46,6 +55,7 @@ async function openPeer(net: MockMessageProtocol): Promise<GossipSdk> {
   });
   (sdk.groups as unknown as { now: () => number }).now = () => clock;
   await sdk.conversations.settle();
+  mnemonics.set(sdk, mnemonic);
   return sdk;
 }
 
@@ -546,5 +556,143 @@ describe('Direct chats, contacts and connections', { timeout: 300_000 }, () => {
     expect(await texts(carol.groups, groupId)).toContain(
       'from bob, added back'
     );
+  });
+
+  /**
+   * The account of `p` restored from its recovery phrase on an empty
+   * device, `p` closed for good; the board read from now on, as the app
+   * does for a restored account.
+   */
+  async function restore(p: GossipSdk): Promise<GossipSdk> {
+    const userId = p.userId;
+    await p.closeSession();
+    const restored = await openPeer(net, mnemonics.get(p));
+    await restored.announcements.skipHistorical();
+    peers = peers.map(q => (q === p ? restored : q));
+    expect(restored.userId).toBe(userId);
+    return restored;
+  }
+
+  /** What the app does when the user adds a contact by user ID. */
+  async function addContact(p: GossipSdk, other: GossipSdk, name: string) {
+    await p.contacts.add(other.userId, name, other.publicKeys);
+    const contact = (await p.contacts.get(other.userId))!;
+    expect((await p.discussions.start(contact)).success).toBe(true);
+  }
+
+  /**
+   * A message passes each way over the session: in a group Alice founds,
+   * which needs no direct chat (which one the two keep after a restore is
+   * not what these tests are about).
+   */
+  async function messagesFlow(alice: GossipSdk, bob: GossipSdk) {
+    const groupId = await alice.groups.createGroup('After', [bob.userId]);
+    await deliver();
+    const inv = (await bob.groups.invitations()).find(
+      i => i.epochId === groupId
+    );
+    expect(inv).toBeDefined();
+    await bob.conversations.acceptInvitation(groupId);
+    await deliver();
+    await bob.groups.sendMessage(groupId, 'from bob');
+    await alice.groups.sendMessage(groupId, 'from alice');
+    await deliver();
+    for (const p of [alice, bob]) {
+      expect((await texts(p.groups, groupId)).sort()).toEqual([
+        'from alice',
+        'from bob',
+      ]);
+    }
+  }
+
+  /** The announcements posted to the board so far. */
+  const posted = () => net.getStoredAnnouncements().length;
+
+  /** Alice and Bob, contacts with a direct chat; Bob then restored empty. */
+  async function restoredContact(): Promise<{
+    alice: GossipSdk;
+    bob: GossipSdk;
+  }> {
+    const [alice, bob0] = await open(2);
+    await setupSession(alice, bob0, 'Bob', 'Alice', 'hello', {
+      asNewContact: true,
+    });
+    await deliver();
+    expect(await keys(alice)).toHaveLength(1);
+    return { alice, bob: await restore(bob0) };
+  }
+
+  it('answers a contact restored from its recovery phrase who adds this device again', async () => {
+    const { alice, bob } = await restoredContact();
+    const prompts: unknown[] = [];
+    alice.on(SdkEventType.SESSION_REQUESTED, e => prompts.push(e));
+
+    await addContact(bob, alice, 'Alice');
+    await deliver(10);
+
+    // Alice's device answered without her doing anything.
+    expect(alice.discussions.getStatus(bob.userId)).toBe(SessionStatus.Active);
+    expect(bob.discussions.getStatus(alice.userId)).toBe(SessionStatus.Active);
+    expect(prompts).toEqual([]);
+    await messagesFlow(alice, bob);
+  });
+
+  it('answers a contact who announces itself anew once, and never an answer to its own', async () => {
+    const { alice, bob } = await restoredContact();
+    const before = posted();
+    await addContact(bob, alice, 'Alice');
+    await deliver(10);
+    expect(bob.discussions.getStatus(alice.userId)).toBe(SessionStatus.Active);
+    // Bob's request and Alice's answer: Bob does not answer an answer.
+    const settled = posted();
+    expect(settled).toBe(before + 2);
+    await deliver(10);
+    expect(posted()).toBe(settled);
+
+    // Bob's request and Alice's answer, replayed on the board: within ten
+    // minutes of her answer, neither device answers again.
+    const replayed = net.getStoredAnnouncements().slice(-2);
+    for (const a of replayed) await net.sendAnnouncement(a.data);
+    await deliver(10);
+    expect(posted()).toBe(settled + replayed.length);
+    for (const p of [alice, bob]) {
+      const other = p === alice ? bob : alice;
+      expect(p.discussions.getStatus(other.userId)).toBe(SessionStatus.Active);
+    }
+  });
+
+  it('still waits for the user before accepting a first contact request', async () => {
+    const [alice, bob] = await open(2);
+    const prompts: unknown[] = [];
+    bob.on(SdkEventType.SESSION_REQUESTED, e => prompts.push(e));
+
+    await addContact(alice, bob, 'Bob');
+    const sent = posted();
+    await deliver(10);
+
+    expect(prompts).toHaveLength(1);
+    expect(posted()).toBe(sent);
+    expect(bob.discussions.getStatus(alice.userId)).toBe(
+      SessionStatus.PeerRequested
+    );
+    expect(alice.discussions.getStatus(bob.userId)).toBe(
+      SessionStatus.SelfRequested
+    );
+  });
+
+  it('connects again a restored contact removed and added back by user ID', async () => {
+    const { alice, bob } = await restoredContact();
+    await addContact(bob, alice, 'Alice');
+    await deliver(10);
+
+    // Alice removes Bob and adds him again: Bob, who holds the session,
+    // answers her new announcement.
+    await alice.contacts.delete(bob.userId);
+    await addContact(alice, bob, 'Bob');
+    await deliver(10);
+
+    expect(alice.discussions.getStatus(bob.userId)).toBe(SessionStatus.Active);
+    expect(bob.discussions.getStatus(alice.userId)).toBe(SessionStatus.Active);
+    await messagesFlow(alice, bob);
   });
 });
