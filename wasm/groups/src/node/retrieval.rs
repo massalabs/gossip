@@ -345,7 +345,7 @@ impl Node {
     }
 
     /// Completes a sync-object lookup (§12.5).
-    fn complete_lookup(&mut self, key: TaskKey, result: LookupResult) {
+    pub(crate) fn complete_lookup(&mut self, key: TaskKey, result: LookupResult) {
         if let Target::SyncObj(sync) = key.target
             && self.t.tasks.remove(&key).is_some()
         {

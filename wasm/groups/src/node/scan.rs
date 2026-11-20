@@ -581,20 +581,7 @@ impl Node {
         live_until: u64,
     ) -> Result<Option<super::records::AnswerOp>, NodeError> {
         use super::records::AnswerOp;
-        // Not holding the anchor is legitimate (§12.1); a requester that is not a member of
-        // the held anchor gets the same answer, so it cannot tell the two apart.
-        let member = self.epochs.get(&anchor).is_some_and(|e| {
-            e.root.is_member(&peer)
-                && peer != self.me
-                && e.state != crate::epoch::GroupState::Waiting
-        }) && !matches!(
-            self.group_status(&anchor),
-            super::records::GroupStatus::Removed { .. }
-                | super::records::GroupStatus::Left { .. }
-                | super::records::GroupStatus::Waiting { .. }
-                | super::records::GroupStatus::Superseded { .. }
-        );
-        if !member {
+        if !self.tips_anchor_served(&peer, &anchor) {
             return Ok(Some(AnswerOp::Status(Status::NotAvailable)));
         }
         // A removed peer is told of its removal, a former owner of its handover (§5.6).
@@ -641,6 +628,25 @@ impl Node {
             },
         );
         Ok(Some(page))
+    }
+
+    /// Whether a tips scan of `peer` anchored in `anchor` is answered with a page: `peer` is a
+    /// member of the held anchor, and this device is active in its group or keeps it dissolved
+    /// (§12.1, §5.8). Not holding the anchor is legitimate (§12.1); a requester that is not a
+    /// member of the held anchor, or asks a device no longer active in its group, gets the same
+    /// "not available", so it cannot tell these apart. Judged again when a page is assembled.
+    pub(crate) fn tips_anchor_served(&self, peer: &GossipId, anchor: &ChatId) -> bool {
+        self.epochs.get(anchor).is_some_and(|e| {
+            e.root.is_member(peer)
+                && *peer != self.me
+                && e.state != crate::epoch::GroupState::Waiting
+        }) && !matches!(
+            self.group_status(anchor),
+            super::records::GroupStatus::Removed { .. }
+                | super::records::GroupStatus::Left { .. }
+                | super::records::GroupStatus::Waiting { .. }
+                | super::records::GroupStatus::Superseded { .. }
+        )
     }
 
     /// Whether a new list of `n` entries may be frozen for `peer` (§17.4): 4 live scans per

@@ -79,6 +79,9 @@ struct Pending {
     charged: u64,
     /// When it was assembled.
     assembled_at: u64,
+    /// The groups of the epochs its work names: a group that goes inactive or is closed
+    /// makes it stale (see `stale_group`).
+    groups: BTreeSet<ChatId>,
     /// The plaintext is current only before this instant: the first due item of an epoch
     /// (a deletion or activation that may change what it carries) or the end of the window
     /// of an event it carries, whichever comes first.
@@ -283,6 +286,12 @@ impl Node {
                         .fold(due, u64::min)
                         .max(cx.now.saturating_add(1));
                     pending.assembled_at = cx.now;
+                    pending.groups = pending
+                        .items
+                        .iter()
+                        .filter_map(|k| n.t.queue.get(k).and_then(work_chat))
+                        .map(|c| n.group_of(&c))
+                        .collect();
                     let handle = n.outbox.next;
                     n.outbox.next += 1;
                     n.outbox.items.extend(pending.items.iter().copied());
@@ -449,6 +458,29 @@ impl Node {
             && !self.outbox.stale.contains(&handle)
     }
 
+    /// Whether `chat` is an installed epoch of a superseded chat of two (§5.12).
+    fn superseded(&self, chat: &ChatId) -> bool {
+        self.installed(chat)
+            && matches!(
+                self.group_status(chat),
+                super::records::GroupStatus::Superseded { .. }
+            )
+    }
+
+    /// Marks stale the plaintexts in flight that carry work naming an epoch of `group`, which
+    /// went inactive or was closed (§15.1, D.74): their work is assembled again, and what can
+    /// no longer be sent is dropped or answered as a device that does not hold the epoch
+    /// answers. Why: a device that holds the epoch but is no longer active must send nothing a
+    /// device that deleted the chat would not; a plaintext assembled a moment before the
+    /// change would otherwise still go.
+    pub(crate) fn stale_group(&mut self, group: ChatId) {
+        for (h, p) in &self.outbox.sent {
+            if p.groups.contains(&group) {
+                self.outbox.stale.insert(*h);
+            }
+        }
+    }
+
     /// Marks stale the plaintexts in flight that refer to a pruned event (§15.1).
     pub(crate) fn stale_in_flight(&mut self, chat: ChatId, pruned: &[EventId]) {
         for (h, p) in &self.outbox.sent {
@@ -525,6 +557,18 @@ impl Node {
         let mut purposes: BTreeSet<Purpose> = BTreeSet::new();
         for (key, work) in items {
             match work {
+                // An event or a neighbor request of an epoch whose group is no longer active
+                // here is not sent (§10.4, D.74): a device that deleted the chat sends none.
+                // A superseded chat of two still sends the events queued before the switch,
+                // so that the peer gets what was written in the chat it replaces (§5.12).
+                Work::Full { chat_id, .. } | Work::Notice { chat_id, .. }
+                    if !self.serves(&chat_id) && !self.superseded(&chat_id) =>
+                {
+                    stale.push(key);
+                }
+                Work::NeighborRequest { chat_id } if !self.serves(&chat_id) => {
+                    stale.push(key);
+                }
                 Work::Full { chat_id, event_id } => {
                     match self.sendable(cx, &peer, &chat_id, &event_id)? {
                         Some(e) => match wire::encode_event_blob(&EventObject::Message(e)) {
@@ -632,14 +676,19 @@ impl Node {
                     chat_id,
                     accepted,
                     suggestions,
-                } => control.push((
-                    key,
-                    Frame::NeighborResponse(NeighborResponse {
-                        chat_id,
-                        accepted,
-                        suggestions,
-                    }),
-                )),
+                } => {
+                    // A device no longer active in the group declines without suggestions, as
+                    // one that does not hold the epoch (§13.6, D.6, D.74).
+                    let serves = self.serves(&chat_id);
+                    control.push((
+                        key,
+                        Frame::NeighborResponse(NeighborResponse {
+                            chat_id,
+                            accepted: accepted && serves,
+                            suggestions: if serves { suggestions } else { Vec::new() },
+                        }),
+                    ));
+                }
                 Work::VersionNotice => version_notice.push(key),
                 Work::Object { chat_id, item } => match self.object_blob(&peer, &chat_id, item) {
                     Some(blob) => objects.push((key, Frame::Event(blob))),
@@ -914,10 +963,19 @@ impl Node {
     ) -> Result<Option<Evaluated>, NodeError> {
         let late = !super::timing::may_answer(sent_at, ttl, cx.now);
         let status = |s| Some((Some(Category::Status), ResponseResult::Status(s), None));
-        // An event or sync-object lookup is decided again as on receipt (`handle_query`): the
-        // epoch may have been deleted, or its group gone inactive, in between. One that can no
-        // longer be served gets what a device that cannot serve it gives: "not available" to a
-        // peer that shares an active chat with this device, silence to any other (§13.7, D.74).
+        // An event, sync-object, root or signed-object lookup is decided again as on receipt
+        // (`handle_query`): the epoch may have been deleted, or its group gone inactive, in
+        // between. One that can no longer be served gets what a device that cannot serve it
+        // gives: "not available" to a peer that shares an active chat with this device, silence
+        // to any other (§13.7, D.74). A page of a scan whose anchor is no longer served gets
+        // "not available", as a new scan would.
+        let unserved = || {
+            status(if late {
+                Status::Expired
+            } else {
+                Status::NotAvailable
+            })
+        };
         let lookup = match op {
             AnswerOp::Event { chat_id, event_id } => {
                 Some(QueryEntry::Op(QueryOp::Event { chat_id, event_id }))
@@ -929,6 +987,12 @@ impl Node {
                 chat_id,
                 sync_obj_id,
             })),
+            AnswerOp::Root { chat_id } => Some(QueryEntry::Op(QueryOp::ChatById(chat_id))),
+            AnswerOp::Object { chat_id, item } => {
+                super::objects::item_key(chat_id, item).map(|(chat_id, kind, id)| {
+                    QueryEntry::Op(QueryOp::SignedObject { chat_id, kind, id })
+                })
+            }
             _ => None,
         };
         if let Some(entry) = lookup
@@ -937,11 +1001,13 @@ impl Node {
             if !self.unservable_answered(*peer, &entry) {
                 return Ok(None);
             }
-            return Ok(status(if late {
-                Status::Expired
-            } else {
-                Status::NotAvailable
-            }));
+            return Ok(unserved());
+        }
+        if let AnswerOp::Page { anchor, .. } = op
+            && anchor != super::records::SHARED_SCAN
+            && !self.tips_anchor_served(peer, &anchor)
+        {
+            return Ok(unserved());
         }
         Ok(match op {
             // A "not available" decided on receipt ages as content does: past the deadline it
@@ -1150,5 +1216,32 @@ impl Node {
             }
         };
         wire::encode_event_blob(&object).ok()
+    }
+}
+
+/// The epoch a work item names, if any: a key answer, a status, a blob and the version notice
+/// name none.
+fn work_chat(w: &Work) -> Option<ChatId> {
+    match w {
+        Work::Full { chat_id, .. }
+        | Work::Notice { chat_id, .. }
+        | Work::NeighborRequest { chat_id }
+        | Work::NeighborResponse { chat_id, .. }
+        | Work::Object { chat_id, .. }
+        | Work::ObjectNotice { chat_id, .. }
+        | Work::LeaveRequest { chat_id } => Some(*chat_id),
+        Work::Query { purpose } => match purpose {
+            Purpose::Task(k) => Some(k.chat_id),
+            Purpose::Scan(g) => Some(*g),
+        },
+        Work::Answer { op, .. } => match op {
+            AnswerOp::Event { chat_id, .. }
+            | AnswerOp::SyncObj { chat_id, .. }
+            | AnswerOp::Root { chat_id }
+            | AnswerOp::Object { chat_id, .. } => Some(*chat_id),
+            AnswerOp::Page { anchor, .. } => Some(*anchor),
+            AnswerOp::Keys { .. } | AnswerOp::Status(_) => None,
+        },
+        Work::Blob(_) | Work::VersionNotice => None,
     }
 }
