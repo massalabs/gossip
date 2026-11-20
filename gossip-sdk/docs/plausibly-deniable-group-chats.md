@@ -1406,6 +1406,10 @@ The device then treats them as one group, with the newer line holding the curren
 - Nothing is sent, and no other device learns of it.
 - A wrong link has no effect outside the device: a device answers scans from its own grouping, and
   a requester only receives entries for epochs it is a member of (§12.1).
+- A scan anchored in one group lists nothing of a group linked to it where the device is no longer
+  active (kicked, left, waiting for a kick, dissolved).
+  *Why:* the link is local, so a device that deleted that group lists nothing of it either; listing
+  it would tell a member of both groups that the device kept the history (§10.4).
 
 **At the junction.** After M accepts the invitation, the conversation shows:
 
