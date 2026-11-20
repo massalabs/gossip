@@ -2413,6 +2413,17 @@ back without part of an older epoch's messages in 23 of 300 runs. Kept, they cos
 inactive.
 A kick, a leave or a deletion of that epoch pushed to it is kept, but announced or relayed to no
 one.
+What it had queued, or already assembled, for that epoch when the group went inactive is decided
+again before it goes (§15.1): its events, notices and neighbor requests are dropped; an answer gets
+what a device that does not hold the epoch gives ("not available", or silence where such a device
+is silent; a neighbor request is declined without suggestions); a frozen tips-scan list of that
+group is dropped; a sync-object lookup in progress ends, not found; and a removed peer is owed
+nothing more.
+*Why:* a device that deleted the chat drops or answers all of this the same way (§13.7); otherwise
+work taken a moment before the kick would still tell a member that the device kept the history.
+The exceptions stay: a request to be kicked goes (§5.4), a superseded chat of two still sends the
+events queued before the switch (§5.12), an archive still serves what §5.8 lists, and a key answer
+decided on receipt, which names no epoch, goes as decided.
 What such a device still needs reaches it pushed in full: its own kick or leave (§5.6), deletion
 events (above), a dissolve message (§5.8) and the roots that concern it.
 *Why:* a lookup or a notice tells the peer that gets it that the device still holds the epoch,
@@ -3355,6 +3366,8 @@ transport.
 A revision check or serialization at that handoff prevents a concurrent prune from producing a new
 stale send.
 State changes that invalidate pending work do so atomically with the change.
+A group that goes inactive or is closed makes stale every plaintext in flight that carries work of
+it, so that this work is decided again (§10.4).
 
 ### 15.2 Atomicity
 

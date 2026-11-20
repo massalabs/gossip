@@ -431,8 +431,38 @@ impl Node {
     }
 
     /// Stops the neighbors, lanes and scans of a group: it went inactive, or is closed. Its
-    /// lookups send nothing more while it is inactive (see `retrieves`).
+    /// lookups send nothing more while it is inactive (see `retrieves`), and its sync-object
+    /// lookups end at once, not found, as one asked for then does (§10.4). The lists frozen for
+    /// tips scans anchored in it are dropped: an archive answers a new scan with its dissolve
+    /// message and root only, and any other inactive group "not available" (§12.1, §5.8). The
+    /// plaintexts in flight that carry work of it are made stale, so that this work is decided
+    /// again (§15.1, D.74).
     pub(crate) fn stop_sync(&mut self, group: ChatId) {
+        let group = self.group_of(&group);
+        let lookups: Vec<TaskKey> = self
+            .t
+            .tasks
+            .keys()
+            .filter(|k| {
+                matches!(k.target, Target::SyncObj(_)) && self.group_of(&k.chat_id) == group
+            })
+            .copied()
+            .collect();
+        for k in lookups {
+            self.complete_lookup(k, super::LookupResult::NotFound);
+            self.reindex(k);
+        }
+        let frozen: Vec<_> = self
+            .t
+            .scans_in
+            .keys()
+            .filter(|k| self.group_of(&k.1) == group)
+            .copied()
+            .collect();
+        for k in frozen {
+            self.t.scans_in.remove(&k);
+        }
+        self.stale_group(group);
         self.t.groups.remove(&group);
         let scans: Vec<_> = self
             .t
@@ -1105,14 +1135,7 @@ impl Node {
         // A device no longer active in the group stays silent, as one that does not hold the
         // epoch (D.74): no reply, no root, no lookup. An archive still gives a removed peer
         // its own kick or leave (§5.6, see `signed_served_to`).
-        let archive = matches!(
-            self.group_status(&chat),
-            GroupStatus::Dissolved {
-                must_delete: false,
-                ..
-            }
-        );
-        if !self.serves(&chat) && !archive {
+        if !self.answers_removed_peers(&chat) {
             return;
         }
         let now = cx.now;
@@ -1142,6 +1165,21 @@ impl Node {
                 None,
             );
         }
+    }
+
+    /// Whether this device replies to a removed peer of `chat` at all: it is active in the
+    /// group, or keeps it as an archive, which gives a removed peer its own kick or leave
+    /// (§5.6, §5.8, see `signed_served_to`). A device no longer active in the group stays
+    /// silent, as one that does not hold the epoch (D.74): no reply, no root, no lookup.
+    fn answers_removed_peers(&self, chat: &ChatId) -> bool {
+        self.serves(chat)
+            || matches!(
+                self.group_status(chat),
+                GroupStatus::Dissolved {
+                    must_delete: false,
+                    ..
+                }
+            )
     }
 
     /// The kick naming `peer` in `chat`, or the leave it signed for `chat`, when this device
@@ -1198,6 +1236,12 @@ impl Node {
     /// [`Node::removed_contact`]), if it is owed one and the daily count allows it. Returns
     /// whether a record was held.
     pub(crate) fn send_owed(&mut self, _cx: &mut Cx<'_>, chat: ChatId, peer: GossipId) -> bool {
+        // A device no longer active in the group sends nothing owed either: a record that
+        // arrives while it is inactive (applied in `apply_signed`) does not start a reply that
+        // a device that deleted the chat would never send (D.74).
+        if !self.answers_removed_peers(&chat) {
+            return false;
+        }
         let kick = (
             chat,
             SignedKind::Kick,
