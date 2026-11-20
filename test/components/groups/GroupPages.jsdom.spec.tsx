@@ -415,7 +415,10 @@ describe('group pages', () => {
     await click(boxes[0]);
     await click(byText('new_group.create'));
     await act(flush);
-    expect(fake.service.createGroup).toHaveBeenCalledWith('Trip', ['alice']);
+    // The creator's default timer, pre-selected: the earlier 1 month as 28 days.
+    expect(fake.service.createGroup).toHaveBeenCalledWith('Trip', ['alice'], {
+      messageTimer: 2_419_200_000,
+    });
     expect(
       r.container.querySelector('[data-testid="elsewhere"]')
     ).not.toBeNull();
