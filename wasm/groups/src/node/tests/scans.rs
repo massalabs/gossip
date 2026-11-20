@@ -22,7 +22,7 @@ fn scan(rid: u8, chat: ChatId, id: u8, offset: u64, sent_at: u64) -> Frame {
 }
 
 /// Member `peer` scans device 0 and gets one answer.
-fn ask(net: &mut Net, peer: usize, rid: u8, id: u8, offset: u64) -> ResponseResult {
+pub(crate) fn ask(net: &mut Net, peer: usize, rid: u8, id: u8, offset: u64) -> ResponseResult {
     let chat = net.chat();
     let f = scan(rid, chat, id, offset, net.now);
     net.recv_frames(0, member(peer), &[f]);
@@ -31,14 +31,14 @@ fn ask(net: &mut Net, peer: usize, rid: u8, id: u8, offset: u64) -> ResponseResu
     rs.remove(0).result
 }
 
-fn page(r: ResponseResult) -> Page {
+pub(crate) fn page(r: ResponseResult) -> Page {
     match r {
         ResponseResult::Page(p) => p,
         other => panic!("not a page: {other:?}"),
     }
 }
 
-fn ids(p: &Page) -> Vec<EventId> {
+pub(crate) fn ids(p: &Page) -> Vec<EventId> {
     p.entries
         .iter()
         .map(|e| match e.item {
