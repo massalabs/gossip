@@ -71,6 +71,13 @@ export const discussions = sqliteTable(
      * time. Cleared when the chat is linked.
      */
     directChatTimer: integer('directChatTimer'),
+    /**
+     * When the session was last renewed because the server refused a send
+     * at a seeker it already held (409): at most one such renewal an hour.
+     */
+    seekerConflictRenewedAt: integer('seekerConflictRenewedAt', {
+      mode: 'timestamp_ms',
+    }),
     createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updatedAt', { mode: 'timestamp_ms' }).notNull(),
   },
