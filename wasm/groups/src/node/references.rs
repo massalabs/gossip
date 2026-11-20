@@ -24,6 +24,11 @@
 //! of a group the device is in joins that group's history without a prompt, a group the
 //! user was added to whose invitation never arrived becomes an invitation. Nothing is
 //! fetched in an epoch the user has not accepted.
+//!
+//! **Off in the first release** ([`super::timing::REF_LOOKUPS_SENT`]): no reply is noted,
+//! no record is examined and none left by an earlier run survives the opening of the
+//! engine, so nothing of the above is sent. The reference index and the references the markers keep are
+//! maintained all the same, so that turning it on later finds them.
 
 use super::records::{Marker, MarkerKind, RefLookup, RefReply, Target, TaskKey};
 use super::timing::{
@@ -192,7 +197,8 @@ impl Node {
     /// A message event was accepted from `from` in `chat`: each target of its `replyTo`
     /// that the device cannot show yet is noted, to be fetched or looked up after a short
     /// random wait (§7.6). Only in a group where this device is active: a read-only group
-    /// starts nothing.
+    /// starts nothing. Nothing at all while [`super::timing::REF_LOOKUPS_SENT`] is
+    /// off.
     pub(crate) fn note_reply(
         &mut self,
         cx: &mut Cx<'_>,
@@ -200,6 +206,9 @@ impl Node {
         from: GossipId,
         event: &MessageEvent,
     ) -> Result<(), NodeError> {
+        if !self.ref_lookups {
+            return Ok(());
+        }
         let Payload::Content(c) = event.payload() else {
             return Ok(());
         };
@@ -316,6 +325,29 @@ impl Node {
         }
     }
 
+    /// [`super::timing::REF_LOOKUPS_SENT`] is off: the records left by an earlier run that
+    /// had it on are dropped, with the task of the round each one ran, so that none of them
+    /// is examined or sent (a query entry already queued for such a task goes stale).
+    /// Dropped rather than kept: kept, they would never be examined, so never forgotten
+    /// either, and a running round's task would be continued by the retrieval scheduler.
+    pub(crate) fn drop_ref_lookups(&mut self) {
+        let all: Vec<RefChatId> = self.t.ref_lookups.keys().copied().collect();
+        for reference in &all {
+            self.forget_ref(reference);
+        }
+        let tasks: Vec<TaskKey> = self
+            .t
+            .tasks
+            .keys()
+            .filter(|k| matches!(k.target, Target::Ref(_)))
+            .copied()
+            .collect();
+        for k in tasks {
+            self.t.tasks.remove(&k);
+            self.reindex(k);
+        }
+    }
+
     /// The messages of `chat` are erased (§14.2): the replies of it are forgotten, so that
     /// nothing of a closed chat stays behind, and so is a record left with none.
     pub(crate) fn forget_replies_in(&mut self, chat: &ChatId) {
@@ -356,6 +388,9 @@ impl Node {
 
     /// Examines every record that is due.
     pub(crate) fn ref_timers(&mut self, cx: &mut Cx<'_>) -> Result<(), NodeError> {
+        if !self.ref_lookups {
+            return Ok(());
+        }
         let due: Vec<RefChatId> = self
             .t
             .ref_lookups
@@ -371,6 +406,9 @@ impl Node {
 
     /// The earliest time a record is due.
     pub(crate) fn ref_wakeup(&self) -> Option<u64> {
+        if !self.ref_lookups {
+            return None;
+        }
         self.t.ref_lookups.iter().map(|(_, r)| r.due).min()
     }
 
