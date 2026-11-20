@@ -1179,6 +1179,10 @@ impl Node {
             Ok(EventObject::Message(e)) => {
                 // A message event frame is taking part in a chat of two (§5.12).
                 self.note_participation(&e.chat_id(), from);
+                // A removed peer is told of its removal, a former owner of its handover
+                // (§5.6), by a message event it sends; never by one in a response, which
+                // answers this device's own question and could start a loop.
+                self.removed_contact(cx, e.chat_id(), from);
                 e
             }
             Ok(EventObject::Root(r)) => return self.receive_root(cx, from, *r, group::Via::Direct),
@@ -1222,8 +1226,6 @@ impl Node {
             id: from,
             removed: entry.removed.contains(&from),
         };
-        // A removed peer is told of its removal, a former owner of its handover (§5.6).
-        self.removed_contact(cx, chat, from);
         let received = entry
             .epoch()
             .receive(cx.ov, sender, event.clone(), cx.now)?;

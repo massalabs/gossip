@@ -110,12 +110,21 @@ impl Node {
                     QueryEntry::Op(_) => continue,
                 }]
             };
+            // A removed peer is told of its removal, a former owner of its handover (§5.6), by
+            // any query that names the epoch, the three membership lookups included. Why one
+            // wide rule: which frames a later client sends first is local policy and may
+            // change, while this list is fixed for the wire version; a pushed record is no
+            // question, so no loop can start. A lookup whose answer already carries the
+            // peer's own kick or leave is not answered twice.
             if let QueryEntry::Op(
-                QueryOp::Event { chat_id, .. } | QueryOp::SyncObj { chat_id, .. },
+                QueryOp::Event { chat_id, .. }
+                | QueryOp::SyncObj { chat_id, .. }
+                | QueryOp::SignedObject { chat_id, .. }
+                | QueryOp::Removal { chat_id, .. }
+                | QueryOp::Keys { chat_id, .. },
             ) = entry
+                && !carries_own_removal(&ops, &from)
             {
-                // A removed peer is told of its removal, a former owner of its handover
-                // (§5.6).
                 self.removed_contact(cx, *chat_id, from);
             }
             for op in ops {
@@ -458,7 +467,8 @@ impl Node {
     /// A notice from `from` (§13.5): each entry is authorized on its own. An event this
     /// device knows records a hint (§10.3); an unknown one, or one held only as a
     /// temporary-rejection marker, enters retrieval with `from` as the triggering candidate
-    /// (§11.1, §9.6). Everything a removed peer sends is dropped (§10.4).
+    /// (§11.1, §9.6). Everything a removed peer sends is dropped (§10.4). Every entry from
+    /// a removed peer tells it of its removal (§5.6).
     pub(crate) fn handle_notice(
         &mut self,
         cx: &mut Cx<'_>,
@@ -471,6 +481,9 @@ impl Node {
         }
         for e in n.entries {
             let chat = e.chat_id;
+            // A removed peer is told of its removal, a former owner of its handover (§5.6),
+            // by a notice of any kind that names the epoch.
+            self.removed_contact(cx, chat, from);
             let id = match e.item {
                 EntryItem::Event(id) => {
                     // A notice of a message is taking part in a chat of two (§5.12).
@@ -492,8 +505,6 @@ impl Node {
                     continue;
                 }
             };
-            // A removed peer is told of its removal, a former owner of its handover (§5.6).
-            self.removed_contact(cx, chat, from);
             if !self.may_receive(&chat, &from, false) {
                 continue;
             }
@@ -616,6 +627,21 @@ impl Node {
         }
         Ok(None)
     }
+}
+
+/// Whether `ops` answer with a kick naming `peer` or a leave `peer` signed.
+fn carries_own_removal(ops: &[AnswerOp], peer: &GossipId) -> bool {
+    ops.iter().any(|op| match op {
+        AnswerOp::Object {
+            chat_id,
+            item: EntryItem::Kick(k),
+        } => *k == crate::hash::kick_id(chat_id, peer),
+        AnswerOp::Object {
+            chat_id,
+            item: EntryItem::Leave(l),
+        } => *l == crate::hash::leave_id(chat_id, peer),
+        _ => false,
+    })
 }
 
 /// Whether a returned event is the requested item (§13.4).
