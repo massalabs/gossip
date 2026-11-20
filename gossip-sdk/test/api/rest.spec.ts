@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { RestMessageProtocol } from '../../src/api/messageProtocol/rest';
+import { HttpStatusError, isSeekerConflict } from '../../src/api/errors';
 
 describe('RestMessageProtocol', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -35,6 +36,27 @@ describe('RestMessageProtocol', () => {
       })
     ).rejects.toThrow('HTTP 409');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('tells a seeker already taken by its status', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response('{"error":"key_taken"}', { status: 409 }) as never
+    );
+    const rest = new RestMessageProtocol('http://127.0.0.1:1', 1000, 3);
+    const error = await rest
+      .sendMessage({
+        seeker: new Uint8Array([1]),
+        ciphertext: new Uint8Array([2]),
+      })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(HttpStatusError);
+    expect((error as HttpStatusError).status).toBe(409);
+    expect(isSeekerConflict(error)).toBe(true);
+    expect(isSeekerConflict(new HttpStatusError(400, 'Bad Request'))).toBe(
+      false
+    );
+    expect(isSeekerConflict(new Error('unreachable'))).toBe(false);
   });
 
   it('repeats a request that was rate limited or failed on the server', async () => {

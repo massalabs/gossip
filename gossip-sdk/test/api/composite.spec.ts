@@ -5,6 +5,7 @@ import type {
   TransportConnectivity,
 } from '../../src/api/messageProtocol/types';
 import { MockMessageProtocol } from '../mocks';
+import { HttpStatusError, isSeekerConflict } from '../../src/api/errors';
 
 const bytes = (...values: number[]) => new Uint8Array(values);
 
@@ -53,6 +54,21 @@ describe('CompositeMessageProtocol', () => {
         ciphertext: bytes(9),
       })
     ).rejects.toThrow('unreachable');
+  });
+
+  it('reports a seeker the server already holds, even when the mesh took the message', async () => {
+    class TakenProtocol extends MockMessageProtocol {
+      override sendMessage(): Promise<void> {
+        return Promise.reject(new HttpStatusError(409, 'Conflict'));
+      }
+    }
+    const mesh = new MockMessageProtocol();
+    const protocol = composite(new TakenProtocol(), mesh);
+    const error = await protocol
+      .sendMessage({ seeker: bytes(1), ciphertext: bytes(9) })
+      .catch((e: unknown) => e);
+    expect(isSeekerConflict(error)).toBe(true);
+    expect(mesh.getStoredMessages().size).toBe(1);
   });
 
   it('tells once which transports took a send', async () => {

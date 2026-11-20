@@ -22,6 +22,8 @@ import type { GroupService } from '../../src/services/groups';
 import { SessionStatus } from '../../src/wasm/bindings';
 import type { EncryptedMessage } from '../../src/api/messageProtocol/types';
 import { SdkEventType } from '../../src/core/SdkEventEmitter';
+import { HttpStatusError } from '../../src/api/errors';
+import { MessageDirection, MessageStatus, MessageType } from '../../src/db';
 
 /** One clock for every SDK, advanced by the test. */
 let clock = 1_800_000_000_000;
@@ -29,13 +31,15 @@ let clock = 1_800_000_000_000;
 /** The server: the first value posted at a seeker stays, another is refused. */
 class FirstWriteProtocol extends MockMessageProtocol {
   conflicts = 0;
+  /** Refuses every message as taken (another device using the seekers). */
+  refuseAll = false;
   async sendMessage(message: EncryptedMessage): Promise<void> {
     const held = this.getStoredMessages().get(
       Array.from(message.seeker).join(',')
     );
-    if (held && !sameBytes(held, message.ciphertext)) {
+    if (this.refuseAll || (held && !sameBytes(held, message.ciphertext))) {
       this.conflicts++;
-      throw new Error('HTTP 409: Conflict');
+      throw new HttpStatusError(409, 'Conflict');
     }
     await super.sendMessage(message);
   }
@@ -418,5 +422,103 @@ describe('A device restored from a backup', { timeout: 300_000 }, () => {
     await sessionsActive(alice.sdk, restored.sdk);
     await messagesFlow(alice.sdk, restored.sdk);
     expect(net.conflicts).toBe(0);
+  });
+
+  /** The seeker conflicts reported by `sdk`, as they come. */
+  function conflictsOf(sdk: GossipSdk) {
+    const seen: { contactUserId: string; renewed: boolean }[] = [];
+    sdk.on(SdkEventType.SEEKER_CONFLICT, e => seen.push(e));
+    return seen;
+  }
+
+  it('without a reset (a raw copy), renews a session once at its first 409, and the content arrives on the new one', async () => {
+    const { alice, bob, chat } = await contacts();
+    const copy = await backup(bob);
+    await bob.sdk.groups.sendMessage(chat, 'gap from bob');
+    await deliver();
+
+    const restored = await restore(bob, copy, { reset: false });
+    const seen = conflictsOf(restored.sdk);
+    await restored.sdk.groups.sendMessage(chat, 'after the restore');
+    await deliver(10);
+
+    expect(net.conflicts).toBeGreaterThan(0);
+    expect(seen.filter(e => e.renewed)).toEqual([
+      { contactUserId: alice.sdk.userId, renewed: true },
+    ]);
+    expect(
+      (await restored.sdk.discussions.get(alice.sdk.userId))
+        ?.seekerConflictRenewedAt
+    ).toBeInstanceOf(Date);
+    await deliver(10, 10_000);
+    expect(await texts(alice.sdk.groups, chat)).toContain('after the restore');
+    await sessionsActive(alice.sdk, restored.sdk);
+
+    // Another 409 within the hour: nothing is renewed, a warning is given,
+    // and the ciphertext is dropped as before.
+    net.refuseAll = true;
+    await restored.sdk.groups.sendMessage(chat, 'refused');
+    await deliver(3);
+    net.refuseAll = false;
+    expect(seen.filter(e => e.renewed)).toHaveLength(1);
+    expect(seen.at(-1)).toEqual({
+      contactUserId: alice.sdk.userId,
+      renewed: false,
+    });
+    expect(
+      await restored.sdk.queries.groups.dueOutbox(
+        restored.sdk.userId,
+        new Date(8_000_000_000_000)
+      )
+    ).toEqual([]);
+  });
+
+  it('without a reset, renews a session at a one-to-one message refused with 409, and never retries it for ever', async () => {
+    const { alice, bob } = await contacts();
+    const copy = await backup(bob);
+    const restored = await restore(bob, copy, { reset: false });
+    const seen = conflictsOf(restored.sdk);
+    // A seeker the server holds with another value.
+    const [taken] = [...net.getStoredMessages().keys()];
+    const seeker = new Uint8Array(taken.split(',').map(Number));
+    const queued = async (n: number) =>
+      restored.sdk.queries.messages.insert({
+        ownerUserId: restored.sdk.userId,
+        contactUserId: alice.sdk.userId,
+        content: '',
+        type: MessageType.KEEP_ALIVE,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.READY,
+        timestamp: new Date(clock),
+        seeker,
+        encryptedMessage: new Uint8Array([n]),
+        whenToSend: new Date(0),
+      });
+    const send = () =>
+      (
+        restored.sdk as unknown as {
+          _message: {
+            processSendQueueForContact: (id: string) => Promise<unknown>;
+          };
+        }
+      )._message.processSendQueueForContact(alice.sdk.userId);
+    const status = async (id: number) =>
+      (await restored.sdk.queries.messages.getById(id))?.status;
+
+    const first = await queued(1);
+    await send();
+    expect(seen).toEqual([{ contactUserId: alice.sdk.userId, renewed: true }]);
+    // Sent again once the new session is active, on a new seeker.
+    expect(await status(first)).not.toBe(MessageStatus.READY);
+
+    const second = await queued(2);
+    await send();
+    expect(seen.at(-1)).toEqual({
+      contactUserId: alice.sdk.userId,
+      renewed: false,
+    });
+    expect(await status(second)).toBe(MessageStatus.FAILED);
+    await send();
+    expect(seen).toHaveLength(2);
   });
 });
