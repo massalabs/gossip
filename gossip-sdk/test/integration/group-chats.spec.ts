@@ -358,8 +358,12 @@ describe('Group chats', { timeout: 120_000 }, () => {
     const reply = (await alice.groups.timeline(groupId)).find(
       i => i.kind === 'message' && i.author === bob.userId
     );
-    expect(reply?.kind === 'message' && reply.replyTo).toEqual([
-      { epochId: groupId, syncObjId: first.syncObjId },
+    expect(reply?.kind === 'message' && reply.replyTo).toMatchObject([
+      {
+        epochId: groupId,
+        syncObjId: first.syncObjId,
+        message: { body: { type: 'text', text: 'question' } },
+      },
     ]);
 
     // A local-only edit changes Alice's copy and nothing else.
@@ -396,6 +400,47 @@ describe('Group chats', { timeout: 120_000 }, () => {
     );
   });
 
+  it('shows the quote of a reply to a message of another group', async () => {
+    const first = await alice.groups.createGroup('First', [bob.userId]);
+    const second = await alice.groups.createGroup('Second', [bob.userId]);
+    await deliver();
+    for (const inv of await bob.groups.invitations()) {
+      await bob.groups.acceptInvitation(inv.epochId);
+    }
+    await deliver();
+    const target = await bob.groups.sendMessage(first, 'over there');
+    await deliver();
+
+    await alice.groups.sendMessage(second, 'about that', {
+      replyTo: [{ epochId: first, syncObjId: target.syncObjId }],
+    });
+    await deliver();
+    for (const p of [alice, bob]) {
+      const reply = (await p.groups.timeline(second)).find(
+        i => i.kind === 'message'
+      );
+      // Read from the other group's own timeline: nothing is asked for.
+      expect(reply?.kind === 'message' && reply.replyTo).toMatchObject([
+        {
+          epochId: first,
+          syncObjId: target.syncObjId,
+          message: {
+            epochId: first,
+            body: { type: 'text', text: 'over there' },
+          },
+        },
+      ]);
+    }
+
+    // Deleted for everyone, the target is no longer quoted.
+    await bob.groups.deleteMessage(first, target.syncObjId);
+    await deliver();
+    const reply = (await alice.groups.timeline(second)).find(
+      i => i.kind === 'message'
+    );
+    expect(reply?.kind === 'message' && reply.replyTo[0].message).toBeNull();
+  });
+
   it('keeps the metadata an edit does not name, a reply target included', async () => {
     const groupId = await alice.groups.createGroup('Edits', [bob.userId]);
     await deliver();
@@ -423,7 +468,7 @@ describe('Group chats', { timeout: 120_000 }, () => {
         type: 'text',
         text: 'answer, edited',
       });
-      expect(m?.kind === 'message' && m.replyTo).toEqual([
+      expect(m?.kind === 'message' && m.replyTo).toMatchObject([
         { epochId: groupId, syncObjId: first.syncObjId },
       ]);
       expect(m?.kind === 'message' && m.metadata['x.note']).toEqual(
