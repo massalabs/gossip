@@ -1267,8 +1267,9 @@ its ID.
 - the device erases the group's messages at once, in the named epoch and in every earlier epoch it
   holds that leads to the named one by parent links; side branches that do not lead to it are not
   erased;
-- it keeps the named root and the dissolve message for two weeks, only to announce the message and
-  answer lookups for it, then deletes them;
+- it keeps the named root and the dissolve message for two weeks, counted from the moment this
+  device applied the dissolve, only to announce the message and answer lookups for it, then
+  deletes them; every member device does so, the owner's included;
 - it then keeps only a **dissolved marker** (§14.2).
 
 If a device receives both forms for the same epoch, it deletes.
@@ -1278,6 +1279,18 @@ If a device receives both forms for the same epoch, it deletes.
 After "Keep archived", an accepted root continues the conversation with its history, as after a
 kick.
 After "Delete", an accepted root shows as a new group without the old history.
+
+**Serving what a dissolved group keeps.** In both forms, for as long as it keeps them, a device
+serves the named root and the dissolve message to a member of that root, whether or not the two
+share another chat. A member's tips scan is answered with a page that lists only the dissolve
+message and the root of the current epoch when it is not the anchor: no message event.
+After "Dissolve & Delete", once the two weeks are over, the device answers as one that never held
+the epoch.
+*Why:* this is how a device that missed the dissolve learns it; answering such a scan "not
+available" left 9 of 300 simulated devices that never applied the dissolve. Listing only these two
+entries matches what a dissolved group already serves. No event ID is given, so nothing of the
+messages is revealed and the asker asks for nothing it would be refused. A device that missed the
+dissolve may share nothing else with this one, so the root is served without that condition.
 
 *Why not the automatic rejection of §4.8:* that rule respects a choice the user made.
 After a dissolve the user chose nothing; the owner did.
@@ -2327,8 +2340,9 @@ A device that holds an epoch but is no longer active in its group (kicked, left,
 kick, dissolved) answers a member exactly as a device that does not hold the epoch would, query by
 query: silence to an event, sync-object, signed-object, removal or key lookup (no entry at all),
 "not available" to a tips scan (§12.1). It sends a removed peer nothing either (§5.6).
-The exceptions: a dissolved group still serves its roots and its dissolve message (§5.8), and an
-archive ("Dissolve & Keep archived") gives a removed peer its own kick or leave (§12.8).
+The exceptions: a dissolved group still serves its roots and its dissolve message, and answers a
+member's tips scan with a page of these two entries only (§5.8); an archive ("Dissolve & Keep
+archived") gives a removed peer its own kick or leave (§12.8).
 *Why:* "not available" would tell a member that this device kept the chat. Silence cannot be told
 apart from a device that deleted the chat or is offline. The cost is one timeout for the asker,
 only until it learns that this device is out.
@@ -2509,6 +2523,8 @@ It never enumerates every retained event.
 **Anchor.** The request names an anchor: the requester's current epoch in that group.
 
 - The responder answers only if it holds the anchor and both peers are members of it.
+- A responder whose group is dissolved lists only its dissolve message and the root of its
+  current epoch when it is not the anchor, never a message event (§5.8).
 - If the responder does not hold the anchor, it answers "not available".
   This is legitimate (§11.8): being late on a root is not a fault.
   The requester then sends that peer a root notice for the anchor (§4.6) and runs the scan with
@@ -5058,6 +5074,15 @@ closed that epoch: silence means yes, a lookup means no.
 - Signed objects and their notices from a removed peer are accepted, and may be fetched from it;
   only its message events are dropped (§10.4). Why: a signed object proves itself whoever carries
   it; refusing it would lose a membership fact when that peer is the only one online that holds it.
+
+*Settled, for a dissolved group:* in both forms, while it keeps them, a device serves the named
+root and the dissolve message to a member of that root, whether or not they share another chat,
+and answers a member's tips scan with a page that lists only the dissolve message and the root of
+its current epoch, never a message event (§5.8, §12.1). "Dissolve & Delete" keeps them two weeks
+from the moment each device applied the dissolve; every member device keeps them, not only the
+owner's. Why: it is how a device that missed the dissolve learns it ("not available" left 9 of 300
+simulated devices never applying it), it matches what a dissolved group already serves, and no
+event ID is given, so nothing of the messages is revealed and nothing is asked for in vain.
 
 *Settled, for the shared-chats scan:* the scan lists, for a chat the asker is no longer in, the
 last epoch in which the asker is listed, whether it was removed from it or left it. A lookup of
