@@ -237,6 +237,8 @@ fn migrate_from_is_ignored_when_a_condition_fails() {
         epoch_challenge: crate::ids::Challenge::from_bytes([8; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([7; 32]),
         created_at: net.now + 1,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let next = Root::create_founding(
         params,
@@ -967,6 +969,8 @@ fn taking_part_is_compared_with_no_date() {
         epoch_challenge: crate::ids::Challenge::from_bytes([8; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([7; 32]),
         created_at: founded_at,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let gl = Root::create_founding(
         params,

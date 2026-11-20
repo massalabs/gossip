@@ -1546,7 +1546,8 @@ fn debug_hides_secrets_and_content() {
 }
 
 #[test]
-fn migrate_from_is_a_strict_uint64_and_field_12_is_unknown() {
+fn migrate_from_and_the_message_timer_are_strict_uint64_the_settings_a_map_and_field_14_is_unknown()
+{
     let objects = objects();
     let EventObject::Root(root) = &objects[0] else {
         panic!()
@@ -1559,8 +1560,29 @@ fn migrate_from_is_a_strict_uint64_and_field_12_is_unknown() {
         decode_event_blob(&event(&wrong), 1),
         Err(Error::Malformed(_))
     ));
-    // Field 12, unknown in wire version 1 (§13.8).
-    let unknown = [root_bytes.clone(), vec![0x60, 0x00]].concat();
+    // Field 12, the message timer, with the length-delimited wire type.
+    let wrong = [root_bytes.clone(), raw_field(0x62, &[0])].concat();
+    assert!(matches!(
+        decode_event_blob(&event(&wrong), 1),
+        Err(Error::Malformed(_))
+    ));
+    // Field 12 as a varint: the timer.
+    let timed = [root_bytes.clone(), vec![0x60, 0x80, 0xdd, 0xdb, 0x01]].concat();
+    let r = decode_event_blob(&event(&timed), 1);
+    assert!(matches!(r, Ok(EventObject::Root(ref x)) if x.message_timer() == 3_600_000));
+    // Field 13 as a varint is malformed; as entries, the settings map.
+    let wrong = [root_bytes.clone(), vec![0x68, 0x00]].concat();
+    assert!(matches!(
+        decode_event_blob(&event(&wrong), 1),
+        Err(Error::Malformed(_))
+    ));
+    let set = [root_bytes.clone(), raw_field(0x6a, &[0x0a, 0x01, b'k'])].concat();
+    let r = decode_event_blob(&event(&set), 1);
+    assert!(
+        matches!(r, Ok(EventObject::Root(ref x)) if x.settings().get("k") == Some(&Vec::new()))
+    );
+    // Field 14, unknown in wire version 1 (§13.8).
+    let unknown = [root_bytes.clone(), vec![0x70, 0x00]].concat();
     assert!(matches!(
         decode_event_blob(&event(&unknown), 1),
         Err(Error::Malformed(_))
@@ -1610,6 +1632,28 @@ fn golden_values() -> Vec<(String, String)> {
     out.push((
         "multi-parent root ID".into(),
         hex::encode(multi.chat_id().as_bytes()),
+    ));
+    // A root with a message timer of one week and two settings (§4.1).
+    let mut p = crate::root::tests::params(&alice, &[&alice, &bob], 0x40);
+    p.message_timer = 604_800_000;
+    p.settings = BTreeMap::from([
+        ("gossip.example.a".to_owned(), vec![1, 2]),
+        ("b".to_owned(), Vec::new()),
+    ]);
+    let timed = crate::Root::create_successor(
+        p,
+        &[ChatId::from_bytes([3; 32])],
+        &alice.secret.dsa_signing_key,
+        [3; 32],
+    )
+    .unwrap();
+    out.push((
+        "timed root ID".into(),
+        hex::encode(timed.chat_id().as_bytes()),
+    ));
+    out.push((
+        "timed root event blob".into(),
+        digest(&encode_event_blob(&EventObject::Root(Box::new(timed))).unwrap()),
     ));
     // Result projections of a forward, a reaction added and removed, and a media message;
     // with the reactions and the media message as event blobs.
@@ -1823,6 +1867,8 @@ fn stored_signatures_verify() {
         root.ref_chat_id_challenge(),
         root.created_at(),
         root.migrate_from(),
+        root.message_timer(),
+        root.settings(),
         &stored["root"],
     )
     .unwrap();

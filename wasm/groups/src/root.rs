@@ -1,6 +1,7 @@
 //! The root: the signed record that founds an epoch (§4.1 to §4.7).
 
 use core::fmt;
+use std::collections::BTreeMap;
 
 use auth::UserPublicKeys;
 use crypto_dsa::{SIGNATURE_SIZE, SIGNING_RANDOMNESS_SIZE};
@@ -8,7 +9,8 @@ use crypto_dsa::{SIGNATURE_SIZE, SIGNING_RANDOMNESS_SIZE};
 use crate::cbor::Value;
 use crate::constants::{
     CONTEXT_ROOT_SIGNATURE, DOMAIN_ROOT, EVENT_VERSION, MAX_MEMBERS, MAX_NAME_BYTES,
-    MAX_ROOT_PARENTS, MIN_MEMBERS, MIN_ROOT_PARENTS,
+    MAX_ROOT_PARENTS, MAX_SETTINGS_BYTES, MAX_SETTINGS_ENTRIES, MAX_SETTINGS_KEY_BYTES,
+    MIN_MEMBERS, MIN_ROOT_PARENTS,
 };
 use crate::error::{Error, Result};
 use crate::hash::{h, parent_commitment, ref_chat_id};
@@ -52,6 +54,11 @@ pub struct RootParams {
     pub ref_chat_id_challenge: Challenge,
     /// The creator's clock at creation, see [`next_root_created_at`].
     pub created_at: u64,
+    /// The message timer, in milliseconds: each message of the epoch is deleted on every
+    /// device at its creation date plus this; 0 keeps messages forever (§4.1, §7.7).
+    pub message_timer: u64,
+    /// The settings map (§4.1): version 1 knows no key, keeps every entry and acts on none.
+    pub settings: BTreeMap<String, Vec<u8>>,
 }
 
 /// What a device knows about the delivery of a root it received (§4.7 steps 2, 4, 5 and 7).
@@ -94,6 +101,8 @@ pub struct Root {
     ref_chat_id_challenge: Challenge,
     created_at: u64,
     migrate_from: Option<u64>,
+    message_timer: u64,
+    settings: BTreeMap<String, Vec<u8>>,
     signature: SignatureBytes,
     chat_id: ChatId,
 }
@@ -119,11 +128,17 @@ pub fn next_root_created_at(now: u64, greatest_held: Option<u64>) -> Result<u64>
 ///
 /// ```text
 /// chat_id = H("gossip.groups.root.1", version, type, name, parents, members, group_secret,
-///             owner, epoch_challenge, ref_chat_id_challenge, created_at, migrate_from)
+///             owner, epoch_challenge, ref_chat_id_challenge, created_at, migrate_from,
+///             message_timer, settings)
 /// ```
 ///
 /// `migrate_from` is an array holding its one unsigned integer when present, the empty array
+/// when absent. `message_timer` is always an unsigned integer, 0 when absent. `settings` is a
+/// map from text to bytes in the canonical key order, as a message's metadata (§6.2); empty
 /// when absent.
+///
+/// Why hashed: the ID is what the owner signs, so only the owner can set or change the timer
+/// or a setting, and every member of the epoch holds the same ones.
 #[allow(clippy::too_many_arguments)]
 fn compute_chat_id(
     version: u64,
@@ -137,6 +152,8 @@ fn compute_chat_id(
     ref_chat_id_challenge: &Challenge,
     created_at: u64,
     migrate_from: Option<u64>,
+    _message_timer: u64,
+    _settings: &BTreeMap<String, Vec<u8>>,
 ) -> ChatId {
     ChatId::from_bytes(h(
         DOMAIN_ROOT,
@@ -154,6 +171,25 @@ fn compute_chat_id(
             Value::Array(migrate_from.into_iter().map(Value::Uint).collect()),
         ],
     ))
+}
+
+/// The settings map from its entries as received (§4.1): a key given twice, a key that is
+/// empty or longer than 64 bytes, more than 128 entries, or more than 16,384 bytes by the
+/// measure of a message's metadata (§13.10) make the root malformed. Any other key is kept,
+/// known or not.
+fn settings_map(entries: Vec<proto::SettingsEntry>) -> Result<BTreeMap<String, Vec<u8>>> {
+    Ok(entries.into_iter().map(|e| (e.key, e.value)).collect())
+}
+
+/// The settings map as protobuf entries, by ascending key.
+fn settings_entries(settings: &BTreeMap<String, Vec<u8>>) -> Vec<proto::SettingsEntry> {
+    settings
+        .iter()
+        .map(|(k, v)| proto::SettingsEntry {
+            key: k.clone(),
+            value: v.clone(),
+        })
+        .collect()
 }
 
 fn check_count(field: &'static str, n: usize, min: usize, max: usize) -> Result<()> {
@@ -272,6 +308,8 @@ impl Root {
             // Placeholder of the right size; the signature is not hashed.
             signature: vec![0; SIGNATURE_SIZE],
             migrate_from,
+            message_timer: params.message_timer,
+            settings: settings_entries(&params.settings),
         };
         Self::from_proto(EVENT_VERSION, unsigned)
     }
@@ -369,6 +407,7 @@ impl Root {
         if p.owner.is_empty() {
             return Err(Error::Missing("owner"));
         }
+        let settings = settings_map(core::mem::take(&mut p.settings))?;
         // §4.6: a root MUST fit one empty container. A received root was bounded as received,
         // which is never shorter (see `wire::decode_event_blob`); this guards a root built
         // or converted here.
@@ -391,6 +430,8 @@ impl Root {
             &ref_chat_id_challenge,
             p.created_at,
             p.migrate_from,
+            p.message_timer,
+            &settings,
         );
 
         let (owner_keys, owner_id) = parse_user_public_keys(&p.owner)?;
@@ -412,6 +453,8 @@ impl Root {
             ref_chat_id_challenge,
             created_at: p.created_at,
             migrate_from: p.migrate_from,
+            message_timer: p.message_timer,
+            settings,
             signature,
             chat_id,
         };
@@ -439,6 +482,8 @@ impl Root {
         ref_chat_id_challenge: &Challenge,
         created_at: u64,
         migrate_from: Option<u64>,
+        message_timer: u64,
+        settings: &BTreeMap<String, Vec<u8>>,
         signature: &[u8],
     ) -> Result<Self> {
         Self::from_proto(
@@ -455,6 +500,8 @@ impl Root {
                 created_at,
                 signature: signature.to_vec(),
                 migrate_from,
+                message_timer,
+                settings: settings_entries(settings),
             },
         )
     }
@@ -474,6 +521,8 @@ impl Root {
             created_at: self.created_at,
             signature: self.signature.as_bytes().to_vec(),
             migrate_from: self.migrate_from,
+            message_timer: self.message_timer,
+            settings: settings_entries(&self.settings),
         }
     }
 
@@ -682,6 +731,18 @@ impl Root {
         self.migrate_from
     }
 
+    /// The message timer, in milliseconds; 0 keeps messages forever (§4.1, §7.7).
+    #[must_use]
+    pub fn message_timer(&self) -> u64 {
+        self.message_timer
+    }
+
+    /// The settings map (§4.1), every entry kept, known or not.
+    #[must_use]
+    pub fn settings(&self) -> &BTreeMap<String, Vec<u8>> {
+        &self.settings
+    }
+
     /// The signature.
     #[must_use]
     pub fn signature(&self) -> &SignatureBytes {
@@ -710,6 +771,8 @@ impl fmt::Debug for Root {
             .field("owner", &self.owner_id)
             .field("created_at", &self.created_at)
             .field("migrate_from", &self.migrate_from)
+            .field("message_timer", &self.message_timer)
+            .field("settings", &crate::redact::Entries(self.settings.len()))
             .finish_non_exhaustive()
     }
 }
@@ -728,6 +791,8 @@ pub(crate) mod tests {
             epoch_challenge: Challenge::from_bytes([seed.wrapping_add(1); 32]),
             ref_chat_id_challenge: Challenge::from_bytes([seed.wrapping_add(2); 32]),
             created_at: 1_700_000_000_000,
+            message_timer: 0,
+            settings: std::collections::BTreeMap::new(),
         }
     }
 
@@ -759,11 +824,11 @@ pub(crate) mod tests {
         );
         assert_eq!(
             hex::encode(root.chat_id().as_bytes()),
-            "748782712c59e824e4c3a08f098f1acbf26d3b8c4e3e4a1b4dfb857fd0628842"
+            "715db971fb42b92cad2ffdd580e210d62124d1e7a198de9735fbb0575d99dba2"
         );
         assert_eq!(
             hex::encode(root.ref_chat_id().as_bytes()),
-            "cf4bbd2ce6e05343ff77d63a4995fc3c5a1821723210dfc83eef067b18835e62"
+            "28e3df1fa32a8f4177037b9b0e0b6aef35def11381d8dfcf359995ccc4894378"
         );
         assert_eq!(
             hex::encode(root.parents()[0].as_bytes()),
@@ -783,7 +848,22 @@ pub(crate) mod tests {
                     .chat_id()
                     .as_bytes()
             ),
-            "181ef8e3bed972b5d4fe6b12d80ba7953ef97fd91aa43b52b17373cdfcd8decb"
+            "181eb208ce28b46d574961888be75330a879777bb9e79cca0094f6920cca2ed2"
+        );
+        // The same group with a message timer of one hour and one setting (§4.1).
+        let mut p = params(&alice, &[&alice, &bob], 0x10);
+        p.message_timer = 3_600_000;
+        p.settings = BTreeMap::from([("gossip.example".to_owned(), b"on".to_vec())]);
+        let timed = Root::create_successor(
+            p,
+            &[ChatId::from_bytes([0xd0; 32])],
+            &alice.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+        .unwrap();
+        assert_eq!(
+            hex::encode(timed.chat_id().as_bytes()),
+            "a5fc9e04243fc25ad5e10c5fc4621143ce4b025d7b13ded4cb79510aa48b0157"
         );
     }
 
@@ -806,6 +886,10 @@ pub(crate) mod tests {
                 Value::Uint(1_700_000_000_000),
                 // `migrate_from` absent: the empty array.
                 Value::Array(vec![]),
+                // The message timer: 0, an unsigned integer whether present or not.
+                Value::Uint(0),
+                // The settings map: empty.
+                Value::Map(vec![]),
             ],
         );
         assert_eq!(root.chat_id().as_bytes(), &expected);
@@ -846,6 +930,8 @@ pub(crate) mod tests {
                 Value::Uint(1_700_000_000_000),
                 // `migrate_from` present: an array holding its one unsigned integer.
                 Value::Array(vec![Value::Uint(0)]),
+                Value::Uint(0),
+                Value::Map(vec![]),
             ],
         );
         assert_eq!(root.chat_id().as_bytes(), &expected);
@@ -898,6 +984,8 @@ pub(crate) mod tests {
             root.ref_chat_id_challenge(),
             root.created_at(),
             root.migrate_from(),
+            root.message_timer(),
+            root.settings(),
             root.signature().as_bytes(),
         )
         .unwrap();
@@ -955,8 +1043,8 @@ pub(crate) mod tests {
         assert!(owner_len >= 256);
         let bytes32 = |b: &[u8; 32]| [&[0x58, 0x20][..], b].concat();
         let projection = [
-            // An array of 12 items, then the domain as text of 20 bytes.
-            &[0x8c, 0x74][..],
+            // An array of 14 items, then the domain as text of 20 bytes.
+            &[0x8e, 0x74][..],
             b"gossip.groups.root.1",
             // version 1, type 0 (successor), name "Team" as text.
             &[0x01, 0x00, 0x64],
@@ -979,11 +1067,36 @@ pub(crate) mod tests {
             &[0x1b, 0x00, 0x00, 0x01, 0x8b, 0xcf, 0xe5, 0x68, 0x00],
             // migrate_from absent: the empty array.
             &[0x80],
+            // The message timer 0, then the empty settings map.
+            &[0x00, 0xa0],
         ]
         .concat();
         assert_eq!(
             root.chat_id().as_bytes(),
             blake3::hash(&projection).as_bytes()
+        );
+        // With a message timer of one day and two settings: the timer as a four-byte unsigned
+        // integer, the map in the canonical key order, the shorter key first (§1.2).
+        let mut p = params(&alice, &[&alice], 0x10);
+        p.message_timer = 86_400_000;
+        p.settings = BTreeMap::from([("z".to_owned(), vec![1]), ("aa".to_owned(), vec![2])]);
+        let timed = Root::create_successor(
+            p,
+            &[ChatId::from_bytes([0xd0; 32])],
+            &alice.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+        .unwrap();
+        let mut timed_projection = projection[..projection.len() - 2].to_vec();
+        timed_projection.extend_from_slice(&[0x1a, 0x05, 0x26, 0x5c, 0x00]);
+        timed_projection.extend_from_slice(&[0xa2, 0x61, b'z', 0x41, 0x01, 0x62, b'a', b'a', 0x41, 0x02]);
+        assert_eq!(
+            timed.chat_id().as_bytes(),
+            blake3::hash(&timed_projection).as_bytes()
+        );
+        assert_eq!(
+            hex::encode(timed.chat_id().as_bytes()),
+            "8d1527fcef3a12990e7bea29e6b9f8d4d199d949f4fda94d7af5840917183128"
         );
     }
 
@@ -1019,6 +1132,13 @@ pub(crate) mod tests {
             Box::new(|p| p.ref_chat_id_challenge[0] ^= 1),
             Box::new(|p| p.created_at += 1),
             Box::new(|p| p.migrate_from = Some(0)),
+            Box::new(|p| p.message_timer = 1),
+            Box::new(|p| {
+                p.settings = vec![proto::SettingsEntry {
+                    key: "k".into(),
+                    value: vec![],
+                }];
+            }),
         ];
         for change in changes {
             let r = modified(&root, |p| change(p)).unwrap();
@@ -1498,6 +1618,187 @@ pub(crate) mod tests {
             root.verify_received(&ctx(None, bob.id, carol.id)),
             Err(Error::NotMember("the delivering peer"))
         );
+    }
+
+    /// The message timer has one single form (§4.1): a plain scalar, absent on the wire when
+    /// 0, read as 0 when absent, hashed as an unsigned integer either way. Every value is
+    /// valid.
+    #[test]
+    fn the_message_timer_has_one_form_and_every_value_is_valid() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        assert_eq!(root.message_timer(), 0);
+        // Absent on the wire when 0, field 12 as a varint otherwise.
+        let mut alone = proto::GroupRoot::default();
+        assert!(prost::Message::encode_to_vec(&alone).is_empty());
+        alone.message_timer = 5;
+        assert_eq!(prost::Message::encode_to_vec(&alone), [0x60, 0x05]);
+        let encoded = prost::Message::encode_to_vec(&root.to_proto());
+        // Written as 0 by another encoder: the same field values, the same root.
+        let explicit = [encoded.clone(), vec![0x60, 0x00]].concat();
+        let blob = [&[0x01][..], &[0x0a], &varint(explicit.len()), &explicit].concat();
+        match wire::decode_event_blob(&blob, 1).unwrap() {
+            wire::EventObject::Root(r) => assert_eq!(r.chat_id(), root.chat_id()),
+            _ => panic!("not a root"),
+        }
+        for timer in [1, 86_400_000, u64::MAX] {
+            let r = modified(&root, |p| p.message_timer = timer).unwrap();
+            assert_eq!(r.message_timer(), timer);
+            let back = Root::from_proto(1, r.to_proto()).unwrap();
+            assert_eq!(back.chat_id(), r.chat_id());
+            assert_eq!(back.message_timer(), timer);
+        }
+    }
+
+    fn varint(n: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        prost::encoding::encode_varint(n as u64, &mut out);
+        out
+    }
+
+    fn entry(key: &str, value: &[u8]) -> proto::SettingsEntry {
+        proto::SettingsEntry {
+            key: key.to_owned(),
+            value: value.to_vec(),
+        }
+    }
+
+    /// The settings map (§4.1): every entry kept, known or not, in ascending key order; a
+    /// key given twice, a key empty or longer than 64 bytes, more than 128 entries or more
+    /// than 16,384 bytes by the measure of a message's metadata (§13.10) make the root
+    /// malformed. Absent and empty are one form.
+    #[test]
+    fn the_settings_map_keeps_every_entry_within_its_limits() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        assert!(root.settings().is_empty());
+        // Unknown keys are kept and hashed, in key order whatever the order received.
+        let r = modified(&root, |p| {
+            p.settings = vec![entry("z.later", b"1"), entry("a.later", b"")];
+        })
+        .unwrap();
+        assert_eq!(
+            r.settings().keys().collect::<Vec<_>>(),
+            ["a.later", "z.later"]
+        );
+        let sorted = modified(&root, |p| {
+            p.settings = vec![entry("a.later", b""), entry("z.later", b"1")];
+        })
+        .unwrap();
+        assert_eq!(sorted.chat_id(), r.chat_id());
+        assert_eq!(
+            r.to_proto().settings,
+            vec![entry("a.later", b""), entry("z.later", b"1")]
+        );
+        // A key given twice, even with the same value.
+        for second in [&b"1"[..], b"2"] {
+            assert_eq!(
+                modified(&root, |p| {
+                    p.settings = vec![entry("k", b"1"), entry("k", second)];
+                })
+                .map(|_| ()),
+                Err(Error::Duplicate("settings"))
+            );
+        }
+        // Keys of 1 to 64 bytes.
+        assert!(matches!(
+            modified(&root, |p| p.settings = vec![entry("", b"1")]),
+            Err(Error::TooFew {
+                field: "settings key",
+                ..
+            })
+        ));
+        assert!(modified(&root, |p| p.settings = vec![entry(&"k".repeat(64), b"")]).is_ok());
+        assert!(modified(&root, |p| p.settings = vec![entry(&"\u{e9}".repeat(32), b"")]).is_ok());
+        assert!(matches!(
+            modified(&root, |p| p.settings = vec![entry(&"k".repeat(65), b"")]),
+            Err(Error::TooMany {
+                field: "settings key",
+                max: 64,
+                got: 65
+            })
+        ));
+        // At most 128 entries.
+        let many = |n: usize| (0..n).map(|i| entry(&format!("k{i:03}"), b"")).collect();
+        assert!(modified(&root, |p| p.settings = many(128)).is_ok());
+        assert!(matches!(
+            modified(&root, |p| p.settings = many(129)),
+            Err(Error::TooMany {
+                field: "settings",
+                max: 128,
+                got: 129
+            })
+        ));
+        // At most 16,384 bytes, every entry counting its key and value fields: one entry
+        // of a 1-byte key and a value of 16,375 bytes is 1 + 2 + (1 + 1 + 1) + (1 + 2 +
+        // 16,375) = 16,384 bytes.
+        assert!(modified(&root, |p| p.settings = vec![entry("k", &[0; 16_375])]).is_ok());
+        assert_eq!(
+            modified(&root, |p| p.settings = vec![entry("k", &[0; 16_376])]).map(|_| ()),
+            Err(Error::TooMany {
+                field: "settings",
+                max: 16_384,
+                got: 16_385
+            })
+        );
+    }
+
+    /// The settings map on the wire (Appendix C): field 13, entries of a text key and a byte
+    /// value, refused when the key is not UTF-8, when an entry holds an unknown field, when
+    /// a key is given twice or when there are more than 128 entries.
+    #[test]
+    fn the_settings_map_is_checked_as_received() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let base = prost::Message::encode_to_vec(&root.to_proto());
+        let decode = |extra: &[u8]| {
+            let inner = [base.clone(), extra.to_vec()].concat();
+            let blob = [&[0x01][..], &[0x0a], &varint(inner.len()), &inner].concat();
+            wire::decode_event_blob(&blob, 1)
+        };
+        let field = |e: &[u8]| [&[0x6a][..], &varint(e.len()), e].concat();
+        let good = field(&[0x0a, 0x01, b'k', 0x12, 0x01, 0x07]);
+        match decode(&good).unwrap() {
+            wire::EventObject::Root(r) => {
+                assert_eq!(r.settings().get("k"), Some(&vec![7]));
+                assert_ne!(r.chat_id(), root.chat_id());
+            }
+            _ => panic!("not a root"),
+        }
+        // An empty value left out, as protobuf writes it: the same root as written in full.
+        let id = |o: wire::EventObject| match o {
+            wire::EventObject::Root(r) => r.chat_id(),
+            _ => panic!("not a root"),
+        };
+        let short = decode(&field(&[0x0a, 0x01, b'k'])).unwrap();
+        let full = decode(&field(&[0x0a, 0x01, b'k', 0x12, 0x00])).unwrap();
+        assert_eq!(id(short), id(full));
+        // The same key twice.
+        assert_eq!(
+            decode(&[good.clone(), good.clone()].concat()).map(|_| ()),
+            Err(Error::Duplicate("settings"))
+        );
+        // A key that is not UTF-8.
+        assert!(matches!(
+            decode(&field(&[0x0a, 0x01, 0xff])),
+            Err(Error::InvalidUtf8(_))
+        ));
+        // An unknown field in an entry.
+        assert!(matches!(
+            decode(&field(&[0x0a, 0x01, b'k', 0x18, 0x01])),
+            Err(Error::Malformed(_))
+        ));
+        // 129 entries, counted before decoding.
+        let many: Vec<u8> = (0..129)
+            .flat_map(|i| field(&[&[0x0a, 0x04][..], format!("k{i:03}").as_bytes()].concat()))
+            .collect();
+        assert!(matches!(
+            decode(&many),
+            Err(Error::TooMany {
+                field: "settings",
+                ..
+            })
+        ));
     }
 
     #[test]

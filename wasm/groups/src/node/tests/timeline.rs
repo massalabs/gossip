@@ -357,6 +357,8 @@ fn a_member_back_after_a_dissolve_reads_that_it_was_dissolved() {
         epoch_challenge: crate::ids::Challenge::from_bytes([4; 32]),
         ref_chat_id_challenge: crate::ids::Challenge::from_bytes([5; 32]),
         created_at: net.now,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     let z = Root::create_successor(
         params,

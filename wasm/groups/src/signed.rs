@@ -424,6 +424,8 @@ mod tests {
             root.ref_chat_id_challenge(),
             root.created_at(),
             root.migrate_from(),
+            root.message_timer(),
+            root.settings(),
             root.signature().as_bytes(),
         )
         .unwrap();

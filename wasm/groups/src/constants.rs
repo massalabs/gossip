@@ -87,6 +87,13 @@ pub const MAX_TEXT_BYTES: usize = 16_384;
 /// The framing is counted, so that many small entries cannot make the encoded metadata
 /// several times larger than the limit.
 pub const MAX_METADATA_BYTES: usize = 16_384;
+/// Maximum number of entries of the settings map of a root (§4.1).
+pub const MAX_SETTINGS_ENTRIES: usize = 128;
+/// Maximum size of the settings map of a root, measured as a message's metadata (§4.1,
+/// §13.10): every entry counts its key and its value fields, empty or not.
+pub const MAX_SETTINGS_BYTES: usize = 16_384;
+/// Maximum size of a key of the settings map, in UTF-8 bytes; at least one byte (§4.1).
+pub const MAX_SETTINGS_KEY_BYTES: usize = 64;
 /// Metadata key that carries reply targets (§7.6, Appendix C).
 pub const METADATA_KEY_REPLY_TO: &str = "replyTo";
 /// Maximum size of the emoji of a reaction, in encoded UTF-8 bytes; at least one byte (§7.6).
@@ -208,7 +215,7 @@ mod tests {
         for (got, want) in strings {
             assert_eq!(got, want);
         }
-        let numbers: [(u64, u64); 27] = [
+        let numbers: [(u64, u64); 30] = [
             (PROTOCOL_VERSION, 1),
             (EVENT_VERSION, 1),
             (ID_SIZE as u64, 32),
@@ -224,6 +231,9 @@ mod tests {
             (MAX_REPLY_TARGETS as u64, 32),
             (MAX_TEXT_BYTES as u64, 16_384),
             (MAX_METADATA_BYTES as u64, 16_384),
+            (MAX_SETTINGS_ENTRIES as u64, 128),
+            (MAX_SETTINGS_BYTES as u64, 16_384),
+            (MAX_SETTINGS_KEY_BYTES as u64, 64),
             (MAX_EMOJI_BYTES as u64, 64),
             (MAX_MIMETYPE_BYTES as u64, 127),
             (MAX_PLAINTEXT_BYTES as u64, 57_344),

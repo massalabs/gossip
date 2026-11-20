@@ -62,6 +62,8 @@ pub(crate) fn epoch_root(n: usize, seed: u8) -> Root {
         epoch_challenge: Challenge::from_bytes([seed.wrapping_add(1); 32]),
         ref_chat_id_challenge: Challenge::from_bytes([seed.wrapping_add(2); 32]),
         created_at: T0,
+        message_timer: 0,
+        settings: std::collections::BTreeMap::new(),
     };
     Root::create_successor(
         params,
