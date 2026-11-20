@@ -87,9 +87,18 @@ impl UserPublicKeys {
     /// # Returns
     ///
     /// A `Result` containing the deserialized `UserPublicKeys` or an error.
+    ///
+    /// The bytes must be exactly the encoding [`Self::to_bytes`] gives for the keys:
+    /// trailing bytes or another encoding of the same keys would hash to another user ID.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
-        bincode::serde::decode_from_slice(bytes, bincode::config::standard())
-            .map(|(result, _)| result)
+        let (keys, read): (Self, usize) =
+            bincode::serde::decode_from_slice(bytes, bincode::config::standard())?;
+        if read != bytes.len() || keys.to_bytes().as_slice() != bytes {
+            return Err(bincode::error::DecodeError::Other(
+                "public keys are not in their canonical encoding",
+            ));
+        }
+        Ok(keys)
     }
 
     /// Derives a unique user ID from the public keys.
