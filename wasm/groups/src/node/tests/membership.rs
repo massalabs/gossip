@@ -2557,6 +2557,77 @@ fn a_member_that_left_can_be_added_back() {
     assert_eq!(s0.current, z);
 }
 
+/// §5.3, §5.5: a member removed and added back holds the epoch before its removal and the root
+/// that adds it back, never the epoch between. Made owner by a handover, it acts on the leave of
+/// a late leaver that names the epoch before: a device that cannot check an epoch between treats
+/// another member's leave as live. Only its own old leave is not live across such a gap (see
+/// `a_member_added_back_and_restored_before_its_leave_learns_it_and_gets_its_history`).
+#[test]
+fn an_owner_added_back_acts_on_a_late_leave_naming_an_epoch_before_its_gap() {
+    let (mut net, x) = founded(4);
+    let (a, late) = (1, 3);
+    net.offline[late] = true;
+    let y = net
+        .change(
+            0,
+            x,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![gid(a)],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.exchange();
+    let z = net
+        .change(
+            0,
+            y,
+            GroupChange::Successor {
+                add: vec![gid(a)],
+                remove: vec![],
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.accept_all(a), vec![x]);
+    net.run(2 * MIN);
+    assert_eq!(net.current(a, &x), Some(z));
+    assert!(
+        !net.devs[a].node.t.epochs.contains(&y),
+        "device {a} never held Y"
+    );
+    let w = net
+        .change(
+            0,
+            z,
+            GroupChange::Handover {
+                new_owner: gid(a),
+                leave: false,
+                name: None,
+            },
+        )
+        .unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.current(a, &x), Some(w));
+    // The late leaver, still at X, signs its leave of X; it reaches the new owner.
+    let root_x = net.devs[late].node.root(&x).unwrap();
+    let leave = crate::Leave::sign(
+        &root_x,
+        &ident(late).public,
+        &ident(late).secret.dsa_signing_key,
+        [3; 32],
+    )
+    .unwrap();
+    let blob = wire::encode_event_blob(&EventObject::Leave(leave)).unwrap();
+    net.recv_frames_m(a, late, &[Frame::Event(blob)]);
+    net.run(HOUR);
+    let cur = net.current(a, &x).unwrap();
+    assert_ne!(cur, w, "the new owner created no successor");
+    assert!(!net.summary(a, &x).unwrap().members.contains(&gid(late)));
+}
+
 /// Found by the membership simulation (code at `ec011623`, seed 199): a member that left X
 /// received Y, a root continuing X that still lists it, first as the continuation of a
 /// closed epoch (recorded closed), then in full again (an invitation with its "closed before"
