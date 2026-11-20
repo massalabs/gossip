@@ -48,6 +48,8 @@ mod sim_groups;
 #[cfg(test)]
 mod sim_net;
 #[cfg(test)]
+mod sim_report;
+#[cfg(test)]
 mod test_support;
 
 pub use epoch::local::{ChangeError, LocalEdit, MetadataPatch, Published};

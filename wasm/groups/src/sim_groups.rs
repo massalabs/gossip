@@ -53,7 +53,12 @@
 //!   [`LIMITS`];
 //! - every generated behaviour occurred at least once over the default seeds.
 //!
-//! Environment variables (local runs):
+//! The test is ignored by a plain `cargo test`; run it with `cargo test --release -p groups
+//! --lib -- --ignored --exact sim_groups::membership_simulation`. Every requested seed runs,
+//! failing or not, on as many threads as the machine offers, and the run ends with the report
+//! described in [`crate::sim_report`].
+//!
+//! Environment variables:
 //!
 //! - `GROUPS_MEMBERS_SEED=<n>`: replay one seed;
 //! - `GROUPS_MEMBERS_SEEDS=<n>`: run seeds `GROUPS_MEMBERS_FIRST` (default 0) to `+ n`
@@ -75,6 +80,7 @@ use crate::node::{GroupChange, LeaveChoice, MyStatus, Node, NodeError};
 use crate::rng::{TestRng, bytes, uniform_below};
 use crate::root::{Root, RootParams};
 use crate::signed::{Kick, Leave};
+use crate::sim_report::{finish, run_seeds};
 use crate::store::{MemoryStorage, StorageRead, StoredResult};
 use crate::wire::{
     self, Entry, EntryItem, EventObject, Frame, Notice, QueryEntry, QueryOp, Response,
@@ -2825,6 +2831,7 @@ fn env_u64(name: &str) -> Option<u64> {
 }
 
 #[test]
+#[ignore = "simulation: run by the simulations job, or with --ignored"]
 fn membership_simulation() {
     let hours = env_u64("GROUPS_MEMBERS_HOURS").unwrap_or(13);
     let final_hours = env_u64("GROUPS_MEMBERS_FINAL").unwrap_or(48);
@@ -2837,51 +2844,25 @@ fn membership_simulation() {
             (first..first + count).collect()
         }
     };
-    // The seeds run on as many threads as the machine offers; the results are taken in
-    // seed order, so the first failing seed is the one reported.
-    let workers = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .min(seeds.len());
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let results: std::sync::Mutex<BTreeMap<u64, std::thread::Result<Counters>>> =
-        std::sync::Mutex::new(BTreeMap::new());
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let Some(&seed) = seeds.get(i) else { return };
-                    let r = std::panic::catch_unwind(|| run(seed, hours, final_hours));
-                    results.lock().unwrap().insert(seed, r);
-                }
-            });
-        }
-    });
     let mut total = Counters::default();
-    for (seed, r) in results.into_inner().unwrap() {
+    let mut failures = Vec::new();
+    for (seed, r) in run_seeds(&seeds, |seed| run(seed, hours, final_hours)) {
         match r {
             Ok(c) => total.add(&c),
-            Err(p) => {
-                eprintln!(
-                    "membership simulation failed with seed {seed} ({hours} hours); replay \
-                     with GROUPS_MEMBERS_SEED={seed} GROUPS_MEMBERS_HOURS={hours} cargo test \
-                     -p groups membership_simulation"
-                );
-                std::panic::resume_unwind(p);
-            }
+            Err(reason) => failures.push((seed, reason)),
         }
     }
     eprintln!(
         "membership simulation counters over {} seeds: {total:?}",
         seeds.len()
     );
-    if single.is_none() && seeds.len() >= 4 {
-        assert!(
-            total.missing().is_empty(),
-            "situations never exercised: {:?}",
-            total.missing()
-        );
-    }
+    let missing = (single.is_none() && seeds.len() >= 4).then(|| total.missing());
+    finish("membership", seeds.len(), &failures, missing, |seed| {
+        format!(
+            "GROUPS_MEMBERS_SEED={seed} GROUPS_MEMBERS_HOURS={hours} cargo test --release -p \
+             groups --lib -- --ignored --exact sim_groups::membership_simulation"
+        )
+    });
 }
 
 /// Direct chats (§5.12), run with every seed after the group above: honest devices that

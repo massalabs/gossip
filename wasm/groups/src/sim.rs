@@ -31,7 +31,12 @@
 //! The run counts the situations it is meant to exercise ([`Counters`]); the default test
 //! asserts that each occurred at least once across its seeds.
 //!
-//! Environment variables (local runs; the default run takes a few seconds):
+//! The test is ignored by a plain `cargo test`; run it with
+//! `cargo test --release -p groups --lib -- --ignored --exact sim::simulation`. Every
+//! requested seed runs, failing or not, and the run ends with the report described in
+//! [`crate::sim_report`].
+//!
+//! Environment variables (the default run takes a few seconds):
 //!
 //! - `GROUPS_SIM_SEED=<n>`: replay one seed;
 //! - `GROUPS_SIM_SEEDS=<n>`: run seeds `GROUPS_SIM_FIRST` (default 0) to `+ n`;
@@ -49,6 +54,7 @@ use crate::ids::{ChatId, EventId, GossipId, SyncObjId};
 use crate::rng::{TestRng, bytes};
 use crate::root::Root;
 use crate::root::tests::founding;
+use crate::sim_report::{finish, run_seeds};
 use crate::store::{
     EventRow, MemoryStorage, ObjectRecord, StorageError, StorageRead, StoredResult, in_window,
 };
@@ -1523,6 +1529,7 @@ fn env_u64(name: &str) -> Option<u64> {
 }
 
 #[test]
+#[ignore = "simulation: run by the simulations job, or with --ignored"]
 fn simulation() {
     let steps = env_u64("GROUPS_SIM_STEPS").map_or(160, |s| s as usize);
     let single = env_u64("GROUPS_SIM_SEED");
@@ -1535,27 +1542,19 @@ fn simulation() {
         }
     };
     let mut total = Counters::default();
-    for seed in &seeds {
-        let seed = *seed;
-        let result = std::panic::catch_unwind(|| run(seed, steps));
-        match result {
+    let mut failures = Vec::new();
+    for (seed, r) in run_seeds(&seeds, |seed| run(seed, steps)) {
+        match r {
             Ok(c) => total.add(&c),
-            Err(panic) => {
-                eprintln!(
-                    "simulation failed with seed {seed} ({steps} steps); replay with \
-                     GROUPS_SIM_SEED={seed} GROUPS_SIM_STEPS={steps} cargo test -p groups \
-                     simulation"
-                );
-                std::panic::resume_unwind(panic);
-            }
+            Err(reason) => failures.push((seed, reason)),
         }
     }
     eprintln!("simulation counters over {} seeds: {total:?}", seeds.len());
-    if single.is_none() && seeds.len() >= 12 {
-        assert!(
-            total.missing().is_empty(),
-            "situations never exercised: {:?}",
-            total.missing()
-        );
-    }
+    let missing = (single.is_none() && seeds.len() >= 12).then(|| total.missing());
+    finish("merge", seeds.len(), &failures, missing, |seed| {
+        format!(
+            "GROUPS_SIM_SEED={seed} GROUPS_SIM_STEPS={steps} cargo test --release -p groups \
+             --lib -- --ignored --exact sim::simulation"
+        )
+    });
 }
