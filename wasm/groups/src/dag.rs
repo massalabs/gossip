@@ -1,10 +1,13 @@
 //! Tips, the cycle frontier and parent selection (§6.1, §12.1).
 //!
 //! A **tip** is an available event that no **available** event references as a parent (D.27,
-//! choice B; §12.1 says "accepted"). A pruned event answers "not available", so nobody can
-//! learn its parent links: if a pruned child still hid its parents, an event that carries a
-//! current result could become unreachable for discovery. Tips are therefore a function of
-//! the available events and their parent links only.
+//! settled; §6.1, §12.1). A pruned event answers "not available", so nobody can learn its
+//! parent links: if a pruned child still hid its parents, an event that carries a current
+//! result could become unreachable for discovery. Example: E1 creates message 1, X1 creates
+//! message 2 with parent E1, X2 edits message 2 with parent X1, and every device prunes X1.
+//! With X1 hiding E1, the only tip is X2; a device that was offline fetches X2, gets "not
+//! available" for X1 everywhere, and never learns E1. Tips are therefore a function of the
+//! available events and their parent links only.
 //!
 //! Ancestry may contain cycles (an adversary can name events in both directions). Strongly
 //! connected components of the available events are collapsed: a component that no available
