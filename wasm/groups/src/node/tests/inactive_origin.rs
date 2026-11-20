@@ -613,3 +613,183 @@ fn answers_queued_when_the_chat_is_deleted_are_those_of_a_device_that_never_held
         })]
     );
 }
+
+/// Makes R inactive in C the way given, by what members push to it (its own leave, its kick, a
+/// dissolve) or by its own "Ask to be kicked", without letting R send anything; or, with
+/// `None`, deletes C on R.
+fn go_inactive(net: &mut MNet, how: Option<Inactive>, c: ChatId) {
+    let root = net.devs[0].node.root(&c).unwrap();
+    let owner = &super::membership::ident(0).secret.dsa_signing_key;
+    let obj = match how {
+        None => {
+            let now = net.now;
+            let dev = &mut net.devs[R];
+            dev.node
+                .delete_group(&mut dev.store, c, now, &mut net.rng)
+                .unwrap();
+            return;
+        }
+        Some(Inactive::Waiting) => {
+            let now = net.now;
+            let s = signer(R);
+            let dev = &mut net.devs[R];
+            dev.node
+                .leave_group(
+                    &mut dev.store,
+                    &s,
+                    c,
+                    LeaveChoice::AskToBeKicked,
+                    now,
+                    &mut net.rng,
+                )
+                .unwrap();
+            return;
+        }
+        Some(Inactive::Removed) => {
+            EventObject::Kick(crate::Kick::sign(&root, gid(R), owner, [8; 32]).unwrap())
+        }
+        Some(Inactive::Left) => EventObject::Leave(
+            crate::Leave::sign(
+                &root,
+                &super::membership::ident(R).public,
+                &super::membership::ident(R).secret.dsa_signing_key,
+                [7; 32],
+            )
+            .unwrap(),
+        ),
+        Some(Inactive::Dissolved) => {
+            EventObject::Dissolve(crate::Dissolve::sign(&root, false, owner, [9; 32]).unwrap())
+        }
+    };
+    let f = Frame::Event(wire::encode_event_blob(&obj).unwrap());
+    net.recv_frames_m(R, 0, &[f]);
+}
+
+/// The frames of `sent` about C: the answers to Q's query 9, and every other frame whose
+/// bytes name C, except what an inactive group still sends by design: a request to be kicked
+/// (§5.4) and the dissolve an archive announces (§5.8).
+fn about_c(sent: &[(GossipId, Vec<Frame>)], c: ChatId) -> Vec<(GossipId, Frame)> {
+    let mut out = Vec::new();
+    for (to, frames) in sent {
+        for f in frames {
+            let keep = match f {
+                Frame::Response(r) => r.request_id == Some(RequestId::from_bytes([9; 16])),
+                Frame::LeaveRequest(_) => false,
+                Frame::Notice(n) => n
+                    .entries
+                    .iter()
+                    .any(|e| e.chat_id == c && !matches!(e.item, EntryItem::Dissolve(_))),
+                Frame::Event(blob) => {
+                    contains(blob, &c)
+                        && !matches!(
+                            wire::decode_event_blob(blob, 1),
+                            Ok(EventObject::Dissolve(_))
+                        )
+                }
+                f => f.encode().is_ok_and(|b| contains(&b, &c)),
+            };
+            if keep {
+                out.push((*to, f.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// §10.4, §15.1, D.74: while R is active in C, work for C waits in its queue or is already
+/// assembled: its own message, the notices relaying a message of Q, its own neighbor request,
+/// and its answers to Q's lookups and neighbor request. Then R stops being active in C (kicked,
+/// left, waiting for a kick, dissolved). What it sends about C from then on, assembled before
+/// or after, is what it sends when it deletes C instead: no message, notice or neighbor request,
+/// and the answers a device that never held C gives. An archive (dissolved while active) still
+/// serves the root (the decided exception, §5.8); a tips scan anchored in it is restarted, so
+/// that the next list holds its dissolve message and root only. Before, all of this still went
+/// out after the transition.
+#[test]
+fn work_for_the_epoch_queued_or_assembled_before_it_goes_inactive_is_not_sent() {
+    let mut wrong = Vec::new();
+    for how in ALL {
+        let probe = |how: Option<Inactive>| {
+            let (mut net, _, c) = active();
+            let e = net.say(Q, &c, "more");
+            let blob = wire::encode_event_blob(&EventObject::Message(e.clone())).unwrap();
+            net.recv_frames_m(R, Q, &[Frame::Event(blob)]);
+            net.say(R, &c, "mine");
+            net.devs[R].node.queue_work(
+                gid(Q),
+                crate::node::records::Work::NeighborRequest { chat_id: c },
+            );
+            let mut lookups = lookups_of_c(c);
+            if let Frame::Query(q) = &mut lookups[0] {
+                q.sent_at = net.now;
+                q.ttl = 10 * MIN;
+                q.entries.push(QueryEntry::Op(QueryOp::Event {
+                    chat_id: c,
+                    event_id: e.event_id(),
+                }));
+            }
+            net.recv_frames_m(R, Q, &lookups);
+            // Half of it assembled before the transition, in flight.
+            let now = net.now;
+            let dev = &mut net.devs[R];
+            let assembled = dev
+                .node
+                .poll_outbox(&mut dev.store, now, &mut net.rng)
+                .unwrap();
+            go_inactive(&mut net, how, c);
+            let mut sent = Vec::new();
+            for o in assembled {
+                let dev = &mut net.devs[R];
+                if dev.node.is_current(o.handle, net.now) {
+                    dev.node
+                        .handed_off(&mut dev.store, o.handle, net.now, &mut net.rng)
+                        .unwrap();
+                    sent.push((o.to, frames(&o.plaintext)));
+                } else {
+                    dev.node.abandon(o.handle);
+                }
+            }
+            for _ in 0..10 {
+                sent.extend(drain(&mut net));
+                net.now += MIN;
+                net.tick(R);
+            }
+            about_c(&sent, c)
+        };
+        let inactive = probe(Some(how));
+        let deleted = probe(None);
+        let (mut inactive_rest, mut deleted_rest) = (inactive.clone(), deleted.clone());
+        if matches!(how, Inactive::Dissolved) {
+            // The root answer (entry 0) and the page (entry 2) of an archive.
+            let answer = |v: &[(GossipId, Frame)], i: u32| {
+                v.iter().find_map(|(_, f)| match f {
+                    Frame::Response(r) if r.idx == i => Some(r.result.clone()),
+                    _ => None,
+                })
+            };
+            if !matches!(answer(&inactive, 0), Some(ResponseResult::Event(_)))
+                || answer(&inactive, 2) != Some(ResponseResult::Status(Status::Restart))
+            {
+                wrong.push((how, format!("archive answers: {inactive:?}")));
+            }
+            let other = |(_, f): &(GossipId, Frame)| !matches!(f, Frame::Response(r) if r.idx == 0 || r.idx == 2);
+            inactive_rest.retain(other);
+            deleted_rest.retain(other);
+        }
+        if inactive_rest != deleted_rest {
+            wrong.push((
+                how,
+                format!("{inactive_rest:?}\nagainst deleted\n{deleted_rest:?}"),
+            ));
+        }
+        let originated = |v: &[(GossipId, Frame)]| {
+            v.iter()
+                .filter(|(_, f)| !matches!(f, Frame::Response(_) | Frame::NeighborResponse(_)))
+                .count()
+        };
+        if originated(&inactive) > 0 || originated(&deleted) > 0 {
+            wrong.push((how, "originated".to_owned()));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
