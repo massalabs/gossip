@@ -5469,3 +5469,67 @@ fn every_unservable_lookup_from_a_member_gets_the_same_not_available() {
         assert!(answers_of(&mut net, r, 4, vec![op]).is_empty());
     }
 }
+
+/// §4.8, §5.10: device 2 was kicked from the group and keeps it. The owner, from a fork, makes
+/// two roots that add it back, X and Y, both continuing the epoch it was kicked from. Device 2
+/// accepts Y. Whether X arrives before the accept or after it, it ends the same way: adopted,
+/// because the group it continues is active again. Before, X that arrived first stayed an
+/// invitation for good, as an invitation that rejoins its group, while X that arrived after
+/// was adopted.
+#[test]
+fn a_second_root_rejoining_a_group_ends_the_same_whether_it_arrives_before_or_after_the_accept() {
+    let state = |x_first: bool| {
+        let (mut net, g) = founded(3);
+        net.change(
+            0,
+            g,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![gid(2)],
+                name: None,
+            },
+        )
+        .unwrap();
+        net.run(MIN);
+        assert_eq!(net.summary(2, &g).unwrap().status, MyStatus::Removed);
+        net.offline[2] = true;
+        let backup = net.devs[0].store.clone();
+        let mut roots = Vec::new();
+        for name in ["X", "Y"] {
+            net.devs[0].store = backup.clone();
+            net.restart(0);
+            let e = net
+                .change(
+                    0,
+                    g,
+                    GroupChange::Successor {
+                        add: vec![gid(2)],
+                        remove: vec![],
+                        name: Some(name.into()),
+                    },
+                )
+                .unwrap();
+            roots.push(net.devs[0].node.root(&e).unwrap());
+        }
+        net.offline[2] = false;
+        let frame = |r: &Root| {
+            Frame::Event(wire::encode_event_blob(&EventObject::Root(Box::new(r.clone()))).unwrap())
+        };
+        let (x, y) = (roots[0].chat_id(), roots[1].chat_id());
+        if x_first {
+            net.recv_frames_m(2, 0, &[frame(&roots[0])]);
+        }
+        net.recv_frames_m(2, 0, &[frame(&roots[1])]);
+        assert_eq!(net.accept(2, y), g);
+        if !x_first {
+            net.recv_frames_m(2, 0, &[frame(&roots[0])]);
+        }
+        let n = &net.devs[2].node;
+        let invitations: Vec<ChatId> = n.invitations(net.now).iter().map(|i| i.chat_id).collect();
+        let group_of_x = n.group(&x).map(|s| s.group);
+        (invitations, group_of_x, n.group(&y).map(|s| s.group))
+    };
+    let after = state(false);
+    assert!(after.0.is_empty(), "{after:?}");
+    assert_eq!(state(true), after);
+}
