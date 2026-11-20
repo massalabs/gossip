@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 use super::*;
 use crate::keys::KeySigner;
-use crate::node::records::{EpochStatus, GroupStatus, SignedObject};
+use crate::node::records::{EpochStatus, GroupStatus, Marker, SignedObject};
 use crate::rng::TestRng;
 use crate::store::MemoryStorage;
 use crate::test_support::{Identity, identity};
@@ -2549,6 +2549,92 @@ fn a_member_that_left_can_be_added_back() {
         "(b) not removed again: {s0:?}"
     );
     assert_eq!(s0.current, z);
+}
+
+/// Found by the membership simulation (code at `ec011623`, seed 199): a member that left X
+/// received Y, a root continuing X that still lists it, first as the continuation of a
+/// closed epoch (recorded closed), then in full again (an invitation with its "closed before"
+/// warning), so it held Y both as a record and as a closed marker. The root Z that adds it
+/// back names Y and an epoch U it never held; Y was matched twice, once per table, and
+/// counted as two closed parents of two, so Z was rejected as a continuation of a closed
+/// chat (§4.8 case 3) instead of being an invitation (§5.10). The member never held the
+/// later epochs, nor applied the dissolve that followed.
+#[test]
+fn a_root_adding_back_a_member_beside_a_closed_epoch_held_again_is_an_invitation() {
+    let (mut net, x) = founded(4);
+    let now = net.now;
+    let s = signer(3);
+    let dev = &mut net.devs[3];
+    dev.node
+        .leave_group(
+            &mut dev.store,
+            &s,
+            x,
+            LeaveChoice::Signed,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    // The owner renames before the leave reaches it: Y still lists the member.
+    let y = net
+        .change(
+            0,
+            x,
+            GroupChange::Successor {
+                add: vec![],
+                remove: vec![],
+                name: Some("Y".into()),
+            },
+        )
+        .unwrap();
+    let y_root = net.devs[0].node.root(&y).unwrap().clone();
+    assert!(y_root.is_member(&gid(3)));
+    let blob = |r: &Root| wire::encode_event_blob(&EventObject::Root(Box::new(r.clone()))).unwrap();
+    // Y continues the closed X: recorded closed; delivered in full again, an invitation
+    // marked "closed before" (§4.8 case 1).
+    net.recv_frames_m(3, 0, &[Frame::Event(blob(&y_root))]);
+    net.recv_frames_m(3, 0, &[Frame::Event(blob(&y_root))]);
+    assert!(
+        net.devs[3]
+            .node
+            .t
+            .markers
+            .get(&y)
+            .is_some_and(Marker::is_closed)
+    );
+    assert!(matches!(
+        net.devs[3].node.t.epochs.get(&y).map(|r| &r.status),
+        Some(EpochStatus::Invitation(_))
+    ));
+    // Z adds the member back, naming Y and an epoch U the member never held.
+    let u = ChatId::from_bytes([0x55; 32]);
+    let members: Vec<GossipId> = (0..4).map(gid).collect();
+    let params = crate::root::RootParams {
+        name: "Z".into(),
+        members,
+        group_secret: crate::ids::GroupSecret::from_bytes([4; 32]),
+        owner: ident(0).public.clone(),
+        epoch_challenge: crate::ids::Challenge::from_bytes([5; 32]),
+        ref_chat_id_challenge: crate::ids::Challenge::from_bytes([6; 32]),
+        created_at: net.now,
+    };
+    let z_root =
+        Root::create_successor(params, &[y, u], &ident(0).secret.dsa_signing_key, [1; 32]).unwrap();
+    let z = z_root.chat_id();
+    net.recv_frames_m(3, 0, &[Frame::Event(blob(&z_root))]);
+    assert!(
+        !net.devs[3]
+            .node
+            .t
+            .markers
+            .get(&z)
+            .is_some_and(Marker::is_closed),
+        "Z was rejected as a continuation of a closed chat"
+    );
+    assert!(matches!(
+        net.devs[3].node.t.epochs.get(&z).map(|r| &r.status),
+        Some(EpochStatus::Invitation(_))
+    ));
 }
 
 /// A member in X is saved to a backup; messages are then sent in X by it and by others (the
