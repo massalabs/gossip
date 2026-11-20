@@ -1792,13 +1792,38 @@ fn a_message_whose_versions_have_other_creation_dates_is_erased_after_the_latest
     assert!(f.holds_nothing());
 }
 
+const DAY: u64 = 24 * HOUR;
+const WEEK: u64 = 7 * DAY;
+
+/// The step to which the date kept beside a deleted message is rounded up, by the timer `T`
+/// (§7.7), as the table of the spec gives it.
+fn step_of(timer: u64) -> u64 {
+    match timer {
+        t if t <= HOUR => 5 * MIN,
+        t if t <= DAY => HOUR,
+        t if t <= WEEK => DAY,
+        _ => WEEK,
+    }
+}
+
+/// `at` rounded up to a multiple of `step`, counted from the Unix origin.
+fn up(at: u64, step: u64) -> u64 {
+    at.div_ceil(step) * step
+}
+
 /// §7.7: a message deleted by a deletion event or by hand before its moment keeps its
-/// tombstone, its stubs and its deletion event as without a timer; the timer does not erase
-/// it. A deletion that arrives after the timer erased its message is received as one for a
-/// message the device does not hold: it leaves a tombstone, as it would without a timer.
+/// tombstone, its stubs and its deletion event until its moment rounded up to the step of
+/// the timer, and is then erased with every record of it. Until then the tombstone does its
+/// job: the message cannot come back. After it, a copy offered late is refused by its own
+/// dates. Deleting a message by hand leaves no more trace than letting the timer run.
 #[test]
-fn a_message_deleted_before_its_moment_is_kept_as_without_a_timer() {
+fn a_message_deleted_before_its_moment_is_erased_at_its_moment_rounded_up() {
     let bob_id = Fixture::new().bob.id;
+    let erase = up(T0 + HOUR, 5 * MIN);
+    assert!(
+        erase > T0 + HOUR,
+        "the test needs a moment that is not a multiple"
+    );
     // By a deletion event, immediate or scheduled before the moment.
     for scheduled in [None, Some(T0 + 20 * MIN)] {
         let mut f = Fixture::with_timer(HOUR);
@@ -1806,15 +1831,29 @@ fn a_message_deleted_before_its_moment_is_kept_as_without_a_timer() {
         let d = f.event(T0 + 10, 2, &[e.event_id()], del(1, scheduled));
         f.recv(&e, T0 + 1);
         f.recv(&d, T0 + 11);
-        f.tick(T0 + 3 * HOUR);
+        f.tick(T0 + 30 * MIN);
+        assert!(f.obj(1).is_deleted(), "{scheduled:?}");
+        assert_eq!(f.obj(1).erase_at, Some(erase), "{scheduled:?}");
+        // The tombstone blocks the message until then.
+        assert_eq!(
+            f.recv(&e, T0 + 40 * MIN),
+            Outcome::KeptPruned,
+            "{scheduled:?}"
+        );
+        f.tick(erase - 1);
         assert!(f.obj(1).is_deleted(), "{scheduled:?}");
         assert_eq!(f.state(&e), PRUNED, "{scheduled:?}");
         assert!(f.has_edges(e.event_id()), "{scheduled:?}");
         assert_eq!(held_role(f.state(&d)), Some(Role::Current), "{scheduled:?}");
         assert_eq!(
-            f.epoch().next_wakeup(&f.store, T0 + 3 * HOUR).unwrap(),
-            None
+            f.epoch().next_wakeup(&f.store, erase - 1).unwrap(),
+            Some(erase),
+            "{scheduled:?}"
         );
+        f.tick(erase);
+        assert!(f.holds_nothing(), "{scheduled:?}: {:?}", f.records());
+        assert_eq!(f.recv(&e, erase), Outcome::Expired, "{scheduled:?}");
+        assert!(f.holds_nothing(), "{scheduled:?}");
     }
     // By hand.
     let mut f = Fixture::with_timer(HOUR);
@@ -1824,18 +1863,87 @@ fn a_message_deleted_before_its_moment_is_kept_as_without_a_timer() {
     ep(&root)
         .local_delete(&mut f.store, T0 + 10, sid(1))
         .unwrap();
-    f.tick(T0 + 3 * HOUR);
+    assert_eq!(f.obj(1).erase_at, Some(erase));
+    f.tick(erase - 1);
     assert!(f.obj(1).is_deleted());
     assert_eq!(f.state(&e), PRUNED);
-    // A deletion arriving after the erasure.
-    let mut g = Fixture::with_timer(HOUR);
-    let e = g.event(T0, 1, &[], text(1, bob_id, T0, T0, "hi"));
-    g.recv(&e, T0 + 1);
-    g.tick(T0 + HOUR);
-    assert!(g.holds_nothing());
-    let d = g.event(T0 + 10, 2, &[], del(1, None));
-    assert_eq!(g.recv(&d, T0 + HOUR + 1), Outcome::Accepted(Merge::Won));
-    assert!(g.obj(1).is_deleted());
+    f.tick(erase);
+    assert!(f.holds_nothing(), "{:?}", f.records());
+    assert_eq!(f.recv(&e, erase), Outcome::Expired);
+}
+
+/// §7.7: the date kept beside a deleted message is its moment rounded up to a step that
+/// depends on the timer: 5 minutes up to an hour, an hour up to a day, a day up to a week,
+/// a week beyond. A moment already on a step is kept. A rounded date past the top of the
+/// integer range never comes. With no timer, nothing changes.
+#[test]
+fn the_date_kept_beside_a_deleted_message_is_rounded_up_by_the_timer() {
+    let bob_id = Fixture::new().bob.id;
+    let deleted = |timer: u64, created: u64| {
+        let mut f = Fixture::with_timer(timer);
+        let e = f.event(T0, 1, &[], text(1, bob_id, created, created, "hi"));
+        assert_eq!(f.recv(&e, T0 + 1), Outcome::Accepted(Merge::Won), "{timer}");
+        let root = f.root.clone();
+        ep(&root)
+            .local_delete(&mut f.store, T0 + 10, sid(1))
+            .unwrap();
+        check_invariants(&f.store, &f.root.chat_id(), T0 + 10).unwrap();
+        f.obj(1)
+    };
+    for timer in [
+        MIN,
+        5 * MIN,
+        HOUR,
+        HOUR + 1,
+        2 * HOUR,
+        DAY,
+        DAY + 1,
+        3 * DAY,
+        WEEK,
+        WEEK + 1,
+        4 * WEEK,
+    ] {
+        let obj = deleted(timer, T0);
+        let step = step_of(timer);
+        assert_eq!(obj.erase_at, Some(up(T0 + timer, step)), "{timer}");
+        assert!(obj.erase_at.unwrap() > T0 + timer, "{timer}");
+        assert_eq!(obj.erase_at.unwrap() % step, 0, "{timer}");
+    }
+    // A moment on a step is kept as it is.
+    let on_step = T0 - T0 % (5 * MIN);
+    assert_eq!(deleted(HOUR, on_step).erase_at, Some(on_step + HOUR));
+    // Past the top of the range once rounded: never.
+    let obj = deleted(u64::MAX - T0 - 10, T0);
+    assert_eq!(obj.erase_at, None);
+    assert!(obj.stubs.is_empty());
+    // No timer: the tombstone is kept as before.
+    assert_eq!(deleted(0, T0).erase_at, None);
+}
+
+/// §7.7: with versions of other creation dates, the latest moment among them is kept, then
+/// rounded; a later version that the tombstone absorbs counts too.
+#[test]
+fn a_deleted_message_with_versions_of_other_dates_is_erased_at_the_latest_rounded_up() {
+    let mut f = Fixture::with_timer(HOUR);
+    let bob = f.bob.id;
+    let v1 = f.event(T0, 1, &[], text(1, bob, T0 + 30 * MIN, T0, "later date"));
+    let v2 = f.event(T0 + 1, 2, &[], text(1, bob, T0, T0 + 1, "earlier date"));
+    f.recv(&v1, T0 + 1);
+    f.recv(&v2, T0 + 2);
+    let d = f.event(T0 + 10, 3, &[v2.event_id()], del(1, None));
+    f.recv(&d, T0 + 11);
+    assert_eq!(f.obj(1).erase_at, Some(up(T0 + 90 * MIN, 5 * MIN)));
+    let v3 = f.event(
+        T0 + 20,
+        4,
+        &[],
+        text(1, bob, T0 + 40 * MIN, T0 + 20, "absorbed"),
+    );
+    assert_eq!(f.recv(&v3, T0 + 21), Outcome::Accepted(Merge::Lost));
+    assert!(f.obj(1).is_deleted());
+    assert_eq!(f.obj(1).erase_at, Some(up(T0 + 100 * MIN, 5 * MIN)));
+    f.tick(up(T0 + 100 * MIN, 5 * MIN));
+    assert!(f.holds_nothing(), "{:?}", f.records());
 }
 
 /// §7.7: with no timer nothing is deleted, and a moment beyond the top of the integer range
