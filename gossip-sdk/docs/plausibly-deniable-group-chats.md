@@ -3509,6 +3509,14 @@ This is accepted: deletion is meant to reach every device that holds the epoch, 
 events already reach removed peers, and the owner could have dissolved with deletion just before
 the kick.
 
+### 16.9 Accepted cost: one signature scheme
+
+Roots, kicks, leaves and dissolve messages are signed with ML-DSA-65 only, with the account's
+identity key (§2, D.83). If a flaw is found in ML-DSA-65, there is **no fallback inside wire version
+1**: anyone able to forge these signatures can sign roots, kicks and dissolve messages in another
+member's name, and the account identity is broken as well. Recovery takes a new protocol version,
+which a break of the identity key needs in any case.
+
 ## 17. Readiness, validation and future work
 
 ### 17.1 Release prerequisites
@@ -4146,7 +4154,8 @@ The revised section is planned to state the following.
 5. **Messages:** still unsigned, deniable, and open to fabrication by any member.
 6. **"Ask to be kicked":** deniable.
    Only the owner learns of it and holds no proof.
-7. **Signatures are ML-DSA-65 only,** with no second classical signature.
+7. **Signatures are ML-DSA-65 only,** with no second classical signature: no fallback inside
+   version 1 if ML-DSA-65 is broken (§16.9, D.83).
 
 *What the owner and former owners can do*
 
@@ -5383,9 +5392,9 @@ afterwards.*
 - **A (recommended):** confirm the first; scale the budget of the second with the container.
 - **B:** keep the budget as it is.
 
-### D.83 Three additions to the wire format, refused (§2.2, §11.3, §11.7, §12.1, §13.1)
+### D.83 Additions to the wire format, refused (§2.2, §4.7, §10.1, §11.3, §11.7, §12.1, §13.1, §13.4)
 
-*Settled:* none of the three is added. The format of version 1 stays fully closed (§2.2, §13.8).
+*Settled:* none of them is added. The format of version 1 stays fully closed (§2.2, §13.8).
 
 - **An ignorable hints field in the container**, which a device could fill with advice for its
   peers and a receiver could skip. Why not: the container is closed, so an unknown field is
@@ -5399,6 +5408,17 @@ afterwards.*
   answer as an event the device does not hold, so that a withdrawn or deleted message leaves
   nothing a peer can tell apart (§9.3); the tip rule over available events already keeps
   discovery going (§12.1).
+- **A retry delay carried with `busy`** (§13.4). Why not: the requester's own backoff already
+  works (D.46, D.52); how long to wait is local policy (§2.2); and a hostile responder could use a
+  delay it names to keep a peer away from the group for as long as it likes.
+- **A frame that ends a neighbor link** (§10.1). Why not: a link that only one side still keeps
+  goes on delivering; a dead link must be found by behaviour anyway, for the peers that simply go
+  offline; and how many links a device keeps is local policy.
+- **A second, classical signature beside ML-DSA-65** on roots, kicks, leaves and dissolve
+  messages (§4.7, §5.3, §5.6, §5.8). Why not: the only signing key a device has is the account's
+  identity key, with the crypto libraries the project allows; signed objects stay small; and a
+  break of ML-DSA-65 breaks the account identity itself, which needs a new protocol version in any
+  case. The accepted cost is stated in §16.9.
 
 ### D.84 The message timer and the settings map: points to confirm (§4.1, §6.2, §7.6, §7.7)
 

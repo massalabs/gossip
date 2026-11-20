@@ -122,6 +122,8 @@ impl Leave {
         if GossipId::of_keys(leaver_keys) != self.leaver {
             return Err(Error::KeysMismatch);
         }
+        // ML-DSA-65 only, with no second classical signature (D.83, §16.9): a flaw in it has no
+        // fallback inside wire version 1.
         verify_id(
             leaver_keys,
             CONTEXT_LEAVE_SIGNATURE,
@@ -242,6 +244,8 @@ impl Kick {
         if !root.is_member(&self.removed) {
             return Err(Error::NotMember("the removed member"));
         }
+        // ML-DSA-65 only, with no second classical signature (D.83, §16.9): a flaw in it has no
+        // fallback inside wire version 1.
         verify_id(
             root.owner_keys(),
             CONTEXT_KICK_SIGNATURE,
@@ -361,6 +365,8 @@ impl Dissolve {
     /// [`Error::IdMismatch`] or [`Error::InvalidSignature`].
     pub fn verify(&self, root: &Root) -> Result<()> {
         check_names_epoch(&self.chat_id, root)?;
+        // ML-DSA-65 only, with no second classical signature (D.83, §16.9): a flaw in it has no
+        // fallback inside wire version 1.
         verify_id(
             root.owner_keys(),
             CONTEXT_DISSOLVE_SIGNATURE,
