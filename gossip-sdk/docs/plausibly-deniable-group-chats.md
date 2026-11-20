@@ -1277,6 +1277,16 @@ its ID.
 - Every device verifies it with the owner keys of that epoch's root.
 - It applies only when it names the device's **current** epoch.
   A dissolve message naming another epoch is ignored.
+- A device that is already no longer active in the group when the dissolve arrives (kicked, left,
+  or waiting for a kick) applies it **silently**: it does not relay or announce it, and it stays in
+  its state, so it goes on answering as a device that does not hold the epoch (§10.4). With
+  `must_delete` true it still erases the group's messages as below; with `must_delete` false
+  nothing it does changes. Only a device that was active when it applied the dissolve keeps,
+  announces and serves the named root and the message as below.
+  *Why:* announcing the dissolve, or serving its root and a page afterwards, told the members that
+  this device had kept the chat, which a device that deleted its copy never does. The owner pushes
+  the message in full to every member, and the active members relay and serve it, so a device that
+  missed it still learns it from them.
 
 **Effect with `must_delete` false** ("Dissolve & Keep archived"):
 
@@ -2348,7 +2358,8 @@ A notice would save nothing.
 **Groups in a special state.** A device whose group is a read-only archive after a kick (§5.6),
 or after it left and keeps the group read-only, applies deletion events for that epoch, verifies
 and stores kicks, leaves and dissolve messages naming an epoch it holds, applies a dissolve message
-naming that epoch ("Dissolve & Delete" erases its archive), and drops every other incoming event.
+naming that epoch silently ("Dissolve & Delete" erases its archive; it stays kicked or left and
+announces nothing, §5.8), and drops every other incoming event.
 A device in the waiting state (§5.4), and a device whose group was dissolved (§5.8), drop every
 incoming event except roots, kicks and dissolve messages.
 *Why:* "Dissolve & Delete" is meant to erase the chat on every device that holds the epoch;
@@ -3479,7 +3490,9 @@ peers that share nothing (§4.6).
 ### 16.8 Known limitation: a removed member's archive stays within the owner's reach
 
 A device kicked from an epoch, or that left it and keeps it read-only, still applies a dissolve
-message naming that epoch, and "Dissolve & Delete" erases its archive (§5.6, §10.4). The owner of an
+message naming that epoch, silently, and "Dissolve & Delete" erases its archive (§5.6, §5.8,
+§10.4). It does not announce the dissolve and does not serve its root afterwards, so the dissolve
+does not show the members that it had kept the epoch. The owner of an
 epoch can therefore erase a removed member's copy of it at any time after the removal, although
 that member is no longer in the group. Only a dissolve naming an epoch the member holds reaches it;
 a dissolve of a later epoch does not.
@@ -5147,7 +5160,9 @@ closed that epoch: silence means yes, a lookup means no.
   silence to lookups, which cost each asker one timeout per inactive device; a simulated device
   kept asking such peers for a day.) The exceptions stay: a
   dissolved group serves its roots and its dissolve message; an archive gives a removed peer its own
-  kick or leave; the shared-chats scan rules below.
+  kick or leave; the shared-chats scan rules below. Only a device that was active when it
+  applied the dissolve keeps that dissolved state: one already kicked, left or waiting applies a
+  dissolve silently and stays as it was (§5.8).
 - Any query, notice or message event from a removed peer that names the epoch makes a retained
   member send it its kick or leave, the three membership lookups included; never a response, never a
   frame that names no epoch; a lookup that already returns the peer's own record does not send it

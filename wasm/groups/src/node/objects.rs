@@ -367,8 +367,20 @@ impl Node {
                 self.send_owed(cx, chat, removed);
             }
             SignedObject::Dissolve(d) => {
-                let pool = self.object_pool(&chat, None);
-                self.relay_object(cx, chat, obj.item(), pool);
+                // A device already no longer active in the group (kicked, left, waiting for a
+                // kick, superseded) applies it silently (§5.8, D.74): it announces it to no
+                // one and stays in its state, so that it goes on answering as a device that
+                // does not hold the epoch; "Dissolve & Delete" still erases its archive.
+                // Only a device that was active when it applied the dissolve serves the root
+                // and the dissolve message. Why: announcing the dissolve, or serving its root
+                // and a page afterwards, told the members that this device kept the chat, which
+                // a device that deleted its copy never does.
+                let inactive =
+                    !matches!(status, GroupStatus::Active | GroupStatus::Dissolved { .. });
+                if !inactive {
+                    let pool = self.object_pool(&chat, None);
+                    self.relay_object(cx, chat, obj.item(), pool);
+                }
                 // Applied by a device kicked from that epoch, or that left it and keeps it
                 // read-only, as by any other (§5.6, §10.4): "Dissolve & Delete" then erases its
                 // archive. Why: the deletion is meant to erase the chat on every device that
@@ -379,7 +391,13 @@ impl Node {
                 // member's archive stays within the owner's reach after the removal; only a
                 // dissolve naming an epoch that member holds reaches it, never one of a later
                 // epoch.
-                if current == Some(chat)
+                if current == Some(chat) && inactive {
+                    if d.must_delete() {
+                        self.erase_dissolved(group, chat);
+                        self.rebuild_epochs();
+                        self.changed(group, ChangeKind::ReadOnly, cx.now);
+                    }
+                } else if current == Some(chat)
                     || matches!(status, GroupStatus::Dissolved { epoch, .. } if epoch == chat)
                 {
                     self.apply_dissolve(cx, group, chat, d.must_delete());
@@ -459,50 +477,55 @@ impl Node {
         };
         self.stop_sync(group);
         if must_delete {
-            // The named epoch and every earlier epoch that leads to it (§5.8); side
-            // branches that do not lead to it are not erased.
-            let mut erase = BTreeSet::new();
-            let mut stack = vec![chat];
+            self.erase_dissolved(group, chat);
+        }
+        self.rebuild_epochs();
+        self.changed(group, ChangeKind::ReadOnly, cx.now);
+    }
+
+    /// What "Dissolve & Delete" naming `chat`, the current epoch of `group`, erases (§5.8).
+    pub(crate) fn erase_dissolved(&mut self, group: ChatId, chat: ChatId) {
+        // The named epoch and every earlier epoch that leads to it (§5.8); side
+        // branches that do not lead to it are not erased.
+        let mut erase = BTreeSet::new();
+        let mut stack = vec![chat];
+        while let Some(c) = stack.pop() {
+            if erase.insert(c)
+                && let Some(r) = self.t.epochs.get(&c)
+            {
+                stack.extend(r.parents.iter().copied());
+            }
+        }
+        // The epochs a remaining side branch descends from keep their root (its line);
+        // the others but the named one are deleted at once: only the named root and
+        // the message are kept (two weeks by a device that was active, §5.8).
+        let mut kept_lines = BTreeSet::new();
+        for e in self.ends(&group) {
+            if e == chat {
+                continue;
+            }
+            let mut stack = vec![e];
             while let Some(c) = stack.pop() {
-                if erase.insert(c)
+                if kept_lines.insert(c)
                     && let Some(r) = self.t.epochs.get(&c)
                 {
                     stack.extend(r.parents.iter().copied());
                 }
             }
-            // The epochs a remaining side branch descends from keep their root (its line);
-            // the others but the named one are deleted at once: only the named root and
-            // the message are kept two weeks.
-            let mut kept_lines = BTreeSet::new();
-            for e in self.ends(&group) {
-                if e == chat {
-                    continue;
-                }
-                let mut stack = vec![e];
-                while let Some(c) = stack.pop() {
-                    if kept_lines.insert(c)
-                        && let Some(r) = self.t.epochs.get(&c)
-                    {
-                        stack.extend(r.parents.iter().copied());
-                    }
-                }
+        }
+        for c in &erase {
+            self.erase_messages(*c);
+            // Erased: nothing is fetched into it again, even after a rejoin.
+            if let Some(r) = self.t.epochs.get_mut(c) {
+                r.state_override = Some(crate::epoch::GroupState::Dissolved);
             }
-            for c in &erase {
-                self.erase_messages(*c);
-                // Erased: nothing is fetched into it again, even after a rejoin.
-                if let Some(r) = self.t.epochs.get_mut(c) {
-                    r.state_override = Some(crate::epoch::GroupState::Dissolved);
-                }
-                if *c != chat && !kept_lines.contains(c) {
-                    self.drop_epoch(c);
-                    // A dissolved marker (a chat ID only, §14.2): the same root relayed
-                    // again is dropped, not an invitation.
-                    self.t.markers.insert(*c, Marker::Dissolved);
-                }
+            if *c != chat && !kept_lines.contains(c) {
+                self.drop_epoch(c);
+                // A dissolved marker (a chat ID only, §14.2): the same root relayed
+                // again is dropped, not an invitation.
+                self.t.markers.insert(*c, Marker::Dissolved);
             }
         }
-        self.rebuild_epochs();
-        self.changed(group, ChangeKind::ReadOnly, cx.now);
     }
 
     /// Erases the message records of `chat` at the commit, with the work and hints that
