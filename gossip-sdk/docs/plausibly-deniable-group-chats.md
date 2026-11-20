@@ -2401,7 +2401,8 @@ learnt before, which a scan does not always bring back (an older event reached o
 version since pruned); in the membership simulation, dropping them left a restored member added
 back without part of an older epoch's messages in 23 of 300 runs. Kept, they cost no traffic while the group is
 inactive.
-A kick or a leave of that epoch pushed to it is kept, but announced to no one.
+A kick, a leave or a deletion of that epoch pushed to it is kept, but announced or relayed to no
+one.
 What such a device still needs reaches it pushed in full: its own kick or leave (§5.6), deletion
 events (above), a dissolve message (§5.8) and the roots that concern it.
 *Why:* a lookup or a notice tells the peer that gets it that the device still holds the epoch,

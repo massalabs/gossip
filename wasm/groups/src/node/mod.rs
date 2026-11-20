@@ -1273,12 +1273,12 @@ impl Node {
                 self.mark_seen(cx, chat, from, id)?;
                 self.supplied(&from, chat, Target::Event(id));
                 if let Outcome::Accepted(merge) = outcome {
-                    // A superseded chat of two takes what its members send it, and fetches
-                    // and relays nothing (§5.12).
-                    let relays = !matches!(
-                        self.group_status(&chat),
-                        records::GroupStatus::Superseded { .. }
-                    );
+                    // A device no longer active in the group keeps what is pushed to it (a
+                    // deletion after a kick or a leave, §10.4; what the members of a superseded
+                    // chat of two send it, §5.12), but fetches and relays nothing: a device
+                    // that deleted the chat or never held it sends nothing, so a relay would
+                    // tell a member that this one kept the history (D.74).
+                    let relays = self.serves(&chat);
                     for parent in event.parents().iter().filter(|_| relays) {
                         self.want_event(cx, chat, *parent, Some(from), TriggerKind::Child)?;
                     }
