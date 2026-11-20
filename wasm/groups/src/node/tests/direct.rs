@@ -20,7 +20,10 @@ impl MNet {
             &s,
             "Direct".into(),
             members.iter().map(|m| gid(*m)).collect(),
-            GroupOptions { migrate_from },
+            GroupOptions {
+                migrate_from,
+                ..Default::default()
+            },
             now,
             &mut self.rng,
         )

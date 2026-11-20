@@ -65,6 +65,9 @@ pub struct GroupOptions {
     /// The format version of the earlier conversation the group continues (§5.12); only on
     /// a group of two, this device and one other.
     pub migrate_from: Option<u64>,
+    /// The message timer of the group, in milliseconds (§4.1, §7.7); 0 keeps messages
+    /// forever.
+    pub message_timer: u64,
 }
 
 /// The peers a device's connections are judged against (§5.12).

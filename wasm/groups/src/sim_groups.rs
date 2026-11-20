@@ -3038,6 +3038,7 @@ mod direct {
                             vec![gid(peer)],
                             GroupOptions {
                                 migrate_from: Some(0),
+                                ..Default::default()
                             },
                             now,
                             &mut self.rng,
@@ -3069,6 +3070,7 @@ mod direct {
                             vec![gid(peer)],
                             GroupOptions {
                                 migrate_from: Some(0),
+                                ..Default::default()
                             },
                             now,
                             &mut self.rng,
@@ -3100,6 +3102,7 @@ mod direct {
                             vec![gid(peer)],
                             GroupOptions {
                                 migrate_from: Some(0),
+                                ..Default::default()
                             },
                             now,
                             &mut self.rng,

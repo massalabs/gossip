@@ -73,6 +73,25 @@ pub struct GroupSummary {
     /// An automatic chat of two this device owns: whether the other person has taken part
     /// in it (§5.12). `None` for any other group.
     pub took_part: Option<bool>,
+    /// The message timer of the current epoch, in milliseconds; 0 keeps messages forever
+    /// (§7.7).
+    pub message_timer: u64,
+    /// Every epoch of the group with its message timer and when it started, in the order
+    /// they started: each message keeps the timer of its own epoch (§7.7), so that the
+    /// interface can show from which point messages disappear after which time.
+    pub timers: Vec<EpochTimer>,
+}
+
+/// The message timer of one epoch (§7.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpochTimer {
+    /// The epoch.
+    pub epoch: ChatId,
+    /// Its message timer, in milliseconds; 0 keeps its messages forever.
+    pub message_timer: u64,
+    /// When it started: the time `T` of its root's line (§7.5), or when this device received
+    /// it if it has none.
+    pub started_at: u64,
 }
 
 /// An invitation to answer (§4.8).
@@ -104,6 +123,9 @@ pub struct InvitationSummary {
     /// continues (§5.12): "`owner` wants to continue this conversation in a new group".
     /// Accepting supersedes it; declining leaves it as it is.
     pub continues: Option<ChatId>,
+    /// The message timer of the invited root, in milliseconds; 0 keeps messages forever
+    /// (§7.7).
+    pub message_timer: u64,
 }
 
 /// A line of the timeline (§5.6, §5.8, §5.10, §7.5).
@@ -277,6 +299,8 @@ impl Node {
                 took_part: self
                     .own_direct_chat(group)
                     .then(|| g.is_some_and(|g| g.took_part)),
+                message_timer: 0,
+                timers: Vec::new(),
             });
         }
         out
@@ -311,6 +335,7 @@ impl Node {
                         .filter(|_| self.direct_owner(&r.root, inv.rejoins.is_some()).is_some()),
                     migration_of: self.migration_of(c),
                     continues: self.continued_by(&r.root, inv.rejoins.is_some()),
+                    message_timer: 0,
                 }),
                 EpochStatus::Installed => None,
             })

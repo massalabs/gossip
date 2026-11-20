@@ -89,3 +89,157 @@ fn the_owner_carries_the_timer_and_every_setting_forward() {
         assert_eq!(root.settings(), &settings, "{change:?}");
     }
 }
+
+/// Owner 0 founds a group of `members` with the message timer `timer`; every member
+/// accepts.
+fn found_timed(net: &mut MNet, members: &[usize], timer: u64) -> ChatId {
+    let now = net.now;
+    let s = super::membership::signer(0);
+    let dev = &mut net.devs[0];
+    let g = dev
+        .node
+        .create_group_with(
+            &mut dev.store,
+            &s,
+            "Timed".into(),
+            members.iter().map(|m| gid(*m)).collect(),
+            GroupOptions {
+                message_timer: timer,
+                ..GroupOptions::default()
+            },
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    net.exchange();
+    for &d in members {
+        let inv = net.devs[d].node.invitations(net.now);
+        assert_eq!(inv.len(), 1, "device {d}");
+        assert_eq!(inv[0].message_timer, timer, "device {d}");
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    g
+}
+
+/// §7.7: a group founded with a timer; its messages are deleted on every device at their
+/// moment, a device offline until after it never shows it, and nothing is sent for it.
+#[test]
+fn a_group_founded_with_a_timer_deletes_its_messages_on_every_device() {
+    let mut net = MNet::new(3, true);
+    let g = found_timed(&mut net, &[1, 2], HOUR);
+    for d in 0..3 {
+        let s = net.summary(d, &g).unwrap();
+        assert_eq!(s.message_timer, HOUR, "device {d}");
+        assert_eq!(s.timers.len(), 1, "device {d}");
+        assert_eq!(
+            (s.timers[0].epoch, s.timers[0].message_timer),
+            (g, HOUR),
+            "device {d}"
+        );
+    }
+    net.offline[2] = true;
+    let sent = net.now;
+    let e = net.say(0, &g, "brief");
+    net.run(MIN);
+    assert_eq!(net.texts(1, &g), vec!["brief".to_owned()]);
+    net.run(sent + HOUR - net.now);
+    for d in 0..2 {
+        assert!(net.texts(d, &g).is_empty(), "device {d}");
+        assert_eq!(
+            net.devs[d]
+                .store
+                .event_row(&g, &e.event_id())
+                .unwrap()
+                .map(|r| r.state),
+            Some(crate::store::RowState::Pruned),
+            "device {d}"
+        );
+    }
+    net.offline[2] = false;
+    net.run(30 * MIN);
+    assert!(net.texts(2, &g).is_empty());
+    assert!(
+        net.devs[2]
+            .store
+            .event_row(&g, &e.event_id())
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// §7.7: the owner changes the timer by a new root; each message keeps the timer of its own
+/// epoch, and the view lists every epoch with its timer and when it started. Only the owner
+/// changes it.
+#[test]
+fn the_owner_changes_the_timer_and_each_message_keeps_the_timer_of_its_epoch() {
+    let mut net = MNet::new(3, true);
+    let g = found_timed(&mut net, &[1, 2], HOUR);
+    let start = net.now;
+    net.say(1, &g, "old");
+    net.run(MIN);
+    assert_eq!(
+        net.change(1, g, GroupChange::MessageTimer { timer: 0 }),
+        Err(NodeError::NotOwner)
+    );
+    let e2 = net
+        .change(0, g, GroupChange::MessageTimer { timer: 3 * HOUR })
+        .unwrap();
+    net.run(MIN);
+    let root = net.devs[0].node.root(&e2).unwrap();
+    assert_eq!(root.message_timer(), 3 * HOUR);
+    assert_eq!(root.members().len(), 3);
+    assert_eq!(root.name(), "Timed");
+    net.say(2, &g, "new");
+    net.run(MIN);
+    for d in 0..3 {
+        assert_eq!(net.current(d, &g), Some(e2), "device {d}");
+        let s = net.summary(d, &g).unwrap();
+        assert_eq!(s.message_timer, 3 * HOUR, "device {d}");
+        let timers: Vec<(ChatId, u64)> = s
+            .timers
+            .iter()
+            .map(|t| (t.epoch, t.message_timer))
+            .collect();
+        assert_eq!(timers, vec![(g, HOUR), (e2, 3 * HOUR)], "device {d}");
+        assert!(
+            s.timers[0].started_at < s.timers[1].started_at,
+            "device {d}"
+        );
+        assert_eq!(net.texts(d, &g), vec!["old".to_owned(), "new".to_owned()]);
+    }
+    net.run(start + HOUR + MIN - net.now);
+    for d in 0..3 {
+        assert_eq!(net.texts(d, &g), vec!["new".to_owned()], "device {d}");
+    }
+    net.run(3 * HOUR);
+    for d in 0..3 {
+        assert!(net.texts(d, &g).is_empty(), "device {d}");
+    }
+}
+
+/// §7.7: a member removed from the group keeps a read-only archive, whose messages are
+/// deleted at their moment as everywhere else.
+#[test]
+fn a_removed_members_archive_deletes_its_messages_too() {
+    let mut net = MNet::new(3, true);
+    let g = found_timed(&mut net, &[1, 2], HOUR);
+    let sent = net.now;
+    net.say(0, &g, "brief");
+    net.run(MIN);
+    net.change(
+        0,
+        g,
+        GroupChange::Successor {
+            add: vec![],
+            remove: vec![gid(2)],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.summary(2, &g).unwrap().status, MyStatus::Removed);
+    assert_eq!(net.texts(2, &g), vec!["brief".to_owned()]);
+    net.run(sent + HOUR - net.now);
+    assert!(net.texts(2, &g).is_empty());
+}
