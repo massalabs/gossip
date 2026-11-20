@@ -53,7 +53,7 @@ export const EstablishSessionError =
   'Session manager failed to establish outgoing session';
 
 /**
- * How long after answering a connection's new announcement this device
+ * How long after answering a peer's new announcement this device
  * waits before answering another from the same peer: it ends any exchange
  * of answers (both sides answering each other's).
  */
@@ -65,7 +65,7 @@ export class AnnouncementService {
   private isProcessingAnnouncements = false;
   /** Peers our latest announcement was sent to and not answered yet. */
   private awaitingAnswer = new Set<string>();
-  /** When a new announcement of each automatic connection was last answered. */
+  /** When a new announcement of each peer was last answered. */
   private renewalAnsweredAt = new Map<string, number>();
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
@@ -785,18 +785,23 @@ export class AnnouncementService {
     const answersOurs = this.awaitingAnswer.delete(contactUserId);
     const statusNow = this.session.peerSessionStatus(contactUserIdRaw);
     if (
-      automatic &&
-      (statusNow === SessionStatus.PeerRequested ||
-        (statusNow === SessionStatus.Active &&
-          !answersOurs &&
-          this._mayAnswerRenewal(contactUserId)))
+      (automatic && statusNow === SessionStatus.PeerRequested) ||
+      (statusNow === SessionStatus.Active &&
+        !answersOurs &&
+        this._mayAnswerRenewal(contactUserId))
     ) {
-      // A connection whose peer announced itself anew without answering
-      // ours, such as a member who revoked its connection to us when it left
-      // a group and opens it again once added back: the session it just
+      // A peer that announced itself anew without answering ours: a member
+      // who revoked its connection to us when it left a group and opens it
+      // again once added back, or a contact restored from its recovery
+      // phrase, or who removed us and added us back. The session it just
       // made pairs our earlier announcement, which it no longer holds, so it
-      // waits for a new one from us. A contact the user accepted is left as
-      // before.
+      // waits for a new one from us. A contact the user accepted is answered
+      // too: taking its new announcement and re-keying the session without
+      // asking is already what a forced reset does, where the peer still
+      // holds our earlier announcement; here the only piece missing is ours,
+      // and answering gives the peer no power it did not have. A first
+      // request from someone the user has not accepted still waits for the
+      // user (PeerRequested is answered for a connection only).
       try {
         await this.connections?.accept(contactUserId);
       } catch {
