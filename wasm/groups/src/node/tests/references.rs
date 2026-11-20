@@ -503,3 +503,33 @@ fn a_missed_invitation_fetched_by_reference_is_prompted() {
     net.run(10 * MIN);
     assert!(holds(&net, 3, &e2, &m));
 }
+
+/// §7.6: once device 3 holds the target's epoch, a target it lacks is fetched by a
+/// sync-object lookup in that epoch, without any lookup by reference.
+#[test]
+fn a_quoted_message_missing_from_a_held_epoch_is_fetched() {
+    let mut net = MNet::new(5, true);
+    let g = net.create(0, &[1, 2, 3]);
+    let h = net.create(4, &[1, 3]);
+    net.exchange();
+    for d in 1..5 {
+        net.accept_all(d);
+    }
+    net.run(2 * MIN);
+    net.offline[3] = true;
+    let m = net.say(2, &g, "missed");
+    net.run(MIN);
+    net.offline[3] = false;
+    assert!(!holds(&net, 3, &g, &m));
+    let r = reference(&net, 0, &g);
+    reply(&mut net, 1, &h, &[(r, sync(&m))]);
+    let mut log = exchange_log(&mut net);
+    log.extend(run_log(&mut net, 3 * MIN));
+    let fetch = QueryOp::SyncObj {
+        chat_id: g,
+        sync_obj_id: sync(&m),
+    };
+    assert!(ops(&log).iter().any(|(f, _, op)| *f == 3 && *op == fetch));
+    assert!(by_ref(&log, r).is_empty());
+    assert!(holds(&net, 3, &g, &m));
+}
