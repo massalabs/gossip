@@ -467,8 +467,9 @@ impl Node {
     /// A notice from `from` (§13.5): each entry is authorized on its own. An event this
     /// device knows records a hint (§10.3); an unknown one, or one held only as a
     /// temporary-rejection marker, enters retrieval with `from` as the triggering candidate
-    /// (§11.1, §9.6). Everything a removed peer sends is dropped (§10.4). Every entry from
-    /// a removed peer tells it of its removal (§5.6).
+    /// (§11.1, §9.6). A removed peer's notices of messages are dropped (§10.4); its notices
+    /// of signed objects are acted on, and the object is asked of it (see
+    /// `object_announced`). Every entry from a removed peer tells it of its removal (§5.6).
     pub(crate) fn handle_notice(
         &mut self,
         cx: &mut Cx<'_>,

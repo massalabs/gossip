@@ -176,6 +176,8 @@ impl Node {
             return Ok(Answer::Refused);
         }
         let root = rec.root;
+        // Any member of the epoch may carry it, a removed peer of it included (§10.4): the
+        // signature proves the object, not the carrier (see `object_announced`).
         if !root.is_member(&from) {
             return Ok(Answer::Refused);
         }
@@ -912,6 +914,13 @@ impl Node {
     /// A signed object announced by `from` in a notice or a page entry: fetched by a
     /// signed-object lookup unless held. A leave that is not live is ignored without
     /// fetching (§5.3); `from` must be a member of the named epoch.
+    ///
+    /// `from` may be a removed peer of that epoch: unlike its messages (§10.4), what it
+    /// announces is fetched, from it too. Why: a signed object proves itself whoever carries
+    /// it, and a removed peer cannot forge one. Refusing it would lose a membership fact when
+    /// that peer is the only device online that holds it, and would refuse its own leave
+    /// coming from it. The cost is that the lookup tells that peer this device lacked one
+    /// membership object, which says nothing about messages or who wrote them.
     pub(crate) fn object_announced(
         &mut self,
         cx: &mut Cx<'_>,
