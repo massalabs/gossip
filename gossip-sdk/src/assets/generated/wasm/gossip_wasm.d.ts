@@ -1,23 +1,5 @@
 /* tslint:disable */
 /* eslint-disable */
-/**
- * The largest group plaintext, in bytes (§13.10).
- */
-export function group_max_plaintext_bytes(): number;
-/**
- * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
- * forward of text. A longer one is refused by the engine and by every receiver.
- */
-export function group_max_text_bytes(): number;
-/**
- * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
- */
-export function group_max_metadata_bytes(): number;
-/**
- * The size of message metadata, given as `publish_message` takes it (a list of
- * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
- */
-export function group_metadata_bytes(metadata: string): number;
 export function start(): void;
 /**
  * Generates user keys from a passphrase.
@@ -93,6 +75,24 @@ export function aead_encrypt(key: EncryptionKey, nonce: Nonce, plaintext: Uint8A
  * ```
  */
 export function aead_decrypt(key: EncryptionKey, nonce: Nonce, ciphertext: Uint8Array, aad: Uint8Array): Uint8Array | undefined;
+/**
+ * The largest group plaintext, in bytes (§13.10).
+ */
+export function group_max_plaintext_bytes(): number;
+/**
+ * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
+ * forward of text. A longer one is refused by the engine and by every receiver.
+ */
+export function group_max_text_bytes(): number;
+/**
+ * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
+ */
+export function group_max_metadata_bytes(): number;
+/**
+ * The size of message metadata, given as `publish_message` takes it (a list of
+ * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
+ */
+export function group_metadata_bytes(metadata: string): number;
 /**
  * Session status indicating the state of a peer session.
  */
@@ -223,8 +223,9 @@ export class GroupsNode {
   set_session(peer_id: Uint8Array, has_session: boolean): void;
   /**
    * `change`: `{"t":"Successor","add":[hex],"remove":[hex],"name":null|string}`,
-   * `{"t":"Handover","new_owner":hex,"leave":bool,"name":…}` or
-   * `{"t":"Resolve","members":[hex],"name":…}`. Returns the new epoch.
+   * `{"t":"Handover","new_owner":hex,"leave":bool,"name":…}`,
+   * `{"t":"MessageTimer","timer":ms}` or `{"t":"Resolve","members":[hex],"name":…}`.
+   * Returns the new epoch.
    */
   change_group(group: Uint8Array, change: string, now: number): Uint8Array;
   /**
@@ -248,7 +249,8 @@ export class GroupsNode {
   publish_edit(epoch: Uint8Array, sync_obj_id: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, now: number): string;
   /**
    * The batches committed since the last call, oldest first: an array of
-   * `{rows, removedRows, edges, objects, node, erase}`, to apply in order.
+   * `{rows, removedRows, edges, removedEdges, objects, removedObjects, node, erase}`, to
+   * apply in order.
    */
   take_batches(): any;
   /**
@@ -319,6 +321,12 @@ export class GroupsNode {
   decline_invitation(epoch: Uint8Array, choice: string, now: number): void;
   lookup_sync_object(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): void;
   /**
+   * The results of the sync-object lookups completed since the last call, in JSON:
+   * `[{epoch, syncObjId, found}]`, `found` the event ID received or `null`. Removing them
+   * is a committed operation: take the batches after it.
+   */
+  take_lookup_results(now: number): string;
+  /**
    * The consents not used yet, in JSON: `[["<peer hex>", "<expires at>"], …]`.
    */
   direct_chat_consents(): string;
@@ -343,6 +351,13 @@ export class GroupsNode {
    * its contact request was accepted (§5.12): one-shot, for 14 days.
    */
   consent_to_direct_chat(peer_id: Uint8Array, consent: boolean, now: number): void;
+  /**
+   * As `create_group_with`, with the message timer of the group in milliseconds (§7.7):
+   * each message is deleted on every device at its creation date plus the timer; 0 keeps
+   * messages forever. The owner changes it later with `change_group`
+   * (`{"t":"MessageTimer","timer":ms}`).
+   */
+  create_group_with_timer(name: string, members: Uint8Array, migrate_from: number | null | undefined, message_timer: number, now: number): Uint8Array;
   /**
    * The members of accepted groups with which no session is reported (`set_session`):
    * the connections to open. Concatenated 32-byte GossipIDs.
@@ -762,70 +777,6 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly __wbg_groupsnode_free: (a: number, b: number) => void;
-  readonly group_max_metadata_bytes: () => number;
-  readonly group_max_plaintext_bytes: () => number;
-  readonly group_metadata_bytes: (a: number, b: number) => [number, number, number];
-  readonly groupsnode_abandon: (a: number, b: number) => void;
-  readonly groupsnode_accept_invitation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-  readonly groupsnode_accepted_contacts: (a: number) => [number, number];
-  readonly groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
-  readonly groupsnode_connections_to_revoke: (a: number, b: number, c: number) => [number, number, number, number];
-  readonly groupsnode_consent_to_direct_chat: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-  readonly groupsnode_create_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
-  readonly groupsnode_create_group_with: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
-  readonly groupsnode_decline_invitation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
-  readonly groupsnode_decode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
-  readonly groupsnode_delete_group: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly groupsnode_direct_chat_consents: (a: number) => [number, number];
-  readonly groupsnode_dissolve_group: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-  readonly groupsnode_earlier_conversations: (a: number) => [number, number];
-  readonly groupsnode_encode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
-  readonly groupsnode_epoch: (a: number, b: number, c: number) => [number, number, number, number];
-  readonly groupsnode_group: (a: number, b: number, c: number) => [number, number, number, number];
-  readonly groupsnode_groups: (a: number) => [number, number];
-  readonly groupsnode_handed_off: (a: number, b: number, c: number) => [number, number];
-  readonly groupsnode_handle_plaintext: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
-  readonly groupsnode_holds_direct_chat: (a: number, b: number, c: number) => [number, number, number];
-  readonly groupsnode_invitations: (a: number, b: number) => [number, number, number, number];
-  readonly groupsnode_is_co_member: (a: number, b: number, c: number) => [number, number, number];
-  readonly groupsnode_is_current: (a: number, b: number, c: number) => [number, number, number];
-  readonly groupsnode_keys: (a: number, b: number, c: number) => [number, number, number, number];
-  readonly groupsnode_learn_keys: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-  readonly groupsnode_leave_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
-  readonly groupsnode_link_groups: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
-  readonly groupsnode_local_delete: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
-  readonly groupsnode_local_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
-  readonly groupsnode_lookup_sync_object: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
-  readonly groupsnode_me: (a: number) => [number, number];
-  readonly groupsnode_media: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
-  readonly groupsnode_next_wakeup: (a: number, b: number) => [number, number, number, number];
-  readonly groupsnode_open: (a: number, b: number, c: any) => [number, number, number];
-  readonly groupsnode_orphans: (a: number) => number;
-  readonly groupsnode_peer_reconnected: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly groupsnode_peers_wanting_connection: (a: number) => [number, number];
-  readonly groupsnode_pending_batches: (a: number) => number;
-  readonly groupsnode_poll_outbox: (a: number, b: number) => [number, number, number];
-  readonly groupsnode_publish_deletion: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
-  readonly groupsnode_publish_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
-  readonly groupsnode_publish_media: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
-  readonly groupsnode_publish_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
-  readonly groupsnode_publish_reaction: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
-  readonly groupsnode_published: (a: number, b: number, c: number) => [number, number];
-  readonly groupsnode_ref_chat_id: (a: number, b: number, c: number) => [number, number, number, number];
-  readonly groupsnode_resend_root: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly groupsnode_retry: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
-  readonly groupsnode_scan_shared_chats: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly groupsnode_set_accepted_contact: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-  readonly groupsnode_set_earlier_conversation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
-  readonly groupsnode_set_local_name: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
-  readonly groupsnode_set_session: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly groupsnode_snapshot: (a: number) => [number, number, number];
-  readonly groupsnode_take_batches: (a: number) => [number, number, number];
-  readonly groupsnode_take_changes: (a: number, b: number) => [number, number, number, number];
-  readonly groupsnode_tick: (a: number, b: number) => [number, number];
-  readonly groupsnode_timeline: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-  readonly group_max_text_bytes: () => number;
   readonly __wbg_addressedannouncement_free: (a: number, b: number) => void;
   readonly __wbg_announcementresult_free: (a: number, b: number) => void;
   readonly __wbg_encryptionkey_free: (a: number, b: number) => void;
@@ -898,6 +849,72 @@ export interface InitOutput {
   readonly usersecretkeys_kem_secret_key: (a: number) => [number, number];
   readonly usersecretkeys_massa_secret_key: (a: number) => [number, number];
   readonly usersecretkeys_to_bytes: (a: number) => [number, number, number, number];
+  readonly __wbg_groupsnode_free: (a: number, b: number) => void;
+  readonly group_max_metadata_bytes: () => number;
+  readonly group_max_plaintext_bytes: () => number;
+  readonly group_metadata_bytes: (a: number, b: number) => [number, number, number];
+  readonly groupsnode_abandon: (a: number, b: number) => void;
+  readonly groupsnode_accept_invitation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly groupsnode_accepted_contacts: (a: number) => [number, number];
+  readonly groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_connections_to_revoke: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_consent_to_direct_chat: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly groupsnode_create_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_create_group_with: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+  readonly groupsnode_create_group_with_timer: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+  readonly groupsnode_decline_invitation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_decode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_delete_group: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_direct_chat_consents: (a: number) => [number, number];
+  readonly groupsnode_dissolve_group: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly groupsnode_earlier_conversations: (a: number) => [number, number];
+  readonly groupsnode_encode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_epoch: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_group: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_groups: (a: number) => [number, number];
+  readonly groupsnode_handed_off: (a: number, b: number, c: number) => [number, number];
+  readonly groupsnode_handle_plaintext: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_holds_direct_chat: (a: number, b: number, c: number) => [number, number, number];
+  readonly groupsnode_invitations: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_is_co_member: (a: number, b: number, c: number) => [number, number, number];
+  readonly groupsnode_is_current: (a: number, b: number, c: number) => [number, number, number];
+  readonly groupsnode_keys: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_learn_keys: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly groupsnode_leave_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_link_groups: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+  readonly groupsnode_local_delete: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_local_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+  readonly groupsnode_lookup_sync_object: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_me: (a: number) => [number, number];
+  readonly groupsnode_media: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+  readonly groupsnode_next_wakeup: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_open: (a: number, b: number, c: any) => [number, number, number];
+  readonly groupsnode_orphans: (a: number) => number;
+  readonly groupsnode_peer_reconnected: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_peers_wanting_connection: (a: number) => [number, number];
+  readonly groupsnode_pending_batches: (a: number) => number;
+  readonly groupsnode_poll_outbox: (a: number, b: number) => [number, number, number];
+  readonly groupsnode_publish_deletion: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+  readonly groupsnode_publish_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
+  readonly groupsnode_publish_media: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+  readonly groupsnode_publish_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+  readonly groupsnode_publish_reaction: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+  readonly groupsnode_published: (a: number, b: number, c: number) => [number, number];
+  readonly groupsnode_ref_chat_id: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_resend_root: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_retry: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_scan_shared_chats: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_set_accepted_contact: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly groupsnode_set_earlier_conversation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_set_local_name: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_set_session: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_snapshot: (a: number) => [number, number, number];
+  readonly groupsnode_take_batches: (a: number) => [number, number, number];
+  readonly groupsnode_take_changes: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_take_lookup_results: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_tick: (a: number, b: number) => [number, number];
+  readonly groupsnode_timeline: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly group_max_text_bytes: () => number;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;
