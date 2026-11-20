@@ -342,7 +342,6 @@ fn responses_round_trip() {
         offset: 10,
         count: 5,
         entries: entries.clone(),
-        skipped: 0,
     };
     assert!(page.is_final());
     let frames = vec![
@@ -353,10 +352,7 @@ fn responses_round_trip() {
         response(ResponseResult::Status(Status::Malformed)),
         response(ResponseResult::Status(Status::Busy)),
         response(ResponseResult::Keys(identity(1).public.to_bytes())),
-        Frame::Notice(Notice {
-            entries,
-            skipped: 0,
-        }),
+        Frame::Notice(Notice { entries }),
     ];
     let bytes = encode_plaintext(&frames).unwrap();
     let decoded: Vec<Frame> = frames_of(&bytes).into_iter().map(|f| f.unwrap()).collect();
@@ -586,14 +582,12 @@ fn notice_limits() {
     assert!(
         encode_plaintext(&[Frame::Notice(Notice {
             entries: entries[..128].to_vec(),
-            skipped: 0,
         })])
         .is_ok()
     );
     assert!(matches!(
         encode_plaintext(&[Frame::Notice(Notice {
             entries: entries.clone(),
-            skipped: 0,
         })]),
         Err(Error::TooMany { .. })
     ));
@@ -1727,7 +1721,6 @@ fn golden_values() -> Vec<(String, String)> {
             offset: 0,
             count: 2,
             entries: vec![entry(1), entry(2)],
-            skipped: 0,
         })),
     ));
     frames.push((
@@ -1738,7 +1731,6 @@ fn golden_values() -> Vec<(String, String)> {
         "notice".into(),
         Frame::Notice(Notice {
             entries: vec![entry(1), entry(3)],
-            skipped: 0,
         }),
     ));
     let c = ChatId::from_bytes([1; 32]);

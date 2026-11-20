@@ -225,12 +225,6 @@ impl Node {
                     self.scan_invalid(cx, key, current);
                     return Ok(());
                 }
-                if p.skipped > 0 {
-                    // Invalid entries are skipped and the sender penalised as for one
-                    // malformed item (D.23, D.37).
-                    self.stats.invalid += 1;
-                    self.penalize(&peer, PENALTY_MALFORMED);
-                }
                 self.answered(&peer);
                 for e in &p.entries {
                     self.page_entry(cx, chat, peer, *e)?;
@@ -840,7 +834,6 @@ impl Node {
             offset,
             count: (list.len() - start) as u64,
             entries: list[start..end].to_vec(),
-            skipped: 0,
         })
     }
 

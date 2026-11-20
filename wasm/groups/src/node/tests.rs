@@ -301,7 +301,6 @@ pub(crate) fn notice(chat: ChatId, ids: &[EventId]) -> Frame {
                 item: EntryItem::Event(*id),
             })
             .collect(),
-        skipped: 0,
     })
 }
 

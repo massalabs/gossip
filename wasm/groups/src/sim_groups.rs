@@ -1920,7 +1920,6 @@ impl Sim {
                             ))),
                         },
                     ],
-                    skipped: 0,
                 })
             }
         };
@@ -1969,10 +1968,7 @@ impl Sim {
                     item: EntryItem::Root,
                 });
             }
-            Frame::Notice(Notice {
-                entries,
-                skipped: 0,
-            })
+            Frame::Notice(Notice { entries })
         };
         self.counters.stranger_frames += 1;
         let pt = wire::encode_plaintext(&[frame]).expect("fits");

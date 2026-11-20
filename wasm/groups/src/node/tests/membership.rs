@@ -2266,10 +2266,7 @@ fn a_removed_peer_is_told_of_its_removal_by_any_query_notice_or_event_naming_the
     let cases: Vec<(&str, Frame, usize)> = vec![
         (
             "an event notice",
-            Frame::Notice(Notice {
-                entries: vec![],
-                skipped: 0,
-            }),
+            Frame::Notice(Notice { entries: vec![] }),
             1,
         ),
         (
@@ -2279,7 +2276,6 @@ fn a_removed_peer_is_told_of_its_removal_by_any_query_notice_or_event_naming_the
                     chat_id: any,
                     item: EntryItem::Leave(crate::hash::leave_id(&any, &gid(2))),
                 }],
-                skipped: 0,
             }),
             1,
         ),
@@ -2413,7 +2409,6 @@ fn a_signed_object_from_a_removed_peer_is_accepted_and_fetched_from_it() {
                 chat_id: g,
                 item: EntryItem::Kick(crate::hash::kick_id(&g, &gid(2))),
             }],
-            skipped: 0,
         })],
     );
     net.run(2 * MIN);
@@ -2803,7 +2798,6 @@ fn a_root_notice_from_a_stranger_gets_no_reaction() {
             chat_id: unknown,
             item: EntryItem::Root,
         }],
-        skipped: 0,
     })])
     .unwrap();
     let now = net.now;
