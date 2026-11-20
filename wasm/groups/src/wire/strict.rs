@@ -9,7 +9,9 @@
 //! - a `uint32` above `u32::MAX` and a `bool` other than 0 or 1, which a decoder would
 //!   otherwise convert lossily (§1.1);
 //! - text that is not UTF-8, a truncated field or a varint longer than 64 bits;
-//! - two different cases of one `oneof`: a frame holds exactly one kind (§13.1, D.24);
+//! - two different cases of one `oneof`: a frame holds exactly one kind (§13.1, D.24), at
+//!   every level. Why: a stock protobuf decoder keeps the last case, another may keep the
+//!   first, so two implementations could read different messages from the same bytes;
 //! - more occurrences of a repeated field than its limit (§4.1, §6.1, §7.6, §13.10).
 //!
 //! Repeated occurrences of a singular field are accepted as protobuf defines them (the last
