@@ -444,7 +444,23 @@ impl Node {
                 has_messages = true;
             }
         }
-        // What was queued before the switch still goes: the peer gets the chat it replaces.
+        // What was queued before the switch still goes: the peer gets the chat it replaces,
+        // by its founding root, which §5.12 recognises. A root or signed object of a later
+        // epoch is not pushed: a device without its parent (an account reinstalled, say)
+        // cannot tell that root from a new group and would show it as an ordinary invitation.
+        let later: Vec<super::records::WorkKey> = self
+            .t
+            .queue
+            .iter()
+            .filter(|(_, w)| {
+                matches!(w, super::records::Work::Object { chat_id, .. }
+                    if *chat_id != group && self.group_of(chat_id) == group)
+            })
+            .map(|(k, _)| *k)
+            .collect();
+        for k in later {
+            self.remove_queued(&k);
+        }
         self.queued_objects_in_full(group);
         let before = {
             let g = self.group_rec_mut(group);
