@@ -65,7 +65,10 @@ import {
 } from './services/auth.js';
 import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
-import { SelfMessageService } from './services/selfMessage.js';
+import {
+  SelfMessageService,
+  reencryptSelfMessages,
+} from './services/selfMessage.js';
 import {
   validateUserIdFormat,
   type ValidationResult,
@@ -1213,6 +1216,150 @@ class GossipSdk {
         );
       }
       await this.requireConn().secureStorageAbortOnboardingCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * Re-encrypt the notes-to-self of `ownerUserId` from `oldKey` to `newKey`.
+   * Needs unlocked storage but no open session, so it can run inside a rekey
+   * candidate. Whoever replaces an account's profile key must call this, or
+   * the notes become unreadable.
+   */
+  async reencryptSelfMessages(
+    ownerUserId: string,
+    oldKey: EncryptionKey,
+    newKey: EncryptionKey
+  ): Promise<{ rewritten: number; unreadable: number }> {
+    if (!this._queries) {
+      throw new Error('Storage is locked');
+    }
+    return reencryptSelfMessages(this._queries, ownerUserId, oldKey, newKey);
+  }
+
+  /**
+   * Start fetching the current bulletin counter. Needs no open session, so
+   * account creation can issue the request up front and hand the promise to
+   * `announcements.skipHistorical(...)` once the account exists. The returned
+   * promise never rejects unhandled; a failure surfaces when it is awaited.
+   */
+  prefetchBulletinCounter(): Promise<string> {
+    if (this.state.status === SdkStatus.UNINITIALIZED) {
+      return Promise.reject(new Error('SDK not initialized'));
+    }
+    const request = this.state.messageProtocol.fetchBulletinCounter();
+    request.catch(() => {});
+    return request;
+  }
+
+  /**
+   * Start an in-place rekey: re-encrypt the whole store into a new
+   * generation, to set or change an account password or simply to refresh
+   * every key. Storage must be locked and no session open.
+   *
+   * Sequence:
+   *  1. `secureStorageBeginRekey()`
+   *  2. `secureStorageAdmitRekey(password, newPassword?)` once per account to
+   *     keep. Accounts that are not admitted are erased by the commit.
+   *     Optionally `secureStorageAdmitRekeyNew(password)` to create one new
+   *     account in a free slot.
+   *  3. `secureStorageBuildRekeyCandidate()`. From here `secureStorageUnlock`,
+   *     `queries`, `profiles`, session-blob calls and `secureStorageLock` act
+   *     on the in-memory candidate, so account contents can be rewritten
+   *     before anything durable changes.
+   *  4. `secureStorageCommitRekeyCandidate()`, or `secureStorageAbortRekey()`
+   *     at any point before it.
+   *
+   * Until the commit resolves, the durable store is only read.
+   */
+  async secureStorageBeginRekey(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot rekey while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageBeginRekey();
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * Admit one account to the active rekey. Resolves `false` when the
+   * passwords are not acceptable; it never says why, and never which account
+   * (if any) a password belongs to.
+   */
+  async secureStorageAdmitRekey(
+    password: string,
+    newPassword?: string
+  ): Promise<boolean> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      return await this.requireConn().secureStorageAdmitRekey(
+        password,
+        newPassword
+      );
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /**
+   * Admit a new, empty account to the active rekey (at most one). It is
+   * created in a free slot when the candidate is built, and is never
+   * reported. Resolves `false` when the password is not acceptable, without
+   * saying why: it opens an existing account, or another admitted account
+   * ends up with it.
+   */
+  async secureStorageAdmitRekeyNew(password: string): Promise<boolean> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      return await this.requireConn().secureStorageAdmitRekeyNew(password);
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  async secureStorageBuildRekeyCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageBuildRekeyCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Commit the rekey candidate atomically. Lock the candidate first. */
+  async secureStorageCommitRekeyCandidate(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      if (this.state.status === SdkStatus.SESSION_OPEN) {
+        throw new Error(
+          'SESSION_OPEN: cannot commit a rekey candidate while a session is open. ' +
+            'Call closeSession() first.'
+        );
+      }
+      await this.requireConn().secureStorageCommitRekeyCandidate();
+      this._queries = null;
+      this._profile = null;
+    } finally {
+      releaseLifecycle();
+    }
+  }
+
+  /** Abandon the rekey. Nothing durable has changed. */
+  async secureStorageAbortRekey(): Promise<void> {
+    const releaseLifecycle = this.reserveAccountLifecycle();
+    try {
+      await this.requireConn().secureStorageAbortRekey();
       this._queries = null;
       this._profile = null;
     } finally {

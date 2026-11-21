@@ -14,5 +14,10 @@
   "create_account": "创建新账户",
   "back": "返回",
   "get_started_button": "开始使用",
-  "next": "下一步"
+  "next": "下一步",
+  "new_account": "新建账户",
+  "restore": "恢复",
+  "terms_notice": "继续即表示你同意",
+  "terms_link": "服务条款",
+  "multiple_accounts": "多个可否认账户"
 }

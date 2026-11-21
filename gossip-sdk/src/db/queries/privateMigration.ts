@@ -90,6 +90,63 @@ export class PrivateMigrationQueries {
     });
   }
 
+  /**
+   * Record the journal as already complete for `installationEpoch`, in one
+   * transaction. Only for an account that was created inside this very
+   * generation: every phase exists to carry data over from an older
+   * generation or format, and such an account has none.
+   */
+  async beginCompleted(
+    installationEpoch: string
+  ): Promise<PrivateMigrationStateV1> {
+    validateEpoch(installationEpoch);
+    return this.conn.withTransaction(async tx => {
+      const values = {
+        formatVersion: PRIVATE_MIGRATION_FORMAT_VERSION,
+        installationEpoch,
+        completedPhase: PRIVATE_MIGRATION_PHASE_COUNT,
+      };
+      const row = await tx
+        .insert(privateMigration)
+        .values({ id: PRIVATE_MIGRATION_SINGLETON_ID, ...values })
+        .onConflictDoUpdate({ target: privateMigration.id, set: values })
+        .returning()
+        .get();
+      return validate(row);
+    });
+  }
+
+  /**
+   * Carry a finished journal over to a generation that is an in-place
+   * re-encryption of the one it was finished in. The account's contents are
+   * the same, so there is nothing left to carry over. Resolves `false`, and
+   * changes nothing, unless the journal is complete for `fromEpoch`; the next
+   * login then walks the journal as usual.
+   */
+  async carryOver(fromEpoch: string, toEpoch: string): Promise<boolean> {
+    validateEpoch(fromEpoch);
+    validateEpoch(toEpoch);
+    return this.conn.withTransaction(async tx => {
+      const updated = await tx
+        .update(privateMigration)
+        .set({ installationEpoch: toEpoch })
+        .where(
+          and(
+            eq(privateMigration.id, PRIVATE_MIGRATION_SINGLETON_ID),
+            eq(
+              privateMigration.formatVersion,
+              PRIVATE_MIGRATION_FORMAT_VERSION
+            ),
+            eq(privateMigration.installationEpoch, fromEpoch),
+            eq(privateMigration.completedPhase, PRIVATE_MIGRATION_PHASE_COUNT)
+          )
+        )
+        .returning()
+        .get();
+      return updated !== undefined;
+    });
+  }
+
   async completePhase(
     installationEpoch: string,
     phase: number

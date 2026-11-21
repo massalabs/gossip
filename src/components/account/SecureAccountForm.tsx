@@ -31,7 +31,7 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
       <AccountCreationForm
         onSubmit={async result => onSubmit(result)}
         standalone={false}
-        allowMnemonicImport
+        multiAccount
       />
     </PageLayout>
   );

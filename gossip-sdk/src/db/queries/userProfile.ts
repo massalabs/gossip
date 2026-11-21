@@ -101,6 +101,9 @@ function parseSecurityEnvelope(value: unknown): RawSecurityEnvelope {
   ) {
     throw new Error('Invalid iCloud sync preference');
   }
+  if (envelope.passwordless !== undefined && envelope.passwordless !== true) {
+    throw new Error('Invalid passwordless marker');
+  }
   if (
     envelope.webauthn !== undefined &&
     (typeof envelope.webauthn !== 'object' ||
@@ -154,6 +157,7 @@ export function rowToUserProfile(row: UserProfileRow): UserProfile {
     ...(raw.iCloudSync === undefined
       ? {}
       : { iCloudSync: raw.iCloudSync as boolean }),
+    ...(raw.passwordless === true ? { passwordless: true as const } : {}),
     encKeySalt: toBoundedUint8Array(
       raw.encKeySalt,
       'profile encryption salt',
@@ -210,6 +214,9 @@ export function userProfileToRow(profile: UserProfile): UserProfileInsert {
       ...(profile.security.iCloudSync === undefined
         ? {}
         : { iCloudSync: profile.security.iCloudSync }),
+      ...(profile.security.passwordless === true
+        ? { passwordless: true as const }
+        : {}),
       mnemonicBackup: {
         encryptedMnemonic: Array.from(checkedMnemonic),
         createdAt: checkedCreatedAt,

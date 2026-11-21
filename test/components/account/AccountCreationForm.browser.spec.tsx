@@ -8,8 +8,14 @@ import SecureAccountCreation from '../../../src/components/account/SecureAccount
 
 const mocks = vi.hoisted(() => ({
   initializeAccount: vi.fn(),
-  logout: vi.fn(),
+  loadAccount: vi.fn(),
   validateMnemonic: vi.fn<(mnemonic: string) => boolean>(),
+  checkBiometricAvailability: vi.fn(),
+  configureBiometricLoginWithRollback: vi.fn(),
+  rollbackBiometric: vi.fn(),
+  buildOnboardingAccount: vi.fn(),
+  commitBuild: vi.fn(),
+  abortBuild: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -20,19 +26,29 @@ vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => {} },
 }));
 
-vi.mock('../../../src/stores/accountStore', () => ({
-  IncompleteOnboardingSlotCleanupError: class extends Error {},
-  useAccountStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      initializeAccount: mocks.initializeAccount,
-      logout: mocks.logout,
-    }),
-}));
+vi.mock('../../../src/stores/accountStore', () => {
+  const state = {
+    initializeAccount: mocks.initializeAccount,
+    loadAccount: mocks.loadAccount,
+  };
+  const useAccountStore = (
+    selector: (state: Record<string, unknown>) => unknown
+  ) => selector(state);
+  useAccountStore.getState = () => state;
+  return {
+    IncompleteOnboardingSlotCleanupError: class extends Error {},
+    useAccountStore,
+  };
+});
 
 vi.mock('../../../src/services/biometricService', () => ({
-  checkBiometricAvailability: vi.fn(async () => ({ available: false })),
-  configureBiometricLogin: vi.fn(),
-  configureBiometricLoginWithRollback: vi.fn(),
+  checkBiometricAvailability: mocks.checkBiometricAvailability,
+  configureBiometricLoginWithRollback:
+    mocks.configureBiometricLoginWithRollback,
+}));
+
+vi.mock('../../../src/components/account/commitOnboardingAccount', () => ({
+  buildOnboardingAccount: mocks.buildOnboardingAccount,
 }));
 
 vi.mock('@massalabs/gossip-sdk', async () => {
@@ -50,8 +66,10 @@ vi.mock('@massalabs/gossip-sdk', async () => {
   };
 });
 
-async function enterAndConfirmAccount() {
-  await userEvent.fill(page.getByPlaceholder('create.enter_username'), 'alice');
+const DEFAULT_USERNAME = /^user-[a-z2-9]{4}$/;
+const decoder = new TextDecoder();
+
+async function enterPassword() {
   await userEvent.fill(
     page.getByPlaceholder('create.enter_password'),
     'valid-password'
@@ -60,34 +78,47 @@ async function enterAndConfirmAccount() {
     page.getByPlaceholder('create.confirm_password'),
     'valid-password'
   );
-  await userEvent.click(page.getByRole('button', { name: 'create.title' }));
-  await userEvent.click(
-    page.getByRole('button', { name: 'create.password_confirm_validate' })
-  );
 }
 
-describe('AccountCreationForm mandatory password', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+const FRESH_LOGIN = { mnemonic: 'the mnemonic', encryptionKey: { id: 'key' } };
 
-  it('blocks invalid or mismatched passwords and submits confirmed credentials', async () => {
+/** Capture the secret at build time: the component wipes it afterwards. */
+function recordBuiltPasswords(): string[] {
+  const passwords: string[] = [];
+  mocks.buildOnboardingAccount.mockImplementation(
+    async (account: { passwordBytes: Uint8Array }) => {
+      passwords.push(decoder.decode(account.passwordBytes));
+      return { commit: mocks.commitBuild, abort: mocks.abortBuild };
+    }
+  );
+  return passwords;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.checkBiometricAvailability.mockResolvedValue({ available: false });
+  mocks.buildOnboardingAccount.mockResolvedValue({
+    commit: mocks.commitBuild,
+    abort: mocks.abortBuild,
+  });
+  mocks.commitBuild.mockResolvedValue(FRESH_LOGIN);
+  mocks.abortBuild.mockResolvedValue(undefined);
+  mocks.loadAccount.mockResolvedValue(undefined);
+  mocks.rollbackBiometric.mockResolvedValue(undefined);
+});
+
+describe('AccountCreationForm', () => {
+  it('asks only for a confirmed valid password', async () => {
     const onSubmit = vi.fn(async () => {});
     await render(<AccountCreationForm onSubmit={onSubmit} />);
 
     const submit = page.getByRole('button', { name: 'create.title' });
     await expect
-      .element(page.getByText('create.unique_password_title'))
+      .element(page.getByText('create.password_hint'))
       .toBeInTheDocument();
-    await expect
-      .element(page.getByText('create.unique_password_warning'))
-      .toBeInTheDocument();
+    expect(document.querySelectorAll('input').length).toBe(2);
     await expect.element(submit).toBeDisabled();
 
-    await userEvent.fill(
-      page.getByPlaceholder('create.enter_username'),
-      'alice'
-    );
     await userEvent.fill(
       page.getByPlaceholder('create.enter_password'),
       'invalid-password'
@@ -110,28 +141,16 @@ describe('AccountCreationForm mandatory password', () => {
     await expect.element(submit).toBeEnabled();
 
     await userEvent.click(submit);
-    expect(onSubmit).not.toHaveBeenCalled();
-    await userEvent.click(
-      page.getByRole('button', { name: 'create.password_confirm_validate' })
-    );
 
     await vi.waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith({
-        username: 'alice',
-        password: 'valid-password',
-      });
+      expect(onSubmit).toHaveBeenCalledWith({ password: 'valid-password' });
     });
   });
 
-  it('stages a validated mnemonic through the individual account form', async () => {
+  it('submits a validated, normalized mnemonic in import mode', async () => {
     const onSubmit = vi.fn(async () => {});
-    await render(
-      <AccountCreationForm onSubmit={onSubmit} allowMnemonicImport />
-    );
+    await render(<AccountCreationForm onSubmit={onSubmit} mode="import" />);
 
-    await userEvent.click(
-      page.getByRole('button', { name: 'create.import_tab' })
-    );
     const mnemonicInput = page.getByLabelText('create.mnemonic_label');
     await expect
       .element(mnemonicInput)
@@ -145,18 +164,84 @@ describe('AccountCreationForm mandatory password', () => {
       mnemonicInput,
       'ABANDON abandon abandon abandon abandon abandon\nabandon abandon abandon abandon abandon about'
     );
-    await userEvent.fill(
-      page.getByPlaceholder('create.enter_username'),
-      'restored'
+    await enterPassword();
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_account' })
     );
+
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        password: 'valid-password',
+        mnemonic:
+          'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      });
+    });
+  });
+
+  it('does not revalidate an unchanged mnemonic on unrelated renders', async () => {
+    await render(<AccountCreationForm onSubmit={vi.fn()} mode="import" />);
+
+    await userEvent.fill(
+      page.getByLabelText('create.mnemonic_label'),
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+    );
+    mocks.validateMnemonic.mockClear();
+
     await userEvent.fill(
       page.getByPlaceholder('create.enter_password'),
       'valid-password'
     );
+
+    expect(mocks.validateMnemonic).not.toHaveBeenCalled();
+  });
+});
+
+describe('AccountCreationForm for deniable accounts', () => {
+  it('asks for a username and confirms the password is memorized', async () => {
+    const onSubmit = vi.fn(async () => {});
+    await render(<AccountCreationForm onSubmit={onSubmit} multiAccount />);
+
+    await expect
+      .element(page.getByText('create.unique_password_title'))
+      .toBeInTheDocument();
+    const submit = page.getByRole('button', { name: 'create.title' });
+    await enterPassword();
+    await expect.element(submit).toBeDisabled();
+
     await userEvent.fill(
-      page.getByPlaceholder('create.confirm_password'),
-      'valid-password'
+      page.getByPlaceholder('create.enter_username'),
+      'alice'
     );
+    await userEvent.click(submit);
+    expect(onSubmit).not.toHaveBeenCalled();
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.password_confirm_validate' })
+    );
+
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith({
+        username: 'alice',
+        password: 'valid-password',
+      });
+    });
+  });
+
+  it('offers recovery-phrase import through its tabs', async () => {
+    const onSubmit = vi.fn(async () => {});
+    await render(<AccountCreationForm onSubmit={onSubmit} multiAccount />);
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_tab' })
+    );
+    await userEvent.fill(
+      page.getByLabelText('create.mnemonic_label'),
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+    );
+    await userEvent.fill(
+      page.getByPlaceholder('create.enter_username'),
+      'restored'
+    );
+    await enterPassword();
     await userEvent.click(
       page.getByRole('button', { name: 'create.import_account' })
     );
@@ -173,57 +258,190 @@ describe('AccountCreationForm mandatory password', () => {
       });
     });
   });
+});
 
-  it('does not revalidate an unchanged mnemonic on unrelated renders', async () => {
-    await render(
-      <AccountCreationForm onSubmit={vi.fn()} allowMnemonicImport />
-    );
-
-    await userEvent.click(
-      page.getByRole('button', { name: 'create.import_tab' })
-    );
-    await userEvent.fill(
-      page.getByLabelText('create.mnemonic_label'),
-      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-    );
-    mocks.validateMnemonic.mockClear();
-
-    await userEvent.fill(
-      page.getByPlaceholder('create.enter_username'),
-      'restored'
-    );
-
-    expect(mocks.validateMnemonic).not.toHaveBeenCalled();
-  });
-
-  it('forwards confirmed credentials through classic account creation', async () => {
+describe('ClassicAccountCreation', () => {
+  it('creates the account with a default username', async () => {
     const onComplete = vi.fn();
     mocks.initializeAccount.mockResolvedValue(undefined);
     await render(
       <ClassicAccountCreation onComplete={onComplete} onBack={vi.fn()} />
     );
 
-    await enterAndConfirmAccount();
+    await enterPassword();
+    await userEvent.click(page.getByRole('button', { name: 'create.title' }));
 
     await vi.waitFor(() => {
       expect(mocks.initializeAccount).toHaveBeenCalledWith(
-        'alice',
+        expect.stringMatching(DEFAULT_USERNAME),
         'valid-password'
       );
       expect(onComplete).toHaveBeenCalledOnce();
     });
   });
+});
 
-  it('stages confirmed credentials through secure account creation', async () => {
+describe('SecureAccountCreation', () => {
+  it('creates a biometric account and logs in without showing a form', async () => {
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: true });
+    mocks.configureBiometricLoginWithRollback.mockResolvedValue({
+      success: true,
+      rollback: mocks.rollbackBiometric,
+    });
+    const committed = recordBuiltPasswords();
+    const onComplete = vi.fn();
+    const lease = { release: vi.fn() };
+
+    await render(
+      <SecureAccountCreation
+        onComplete={onComplete}
+        onBack={vi.fn()}
+        creationModeLease={lease}
+      />
+    );
+
+    await vi.waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+    expect(document.querySelectorAll('input').length).toBe(0);
+
+    expect(mocks.configureBiometricLoginWithRollback).toHaveBeenCalledOnce();
+    const [secret, syncToICloud] =
+      mocks.configureBiometricLoginWithRollback.mock.calls[0];
+    expect(syncToICloud).toBe(false);
+    // 32 random bytes, base64-encoded.
+    expect(secret).toMatch(/^[A-Za-z0-9+/]{43}=$/);
+
+    const [account] = mocks.buildOnboardingAccount.mock.calls[0];
+    expect(account.username).toMatch(DEFAULT_USERNAME);
+    expect(account.passwordless).toBe(true);
+    expect(mocks.commitBuild).toHaveBeenCalledWith(lease);
+    expect(committed).toEqual([secret]);
+    // The automatic login reuses what creation derived.
+    expect(mocks.loadAccount).toHaveBeenCalledWith({
+      type: 'password',
+      password: secret,
+      fresh: FRESH_LOGIN,
+    });
+    // The build starts while the biometric prompt is still open, not after.
+    expect(
+      mocks.buildOnboardingAccount.mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      mocks.configureBiometricLoginWithRollback.mock.invocationCallOrder[0]
+    );
+    // The secret does not outlive creation.
+    expect(account.passwordBytes.every((byte: number) => byte === 0)).toBe(
+      true
+    );
+    expect(mocks.rollbackBiometric).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a password when the biometric prompt is cancelled', async () => {
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: true });
+    mocks.configureBiometricLoginWithRollback.mockResolvedValue({
+      success: false,
+      error: 'cancelled',
+    });
+    const committed = recordBuiltPasswords();
+    const onComplete = vi.fn();
+
+    await render(
+      <SecureAccountCreation onComplete={onComplete} onBack={vi.fn()} />
+    );
+
+    await expect
+      .element(page.getByPlaceholder('create.enter_password'))
+      .toBeInTheDocument();
+    // The account built during the prompt is thrown away, never committed.
+    expect(mocks.abortBuild).toHaveBeenCalledOnce();
+    expect(mocks.commitBuild).not.toHaveBeenCalled();
+    await expect
+      .element(page.getByRole('button', { name: 'create.use_biometrics' }))
+      .toBeInTheDocument();
+
+    await enterPassword();
+    await userEvent.click(page.getByRole('button', { name: 'create.title' }));
+
+    await vi.waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+    expect(committed.at(-1)).toBe('valid-password');
+    expect(mocks.commitBuild).toHaveBeenCalledOnce();
+    expect(mocks.loadAccount).toHaveBeenCalledWith({
+      type: 'password',
+      password: 'valid-password',
+      fresh: FRESH_LOGIN,
+    });
+  });
+
+  it('goes straight to the password form without biometrics', async () => {
     await render(
       <SecureAccountCreation onComplete={vi.fn()} onBack={vi.fn()} />
     );
 
-    await enterAndConfirmAccount();
-
     await expect
-      .element(page.getByText('secure_setup.title'))
+      .element(page.getByPlaceholder('create.enter_password'))
       .toBeInTheDocument();
-    expect(mocks.initializeAccount).not.toHaveBeenCalled();
+    expect(mocks.configureBiometricLoginWithRollback).not.toHaveBeenCalled();
+    expect(
+      page.getByRole('button', { name: 'create.use_biometrics' }).query()
+    ).toBeNull();
+  });
+
+  it('undoes the biometric credential when account creation fails', async () => {
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: true });
+    mocks.configureBiometricLoginWithRollback.mockResolvedValue({
+      success: true,
+      rollback: mocks.rollbackBiometric,
+    });
+    mocks.commitBuild.mockRejectedValue(new Error('disk full'));
+    const onComplete = vi.fn();
+
+    await render(
+      <SecureAccountCreation onComplete={onComplete} onBack={vi.fn()} />
+    );
+
+    await expect.element(page.getByText('create.failed')).toBeInTheDocument();
+    expect(mocks.rollbackBiometric).toHaveBeenCalledOnce();
+    expect(mocks.loadAccount).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  it('still completes when automatic login fails after a durable creation', async () => {
+    mocks.loadAccount.mockRejectedValue(new Error('offline'));
+    const onComplete = vi.fn();
+
+    await render(
+      <SecureAccountCreation onComplete={onComplete} onBack={vi.fn()} />
+    );
+
+    await enterPassword();
+    await userEvent.click(page.getByRole('button', { name: 'create.title' }));
+
+    await vi.waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+  });
+
+  it('restores an identity from a recovery phrase with a password', async () => {
+    mocks.checkBiometricAvailability.mockResolvedValue({ available: true });
+    const onComplete = vi.fn();
+
+    await render(
+      <SecureAccountCreation
+        onComplete={onComplete}
+        onBack={vi.fn()}
+        mode="import"
+      />
+    );
+
+    await userEvent.fill(
+      page.getByLabelText('create.mnemonic_label'),
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+    );
+    await enterPassword();
+    await userEvent.click(
+      page.getByRole('button', { name: 'create.import_account' })
+    );
+
+    await vi.waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+    expect(mocks.configureBiometricLoginWithRollback).not.toHaveBeenCalled();
+    const [account] = mocks.buildOnboardingAccount.mock.calls[0];
+    expect(account.mnemonicBytes).toBeDefined();
+    expect(account.passwordless).toBeUndefined();
   });
 });

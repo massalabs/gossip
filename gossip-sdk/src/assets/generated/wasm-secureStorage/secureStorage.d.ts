@@ -1,6 +1,34 @@
 /* tslint:disable */
 /* eslint-disable */
 export function initSecureStorage(domain: string, backend: string): Promise<void>;
+export function endOuterMigration(): void;
+export function idbHasData(): Promise<boolean>;
+export function provisionStorage(): void;
+export function namespaceDataLength(namespace: number): number;
+export function clearNamespace(namespace: number): void;
+/**
+ * Verify that this worker still owns the active IndexedDB generation.
+ */
+export function verifyStorageGeneration(): Promise<void>;
+/**
+ * Called by the worker when an allocation or destruction transaction rejects.
+ * This prevents a later cover-traffic flush from durably carrying the failed
+ * lifecycle operation. The recovered state is always locked.
+ */
+export function reloadDurableStorage(): Promise<void>;
+/**
+ * Abandon a poisoned SQLite transaction and restore its last durable image
+ * while retaining the current unlocked session keys. No pending VFS bytes are
+ * flushed: closing SQLite rolls back its in-memory journal, then the IndexedDB
+ * cache is reloaded before a fresh database handle is opened.
+ */
+export function resetSqlDatabaseToDurable(): Promise<void>;
+export function flushEncrypted(): Promise<void>;
+export function openDatabase(): void;
+export function closeDatabase(): void;
+export function allocateSession(slot: number, password: Uint8Array): void;
+export function unlockSession(password: Uint8Array): boolean;
+export function lockSession(): void;
 /**
  * Permanently destroy the data of the currently unlocked slot.
  *
@@ -23,8 +51,12 @@ export function coverTrafficTick(namespace: number): void;
  * reimplements pq-rerand's canonical parser.
  */
 export function validatePortableKeypair(value: Uint8Array): void;
-export function openDatabase(): void;
-export function closeDatabase(): void;
+/**
+ * Strictly validate one version-1 encrypted block record.
+ */
+export function validatePortableBlock(value: Uint8Array): void;
+export function writeNamespaceData(namespace: number, offset: number, data: Uint8Array): void;
+export function readNamespaceData(namespace: number, offset: number, len: number): Uint8Array;
 /**
  * Run a SQL statement with bound parameters.
  *
@@ -33,58 +65,9 @@ export function closeDatabase(): void;
  * (positional column values), matching the Drizzle sqlite-proxy contract.
  */
 export function execSql(sql: string, params: Array<any>): ExecResult;
-/**
- * Strictly validate one version-1 encrypted block record.
- */
-export function validatePortableBlock(value: Uint8Array): void;
-export function writeNamespaceData(namespace: number, offset: number, data: Uint8Array): void;
-export function readNamespaceData(namespace: number, offset: number, len: number): Uint8Array;
-export function namespaceDataLength(namespace: number): number;
-export function clearNamespace(namespace: number): void;
-/**
- * Verify that this worker still owns the active IndexedDB generation.
- */
-export function verifyStorageGeneration(): Promise<void>;
-/**
- * Called by the worker when an allocation or destruction transaction rejects.
- * This prevents a later cover-traffic flush from durably carrying the failed
- * lifecycle operation. The recovered state is always locked.
- */
-export function reloadDurableStorage(): Promise<void>;
-/**
- * Abandon a poisoned SQLite transaction and restore its last durable image
- * while retaining the current unlocked session keys. No pending VFS bytes are
- * flushed: closing SQLite rolls back its in-memory journal, then the IndexedDB
- * cache is reloaded before a fresh database handle is opened.
- */
-export function resetSqlDatabaseToDurable(): Promise<void>;
-export function flushEncrypted(): Promise<void>;
 export function beginOnboardingCandidate(): void;
 export function exportOnboardingCandidate(): Uint8Array;
 export function activateOnboardingGeneration(): Promise<void>;
-/**
- * Generate fresh current-suite keypairs for all slots at once. Every public
- * key changes, so comparing source and destination cannot reveal selection.
- */
-export function finalizeOuterMigration(): Array<any>;
-/**
- * Transform one complete fixed-slot block coordinate.
- */
-export function migrateOuterBlockBatch(namespace: number, block_index: number, values: Array<any>): Array<any>;
-export function finishOuterMigrationNamespace(namespace: number, source_block_count: number): void;
-export function endOuterMigration(): void;
-export function idbHasData(): Promise<boolean>;
-export function provisionStorage(): void;
-export function allocateSession(slot: number, password: Uint8Array): void;
-export function unlockSession(password: Uint8Array): boolean;
-export function lockSession(): void;
-export function endOnboardingCandidate(): void;
-/**
- * Replace this terminal worker's active backend with an isolated in-memory
- * portable candidate and authenticate its keypairs without exposing the
- * matched slot to JavaScript.
- */
-export function beginCandidatePreview(domain: string, password: Uint8Array, keypairs: Array<any>): boolean;
 /**
  * Admit one canonical candidate block. Only namespace 0 blocks belonging to
  * the internally authenticated slot are retained; callers never learn which
@@ -111,6 +94,54 @@ export function beginOuterMigration(domain: string, keypairs: Array<any>): void;
  * zeroized before return and a generic false discloses no matched slot.
  */
 export function admitOuterMigrationPassword(password: Uint8Array): boolean;
+/**
+ * Generate fresh current-suite keypairs for all slots at once. Every public
+ * key changes, so comparing source and destination cannot reveal selection.
+ */
+export function finalizeOuterMigration(): Array<any>;
+/**
+ * Transform one complete fixed-slot block coordinate.
+ */
+export function migrateOuterBlockBatch(namespace: number, block_index: number, values: Array<any>): Array<any>;
+export function finishOuterMigrationNamespace(namespace: number, source_block_count: number): void;
+export function endOnboardingCandidate(): void;
+/**
+ * Start password admission for an in-place rekey of the durable store.
+ * The store must be locked; its content is only read until the candidate is
+ * committed.
+ */
+export function beginRekey(): void;
+/**
+ * Admit an account that keeps its password.
+ */
+export function admitRekeyKeep(password: Uint8Array): boolean;
+/**
+ * Admit an account whose password is replaced.
+ */
+export function admitRekeyChange(password: Uint8Array, new_password: Uint8Array): boolean;
+/**
+ * Create a new, empty account with this password in the rekey candidate.
+ * Resolves `false` for every secret-dependent rejection, like the other
+ * admissions; the slot it gets is never reported.
+ */
+export function admitRekeyNew(password: Uint8Array): boolean;
+/**
+ * Re-encrypt the durable store into an in-memory candidate and make that
+ * candidate the active backend, exactly like an onboarding candidate. It is
+ * then committed with `exportOnboardingCandidate` +
+ * `activateOnboardingGeneration`, or discarded with `endOnboardingCandidate`.
+ */
+export function buildRekeyCandidate(): void;
+/**
+ * Drop password-admission state without building a candidate.
+ */
+export function endRekey(): void;
+/**
+ * Replace this terminal worker's active backend with an isolated in-memory
+ * portable candidate and authenticate its keypairs without exposing the
+ * matched slot to JavaScript.
+ */
+export function beginCandidatePreview(domain: string, password: Uint8Array, keypairs: Array<any>): boolean;
 export function initThreadPool(num_threads: number): Promise<any>;
 export function wbg_rayon_start_worker(receiver: number): void;
 /**
@@ -143,11 +174,16 @@ export interface InitOutput {
   readonly __wbg_execresult_free: (a: number, b: number) => void;
   readonly activateOnboardingGeneration: () => any;
   readonly admitOuterMigrationPassword: (a: number, b: number) => [number, number, number];
+  readonly admitRekeyChange: (a: number, b: number, c: number, d: number) => [number, number, number];
+  readonly admitRekeyKeep: (a: number, b: number) => [number, number, number];
+  readonly admitRekeyNew: (a: number, b: number) => [number, number, number];
   readonly allocateSession: (a: number, b: number, c: number) => [number, number];
   readonly appendCandidatePreviewBlock: (a: number, b: number, c: number, d: number, e: number) => [number, number];
   readonly beginCandidatePreview: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
   readonly beginOnboardingCandidate: () => [number, number];
   readonly beginOuterMigration: (a: number, b: number, c: any) => [number, number];
+  readonly beginRekey: () => [number, number];
+  readonly buildRekeyCandidate: () => [number, number];
   readonly clearNamespace: (a: number) => [number, number];
   readonly closeDatabase: () => [number, number];
   readonly coverTrafficTick: (a: number) => [number, number];
@@ -155,6 +191,7 @@ export interface InitOutput {
   readonly endCandidatePreview: () => any;
   readonly endOnboardingCandidate: () => [number, number];
   readonly endOuterMigration: () => void;
+  readonly endRekey: () => void;
   readonly execSql: (a: number, b: number, c: any) => [number, number, number];
   readonly execresult_lastInsertRowId: (a: number) => number;
   readonly execresult_rows: (a: number) => any;
@@ -204,11 +241,11 @@ export interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure129_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure704_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure101_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
-  readonly wasm_bindgen_c8f7f980e6f4097b___convert__closures_____invoke______: (a: number, b: number) => void;
-  readonly closure760_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure46_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+  readonly closure124_externref_shim: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen_68d4d73dda818e04___convert__closures_____invoke______: (a: number, b: number) => void;
+  readonly closure700_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure757_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

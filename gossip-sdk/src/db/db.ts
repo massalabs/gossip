@@ -81,6 +81,13 @@ export interface ProfileSecurityV1 {
   // iCloud Keychain sync preference (iOS only)
   iCloudSync?: boolean;
 
+  // Present (and true) only while the account password is a device-generated
+  // secret the user has never seen, i.e. the account was created with
+  // biometrics and no password has been set yet. Removed when one is set, so
+  // an account that has a password is indistinguishable from one created
+  // with it. Absent on every other account.
+  passwordless?: true;
+
   // Mnemonic backup details
   mnemonicBackup: {
     encryptedMnemonic: Uint8Array;
