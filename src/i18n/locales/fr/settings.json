@@ -20,6 +20,7 @@
     "privacy": "Confidentialité",
     "security": "Sécurité",
     "feedback": "Envoyer des commentaires",
+    "feedback_external": "Ouvre un site web externe : cryptpad.fr",
     "mesh": "Réseau Mesh"
   },
   "delete_account": {
@@ -263,6 +264,7 @@
     "battery_settings": "Réglages batterie",
     "enable_autostart": "Activer le démarrage automatique (MIUI)",
     "learn_more": "En savoir plus",
+    "learn_more_external": "Ce lien ouvre un site web externe, dontkillmyapp.com. Ce site apprendra la marque de votre téléphone par la page que vous ouvrez, ainsi que votre adresse IP.",
     "debug_info": "Infos de débogage",
     "refresh_status": "Actualiser le statut",
     "device_warnings": {

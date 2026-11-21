@@ -55,12 +55,22 @@ const TAP_TIMEOUT_MS = 2000; // Reset counter after 2 seconds of inactivity
 const SettingsRow: React.FC<{
   icon: React.ReactNode;
   label: string;
+  /** A short second line under the label. */
+  description?: string;
   onClick: () => void;
   /** Draw the divider under the row (all rows of a group except the last). */
   withDivider?: boolean;
   className?: string;
   trailing?: React.ReactNode;
-}> = ({ icon, label, onClick, withDivider = false, className, trailing }) => (
+}> = ({
+  icon,
+  label,
+  description,
+  onClick,
+  withDivider = false,
+  className,
+  trailing,
+}) => (
   <Button
     variant="outline"
     size="custom"
@@ -70,7 +80,14 @@ const SettingsRow: React.FC<{
     onClick={onClick}
   >
     <span className="mr-5 w-5 h-5 [&>svg]:w-5 [&>svg]:h-5">{icon}</span>
-    <span className="text-[15px] font-medium flex-1 text-left">{label}</span>
+    {description ? (
+      <span className="flex-1 flex flex-col text-left">
+        <span className="text-[15px] font-medium">{label}</span>
+        <span className="text-xs text-muted-foreground">{description}</span>
+      </span>
+    ) : (
+      <span className="text-[15px] font-medium flex-1 text-left">{label}</span>
+    )}
     {trailing}
   </Button>
 );
@@ -334,10 +351,12 @@ const Settings = (): React.ReactElement => {
           <SettingsRow
             icon={<MessageSquare />}
             label={t('menu.feedback')}
+            description={t('menu.feedback_external')}
             onClick={() =>
               window.open(
                 'https://cryptpad.fr/form/#/2/form/view/ZzlOcdHn5aACC2omt+QoCLoDohBgdZtWSIXjxmguPDs/embed/',
-                '_blank'
+                '_blank',
+                'noopener,noreferrer'
               )
             }
             withDivider={showDebugOption}

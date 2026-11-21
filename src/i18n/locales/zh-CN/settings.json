@@ -20,6 +20,7 @@
     "privacy": "隐私",
     "security": "安全",
     "feedback": "发送反馈",
+    "feedback_external": "打开外部网站：cryptpad.fr",
     "mesh": "离线网络"
   },
   "delete_account": {
@@ -263,6 +264,7 @@
     "battery_settings": "电池设置",
     "enable_autostart": "启用自启动（MIUI）",
     "learn_more": "了解更多",
+    "learn_more_external": "此链接会打开外部网站 dontkillmyapp.com。该网站会从您打开的页面得知您的手机品牌，并得知您的 IP 地址。",
     "debug_info": "调试信息",
     "refresh_status": "刷新状态",
     "device_warnings": {
