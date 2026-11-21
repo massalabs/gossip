@@ -307,15 +307,20 @@ impl GroupsNode {
     }
 
     /// Gives (`consent`) or withdraws the consent to the group of two `peer` creates after
-    /// its contact request was accepted (§5.12): one-shot, for 14 days.
+    /// its contact request was accepted (§5.12): one-shot, for 14 days. `timer` is the
+    /// message timer the request announced, in milliseconds, if it announced one: the
+    /// consent then covers only a root with that timer, and a root with another is an
+    /// invitation that names it (`announced_timer`). Local, never sent.
     pub fn consent_to_direct_chat(
         &mut self,
         peer_id: &[u8],
         consent: bool,
         now: f64,
+        timer: Option<f64>,
     ) -> Result<(), JsValue> {
+        let timer = timer.map(ms).transpose()?;
         self.core
-            .consent_to_direct_chat(peer(peer_id)?, consent, ms(now)?)
+            .consent_to_direct_chat(peer(peer_id)?, consent, timer, ms(now)?)
             .map_err(js)
     }
 

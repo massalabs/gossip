@@ -132,6 +132,8 @@ macro_rules! node_tables {
             lookup_results,
             earlier,
             consents,
+            consent_timers,
+            announced_timers,
             backoff,
             contacts,
             ref_lookups

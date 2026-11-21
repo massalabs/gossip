@@ -3126,10 +3126,18 @@ mod direct {
                     }
                 }
                 Kind::Contact { .. } => {
-                    // The peer accepted this device's request: it consents, this founds.
+                    // The peer accepted this device's request: it consents, this founds. The
+                    // request announced the timer the chat is founded with (none: 0).
                     let dev = &mut self.devs[peer];
                     dev.node
-                        .consent_to_direct_chat(&mut dev.store, gid(d), true, now, &mut self.rng)
+                        .consent_to_direct_chat(
+                            &mut dev.store,
+                            gid(d),
+                            true,
+                            Some(0),
+                            now,
+                            &mut self.rng,
+                        )
                         .unwrap();
                     dev.consented.insert(d);
                     // The requester founds the chat, as every automatic group of two, with
