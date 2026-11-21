@@ -34,7 +34,8 @@
 //!   is adopted without a prompt under a one-shot consent ([`Node::consent_to_direct_chat`],
 //!   expiring after [`CONSENT_MS`]). Once the device holds a direct chat with that peer
 //!   ([`Node::holds_direct_chat`]: active, and listing both), a later creation from it is an
-//!   ordinary invitation.
+//!   ordinary invitation. Accepting one over a chat of two that same peer founded (an
+//!   account reinstalled into an empty device founds its chat again) supersedes that chat.
 //! - **Connections.** [`Node::is_co_member`], [`Node::connections_to_revoke`] and
 //!   [`Node::peers_wanting_connection`] are pure queries; [`ChangeKind::Connections`] is
 //!   reported, keyed by [`DEVICE`], when what they answer may have changed.
@@ -334,6 +335,34 @@ impl Node {
             .collect()
     }
 
+    /// The active chats of two that `peer` founded with this device at format `version`
+    /// by an automatic creating root, other than `except`, whose current epoch is still
+    /// owned by `peer` and lists exactly the two (§5.12): what accepting a newer automatic
+    /// chat of the same owner supersedes.
+    fn peer_chats(&self, peer: GossipId, version: u64, except: &ChatId) -> Vec<ChatId> {
+        self.t
+            .epochs
+            .iter()
+            .filter(|(c, r)| {
+                *c != except
+                    && r.status == EpochStatus::Installed
+                    && r.parents.is_empty()
+                    && r.root.migrate_from() == Some(version)
+                    && self.direct_owner(&r.root, false) == Some(peer)
+                    && self.group_status(c) == GroupStatus::Active
+                    && self
+                        .current_epoch(c)
+                        .and_then(|e| self.t.epochs.get(&e))
+                        .is_some_and(|e| {
+                            e.root.owner_id() == peer
+                                && e.root.members().len() == 2
+                                && e.root.is_member(&self.me)
+                        })
+            })
+            .map(|(c, _)| *c)
+            .collect()
+    }
+
     // ── Acting on a received root ────────────────────────────────────────────
 
     /// What receiving the valid root `root` from `from` does under §5.12, before the cases
@@ -535,6 +564,19 @@ impl Node {
                 .then(|| self.group_of(&mine)),
             None => self.own_former_chat(peer, v).map(|c| self.group_of(&c)),
         }
+    }
+
+    /// What accepting the creating root `root` of a peer supersedes (§5.12): the chat it
+    /// continues ([`Node::continued_by`]); otherwise the chats of two that same peer founded
+    /// and this device holds, as an account reinstalled into an empty device founds its chat
+    /// again. That invitation stays an ordinary one: only the user's acceptance links it.
+    pub(crate) fn superseded_on_accept(&self, root: &Root) -> Vec<ChatId> {
+        if let Some(c) = self.continued_by(root, false) {
+            return vec![c];
+        }
+        self.direct_creation(root, false)
+            .map(|(peer, v)| self.peer_chats(peer, v, &root.chat_id()))
+            .unwrap_or_default()
     }
 
     /// Whether `group` is an automatic chat of two this device founded (§5.12): its first
