@@ -184,6 +184,7 @@ pub(crate) fn read_block_of_other_slot<S: BlockStorage>(
             if !exists {
                 return OtherSlotBlock::Missing;
             }
+            #[cfg(debug_assertions)]
             eprintln!(
                 "secureStorage: a block that could not be read is replaced with a cover block \
                  (namespace {namespace}, block {block_index})"

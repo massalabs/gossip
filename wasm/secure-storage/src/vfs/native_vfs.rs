@@ -1694,12 +1694,11 @@ fn ensure_cover_scheduler() {
         // Spawn failure is deliberately not surfaced across the FFI
         // boundary: a missing cover thread is a PD degradation, not a
         // correctness failure, and the caller's init must still succeed.
-        // It must not be SILENT in release builds though - a debug_assert
-        // would mask the loss of the PD invariant on shipped binaries.
-        // Print to stderr so the failure is at least visible in
-        // os_log / logcat for diagnostics.
-        if let Err(e) = spawn_result {
-            eprintln!("secureStorage: PD-DEGRADED cover scheduler spawn failed: {e}");
+        // Debug builds print it to stderr for diagnostics; release builds
+        // write no log.
+        if let Err(_e) = spawn_result {
+            #[cfg(debug_assertions)]
+            eprintln!("secureStorage: PD-DEGRADED cover scheduler spawn failed: {_e}");
         }
     });
 }
