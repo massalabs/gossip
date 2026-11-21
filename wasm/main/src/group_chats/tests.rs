@@ -715,7 +715,7 @@ fn crossing_migrations_consents_and_connections() {
     let now = net.now;
     net.peers[2]
         .core
-        .consent_to_direct_chat(ids[0], true, now)
+        .consent_to_direct_chat(ids[0], true, None, now)
         .unwrap();
     net.peers[2].reopen();
     assert!(
@@ -743,6 +743,82 @@ fn crossing_migrations_consents_and_connections() {
     assert_eq!(net.peers[2].core.direct_chat_consents(), "[]");
     assert!(net.peers[2].core.holds_direct_chat(ids[0]));
     assert!(!net.peers[2].core.holds_direct_chat(ids[1]));
+}
+
+/// §5.12 through the bindings: a consent names the timer the contact request announced and
+/// survives a reopen; a chat founded with another timer is an invitation whose JSON names
+/// the announced timer (`null` on any other invitation), also after reopening from the
+/// tables; one founded with that timer is adopted.
+#[test]
+fn a_consent_names_the_announced_timer_through_the_bindings() {
+    const HOUR: u64 = 3_600_000;
+    let mut net = Net::new(3);
+    let ids: Vec<GossipId> = net.peers.iter().map(Peer::id).collect();
+    let now = net.now;
+    for p in [1, 2] {
+        net.peers[p]
+            .core
+            .consent_to_direct_chat(ids[0], true, Some(24 * HOUR), now)
+            .unwrap();
+        net.peers[p].persist();
+        net.peers[p].reopen();
+    }
+    let other = net.peers[0]
+        .core
+        .create_group_with("".into(), vec![ids[1]], Some(0), HOUR, now)
+        .unwrap();
+    let same = net.peers[0]
+        .core
+        .create_group_with("".into(), vec![ids[2]], Some(0), 24 * HOUR, now)
+        .unwrap();
+    net.peers[0].persist();
+    net.settle(1_000);
+    net.peers[1].reopen();
+    let inv = J::parse(&net.peers[1].core.invitations(net.now + HOUR)).unwrap();
+    let inv = &inv.as_arr().unwrap()[0];
+    assert_eq!(
+        inv.field("chat_id").unwrap().as_str().unwrap(),
+        hex(other.as_bytes())
+    );
+    assert_eq!(
+        inv.field("announced_timer")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap(),
+        24 * HOUR
+    );
+    assert_eq!(net.peers[1].core.direct_chat_consents(), "[]");
+    net.peers[2].reopen();
+    assert_eq!(net.peers[2].core.invitations(net.now + HOUR), "[]");
+    assert!(net.peers[2].core.holds_direct_chat(ids[0]));
+    let _ = same;
+    // Any other invitation names none.
+    let plain = net.peers[2]
+        .core
+        .create_group_with("".into(), vec![ids[1]], None, 0, net.now)
+        .unwrap();
+    net.peers[2].persist();
+    net.settle(1_000);
+    let inv = J::parse(&net.peers[1].core.invitations(net.now + HOUR)).unwrap();
+    let plain = inv
+        .as_arr()
+        .unwrap()
+        .iter()
+        .find(|i| i.field("chat_id").unwrap().as_str().unwrap() == hex(plain.as_bytes()))
+        .unwrap();
+    assert!(matches!(plain.field("announced_timer").unwrap(), J::Null));
+    // Accepted, the invitation names nothing more.
+    net.peers[1].core.accept_invitation(other, net.now).unwrap();
+    net.peers[1].persist();
+    net.peers[1].reopen();
+    assert!(
+        !net.peers[1]
+            .core
+            .invitations(net.now + HOUR)
+            .contains(&hex(other.as_bytes()))
+    );
 }
 
 /// Reactions and media through the bindings (§7.6): a reaction is listed on its target in the

@@ -38,10 +38,22 @@ impl MNet {
     }
 
     fn consent(&mut self, d: usize, peer: usize, consent: bool) {
+        self.consent_with(d, peer, consent, None);
+    }
+
+    /// A consent naming the timer the contact request announced.
+    fn consent_with(&mut self, d: usize, peer: usize, consent: bool, timer: Option<u64>) {
         let now = self.now;
         let dev = &mut self.devs[d];
         dev.node
-            .consent_to_direct_chat(&mut dev.store, gid(peer), consent, now, &mut self.rng)
+            .consent_to_direct_chat(
+                &mut dev.store,
+                gid(peer),
+                consent,
+                timer,
+                now,
+                &mut self.rng,
+            )
             .unwrap();
     }
 
@@ -1507,4 +1519,324 @@ fn both_sides_reinstalled_end_on_one_chat() {
             assert_eq!(net.superseded(h), vec![(gh, gl)]);
         }
     }
+}
+
+// ── The timer the contact request announced ────────────────────────────────
+
+const WEEK: u64 = 7 * DAY;
+
+impl MNet {
+    /// `owner` founds its automatic chat with `peer` with that message timer.
+    fn create_timed(&mut self, owner: usize, peer: usize, message_timer: u64) -> ChatId {
+        let now = self.now;
+        let s = signer(owner);
+        let dev = &mut self.devs[owner];
+        dev.node
+            .create_group_with(
+                &mut dev.store,
+                &s,
+                String::new(),
+                vec![gid(peer)],
+                GroupOptions {
+                    migrate_from: Some(0),
+                    message_timer,
+                },
+                now,
+                &mut self.rng,
+            )
+            .unwrap()
+    }
+}
+
+#[test]
+fn a_consent_adopts_a_chat_with_the_timer_the_request_announced() {
+    // A week announced and founded; and 0 (forever) announced, a chat without a timer.
+    for timer in [WEEK, 0] {
+        let mut net = MNet::new(2, true);
+        net.consent_with(1, 0, true, Some(timer));
+        let g = net.create_timed(0, 1, timer);
+        net.exchange();
+        assert_eq!(net.group_keys(1), vec![g], "timer {timer}");
+        assert!(net.invitation(1, &g).is_none());
+        assert!(net.devs[1].node.direct_chat_consents().is_empty());
+        assert!(net.devs[1].node.t.consent_timers.len() == 0);
+    }
+}
+
+#[test]
+fn a_consent_with_no_announced_timer_adopts_any_timer_as_before() {
+    for timer in [5 * MIN, WEEK, 0] {
+        let mut net = MNet::new(2, true);
+        net.consent(1, 0, true);
+        let g = net.create_timed(0, 1, timer);
+        net.exchange();
+        assert_eq!(net.group_keys(1), vec![g], "timer {timer}");
+    }
+}
+
+/// The root carries another timer than the request announced (one forever and none, or
+/// none and one): an invitation that names the announced timer, which uses the consent up.
+#[test]
+fn a_chat_with_another_timer_than_announced_is_an_invitation_that_names_it() {
+    for (announced, founded) in [(WEEK, 5 * MIN), (WEEK, 0), (0, 5 * MIN)] {
+        let mut net = MNet::new(2, true);
+        net.consent_with(1, 0, true, Some(announced));
+        let g = net.create_timed(0, 1, founded);
+        net.exchange();
+        assert!(net.group_keys(1).is_empty(), "{announced} {founded}");
+        let inv = net.invitation(1, &g).unwrap();
+        assert_eq!(inv.message_timer, founded);
+        assert_eq!(inv.announced_timer, Some(announced));
+        assert_eq!(inv.migration_of, None);
+        assert_eq!(inv.continues, None);
+        // Used up: a later root with the announced timer is an ordinary invitation.
+        assert!(net.devs[1].node.direct_chat_consents().is_empty());
+        assert!(net.devs[1].node.t.consent_timers.len() == 0);
+        let again = net.create_timed(0, 1, announced);
+        net.exchange();
+        assert!(net.group_keys(1).is_empty());
+        assert_eq!(net.invitation(1, &again).unwrap().announced_timer, None);
+    }
+}
+
+#[test]
+fn an_invitation_for_its_timer_is_accepted_as_any_other() {
+    let mut net = MNet::new(2, true);
+    net.consent_with(1, 0, true, Some(WEEK));
+    let g = net.create_timed(0, 1, 5 * MIN);
+    net.exchange();
+    net.run(10 * MIN);
+    assert!(net.invitation(1, &g).is_some());
+    assert_eq!(net.accept(1, g), g);
+    assert_eq!(net.group_keys(1), vec![g]);
+    assert!(net.devs[1].node.t.announced_timers.len() == 0);
+    assert!(net.devs[1].node.announced_timer(&g).is_none());
+    net.run(2 * MIN);
+    net.say(0, &g, "hi");
+    net.run(MIN);
+    assert_eq!(net.texts(1, &g), vec!["hi".to_owned()]);
+    assert_eq!(net.summary(1, &g).unwrap().message_timer, 5 * MIN);
+}
+
+#[test]
+fn an_invitation_for_its_timer_is_declined_as_any_other_and_silently_sends_nothing() {
+    let mut net = MNet::new(2, true);
+    net.consent_with(1, 0, true, Some(WEEK));
+    let g = net.create_timed(0, 1, 5 * MIN);
+    net.exchange();
+    net.run(10 * MIN);
+    net.decline(1, g, LeaveChoice::Silent);
+    assert!(net.invitation(1, &g).is_none());
+    assert!(net.group_keys(1).is_empty());
+    assert!(net.devs[1].node.t.announced_timers.len() == 0);
+    assert!(net.outgoing(1).is_empty());
+    // A signed decline goes as for any invitation.
+    let mut net = MNet::new(2, true);
+    net.consent_with(1, 0, true, Some(WEEK));
+    let g = net.create_timed(0, 1, 5 * MIN);
+    net.exchange();
+    net.decline(1, g, LeaveChoice::Signed);
+    assert!(net.devs[1].node.t.announced_timers.len() == 0);
+    net.run(5 * MIN);
+    assert!(
+        !net.devs[0]
+            .node
+            .root(&net.current(0, &g).unwrap())
+            .unwrap()
+            .is_member(&gid(1))
+    );
+}
+
+/// The consent, with the timer it names, and the invitation that names it survive a
+/// restart in between.
+#[test]
+fn the_announced_timer_survives_a_restart() {
+    let mut net = MNet::new(2, true);
+    net.consent_with(1, 0, true, Some(WEEK));
+    net.restart(1);
+    let g = net.create_timed(0, 1, 5 * MIN);
+    net.exchange();
+    net.restart(1);
+    assert_eq!(net.invitation(1, &g).unwrap().announced_timer, Some(WEEK));
+    let mut net = MNet::new(2, true);
+    net.consent_with(1, 0, true, Some(WEEK));
+    net.restart(1);
+    let g = net.create_timed(0, 1, WEEK);
+    net.exchange();
+    assert_eq!(net.group_keys(1), vec![g]);
+}
+
+/// The root arrived before the consent: a root with the announced timer is adopted, one
+/// with another stays an invitation that now names it.
+#[test]
+fn a_consent_given_after_the_root_arrived_checks_its_timer() {
+    let mut net = MNet::new(2, true);
+    let g = net.create_timed(0, 1, 5 * MIN);
+    net.exchange();
+    assert_eq!(net.invitation(1, &g).unwrap().announced_timer, None);
+    net.consent_with(1, 0, true, Some(WEEK));
+    assert!(net.group_keys(1).is_empty());
+    assert_eq!(net.invitation(1, &g).unwrap().announced_timer, Some(WEEK));
+    assert!(net.devs[1].node.direct_chat_consents().is_empty());
+    let mut net = MNet::new(2, true);
+    let g = net.create_timed(0, 1, WEEK);
+    net.exchange();
+    net.consent_with(1, 0, true, Some(WEEK));
+    assert_eq!(net.group_keys(1), vec![g]);
+}
+
+/// After the two weeks of the consent, a root is an ordinary invitation, as before: it
+/// names no announced timer.
+#[test]
+fn an_expired_consent_names_no_announced_timer() {
+    let mut net = MNet::new(2, true);
+    net.consent_with(1, 0, true, Some(WEEK));
+    net.run(CONSENT_MS);
+    assert!(net.devs[1].node.t.consent_timers.len() == 0);
+    let g = net.create_timed(0, 1, 5 * MIN);
+    net.exchange();
+    assert_eq!(net.invitation(1, &g).unwrap().announced_timer, None);
+}
+
+/// A second request accepted again replaces the timer the consent names; one accepted
+/// with no timer clears it.
+#[test]
+fn a_consent_given_again_names_the_timer_of_the_last_request() {
+    let mut net = MNet::new(2, true);
+    net.consent_with(1, 0, true, Some(WEEK));
+    net.consent_with(1, 0, true, Some(5 * MIN));
+    let g = net.create_timed(0, 1, 5 * MIN);
+    net.exchange();
+    assert_eq!(net.group_keys(1), vec![g]);
+    let mut net = MNet::new(2, true);
+    net.consent_with(1, 0, true, Some(WEEK));
+    net.consent_with(1, 0, true, None);
+    let g = net.create_timed(0, 1, 5 * MIN);
+    net.exchange();
+    assert_eq!(net.group_keys(1), vec![g]);
+    let mut net = MNet::new(2, true);
+    net.consent_with(1, 0, true, Some(WEEK));
+    net.consent(1, 0, false);
+    assert!(net.devs[1].node.t.consent_timers.len() == 0);
+}
+
+/// Two creations at once (§5.12, table row 1): the tie rule decides, as before, whatever
+/// the request announced. H consented with the timer L's request announced, founded its
+/// own chat, and L founded its chat with another timer: H switches to L's chat without a
+/// prompt, in either order of arrival. Left as it is: changing it changes a row of the
+/// table.
+#[test]
+fn the_tie_rule_ignores_the_announced_timer() {
+    let (l, h) = sorted_pair();
+    for h_first in [true, false] {
+        let mut net = MNet::new(2, true);
+        net.consent_with(h, l, true, Some(WEEK));
+        let gl = net.create_timed(l, h, 5 * MIN);
+        let gh = if h_first {
+            let gh = net.create_timed(h, l, WEEK);
+            net.run(10 * MIN);
+            gh
+        } else {
+            // L's chat reaches H first: the invitation that names the timer, then H
+            // founds and takes L's chat instead (it sorts first).
+            net.deliver(l, h);
+            assert_eq!(net.invitation(h, &gl).unwrap().announced_timer, Some(WEEK));
+            let gh = net.create_timed(h, l, WEEK);
+            net.run(10 * MIN);
+            gh
+        };
+        for d in [l, h] {
+            assert_eq!(net.group_keys(d), vec![gl], "h_first {h_first} device {d}");
+            assert!(net.devs[d].node.invitations(net.now + DAY).is_empty());
+        }
+        assert_eq!(net.summary(h, &gl).unwrap().message_timer, 5 * MIN);
+        let _ = gh;
+    }
+}
+
+/// What the requester sees. Kinds of the frames device 1 sends to device 0, minute by
+/// minute, until the user answers (at minute 30, when `answer`).
+fn frames_sent(
+    consent: Option<Option<u64>>,
+    founded: u64,
+    answer: bool,
+) -> Vec<(u64, Vec<&'static str>)> {
+    let mut net = MNet::new(2, true);
+    if let Some(timer) = consent {
+        net.consent_with(1, 0, true, timer);
+    }
+    let g = net.create_timed(0, 1, founded);
+    let mut log = Vec::new();
+    for step in 0..60 {
+        net.now += MIN;
+        if answer && step == 30 && net.invitation(1, &g).is_some() {
+            net.accept(1, g);
+        }
+        net.tick(0);
+        net.tick(1);
+        net.deliver(0, 1);
+        let out = net.outgoing(1);
+        for (to, pt) in &out {
+            assert_eq!(*to, 0);
+            let p = wire::decode_plaintext(pt).unwrap();
+            let kinds = p
+                .frames()
+                .map(|f| match f.unwrap() {
+                    Frame::Event(_) => "event",
+                    Frame::Query(_) => "query",
+                    Frame::Response(_) => "response",
+                    Frame::Notice(_) => "notice",
+                    Frame::NeighborRequest(_) => "neighbor request",
+                    Frame::NeighborResponse(_) => "neighbor response",
+                    Frame::LeaveRequest(_) => "leave request",
+                })
+                .collect();
+            log.push((step, kinds));
+        }
+        let now = net.now;
+        for (_, pt) in out {
+            let dev = &mut net.devs[0];
+            dev.node
+                .handle_plaintext(&mut dev.store, gid(1), &pt, now, &mut net.rng)
+                .unwrap();
+        }
+    }
+    log
+}
+
+/// Every frame the accepting device sends, with a chat of another timer than announced,
+/// is what it sends for an invitation from a peer it gave no consent to: answers to the
+/// requester's own frames, nothing of its own, until the user accepts. With the timer
+/// announced, it adopts the chat at once and sends what an accepted chat sends (a query and
+/// a neighbor request) at once. The two differ until the user's answer: a requester that
+/// founds with another timer than it announced sees that the device held its chat as an
+/// invitation, as it would for any invitation.
+#[test]
+fn the_frames_of_a_chat_of_another_timer_are_those_of_an_invitation() {
+    let asked = frames_sent(Some(Some(WEEK)), 5 * MIN, false);
+    let ordinary = frames_sent(None, 5 * MIN, false);
+    assert_eq!(asked, ordinary);
+    assert!(
+        asked
+            .iter()
+            .flat_map(|(_, k)| k)
+            .all(|k| *k == "response" || *k == "neighbor response"),
+        "{asked:?}"
+    );
+    let adopted = frames_sent(Some(Some(WEEK)), WEEK, false);
+    let as_before = frames_sent(Some(None), 5 * MIN, false);
+    assert_eq!(adopted, as_before);
+    assert!(adopted.iter().flat_map(|(_, k)| k).any(|k| *k == "query"));
+    assert_ne!(asked, adopted);
+    // Accepted later, the chat sends what an adopted one sent at once.
+    let accepted = frames_sent(Some(Some(WEEK)), 5 * MIN, true);
+    let after: Vec<&str> = accepted
+        .iter()
+        .filter(|(s, _)| *s >= 30)
+        .flat_map(|(_, k)| k.iter().copied())
+        .collect();
+    assert!(
+        after.contains(&"query") && after.contains(&"neighbor request"),
+        "{accepted:?}"
+    );
 }
