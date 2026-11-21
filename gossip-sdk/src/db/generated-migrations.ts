@@ -185,4 +185,15 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'ALTER TABLE `discussions` ADD `seekerConflictRenewedAt` integer;',
     ],
   },
+  {
+    idx: 15,
+    tag: '0015_discussions_renewal_answer',
+    when: 1795223316032,
+    digest: 'f523b4edaac29ee0fe82645b95d259680b3f8ed38ac0b66f65021832f5ef8170',
+    statements: [
+      'ALTER TABLE `discussions` ADD `awaitingAnswer` integer DEFAULT false NOT NULL;',
+      'ALTER TABLE `discussions` ADD `renewalAnsweredAt` integer;',
+      'ALTER TABLE `discussions` ADD `renewalAnswerOwed` integer DEFAULT false NOT NULL;',
+    ],
+  },
 ];
