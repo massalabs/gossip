@@ -11,6 +11,10 @@ import { useAccountStore } from '../../../src/stores/accountStore';
 import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import { flush, makeFakeGroups, summary } from '../../helpers/fakeGroups';
 import { byText, click, renderAt } from './render';
+import enGroups from '../../../src/i18n/locales/en/groups.json';
+import frGroups from '../../../src/i18n/locales/fr/groups.json';
+import ruGroups from '../../../src/i18n/locales/ru/groups.json';
+import zhGroups from '../../../src/i18n/locales/zh-CN/groups.json';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -115,12 +119,22 @@ describe('group pages', () => {
     expect(bobs.textContent).toContain('bob');
     expect(bobs.textContent).toContain('timeline.reply_to');
     expect(bobs.textContent).toContain('question');
+    // A target in the same group names no group.
+    expect(bobs.textContent).not.toContain('timeline.reply_in_group');
     expect(r.container.querySelector('textarea')).not.toBeNull();
     expect(useGroupStore.getState().currentGroupId).toBe('g1');
   });
 
   it('shows the quote of a reply to a message of another chat, as the SDK gives it', async () => {
-    fake.state.groups = [summary()];
+    fake.state.groups = [
+      summary(),
+      summary({
+        groupId: 'camp',
+        currentEpoch: 'other',
+        name: 'Camp',
+        timers: [{ epochId: 'other', messageTimer: 0, startedAt: 0n }],
+      }),
+    ];
     fake.state.timelines.set('g1', [
       message({
         syncObjId: 's2',
@@ -153,8 +167,20 @@ describe('group pages', () => {
       '[data-testid="group-message"]'
     )!.textContent;
     expect(text).toContain('over there');
+    // The group it is in (§7.6 "Display").
+    const quotes = Array.from(
+      r.container.querySelectorAll('[data-testid="group-reply-preview"]')
+    ).map(q => q.textContent);
+    expect(quotes[0]).toContain('timeline.reply_in_group');
+    expect(quotes[1]).not.toContain('timeline.reply_in_group');
     // A target not held yet says so; displaying it asks for nothing.
     expect(text).toContain('timeline.reply_unavailable');
+  });
+
+  it('says "in <group>" in every language', () => {
+    for (const locale of [enGroups, frGroups, ruGroups, zhGroups]) {
+      expect(locale.timeline.reply_in_group).toContain('{{name}}');
+    }
   });
 
   it('shows the chats a chat replaced before its timeline, read only, and asks to continue in a new one', async () => {
