@@ -5966,4 +5966,11 @@ _Known limits:_
 - The other person's copy of a replaced chat lacks its later epochs when they were still queued
   at the switch: what was written there after a timer change is missing from that copy.
 
-- **A (recommended):** keep as described.
+_Decision:_ link on accept, as described above, chosen by the owner on 2026-11-21.
+
+_Alternatives not taken:_
+
+- Replace the chat held silently when the new one arrives: not wanted, as the conversation must
+  never switch without the user's consent.
+- Only document the two chats: parallel chats of two with the same person would pile up with each
+  reinstall.
