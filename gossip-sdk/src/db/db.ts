@@ -293,6 +293,15 @@ export interface Discussion {
    * a seeker it already held (409); null if never.
    */
   seekerConflictRenewedAt: Date | null;
+  /**
+   * This device's latest announcement to the peer was made on its own
+   * initiative and the peer has not announced itself since.
+   */
+  awaitingAnswer: boolean;
+  /** When a new announcement of the peer was last answered; null if never. */
+  renewalAnsweredAt: Date | null;
+  /** A new announcement of the peer waits for the end of the ten minutes. */
+  renewalAnswerOwed: boolean;
 
   // Timestamps
   createdAt: Date;

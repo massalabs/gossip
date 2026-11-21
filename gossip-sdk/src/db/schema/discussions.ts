@@ -78,6 +78,26 @@ export const discussions = sqliteTable(
     seekerConflictRenewedAt: integer('seekerConflictRenewedAt', {
       mode: 'timestamp_ms',
     }),
+    /**
+     * This device's latest announcement to the peer was made on its own
+     * initiative (a request, a renewal) and the peer has not announced
+     * itself since: the peer's next announcement answers it.
+     */
+    awaitingAnswer: integer('awaitingAnswer', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    /**
+     * When this device last answered a new announcement of the peer: it
+     * answers at most one in ten minutes. Null if never.
+     */
+    renewalAnsweredAt: integer('renewalAnsweredAt', { mode: 'timestamp_ms' }),
+    /**
+     * A new announcement of the peer came within those ten minutes and is
+     * answered once they end.
+     */
+    renewalAnswerOwed: integer('renewalAnswerOwed', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updatedAt', { mode: 'timestamp_ms' }).notNull(),
   },

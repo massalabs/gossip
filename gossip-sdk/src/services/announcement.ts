@@ -53,20 +53,26 @@ export const EstablishSessionError =
   'Session manager failed to establish outgoing session';
 
 /**
- * How long after answering a peer's new announcement this device
- * waits before answering another from the same peer: it ends any exchange
- * of answers (both sides answering each other's).
+ * How long after answering a peer's new announcement this device waits
+ * before answering another from the same peer. One that comes meanwhile is
+ * answered once this time has passed, for the peer's latest announcement.
  */
-const CONNECTION_RENEWAL_ANSWER_MS = 10 * 60 * 1000;
+export const CONNECTION_RENEWAL_ANSWER_MS = 10 * 60 * 1000;
 
 export class AnnouncementService {
   private messageProtocol: IMessageProtocol;
   private session: SessionModule;
   private isProcessingAnnouncements = false;
-  /** Peers our latest announcement was sent to and not answered yet. */
-  private awaitingAnswer = new Set<string>();
-  /** When a new announcement of each peer was last answered. */
-  private renewalAnsweredAt = new Map<string, number>();
+  /**
+   * Peers whose new announcement this device is answering now: the
+   * announcement made for it is an answer, not one that waits for an
+   * answer. Whether a peer's announcement answers ours, when one was last
+   * answered and whether one is owed an answer are kept with the
+   * discussion, so that they survive a reload.
+   */
+  private answering = new Set<string>();
+  /** The clock of the renewal answers (tests replace it). */
+  private now: () => number = () => Date.now();
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
   private refreshService?: RefreshService;
@@ -183,6 +189,12 @@ export class AnnouncementService {
     const log = logger.forMethod('establishSession');
 
     const contactUserId = encodeUserId(contactPublicKeys.derive_id());
+    // An announcement that accepts the peer's request, or answers its new
+    // announcement, is an answer; any other waits for the peer's.
+    const isAnswer =
+      this.answering.has(contactUserId) ||
+      this.session.peerSessionStatus(contactPublicKeys.derive_id()) ===
+        SessionStatus.PeerRequested;
 
     // CRITICAL: await to ensure session state is persisted before returning
     // the addressed entry only exists for the mesh; without one, the board
@@ -208,14 +220,13 @@ export class AnnouncementService {
       };
     }
 
-    if (
-      this.session.peerSessionStatus(contactPublicKeys.derive_id()) ===
-      SessionStatus.SelfRequested
-    ) {
-      this.awaitingAnswer.add(contactUserId);
-    } else {
-      this.awaitingAnswer.delete(contactUserId);
-    }
+    // Whatever it is, it pairs with the peer's latest announcement: no
+    // earlier one of the peer is owed an answer any more.
+    await this.queries.discussions.updateByOwnerAndContact(
+      this.session.userIdEncoded,
+      contactUserId,
+      { awaitingAnswer: !isAnswer, renewalAnswerOwed: false }
+    );
 
     log.info('announcement prepared for outgoing session', {
       contactUserId,
@@ -407,6 +418,7 @@ export class AnnouncementService {
           log.info('updated lastBulletinCounter', { highestCounter });
         }
 
+        await this._answerOwedRenewals();
         return {
           success: errors.length === 0 || newAnnouncementsCount > 0,
           newAnnouncementsCount: newAnnouncementsCount + addressedCount,
@@ -462,6 +474,7 @@ export class AnnouncementService {
         });
       }
       await this._persistTransportCursors();
+      await this._answerOwedRenewals();
 
       return {
         success: errors.length === 0 || newAnnouncementsCount > 0,
@@ -589,15 +602,72 @@ export class AnnouncementService {
     }
   }
 
-  /** Whether to answer a new announcement of this connection now. */
-  private _mayAnswerRenewal(contactUserId: string): boolean {
-    const now = Date.now();
-    const last = this.renewalAnsweredAt.get(contactUserId);
-    if (last !== undefined && now - last < CONNECTION_RENEWAL_ANSWER_MS) {
-      return false;
+  /** Answers a peer's announcement now: a new one from us, made as an answer. */
+  private async _answer(contactUserId: string): Promise<void> {
+    this.answering.add(contactUserId);
+    try {
+      await this.connections?.accept(contactUserId);
+    } catch {
+      logger.error('announcement not answered');
+    } finally {
+      this.answering.delete(contactUserId);
     }
-    this.renewalAnsweredAt.set(contactUserId, now);
-    return true;
+  }
+
+  /**
+   * A new announcement of a connection that does not answer ours: answered
+   * now, or, within ten minutes of the last answer to that peer, once they
+   * end (`_answerOwedRenewals`). The ten minutes end any exchange of
+   * answers; deferring rather than dropping keeps a peer that announced
+   * itself again soon (restored twice) from waiting for good.
+   */
+  private async _answerRenewal(
+    discussionId: number,
+    contactUserId: string,
+    answeredAt: Date | null
+  ): Promise<void> {
+    const now = this.now();
+    if (
+      answeredAt !== null &&
+      now - answeredAt.getTime() < CONNECTION_RENEWAL_ANSWER_MS
+    ) {
+      await this.queries.discussions.updateById(discussionId, {
+        renewalAnswerOwed: true,
+      });
+      return;
+    }
+    await this.queries.discussions.updateById(discussionId, {
+      renewalAnsweredAt: new Date(now),
+      renewalAnswerOwed: false,
+    });
+    await this._answer(contactUserId);
+  }
+
+  /**
+   * Answers, once, each peer owed an answer whose ten minutes have ended
+   * and whose session is still active: the answer pairs with its latest
+   * announcement.
+   */
+  private async _answerOwedRenewals(): Promise<void> {
+    if (!this.connections) return;
+    const now = this.now();
+    const rows = await this.queries.discussions.getByOwner(
+      this.session.userIdEncoded
+    );
+    for (const row of rows) {
+      if (!row.renewalAnswerOwed) continue;
+      const at = row.renewalAnsweredAt?.getTime();
+      if (at !== undefined && now - at < CONNECTION_RENEWAL_ANSWER_MS) {
+        continue;
+      }
+      if (
+        this.session.peerSessionStatus(decodeUserId(row.contactUserId)) !==
+        SessionStatus.Active
+      ) {
+        continue;
+      }
+      await this._answerRenewal(row.id, row.contactUserId, null);
+    }
   }
 
   private async _generateTemporaryContactName(
@@ -782,26 +852,26 @@ export class AnnouncementService {
       automatic
     );
 
-    const answersOurs = this.awaitingAnswer.delete(contactUserId);
+    const row = await this.queries.discussions.getById(discussionId);
+    const answersOurs = row?.awaitingAnswer === true;
+    if (answersOurs) {
+      await this.queries.discussions.updateById(discussionId, {
+        awaitingAnswer: false,
+      });
+    }
     const statusNow = this.session.peerSessionStatus(contactUserIdRaw);
     if (!isNewContact && statusNow === SessionStatus.Active && !answersOurs) {
       // The peer's new announcement replaced an active session (it renewed
       // it, or it was restored from a copy, or it added us back): what was
       // sent on the old one may never be read. The group engine is told, as
       // for a renewal of ours, and scans the peer.
-      const row = await this.queries.discussions.getByOwnerAndContact(
-        this.session.userIdEncoded,
-        contactUserId
-      );
       if (row) {
         this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, toDiscussion(row));
       }
     }
     if (
       (automatic && statusNow === SessionStatus.PeerRequested) ||
-      (statusNow === SessionStatus.Active &&
-        !answersOurs &&
-        this._mayAnswerRenewal(contactUserId))
+      (statusNow === SessionStatus.Active && !answersOurs)
     ) {
       // A peer that announced itself anew without answering ours: a member
       // who revoked its connection to us when it left a group and opens it
@@ -815,10 +885,14 @@ export class AnnouncementService {
       // and answering gives the peer no power it did not have. A first
       // request from someone the user has not accepted still waits for the
       // user (PeerRequested is answered for a connection only).
-      try {
-        await this.connections?.accept(contactUserId);
-      } catch {
-        log.error('automatic connection not accepted');
+      if (statusNow === SessionStatus.PeerRequested) {
+        await this._answer(contactUserId);
+      } else if (row) {
+        await this._answerRenewal(
+          discussionId,
+          contactUserId,
+          row.renewalAnsweredAt
+        );
       }
     }
 
