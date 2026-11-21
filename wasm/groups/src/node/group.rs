@@ -568,7 +568,7 @@ impl Node {
         // §5.12: two creations at once (whatever this device closed: the losing group of a
         // pair is closed, and a copy delivered again is judged again), or a direct chat the
         // caller consented to.
-        if self.receive_direct(cx, from, &root, !matched.is_empty(), closed_before)? {
+        if self.receive_direct(cx, from, &root, !matched.is_empty(), closed_before, via)? {
             return Ok(Answer::Supplied);
         }
         // Case 1, closed by the user: a full root delivered directly prompts again.
@@ -1019,7 +1019,7 @@ impl Node {
     /// Records an invitation (§4.8): looked up first when parents are unmatched, then
     /// prompted.
     #[allow(clippy::too_many_arguments)]
-    fn invite(
+    pub(crate) fn invite(
         &mut self,
         cx: &mut Cx<'_>,
         from: GossipId,
@@ -1175,6 +1175,7 @@ impl Node {
     /// Removes an epoch record and its index entries.
     pub(crate) fn take_record(&mut self, id: &ChatId) -> Option<EpochRecord> {
         let rec = self.t.epochs.remove(id)?;
+        self.t.announced_timers.remove(id);
         self.ref_removed(rec.root.ref_chat_id());
         if !self.t.held_roots.contains(id) {
             self.index_remove(id);

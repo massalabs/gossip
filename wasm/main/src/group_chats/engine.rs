@@ -280,9 +280,15 @@ impl Core {
             .map_err(err)
     }
 
-    pub fn consent_to_direct_chat(&mut self, peer: GossipId, consent: bool, now: u64) -> R<()> {
+    pub fn consent_to_direct_chat(
+        &mut self,
+        peer: GossipId,
+        consent: bool,
+        timer: Option<u64>,
+        now: u64,
+    ) -> R<()> {
         self.node
-            .consent_to_direct_chat(&mut self.store, peer, consent, now, &mut rng)
+            .consent_to_direct_chat(&mut self.store, peer, consent, timer, now, &mut rng)
             .map_err(err)
     }
 

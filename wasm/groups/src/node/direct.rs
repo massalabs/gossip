@@ -36,6 +36,11 @@
 //!   ([`Node::holds_direct_chat`]: active, and listing both), a later creation from it is an
 //!   ordinary invitation. Accepting one over a chat of two that same peer founded (an
 //!   account reinstalled into an empty device founds its chat again) supersedes that chat.
+//! - **The announced timer.** A consent may name the message timer the contact request
+//!   announced: the consent then covers only a root with that timer. The first root it would
+//!   cover with another timer uses it up and is held as an invitation, whose summary names
+//!   the announced timer ([`super::InvitationSummary::announced_timer`]). A local value,
+//!   never sent; it covers the first adoption only.
 //! - **Connections.** [`Node::is_co_member`], [`Node::connections_to_revoke`] and
 //!   [`Node::peers_wanting_connection`] are pure queries; [`ChangeKind::Connections`] is
 //!   reported, keyed by [`DEVICE`], when what they answer may have changed.
@@ -120,6 +125,11 @@ impl Node {
     /// owns, after the user accepted its contact request (§5.12): the first such root from it
     /// is adopted as if the user had accepted it, within [`CONSENT_MS`]. One-shot.
     ///
+    /// `timer` is the message timer the contact request announced, if it announced one: the
+    /// consent then covers only a root with that timer (0 and a root without a timer are
+    /// the same). The first root from `peer` it would cover with another timer uses it up
+    /// and is held as an invitation that names the announced timer. Local, never sent.
+    ///
     /// # Errors
     ///
     /// A storage failure.
@@ -128,18 +138,46 @@ impl Node {
         store: &mut S,
         peer: GossipId,
         consent: bool,
+        timer: Option<u64>,
         now: u64,
         rng: &mut dyn Randomness,
     ) -> Result<(), NodeError> {
         self.run(store, now, rng, |n, cx| {
             if consent && peer != n.me {
                 n.t.consents.insert(peer, cx.now.saturating_add(CONSENT_MS));
+                match timer {
+                    Some(t) => n.t.consent_timers.insert(peer, t),
+                    None => {
+                        n.t.consent_timers.remove(&peer);
+                    }
+                }
                 n.settle_invitations_of(cx, peer)?;
             } else {
-                n.t.consents.remove(&peer);
+                n.drop_consent(&peer);
             }
             Ok(())
         })
+    }
+
+    /// Removes the consent to a direct chat with `peer`, with the timer it names.
+    fn drop_consent(&mut self, peer: &GossipId) {
+        self.t.consents.remove(peer);
+        self.t.consent_timers.remove(peer);
+    }
+
+    /// Whether a consent to a direct chat with `peer` is held and not expired.
+    fn consented(&self, peer: &GossipId, now: u64) -> bool {
+        self.t.consents.get(peer).is_some_and(|until| *until > now)
+    }
+
+    /// The timer the consent to `peer`'s direct chat names, when `root` carries another:
+    /// the consent does not cover it.
+    fn announced_mismatch(&self, peer: &GossipId, root: &Root) -> Option<u64> {
+        self.t
+            .consent_timers
+            .get(peer)
+            .copied()
+            .filter(|t| *t != root.message_timer())
     }
 
     /// Declares (`accepted`) or clears that `peer` is a contact the user accepted. Only such a
@@ -182,6 +220,13 @@ impl Node {
     #[must_use]
     pub fn direct_chat_consents(&self) -> Vec<(GossipId, u64)> {
         self.t.consents.iter().map(|(p, t)| (*p, *t)).collect()
+    }
+
+    /// The timer the contact request announced, for the held invitation `chat` that a
+    /// consent did not cover because its root carries another timer (§5.12).
+    #[must_use]
+    pub fn announced_timer(&self, chat: &ChatId) -> Option<u64> {
+        self.t.announced_timers.get(chat).copied()
     }
 
     // ── Classification ───────────────────────────────────────────────────────
@@ -375,6 +420,7 @@ impl Node {
         root: &Root,
         parent_held: bool,
         closed_before: bool,
+        via: super::group::Via,
     ) -> Result<bool, NodeError> {
         let Some((peer, v)) = self.direct_creation(root, parent_held) else {
             return Ok(false);
@@ -391,15 +437,19 @@ impl Node {
             // Always an invitation to continue the chat the peer is no longer in.
             return Ok(false);
         }
-        if !closed_before
-            && !self.holds_direct_chat(&peer)
-            && self
-                .t
-                .consents
-                .get(&peer)
-                .is_some_and(|until| *until > cx.now)
-        {
-            self.t.consents.remove(&peer);
+        if !closed_before && !self.holds_direct_chat(&peer) && self.consented(&peer, cx.now) {
+            if let Some(announced) = self.announced_mismatch(&peer, root) {
+                // Not the timer the request announced: the invitation a root of no consent
+                // is (§4.8 case 5), naming that timer. It uses the consent up.
+                let id = root.chat_id();
+                self.invite(cx, from, root.clone(), Vec::new(), false, None, via);
+                if self.t.epochs.contains(&id) {
+                    self.drop_consent(&peer);
+                    self.t.announced_timers.insert(id, announced);
+                }
+                return Ok(true);
+            }
+            self.drop_consent(&peer);
             self.adopt(cx, root.clone(), from, Vec::new(), false)?;
             self.changed(root.chat_id(), ChangeKind::Joined, cx.now);
             return Ok(true);
@@ -635,14 +685,15 @@ impl Node {
             if self.own_former_chat(peer, v).is_some() {
                 continue;
             }
-            if !self.holds_direct_chat(&peer)
-                && self
-                    .t
-                    .consents
-                    .get(&peer)
-                    .is_some_and(|until| *until > cx.now)
-            {
-                self.t.consents.remove(&peer);
+            if !self.holds_direct_chat(&peer) && self.consented(&peer, cx.now) {
+                if let Some(announced) = self.announced_mismatch(&peer, &rec.root) {
+                    // Not the timer the request announced: it stays an invitation, naming
+                    // that timer, and uses the consent up.
+                    self.drop_consent(&peer);
+                    self.t.announced_timers.insert(c, announced);
+                    continue;
+                }
+                self.drop_consent(&peer);
                 self.take_record(&c);
                 self.t.events.remove(&(c, ChangeKind::Invitation));
                 self.drop_tasks_of(&[c]);
@@ -717,7 +768,7 @@ impl Node {
             .map(|(p, _)| *p)
             .collect();
         for p in expired {
-            self.t.consents.remove(&p);
+            self.drop_consent(&p);
         }
     }
 

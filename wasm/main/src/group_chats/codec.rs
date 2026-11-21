@@ -745,7 +745,8 @@ record!(InvitationSummary {
     migrate_from,
     migration_of,
     continues,
-    message_timer
+    message_timer,
+    announced_timer
 });
 variants!(TimelineLine {
     Founded { epoch, owner },

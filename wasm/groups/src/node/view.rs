@@ -126,6 +126,9 @@ pub struct InvitationSummary {
     /// The message timer of the invited root, in milliseconds; 0 keeps messages forever
     /// (§7.7).
     pub message_timer: u64,
+    /// The message timer the owner's contact request announced, when this root carries
+    /// another (§5.12): the consent to its chat did not cover it, so it is asked. Local.
+    pub announced_timer: Option<u64>,
 }
 
 /// A line of the timeline (§5.6, §5.8, §5.10, §7.5).
@@ -352,6 +355,7 @@ impl Node {
                     migration_of: self.migration_of(c),
                     continues: self.continued_by(&r.root, inv.rejoins.is_some()),
                     message_timer: r.root.message_timer(),
+                    announced_timer: self.announced_timer(c),
                 }),
                 EpochStatus::Installed => None,
             })

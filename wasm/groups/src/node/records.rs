@@ -677,6 +677,8 @@ tables! {
     lookup_results: (ChatId, SyncObjId) => super::LookupResult,
     earlier: (GossipId, u64) => u64,
     consents: GossipId => u64,
+    consent_timers: GossipId => u64,
+    announced_timers: ChatId => u64,
     backoff: GossipId => Backoff,
     contacts: GossipId => u64,
     ref_lookups: RefChatId => RefLookup,
