@@ -219,6 +219,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                 isSending={isSending}
                 isOptimisticallySent={isOptimisticallySent}
                 showTimestamp={showTimestamp}
+                viaMesh={message.metadata?.via === 'mesh'}
+                isDelayed={message.metadata?.delayed === true}
               />
             </p>
           )}

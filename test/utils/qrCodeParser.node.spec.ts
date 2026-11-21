@@ -72,6 +72,14 @@ describe('qrCodeParser - parseInvite', () => {
     validateUserIdFormatSpy.mockReset();
   });
 
+  it('returns the user id of an uppercase invite in lowercase', () => {
+    const id = validationModule.encodeUserId(new Uint8Array(32).fill(7));
+
+    const parsed = parseInvite(`/${AppRoute.invite}/${id.toUpperCase()}`);
+
+    expect(parsed.userId).toBe(id);
+  });
+
   it('parses a valid invite path and validates userId', () => {
     validateUserIdFormatSpy.mockReturnValue({ valid: true });
     const userId = 'gossip1validuser';

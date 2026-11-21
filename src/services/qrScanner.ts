@@ -10,11 +10,31 @@ interface QrScannerPlugin {
    * Resolves with the decoded text. Rejects with code CANCELLED if the user
    * closes the scanner.
    *
+   * With `continuous`, the scanner stays open and emits a `frame` event for
+   * every new code it reads (animated codes); it resolves with an empty value
+   * once `finish()` closes it.
+   *
    * `closeLabel` is the accessibility label of the close button. It is passed
    * from JS because the app has its own language setting, which can differ
    * from the OS locale that native resources would follow.
    */
-  scan(options?: { closeLabel?: string }): Promise<{ value: string }>;
+  scan(options?: {
+    closeLabel?: string;
+    continuous?: boolean;
+  }): Promise<{ value: string }>;
+  /** Text shown over the camera of a continuous scan (progress, hints). */
+  setStatus(options: { text: string }): Promise<void>;
+  /**
+   * Closes a continuous scan. Called while a scan is still opening (waiting
+   * for the camera permission, or for its screen), it is remembered and that
+   * scan is closed as soon as it appears; `scan()` then resolves with an
+   * empty value.
+   */
+  finish(): Promise<void>;
+  addListener(
+    event: 'frame',
+    handler: (event: { value: string }) => void
+  ): Promise<{ remove(): Promise<void> }>;
 }
 
 export const QrScanner = registerPlugin<QrScannerPlugin>('QrScanner');

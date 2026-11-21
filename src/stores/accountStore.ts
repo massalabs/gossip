@@ -16,6 +16,7 @@ import { getSdk } from './sdkStore';
 import { configureBiometricLogin as storeBiometricPassword } from '../services/biometricService';
 import { finalizeCommittedAccountGenerationAuthority } from '../services/portableImportAuthorization';
 import { resetAllAccountStorage } from '../services/unsupportedStorageReset';
+import { wipeMesh } from '../services/meshNode';
 
 import { Provider, Account } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
@@ -884,6 +885,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     resetAccount: async () => {
       set({ isLoading: true });
       try {
+        // before the reset, which reloads the app; throws, and stops the
+        // reset, when the mesh node could not be emptied
+        await wipeMesh();
         await resetAllAccountStorage();
       } catch (error) {
         logger.error('Error resetting all accounts:', error);

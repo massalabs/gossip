@@ -1,0 +1,19 @@
+UPDATE `messages` SET `contactUserId` = lower(`contactUserId`) WHERE `contactUserId` <> lower(`contactUserId`);
+--> statement-breakpoint
+UPDATE `discussions` SET `unreadCount` = (SELECT sum(`g`.`unreadCount`) FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`)) WHERE `id` = (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) AND `g`.`id` <> `discussions`.`id`);
+--> statement-breakpoint
+UPDATE `discussions` SET (`lastMessageId`, `lastMessageContent`, `lastMessageTimestamp`) = (SELECT `g`.`lastMessageId`, `g`.`lastMessageContent`, `g`.`lastMessageTimestamp` FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY coalesce(`g`.`lastMessageTimestamp`, 0) DESC, (`g`.`contactUserId` = lower(`g`.`contactUserId`)) DESC, `g`.`id` ASC LIMIT 1) WHERE `id` = (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) AND `g`.`id` <> `discussions`.`id`);
+--> statement-breakpoint
+DELETE FROM `discussions` WHERE `id` <> (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1);
+--> statement-breakpoint
+UPDATE `discussions` SET `contactUserId` = lower(`contactUserId`) WHERE `contactUserId` <> lower(`contactUserId`);
+--> statement-breakpoint
+DELETE FROM `contacts` WHERE `id` <> (SELECT `k`.`id` FROM `contacts` AS `k` WHERE `k`.`ownerUserId` = `contacts`.`ownerUserId` AND lower(`k`.`userId`) = lower(`contacts`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`id` ASC LIMIT 1);
+--> statement-breakpoint
+UPDATE `contacts` SET `userId` = lower(`userId`) WHERE `userId` <> lower(`userId`);
+--> statement-breakpoint
+UPDATE `discardedPeers` SET `announcementFloorMillis` = (SELECT max(`g`.`announcementFloorMillis`) FROM `discardedPeers` AS `g` WHERE `g`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`g`.`userId`) = lower(`discardedPeers`.`userId`)) WHERE `rowid` = (SELECT `k`.`rowid` FROM `discardedPeers` AS `k` WHERE `k`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`k`.`userId`) = lower(`discardedPeers`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`rowid` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discardedPeers` AS `g` WHERE `g`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`g`.`userId`) = lower(`discardedPeers`.`userId`) AND `g`.`rowid` <> `discardedPeers`.`rowid`);
+--> statement-breakpoint
+DELETE FROM `discardedPeers` WHERE `rowid` <> (SELECT `k`.`rowid` FROM `discardedPeers` AS `k` WHERE `k`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`k`.`userId`) = lower(`discardedPeers`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`rowid` ASC LIMIT 1);
+--> statement-breakpoint
+UPDATE `discardedPeers` SET `userId` = lower(`userId`) WHERE `userId` <> lower(`userId`);

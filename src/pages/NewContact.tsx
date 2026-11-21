@@ -10,7 +10,8 @@ import ScanQRCode from '../components/settings/ScanQRCode';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { Upload, CheckCircle, Info, Loader } from 'react-feather';
-import { formatUserId } from '@massalabs/gossip-sdk';
+import { formatUserId, type UserPublicKeys } from '@massalabs/gossip-sdk';
+import { verifyKeysForEncodedUserId } from '../utils/contactExchange';
 import { USERNAME_MAX_LENGTH } from '../utils/validation';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import PageLayout from '../components/ui/Layout/PageLayout';
@@ -43,6 +44,7 @@ const NewContact: React.FC = () => {
     hasUnsavedChanges,
     fileState,
     handleFileImport,
+    handleVerifiedContact,
     handleNameChange,
     handleUserIdChange,
     handleMessageChange,
@@ -62,11 +64,27 @@ const NewContact: React.FC = () => {
 
   useEffect(() => {
     if (!state?.userId) return;
+    // Keys read in person come along; check them again against the id.
+    const keys =
+      state.publicKeys instanceof Uint8Array
+        ? verifyKeysForEncodedUserId(state.userId, state.publicKeys)
+        : null;
+    if (keys) {
+      handleVerifiedContact(state.userId, keys, state.name);
+      return;
+    }
     handleUserIdChange(state.userId);
     if (state?.name) {
       handleNameChange(state.name);
     }
-  }, [state?.userId, state?.name, handleUserIdChange, handleNameChange]);
+  }, [
+    state?.userId,
+    state?.name,
+    state?.publicKeys,
+    handleUserIdChange,
+    handleNameChange,
+    handleVerifiedContact,
+  ]);
 
   const handleBack = useCallback(() => {
     if (hasUnsavedChanges) {
@@ -86,15 +104,23 @@ const NewContact: React.FC = () => {
   }, []);
 
   const handleScanSuccess = useCallback(
-    (scannedUserId: string, scannedName?: string) => {
+    (
+      scannedUserId: string,
+      scannedName?: string,
+      scannedKeys?: UserPublicKeys
+    ) => {
       setShowScanner(false);
 
+      if (scannedKeys) {
+        handleVerifiedContact(scannedUserId, scannedKeys, scannedName);
+        return;
+      }
       handleUserIdChange(scannedUserId);
       if (scannedName) {
         handleNameChange(scannedName);
       }
     },
-    [handleUserIdChange, handleNameChange]
+    [handleUserIdChange, handleNameChange, handleVerifiedContact]
   );
 
   if (showScanner) {

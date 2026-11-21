@@ -17,6 +17,7 @@ import {
   type UpdateContactNameResult,
   type DeleteContactResult,
 } from '../utils/contacts.js';
+import { canonicalUserId } from '../utils/userId.js';
 import { Queries } from '../db/queries/index.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 
@@ -50,7 +51,7 @@ export class ContactService {
     return (
       (await this.queries.contacts.getByOwnerAndUser(
         this.owner,
-        contactUserId
+        canonicalUserId(contactUserId)
       )) ?? null
     );
   }
@@ -69,10 +70,16 @@ export class ContactService {
     contactUserId: string,
     newName: string
   ): Promise<UpdateContactNameResult> {
-    return updateContactName(this.owner, contactUserId, newName, this.queries);
+    return updateContactName(
+      this.owner,
+      canonicalUserId(contactUserId),
+      newName,
+      this.queries
+    );
   }
 
   async delete(contactUserId: string): Promise<DeleteContactResult> {
+    contactUserId = canonicalUserId(contactUserId);
     const result = await deleteContact(
       this.owner,
       contactUserId,

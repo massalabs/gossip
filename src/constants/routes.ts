@@ -84,6 +84,9 @@ export const ROUTES = {
   settingsShareContact: route(`/${AppRoute.settings}/share-contact`),
   settingsWeb3: route(`/${AppRoute.settings}/web3`),
   settingsPrivacy: route(`/${AppRoute.settings}/privacy`),
+  settingsMesh: route(`/${AppRoute.settings}/mesh`),
+  settingsMeshPrepare: route(`/${AppRoute.settings}/mesh/prepare`),
+  settingsMeshShareApp: route(`/${AppRoute.settings}/mesh/share-app`),
 
   // Actions
   newContact: route(`/${AppRoute.newContact}`),

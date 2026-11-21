@@ -17,6 +17,7 @@ import { decodeUserId, encodeUserId } from '../utils/userId.js';
 import {
   IMessageProtocol,
   EncryptedMessage,
+  type TransportConnectivity,
 } from '../api/messageProtocol/index.js';
 import { SessionStatus } from '../wasm/bindings.js';
 import { SessionModule } from '../wasm/index.js';
@@ -219,9 +220,45 @@ export interface SendMessageResult {
   error?: string;
 }
 
+/**
+ * An incoming message read this long after its sender dated it is marked
+ * `delayed` in its metadata: it travelled by store-and-forward (a mesh, a
+ * bridge) or sat on a node while we were offline.
+ */
+const DELAYED_MESSAGE_MS = 10 * 60 * 1000;
+
+/**
+ * Clock skew tolerated before a sender's date is treated as ahead of ours.
+ * Beyond it, or when the session flags the message stale (dated before the
+ * previous one, or past the age window), the message is placed at the time
+ * we read it: otherwise the sender's clock alone would decide where it lands
+ * in the conversation, anywhere in the past or pinned below later messages.
+ */
+const FUTURE_DATED_MESSAGE_MS = 60 * 1000;
+
+/**
+ * Where an incoming message sits in the conversation, and whether to mark it
+ * delayed. `now` is when we read it.
+ */
+export function placeIncomingMessage(
+  sentAt: Date,
+  stale: boolean,
+  now: number
+): { timestamp: Date; delayed: boolean; untrustedSentAt: boolean } {
+  const untrustedSentAt =
+    stale || sentAt.getTime() > now + FUTURE_DATED_MESSAGE_MS;
+  return {
+    timestamp: untrustedSentAt ? new Date(now) : sentAt,
+    delayed: untrustedSentAt || now - sentAt.getTime() > DELAYED_MESSAGE_MS,
+    untrustedSentAt,
+  };
+}
+
 interface Decrypted {
   content: string;
   sentAt: Date;
+  /** The session read it past its age limit or dated before the previous one. */
+  stale?: boolean;
   senderId: string;
   seeker: Uint8Array;
   messageId: Uint8Array; // 12-byte random ID
@@ -246,6 +283,12 @@ interface Decrypted {
 }
 
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+/**
+ * How long a pushed message waits for its seeker to come up: the sessions'
+ * maximum message age, past which nobody could still send it.
+ */
+const PUSHED_MESSAGE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 const logger = new Logger('MessageService');
 export class MessageService {
@@ -305,6 +348,39 @@ export class MessageService {
     this.queries = queries;
   }
 
+  /**
+   * Accepts messages a transport pushed instead of being polled for (a mesh
+   * node). They are kept until the fetch loop reaches their seeker, so one
+   * that arrives before its predecessor is not lost. Returns how many were new.
+   */
+  /**
+   * Seekers a pushed message may sit at: the next one of each peer, the ones
+   * after it, and where peers would address a re-announcement to us.
+   */
+  private wantedSeekers(): Uint8Array[] {
+    if (!this.session) return [];
+    return [
+      ...this.session.getMessageBoardReadKeys(),
+      ...this.session.getMessageBoardLookaheadKeys(),
+      ...this.session.getReannouncementMailboxKeys(),
+    ];
+  }
+
+  async ingestMessages(messages: EncryptedMessage[]): Promise<number> {
+    // anything at another seeker is not for us, or no longer readable
+    const wanted = new Set(this.wantedSeekers().map(s => encodeToBase64(s)));
+    const added = await this.queries.pendingEncryptedMessages.insertNew(
+      messages.filter(m => wanted.has(encodeToBase64(m.seeker)))
+    );
+    if (added > 0) await this.fetchMessages();
+    return added;
+  }
+
+  /** What the transports can reach; transports that cannot tell are taken as online. */
+  getConnectivity(): TransportConnectivity {
+    return this.messageProtocol.getConnectivity?.() ?? 'internet';
+  }
+
   setQueueManager(queueManager: QueueManager): void {
     this.queueManager = queueManager;
   }
@@ -325,6 +401,8 @@ export class MessageService {
       let iterations = 0;
       let newMessagesCount = 0;
       let seekers: Uint8Array[] = [];
+      // every seeker waited on during this fetch, to drop pushed messages once read
+      const waitedSeekers = new Map<string, Uint8Array>();
 
       while (true) {
         seekers = this.session.getMessageBoardReadKeys();
@@ -347,8 +425,32 @@ export class MessageService {
           break;
         }
 
-        const encryptedMessages =
-          await this.messageProtocol.fetchMessages(seekers);
+        for (const seeker of seekers) {
+          waitedSeekers.set(encodeToBase64(seeker), seeker);
+        }
+
+        // Messages pushed by a transport wait in the inbox until their seeker
+        // comes up; they are read after the fetched ones, so the first copy of a
+        // message the network served is offered first.
+        let encryptedMessages: EncryptedMessage[] = [];
+        let networkError: unknown;
+        try {
+          encryptedMessages = await this.messageProtocol.fetchMessages(seekers);
+        } catch (error) {
+          networkError = error;
+        }
+        const pushed =
+          await this.queries.pendingEncryptedMessages.getBySeekers(seekers);
+        if (networkError !== undefined && pushed.length === 0) {
+          if (iterations === 0) throw networkError;
+          break;
+        }
+        encryptedMessages = encryptedMessages.concat(
+          pushed.map(row => ({
+            seeker: row.seeker,
+            ciphertext: row.ciphertext,
+          }))
+        );
         previousSeekers = currentSeekers;
 
         if (encryptedMessages.length === 0) {
@@ -390,6 +492,26 @@ export class MessageService {
         this.eventEmitter.emit(SdkEventType.SEEKERS_UPDATED, seekers);
       } catch (error) {
         log.error('failed to update active seekers', error);
+      }
+
+      try {
+        // a seeker waited on and then left behind has been read
+        for (const seeker of seekers) {
+          waitedSeekers.delete(encodeToBase64(seeker));
+        }
+        await this.queries.pendingEncryptedMessages.deleteBySeekers([
+          ...waitedSeekers.values(),
+        ]);
+        // a lookahead seeker the sender did not use after all (it drew a
+        // fresh one) is no longer wanted: what was pushed there goes too
+        await this.queries.pendingEncryptedMessages.deleteExceptSeekers(
+          this.wantedSeekers()
+        );
+        await this.queries.pendingEncryptedMessages.deleteFetchedBefore(
+          new Date(Date.now() - PUSHED_MESSAGE_TTL_MS)
+        );
+      } catch (error) {
+        log.error('failed to clean pushed messages', error);
       }
 
       if (newMessagesCount > 0) {
@@ -531,6 +653,7 @@ export class MessageService {
           decrypted.push({
             content: deserialized.content,
             sentAt: new Date(Number(out.timestamp)),
+            stale: out.stale,
             senderId: encodeUserId(out.user_id),
             seeker: msg.seeker,
             messageId: deserialized.messageId ?? new Uint8Array(),
@@ -560,6 +683,19 @@ export class MessageService {
     }
 
     return { decrypted, acknowledgedSeekers };
+  }
+
+  /**
+   * Metadata marking `msg` as sent over the mesh only (no internet node took
+   * it), for the UI to show it waits for a bridge; undefined otherwise.
+   */
+  private meshOnlyMetadata(
+    msg: Message,
+    seeker: Uint8Array
+  ): Record<string, unknown> | undefined {
+    const kinds = this.messageProtocol.takeAcceptedBy?.(seeker);
+    if (!kinds || kinds.includes('internet')) return undefined;
+    return { ...(msg.metadata ?? {}), via: 'mesh' };
   }
 
   private async storeDecryptedMessages(
@@ -690,6 +826,11 @@ export class MessageService {
           continue;
         }
 
+        const reactionAt = placeIncomingMessage(
+          message.sentAt,
+          !!message.stale,
+          Date.now()
+        ).timestamp;
         const id = await this.queries.messages.insert({
           messageId: message.messageId,
           ownerUserId,
@@ -698,7 +839,7 @@ export class MessageService {
           type: MessageType.REACTION,
           direction: MessageDirection.INCOMING,
           status: MessageStatus.DELIVERED,
-          timestamp: message.sentAt,
+          timestamp: reactionAt,
           metadata: serializeMetadata({}),
           reactionOf: serializeReactionOf(message.reactionOf),
         });
@@ -712,7 +853,7 @@ export class MessageService {
           type: MessageType.REACTION,
           direction: MessageDirection.INCOMING,
           status: MessageStatus.DELIVERED,
-          timestamp: message.sentAt,
+          timestamp: reactionAt,
           reactionOf: message.reactionOf,
         });
 
@@ -761,6 +902,20 @@ export class MessageService {
         }
       }
 
+      const placed = placeIncomingMessage(
+        message.sentAt,
+        !!message.stale,
+        Date.now()
+      );
+      // the sender's own date stays available when it was not used
+      const incomingMetadata = placed.delayed
+        ? {
+            delayed: true,
+            ...(placed.untrustedSentAt && {
+              sentAt: message.sentAt.getTime(),
+            }),
+          }
+        : {};
       const incomingMsg: Omit<Message, 'id'> = {
         messageId: message.messageId,
         ownerUserId,
@@ -769,7 +924,8 @@ export class MessageService {
         type: message.type,
         direction: MessageDirection.INCOMING,
         status: MessageStatus.DELIVERED,
-        timestamp: message.sentAt,
+        timestamp: placed.timestamp,
+        metadata: incomingMetadata,
         replyTo: message.replyTo,
         forwardOf: message.forwardOf,
       };
@@ -782,8 +938,8 @@ export class MessageService {
         type: message.type,
         direction: MessageDirection.INCOMING,
         status: MessageStatus.DELIVERED,
-        timestamp: message.sentAt,
-        metadata: serializeMetadata({}),
+        timestamp: placed.timestamp,
+        metadata: serializeMetadata(incomingMetadata),
         replyTo: serializeReplyTo(message.replyTo),
         forwardOf: serializeForwardOf(message.forwardOf),
       });
@@ -793,7 +949,7 @@ export class MessageService {
       await this.queries.discussions.updateById(discussion.id, {
         lastMessageId: id,
         lastMessageContent: message.content,
-        lastMessageTimestamp: message.sentAt,
+        lastMessageTimestamp: placed.timestamp,
         updatedAt: now,
         lastSyncTimestamp: now,
       });
@@ -1235,26 +1391,21 @@ export class MessageService {
           // session manager in `wasm/sessions/src/session_manager.rs`
           // and `session.rs`):
           //   - Window where network landed but persist did NOT:
-          //     B has advanced its peer-ratchet to the next expected
-          //     seeker. On A's restart, state is restored to the
-          //     pre-crash counter. A's send loop re-runs the row
-          //     (still WAITING_SESSION) and re-encrypts with the
-          //     OLD counter → produces a seeker B no longer expects
-          //     → B's `feed_incoming_message_board_read` finds no
-          //     matching peer and silently ignores the duplicate.
-          //     **No session kill.** The session-close branch in
-          //     `session_manager.rs:642` only fires after a peer is
-          //     matched AND `try_feed_incoming_message` returns None
-          //     (decrypt failure on a matched session) — neither
-          //     condition is met for a stale-seeker retry.
-          //   - Side-effect: A's row stays WAITING_SESSION and is
-          //     retried on every session refresh. The `acknowledged
-          //     _seekers` field of the next message B sends back
-          //     to A includes the seeker A originally published
-          //     (which B did receive successfully), and A's send
-          //     loop uses that to mark the row SENT and stop
-          //     retrying. So the "stuck retry" is self-healing as
-          //     soon as the conversation has any back-traffic.
+          //     on A's restart, state is restored to the pre-crash
+          //     ratchet and the row (still WAITING_SESSION) is
+          //     re-encrypted. The seeker comes from the restored seeker
+          //     keypair, so it is the SAME seeker with DIFFERENT bytes
+          //     (and a different next seeker inside).
+          //     * If B already read the first copy, B has moved on and
+          //       ignores the second: no session kill. But A's chain now
+          //       continues from the second copy, which B never read, so
+          //       B stops finding A's messages until a re-announcement.
+          //     * If B has not read it yet, which copy B sees depends on
+          //       the store: one value per seeker on a single node, but
+          //       a mesh can carry both. B reads whichever comes first.
+          //     A durable persist before the network write would close
+          //     this window at the cost of latency; READY retries below
+          //     already resend the stored bytes unchanged.
           //
           // Promise.all rejects on either failure:
           //   - Network failed → caught below, row → READY with
@@ -1344,6 +1495,7 @@ export class MessageService {
           //     mostly in tap-to-sent perception, not raw
           //     throughput on rapid bursts.
           sentCount++;
+          const freshMeshMetadata = this.meshOnlyMetadata(msg, seeker);
           log.debug('message sent (skipped READY)', {
             messageId: msg.id,
             status: MessageStatus.SENT,
@@ -1357,6 +1509,7 @@ export class MessageService {
               this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
                 ...msg,
                 status: MessageStatus.SENT,
+                ...(freshMeshMetadata && { metadata: freshMeshMetadata }),
               });
             } catch (error) {
               log.error('failed to emit message sent event', {
@@ -1375,9 +1528,13 @@ export class MessageService {
             .updateById(msgId!, {
               status: MessageStatus.SENT,
               seeker,
-              encryptedMessage: null,
+              // only a mesh took it: kept for a server (repostMeshOnly)
+              encryptedMessage: freshMeshMetadata ? encryptedMessage : null,
               serializedContent: null,
               whenToSend: null,
+              ...(freshMeshMetadata && {
+                metadata: serializeMetadata(freshMeshMetadata),
+              }),
             })
             .catch(error => {
               log.error(
@@ -1436,15 +1593,20 @@ export class MessageService {
             const latestRow = await this.queries.messages.getById(msg.id);
 
             let sent = false;
+            const queuedMeshMetadata = this.meshOnlyMetadata(msg, seeker);
             if (
               latestRow && // ensure the discussion has not been deleted
               latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
             ) {
               await this.queries.messages.updateById(msg.id, {
                 status: MessageStatus.SENT,
-                encryptedMessage: null,
+                // only a mesh took it: kept for a server (repostMeshOnly)
+                encryptedMessage: queuedMeshMetadata ? encryptedMessage : null,
                 serializedContent: null,
                 whenToSend: null,
+                ...(queuedMeshMetadata && {
+                  metadata: serializeMetadata(queuedMeshMetadata),
+                }),
               });
               sent = true;
             }
@@ -1467,6 +1629,7 @@ export class MessageService {
                   this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
                     ...msg,
                     status: MessageStatus.SENT,
+                    ...(queuedMeshMetadata && { metadata: queuedMeshMetadata }),
                   });
                 } catch (error) {
                   log.error('failed to emit message sent event', {
@@ -1500,6 +1663,61 @@ export class MessageService {
     } finally {
       this.processingContacts.delete(contactUserId);
     }
+  }
+
+  /**
+   * Posts to a server the sent messages that only a mesh took, so that they
+   * reach the peer even when no bridge carries them; a mesh node uploads
+   * nothing unless it bridges. Their ciphertext stays in the account's own
+   * storage until then (and goes once the peer acknowledges them). Stops at
+   * the first failure: no server answers. Returns how many were posted.
+   */
+  async repostMeshOnly(): Promise<number> {
+    const log = logger.forMethod('repostMeshOnly');
+    const ownerUserId = this.session.userIdEncoded;
+    if (!ownerUserId || this.getConnectivity() === 'offline') return 0;
+    const rows = await this.queries.messages.getMeshOnlySent(ownerUserId);
+    let posted = 0;
+    for (const row of rows) {
+      if (!row.seeker || !row.encryptedMessage) continue;
+      // a 4xx but 429 is final: 409 means the server holds the seeker already
+      // (a bridge got there first), anything else that it never takes it
+      let onServer = true;
+      try {
+        await this.messageProtocol.sendMessage(
+          { seeker: row.seeker, ciphertext: row.encryptedMessage },
+          { internetOnly: true }
+        );
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : '';
+        if (!/HTTP 4(?!29)\d\d/.test(reason)) {
+          log.info('no server took a mesh-only message; retried later', {
+            messageId: row.id,
+            error,
+          });
+          break;
+        }
+        onServer = reason.includes('HTTP 409');
+      }
+      const latest = await this.queries.messages.getById(row.id);
+      if (!latest || latest.status !== MessageStatus.SENT) continue;
+      const metadata = deserializeMetadata(latest.metadata) ?? {};
+      if (onServer) delete metadata.via;
+      await this.queries.messages.updateById(row.id, {
+        encryptedMessage: null,
+        metadata: serializeMetadata(
+          Object.keys(metadata).length > 0 ? metadata : undefined
+        ),
+      });
+      if (onServer) posted++;
+      const updated = await this.queries.messages.getById(row.id);
+      if (updated) {
+        this.eventEmitter.emit(SdkEventType.MESSAGE_UPDATED, {
+          messages: [rowToMessage(updated)],
+        });
+      }
+    }
+    return posted;
   }
 
   /**

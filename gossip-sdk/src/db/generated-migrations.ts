@@ -104,4 +104,32 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'CREATE TABLE `privateMigration` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`formatVersion` integer DEFAULT 1 NOT NULL,\n\t`installationEpoch` text NOT NULL,\n\t`completedPhase` integer DEFAULT 0 NOT NULL\n);',
     ],
   },
+  {
+    idx: 8,
+    tag: '0008_jittery_warstar',
+    when: 1792426638781,
+    digest: 'cce9a4661bf135b4784f3275f449f68389519c34b25c7384562cd2150e13cdaf',
+    statements: [
+      'CREATE TABLE `discardedPeers` (\n\t`ownerUserId` text NOT NULL,\n\t`userId` text NOT NULL,\n\t`announcementFloorMillis` integer NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `userId`)\n);',
+      'CREATE TABLE `transportCursors` (\n\t`userId` text PRIMARY KEY NOT NULL,\n\t`cursors` text NOT NULL\n);',
+    ],
+  },
+  {
+    idx: 9,
+    tag: '0009_lowercase_user_ids',
+    when: 1794590816699,
+    digest: '8c3e94f5050426ee048c2d9d6f3dc0519c31e4d8e32f3503a81292d6865f84a2',
+    statements: [
+      'UPDATE `messages` SET `contactUserId` = lower(`contactUserId`) WHERE `contactUserId` <> lower(`contactUserId`);',
+      'UPDATE `discussions` SET `unreadCount` = (SELECT sum(`g`.`unreadCount`) FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`)) WHERE `id` = (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) AND `g`.`id` <> `discussions`.`id`);',
+      'UPDATE `discussions` SET (`lastMessageId`, `lastMessageContent`, `lastMessageTimestamp`) = (SELECT `g`.`lastMessageId`, `g`.`lastMessageContent`, `g`.`lastMessageTimestamp` FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY coalesce(`g`.`lastMessageTimestamp`, 0) DESC, (`g`.`contactUserId` = lower(`g`.`contactUserId`)) DESC, `g`.`id` ASC LIMIT 1) WHERE `id` = (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discussions` AS `g` WHERE `g`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`g`.`contactUserId`) = lower(`discussions`.`contactUserId`) AND `g`.`id` <> `discussions`.`id`);',
+      'DELETE FROM `discussions` WHERE `id` <> (SELECT `k`.`id` FROM `discussions` AS `k` WHERE `k`.`ownerUserId` = `discussions`.`ownerUserId` AND lower(`k`.`contactUserId`) = lower(`discussions`.`contactUserId`) ORDER BY (`k`.`contactUserId` = lower(`k`.`contactUserId`)) DESC, `k`.`id` ASC LIMIT 1);',
+      'UPDATE `discussions` SET `contactUserId` = lower(`contactUserId`) WHERE `contactUserId` <> lower(`contactUserId`);',
+      'DELETE FROM `contacts` WHERE `id` <> (SELECT `k`.`id` FROM `contacts` AS `k` WHERE `k`.`ownerUserId` = `contacts`.`ownerUserId` AND lower(`k`.`userId`) = lower(`contacts`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`id` ASC LIMIT 1);',
+      'UPDATE `contacts` SET `userId` = lower(`userId`) WHERE `userId` <> lower(`userId`);',
+      'UPDATE `discardedPeers` SET `announcementFloorMillis` = (SELECT max(`g`.`announcementFloorMillis`) FROM `discardedPeers` AS `g` WHERE `g`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`g`.`userId`) = lower(`discardedPeers`.`userId`)) WHERE `rowid` = (SELECT `k`.`rowid` FROM `discardedPeers` AS `k` WHERE `k`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`k`.`userId`) = lower(`discardedPeers`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`rowid` ASC LIMIT 1) AND EXISTS (SELECT 1 FROM `discardedPeers` AS `g` WHERE `g`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`g`.`userId`) = lower(`discardedPeers`.`userId`) AND `g`.`rowid` <> `discardedPeers`.`rowid`);',
+      'DELETE FROM `discardedPeers` WHERE `rowid` <> (SELECT `k`.`rowid` FROM `discardedPeers` AS `k` WHERE `k`.`ownerUserId` = `discardedPeers`.`ownerUserId` AND lower(`k`.`userId`) = lower(`discardedPeers`.`userId`) ORDER BY (`k`.`userId` = lower(`k`.`userId`)) DESC, `k`.`rowid` ASC LIMIT 1);',
+      'UPDATE `discardedPeers` SET `userId` = lower(`userId`) WHERE `userId` <> lower(`userId`);',
+    ],
+  },
 ];

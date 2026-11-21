@@ -1,6 +1,10 @@
 import { logger } from '../utils/logger.ts';
 import { useCallback, useRef, useState } from 'react';
-import { validateUserIdFormat, UserPublicKeys } from '@massalabs/gossip-sdk';
+import {
+  canonicalUserId,
+  validateUserIdFormat,
+  UserPublicKeys,
+} from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useGossipSdk } from './useGossipSdk';
@@ -62,6 +66,7 @@ export function useUserIdResolution() {
         throw new Error('SDK not initialized');
       }
 
+      // without internet, keys come from the in-person contact code instead
       const publicKey = await gossip.auth.fetchPublicKeyByUserId(uid);
       publicKeysCache.current.set(uid, publicKey);
       return publicKey;
@@ -181,23 +186,26 @@ export function useUserIdResolution() {
       }
 
       // Not an MNS domain - handle as regular gossip ID
+      const result = validateUserIdFormat(trimmed);
+      // The same id can be typed in lowercase or in uppercase. One spelling
+      // from here on: for the checks below, the field and what is stored.
+      const id = result.valid ? canonicalUserId(trimmed) : trimmed;
+
       // Prevent adding own user ID as a contact
-      if (userProfile?.userId && trimmed === userProfile.userId) {
+      if (userProfile?.userId && id === userProfile.userId) {
         setUserId(_ => ({
-          value: trimmed,
+          value: id,
           error: 'You cannot add yourself as a contact',
           loading: false,
         }));
         return;
       }
 
-      setUserId(prev => ({
-        ...prev,
+      setUserId(_ => ({
+        value: id,
         error: undefined,
         loading: true,
       }));
-
-      const result = validateUserIdFormat(trimmed);
 
       if (!result.valid) {
         setUserId(_ => ({
@@ -210,7 +218,7 @@ export function useUserIdResolution() {
         return;
       }
 
-      await fetchAndValidateId(trimmed, seq);
+      await fetchAndValidateId(id, seq);
     },
     [fetchAndValidateId, userProfile?.userId, mnsEnabled]
   );

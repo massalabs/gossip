@@ -164,7 +164,7 @@ mod announcement_root_kdf;
 mod history;
 mod message_root_kdf;
 
-pub use agraphon::Agraphon;
+pub use agraphon::{Agraphon, DecryptedIncomingMessage};
 pub use announcement::{
     IncomingAnnouncement, IncomingAnnouncementPrecursor, OutgoingAnnouncement,
     OutgoingAnnouncementPrecursor,

@@ -93,10 +93,12 @@ mv .env.example .env
 ```
 
 Set `VITE_GOSSIP_API_URL` to the API base URL used for message transfer.
-The SDK defaults to `https://api.usegossip.com` and the app overrides it at
-runtime via `setProtocolBaseUrl` during startup.
+The app speaks version 2 of the Gossip API, which the server exposes under
+`/v2`, so the base URL ends in `/v2` (the app appends `/api/...`). The SDK
+defaults to `https://api.usegossip.com/v2` and the app overrides it at runtime
+via `setProtocolBaseUrl` during startup.
 
-For a local HTTP backend, set e.g. `VITE_GOSSIP_API_URL=http://localhost:40001`
+For a local HTTP backend, set e.g. `VITE_GOSSIP_API_URL=http://localhost:40001/v2`
 and run `npm run dev`. Vite keeps the frontend on HTTPS and proxies API requests
 through `/__gossip_api` to avoid mixed-content errors while preserving camera,
 crypto and service worker access. With `npm run dev:host`, the backend URL is

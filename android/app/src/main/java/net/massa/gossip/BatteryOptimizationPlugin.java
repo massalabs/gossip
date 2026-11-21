@@ -73,6 +73,41 @@ public class BatteryOptimizationPlugin extends Plugin {
     }
 
     /**
+     * Check if battery saver is on. It slows Bluetooth scanning while the
+     * screen is off, which the offline mesh relies on.
+     */
+    @PluginMethod
+    public void isPowerSaveMode(PluginCall call) {
+        PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+        JSObject result = new JSObject();
+        result.put("isPowerSave", powerManager != null && powerManager.isPowerSaveMode());
+        call.resolve(result);
+    }
+
+    /**
+     * Open the battery saver settings, where the user can turn it off; an app
+     * cannot turn it off itself.
+     */
+    @PluginMethod
+    public void openBatterySaverSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            try {
+                Intent fallbackIntent = new Intent(Settings.ACTION_SETTINGS);
+                fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(fallbackIntent);
+                call.resolve();
+            } catch (Exception e2) {
+                call.reject("Failed to open battery saver settings", e2);
+            }
+        }
+    }
+
+    /**
      * Open the battery optimization settings for this app.
      * This allows the user to disable battery optimization.
      */

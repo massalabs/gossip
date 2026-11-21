@@ -274,6 +274,73 @@ export const SessionStatus = Object.freeze({
     Saturated: 6, "6": "Saturated",
 });
 
+const AddressedAnnouncementFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_addressedannouncement_free(ptr >>> 0, 1));
+/**
+ * Announcement for a peer, with the board entry that carries it to a peer we
+ * already exchanged announcements with.
+ */
+export class AddressedAnnouncement {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(AddressedAnnouncement.prototype);
+        obj.__wbg_ptr = ptr;
+        AddressedAnnouncementFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        AddressedAnnouncementFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_addressedannouncement_free(ptr, 0);
+    }
+    /**
+     * The announcement bytes to post to the announcement board.
+     * @returns {Uint8Array}
+     */
+    get announcement() {
+        const ret = wasm.addressedannouncement_announcement(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Signed entry to post at `mailbox_seeker` like a message, if any.
+     * @returns {Uint8Array | undefined}
+     */
+    get mailbox_data() {
+        const ret = wasm.addressedannouncement_mailbox_data(this.__wbg_ptr);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
+     * Seeker of the board entry carrying the announcement, if any.
+     * @returns {Uint8Array | undefined}
+     */
+    get mailbox_seeker() {
+        const ret = wasm.addressedannouncement_mailbox_seeker(this.__wbg_ptr);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+}
+if (Symbol.dispose) AddressedAnnouncement.prototype[Symbol.dispose] = AddressedAnnouncement.prototype.free;
+
 const AnnouncementResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_announcementresult_free(ptr >>> 0, 1));
@@ -518,6 +585,15 @@ export class ReceiveMessageOutput {
         return ret;
     }
     /**
+     * Whether the sender's timestamp is older than the configured maximum age or than
+     * the previous message: authentic and in order, but possibly delayed in transit.
+     * @returns {boolean}
+     */
+    get stale() {
+        const ret = wasm.receivemessageoutput_stale(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Gets the received message contents.
      * @returns {Uint8Array}
      */
@@ -628,13 +704,24 @@ export class SessionConfig {
     /**
      * Creates a default configuration with sensible defaults:
      * - Announcement age: 1 week
-     * - Announcement future: 1 minute
-     * - Message age: 1 week
-     * - Message future: 1 minute
-     * - Session inactivity: 1 week
+     * - Announcement future: 1 hour
+     * - Message age: 2 weeks
+     * - Message future: 1 day
+     * - Session inactivity: 2 weeks
      * - Keep-alive interval: 1 day
      * - Max lag: 10000 messages
      * - Max peer lag before keep-alive: 8 messages
+     *
+     * The clock windows allow for store-and-forward delivery: a phone that relays
+     * over Bluetooth while offline has no time source, and a clock set by hand can be
+     * off by a whole time zone. A message dated beyond the future window is not lost,
+     * only left to be read again later; one older than the age window is delivered and
+     * flagged stale. Two weeks matches the network's retention, past which a message
+     * cannot be fetched anyway. Announcements keep a tighter future window because a
+     * future-dated announcement blocks the sender's later, correctly dated ones.
+     * Session inactivity is measured on the peer's message timestamps, so it matches
+     * the message age window: a message that waited up to two weeks in transit still
+     * finds its session instead of arriving after it expired.
      * @returns {SessionConfig}
      */
     static new_default() {
@@ -689,7 +776,16 @@ export class SessionManagerWrapper {
         wasm.__wbg_sessionmanagerwrapper_free(ptr, 0);
     }
     /**
-     * Discards a peer and all associated session state.
+     * Replaces the configuration, which a manager restored from a blob otherwise keeps
+     * from when it was created.
+     * @param {SessionConfig} config
+     */
+    set_config(config) {
+        _assertClass(config, SessionConfig);
+        var ptr0 = config.__destroy_into_raw();
+        wasm.sessionmanagerwrapper_set_config(this.__wbg_ptr, ptr0);
+    }
+    /**
      * @param {Uint8Array} peer_id
      */
     peer_discard(peer_id) {
@@ -866,6 +962,15 @@ export class SessionManagerWrapper {
         return ret;
     }
     /**
+     * Gets the seekers where peers would post their next announcement to us
+     * (JS-owned Uint8Arrays, see `get_message_board_read_keys`).
+     * @returns {Array<any>}
+     */
+    get_reannouncement_mailbox_keys() {
+        const ret = wasm.sessionmanagerwrapper_get_reannouncement_mailbox_keys(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * Processes an incoming message from the message board.
      *
      * Each acknowledged seeker is materialised as a JS-owned Uint8Array
@@ -887,6 +992,55 @@ export class SessionManagerWrapper {
         return ret === 0 ? undefined : ReceiveMessageOutput.__wrap(ret);
     }
     /**
+     * Gets the seekers of the messages after the next one from each peer, for
+     * transports that request messages ahead of time (JS-owned Uint8Arrays, see
+     * `get_message_board_read_keys`).
+     * @returns {Array<any>}
+     */
+    get_message_board_lookahead_keys() {
+        const ret = wasm.sessionmanagerwrapper_get_message_board_lookahead_keys(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Returns the announcement carried by an entry read at a re-announcement
+     * mailbox seeker, if it is signed by the seeker key and decrypts; feed it to
+     * `feed_incoming_announcement`.
+     * @param {Uint8Array} seeker
+     * @param {Uint8Array} data
+     * @returns {Uint8Array | undefined}
+     */
+    open_reannouncement_mailbox_read(seeker, data) {
+        const ptr0 = passArray8ToWasm0(seeker, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.sessionmanagerwrapper_open_reannouncement_mailbox_read(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        let v3;
+        if (ret[0] !== 0) {
+            v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v3;
+    }
+    /**
+     * Same as `establish_outgoing_session`, also returning the board entry that
+     * carries the announcement to a peer we already exchanged announcements with.
+     * @param {UserPublicKeys} peer_pk
+     * @param {UserPublicKeys} our_pk
+     * @param {UserSecretKeys} our_sk
+     * @param {Uint8Array} user_data
+     * @returns {AddressedAnnouncement}
+     */
+    establish_outgoing_session_addressed(peer_pk, our_pk, our_sk, user_data) {
+        _assertClass(peer_pk, UserPublicKeys);
+        _assertClass(our_pk, UserPublicKeys);
+        _assertClass(our_sk, UserSecretKeys);
+        const ptr0 = passArray8ToWasm0(user_data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.sessionmanagerwrapper_establish_outgoing_session_addressed(this.__wbg_ptr, peer_pk.__wbg_ptr, our_pk.__wbg_ptr, our_sk.__wbg_ptr, ptr0, len0);
+        return AddressedAnnouncement.__wrap(ret);
+    }
+    /**
      * Creates a new session manager with the given configuration.
      * @param {SessionConfig} config
      */
@@ -897,6 +1051,22 @@ export class SessionManagerWrapper {
         this.__wbg_ptr = ret >>> 0;
         SessionManagerWrapperFinalization.register(this, this.__wbg_ptr, this);
         return this;
+    }
+    /**
+     * Discards a peer and all associated session state.
+     * Timestamp (milliseconds) of the latest announcement accepted from a peer, if
+     * any: keep it when discarding the peer to refuse replays of older ones.
+     * @param {Uint8Array} peer_id
+     * @returns {number | undefined}
+     */
+    peer_latest_incoming_announcement_timestamp(peer_id) {
+        const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.sessionmanagerwrapper_peer_latest_incoming_announcement_timestamp(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        return ret[0] === 0 ? undefined : ret[1];
     }
     /**
      * Refreshes sessions and returns peer IDs that need keep-alive messages.

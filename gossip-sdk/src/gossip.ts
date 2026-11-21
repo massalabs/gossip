@@ -50,7 +50,7 @@ import {
   ensureWasmInitialized,
 } from './wasm/loader.js';
 import { generateUserKeys } from './wasm/userKeys.js';
-import { SessionModule } from './wasm/session.js';
+import { SessionModule, type SessionConfigSource } from './wasm/session.js';
 import {
   EncryptionKey,
   generateEncryptionKeyFromSeed,
@@ -85,11 +85,7 @@ import {
   type SecureStorageState,
 } from './db/sqlite.js';
 import { Queries } from './db/queries/index.js';
-import {
-  type UserPublicKeys,
-  type SessionConfig,
-  SessionManagerWrapper,
-} from './wasm/bindings.js';
+import { type UserPublicKeys, SessionManagerWrapper } from './wasm/bindings.js';
 import {
   SdkEventEmitter,
   SdkEventType,
@@ -173,6 +169,11 @@ export interface GossipSdkInitOptions {
   config?: DeepPartial<SdkConfig>;
   /** SQLite storage backend. Defaults to in-memory. */
   storage?: StorageConfig;
+  /**
+   * Transport for messages and announcements. Defaults to the REST node at
+   * the configured base URL; pass a CompositeMessageProtocol to add others.
+   */
+  messageProtocol?: IMessageProtocol;
 }
 
 export interface OpenSessionOptions {
@@ -189,8 +190,11 @@ export interface OpenSessionOptions {
     encryptedBlob: Uint8Array,
     encryptionKey: EncryptionKey
   ) => Promise<void>;
-  /** Custom session configuration (optional, uses defaults if not provided) */
-  sessionConfig?: SessionConfig;
+  /**
+   * Custom session configuration (optional, uses defaults if not provided).
+   * Pass a function to have it applied to restored sessions as well.
+   */
+  sessionConfig?: SessionConfigSource;
   /**
    * Auto-start the polling loop (messages / announcements / session
    * refresh) after the session is open. Defaults to `true` for
@@ -260,6 +264,8 @@ class GossipSdk {
   private _discussion: DiscussionService | null = null;
   private _message: MessageService | null = null;
   private _refresh: RefreshService | null = null;
+  private _wantedSeekersListener: ((seekers: Uint8Array[]) => void) | null =
+    null;
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
 
@@ -434,7 +440,8 @@ class GossipSdk {
         logger.info('[GossipSdk] SQLite initialized');
       }
       // Create message protocol
-      const messageProtocol = createMessageProtocol();
+      const messageProtocol =
+        options.messageProtocol ?? createMessageProtocol();
 
       // Create services that don't need a session
       this._auth = new AuthService(createAuthProtocol());
@@ -447,6 +454,39 @@ class GossipSdk {
         messageProtocol,
         config,
       };
+
+      // Transports that ask other nodes for our messages (a mesh node's
+      // wanted list) follow the seekers the message fetch settles on.
+      if (messageProtocol.setWantedSeekers) {
+        this._wantedSeekersListener = seekers => {
+          // also the seekers peers will most likely use next, so a slow
+          // transport can bring several messages in one round trip, and
+          // where peers would address a re-announcement to us
+          const session =
+            this.state.status === SdkStatus.SESSION_OPEN
+              ? this.state.session
+              : undefined;
+          // both only for a mesh: they would let an internet node link
+          // contacts, and polling serves the next seeker alone well enough
+          const meshExtras =
+            session && messageProtocol.isMeshEnabled?.()
+              ? [
+                  ...session.getMessageBoardLookaheadKeys(),
+                  ...session.getReannouncementMailboxKeys(),
+                ]
+              : [];
+          // local-only on the mesh, so that no bridge asks the internet
+          messageProtocol
+            .setWantedSeekers?.(seekers, meshExtras)
+            .catch(error => {
+              logger.warn('[GossipSdk] failed to update wanted seekers', error);
+            });
+        };
+        this.eventEmitter.on(
+          SdkEventType.SEEKERS_UPDATED,
+          this._wantedSeekersListener
+        );
+      }
 
       return this;
     } catch (err) {
@@ -898,6 +938,11 @@ class GossipSdk {
     // Clear message queues
     this.messageQueues.clear();
 
+    // Stop asking other nodes for the closed account's messages
+    this.state.messageProtocol.setWantedSeekers?.([]).catch(error => {
+      logger.warn('[GossipSdk] failed to clear wanted seekers', error);
+    });
+
     // Reset to initialized state
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -941,6 +986,13 @@ class GossipSdk {
     this._lifecycleCloseActive = true;
     try {
       await this.closeSessionInternal();
+      if (this._wantedSeekersListener) {
+        this.eventEmitter.off(
+          SdkEventType.SEEKERS_UPDATED,
+          this._wantedSeekersListener
+        );
+        this._wantedSeekersListener = null;
+      }
       this._queries = null;
       if (this._conn) {
         await this._conn.close();

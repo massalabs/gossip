@@ -81,5 +81,32 @@
     "file_modal_body": "Partage ton profil sous forme de fichier avec les personnes avec qui tu veux discuter. Ton contact peut importer ton fichier depuis la page <newContactLink>Nouveau contact</newContactLink>.",
     "file_modal_note": "Contrairement aux autres modes de partage de profil, le profil par fichier reste valide même si tu ne te connectes pas à l'app pendant plus de 2 semaines.",
     "share_file": "Partager le fichier"
+  },
+  "contact_code": {
+    "mode_in_person": "En personne",
+    "mode_link": "Lien d'invitation",
+    "qr_label": "Votre code contact, animé",
+    "hold_phone": "Tenez votre téléphone devant leur caméra",
+    "bluetooth_on": "Bluetooth activé : leur téléphone peut aussi recevoir vos clés ainsi.",
+    "bluetooth_off_hint": "Fonctionne sans internet. Le Bluetooth accélère l'échange.",
+    "bluetooth_offer": "Utiliser aussi le Bluetooth",
+    "bluetooth_unavailable": "Le Bluetooth est désactivé ou non autorisé. Le code animé fonctionne sans.",
+    "bluetooth_unavailable_simple": "Le code simple a besoin du Bluetooth. Activez-le ou affichez le code animé.",
+    "bluetooth_stopped": "Bluetooth arrêté.",
+    "restart": "Recommencer",
+    "shared": "Envoyé à un téléphone proche",
+    "simple_code": "Afficher un code simple",
+    "animated_code": "Afficher le code animé",
+    "simple_code_hint": "Leur téléphone lit ce code, puis reçoit vos clés par Bluetooth.",
+    "point_camera": "Visez leur code avec la caméra",
+    "reading": "Lecture de leur code… {{percent}} %",
+    "using_bluetooth": "Bluetooth en cours…",
+    "keep_close": "Gardez les deux téléphones près l’un de l’autre.",
+    "bluetooth_failed_keep_camera": "Le Bluetooth n'a pas marché. Gardez la caméra sur leur code.",
+    "bluetooth_failed": "Impossible de recevoir leurs clés par Bluetooth. Demandez-leur de garder leur code à l'écran et réessayez.",
+    "bluetooth_needed": "Autorisez le Bluetooth pour lire un code simple, ou demandez-leur d'afficher le code animé.",
+    "not_gossip_code": "Ce n'est pas un code Gossip",
+    "keys_mismatch": "Les clés de ce code ne correspondent pas à son identifiant. Le contact n'a pas été ajouté.",
+    "web_simple_code": "Ce code a besoin du Bluetooth : demandez-leur d'afficher le code animé."
   }
 }
