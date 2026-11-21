@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { playwright } from '@vitest/browser-playwright';
 import crossOriginIsolation from 'vite-plugin-cross-origin-isolation';
+import tailwindcss from '@tailwindcss/vite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,7 +46,12 @@ export default defineConfig({
         // wasm-bindgen-rayon to transfer the WASM Memory to rayon Web
         // Worker threads). The plugin sets the headers on every response
         // and on the worker scripts spawned by Vite.
-        plugins: [secureStorageTestWorker, crossOriginIsolation()],
+        // Tailwind: a test that imports the app's styles lays out as the app.
+        plugins: [
+          secureStorageTestWorker,
+          crossOriginIsolation(),
+          tailwindcss(),
+        ],
         optimizeDeps: {
           include: [
             'react',
