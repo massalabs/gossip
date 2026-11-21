@@ -167,7 +167,10 @@ const Invitation: React.FC = () => {
         {invitation && (
           <p className="flex items-center gap-1 text-xs text-foreground">
             <Shield className="w-3.5 h-3.5 text-success shrink-0" />
-            {t('invitation.owner_verified')}
+            <span className="min-w-0 truncate">
+              {t('invitation.owner_verified')}{' '}
+              <SafeName name={memberName(invitation.owner)} />
+            </span>
           </p>
         )}
         {invitation?.receivedFrom && (
