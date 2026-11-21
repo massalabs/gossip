@@ -43,7 +43,8 @@ mkdir -p "$TMP/headers"
 echo "[1/3] cargo build (aarch64-apple-ios + aarch64-apple-ios-sim)..."
 for target in aarch64-apple-ios aarch64-apple-ios-sim; do
     rustup target add "$target" >/dev/null
-    cargo build --locked -p gossip-mobile --target "$target" -j "${JOBS:-3}" ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
+    cargo build --locked -p gossip-mobile --target "$target" -j "${JOBS:-3}" \
+        --config "$(bash "$ROOT_DIR/scripts/rust-remap-flags.sh")" ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
 done
 DEVICE_LIB="$CARGO_TARGET_DIR/aarch64-apple-ios/$TARGET_DIR/libgossip_mobile.a"
 SIM_LIB="$CARGO_TARGET_DIR/aarch64-apple-ios-sim/$TARGET_DIR/libgossip_mobile.a"

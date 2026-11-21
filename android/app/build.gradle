@@ -198,6 +198,7 @@ tasks.register('buildRustSecureStorage', Exec) {
     inputs.dir "${rootDir}/wasm/crypto-password-kdf/src"
     inputs.dir "${rootDir}/wasm/uniffi-bindgen"
     inputs.file "${rootDir}/scripts/build-native-android.sh"
+    inputs.file "${rootDir}/scripts/rust-remap-flags.sh"
     // Pin the NDK version into the input fingerprint so switching it
     // in gradle.properties invalidates the cached .so even when the
     // Rust source is unchanged.
@@ -231,6 +232,7 @@ if (hasMeshCore) {
         inputs.file new File(gossipWasmDir, 'Cargo.toml')
         inputs.file new File(gossipWasmDir, 'Cargo.lock')
         inputs.file "${rootDir}/scripts/build-mesh-android.sh"
+        inputs.file "${rootDir}/scripts/rust-remap-flags.sh"
         inputs.property 'ndkVersion', gossipNdkVersion
         inputs.property 'abis', gossipAbis.join(',')
         inputs.property 'rustProfile', rustProfileEnv
