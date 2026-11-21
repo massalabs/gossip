@@ -17,6 +17,7 @@ import { useSdkStore } from '../../../src/stores/sdkStore';
 import { useGroupStore } from '../../../src/stores/groupStore';
 import { useAccountStore } from '../../../src/stores/accountStore';
 import { useAppStore } from '../../../src/stores/appStore';
+import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import {
   MESSAGE_TIMER_OPTIONS,
   messageTimerLabel,
@@ -353,6 +354,27 @@ describe('message timer screens', () => {
     const section = r.container.querySelector('[data-testid="invite-timer"]');
     expect(section?.textContent).toContain('timer.disappear_after');
     expect(section?.textContent).toContain('timer.owner_only');
+  });
+
+  it('names the verified owner on the invitation screen, a contact by name', async () => {
+    useDiscussionStore.setState({
+      contacts: [{ userId: 'bob', name: 'Bob' }] as never,
+    });
+    fake.state.invitations = [invitation()];
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <Invitation />,
+      '/invitation/group/e1',
+      '/invitation/:kind/:id'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    const line = Array.from(
+      r.container.querySelectorAll('[data-testid="invite-who"] p')
+    ).find(p => p.textContent?.includes('invitation.owner_verified'));
+    expect(line?.textContent).toBe('invitation.owner_verified Bob');
+    useDiscussionStore.setState({ contacts: [] } as never);
   });
 
   it('says on the invitation when messages are kept', async () => {
