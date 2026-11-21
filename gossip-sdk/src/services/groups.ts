@@ -798,8 +798,11 @@ export class GroupService {
   private closed = false;
   /** Failed sends of each outbox row since this service opened. */
   private outboxFailures = new Map<number, number>();
-  /** A send is queued on the chain and has not started yet. */
-  private pumpQueued = false;
+  /**
+   * The end of the chain when it is a send that has not started yet: a kick
+   * then adds nothing, since that send runs after everything queued so far.
+   */
+  private queuedPump: Promise<void> | null = null;
   /**
    * Per group key, the digest of the messages its timeline shows (reactions
    * left out), to tell a change of reactions alone from one of messages.
@@ -1117,13 +1120,19 @@ export class GroupService {
     return next;
   }
 
-  /** Queues a send of what the outbox holds, unless one is already queued. */
+  /**
+   * Queues a send of what the outbox holds after everything queued so far,
+   * unless the end of the chain is such a send not started yet. A send queued before
+   * an operation does not cover it: an operation queued behind a send that
+   * has not started yet (messages sent faster than one send runs) gets its
+   * own, otherwise what it queued would wait for other traffic or the next
+   * wake-up, and could reach its message timer unsent.
+   */
   private kick(): void {
-    if (this.closed || this.pumpQueued) return;
-    this.pumpQueued = true;
-    this.chain = this.chain
+    if (this.closed || this.chain === this.queuedPump) return;
+    const queued: Promise<void> = this.chain
       .then(async () => {
-        this.pumpQueued = false;
+        if (this.queuedPump === queued) this.queuedPump = null;
         await this.pump();
       })
       .catch(error => {
@@ -1131,6 +1140,8 @@ export class GroupService {
         if (isWasmTrap(error)) this.recover(error);
       })
       .finally(() => this.schedule());
+    this.chain = queued;
+    this.queuedPump = queued;
   }
 
   /** Persists the pending batches; on failure the engine is reopened. */
