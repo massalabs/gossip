@@ -43,8 +43,11 @@ export interface KnownInertHost {
 }
 
 const OWNER = 'project owner, privacy hardening decision (Nov 2026)';
-const PENDING =
-  'PENDING owner confirmation: library message or comment text found in the bundle by the first run of this check';
+// The eight library hosts below were found in the bundle by the first run of
+// the check. The owner checked each one by hand: it is text inside a library's
+// error message or license notice, and the app never requests it.
+const OWNER_CHECKED_TEXT =
+  'project owner, confirmed on 2026-11-21 after a hand check: text inside a library error message or license notice, never requested';
 
 /** ALLOWED: hosts the app may contact, link to, or name. */
 export const ALLOWED_HOSTS: readonly AllowedHost[] = [
@@ -206,51 +209,56 @@ export const KNOWN_INERT_HOSTS: readonly KnownInertHost[] = [
   },
   {
     host: 'fb.me',
-    whyInert: 'React prop-types error message text, never requested',
+    whyInert:
+      'address in the text of a prop-types error message (React), never requested',
     evidence: 'node_modules/prop-types (message of checkPropTypes)',
-    approvedBy: PENDING,
+    approvedBy: OWNER_CHECKED_TEXT,
   },
   {
     host: 'react.dev',
-    whyInert: 'React minified error message link, never requested',
+    whyInert: 'address in the text of a React error message, never requested',
     evidence: 'node_modules/react-dom (production error formatter)',
-    approvedBy: PENDING,
+    approvedBy: OWNER_CHECKED_TEXT,
   },
   {
     host: 'reactrouter.com',
-    whyInert: 'React Router error message link, never requested',
+    whyInert:
+      'address in the text of a React Router error message, never requested',
     evidence: 'node_modules/react-router (data router error message)',
-    approvedBy: PENDING,
+    approvedBy: OWNER_CHECKED_TEXT,
   },
   {
     host: 'www.i18next.com',
-    whyInert: 'i18next deprecation message link, never requested',
+    whyInert: 'address in the text of an i18next warning, never requested',
     evidence: 'node_modules/i18next (legacy format warning)',
-    approvedBy: PENDING,
+    approvedBy: OWNER_CHECKED_TEXT,
   },
   {
     host: 'capacitorjs.com',
-    whyInert: 'license comment of @capacitor/core, never requested',
+    whyInert:
+      'address in the license notice comment of @capacitor/core, never requested',
     evidence: 'node_modules/@capacitor/core (/*! Capacitor ... */)',
-    approvedBy: PENDING,
+    approvedBy: OWNER_CHECKED_TEXT,
   },
   {
     host: 'feross.org',
-    whyInert: 'license comments of buffer, ieee754 and safe-buffer',
+    whyInert:
+      'address in the license notice comments of buffer, ieee754 and safe-buffer, never requested',
     evidence: 'node_modules/ieee754, node_modules/safe-buffer',
-    approvedBy: PENDING,
+    approvedBy: OWNER_CHECKED_TEXT,
   },
   {
     host: 'mths.be',
-    whyInert: 'license comment of punycode',
+    whyInert:
+      'address in the license notice comment of punycode, never requested',
     evidence: 'node_modules/punycode',
-    approvedBy: PENDING,
+    approvedBy: OWNER_CHECKED_TEXT,
   },
   {
     host: 'bit.ly',
     whyInert:
-      'Workbox precache warning text in the service worker, never requested',
+      'address in the text of a Workbox precache message in the service worker (sw.js), never requested',
     evidence: 'node_modules/workbox-precaching (dist/sw.js)',
-    approvedBy: PENDING,
+    approvedBy: OWNER_CHECKED_TEXT,
   },
 ];
