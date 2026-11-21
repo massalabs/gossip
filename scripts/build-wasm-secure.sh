@@ -31,7 +31,8 @@ cd "$ROOT_DIR/wasm/secure-storage"
 echo "[1/3] cargo zigbuild (wasm32-unknown-unknown)..."
 AR_wasm32_unknown_unknown="$LLVM_AR" \
     cargo +nightly zigbuild --lib --release \
-        --target wasm32-unknown-unknown --features wasm
+        --target wasm32-unknown-unknown --features wasm \
+        --config "$(bash "$ROOT_DIR/scripts/rust-remap-flags.sh" target.wasm32-unknown-unknown.rustflags)"
 
 echo "[2/3] wasm-bindgen JS glue..."
 wasm-bindgen --target web --out-dir "$SDK_GEN" \
