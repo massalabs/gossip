@@ -1,4 +1,4 @@
-import i18n from 'i18next';
+import i18n, { type LoggerModule } from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 
@@ -118,6 +118,22 @@ const resources = {
     groups: ruGroups,
   },
 };
+
+// i18next writes its errors to the console even with `debug` off. A release
+// build writes no log, so unless debug logging is on (dev server or
+// VITE_DEBUG_LOGS, as in src/utils/logger.ts) it gets a logger that writes
+// nothing.
+const isDebugLoggingEnabled =
+  import.meta.env.DEV || import.meta.env.VITE_DEBUG_LOGS === 'true';
+if (!isDebugLoggingEnabled) {
+  const silentLogger: LoggerModule = {
+    type: 'logger',
+    log: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
+  };
+  i18n.use(silentLogger);
+}
 
 i18n
   .use(LanguageDetector)
