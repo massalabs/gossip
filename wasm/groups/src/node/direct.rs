@@ -553,15 +553,17 @@ impl Node {
     }
 
     /// Settles the held invitations from `peer` that this device now acts on: a migration
-    /// that pairs with its own, or a group of two it consents to.
+    /// that pairs with its own, or a group of two it consents to. A creating root fetched as
+    /// the parent of another invitation counts too: an account reinstalled into an empty
+    /// device holds the first epoch of its former chat that way when a later epoch reached it
+    /// first, and that later epoch is settled with it.
     fn settle_invitations_of(&mut self, cx: &mut Cx<'_>, peer: GossipId) -> Result<(), NodeError> {
         let invitations: Vec<ChatId> = self
             .t
             .epochs
             .iter()
             .filter(|(_, r)| {
-                matches!(&r.status, EpochStatus::Invitation(i) if i.fetched_for.is_none())
-                    && r.root.owner_id() == peer
+                matches!(&r.status, EpochStatus::Invitation(_)) && r.root.owner_id() == peer
             })
             .map(|(c, _)| *c)
             .collect();
