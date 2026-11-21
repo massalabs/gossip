@@ -391,6 +391,137 @@ describe('Direct chats, contacts and connections', { timeout: 300_000 }, () => {
     expect(await texts(alice.groups, groupId)).toEqual(['hi']);
   });
 
+  const FIVE_MINUTES = 5 * 60_000;
+  const ONE_HOUR = 60 * 60_000;
+
+  /**
+   * Alice sends Bob a contact request announcing `announced` (none when
+   * undefined) and founds the chat with `founded` (a modified client, when
+   * they differ); Bob sees the announced timer and accepts.
+   */
+  async function requestWithTimer(
+    alice: GossipSdk,
+    bob: GossipSdk,
+    announced: number | undefined,
+    founded: number | undefined = announced
+  ): Promise<void> {
+    await alice.contacts.add(bob.userId, 'Bob', bob.publicKeys);
+    const contact = (await alice.contacts.get(bob.userId))!;
+    const started = await alice.discussions.start(
+      contact,
+      { username: 'Alice', message: 'hello' },
+      announced === undefined ? {} : { messageTimer: announced }
+    );
+    expect(started.success).toBe(true);
+    if (founded !== announced) {
+      const row = await alice.queries.discussions.getByOwnerAndContact(
+        alice.userId,
+        bob.userId
+      );
+      await alice.queries.discussions.updateById(row!.id!, {
+        directChatTimer: founded ?? null,
+      });
+    }
+    await bob.announcements.fetch();
+    const d = (await bob.discussions.get(alice.userId))!;
+    expect(d.directChatTimer).toBe(announced ?? null);
+    expect((await bob.discussions.accept(d)).success).toBe(true);
+  }
+
+  it('adopts without a prompt a chat with the timer the request announced, forever included', async () => {
+    for (const timer of [ONE_HOUR, 0]) {
+      const [alice, bob] = await open(2);
+      await requestWithTimer(alice, bob, timer);
+      await deliver();
+      const groupId = await alice.conversations.directChatWith(bob.userId);
+      expect(groupId).not.toBeNull();
+      expect(await keys(bob)).toEqual([groupId]);
+      expect(await bob.groups.invitations()).toEqual([]);
+      expect((await bob.groups.get(groupId!))!.messageTimer).toBe(timer);
+      expect((await bob.discussions.get(alice.userId))?.linkedGroupId).toBe(
+        groupId
+      );
+      for (const p of peers) await p.closeSession();
+      peers = [];
+    }
+  });
+
+  it('adopts as before the chat of a request that announced no timer', async () => {
+    const [alice, bob] = await open(2);
+    await requestWithTimer(alice, bob, undefined);
+    await deliver();
+    const groupId = await alice.conversations.directChatWith(bob.userId);
+    expect(await keys(bob)).toEqual([groupId]);
+    expect(await bob.groups.invitations()).toEqual([]);
+  });
+
+  it('asks for a chat founded with another timer than the request announced, saying both, and accepting links it', async () => {
+    const [alice, bob] = await open(2);
+    await requestWithTimer(alice, bob, ONE_HOUR, FIVE_MINUTES);
+    await deliver();
+    const groupId = await alice.conversations.directChatWith(bob.userId);
+    expect(groupId).not.toBeNull();
+    expect(await keys(bob)).toEqual([]);
+    const [inv] = await bob.groups.invitations();
+    expect(inv).toMatchObject({
+      epochId: groupId,
+      owner: alice.userId,
+      messageTimer: FIVE_MINUTES,
+      announcedTimer: ONE_HOUR,
+      migrationOf: null,
+      continues: null,
+    });
+    // Alice's chat has not seen Bob take part.
+    expect((await alice.groups.get(groupId!))!.tookPart).toBe(false);
+
+    expect(await bob.conversations.acceptInvitation(inv.epochId)).toBe(groupId);
+    await deliver();
+    expect(await keys(bob)).toEqual([groupId]);
+    expect(await bob.groups.invitations()).toEqual([]);
+    expect((await bob.groups.get(groupId!))!.messageTimer).toBe(FIVE_MINUTES);
+    expect((await bob.discussions.get(alice.userId))?.linkedGroupId).toBe(
+      groupId
+    );
+    await alice.groups.sendMessage(groupId!, 'hi');
+    await deliver();
+    expect(await texts(bob.groups, groupId!)).toEqual(['hi']);
+  });
+
+  it('asks for a chat founded without a timer when the request announced one, and declining it silently leaves Alice unaware', async () => {
+    const [alice, bob] = await open(2);
+    await requestWithTimer(alice, bob, ONE_HOUR, 0);
+    await deliver();
+    const groupId = await alice.conversations.directChatWith(bob.userId);
+    const [inv] = await bob.groups.invitations();
+    expect(inv).toMatchObject({ messageTimer: 0, announcedTimer: ONE_HOUR });
+
+    await bob.conversations.declineInvitation(inv.epochId, 'Silent');
+    await deliver();
+    expect(await bob.groups.invitations()).toEqual([]);
+    expect(await keys(bob)).toEqual([]);
+    expect(
+      (await bob.discussions.get(alice.userId))?.linkedGroupId ?? null
+    ).toBeNull();
+    // Nothing reached Alice: Bob is still listed and never took part.
+    const g = (await alice.groups.get(groupId!))!;
+    expect(g.members).toContain(bob.userId);
+    expect(g.tookPart).toBe(false);
+  });
+
+  it('keeps the announced timer across a reload between accepting the request and the chat', async () => {
+    const [alice, bob] = await open(2);
+    await requestWithTimer(alice, bob, ONE_HOUR, FIVE_MINUTES);
+    await reload(bob);
+    await deliver();
+    const [inv] = await bob.groups.invitations();
+    expect(inv).toMatchObject({
+      messageTimer: FIVE_MINUTES,
+      announcedTimer: ONE_HOUR,
+    });
+    await reload(bob);
+    expect((await bob.groups.invitations())[0]?.announcedTimer).toBe(ONE_HOUR);
+  });
+
   it('gives crossing contact requests one direct chat', async () => {
     const [alice, bob] = await open(2);
     await alice.contacts.add(bob.userId, 'Bob', bob.publicKeys);
