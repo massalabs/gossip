@@ -256,12 +256,18 @@ export class DiscussionService {
 
   /**
    * Called when the user accepts a contact request, before the session is
-   * accepted: the consent to the chat its requester founds (§5.12).
+   * accepted: the consent to the chat its requester founds (§5.12), with
+   * the message timer the request announced, shown to the user, if any.
    */
-  private onContactAccepted?: (contactUserId: string) => Promise<void>;
+  private onContactAccepted?: (
+    contactUserId: string,
+    announcedTimer?: number
+  ) => Promise<void>;
 
   setOnContactAccepted(
-    hook: ((contactUserId: string) => Promise<void>) | undefined
+    hook:
+      | ((contactUserId: string, announcedTimer?: number) => Promise<void>)
+      | undefined
   ): void {
     this.onContactAccepted = hook;
   }
@@ -280,7 +286,15 @@ export class DiscussionService {
       }
 
       try {
-        await this.onContactAccepted?.(discussion.contactUserId);
+        // The timer the request announced, as the screen showed it; none
+        // when this device sent a request too (it then holds its own).
+        const announcedTimer = discussion.directChatOwed
+          ? undefined
+          : (discussion.directChatTimer ?? undefined);
+        await this.onContactAccepted?.(
+          discussion.contactUserId,
+          announcedTimer
+        );
       } catch {
         log.error('consent to the direct chat not recorded');
       }

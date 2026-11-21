@@ -462,10 +462,15 @@ export class ConversationService {
 
   /**
    * The accepter's side of a new contact: accepting the request consents to
-   * the chat its requester founds (one-shot, for two weeks).
+   * the chat its requester founds (one-shot, for two weeks), with the
+   * message timer the request announced, if any: a chat with another timer
+   * is then asked as an invitation that says so.
    */
-  async contactRequestAccepted(contactUserId: string): Promise<void> {
-    await this.groups.consentToDirectChat(contactUserId, true);
+  async contactRequestAccepted(
+    contactUserId: string,
+    announcedTimer?: number
+  ): Promise<void> {
+    await this.groups.consentToDirectChat(contactUserId, true, announcedTimer);
     await this.acceptAsContact(contactUserId);
     await this.syncAcceptedContacts();
   }

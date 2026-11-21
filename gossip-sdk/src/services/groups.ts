@@ -149,6 +149,13 @@ export interface GroupInvitation {
   continues: GroupId | null;
   /** The message timer of the invited root, in milliseconds; 0 = forever. */
   messageTimer: number;
+  /**
+   * The message timer (ms, 0 = forever) the owner's contact request
+   * announced, when this chat of two keeps another (§5.12): accepting the
+   * request did not cover it, so it is asked, saying what differs. Null for
+   * any other invitation.
+   */
+  announcedTimer: number | null;
 }
 
 /** A body this account can send or set: text, or a forward of text. */
@@ -1736,10 +1743,23 @@ export class GroupService {
   /**
    * Consents (or withdraws the consent) to the direct chat `peer` founds
    * after this user accepted its contact request (§5.12): one-shot, 14 days.
+   * `announcedTimer` is the message timer the request announced (ms), if
+   * any: the consent then covers only a chat with that timer, and one with
+   * another is an invitation naming it (`announcedTimer`). Kept on this
+   * device only.
    */
-  consentToDirectChat(peer: string, consent: boolean): Promise<void> {
+  consentToDirectChat(
+    peer: string,
+    consent: boolean,
+    announcedTimer?: number
+  ): Promise<void> {
     return this.run(node =>
-      node.consent_to_direct_chat(decodeUserId(peer), consent, this.now())
+      node.consent_to_direct_chat(
+        decodeUserId(peer),
+        consent,
+        this.now(),
+        announcedTimer
+      )
     );
   }
 
@@ -2230,6 +2250,7 @@ export class GroupService {
       migrationOf: r.migration_of ? userIdOf(r.migration_of as string) : null,
       continues: (r.continues as string | null | undefined) ?? null,
       messageTimer: timerOf(r.message_timer),
+      announcedTimer: optionalNumber(r.announced_timer),
     }));
   }
 

@@ -784,8 +784,8 @@ class GossipSdk {
           discussions
         );
         this._conversations = conversations;
-        discussions.setOnContactAccepted(peer =>
-          conversations.contactRequestAccepted(peer)
+        discussions.setOnContactAccepted((peer, announcedTimer) =>
+          conversations.contactRequestAccepted(peer, announcedTimer)
         );
         this._announcement.setConnectionPolicy({
           isCoMember: peer => conversations.isCoMember(peer),
