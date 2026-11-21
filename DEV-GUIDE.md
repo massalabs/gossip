@@ -75,22 +75,22 @@ The Vite server uses HTTPS (required for `crypto.subtle`). Self-signed certs nee
 
 **iOS** (3 layers, belt-and-suspenders):
 
-1. `patches/@capacitor+ios+8.0.0.patch` — patches `WebViewDelegationHandler.swift` to accept self-signed certs (persisted via `patch-package`, applied on `npm install`)
+1. `patches/@capacitor+ios+8.0.0.patch` — patches `WebViewDelegationHandler.swift` to accept self-signed certs in debug builds only (persisted via `patch-package`, applied on `npm install`)
 2. `ios/App/App/SSLBypassPlugin.swift` — Capacitor plugin registered in debug builds only
 3. `ios/App/App/Info.plist` — `WKAppBoundDomains` removed (blocks localStorage on non-listed domains)
 
 ### Key files
 
-| File                                              | Purpose                                   |
-| ------------------------------------------------- | ----------------------------------------- |
-| `scripts/dev-android.sh`                          | Android hot reload script                 |
-| `scripts/dev-ios.sh`                              | iOS hot reload script                     |
-| `scripts/dev-all.sh`                              | Both platforms simultaneously             |
-| `capacitor.config.ts`                             | Reads `DEV_SERVER_URL` env var            |
-| `patches/@capacitor+ios+8.0.0.patch`              | SSL bypass patch for Capacitor iOS        |
-| `ios/App/App/SSLBypassPlugin.swift`               | SSL bypass Capacitor plugin (debug only)  |
-| `ios/App/App/MyViewController.swift`              | Plugin registration + WebView inspectable |
-| `android/app/src/main/java/.../MainActivity.java` | SSL bypass for Android (debug only)       |
+| File                                              | Purpose                                         |
+| ------------------------------------------------- | ----------------------------------------------- |
+| `scripts/dev-android.sh`                          | Android hot reload script                       |
+| `scripts/dev-ios.sh`                              | iOS hot reload script                           |
+| `scripts/dev-all.sh`                              | Both platforms simultaneously                   |
+| `capacitor.config.ts`                             | Reads `DEV_SERVER_URL` env var                  |
+| `patches/@capacitor+ios+8.0.0.patch`              | SSL bypass patch for Capacitor iOS (debug only) |
+| `ios/App/App/SSLBypassPlugin.swift`               | SSL bypass Capacitor plugin (debug only)        |
+| `ios/App/App/MyViewController.swift`              | Plugin registration + WebView inspectable       |
+| `android/app/src/main/java/.../MainActivity.java` | SSL bypass for Android (debug only)             |
 
 ## Troubleshooting
 
