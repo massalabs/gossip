@@ -21,6 +21,7 @@ import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import { SessionStatus } from '@massalabs/gossip-sdk';
 import {
   MESSAGE_TIMER_OPTIONS,
+  announcedTimerLines,
   messageTimerLabel,
 } from '../../../src/constants/messageTimer';
 import i18next from 'i18next';
@@ -116,6 +117,7 @@ const invitation = (over: Partial<GroupInvitation> = {}): GroupInvitation => ({
   migrationOf: null,
   continues: null,
   messageTimer: HOUR,
+  announcedTimer: null,
   ...over,
 });
 
@@ -203,6 +205,70 @@ describe('message timer labels', () => {
           return messageTimerLabel(ms, t);
         })
       ).toEqual(labels);
+    }
+  });
+});
+
+describe('a chat whose timer is not the one the contact request announced', () => {
+  it('says so in simple words in every language, with both timers', async () => {
+    const WEEK = 7 * 24 * HOUR;
+    const FIVE_MINUTES = 5 * 60_000;
+    const expected: [string, unknown, [string, string, string], string][] = [
+      [
+        'en',
+        enGroups,
+        [
+          'Alice announced another timer when asking to chat.',
+          'Announced: 1 week',
+          'This chat: 5 minutes',
+        ],
+        'Announced: Forever',
+      ],
+      [
+        'fr',
+        frGroups,
+        [
+          'Alice a annoncé une autre durée en demandant à discuter.',
+          'Annoncée : 1 semaine',
+          'Cette discussion : 5 minutes',
+        ],
+        'Annoncée : Pour toujours',
+      ],
+      [
+        'ru',
+        ruGroups,
+        [
+          'В запросе Alice был указан другой таймер.',
+          'В запросе: 1 неделя',
+          'В этом чате: 5 минут',
+        ],
+        'В запросе: Навсегда',
+      ],
+      [
+        'zh-CN',
+        zhGroups,
+        [
+          'Alice 在请求聊天时说明的是另一个定时。',
+          '说明的定时：1 周',
+          '此聊天：5 分钟',
+        ],
+        '说明的定时：永久',
+      ],
+    ];
+    for (const [lng, groups, lines, forever] of expected) {
+      const i18n = i18next.createInstance();
+      await i18n.init({
+        lng,
+        ns: ['groups'],
+        resources: { [lng]: { groups } } as never,
+        interpolation: { escapeValue: false },
+      });
+      const t = (key: string, options?: Record<string, unknown>) =>
+        i18n.t(key, options) as string;
+      expect(announcedTimerLines('Alice', WEEK, FIVE_MINUTES, t)).toEqual(
+        lines
+      );
+      expect(announcedTimerLines('Alice', 0, FIVE_MINUTES, t)[1]).toBe(forever);
     }
   });
 });
@@ -402,6 +468,60 @@ describe('message timer screens', () => {
       discussions: [],
       sessionsStatuses: new Map(),
     } as never);
+  });
+
+  it('says on the invitation of a chat of two that its timer is not the one the request announced, with both', async () => {
+    fake.state.invitations = [
+      invitation({
+        members: ['bob', 'me'],
+        migrateFrom: 0,
+        messageTimer: 5 * 60_000,
+        announcedTimer: 168 * HOUR,
+      }),
+    ];
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <Invitation />,
+      '/invitation/group/e1',
+      '/invitation/:kind/:id'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    const section = r.container.querySelector('[data-testid="invite-timer"]');
+    const warning = section?.querySelector(
+      '[data-testid="invite-timer-announced"]'
+    );
+    // Its three lines; the wording with both timers is checked above.
+    expect(
+      Array.from(warning?.querySelectorAll('p') ?? []).map(p => p.textContent)
+    ).toEqual([
+      'groups:timer.announced_differs',
+      'groups:timer.announced',
+      'groups:timer.this_chat',
+    ]);
+    expect(r.container.querySelector('[data-testid="invite-accept"]')).not.toBe(
+      null
+    );
+    expect(
+      r.container.querySelector('[data-testid="invite-decline"]')
+    ).not.toBe(null);
+  });
+
+  it('says nothing of an announced timer on any other invitation', async () => {
+    fake.state.invitations = [invitation({ members: ['bob', 'me'] })];
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <Invitation />,
+      '/invitation/group/e1',
+      '/invitation/:kind/:id'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    expect(
+      r.container.querySelector('[data-testid="invite-timer-announced"]')
+    ).toBeNull();
   });
 
   it('says on the invitation when messages are kept', async () => {
