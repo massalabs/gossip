@@ -1359,3 +1359,152 @@ fn a_later_epoch_reaching_a_reinstalled_device_settles_with_its_new_chat() {
         }
     }
 }
+
+impl MNet {
+    /// `carol` is reinstalled into an empty device and founds a chat with `alice` again, as
+    /// it does once `alice` is a contact again. Returns that chat.
+    fn refound(&mut self, carol: usize, alice: usize) -> ChatId {
+        self.reinstall(carol);
+        let g = self.create_with(carol, &[alice], Some(0)).unwrap();
+        self.run(5 * MIN);
+        g
+    }
+
+    /// `alice` adopts the chat `carol` founds after a contact request it accepted, and
+    /// `carol` writes in it. Returns the chat.
+    fn adopted_from(&mut self, carol: usize, alice: usize) -> ChatId {
+        self.consent(alice, carol, true);
+        let g = self.create_with(carol, &[alice], Some(0)).unwrap();
+        self.run(2 * MIN);
+        assert_eq!(self.group_keys(alice), vec![g]);
+        self.say(carol, &g, "from the owner");
+        self.run(2 * MIN);
+        g
+    }
+
+    /// Both devices are on `g` alone, with no invitation left.
+    fn on_one_chat(&self, devices: [usize; 2], g: ChatId, ctx: &str) {
+        for d in devices {
+            assert_eq!(self.group_keys(d), vec![g], "{ctx} device {d}");
+            assert!(self.invitations_of(d).is_empty(), "{ctx} device {d}");
+        }
+    }
+}
+
+/// The chain of chats of two that `chats` replaced each other in, as `d` holds it: each
+/// superseded by the next, the last one listing all the others, oldest first.
+fn check_chain(net: &MNet, d: usize, chats: &[ChatId]) {
+    let (last, earlier) = chats.split_last().unwrap();
+    let mut held = net.superseded(d);
+    held.sort();
+    let mut expected: Vec<(ChatId, ChatId)> = chats.windows(2).map(|w| (w[0], w[1])).collect();
+    expected.sort();
+    assert_eq!(held, expected, "device {d}");
+    assert_eq!(net.summary(d, last).unwrap().earlier, earlier, "device {d}");
+}
+
+/// An account reinstalled into an empty device founds its chat of two again, once, twice and
+/// three times. The other person holds the chat that same owner founded before, written in
+/// or not: the new chat is an ordinary invitation, and accepting it supersedes the chat held,
+/// which stays readable history listed before it; one chat each, in both orders of the
+/// GossipIDs.
+#[test]
+fn accepting_a_reinstalled_owners_new_chat_supersedes_the_one_held() {
+    let (l, h) = sorted_pair();
+    for (alice, carol) in [(h, l), (l, h)] {
+        for wrote in [false, true] {
+            let mut net = MNet::new(2, true);
+            let mut chats = vec![net.adopted_from(carol, alice)];
+            for cycle in 1..=3 {
+                let ctx = format!("carol {carol} wrote {wrote} cycle {cycle}");
+                let prev = *chats.last().unwrap();
+                if wrote {
+                    net.say(alice, &prev, "written");
+                    net.run(2 * MIN);
+                }
+                let y = net.refound(carol, alice);
+                let inv = net.invitation(alice, &y).expect("an invitation");
+                assert_eq!((inv.continues, inv.migration_of), (None, None), "{ctx}");
+                assert_eq!(net.group_keys(alice), vec![prev], "{ctx}");
+                assert_eq!(net.accept(alice, y), y);
+                chats.push(y);
+                net.run(2 * MIN);
+                net.on_one_chat([alice, carol], y, &ctx);
+                check_chain(&net, alice, &chats);
+                assert!(
+                    net.texts(alice, &chats[0])
+                        .contains(&"from the owner".to_owned())
+                );
+                net.say(carol, &y, "again");
+                net.run(2 * MIN);
+                assert!(net.texts(alice, &y).contains(&"again".to_owned()), "{ctx}");
+            }
+        }
+    }
+}
+
+#[test]
+fn declining_the_new_chat_of_a_reinstalled_owner_keeps_the_one_held() {
+    let (l, h) = sorted_pair();
+    for (alice, carol) in [(h, l), (l, h)] {
+        let mut net = MNet::new(2, true);
+        let g = net.adopted_from(carol, alice);
+        let y = net.refound(carol, alice);
+        assert!(net.invitation(alice, &y).is_some());
+        net.decline(alice, y, LeaveChoice::Silent);
+        net.run(HOUR);
+        assert_eq!(net.group_keys(alice), vec![g]);
+        assert!(net.superseded(alice).is_empty());
+        assert!(net.invitations_of(alice).is_empty());
+        assert_eq!(net.group_keys(carol), vec![y]);
+    }
+}
+
+/// The live run: the other person owns the chat both wrote in, the reinstalled one founds a
+/// chat three times, and each invitation is accepted. The first time the tie rule of §5.12
+/// applies (asked, or kept); later, accepting the reinstalled owner's next chat supersedes
+/// its previous one. Never two chats.
+#[test]
+fn three_reinstalls_in_a_row_leave_one_chat_of_two_once_accepted() {
+    let (l, h) = sorted_pair();
+    for (alice, carol) in [(h, l), (l, h)] {
+        let mut net = MNet::new(2, true);
+        let x = net.chat_taken_part_in(alice, carol);
+        let mut current = x;
+        for cycle in 1..=3 {
+            let ctx = format!("carol {carol} cycle {cycle}");
+            let y = net.refound(carol, alice);
+            net.accept_all(alice);
+            net.run(5 * MIN);
+            // The device that sorts first keeps its own chat; otherwise the new one wins.
+            if alice == h || current != x {
+                current = y;
+            }
+            net.on_one_chat([alice, carol], current, &ctx);
+        }
+    }
+}
+
+/// Both people reinstall: neither holds anything, and the chats they found settle as for a
+/// new contact (§5.12): one each when one founds it, the tie rule when both do.
+#[test]
+fn both_sides_reinstalled_end_on_one_chat() {
+    let (l, h) = sorted_pair();
+    for both_found in [false, true] {
+        let mut net = MNet::new(2, true);
+        let _ = net.chat_taken_part_in(h, l);
+        net.reinstall(l);
+        net.reinstall(h);
+        net.consent(h, l, true);
+        let gl = net.create_with(l, &[h], Some(0)).unwrap();
+        let gh = both_found.then(|| {
+            net.consent(l, h, true);
+            net.create_with(h, &[l], Some(0)).unwrap()
+        });
+        net.run(10 * MIN);
+        net.on_one_chat([l, h], gl, &format!("both {both_found}"));
+        if let Some(gh) = gh {
+            assert_eq!(net.superseded(h), vec![(gh, gl)]);
+        }
+    }
+}
