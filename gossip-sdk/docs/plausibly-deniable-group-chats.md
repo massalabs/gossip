@@ -1563,6 +1563,27 @@ An accepted contact counts as an earlier conversation of format version 0 with t
 when it holds nothing but the request. The requester's device then creates a group of the two,
 which it owns, with `migrate_from = 0`, and the accepting device adopts that root without a prompt.
 
+**The timer the request announced.** A contact request may state the message timer (§7.7) its
+sender chose for that chat, and the accepting device shows it before the user accepts. The consent
+then covers only a root that carries that timer; `0` and a root without a timer are the same. The
+first root from that person that the consent would cover, but with another timer, uses the consent
+up and is shown as an ordinary invitation, with Accept and Decline, saying which timer was
+announced and which the chat keeps. A request that states no timer (from an earlier version)
+leaves nothing to compare: the root is adopted as before. The announced timer is kept by the
+accepting device only, beside the consent: never sent, never hashed, and it expires with the
+consent.
+
+- It covers the first adoption only. The owner may change the timer afterwards with a new root,
+  which the device follows as every member does (§7.7), and the timeline shows it. An owner can
+  therefore announce a week, found the chat with a week and change it a minute later.
+- Nothing is sent because of it. A chat held as an invitation sends what any invitation sends, and
+  declining it silently sends nothing. The requester can still tell it apart from an adoption:
+  an adopted chat makes the device query and connect at once (§4.8), an invitation only once the
+  user accepts. Only a requester that founds with another timer than it announced sees this; it
+  learns that the device compared, and when its user accepted, as for any invitation.
+- The tie rule below does not look at it: when the device holds its own chat too, the cases of the
+  table apply as they are.
+
 **One automatic chat per pair.** Every group a device creates by itself, after a contact request
 or by migrating an earlier conversation, carries `migrate_from = 0`, and at most one such group
 exists between two people. A group a user creates deliberately never carries the field: it is
@@ -1651,20 +1672,26 @@ it first) treats that root as received directly: it pairs with the device's own 
 The cases, with L the person whose GossipID sorts first, H the other, and G_L and G_H the chats
 each created. "Asked" means the invitation to continue above.
 
-| #   | Situation                                                                         | L's device                             | H's device                                 | Continues in                               |
-| --- | --------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------ | ------------------------------------------ |
-| 1   | Both create at the same moment                                                    | not asked: keeps G_L                   | not asked: switches to G_L                 | G_L                                        |
-| 2a  | H creates after L accepted H's contact request; L has none yet                    | not asked: the contact was the consent |                                            | G_H                                        |
-| 2b  | H migrates an earlier conversation with history; L has none yet                   | asked                                  |                                            | G_H if L accepts                           |
-| 3   | H creates and writes in G_H while L is offline; L had created G_L                 | not asked: keeps G_L, G_H is history   | not asked: switches to G_L, G_H is history | G_L                                        |
-| 4a  | L ignored H's invitation without answering; later L creates G_L                   | not asked: keeps G_L                   | not asked: switches to G_L, G_H is history | G_L                                        |
-| 4b  | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L                   | asked                                      | G_L if H accepts                           |
-| 5   | L took part in G_H, then sends a new G_L                                          |                                        | asked                                      | G_H; G_L if H accepts                      |
-| 6   | H sends a new G_H, whether or not H took part in G_L                              | not asked: keeps G_L, G_H is history   |                                            | G_L                                        |
-| 7   | H joined G_L, then restores an old backup and creates G_H                         | not asked: keeps G_L                   | not asked: switches to G_L                 | G_L                                        |
-| 8   | L joined G_H, then restores an old backup and creates G_L                         | not asked: keeps G_L                   | asked                                      | each on its own until H accepts, then G_L  |
-| 9   | H restores a backup from before L took part; L sends G_L                          |                                        | not asked: switches to G_L, G_H is history | G_L                                        |
-| 10  | H holds G_L, which L created; L reinstalls into an empty device and creates G_L2  |                                        | asked (an ordinary invitation)             | each on its own until H accepts, then G_L2 |
+| #   | Situation                                                                         | L's device                              | H's device                                 | Continues in                               |
+| --- | --------------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------ | ------------------------------------------ |
+| 1   | Both create at the same moment                                                    | not asked: keeps G_L                    | not asked: switches to G_L                 | G_L                                        |
+| 2a  | H creates after L accepted H's contact request; L has none yet                    | not asked: the contact was the consent¹ |                                            | G_H                                        |
+| 2b  | H migrates an earlier conversation with history; L has none yet                   | asked                                   |                                            | G_H if L accepts                           |
+| 3   | H creates and writes in G_H while L is offline; L had created G_L                 | not asked: keeps G_L, G_H is history    | not asked: switches to G_L, G_H is history | G_L                                        |
+| 4a  | L ignored H's invitation without answering; later L creates G_L                   | not asked: keeps G_L                    | not asked: switches to G_L, G_H is history | G_L                                        |
+| 4b  | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L                    | asked                                      | G_L if H accepts                           |
+| 5   | L took part in G_H, then sends a new G_L                                          |                                         | asked                                      | G_H; G_L if H accepts                      |
+| 6   | H sends a new G_H, whether or not H took part in G_L                              | not asked: keeps G_L, G_H is history    |                                            | G_L                                        |
+| 7   | H joined G_L, then restores an old backup and creates G_H                         | not asked: keeps G_L                    | not asked: switches to G_L                 | G_L                                        |
+| 8   | L joined G_H, then restores an old backup and creates G_L                         | not asked: keeps G_L                    | asked                                      | each on its own until H accepts, then G_L  |
+| 9   | H restores a backup from before L took part; L sends G_L                          |                                         | not asked: switches to G_L, G_H is history | G_L                                        |
+| 10  | H holds G_L, which L created; L reinstalls into an empty device and creates G_L2  |                                         | asked (an ordinary invitation)²            | each on its own until H accepts, then G_L2 |
+
+¹ Unless G_H carries another timer than H's request announced: then G_H is an ordinary invitation
+on L's device (above).
+
+² Whatever timer G_L2 carries: H holds a chat of two with L, so no consent applies and the
+invitation names no announced timer.
 
 _Why:_ two people who start the same chat at the same moment must end on one chat without being
 asked, but a chat both have used must not be replaced by one of them without the other's consent,
