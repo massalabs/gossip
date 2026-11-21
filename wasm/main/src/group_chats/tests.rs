@@ -821,6 +821,58 @@ fn a_consent_names_the_announced_timer_through_the_bindings() {
     );
 }
 
+/// A store written by the build before the announced timer (no `consent_timers` nor
+/// `announced_timers` records) opens: the two tables read as empty, and the consent it holds
+/// adopts the chat whatever its timer, as that build did.
+#[test]
+fn a_store_without_the_announced_timer_tables_opens_as_before() {
+    const HOUR: u64 = 3_600_000;
+    let mut net = Net::new(2);
+    let ids: Vec<GossipId> = net.peers.iter().map(Peer::id).collect();
+    let now = net.now;
+    net.peers[1]
+        .core
+        .consent_to_direct_chat(ids[0], true, Some(24 * HOUR), now)
+        .unwrap();
+    net.peers[1].persist();
+    let new_kinds = ["consent_timers", "announced_timers"];
+    assert!(
+        net.peers[1]
+            .db
+            .node
+            .keys()
+            .any(|(kind, _)| kind == "consent_timers")
+    );
+    net.peers[1]
+        .db
+        .node
+        .retain(|(kind, _), _| !new_kinds.contains(&kind.as_str()));
+    let (public, secret) = keys(&net.peers[1].secret_seed);
+    net.peers[1].core = Core::open(
+        IdentityKey::new(public, &secret),
+        &net.peers[1].db.snapshot(),
+    )
+    .unwrap();
+    assert_ne!(net.peers[1].core.direct_chat_consents(), "[]");
+    let g = net.peers[0]
+        .core
+        .create_group_with("".into(), vec![ids[1]], Some(0), HOUR, now)
+        .unwrap();
+    net.peers[0].persist();
+    net.settle(1_000);
+    assert_eq!(net.peers[1].core.invitations(net.now + HOUR), "[]");
+    assert!(net.peers[1].core.holds_direct_chat(ids[0]));
+    let _ = g;
+    net.peers[1].reopen();
+    assert!(
+        !net.peers[1]
+            .db
+            .node
+            .keys()
+            .any(|(kind, _)| new_kinds.contains(&kind.as_str()))
+    );
+}
+
 /// Reactions and media through the bindings (§7.6): a reaction is listed on its target in the
 /// timeline JSON and removed by a later version; a media message comes with its length and
 /// its data is read on its own.
