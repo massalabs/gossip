@@ -20,7 +20,10 @@ import { setupSession } from '../utils';
 import { GossipSdk } from '../../src/gossip';
 import { ensureWasmInitialized } from '../../src/wasm/loader';
 import { generateMnemonic } from '../../src/crypto/bip39';
-import { generateEncryptionKey } from '../../src/wasm/encryption';
+import {
+  encryptionKeyFromBytes,
+  generateEncryptionKey,
+} from '../../src/wasm/encryption';
 import { getTestStorageConfig } from '../testDb';
 import { SdkEventType } from '../../src/core/SdkEventEmitter';
 import {
@@ -39,6 +42,16 @@ let clock = 1_800_000_000_000;
 
 /** The recovery phrase of each peer, to restore it on an empty device. */
 const mnemonics = new WeakMap<GossipSdk, string>();
+/** The storage key of each peer, to open it again. */
+const keysOf = new WeakMap<GossipSdk, Uint8Array>();
+
+/** The test clock, for what an SDK times by itself. */
+function setClock(sdk: GossipSdk) {
+  (sdk.groups as unknown as { now: () => number }).now = () => clock;
+  (
+    sdk as unknown as { _announcement: { now: () => number } }
+  )._announcement.now = () => clock;
+}
 
 async function openPeer(
   net: MockMessageProtocol,
@@ -46,16 +59,18 @@ async function openPeer(
 ): Promise<GossipSdk> {
   const sdk = new GossipSdk();
   await sdk.init({ storage: getTestStorageConfig(), messageProtocol: net });
+  const encryptionKey = await generateEncryptionKey();
   await sdk.openSession({
     mnemonic,
-    encryptionKey: await generateEncryptionKey(),
+    encryptionKey,
     onPersist: async () => {},
     autoStartPolling: false,
     publishPublicKey: false,
   });
-  (sdk.groups as unknown as { now: () => number }).now = () => clock;
+  setClock(sdk);
   await sdk.conversations.settle();
   mnemonics.set(sdk, mnemonic);
+  keysOf.set(sdk, encryptionKey.to_bytes());
   return sdk;
 }
 
@@ -760,6 +775,142 @@ describe('Direct chats, contacts and connections', { timeout: 300_000 }, () => {
       const other = p === alice ? bob : alice;
       expect(p.discussions.getStatus(other.userId)).toBe(SessionStatus.Active);
     }
+  });
+
+  const TEN_MINUTES = 10 * 60_000;
+
+  /** `p` closed and opened again on its own database, as after a reload. */
+  async function reload(p: GossipSdk) {
+    const encryptedSession = p.getEncryptedSession();
+    await p.closeSession();
+    await p.openSession({
+      mnemonic: mnemonics.get(p)!,
+      encryptedSession,
+      encryptionKey: await encryptionKeyFromBytes(keysOf.get(p)!),
+      onPersist: async () => {},
+      autoStartPolling: false,
+      publishPublicKey: false,
+    });
+    setClock(p);
+    await p.conversations.settle();
+  }
+
+  /** Bob restored, adds Alice; she answers at once. */
+  async function answeredOnce(): Promise<{ alice: GossipSdk; bob: GossipSdk }> {
+    const { alice, bob } = await restoredContact();
+    await addContact(bob, alice, 'Alice');
+    await deliver(10);
+    expect(bob.discussions.getStatus(alice.userId)).toBe(SessionStatus.Active);
+    return { alice, bob };
+  }
+
+  /** Bob restored again a minute later, adds Alice: she owes him an answer. */
+  async function renewedWithinTheWindow(
+    alice: GossipSdk,
+    bob0: GossipSdk
+  ): Promise<{ bob: GossipSdk; waiting: number }> {
+    clock += 60_000;
+    const bob = await restore(bob0);
+    await addContact(bob, alice, 'Alice');
+    await deliver(10);
+    // Within ten minutes of her answer: not answered yet.
+    expect(bob.discussions.getStatus(alice.userId)).toBe(
+      SessionStatus.SelfRequested
+    );
+    return { bob, waiting: posted() };
+  }
+
+  it('answers a renewal that comes within ten minutes of an earlier answer once they end, once', async () => {
+    const { alice, bob: bob0 } = await answeredOnce();
+    const { bob, waiting } = await renewedWithinTheWindow(alice, bob0);
+
+    clock += TEN_MINUTES;
+    await deliver(10);
+    expect(posted()).toBe(waiting + 1);
+    expect(alice.discussions.getStatus(bob.userId)).toBe(SessionStatus.Active);
+    expect(bob.discussions.getStatus(alice.userId)).toBe(SessionStatus.Active);
+    await messagesFlow(alice, bob);
+
+    // Nothing more: Bob does not answer the answer, Alice owes nothing.
+    const settled = posted();
+    for (let i = 0; i < 3; i++) {
+      clock += TEN_MINUTES;
+      await deliver(4);
+    }
+    expect(posted()).toBe(settled);
+  });
+
+  it('keeps a renewal owed an answer across a reload, and answers it once the ten minutes end', async () => {
+    const { alice, bob: bob0 } = await answeredOnce();
+    const { bob, waiting } = await renewedWithinTheWindow(alice, bob0);
+
+    await reload(alice);
+    await deliver(4);
+    // The reload does not end the ten minutes.
+    expect(posted()).toBe(waiting);
+    clock += TEN_MINUTES;
+    await deliver(10);
+    expect(posted()).toBe(waiting + 1);
+    expect(bob.discussions.getStatus(alice.userId)).toBe(SessionStatus.Active);
+    await messagesFlow(alice, bob);
+  });
+
+  it('owes no answer for a replayed announcement', async () => {
+    const { alice, bob } = await answeredOnce();
+    const settled = posted();
+    for (const a of net.getStoredAnnouncements().slice(-2)) {
+      await net.sendAnnouncement(a.data);
+    }
+    await deliver(4);
+    clock += TEN_MINUTES;
+    await deliver(6);
+    expect(posted()).toBe(settled + 2);
+    for (const p of [alice, bob]) {
+      const other = p === alice ? bob : alice;
+      expect(p.discussions.getStatus(other.userId)).toBe(SessionStatus.Active);
+    }
+  });
+
+  it('answers a renewal of an active session once, and never the answer, even once the ten minutes end', async () => {
+    const [alice, bob] = await open(2);
+    await setupSession(alice, bob, 'Bob', 'Alice', 'hello', {
+      asNewContact: true,
+    });
+    await deliver();
+    const before = posted();
+    expect((await alice.discussions.renew(bob.userId)).success).toBe(true);
+    await deliver(10);
+    // Alice's renewal and Bob's answer.
+    expect(posted()).toBe(before + 2);
+    for (let i = 0; i < 3; i++) {
+      clock += TEN_MINUTES;
+      await deliver(4);
+    }
+    expect(posted()).toBe(before + 2);
+    expect(alice.discussions.getStatus(bob.userId)).toBe(SessionStatus.Active);
+    expect(bob.discussions.getStatus(alice.userId)).toBe(SessionStatus.Active);
+    await messagesFlow(alice, bob);
+  });
+
+  it('settles two devices that renew at once without answering either, even once the ten minutes end', async () => {
+    const [alice, bob] = await open(2);
+    await setupSession(alice, bob, 'Bob', 'Alice', 'hello', {
+      asNewContact: true,
+    });
+    await deliver();
+    const before = posted();
+    expect((await alice.discussions.renew(bob.userId)).success).toBe(true);
+    expect((await bob.discussions.renew(alice.userId)).success).toBe(true);
+    await deliver(10);
+    expect(posted()).toBe(before + 2);
+    for (let i = 0; i < 3; i++) {
+      clock += TEN_MINUTES;
+      await deliver(4);
+    }
+    expect(posted()).toBe(before + 2);
+    expect(alice.discussions.getStatus(bob.userId)).toBe(SessionStatus.Active);
+    expect(bob.discussions.getStatus(alice.userId)).toBe(SessionStatus.Active);
+    await messagesFlow(alice, bob);
   });
 
   it('still waits for the user before accepting a first contact request', async () => {
