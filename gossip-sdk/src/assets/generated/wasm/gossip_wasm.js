@@ -181,9 +181,32 @@ function debugString(val) {
     // TODO we could test for more things here, like `Set`s and `Map`s.
     return className;
 }
+/**
+ * The largest group plaintext, in bytes (§13.10).
+ * @returns {number}
+ */
+export function group_max_plaintext_bytes() {
+    const ret = wasm.group_max_plaintext_bytes();
+    return ret >>> 0;
+}
 
-export function start() {
-    wasm.start();
+/**
+ * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
+ * forward of text. A longer one is refused by the engine and by every receiver.
+ * @returns {number}
+ */
+export function group_max_text_bytes() {
+    const ret = wasm.group_max_metadata_bytes();
+    return ret >>> 0;
+}
+
+/**
+ * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
+ * @returns {number}
+ */
+export function group_max_metadata_bytes() {
+    const ret = wasm.group_max_metadata_bytes();
+    return ret >>> 0;
 }
 
 function takeFromExternrefTable0(idx) {
@@ -191,6 +214,39 @@ function takeFromExternrefTable0(idx) {
     wasm.__externref_table_dealloc(idx);
     return value;
 }
+/**
+ * The size of message metadata, given as `publish_message` takes it (a list of
+ * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
+ * @param {string} metadata
+ * @returns {number}
+ */
+export function group_metadata_bytes(metadata) {
+    const ptr0 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.group_metadata_bytes(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] >>> 0;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+
+export function start() {
+    wasm.start();
+}
+
 /**
  * Generates user keys from a passphrase.
  *
@@ -209,18 +265,6 @@ export function generate_user_keys(passphrase) {
     return UserKeys.__wrap(ret[0]);
 }
 
-function _assertClass(instance, klass) {
-    if (!(instance instanceof klass)) {
-        throw new Error(`expected instance of ${klass.name}`);
-    }
-}
-
-function passArray8ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 1, 1) >>> 0;
-    getUint8ArrayMemory0().set(arg, ptr / 1);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
@@ -323,50 +367,6 @@ export function aead_decrypt(key, nonce, ciphertext, aad) {
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     }
     return v3;
-}
-
-/**
- * The largest group plaintext, in bytes (§13.10).
- * @returns {number}
- */
-export function group_max_plaintext_bytes() {
-    const ret = wasm.group_max_plaintext_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
- * forward of text. A longer one is refused by the engine and by every receiver.
- * @returns {number}
- */
-export function group_max_text_bytes() {
-    const ret = wasm.group_max_metadata_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
- * @returns {number}
- */
-export function group_max_metadata_bytes() {
-    const ret = wasm.group_max_metadata_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The size of message metadata, given as `publish_message` takes it (a list of
- * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
- * @param {string} metadata
- * @returns {number}
- */
-export function group_metadata_bytes(metadata) {
-    const ptr0 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.group_metadata_bytes(ptr0, len0);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return ret[0] >>> 0;
 }
 
 /**
