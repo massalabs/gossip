@@ -23,7 +23,10 @@ import { useAccountStore } from '../stores/accountStore';
 import { isolate } from '../utils/groupName';
 import { isAcceptedContact } from '../utils/conversations';
 import { ROUTES } from '../constants/routes';
-import { messageTimerSentence } from '../constants/messageTimer';
+import {
+  announcedTimerLines,
+  messageTimerSentence,
+} from '../constants/messageTimer';
 
 const Section: React.FC<{
   title: string;
@@ -241,6 +244,25 @@ const Invitation: React.FC = () => {
           <p className="text-xs text-muted-foreground">
             {t('timer.owner_only')}
           </p>
+          {invitation.announcedTimer !== null &&
+            invitation.announcedTimer !== undefined && (
+              <div
+                className="flex gap-2 text-xs text-destructive"
+                data-testid="invite-timer-announced"
+              >
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <div className="space-y-0.5">
+                  {announcedTimerLines(
+                    name,
+                    invitation.announcedTimer,
+                    invitation.messageTimer,
+                    t
+                  ).map(line => (
+                    <p key={line}>{line}</p>
+                  ))}
+                </div>
+              </div>
+            )}
         </Section>
       )}
 
