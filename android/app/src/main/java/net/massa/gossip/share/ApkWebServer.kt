@@ -1,6 +1,6 @@
 package net.massa.gossip.share
 
-import android.util.Log
+import net.massa.gossip.DebugLog
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.IOException
@@ -59,7 +59,7 @@ class ApkWebServer(
             } catch (_: SocketException) {
                 return
             } catch (e: IOException) {
-                Log.w(TAG, "accept failed", e)
+                DebugLog.w(TAG, "accept failed", e)
                 continue
             }
             if (active.incrementAndGet() > MAX_CLIENTS) {
@@ -101,7 +101,7 @@ class ApkWebServer(
                 }
                 out.flush()
             } catch (e: IOException) {
-                Log.d(TAG, "client dropped: ${e.message}")
+                DebugLog.d(TAG, "client dropped: ${e.message}")
             }
         }
     }

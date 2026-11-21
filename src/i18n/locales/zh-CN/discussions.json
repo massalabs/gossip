@@ -8,7 +8,8 @@
   "filter": {
     "all": "全部",
     "unread": "未读",
-    "pending": "待处理"
+    "pending": "待处理",
+    "archived": "存档"
   },
   "message_input": {
     "replying_to": "回复",
@@ -21,7 +22,8 @@
     "input_label": "消息输入",
     "send": "发送消息",
     "emoji": "表情",
-    "emoji_search": "搜索表情…"
+    "emoji_search": "搜索表情…",
+    "size_counter": "{{used}} / {{max}} 字节"
   },
   "message": {
     "sent": "已发送",
@@ -93,8 +95,7 @@
   "new_discussion": {
     "title": "新会话",
     "new_contact": "新联系人",
-    "new_group": "新群组（即将推出）",
-    "coming_soon": "即将推出",
+    "new_group": "新群组",
     "contacts": "联系人",
     "search_contacts": "搜索联系人",
     "loading_contacts": "正在加载联系人…",

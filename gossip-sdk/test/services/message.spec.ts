@@ -10,7 +10,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { MessageService } from '../../src/services/message';
+import {
+  MessageService,
+  LEGACY_FORMAT_NOT_SENT,
+} from '../../src/services/message';
 import {
   MessageStatus,
   MessageDirection,
@@ -68,7 +71,8 @@ function createTestMessage(
     ownerUserId: overrides.ownerUserId ?? OWNER_USER_ID,
     contactUserId: overrides.contactUserId ?? CONTACT_USER_ID,
     content: overrides.content ?? 'Test message',
-    type: overrides.type ?? MessageType.TEXT,
+    // Only keep-alives are queued (§2.1: no one-to-one format is sent).
+    type: overrides.type ?? MessageType.KEEP_ALIVE,
     direction: MessageDirection.OUTGOING,
     status: MessageStatus.SENDING,
     timestamp: new Date(),
@@ -231,64 +235,6 @@ describe('MessageService', () => {
     ]);
   });
 
-  it('editMessage updates outgoing message content and marks as edited', async () => {
-    const testQueries = getTestQueries();
-
-    await insertTestContactAndDiscussion();
-
-    // Insert an outgoing text message with a messageId
-    const msgId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Original content',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date('2024-01-01T00:00:00Z'),
-      messageId: new Uint8Array(12).fill(7),
-    });
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
-    const result = await service.editMessage(msgId, 'Edited content');
-    expect(result).toBe(true);
-
-    const updated = await testQueries.messages.getById(msgId);
-    expect(updated?.content).toBe('Edited content');
-    expect(updated?.timestamp?.getTime()).toBe(
-      new Date('2024-01-01T00:00:00Z').getTime()
-    );
-
-    const parsedMetadata = updated?.metadata
-      ? JSON.parse(updated.metadata)
-      : {};
-    expect(parsedMetadata.edited).toBe(true);
-
-    // Control row must persist editOf so send queue serializes MESSAGE_TYPE_EDIT
-    const all = await testQueries.messages.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-    const controlRow = all.find(
-      r => r.metadata && r.metadata.includes('"control":"edit"')
-    );
-    expect(controlRow).toBeDefined();
-    expect(controlRow!.editOf).toBeTruthy();
-    const editOfParsed = JSON.parse(controlRow!.editOf!);
-    expect(editOfParsed.originalMsgId).toBeDefined();
-    expect(Buffer.from(new Uint8Array(12).fill(7))).toEqual(
-      Buffer.from(
-        Uint8Array.from(Buffer.from(editOfParsed.originalMsgId, 'base64'))
-      )
-    );
-  });
-
   it('editMessage returns false for incoming messages and does not modify the row', async () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
@@ -325,184 +271,6 @@ describe('MessageService', () => {
     expect(
       rows.filter(r => r.metadata?.includes?.('"control":"edit"'))
     ).toHaveLength(0);
-  });
-
-  it('deleteMessage marks an incoming message as deleted and enqueues a control message', async () => {
-    const testQueries = getTestQueries();
-    await insertTestContactAndDiscussion();
-
-    const msgId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'From peer',
-      type: MessageType.TEXT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date('2024-06-01T12:00:00Z'),
-      messageId: new Uint8Array(12).fill(8),
-    });
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
-    expect(await service.deleteMessage(msgId)).toBe(true);
-
-    const row = await testQueries.messages.getById(msgId);
-    expect(row?.content).toBe('[Message deleted]');
-    expect(row?.type).toBe(MessageType.DELETED);
-    const rows = await testQueries.messages.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-    // A delete control message should have been enqueued
-    expect(
-      rows.filter(r => r.type === MessageType.DELETED && r.content === '')
-    ).toHaveLength(1);
-  });
-
-  it('deleteMessage on a reaction only deletes the reaction row and keeps original message visible', async () => {
-    const testQueries = getTestQueries();
-    await insertTestContactAndDiscussion();
-
-    // Original text message that will be reacted to
-    const originalMsgIdBytes = new Uint8Array(12).fill(11);
-    const originalRowId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Original message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date('2024-07-01T10:00:00Z'),
-      messageId: originalMsgIdBytes,
-    });
-
-    // Outgoing reaction row
-    const reactionRowId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: '👍',
-      type: MessageType.REACTION,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date('2024-07-01T10:01:00Z'),
-      messageId: new Uint8Array(12).fill(12),
-      reactionOf: JSON.stringify({
-        originalMsgId: Buffer.from(originalMsgIdBytes).toString('base64'),
-      }),
-    });
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
-    // Simulate tapping on own reaction chip → delete the reaction message
-    const deleted = await service.deleteMessage(reactionRowId);
-    expect(deleted).toBe(true);
-
-    const allRows = await testQueries.messages.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-    const originalRow = allRows.find(r => r.id === originalRowId);
-    const reactionRow = allRows.find(r => r.id === reactionRowId);
-
-    // Original message content/type must be unchanged
-    expect(originalRow?.content).toBe('Original message');
-    expect(originalRow?.type).toBe(MessageType.TEXT);
-
-    // Reaction row should now be marked DELETED with "[Message deleted]"
-    expect(reactionRow).toBeUndefined();
-
-    // getVisibleMessages must not surface the deleted reaction as a bubble
-    const visible = await service.getVisibleMessages(CONTACT_USER_ID);
-    const visibleIds = visible.map(m => m.id);
-    expect(visibleIds).toEqual([originalRowId]);
-    expect(visible[0].content).toBe('Original message');
-  });
-
-  it('sendReaction inserts reaction rows without updating discussion last message, even with multiple reactions', async () => {
-    const testQueries = getTestQueries();
-    await insertTestContactAndDiscussion();
-
-    // Insert a base text message with a messageId to react to
-    const originalMessageIdBytes = new Uint8Array(12).fill(5);
-    const baseMsgId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Base message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date('2024-07-01T12:00:00Z'),
-      messageId: originalMessageIdBytes,
-    });
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
-    const discussionBefore = await testQueries.discussions.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-
-    const result = await service.sendReaction(
-      CONTACT_USER_ID,
-      '😀',
-      originalMessageIdBytes
-    );
-    expect(result.success).toBe(true);
-
-    // Send a second reaction that "overrides" the first one at the UI level
-    const result2 = await service.sendReaction(
-      CONTACT_USER_ID,
-      '😂',
-      originalMessageIdBytes
-    );
-    expect(result2.success).toBe(true);
-
-    const allRows = await testQueries.messages.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-    const baseRow = allRows.find(r => r.id === baseMsgId);
-    const reactionRows = allRows.filter(r => r.type === MessageType.REACTION);
-    expect(baseRow).toBeDefined();
-    expect(reactionRows).toHaveLength(2);
-    expect(reactionRows.map(r => r.content).sort()).toEqual(['😀', '😂']);
-    reactionRows.forEach(r => {
-      expect(r.direction).toBe(MessageDirection.OUTGOING);
-      expect(r.reactionOf).toBeTruthy();
-      const parsed = JSON.parse(r.reactionOf!);
-      expect(parsed.originalMsgId).toBeDefined();
-    });
-
-    const discussionAfter = await testQueries.discussions.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-
-    // lastMessage* should still reference the base message, not the reaction
-    expect(discussionAfter?.lastMessageId).toBe(
-      discussionBefore?.lastMessageId
-    );
-    expect(discussionAfter?.lastMessageContent).toBe(
-      discussionBefore?.lastMessageContent
-    );
   });
 
   it('getReactions returns only reaction rows for a contact', async () => {
@@ -611,11 +379,22 @@ describe('MessageService', () => {
 
         expect(dbMessage?.status).toBe(MessageStatus.WAITING_SESSION);
         expect(discussion?.unreadCount).toBe(0);
-        expect(discussion?.lastMessageTimestamp).toBeDefined();
-        expect(discussion?.lastMessageContent).toBe(dbMessage?.content);
-        expect(discussion?.lastMessageId).toBe(dbMessage?.id);
       }
     );
+
+    it('refuses a message of the earlier one-to-one format and stores nothing', async () => {
+      await insertTestContactAndDiscussion();
+      const result = await messageService.sendMessage(
+        createTestMessage({ type: MessageType.TEXT })
+      );
+      expect(result).toEqual({ success: false, error: LEGACY_FORMAT_NOT_SENT });
+      expect(
+        await testQueries.messages.getByOwnerAndContact(
+          OWNER_USER_ID,
+          CONTACT_USER_ID
+        )
+      ).toEqual([]);
+    });
 
     it('discussion should not be updated when sending keep-alive message', async () => {
       await insertTestContactAndDiscussion();
@@ -741,109 +520,6 @@ describe('deleteReactionsForMessage query', () => {
     expect(allRows.find(r => r.id === reaction2Id)).toBeUndefined();
 
     // Unrelated reaction should still exist
-    expect(allRows.find(r => r.id === unrelatedReactionId)).toBeDefined();
-    expect(allRows.find(r => r.id === unrelatedReactionId)?.content).toBe('😂');
-  });
-});
-
-describe('deleteMessage also removes associated reactions', () => {
-  beforeEach(clearAllTables);
-
-  it('deleteMessage deletes reactions for the message from the DB', async () => {
-    const testQueries = getTestQueries();
-    await insertTestContactAndDiscussion();
-
-    const originalMsgIdBytes = new Uint8Array(12).fill(50);
-    const originalMsgIdBase64 = encodeToBase64(originalMsgIdBytes);
-
-    // Insert the outgoing message that will be deleted
-    const msgId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Message to delete',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date('2024-01-01T00:00:00Z'),
-      messageId: originalMsgIdBytes,
-    });
-
-    // Insert reactions referencing this message
-    const reaction1Id = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: '👍',
-      type: MessageType.REACTION,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date('2024-01-01T00:01:00Z'),
-      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
-    });
-
-    const reaction2Id = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: '❤️',
-      type: MessageType.REACTION,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date('2024-01-01T00:02:00Z'),
-      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
-    });
-
-    // Insert an unrelated message with its own reaction
-    const unrelatedMsgIdBytes = new Uint8Array(12).fill(60);
-    const unrelatedMsgId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Unrelated message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date('2024-01-01T00:03:00Z'),
-      messageId: unrelatedMsgIdBytes,
-    });
-
-    const unrelatedReactionId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: '😂',
-      type: MessageType.REACTION,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date('2024-01-01T00:04:00Z'),
-      reactionOf: JSON.stringify({
-        originalMsgId: encodeToBase64(unrelatedMsgIdBytes),
-      }),
-    });
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
-    const result = await service.deleteMessage(msgId);
-    expect(result).toBe(true);
-
-    const allRows = await testQueries.messages.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-
-    // The deleted message should be marked as DELETED
-    const deletedMsg = allRows.find(r => r.id === msgId);
-    expect(deletedMsg?.type).toBe(MessageType.DELETED);
-    expect(deletedMsg?.content).toBe('[Message deleted]');
-
-    // Reactions for the deleted message should be removed
-    expect(allRows.find(r => r.id === reaction1Id)).toBeUndefined();
-    expect(allRows.find(r => r.id === reaction2Id)).toBeUndefined();
-
-    // Unrelated message and its reaction should remain
-    expect(allRows.find(r => r.id === unrelatedMsgId)).toBeDefined();
     expect(allRows.find(r => r.id === unrelatedReactionId)).toBeDefined();
     expect(allRows.find(r => r.id === unrelatedReactionId)?.content).toBe('😂');
   });

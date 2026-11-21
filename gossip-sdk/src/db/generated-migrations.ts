@@ -132,4 +132,68 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'UPDATE `discardedPeers` SET `userId` = lower(`userId`) WHERE `userId` <> lower(`userId`);',
     ],
   },
+  {
+    idx: 10,
+    tag: '0010_group_chats',
+    when: 1795084958395,
+    digest: '0c83b730f5998e9e90ccbdfd7d87c25617a7b45451e5dd107425dcd73cb6293b',
+    statements: [
+      'CREATE TABLE `groupEdges` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`eventId` text NOT NULL,\n\t`parents` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `eventId`)\n);',
+      'CREATE TABLE `groupEventRows` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`eventId` text NOT NULL,\n\t`state` text NOT NULL,\n\t`fields` text,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `eventId`)\n);',
+      'CREATE TABLE `groupObjects` (\n\t`ownerUserId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`syncObjId` text NOT NULL,\n\t`fields` text NOT NULL,\n\t`shareable` integer NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `chatId`, `syncObjId`)\n);',
+      'CREATE TABLE `groupOutbox` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`ownerUserId` text NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`seeker` blob NOT NULL,\n\t`ciphertext` blob NOT NULL,\n\t`whenToSend` integer NOT NULL\n);',
+      'CREATE INDEX `group_outbox_owner_idx` ON `groupOutbox` (`ownerUserId`);',
+      'CREATE TABLE `groupRecords` (\n\t`ownerUserId` text NOT NULL,\n\t`kind` text NOT NULL,\n\t`key` text NOT NULL,\n\t`fields` text NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `kind`, `key`)\n);',
+    ],
+  },
+  {
+    idx: 11,
+    tag: '0011_group_conversations',
+    when: 1795113424155,
+    digest: 'd0ba434cbb789d75849613594b707d776b09cc07d524d64c4826bf38b452cf68',
+    statements: [
+      "ALTER TABLE `contacts` ADD `connection` text DEFAULT 'accepted' NOT NULL;",
+      'ALTER TABLE `discussions` ADD `isArchive` integer DEFAULT false NOT NULL;',
+      'ALTER TABLE `discussions` ADD `archived` integer DEFAULT false NOT NULL;',
+      'ALTER TABLE `discussions` ADD `linkedGroupId` text;',
+      'ALTER TABLE `discussions` ADD `directChatOwed` integer DEFAULT false NOT NULL;',
+      "UPDATE `discussions` SET `isArchive` = 1 WHERE `contactUserId` <> '__self__';",
+    ],
+  },
+  {
+    idx: 12,
+    tag: '0012_discussions_direct_chat_timer',
+    when: 1795186445695,
+    digest: '0d3057bbb4d0fbc7e996f4ae74f514b0895c9833a5f60650f308b0218c857f2c',
+    statements: ['ALTER TABLE `discussions` ADD `directChatTimer` integer;'],
+  },
+  {
+    idx: 13,
+    tag: '0013_private_migration_session_reset',
+    when: 1795190781560,
+    digest: 'fbc09b2d3106ca822208e6972940c55315b38f32365bd8f0c8fddea7eef4de56',
+    statements: [
+      'ALTER TABLE `privateMigration` ADD `sessionReset` integer DEFAULT false NOT NULL;',
+    ],
+  },
+  {
+    idx: 14,
+    tag: '0014_discussions_seeker_conflict',
+    when: 1795192149885,
+    digest: 'f9f7675bd86495c7cb3c527be944fec7764fb3f9b55c839b6d682894099bcfd6',
+    statements: [
+      'ALTER TABLE `discussions` ADD `seekerConflictRenewedAt` integer;',
+    ],
+  },
+  {
+    idx: 15,
+    tag: '0015_discussions_renewal_answer',
+    when: 1795223316032,
+    digest: 'f523b4edaac29ee0fe82645b95d259680b3f8ed38ac0b66f65021832f5ef8170',
+    statements: [
+      'ALTER TABLE `discussions` ADD `awaitingAnswer` integer DEFAULT false NOT NULL;',
+      'ALTER TABLE `discussions` ADD `renewalAnsweredAt` integer;',
+      'ALTER TABLE `discussions` ADD `renewalAnswerOwed` integer DEFAULT false NOT NULL;',
+    ],
+  },
 ];

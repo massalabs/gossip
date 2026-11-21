@@ -1,0 +1,1888 @@
+//! The root: the signed record that founds an epoch (§4.1 to §4.7).
+
+use core::fmt;
+use std::collections::BTreeMap;
+
+use auth::UserPublicKeys;
+use crypto_dsa::{SIGNATURE_SIZE, SIGNING_RANDOMNESS_SIZE};
+
+use crate::cbor::Value;
+use crate::constants::{
+    CONTEXT_ROOT_SIGNATURE, DOMAIN_ROOT, EVENT_VERSION, MAX_MEMBERS, MAX_NAME_BYTES,
+    MAX_ROOT_PARENTS, MAX_SETTINGS_BYTES, MAX_SETTINGS_ENTRIES, MAX_SETTINGS_KEY_BYTES,
+    MIN_MEMBERS, MIN_ROOT_PARENTS,
+};
+use crate::error::{Error, Result};
+use crate::hash::{h, parent_commitment, ref_chat_id};
+use crate::ids::{
+    Challenge, ChatId, GossipId, GroupSecret, ParentCommitment, RefChatId, check_sorted_distinct,
+};
+use crate::keys::{SignatureBytes, Signer, parse_user_public_keys, verify_id};
+use crate::wire::{self, proto};
+
+/// The type of a root (§4.7). It is hashed into the root ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RootType {
+    /// The ordinary root, signed by the owner named in its own `owner` field; also used to
+    /// found a group and to resolve a fork.
+    Successor = 0,
+    /// A root signed by the owner of its single parent, naming a new owner (§5.7).
+    Handover = 1,
+}
+
+impl RootType {
+    /// The value hashed and sent on the wire.
+    #[must_use]
+    pub const fn code(self) -> u64 {
+        self as u64
+    }
+}
+
+/// What the creator chooses for a new root (§4.6), apart from its parents.
+pub struct RootParams {
+    /// The group name: UTF-8, at most 256 bytes.
+    pub name: String,
+    /// The members, the owner included, in any order; they are sorted when the root is built.
+    pub members: Vec<GossipId>,
+    /// 32 fresh random bytes.
+    pub group_secret: GroupSecret,
+    /// The owner's complete keys.
+    pub owner: UserPublicKeys,
+    /// 32 fresh random bytes.
+    pub epoch_challenge: Challenge,
+    /// 32 fresh random bytes, independent of `epoch_challenge`.
+    pub ref_chat_id_challenge: Challenge,
+    /// The creator's clock at creation, see [`next_root_created_at`].
+    pub created_at: u64,
+    /// The message timer, in milliseconds: each message of the epoch is deleted on every
+    /// device at its creation date plus this; 0 keeps messages forever (§4.1, §7.7).
+    pub message_timer: u64,
+    /// The settings map (§4.1): version 1 knows no key, keeps every entry and acts on none.
+    pub settings: BTreeMap<String, Vec<u8>>,
+}
+
+/// What a device knows about the delivery of a root it received (§4.7 steps 2, 4, 5 and 7).
+pub struct ReceiveContext<'a> {
+    /// The `chat_id` announced by the notice, page entry or lookup that led to fetching the
+    /// root, if any.
+    pub announced: Option<ChatId>,
+    /// The receiving device's own GossipID.
+    pub own_id: GossipId,
+    /// The authenticated immediate Agraphon peer that delivered the root.
+    pub peer: GossipId,
+    /// For a handover root, the held root matching its parent commitment, if the device holds
+    /// one.
+    pub handover_parent: Option<&'a Root>,
+}
+
+/// A structurally valid root (§4.7 steps 1 and 3 passed).
+///
+/// Holding a `Root` does not mean its signature was checked: see [`Root::verify_signature`]
+/// and [`Root::verify_received`].
+///
+/// # Identity
+///
+/// The object's identity is its ID, [`Root::chat_id`]: the signature is not hashed, and ML-DSA
+/// signing is randomized, so two valid copies of one object may carry different signatures.
+/// `==` compares the signature too and tells such copies apart; storage and relaying MUST
+/// deduplicate by ID, never by `==`.
+#[derive(Clone)]
+pub struct Root {
+    version: u64,
+    root_type: RootType,
+    name: String,
+    parents: Vec<ParentCommitment>,
+    members: Vec<GossipId>,
+    group_secret: GroupSecret,
+    owner_bytes: Vec<u8>,
+    owner_keys: UserPublicKeys,
+    owner_id: GossipId,
+    epoch_challenge: Challenge,
+    ref_chat_id_challenge: Challenge,
+    created_at: u64,
+    migrate_from: Option<u64>,
+    message_timer: u64,
+    settings: BTreeMap<String, Vec<u8>>,
+    signature: SignatureBytes,
+    chat_id: ChatId,
+}
+
+/// `created_at = max(now, L + 1)` for a new root, where `L` is the greatest `created_at`
+/// among the roots of the group the device holds; `now` for a new group (§4.6 step 4).
+///
+/// `L + 1` saturates at `u64::MAX`: a root signed by another identity (a former owner) may
+/// carry any date, receivers check nothing on it, and the owner must never be unable to
+/// create a root because of it.
+///
+/// # Errors
+///
+/// None; the `Result` is kept for the interface.
+pub fn next_root_created_at(now: u64, greatest_held: Option<u64>) -> Result<u64> {
+    match greatest_held {
+        None => Ok(now),
+        Some(l) => Ok(now.max(l.saturating_add(1))),
+    }
+}
+
+/// The root ID (§4.1):
+///
+/// ```text
+/// chat_id = H("gossip.groups.root.1", version, type, name, parents, members, group_secret,
+///             owner, epoch_challenge, ref_chat_id_challenge, created_at, migrate_from,
+///             message_timer, settings)
+/// ```
+///
+/// `migrate_from` is an array holding its one unsigned integer when present, the empty array
+/// when absent. `message_timer` is always an unsigned integer, 0 when absent. `settings` is a
+/// map from text to bytes in the canonical key order, as a message's metadata (§6.2); empty
+/// when absent.
+///
+/// Why hashed: the ID is what the owner signs, so only the owner can set or change the timer
+/// or a setting, and every member of the epoch holds the same ones.
+#[allow(clippy::too_many_arguments)]
+fn compute_chat_id(
+    version: u64,
+    root_type: RootType,
+    name: &str,
+    parents: &[ParentCommitment],
+    members: &[GossipId],
+    group_secret: &GroupSecret,
+    owner_bytes: &[u8],
+    epoch_challenge: &Challenge,
+    ref_chat_id_challenge: &Challenge,
+    created_at: u64,
+    migrate_from: Option<u64>,
+    message_timer: u64,
+    settings: &BTreeMap<String, Vec<u8>>,
+) -> ChatId {
+    ChatId::from_bytes(h(
+        DOMAIN_ROOT,
+        vec![
+            Value::Uint(version),
+            Value::Uint(root_type.code()),
+            Value::Text(name),
+            Value::Array(parents.iter().map(|p| Value::Bytes(p.as_bytes())).collect()),
+            Value::Array(members.iter().map(|m| Value::Bytes(m.as_bytes())).collect()),
+            Value::Bytes(group_secret.as_bytes()),
+            Value::Bytes(owner_bytes),
+            Value::Bytes(epoch_challenge.as_bytes()),
+            Value::Bytes(ref_chat_id_challenge.as_bytes()),
+            Value::Uint(created_at),
+            Value::Array(migrate_from.into_iter().map(Value::Uint).collect()),
+            Value::Uint(message_timer),
+            Value::Map(
+                settings
+                    .iter()
+                    .map(|(k, v)| (Value::Text(k), Value::Bytes(v)))
+                    .collect(),
+            ),
+        ],
+    ))
+}
+
+/// The settings map from its entries as received (§4.1): a key given twice, a key that is
+/// empty or longer than 64 bytes, more than 128 entries, or more than 16,384 bytes by the
+/// measure of a message's metadata (§13.10) make the root malformed. Any other key is kept,
+/// known or not.
+fn settings_map(entries: Vec<proto::SettingsEntry>) -> Result<BTreeMap<String, Vec<u8>>> {
+    check_count("settings", entries.len(), 0, MAX_SETTINGS_ENTRIES)?;
+    let mut map = BTreeMap::new();
+    for e in entries {
+        if e.key.is_empty() {
+            return Err(Error::TooFew {
+                field: "settings key",
+                min: 1,
+                got: 0,
+            });
+        }
+        if e.key.len() > MAX_SETTINGS_KEY_BYTES {
+            return Err(Error::TooMany {
+                field: "settings key",
+                max: MAX_SETTINGS_KEY_BYTES,
+                got: e.key.len(),
+            });
+        }
+        // One single form: protobuf would keep the last value of a repeated key, another
+        // decoder the first, and the two would hash different settings.
+        if map.insert(e.key, e.value).is_some() {
+            return Err(Error::Duplicate("settings"));
+        }
+    }
+    let len = wire::metadata_len(&map);
+    if len > MAX_SETTINGS_BYTES {
+        return Err(Error::TooMany {
+            field: "settings",
+            max: MAX_SETTINGS_BYTES,
+            got: len,
+        });
+    }
+    Ok(map)
+}
+
+/// The settings map as protobuf entries, by ascending key.
+fn settings_entries(settings: &BTreeMap<String, Vec<u8>>) -> Vec<proto::SettingsEntry> {
+    settings
+        .iter()
+        .map(|(k, v)| proto::SettingsEntry {
+            key: k.clone(),
+            value: v.clone(),
+        })
+        .collect()
+}
+
+fn check_count(field: &'static str, n: usize, min: usize, max: usize) -> Result<()> {
+    if n < min {
+        return Err(Error::TooFew { field, min, got: n });
+    }
+    if n > max {
+        return Err(Error::TooMany { field, max, got: n });
+    }
+    Ok(())
+}
+
+/// Sorts a list and refuses duplicates (used when building, not when receiving).
+fn sorted_distinct<T: Ord + Copy>(field: &'static str, items: &[T]) -> Result<Vec<T>> {
+    let mut v = items.to_vec();
+    v.sort_unstable();
+    if v.windows(2).any(|w| w[0] == w[1]) {
+        return Err(Error::Duplicate(field));
+    }
+    Ok(v)
+}
+
+impl Root {
+    /// Builds and signs a successor root (§4.6, §4.7) naming `parents`, the chat IDs of the
+    /// epochs it continues. To found a new group, `parents` is a single fresh random dummy ID
+    /// that the caller then discards (§4.5).
+    ///
+    /// The signature is checked with the owner's key before the root is returned, so a
+    /// signing key that does not belong to `params.owner` is refused.
+    ///
+    /// # Errors
+    ///
+    /// Any structural rule of §4.1 and §4.7 step 1, [`Error::Duplicate`] for a repeated member
+    /// or parent, [`Error::OwnerNotMember`], [`Error::InvalidSignature`] for a wrong key, and
+    /// [`Error::DoesNotFitContainer`] (§4.6).
+    pub fn create_successor(
+        params: RootParams,
+        parents: &[ChatId],
+        owner_signing_key: &dyn Signer,
+        randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+    ) -> Result<Self> {
+        let root = Self::build(RootType::Successor, params, parents, None)?;
+        root.sign_and_check(owner_signing_key, randomness, None)
+    }
+
+    /// Builds and signs the successor root that founds a new group (§4.5, §4.6), naming the
+    /// single fresh random dummy ID `placeholder`, which the caller then discards. With
+    /// `migrate_from`, the group continues an earlier conversation of that format version
+    /// (§5.12): only a group of exactly two members may carry it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Root::create_successor`], plus [`Error::MigrateFrom`] for `migrate_from` on a
+    /// member list that is not of two.
+    pub fn create_founding(
+        params: RootParams,
+        placeholder: ChatId,
+        migrate_from: Option<u64>,
+        owner_signing_key: &dyn Signer,
+        randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+    ) -> Result<Self> {
+        // The creator sets it only on a group of two (§5.12). A receiver never judges a root
+        // by it: it cannot tell a founding root from a successor whose parent it lacks (§4.5),
+        // and later format versions must stay valid; it only decides whether to act on it.
+        if migrate_from.is_some() {
+            let mut members = params.members.clone();
+            members.sort_unstable();
+            members.dedup();
+            if members.len() != 2 {
+                return Err(Error::MigrateFrom);
+            }
+        }
+        let root = Self::build(RootType::Successor, params, &[placeholder], migrate_from)?;
+        root.sign_and_check(owner_signing_key, randomness, None)
+    }
+
+    /// Builds and signs a handover root (§4.7, §5.7) continuing `parent`, signed with the key
+    /// of `parent`'s owner while `params.owner` names the new owner.
+    ///
+    /// # Errors
+    ///
+    /// As [`Root::create_successor`], plus [`Error::HandoverSameOwner`] and
+    /// [`Error::HandoverChangesMembers`].
+    pub fn create_handover(
+        params: RootParams,
+        parent: &Root,
+        parent_owner_signing_key: &dyn Signer,
+        randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+    ) -> Result<Self> {
+        let root = Self::build(RootType::Handover, params, &[parent.chat_id], None)?;
+        root.sign_and_check(parent_owner_signing_key, randomness, Some(parent))
+    }
+
+    fn build(
+        root_type: RootType,
+        params: RootParams,
+        parents: &[ChatId],
+        migrate_from: Option<u64>,
+    ) -> Result<Self> {
+        let commitments: Vec<ParentCommitment> = parents
+            .iter()
+            .map(|p| parent_commitment(&params.epoch_challenge, p))
+            .collect();
+        let commitments = sorted_distinct("parents", &commitments)?;
+        let members = sorted_distinct("members", &params.members)?;
+        let unsigned = proto::GroupRoot {
+            r#type: root_type as i32,
+            name: params.name,
+            parents: commitments.iter().map(|p| p.as_bytes().to_vec()).collect(),
+            members: members.iter().map(|m| m.as_bytes().to_vec()).collect(),
+            group_secret: params.group_secret.as_bytes().to_vec(),
+            owner: params.owner.to_bytes(),
+            epoch_challenge: params.epoch_challenge.as_bytes().to_vec(),
+            ref_chat_id_challenge: params.ref_chat_id_challenge.as_bytes().to_vec(),
+            created_at: params.created_at,
+            // Placeholder of the right size; the signature is not hashed.
+            signature: vec![0; SIGNATURE_SIZE],
+            migrate_from,
+            message_timer: params.message_timer,
+            settings: settings_entries(&params.settings),
+        };
+        Self::from_proto(EVENT_VERSION, unsigned)
+    }
+
+    /// Test only: `p` signed as a successor by `key`, whatever its fields (a hostile owner).
+    #[cfg(test)]
+    pub(crate) fn forge(p: proto::GroupRoot, key: &dyn Signer) -> Self {
+        let root = Self::from_proto(EVENT_VERSION, p).expect("structurally valid");
+        root.sign_and_check(key, [7; SIGNING_RANDOMNESS_SIZE], None)
+            .expect("signed by its owner")
+    }
+
+    /// Test only: `p` signed by `key`, whatever its type and fields, without any check (a
+    /// hostile owner's handover, for instance).
+    #[cfg(test)]
+    pub(crate) fn forge_unchecked(p: proto::GroupRoot, key: &dyn Signer) -> Self {
+        let mut root = Self::from_proto(EVENT_VERSION, p).expect("structurally valid");
+        root.signature = key.sign_id(
+            CONTEXT_ROOT_SIGNATURE,
+            root.chat_id.as_bytes(),
+            [7; SIGNING_RANDOMNESS_SIZE],
+        );
+        root
+    }
+
+    fn sign_and_check(
+        mut self,
+        signing_key: &dyn Signer,
+        randomness: [u8; SIGNING_RANDOMNESS_SIZE],
+        parent: Option<&Root>,
+    ) -> Result<Self> {
+        self.signature =
+            signing_key.sign_id(CONTEXT_ROOT_SIGNATURE, self.chat_id.as_bytes(), randomness);
+        self.verify_signature(parent)?;
+        Ok(self)
+    }
+
+    /// Validates a received root (§4.7 step 1, then step 3) and computes its ID.
+    ///
+    /// `version` is the root's event version prefix. Step 1 covers the type, the name (UTF-8,
+    /// at most 256 bytes), the parents (1 to 32 distinct 32-byte commitments, ascending; exactly
+    /// one for a handover root), the members (1 to 512 distinct nonzero 32-byte GossipIDs,
+    /// ascending), the length of every fixed-size field and the container limit (§4.6). Step 3
+    /// parses the owner keys, hashes them to the owner's GossipID and checks that the owner is
+    /// a member.
+    ///
+    /// # Errors
+    ///
+    /// The first rule broken.
+    pub(crate) fn from_proto(version: u64, mut p: proto::GroupRoot) -> Result<Self> {
+        if version != EVENT_VERSION {
+            return Err(Error::UnsupportedEventVersion(version));
+        }
+        let root_type = match proto::RootType::try_from(p.r#type) {
+            Ok(proto::RootType::Successor) => RootType::Successor,
+            Ok(proto::RootType::Handover) => RootType::Handover,
+            Err(_) => return Err(Error::Malformed("unknown root type")),
+        };
+        if p.name.len() > MAX_NAME_BYTES {
+            return Err(Error::TooMany {
+                field: "name",
+                max: MAX_NAME_BYTES,
+                got: p.name.len(),
+            });
+        }
+        check_count(
+            "parents",
+            p.parents.len(),
+            MIN_ROOT_PARENTS,
+            MAX_ROOT_PARENTS,
+        )?;
+        let parents = p
+            .parents
+            .iter()
+            .map(|b| ParentCommitment::from_slice(b))
+            .collect::<Result<Vec<_>>>()?;
+        check_sorted_distinct("parents", &parents)?;
+        if root_type == RootType::Handover && parents.len() != 1 {
+            return Err(Error::HandoverParentCount);
+        }
+        check_count("members", p.members.len(), MIN_MEMBERS, MAX_MEMBERS)?;
+        let members = p
+            .members
+            .iter()
+            .map(|b| GossipId::from_slice(b))
+            .collect::<Result<Vec<_>>>()?;
+        if members.iter().any(GossipId::is_zero) {
+            return Err(Error::ZeroId("members"));
+        }
+        check_sorted_distinct("members", &members)?;
+        let group_secret = GroupSecret::from_slice(&p.group_secret)?;
+        let epoch_challenge = Challenge::from_slice(&p.epoch_challenge)?;
+        let ref_chat_id_challenge = Challenge::from_slice(&p.ref_chat_id_challenge)?;
+        let signature = SignatureBytes::from_slice(&p.signature)?;
+        if p.owner.is_empty() {
+            return Err(Error::Missing("owner"));
+        }
+        // §4.6: a root MUST fit one empty container, its settings map included, so it is
+        // measured before the map is taken out. A received root was bounded as received, which
+        // is never shorter (see `wire::decode_event_blob`); this guards a root built or
+        // converted here.
+        if !wire::fits_empty_container(wire::event_blob_len(
+            version,
+            prost::Message::encoded_len(&p),
+        )) {
+            return Err(Error::DoesNotFitContainer);
+        }
+        let settings = settings_map(core::mem::take(&mut p.settings))?;
+
+        let chat_id = compute_chat_id(
+            version,
+            root_type,
+            &p.name,
+            &parents,
+            &members,
+            &group_secret,
+            &p.owner,
+            &epoch_challenge,
+            &ref_chat_id_challenge,
+            p.created_at,
+            p.migrate_from,
+            p.message_timer,
+            &settings,
+        );
+
+        let (owner_keys, owner_id) = parse_user_public_keys(&p.owner)?;
+        if members.binary_search(&owner_id).is_err() {
+            return Err(Error::OwnerNotMember);
+        }
+
+        let root = Self {
+            version,
+            root_type,
+            name: core::mem::take(&mut p.name),
+            parents,
+            members,
+            group_secret,
+            owner_bytes: core::mem::take(&mut p.owner),
+            owner_keys,
+            owner_id,
+            epoch_challenge,
+            ref_chat_id_challenge,
+            created_at: p.created_at,
+            migrate_from: p.migrate_from,
+            message_timer: p.message_timer,
+            settings,
+            signature,
+            chat_id,
+        };
+        Ok(root)
+    }
+
+    /// Rebuilds a root from its stored fields, validating them as decoding does (§4.7 steps
+    /// 1 and 3) and computing its ID; the signature bytes are taken as stored and checked by
+    /// [`Root::verify_signature`] as for a received root. For a backend that stores fields
+    /// rather than an encoding.
+    ///
+    /// # Errors
+    ///
+    /// The first rule broken, as [`crate::wire::decode_event_blob`] would report it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_fields(
+        version: u64,
+        root_type: RootType,
+        name: String,
+        parents: &[ParentCommitment],
+        members: &[GossipId],
+        group_secret: &GroupSecret,
+        owner: Vec<u8>,
+        epoch_challenge: &Challenge,
+        ref_chat_id_challenge: &Challenge,
+        created_at: u64,
+        migrate_from: Option<u64>,
+        message_timer: u64,
+        settings: &BTreeMap<String, Vec<u8>>,
+        signature: &[u8],
+    ) -> Result<Self> {
+        Self::from_proto(
+            version,
+            proto::GroupRoot {
+                r#type: root_type as i32,
+                name,
+                parents: parents.iter().map(|p| p.as_bytes().to_vec()).collect(),
+                members: members.iter().map(|m| m.as_bytes().to_vec()).collect(),
+                group_secret: group_secret.as_bytes().to_vec(),
+                owner,
+                epoch_challenge: epoch_challenge.as_bytes().to_vec(),
+                ref_chat_id_challenge: ref_chat_id_challenge.as_bytes().to_vec(),
+                created_at,
+                signature: signature.to_vec(),
+                migrate_from,
+                message_timer,
+                settings: settings_entries(settings),
+            },
+        )
+    }
+
+    /// The protobuf form of this root.
+    #[must_use]
+    pub(crate) fn to_proto(&self) -> proto::GroupRoot {
+        proto::GroupRoot {
+            r#type: self.root_type as i32,
+            name: self.name.clone(),
+            parents: self.parents.iter().map(|p| p.as_bytes().to_vec()).collect(),
+            members: self.members.iter().map(|m| m.as_bytes().to_vec()).collect(),
+            group_secret: self.group_secret.as_bytes().to_vec(),
+            owner: self.owner_bytes.clone(),
+            epoch_challenge: self.epoch_challenge.as_bytes().to_vec(),
+            ref_chat_id_challenge: self.ref_chat_id_challenge.as_bytes().to_vec(),
+            created_at: self.created_at,
+            signature: self.signature.as_bytes().to_vec(),
+            migrate_from: self.migrate_from,
+            message_timer: self.message_timer,
+            settings: settings_entries(&self.settings),
+        }
+    }
+
+    /// Step 7 of §4.7: verifies the signature over the root ID with the context
+    /// `gossip.groups.root.signature.1`.
+    ///
+    /// - Successor: with the ML-DSA-65 key of the root's own `owner`; `parent` is ignored.
+    /// - Handover: `parent` must be the held root matching the single parent commitment. The
+    ///   signature is verified with the key of that parent's owner; the new owner must differ
+    ///   from the parent's owner and the members must be the parent's, the parent's owner
+    ///   being the only one that may be absent.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::HandoverParentMissing`] when a handover root's parent is not given (the root
+    /// is discarded without penalty and the parent is looked up, §4.7), otherwise
+    /// [`Error::ParentMismatch`], [`Error::InvalidSignature`], [`Error::HandoverSameOwner`] or
+    /// [`Error::HandoverChangesMembers`].
+    pub fn verify_signature(&self, parent: Option<&Root>) -> Result<()> {
+        // ML-DSA-65 only, with no second classical signature (D.83, §16.9): a flaw in it has no
+        // fallback inside wire version 1.
+        match self.root_type {
+            RootType::Successor => verify_id(
+                &self.owner_keys,
+                CONTEXT_ROOT_SIGNATURE,
+                self.chat_id.as_bytes(),
+                &self.signature,
+            ),
+            RootType::Handover => {
+                let parent = parent.ok_or(Error::HandoverParentMissing)?;
+                if !self.names_parent(&parent.chat_id) {
+                    return Err(Error::ParentMismatch);
+                }
+                verify_id(
+                    &parent.owner_keys,
+                    CONTEXT_ROOT_SIGNATURE,
+                    self.chat_id.as_bytes(),
+                    &self.signature,
+                )?;
+                if self.owner_id == parent.owner_id {
+                    return Err(Error::HandoverSameOwner);
+                }
+                // The parent's members exactly, but for the outgoing owner, who may leave
+                // in it ("Hand over and leave", §5.7): a handover adds and removes no one.
+                let kept = parent
+                    .members
+                    .iter()
+                    .filter(|m| **m != parent.owner_id || self.is_member(m));
+                if !kept.eq(self.members.iter()) {
+                    return Err(Error::HandoverChangesMembers);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Steps 2, 4, 5 and 7 of §4.7 for a root this device received (steps 1 and 3 ran when the
+    /// `Root` was built). Step 6, matching the parents, is [`Root::match_parents`]; it never
+    /// rejects a root.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::IdMismatch`] if the root is not the announced one, [`Error::NotMember`] if the
+    /// device or the delivering peer is not a member, then as [`Root::verify_signature`].
+    pub fn verify_received(&self, ctx: &ReceiveContext<'_>) -> Result<()> {
+        if let Some(announced) = ctx.announced
+            && announced != self.chat_id
+        {
+            return Err(Error::IdMismatch("chat_id"));
+        }
+        if !self.is_member(&ctx.own_id) {
+            return Err(Error::NotMember("this device"));
+        }
+        if !self.is_member(&ctx.peer) {
+            return Err(Error::NotMember("the delivering peer"));
+        }
+        self.verify_signature(ctx.handover_parent)
+    }
+
+    /// The commitment this root would carry for the epoch `parent` (§4.5).
+    #[must_use]
+    pub fn commitment_for(&self, parent: &ChatId) -> ParentCommitment {
+        parent_commitment(&self.epoch_challenge, parent)
+    }
+
+    /// Whether one of this root's parent commitments names the epoch `parent`.
+    #[must_use]
+    pub fn names_parent(&self, parent: &ChatId) -> bool {
+        self.parents
+            .binary_search(&self.commitment_for(parent))
+            .is_ok()
+    }
+
+    /// Step 6 of §4.7: the candidates (held roots and closed-chat markers) that one of this
+    /// root's commitments names, in the order given.
+    pub fn match_parents<'a>(
+        &self,
+        candidates: impl IntoIterator<Item = &'a ChatId>,
+    ) -> Vec<ChatId> {
+        candidates
+            .into_iter()
+            .filter(|c| self.names_parent(c))
+            .copied()
+            .collect()
+    }
+
+    /// The direct case of the continuity rule (§4.7): the parent's owner is the same identity
+    /// as this root's owner. The other case, a previous owner in this root's own line, needs
+    /// the held handover roots and is not decided here.
+    #[must_use]
+    pub fn has_same_owner_as(&self, parent: &Root) -> bool {
+        self.owner_id == parent.owner_id
+    }
+
+    /// Whether `id` is in the member list.
+    #[must_use]
+    pub fn is_member(&self, id: &GossipId) -> bool {
+        self.members.binary_search(id).is_ok()
+    }
+
+    /// The root ID, which is the epoch's `chat_id`.
+    #[must_use]
+    pub fn chat_id(&self) -> ChatId {
+        self.chat_id
+    }
+
+    /// The epoch's opaque reference (§4.5).
+    #[must_use]
+    pub fn ref_chat_id(&self) -> RefChatId {
+        ref_chat_id(&self.ref_chat_id_challenge, &self.chat_id)
+    }
+
+    /// The root's event version.
+    #[must_use]
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// The root type.
+    #[must_use]
+    pub fn root_type(&self) -> RootType {
+        self.root_type
+    }
+
+    /// The group name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The parent commitments, ascending.
+    #[must_use]
+    pub fn parents(&self) -> &[ParentCommitment] {
+        &self.parents
+    }
+
+    /// The members, ascending.
+    #[must_use]
+    pub fn members(&self) -> &[GossipId] {
+        &self.members
+    }
+
+    /// The epoch's group secret.
+    #[must_use]
+    pub fn group_secret(&self) -> &GroupSecret {
+        &self.group_secret
+    }
+
+    /// The owner's keys.
+    #[must_use]
+    pub fn owner_keys(&self) -> &UserPublicKeys {
+        &self.owner_keys
+    }
+
+    /// The owner field as carried: `bincode(UserPublicKeys)`.
+    #[must_use]
+    pub fn owner_bytes(&self) -> &[u8] {
+        &self.owner_bytes
+    }
+
+    /// The owner's GossipID.
+    #[must_use]
+    pub fn owner_id(&self) -> GossipId {
+        self.owner_id
+    }
+
+    /// The challenge of the parent commitments.
+    #[must_use]
+    pub fn epoch_challenge(&self) -> &Challenge {
+        &self.epoch_challenge
+    }
+
+    /// The challenge of the epoch reference.
+    #[must_use]
+    pub fn ref_chat_id_challenge(&self) -> &Challenge {
+        &self.ref_chat_id_challenge
+    }
+
+    /// The creator's claimed creation time.
+    #[must_use]
+    pub fn created_at(&self) -> u64 {
+        self.created_at
+    }
+
+    /// The format version of the conversation this group continues (§5.12), if any.
+    #[must_use]
+    pub fn migrate_from(&self) -> Option<u64> {
+        self.migrate_from
+    }
+
+    /// The message timer, in milliseconds; 0 keeps messages forever (§4.1, §7.7).
+    #[must_use]
+    pub fn message_timer(&self) -> u64 {
+        self.message_timer
+    }
+
+    /// The settings map (§4.1), every entry kept, known or not.
+    #[must_use]
+    pub fn settings(&self) -> &BTreeMap<String, Vec<u8>> {
+        &self.settings
+    }
+
+    /// The signature.
+    #[must_use]
+    pub fn signature(&self) -> &SignatureBytes {
+        &self.signature
+    }
+}
+
+impl PartialEq for Root {
+    /// Two roots are equal when they have the same ID, which covers every field but the
+    /// signature, and the same signature. Deduplicate by [`Root::chat_id`], not by this.
+    fn eq(&self, other: &Self) -> bool {
+        self.chat_id == other.chat_id && self.signature == other.signature
+    }
+}
+
+impl Eq for Root {}
+
+impl fmt::Debug for Root {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Root")
+            .field("chat_id", &self.chat_id)
+            .field("type", &self.root_type)
+            .field("name", &self.name)
+            .field("parents", &self.parents.len())
+            .field("members", &self.members.len())
+            .field("owner", &self.owner_id)
+            .field("created_at", &self.created_at)
+            .field("migrate_from", &self.migrate_from)
+            .field("message_timer", &self.message_timer)
+            .field("settings", &crate::redact::Entries(self.settings.len()))
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::test_support::{Identity, identity};
+
+    pub(crate) fn params(owner: &Identity, members: &[&Identity], seed: u8) -> RootParams {
+        RootParams {
+            name: "Team".to_owned(),
+            members: members.iter().map(|m| m.id).collect(),
+            group_secret: GroupSecret::from_bytes([seed; 32]),
+            owner: owner.public.clone(),
+            epoch_challenge: Challenge::from_bytes([seed.wrapping_add(1); 32]),
+            ref_chat_id_challenge: Challenge::from_bytes([seed.wrapping_add(2); 32]),
+            created_at: 1_700_000_000_000,
+            message_timer: 0,
+            settings: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// A root founding a new group of `members`, owned by `owner`.
+    pub(crate) fn founding(owner: &Identity, members: &[&Identity]) -> Root {
+        Root::create_successor(
+            params(owner, members, 0x10),
+            &[ChatId::from_bytes([0xd0; 32])],
+            &owner.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+        .unwrap()
+    }
+
+    fn modified(root: &Root, f: impl FnOnce(&mut proto::GroupRoot)) -> Result<Root> {
+        let mut p = root.to_proto();
+        f(&mut p);
+        Root::from_proto(root.version(), p)
+    }
+
+    #[test]
+    fn root_id_vector() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = founding(&alice, &[&alice, &bob]);
+        assert_eq!(
+            hex::encode(alice.id.as_bytes()),
+            "617651957a1958415121d7824168fee9b34c3ff739627f114c3aba508676ffbe"
+        );
+        assert_eq!(
+            hex::encode(root.chat_id().as_bytes()),
+            "715db971fb42b92cad2ffdd580e210d62124d1e7a198de9735fbb0575d99dba2"
+        );
+        assert_eq!(
+            hex::encode(root.ref_chat_id().as_bytes()),
+            "28e3df1fa32a8f4177037b9b0e0b6aef35def11381d8dfcf359995ccc4894378"
+        );
+        assert_eq!(
+            hex::encode(root.parents()[0].as_bytes()),
+            hex::encode(
+                parent_commitment(
+                    &Challenge::from_bytes([0x11; 32]),
+                    &ChatId::from_bytes([0xd0; 32])
+                )
+                .as_bytes()
+            )
+        );
+        // The same group continuing an earlier one-to-one conversation (§5.12).
+        assert_eq!(
+            hex::encode(
+                migration(&alice, &[&alice, &bob], 0)
+                    .unwrap()
+                    .chat_id()
+                    .as_bytes()
+            ),
+            "181eb208ce28b46d574961888be75330a879777bb9e79cca0094f6920cca2ed2"
+        );
+        // The same group with a message timer of one hour and one setting (§4.1).
+        let mut p = params(&alice, &[&alice, &bob], 0x10);
+        p.message_timer = 3_600_000;
+        p.settings = BTreeMap::from([("gossip.example".to_owned(), b"on".to_vec())]);
+        let timed = Root::create_successor(
+            p,
+            &[ChatId::from_bytes([0xd0; 32])],
+            &alice.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+        .unwrap();
+        assert_eq!(
+            hex::encode(timed.chat_id().as_bytes()),
+            "a5fc9e04243fc25ad5e10c5fc4621143ce4b025d7b13ded4cb79510aa48b0157"
+        );
+    }
+
+    #[test]
+    fn root_id_projection_matches_section_4_1() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let expected = h(
+            DOMAIN_ROOT,
+            vec![
+                Value::Uint(1),
+                Value::Uint(0),
+                Value::Text("Team"),
+                Value::Array(vec![Value::Bytes(root.parents()[0].as_bytes())]),
+                Value::Array(vec![Value::Bytes(alice.id.as_bytes())]),
+                Value::Bytes(&[0x10; 32]),
+                Value::Bytes(&alice.public.to_bytes()),
+                Value::Bytes(&[0x11; 32]),
+                Value::Bytes(&[0x12; 32]),
+                Value::Uint(1_700_000_000_000),
+                // `migrate_from` absent: the empty array.
+                Value::Array(vec![]),
+                // The message timer: 0, an unsigned integer whether present or not.
+                Value::Uint(0),
+                // The settings map: empty.
+                Value::Map(vec![]),
+            ],
+        );
+        assert_eq!(root.chat_id().as_bytes(), &expected);
+    }
+
+    /// A root founding a group of `members` that continues an earlier conversation of
+    /// format version `from` (§5.12).
+    pub(crate) fn migration(owner: &Identity, members: &[&Identity], from: u64) -> Result<Root> {
+        Root::create_founding(
+            params(owner, members, 0x10),
+            ChatId::from_bytes([0xd0; 32]),
+            Some(from),
+            &owner.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+    }
+
+    #[test]
+    fn migrate_from_projection_matches_section_4_1() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = migration(&alice, &[&alice, &bob], 0).unwrap();
+        assert_eq!(root.migrate_from(), Some(0));
+        let mut members = [alice.id, bob.id];
+        members.sort();
+        let expected = h(
+            DOMAIN_ROOT,
+            vec![
+                Value::Uint(1),
+                Value::Uint(0),
+                Value::Text("Team"),
+                Value::Array(vec![Value::Bytes(root.parents()[0].as_bytes())]),
+                Value::Array(members.iter().map(|m| Value::Bytes(m.as_bytes())).collect()),
+                Value::Bytes(&[0x10; 32]),
+                Value::Bytes(&alice.public.to_bytes()),
+                Value::Bytes(&[0x11; 32]),
+                Value::Bytes(&[0x12; 32]),
+                Value::Uint(1_700_000_000_000),
+                // `migrate_from` present: an array holding its one unsigned integer.
+                Value::Array(vec![Value::Uint(0)]),
+                Value::Uint(0),
+                Value::Map(vec![]),
+            ],
+        );
+        assert_eq!(root.chat_id().as_bytes(), &expected);
+        // Present with 0 and absent are different roots, and so are two versions.
+        let plain = founding(&alice, &[&alice, &bob]);
+        assert_eq!(plain.migrate_from(), None);
+        assert_ne!(plain.chat_id(), root.chat_id());
+        let other = migration(&alice, &[&alice, &bob], 1).unwrap();
+        assert_ne!(other.chat_id(), root.chat_id());
+        assert!(root.verify_signature(None).is_ok());
+    }
+
+    #[test]
+    fn migrate_from_is_carried_and_hashed() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = migration(&alice, &[&alice, &bob], 0).unwrap();
+        // The protobuf field is present, with its value 0 (Appendix C: `optional`).
+        let p = root.to_proto();
+        assert_eq!(p.migrate_from, Some(0));
+        let back = Root::from_proto(1, p).unwrap();
+        assert_eq!(back, root);
+        assert_eq!(back.migrate_from(), Some(0));
+        // Through an event blob, under the strict check.
+        let blob =
+            wire::encode_event_blob(&wire::EventObject::Root(Box::new(root.clone()))).unwrap();
+        match wire::decode_event_blob(&blob, 1).unwrap() {
+            wire::EventObject::Root(r) => {
+                assert_eq!(r.chat_id(), root.chat_id());
+                assert_eq!(r.migrate_from(), Some(0));
+            }
+            _ => panic!("not a root"),
+        }
+        // A relayer that strips or changes it changes the ID, and the signature fails.
+        for change in [None, Some(1)] {
+            let r = modified(&root, |p| p.migrate_from = change).unwrap();
+            assert_ne!(r.chat_id(), root.chat_id());
+            assert_eq!(r.verify_signature(None), Err(Error::InvalidSignature));
+        }
+        // Rebuilt from its stored fields.
+        let stored = Root::from_fields(
+            root.version(),
+            root.root_type(),
+            root.name().to_owned(),
+            root.parents(),
+            root.members(),
+            root.group_secret(),
+            root.owner_bytes().to_vec(),
+            root.epoch_challenge(),
+            root.ref_chat_id_challenge(),
+            root.created_at(),
+            root.migrate_from(),
+            root.message_timer(),
+            root.settings(),
+            root.signature().as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(stored, root);
+    }
+
+    #[test]
+    fn migrate_from_is_set_only_on_a_group_of_two_but_never_makes_a_root_invalid() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let carol = identity(3);
+        let root = migration(&alice, &[&alice, &bob], 0).unwrap();
+        // The creator refuses another member count.
+        assert_eq!(
+            migration(&alice, &[&alice], 0).map(|_| ()),
+            Err(Error::MigrateFrom)
+        );
+        assert_eq!(
+            migration(&alice, &[&alice, &bob, &carol], 0).map(|_| ()),
+            Err(Error::MigrateFrom)
+        );
+        // A receiver accepts the field, well encoded, on any root: on more members, several
+        // parents, a handover, and with a format version it does not know. Whether to act on
+        // it is decided elsewhere (§5.12).
+        let big = founding(&alice, &[&alice, &bob, &carol]);
+        let r = modified(&big, |p| p.migrate_from = Some(0)).unwrap();
+        assert_eq!(r.migrate_from(), Some(0));
+        assert!(modified(&root, |p| p.parents = vec![vec![1; 32], vec![2; 32]]).is_ok());
+        assert!(modified(&root, |p| p.r#type = 1).is_ok());
+        assert_eq!(
+            modified(&root, |p| p.migrate_from = Some(u64::MAX))
+                .unwrap()
+                .migrate_from(),
+            Some(u64::MAX)
+        );
+        // Without it, a founding root is what it was.
+        let plain = Root::create_founding(
+            params(&alice, &[&alice, &bob, &carol], 0x10),
+            ChatId::from_bytes([0xd0; 32]),
+            None,
+            &alice.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+        .unwrap();
+        assert_eq!(plain.chat_id(), big.chat_id());
+    }
+
+    #[test]
+    fn root_id_projection_written_by_hand() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let owner = alice.public.to_bytes();
+        // The owner keys take a two-byte length: major type 2, additional information 25.
+        let owner_len = u16::try_from(owner.len()).unwrap();
+        assert!(owner_len >= 256);
+        let bytes32 = |b: &[u8; 32]| [&[0x58, 0x20][..], b].concat();
+        let projection = [
+            // An array of 14 items, then the domain as text of 20 bytes.
+            &[0x8e, 0x74][..],
+            b"gossip.groups.root.1",
+            // version 1, type 0 (successor), name "Team" as text.
+            &[0x01, 0x00, 0x64],
+            b"Team",
+            // parents: an array of one commitment.
+            &[0x81],
+            &bytes32(root.parents()[0].as_bytes()),
+            // members: an array of one GossipID.
+            &[0x81],
+            &bytes32(alice.id.as_bytes()),
+            // group_secret, then the owner keys as bytes.
+            &bytes32(&[0x10; 32]),
+            &[0x59],
+            &owner_len.to_be_bytes(),
+            &owner,
+            // epoch_challenge, then ref_chat_id_challenge.
+            &bytes32(&[0x11; 32]),
+            &bytes32(&[0x12; 32]),
+            // created_at 1,700,000,000,000 as an eight-byte unsigned integer.
+            &[0x1b, 0x00, 0x00, 0x01, 0x8b, 0xcf, 0xe5, 0x68, 0x00],
+            // migrate_from absent: the empty array.
+            &[0x80],
+            // The message timer 0, then the empty settings map.
+            &[0x00, 0xa0],
+        ]
+        .concat();
+        assert_eq!(
+            root.chat_id().as_bytes(),
+            blake3::hash(&projection).as_bytes()
+        );
+        // With a message timer of one day and two settings: the timer as a four-byte unsigned
+        // integer, the map in the canonical key order, the shorter key first (§1.2).
+        let mut p = params(&alice, &[&alice], 0x10);
+        p.message_timer = 86_400_000;
+        p.settings = BTreeMap::from([("z".to_owned(), vec![1]), ("aa".to_owned(), vec![2])]);
+        let timed = Root::create_successor(
+            p,
+            &[ChatId::from_bytes([0xd0; 32])],
+            &alice.secret.dsa_signing_key,
+            [0x5a; 32],
+        )
+        .unwrap();
+        let mut timed_projection = projection[..projection.len() - 2].to_vec();
+        timed_projection.extend_from_slice(&[0x1a, 0x05, 0x26, 0x5c, 0x00]);
+        timed_projection
+            .extend_from_slice(&[0xa2, 0x61, b'z', 0x41, 0x01, 0x62, b'a', b'a', 0x41, 0x02]);
+        assert_eq!(
+            timed.chat_id().as_bytes(),
+            blake3::hash(&timed_projection).as_bytes()
+        );
+        assert_eq!(
+            hex::encode(timed.chat_id().as_bytes()),
+            "8d1527fcef3a12990e7bea29e6b9f8d4d199d949f4fda94d7af5840917183128"
+        );
+    }
+
+    #[test]
+    fn created_roots_verify_and_round_trip() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = founding(&alice, &[&bob, &alice]);
+        assert_eq!(root.members(), {
+            let mut m = vec![alice.id, bob.id];
+            m.sort();
+            m
+        });
+        assert!(root.verify_signature(None).is_ok());
+        let back = Root::from_proto(1, root.to_proto()).unwrap();
+        assert_eq!(back, root);
+        assert_eq!(back.owner_id(), alice.id);
+        assert!(back.verify_signature(None).is_ok());
+    }
+
+    #[test]
+    fn every_field_changes_the_id() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = founding(&alice, &[&alice, &bob]);
+        let id = root.chat_id();
+        type Change = Box<dyn Fn(&mut proto::GroupRoot)>;
+        let changes: Vec<Change> = vec![
+            Box::new(|p| p.name = "Other".into()),
+            Box::new(|p| p.parents[0][0] ^= 1),
+            Box::new(|p| p.group_secret[0] ^= 1),
+            Box::new(|p| p.epoch_challenge[0] ^= 1),
+            Box::new(|p| p.ref_chat_id_challenge[0] ^= 1),
+            Box::new(|p| p.created_at += 1),
+            Box::new(|p| p.migrate_from = Some(0)),
+            Box::new(|p| p.message_timer = 1),
+            Box::new(|p| {
+                p.settings = vec![proto::SettingsEntry {
+                    key: "k".into(),
+                    value: vec![],
+                }];
+            }),
+        ];
+        for change in changes {
+            let r = modified(&root, |p| change(p)).unwrap();
+            assert_ne!(r.chat_id(), id);
+            // The signature over the old ID no longer verifies.
+            assert_eq!(r.verify_signature(None), Err(Error::InvalidSignature));
+        }
+        // The signature itself is not hashed.
+        let r = modified(&root, |p| p.signature[0] ^= 1).unwrap();
+        assert_eq!(r.chat_id(), id);
+        assert_eq!(r.verify_signature(None), Err(Error::InvalidSignature));
+    }
+
+    #[test]
+    fn structural_rules_reject() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let root = founding(&alice, &[&alice, &bob]);
+
+        assert_eq!(
+            Root::from_proto(2, root.to_proto()).map(|_| ()),
+            Err(Error::UnsupportedEventVersion(2))
+        );
+        assert!(matches!(
+            modified(&root, |p| p.r#type = 2),
+            Err(Error::Malformed(_))
+        ));
+        assert!(modified(&root, |p| p.name = "é".repeat(128)).is_ok());
+        assert_eq!(
+            modified(&root, |p| p.name = "x".repeat(257)).map(|_| ()),
+            Err(Error::TooMany {
+                field: "name",
+                max: 256,
+                got: 257
+            })
+        );
+        // Parents: count, length, order, distinctness.
+        assert!(matches!(
+            modified(&root, |p| p.parents.clear()),
+            Err(Error::TooFew {
+                field: "parents",
+                ..
+            })
+        ));
+        assert!(matches!(
+            modified(&root, |p| p.parents =
+                (0u8..33).map(|i| vec![i; 32]).collect()),
+            Err(Error::TooMany {
+                field: "parents",
+                ..
+            })
+        ));
+        assert!(
+            modified(&root, |p| p.parents =
+                (0u8..32).map(|i| vec![i; 32]).collect())
+            .is_ok()
+        );
+        assert!(matches!(
+            modified(&root, |p| {
+                p.parents[0].pop();
+            }),
+            Err(Error::BadLength { .. })
+        ));
+        assert_eq!(
+            modified(&root, |p| p.parents = vec![vec![2; 32], vec![1; 32]]).map(|_| ()),
+            Err(Error::NotSortedDistinct("parents"))
+        );
+        assert_eq!(
+            modified(&root, |p| p.parents = vec![vec![1; 32], vec![1; 32]]).map(|_| ()),
+            Err(Error::NotSortedDistinct("parents"))
+        );
+        // Members: count, length, zero, order, distinctness.
+        assert!(matches!(
+            modified(&root, |p| p.members.clear()),
+            Err(Error::TooFew {
+                field: "members",
+                ..
+            })
+        ));
+        assert!(matches!(
+            modified(&root, |p| {
+                p.members = (1u16..=513)
+                    .map(|i| {
+                        let mut m = vec![0; 32];
+                        m[30..].copy_from_slice(&i.to_be_bytes());
+                        m
+                    })
+                    .collect();
+            }),
+            Err(Error::TooMany {
+                field: "members",
+                ..
+            })
+        ));
+        assert!(matches!(
+            modified(&root, |p| p.members[0].push(0)),
+            Err(Error::BadLength { .. })
+        ));
+        assert_eq!(
+            modified(&root, |p| p.members.insert(0, vec![0; 32])).map(|_| ()),
+            Err(Error::ZeroId("members"))
+        );
+        assert_eq!(
+            modified(&root, |p| p.members.reverse()).map(|_| ()),
+            Err(Error::NotSortedDistinct("members"))
+        );
+        assert_eq!(
+            modified(&root, |p| {
+                let m = p.members[0].clone();
+                p.members.insert(0, m);
+            })
+            .map(|_| ()),
+            Err(Error::NotSortedDistinct("members"))
+        );
+        // Fixed-size fields.
+        assert!(matches!(
+            modified(&root, |p| {
+                p.group_secret.pop();
+            }),
+            Err(Error::BadLength {
+                field: "group_secret",
+                ..
+            })
+        ));
+        assert!(matches!(
+            modified(&root, |p| p.epoch_challenge.push(0)),
+            Err(Error::BadLength {
+                field: "challenge",
+                ..
+            })
+        ));
+        assert!(matches!(
+            modified(&root, |p| p.ref_chat_id_challenge.clear()),
+            Err(Error::BadLength {
+                field: "challenge",
+                ..
+            })
+        ));
+        assert!(matches!(
+            modified(&root, |p| {
+                p.signature.pop();
+            }),
+            Err(Error::BadLength {
+                field: "signature",
+                ..
+            })
+        ));
+        // Owner.
+        assert_eq!(
+            modified(&root, |p| p.owner.clear()).map(|_| ()),
+            Err(Error::Missing("owner"))
+        );
+        assert_eq!(
+            modified(&root, |p| p.owner.push(0)).map(|_| ()),
+            Err(Error::InvalidKeys)
+        );
+        assert_eq!(
+            modified(&root, |p| p.owner.truncate(100)).map(|_| ()),
+            Err(Error::InvalidKeys)
+        );
+        assert_eq!(
+            modified(&root, |p| p
+                .members
+                .retain(|m| m.as_slice() != alice.id.as_bytes()))
+            .map(|_| ()),
+            Err(Error::OwnerNotMember)
+        );
+    }
+
+    #[test]
+    fn a_root_at_the_member_limit_fits_a_container() {
+        let alice = identity(1);
+        let mut members: Vec<GossipId> = (1u16..512)
+            .map(|i| {
+                let mut m = [0u8; 32];
+                m[30..].copy_from_slice(&i.to_be_bytes());
+                GossipId::from_bytes(m)
+            })
+            .collect();
+        members.push(alice.id);
+        let mut p = params(&alice, &[], 0x10);
+        p.members = members;
+        let root = Root::create_successor(
+            p,
+            &[ChatId::from_bytes([0xd0; 32])],
+            &alice.secret.dsa_signing_key,
+            [0; 32],
+        )
+        .unwrap();
+        assert_eq!(root.members().len(), 512);
+        // About 24 KB at 512 members (§4.4), well within one empty container (§4.6).
+        let blob_len = wire::event_blob_len(1, prost::Message::encoded_len(&root.to_proto()));
+        assert!(blob_len > 20_000 && blob_len < 26_000, "{blob_len}");
+        assert!(wire::fits_empty_container(blob_len));
+        // One more member is refused by the member limit, not by the container limit.
+        let mut p = params(&alice, &[], 0x10);
+        p.members = root.members().to_vec();
+        p.members.push(GossipId::from_bytes([0xff; 32]));
+        assert!(matches!(
+            Root::create_successor(
+                p,
+                &[ChatId::from_bytes([0xd0; 32])],
+                &alice.secret.dsa_signing_key,
+                [0; 32],
+            ),
+            Err(Error::TooMany {
+                field: "members",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn oversized_root_does_not_fit_a_container() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        // A name is limited to 256 bytes and the lists are bounded, so only an inflated owner
+        // field can exceed the container.
+        let mut p = root.to_proto();
+        p.owner = vec![0; 300_000];
+        assert_eq!(
+            Root::from_proto(1, p).map(|_| ()),
+            Err(Error::DoesNotFitContainer)
+        );
+    }
+
+    /// §4.6: the container guard counts the settings map. A root that fits one container
+    /// without its settings, and not with them, does not fit.
+    #[test]
+    fn the_container_guard_counts_the_settings_map() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let mut p = root.to_proto();
+        p.settings = (0..64)
+            .map(|i| proto::SettingsEntry {
+                key: format!("k{i:02}"),
+                value: vec![0; 240],
+            })
+            .collect();
+        let settings =
+            prost::Message::encoded_len(&p) - prost::Message::encoded_len(&root.to_proto());
+        assert!(settings > 15_000, "{settings}");
+        // The owner field fills the container but for less than the settings take.
+        p.owner = vec![0; crate::constants::MAX_EVENT_BLOB_BYTES - 10_000];
+        let mut without = p.clone();
+        without.settings.clear();
+        assert!(wire::fits_empty_container(wire::event_blob_len(
+            1,
+            prost::Message::encoded_len(&without)
+        )));
+        assert_eq!(
+            Root::from_proto(1, p).map(|_| ()),
+            Err(Error::DoesNotFitContainer)
+        );
+    }
+
+    #[test]
+    fn builder_rejects_duplicates_non_members_and_wrong_keys() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let mut p = params(&alice, &[&alice, &bob, &bob], 0x10);
+        assert_eq!(
+            Root::create_successor(
+                p,
+                &[ChatId::from_bytes([1; 32])],
+                &alice.secret.dsa_signing_key,
+                [0; 32]
+            )
+            .map(|_| ()),
+            Err(Error::Duplicate("members"))
+        );
+        p = params(&alice, &[&alice], 0x10);
+        assert_eq!(
+            Root::create_successor(
+                p,
+                &[ChatId::from_bytes([1; 32]), ChatId::from_bytes([1; 32])],
+                &alice.secret.dsa_signing_key,
+                [0; 32]
+            )
+            .map(|_| ()),
+            Err(Error::Duplicate("parents"))
+        );
+        p = params(&alice, &[&bob], 0x10);
+        assert_eq!(
+            Root::create_successor(
+                p,
+                &[ChatId::from_bytes([1; 32])],
+                &alice.secret.dsa_signing_key,
+                [0; 32]
+            )
+            .map(|_| ()),
+            Err(Error::OwnerNotMember)
+        );
+        p = params(&alice, &[&alice], 0x10);
+        assert_eq!(
+            Root::create_successor(
+                p,
+                &[ChatId::from_bytes([1; 32])],
+                &bob.secret.dsa_signing_key,
+                [0; 32]
+            )
+            .map(|_| ()),
+            Err(Error::InvalidSignature)
+        );
+        p = params(&alice, &[&alice], 0x10);
+        p.name = "n".repeat(257);
+        assert!(matches!(
+            Root::create_successor(
+                p,
+                &[ChatId::from_bytes([1; 32])],
+                &alice.secret.dsa_signing_key,
+                [0; 32]
+            ),
+            Err(Error::TooMany { field: "name", .. })
+        ));
+    }
+
+    #[test]
+    fn successor_of_a_held_parent() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let carol = identity(3);
+        let first = founding(&alice, &[&alice, &bob]);
+        let second = Root::create_successor(
+            params(&alice, &[&alice, &carol], 0x20),
+            &[first.chat_id()],
+            &alice.secret.dsa_signing_key,
+            [1; 32],
+        )
+        .unwrap();
+        assert!(second.names_parent(&first.chat_id()));
+        assert!(!second.names_parent(&ChatId::from_bytes([0xd0; 32])));
+        let unrelated = ChatId::from_bytes([9; 32]);
+        assert_eq!(
+            second.match_parents([&unrelated, &first.chat_id()]),
+            vec![first.chat_id()]
+        );
+        assert!(second.has_same_owner_as(&first));
+        assert!(second.verify_signature(None).is_ok());
+    }
+
+    #[test]
+    fn handover_rules() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let carol = identity(3);
+        let parent = founding(&alice, &[&alice, &bob, &carol]);
+
+        // Alice hands over to Bob and leaves.
+        let handover = Root::create_handover(
+            params(&bob, &[&bob, &carol], 0x30),
+            &parent,
+            &alice.secret.dsa_signing_key,
+            [2; 32],
+        )
+        .unwrap();
+        assert_eq!(handover.root_type(), RootType::Handover);
+        assert_eq!(handover.owner_id(), bob.id);
+        assert!(handover.verify_signature(Some(&parent)).is_ok());
+        // Not the held parent: cannot be checked, no penalty.
+        assert_eq!(
+            handover.verify_signature(None),
+            Err(Error::HandoverParentMissing)
+        );
+        // Given a root that is not its parent, even one owned by the new owner, the handover
+        // is refused before any signature check.
+        let other = founding(&bob, &[&bob, &carol]);
+        assert_eq!(
+            handover.verify_signature(Some(&other)),
+            Err(Error::ParentMismatch)
+        );
+        // The type is hashed: turning it into a successor changes the ID.
+        let mut p = handover.to_proto();
+        p.r#type = 0;
+        let as_successor = Root::from_proto(1, p).unwrap();
+        assert_ne!(as_successor.chat_id(), handover.chat_id());
+        assert_eq!(
+            as_successor.verify_signature(None),
+            Err(Error::InvalidSignature)
+        );
+
+        // The builder refuses to add a member or to keep the owner.
+        let dave = identity(4);
+        assert_eq!(
+            Root::create_handover(
+                params(&bob, &[&bob, &dave], 0x31),
+                &parent,
+                &alice.secret.dsa_signing_key,
+                [2; 32]
+            )
+            .map(|_| ()),
+            Err(Error::HandoverChangesMembers)
+        );
+        assert_eq!(
+            Root::create_handover(
+                params(&alice, &[&alice, &bob], 0x32),
+                &parent,
+                &alice.secret.dsa_signing_key,
+                [2; 32]
+            )
+            .map(|_| ()),
+            Err(Error::HandoverSameOwner)
+        );
+        // Signed by the new owner instead of the parent's owner.
+        assert_eq!(
+            Root::create_handover(
+                params(&bob, &[&bob], 0x33),
+                &parent,
+                &bob.secret.dsa_signing_key,
+                [2; 32]
+            )
+            .map(|_| ()),
+            Err(Error::InvalidSignature)
+        );
+
+        // A handover root must have exactly one parent.
+        let mut p = handover.to_proto();
+        p.parents = vec![vec![1; 32], vec![2; 32]];
+        assert_eq!(
+            Root::from_proto(1, p).map(|_| ()),
+            Err(Error::HandoverParentCount)
+        );
+    }
+
+    /// A handover root keeps the member list of its parent exactly, except that the
+    /// outgoing owner, who signs it, may be absent; nothing else may be added or removed.
+    /// The name may change (§4.7).
+    #[test]
+    fn a_handover_keeps_the_parents_members_but_its_signer() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let carol = identity(3);
+        let dave = identity(4);
+        let parent = founding(&alice, &[&alice, &bob, &carol]);
+        let signed = |members: &[&Identity], seed: u8| {
+            let mut p = params(&bob, members, seed);
+            p.name = "Renamed".into();
+            let root = Root::build(RootType::Handover, p, &[parent.chat_id()], None).unwrap();
+            Root::forge_unchecked(root.to_proto(), &alice.secret.dsa_signing_key)
+        };
+        // The same members, renamed: valid. Without the outgoing owner: valid.
+        assert!(
+            signed(&[&alice, &bob, &carol], 0x40)
+                .verify_signature(Some(&parent))
+                .is_ok()
+        );
+        assert!(
+            signed(&[&bob, &carol], 0x41)
+                .verify_signature(Some(&parent))
+                .is_ok()
+        );
+        // Another member dropped, with or without the outgoing owner: invalid.
+        for members in [&[&alice, &bob][..], &[&bob][..]] {
+            assert_eq!(
+                signed(members, 0x42).verify_signature(Some(&parent)),
+                Err(Error::HandoverChangesMembers)
+            );
+        }
+        // A member added, even in place of a dropped one: invalid.
+        for members in [
+            &[&alice, &bob, &carol, &dave][..],
+            &[&bob, &carol, &dave][..],
+        ] {
+            assert_eq!(
+                signed(members, 0x43).verify_signature(Some(&parent)),
+                Err(Error::HandoverChangesMembers)
+            );
+        }
+        // The builder refuses to drop a member other than the outgoing owner.
+        assert!(
+            Root::create_handover(
+                params(&bob, &[&alice, &bob], 0x44),
+                &parent,
+                &alice.secret.dsa_signing_key,
+                [2; 32]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn received_root_checks() {
+        let alice = identity(1);
+        let bob = identity(2);
+        let carol = identity(3);
+        let root = founding(&alice, &[&alice, &bob]);
+        let ctx = |announced, own_id, peer| ReceiveContext {
+            announced,
+            own_id,
+            peer,
+            handover_parent: None,
+        };
+        assert!(root.verify_received(&ctx(None, bob.id, alice.id)).is_ok());
+        assert!(
+            root.verify_received(&ctx(Some(root.chat_id()), bob.id, alice.id))
+                .is_ok()
+        );
+        assert_eq!(
+            root.verify_received(&ctx(Some(ChatId::from_bytes([0; 32])), bob.id, alice.id)),
+            Err(Error::IdMismatch("chat_id"))
+        );
+        assert_eq!(
+            root.verify_received(&ctx(None, carol.id, alice.id)),
+            Err(Error::NotMember("this device"))
+        );
+        assert_eq!(
+            root.verify_received(&ctx(None, bob.id, carol.id)),
+            Err(Error::NotMember("the delivering peer"))
+        );
+    }
+
+    /// The message timer has one single form (§4.1): a plain scalar, absent on the wire when
+    /// 0, read as 0 when absent, hashed as an unsigned integer either way. Every value is
+    /// valid.
+    #[test]
+    fn the_message_timer_has_one_form_and_every_value_is_valid() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        assert_eq!(root.message_timer(), 0);
+        // Absent on the wire when 0, field 12 as a varint otherwise.
+        let mut alone = proto::GroupRoot::default();
+        assert!(prost::Message::encode_to_vec(&alone).is_empty());
+        alone.message_timer = 5;
+        assert_eq!(prost::Message::encode_to_vec(&alone), [0x60, 0x05]);
+        let encoded = prost::Message::encode_to_vec(&root.to_proto());
+        // Written as 0 by another encoder: the same field values, the same root.
+        let explicit = [encoded.clone(), vec![0x60, 0x00]].concat();
+        let blob = [&[0x01][..], &[0x0a], &varint(explicit.len()), &explicit].concat();
+        match wire::decode_event_blob(&blob, 1).unwrap() {
+            wire::EventObject::Root(r) => assert_eq!(r.chat_id(), root.chat_id()),
+            _ => panic!("not a root"),
+        }
+        for timer in [1, 86_400_000, u64::MAX] {
+            let r = modified(&root, |p| p.message_timer = timer).unwrap();
+            assert_eq!(r.message_timer(), timer);
+            let back = Root::from_proto(1, r.to_proto()).unwrap();
+            assert_eq!(back.chat_id(), r.chat_id());
+            assert_eq!(back.message_timer(), timer);
+        }
+    }
+
+    fn varint(n: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        prost::encoding::encode_varint(n as u64, &mut out);
+        out
+    }
+
+    fn entry(key: &str, value: &[u8]) -> proto::SettingsEntry {
+        proto::SettingsEntry {
+            key: key.to_owned(),
+            value: value.to_vec(),
+        }
+    }
+
+    /// The settings map (§4.1): every entry kept, known or not, in ascending key order; a
+    /// key given twice, a key empty or longer than 64 bytes, more than 128 entries or more
+    /// than 16,384 bytes by the measure of a message's metadata (§13.10) make the root
+    /// malformed. Absent and empty are one form.
+    #[test]
+    fn the_settings_map_keeps_every_entry_within_its_limits() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        assert!(root.settings().is_empty());
+        // Unknown keys are kept and hashed, in key order whatever the order received.
+        let r = modified(&root, |p| {
+            p.settings = vec![entry("z.later", b"1"), entry("a.later", b"")];
+        })
+        .unwrap();
+        assert_eq!(
+            r.settings().keys().collect::<Vec<_>>(),
+            ["a.later", "z.later"]
+        );
+        let sorted = modified(&root, |p| {
+            p.settings = vec![entry("a.later", b""), entry("z.later", b"1")];
+        })
+        .unwrap();
+        assert_eq!(sorted.chat_id(), r.chat_id());
+        assert_eq!(
+            r.to_proto().settings,
+            vec![entry("a.later", b""), entry("z.later", b"1")]
+        );
+        // A key given twice, even with the same value.
+        for second in [&b"1"[..], b"2"] {
+            assert_eq!(
+                modified(&root, |p| {
+                    p.settings = vec![entry("k", b"1"), entry("k", second)];
+                })
+                .map(|_| ()),
+                Err(Error::Duplicate("settings"))
+            );
+        }
+        // Keys of 1 to 64 bytes.
+        assert!(matches!(
+            modified(&root, |p| p.settings = vec![entry("", b"1")]),
+            Err(Error::TooFew {
+                field: "settings key",
+                ..
+            })
+        ));
+        assert!(modified(&root, |p| p.settings = vec![entry(&"k".repeat(64), b"")]).is_ok());
+        assert!(
+            modified(&root, |p| p.settings =
+                vec![entry(&"\u{e9}".repeat(32), b"")])
+            .is_ok()
+        );
+        assert!(matches!(
+            modified(&root, |p| p.settings = vec![entry(&"k".repeat(65), b"")]),
+            Err(Error::TooMany {
+                field: "settings key",
+                max: 64,
+                got: 65
+            })
+        ));
+        // At most 128 entries.
+        let many = |n: usize| (0..n).map(|i| entry(&format!("k{i:03}"), b"")).collect();
+        assert!(modified(&root, |p| p.settings = many(128)).is_ok());
+        assert!(matches!(
+            modified(&root, |p| p.settings = many(129)),
+            Err(Error::TooMany {
+                field: "settings",
+                max: 128,
+                got: 129
+            })
+        ));
+        // At most 16,384 bytes, every entry counting its key and value fields: one entry
+        // of a 1-byte key and a value of 16,375 bytes is 1 + 2 + (1 + 1 + 1) + (1 + 2 +
+        // 16,375) = 16,384 bytes.
+        assert!(modified(&root, |p| p.settings = vec![entry("k", &[0; 16_375])]).is_ok());
+        assert_eq!(
+            modified(&root, |p| p.settings = vec![entry("k", &[0; 16_376])]).map(|_| ()),
+            Err(Error::TooMany {
+                field: "settings",
+                max: 16_384,
+                got: 16_385
+            })
+        );
+    }
+
+    /// The settings map on the wire (Appendix C): field 13, entries of a text key and a byte
+    /// value, refused when the key is not UTF-8, when an entry holds an unknown field, when
+    /// a key is given twice or when there are more than 128 entries.
+    #[test]
+    fn the_settings_map_is_checked_as_received() {
+        let alice = identity(1);
+        let root = founding(&alice, &[&alice]);
+        let base = prost::Message::encode_to_vec(&root.to_proto());
+        let decode = |extra: &[u8]| {
+            let inner = [base.clone(), extra.to_vec()].concat();
+            let blob = [&[0x01][..], &[0x0a], &varint(inner.len()), &inner].concat();
+            wire::decode_event_blob(&blob, 1)
+        };
+        let field = |e: &[u8]| [&[0x6a][..], &varint(e.len()), e].concat();
+        let good = field(&[0x0a, 0x01, b'k', 0x12, 0x01, 0x07]);
+        match decode(&good).unwrap() {
+            wire::EventObject::Root(r) => {
+                assert_eq!(r.settings().get("k"), Some(&vec![7]));
+                assert_ne!(r.chat_id(), root.chat_id());
+            }
+            _ => panic!("not a root"),
+        }
+        // An empty value left out, as protobuf writes it: the same root as written in full.
+        let id = |o: wire::EventObject| match o {
+            wire::EventObject::Root(r) => r.chat_id(),
+            _ => panic!("not a root"),
+        };
+        let short = decode(&field(&[0x0a, 0x01, b'k'])).unwrap();
+        let full = decode(&field(&[0x0a, 0x01, b'k', 0x12, 0x00])).unwrap();
+        assert_eq!(id(short), id(full));
+        // The same key twice.
+        assert_eq!(
+            decode(&[good.clone(), good.clone()].concat()).map(|_| ()),
+            Err(Error::Duplicate("settings"))
+        );
+        // A key that is not UTF-8.
+        assert!(matches!(
+            decode(&field(&[0x0a, 0x01, 0xff])),
+            Err(Error::InvalidUtf8(_))
+        ));
+        // An unknown field in an entry.
+        assert!(matches!(
+            decode(&field(&[0x0a, 0x01, b'k', 0x18, 0x01])),
+            Err(Error::Malformed(_))
+        ));
+        // 129 entries, counted before decoding.
+        let many: Vec<u8> = (0..129)
+            .flat_map(|i| field(&[&[0x0a, 0x04][..], format!("k{i:03}").as_bytes()].concat()))
+            .collect();
+        assert!(matches!(
+            decode(&many),
+            Err(Error::TooMany {
+                field: "settings",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn created_at_rule() {
+        assert_eq!(next_root_created_at(100, None), Ok(100));
+        assert_eq!(next_root_created_at(100, Some(50)), Ok(100));
+        assert_eq!(next_root_created_at(100, Some(100)), Ok(101));
+        assert_eq!(next_root_created_at(100, Some(500)), Ok(501));
+        assert_eq!(next_root_created_at(100, Some(u64::MAX)), Ok(u64::MAX));
+    }
+}

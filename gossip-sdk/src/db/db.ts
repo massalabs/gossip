@@ -5,6 +5,9 @@
  * Database operations use SQLite via Drizzle ORM (see sqlite.ts and schema.ts).
  */
 
+/** Whether the user accepted a contact, or it is an automatic connection (§5.12). */
+export type ContactConnection = 'accepted' | 'automatic';
+
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
 
@@ -28,6 +31,11 @@ export interface Contact {
   isOnline: boolean;
   lastSeen: Date;
   createdAt: Date;
+  /**
+   * Whether the user accepted this contact, or it is only an automatic
+   * connection to a member of a group (§5.12). Absent means accepted.
+   */
+  connection?: ContactConnection;
 }
 
 export interface Message {
@@ -265,6 +273,37 @@ export interface Discussion {
   killedNextRetryAt?: Date | null;
   saturatedRetryAt?: Date | null;
   saturatedRetryDone: boolean;
+
+  // Group chats (§5.12)
+  /** It holds an earlier one-to-one conversation, shown read-only. */
+  isArchive: boolean;
+  /** The user moved it to the archived list. */
+  archived: boolean;
+  /** The direct chat (group key) that continues it, if any. */
+  linkedGroupId: string | null;
+  /** This device sent the contact request and founds the direct chat. */
+  directChatOwed: boolean;
+  /**
+   * The message timer (ms, 0 = forever) chosen with the contact request, for
+   * the direct chat this device founds; null for the account's default. On
+   * the side that received the request: the timer it states, shown before
+   * it is accepted (null if it states none).
+   */
+  directChatTimer: number | null;
+  /**
+   * When the session was last renewed because the server refused a send at
+   * a seeker it already held (409); null if never.
+   */
+  seekerConflictRenewedAt: Date | null;
+  /**
+   * This device's latest announcement to the peer was made on its own
+   * initiative and the peer has not announced itself since.
+   */
+  awaitingAnswer: boolean;
+  /** When a new announcement of the peer was last answered; null if never. */
+  renewalAnsweredAt: Date | null;
+  /** A new announcement of the peer waits for the end of the ten minutes. */
+  renewalAnswerOwed: boolean;
 
   // Timestamps
   createdAt: Date;

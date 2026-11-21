@@ -7,7 +7,6 @@ import {
   UserProfile,
   SecureStorageRecoveryRequiredError,
   MessagingSessionRecoveryRequiredError,
-  SELF_CONTACT_ID,
   UnreadableMessagingSessionError,
 } from '@massalabs/gossip-sdk';
 
@@ -35,6 +34,7 @@ import {
 } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
+import { useGroupStore } from './groupStore';
 import { useSelfMessageStore } from './selfMessageStore';
 import {
   deriveAccountFromMnemonic,
@@ -105,6 +105,14 @@ interface AccountState {
   encryptionKey: EncryptionKey | null;
   isLoading: boolean;
   privateMigrationPhase: PrivateMigrationPhase | null;
+  /**
+   * The account's messaging sessions were given up at this unlock or an
+   * earlier one (it was restored from a backup), and the user was not told
+   * yet. Held in the account's encrypted storage only.
+   */
+  sessionsResetNotice: boolean;
+  /** The user was told: the mark is cleared in the account. */
+  acknowledgeSessionsResetNotice: () => Promise<void>;
   lockedByUser: boolean;
   account: Account | null;
   evmAddress: string | null;
@@ -216,6 +224,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       provider: null,
       isLoading: false,
       privateMigrationPhase: null,
+      sessionsResetNotice: false,
     };
   };
 
@@ -603,6 +612,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     encryptionKey: null,
     isLoading: true,
     privateMigrationPhase: null,
+    sessionsResetNotice: false,
     lockedByUser: false,
     account: null,
     evmAddress: null,
@@ -635,6 +645,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       const resetTransientAccountStores = (): void => {
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
+        useGroupStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
       };
       if (!sdk.isSecureStorage || accounts.length === 0) {
@@ -745,6 +756,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Filling the account briefly published its profile to the stores.
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
+        useGroupStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
         useAppStore.getState().resetAccountSettings();
         set({ ...clearAccountState(), isLoading: false });
@@ -803,6 +815,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
               formatVersion: 1 as const,
               installationEpoch: migrationEpoch,
               completedPhase: 5,
+              sessionReset: false,
             }
           : migrationEpoch
             ? await sdk.queries.privateMigration.begin(migrationEpoch)
@@ -907,11 +920,33 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           );
         }
 
+        // An account whose journal came from another generation (a backup
+        // imported) gives up its sessions at the unlock that carries the
+        // journal over, without asking: the copy's sessions may have moved on
+        // elsewhere, and their next seekers be already used, so what it sent
+        // on them would be refused. Only the contact requests still waiting
+        // for this user's answer are kept. Nothing is sent before the new
+        // state is persisted and the journal moves on (polling starts after
+        // the last phase); a crash before that resets again.
+        const resetForImport =
+          sessionMigrationPending &&
+          migrationState?.sessionReset === true &&
+          !method.resetMessagingSessions &&
+          sdk.usesSessionBlobNamespace;
+        const resetSessions =
+          method.resetMessagingSessions === true || resetForImport;
+
         let encryptedSession: Uint8Array | undefined;
         let usedLegacySessionFallback = false;
         if (sdk.usesSessionBlobNamespace) {
           if (method.resetMessagingSessions) {
             await sdk.queries.messagingSessionRecovery.prepareReset();
+          } else if (resetForImport) {
+            await sdk.queries.messagingSessionRecovery.prepareReset();
+            // Read only for the requests it holds; everything else in it is
+            // given up as it is loaded.
+            const ns = await sdk.readSessionBlob();
+            encryptedSession = ns && ns.length > 0 ? ns : undefined;
           } else {
             const ns = await sdk.readSessionBlob();
             if (!ns || ns.length === 0) {
@@ -938,13 +973,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // traces of the last lock are gone.
         await admitAccountOutputs(sdk);
         const persistOpenedSession = createOnPersist(profile.userId);
-        let sessionPersistenceEnabled = !method.resetMessagingSessions;
-        try {
-          await sdk.openSession({
+        let sessionPersistenceEnabled = !resetSessions;
+        const open = (session: Uint8Array | undefined) =>
+          sdk.openSession({
             mnemonic,
             identityDerivationVersion:
               profile.security.identityDerivationVersion,
-            encryptedSession,
+            encryptedSession: session,
             encryptionKey,
             onPersist: async (blob, key) => {
               if (sessionPersistenceEnabled) {
@@ -954,7 +989,23 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
             // Start only after the migration journal and lastSeen save commit.
             publishPublicKey: false,
             autoStartPolling: migrationActive ? false : undefined,
+            ...(resetForImport ? { sessionReset: true } : {}),
           });
+        try {
+          try {
+            await open(encryptedSession);
+          } catch (error) {
+            // A copy whose sessions cannot be read keeps no request: all of
+            // them are given up anyway.
+            if (
+              !resetForImport ||
+              encryptedSession === undefined ||
+              !(error instanceof UnreadableMessagingSessionError)
+            ) {
+              throw error;
+            }
+            await open(undefined);
+          }
         } catch (error) {
           if (
             sessionMigrationPending &&
@@ -967,24 +1018,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         }
         sessionOpenedThisCall = true;
 
-        if (method.resetMessagingSessions) {
-          const discussions = await sdk.queries.discussions.getByOwner(
-            profile.userId
-          );
-          for (const discussion of discussions) {
-            if (
-              !discussion.weAccepted ||
-              discussion.contactUserId === SELF_CONTACT_ID
-            ) {
-              continue;
-            }
-            const reopened = await sdk.discussions.createSessionForContact(
-              discussion.contactUserId,
-              new Uint8Array(0),
-              { resetQueue: false, triggerRefresh: false }
-            );
-            if (!reopened.success) throw reopened.error;
-          }
+        if (resetSessions) {
+          // One new session, with a new announcement, per contact and
+          // automatic connection; sent once polling starts.
+          await sdk.rebuildMessagingSessions();
           await sdk.persistSessionBlob(sdk.getEncryptedSession());
           sessionPersistenceEnabled = true;
         } else if (migrationActive && usedLegacySessionFallback) {
@@ -1009,14 +1046,14 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         sdk.startPublicKeyPublication();
         if (migrationActive) sdk.polling.start();
         if (freshAccount && migrationEpoch) {
-          // Not awaited: the user is let in now and this finishes behind
-          // them. Database access is serialized, so it cannot interleave
-          // with another statement.
-          void sdk.queries.privateMigration
-            .beginCompleted(migrationEpoch)
-            .catch(error => {
-              logger.error('Failed to record the completed journal:', error);
-            });
+          // Awaited: a journal never recorded would leave a backup of this
+          // account unable to tell, once imported, that its sessions are to
+          // be given up.
+          try {
+            await sdk.queries.privateMigration.beginCompleted(migrationEpoch);
+          } catch (error) {
+            logger.error('Failed to record the completed journal:', error);
+          }
         }
 
         useAppStore.getState().setIsInitialized(true);
@@ -1029,6 +1066,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           encryptionKey,
           isLoading: false,
           lockedByUser: false,
+          sessionsResetNotice: migrationState?.sessionReset === true,
         });
         accountTransferred = true;
 
@@ -1079,6 +1117,19 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
 
+    acknowledgeSessionsResetNotice: async () => {
+      set({ sessionsResetNotice: false });
+      const sdk = getSdk();
+      const epoch = sdk.accountGenerationEpoch;
+      if (!epoch) return;
+      try {
+        await sdk.queries.privateMigration.acknowledgeSessionReset(epoch);
+      } catch (error) {
+        // Told again at the next unlock.
+        logger.error('Failed to clear the session reset notice:', error);
+      }
+    },
+
     resetAccount: async () => {
       set({ isLoading: true });
       try {
@@ -1104,6 +1155,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (SECURE_STORAGE_ENABLED) void clearAccountTraces();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
+        useGroupStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
         onboardingAllocatedSlots.clear();
         useAppStore.getState().resetAccountSettings();

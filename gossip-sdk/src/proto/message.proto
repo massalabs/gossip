@@ -12,6 +12,7 @@ message Message {
     MESSAGE_TYPE_EDIT = 5;
     MESSAGE_TYPE_REACTION = 6;
     MESSAGE_TYPE_RETENTION_POLICY = 7;
+    MESSAGE_TYPE_GROUP = 8;
   }
 
   MessageType messageType = 1;
@@ -20,4 +21,8 @@ message Message {
   optional bytes citedMsgId = 4;
   optional bytes citedContactId = 5;
   optional string forwardedContent = 6;
+  // The group plaintext of a MESSAGE_TYPE_GROUP message (plausibly deniable
+  // group chats), its only field. It is read under that type only and ignored
+  // under any other.
+  optional bytes groupPlaintext = 7;
 }

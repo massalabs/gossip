@@ -12,6 +12,10 @@
 
 use wasm_bindgen::prelude::*;
 
+mod group_chats;
+
+pub use group_chats::GroupsNode;
+
 // Set up panic hook for better error messages in the browser
 #[wasm_bindgen(start)]
 pub fn start() {
@@ -133,9 +137,8 @@ impl UserPublicKeys {
 
     /// Deserializes public keys from bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<UserPublicKeys, JsValue> {
-        let inner = bincode::serde::decode_from_slice(bytes, bincode::config::standard())
-            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {}", e)))?
-            .0;
+        let inner = public_keys_from_bytes(bytes)
+            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {}", e)))?;
         Ok(UserPublicKeys { inner })
     }
 }
@@ -156,9 +159,8 @@ impl UserSecretKeys {
 
     /// Deserializes secret keys from bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<UserSecretKeys, JsValue> {
-        let inner = bincode::serde::decode_from_slice(bytes, bincode::config::standard())
-            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {}", e)))?
-            .0;
+        let inner = secret_keys_from_bytes(bytes)
+            .map_err(|e| JsValue::from_str(&format!("Deserialization error: {}", e)))?;
         Ok(UserSecretKeys { inner })
     }
 
@@ -184,6 +186,61 @@ impl UserSecretKeys {
     #[wasm_bindgen(getter)]
     pub fn evm_secret_key(&self) -> Vec<u8> {
         self.inner.evm_secret_key.to_vec()
+    }
+}
+
+/// Decodes the public keys behind [`UserPublicKeys::from_bytes`]: `auth` accepts only their
+/// exact encoding.
+fn public_keys_from_bytes(
+    bytes: &[u8],
+) -> Result<auth::UserPublicKeys, bincode::error::DecodeError> {
+    auth::UserPublicKeys::from_bytes(bytes)
+}
+
+/// Decodes the secret keys behind [`UserSecretKeys::from_bytes`], only from their exact
+/// encoding, as `auth` does for public keys: every byte must be read and the keys must encode
+/// back to the same bytes. `auth` has no decoder for secret keys, so the rule is kept here.
+fn secret_keys_from_bytes(
+    bytes: &[u8],
+) -> Result<auth::UserSecretKeys, bincode::error::DecodeError> {
+    let (keys, read): (auth::UserSecretKeys, usize) =
+        bincode::serde::decode_from_slice(bytes, bincode::config::standard())?;
+    let mut check = SameBytes {
+        expected: bytes,
+        at: 0,
+        diff: 0,
+    };
+    let encoded =
+        bincode::serde::encode_into_writer(&keys, &mut check, bincode::config::standard());
+    if read != bytes.len() || encoded.is_err() || check.at != bytes.len() || check.diff != 0 {
+        return Err(bincode::error::DecodeError::Other(
+            "secret keys are not in their canonical encoding",
+        ));
+    }
+    Ok(keys)
+}
+
+/// A bincode writer that compares what is written with `expected` instead of keeping it, so
+/// that no copy of the secret keys is made; every byte is compared, without stopping at the
+/// first difference.
+struct SameBytes<'a> {
+    expected: &'a [u8],
+    at: usize,
+    diff: u8,
+}
+
+impl bincode::enc::write::Writer for SameBytes<'_> {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), bincode::error::EncodeError> {
+        let end = self.at + bytes.len();
+        let Some(expected) = self.expected.get(self.at..end) else {
+            return Err(bincode::error::EncodeError::Other("longer than the input"));
+        };
+        self.diff |= expected
+            .iter()
+            .zip(bytes)
+            .fold(0, |acc, (a, b)| acc | (a ^ b));
+        self.at = end;
+        Ok(())
     }
 }
 
@@ -888,5 +945,55 @@ mod tests {
         // a message delayed up to the age window must still find its session
         let config = SessionConfig::new_default().inner;
         assert!(config.max_session_inactivity_millis >= config.max_incoming_message_age_millis);
+    }
+
+    fn key_bytes() -> (Vec<u8>, Vec<u8>) {
+        let keys = generate_user_keys("binding key bytes").unwrap();
+        (
+            keys.public_keys_bytes.clone(),
+            keys.secret_keys_bytes.clone(),
+        )
+    }
+
+    /// The exact encoding, one and many trailing bytes, cut by one byte, in the middle
+    /// and to nothing, and the first length written with a wider varint than needed.
+    fn variants(bytes: &[u8]) -> Vec<(&'static str, Vec<u8>)> {
+        let mut wider = vec![252, bytes[1], bytes[2], 0, 0];
+        assert_eq!(
+            bytes[0], 251,
+            "the first length is written as 251 then a u16"
+        );
+        wider.extend_from_slice(&bytes[3..]);
+        vec![
+            ("one trailing byte", [bytes, &[0]].concat()),
+            ("many trailing bytes", [bytes, &[0xff; 64]].concat()),
+            ("cut by one byte", bytes[..bytes.len() - 1].to_vec()),
+            ("cut in the middle", bytes[..bytes.len() / 2].to_vec()),
+            ("empty", Vec::new()),
+            ("wider length prefix", wider),
+        ]
+    }
+
+    #[test]
+    fn public_keys_decode_only_from_their_exact_encoding() {
+        let (bytes, _) = key_bytes();
+        let keys = public_keys_from_bytes(&bytes).expect("exact encoding is accepted");
+        assert_eq!(keys.to_bytes(), bytes);
+        assert!(UserPublicKeys::from_bytes(&bytes).is_ok());
+        for (name, variant) in variants(&bytes) {
+            assert!(public_keys_from_bytes(&variant).is_err(), "{name} accepted");
+        }
+    }
+
+    #[test]
+    fn secret_keys_decode_only_from_their_exact_encoding() {
+        let (_, bytes) = key_bytes();
+        let keys = secret_keys_from_bytes(&bytes).expect("exact encoding is accepted");
+        let again = bincode::serde::encode_to_vec(&keys, bincode::config::standard()).unwrap();
+        assert_eq!(again, bytes);
+        assert!(UserSecretKeys::from_bytes(&bytes).is_ok());
+        for (name, variant) in variants(&bytes) {
+            assert!(secret_keys_from_bytes(&variant).is_err(), "{name} accepted");
+        }
     }
 }

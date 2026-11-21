@@ -31,6 +31,7 @@ import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
 import { useRekeyCoordination } from './hooks/useRekeyCoordination';
+import { useSessionsResetNotice } from './hooks/useSessionsResetNotice';
 import { clearAccountTraces } from './services/accountTraces';
 import { SECURE_STORAGE_ENABLED } from './config/features';
 import PageLayout from './components/ui/Layout/PageLayout.tsx';
@@ -52,6 +53,7 @@ export const AppContent: React.FC = () => {
   const rekeyStatus = useRekeyStore(state => state.status);
   useProfileLoader();
   useRekeyCoordination();
+  useSessionsResetNotice();
   useStoreInit(); // Initialize all stores when user profile is available
   const existingAccountInfo = useAccountInfo();
 

@@ -20,6 +20,7 @@
     "privacy": "Конфиденциальность",
     "security": "Безопасность",
     "feedback": "Отправить отзыв",
+    "feedback_external": "Открывает внешний сайт: cryptpad.fr",
     "mesh": "Офлайн-сеть"
   },
   "delete_account": {
@@ -210,7 +211,7 @@
   "privacy": {
     "title": "Конфиденциальность",
     "default_retention_title": "Автоудаление сообщений по умолчанию",
-    "default_retention_description": "К новым чатам будет автоматически применяться эта политика хранения."
+    "default_retention_description": "Новые чаты, которые вы начинаете, получают этот таймер. При создании чата можно выбрать другой."
   },
   "web3": {
     "title": "Web3",
@@ -263,6 +264,7 @@
     "battery_settings": "Настройки батареи",
     "enable_autostart": "Включить автозапуск (MIUI)",
     "learn_more": "Подробнее",
+    "learn_more_external": "Эта ссылка открывает внешний сайт dontkillmyapp.com. По открытой странице этот сайт узнает марку вашего телефона, а также ваш IP-адрес.",
     "debug_info": "Отладочная информация",
     "refresh_status": "Обновить статус",
     "device_warnings": {

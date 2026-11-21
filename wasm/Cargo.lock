@@ -1602,6 +1602,7 @@ dependencies = [
  "crypto-aead",
  "crypto-password-kdf",
  "crypto-rng",
+ "groups",
  "js-sys",
  "massa_signature 4.0.0 (git+https://github.com/massalabs/massa.git)",
  "serde",
@@ -1640,6 +1641,19 @@ dependencies = [
  "ff",
  "rand_core 0.6.4",
  "subtle",
+]
+
+[[package]]
+name = "groups"
+version = "0.1.0"
+dependencies = [
+ "auth",
+ "blake3",
+ "crypto-dsa",
+ "hex",
+ "prost",
+ "thiserror 1.0.69",
+ "zeroize",
 ]
 
 [[package]]
@@ -2755,6 +2769,29 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
+]
+
+[[package]]
+name = "prost"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
+dependencies = [
+ "anyhow",
+ "itertools 0.13.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]

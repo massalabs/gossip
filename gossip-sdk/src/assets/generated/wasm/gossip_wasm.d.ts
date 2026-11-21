@@ -1,5 +1,23 @@
 /* tslint:disable */
 /* eslint-disable */
+/**
+ * The largest group plaintext, in bytes (§13.10).
+ */
+export function group_max_plaintext_bytes(): number;
+/**
+ * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
+ * forward of text. A longer one is refused by the engine and by every receiver.
+ */
+export function group_max_text_bytes(): number;
+/**
+ * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
+ */
+export function group_max_metadata_bytes(): number;
+/**
+ * The size of message metadata, given as `publish_message` takes it (a list of
+ * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
+ */
+export function group_metadata_bytes(metadata: string): number;
 export function start(): void;
 /**
  * Generates user keys from a passphrase.
@@ -159,6 +177,252 @@ export class EncryptionKey {
    * - `salt`: unique, random salt (minimum 8 bytes, recommended 16+ bytes)
    */
   static from_seed(seed: string, salt: Uint8Array): EncryptionKey;
+}
+/**
+ * The group engine of one identity.
+ */
+export class GroupsNode {
+  private constructor();
+  free(): void;
+  [Symbol.dispose](): void;
+  handed_off(handle: number, now: number): void;
+  is_current(handle: number, now: number): boolean;
+  /**
+   * Adds the `UserPublicKeys` bytes of a contact or a session peer to the key cache.
+   * Returns its GossipID.
+   */
+  learn_keys(keys: Uint8Array, now: number): Uint8Array;
+  /**
+   * `edit`: `{"body":…|null,"author":hex|null,"created_at":…|null,
+   * "last_modified_at":…|null,"metadata":…|null,"edited":bool|null}`; `metadata` is a
+   * patch as for `publish_edit`, `null` keeping everything.
+   */
+  local_edit(epoch: Uint8Array, sync_obj_id: Uint8Array, edit: string, now: number): string;
+  invitations(now: number): string;
+  /**
+   * `choice`: `Signed`, `AskToBeKicked` or `Silent`.
+   */
+  leave_group(group: Uint8Array, choice: string, now: number): void;
+  link_groups(a: Uint8Array, b: Uint8Array, linked: boolean, now: number): void;
+  /**
+   * When to call `tick` next, or `undefined`.
+   */
+  next_wakeup(now: number): number | undefined;
+  /**
+   * The plaintexts to send: an array of `{handle, to, plaintext}`.
+   */
+  poll_outbox(now: number): Array<any>;
+  /**
+   * The reference (§4.5) of a held epoch, which reply targets name.
+   */
+  ref_chat_id(epoch: Uint8Array): Uint8Array | undefined;
+  resend_root(group: Uint8Array, now: number): void;
+  /**
+   * Whether a session with `peer` exists (in memory only; report it again after opening).
+   */
+  set_session(peer_id: Uint8Array, has_session: boolean): void;
+  /**
+   * `change`: `{"t":"Successor","add":[hex],"remove":[hex],"name":null|string}`,
+   * `{"t":"Handover","new_owner":hex,"leave":bool,"name":…}`,
+   * `{"t":"MessageTimer","timer":ms}` or `{"t":"Resolve","members":[hex],"name":…}`.
+   * Returns the new epoch.
+   */
+  change_group(group: Uint8Array, change: string, now: number): Uint8Array;
+  /**
+   * Founds a group; `members` is the concatenation of their 32-byte GossipIDs. Returns
+   * the group key.
+   */
+  create_group(name: string, members: Uint8Array, now: number): Uint8Array;
+  delete_group(group: Uint8Array, now: number): void;
+  /**
+   * Whether `peer` is a member of a group this device holds and has accepted: a
+   * connection it asks for may be opened automatically (§5.12).
+   */
+  is_co_member(peer_id: Uint8Array): boolean;
+  local_delete(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): string;
+  /**
+   * An edit starts from the message's current metadata (§2.2: entries a client does not
+   * know, `replyTo` included, survive it). `metadata` is a patch: `[]` or `null` keeps
+   * everything, an array of `[name, hex]` sets those entries, and
+   * `{"set":[[name, hex], …],"remove":[name, …]}` also removes.
+   */
+  publish_edit(epoch: Uint8Array, sync_obj_id: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, now: number): string;
+  /**
+   * The batches committed since the last call, oldest first: an array of
+   * `{rows, removedRows, edges, removedEdges, objects, removedObjects, node, erase}`, to
+   * apply in order.
+   */
+  take_batches(): any;
+  /**
+   * The changes since the last call, in JSON: `[{group, kind}]`.
+   */
+  take_changes(now: number): string;
+  /**
+   * A media message (§7.6): `mimetype` is `type/subtype` (lowercase, no parameters, at most
+   * 127 bytes), `data` any bytes the event can hold; `metadata` as for `publish_message`
+   * (a name or a caption). Returns `{eventId, syncObjId, merge}` in JSON.
+   */
+  publish_media(epoch: Uint8Array, mimetype: string, data: Uint8Array, metadata: string, now: number): string;
+  dissolve_group(group: Uint8Array, must_delete: boolean, now: number): void;
+  set_local_name(group: Uint8Array, name: string | null | undefined, now: number): void;
+  /**
+   * The targets of a `replyTo` value, in the JSON form `encode_reply_to` takes.
+   */
+  decode_reply_to(value: Uint8Array): string;
+  /**
+   * The value of the metadata key `replyTo`: `targets` is
+   * `[{"ref_chat_id":hex,"sync_obj_id":hex}]`, 1 to 32 of them.
+   */
+  encode_reply_to(targets: string): Uint8Array;
+  /**
+   * The number of batches waiting to be taken.
+   */
+  pending_batches(): number;
+  /**
+   * `body`: `{"t":"Text","text":…}`,
+   * `{"t":"Forward","content_type":"Text"|"Media","content":hex}` (a forwarded media
+   * message is the canonical encoding of a `Media`), or
+   * `{"t":"Media","media":{"mimetype":…,"data":hex}}`; a reaction goes through
+   * `publish_reaction`. `metadata`: an array of `[name, hex]`. Returns
+   * `{eventId, syncObjId, merge}` in JSON.
+   */
+  publish_message(epoch: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, now: number): string;
+  /**
+   * A group plaintext received from `from` in its one-to-one session.
+   */
+  handle_plaintext(from: Uint8Array, bytes: Uint8Array, now: number): void;
+  peer_reconnected(peer_id: Uint8Array, now: number): void;
+  publish_deletion(epoch: Uint8Array, sync_obj_id: Uint8Array, scheduled_for: number | null | undefined, now: number): string;
+  /**
+   * Adds (`add`) or removes this device's reaction `emoji` (1 to 64 bytes of UTF-8) to the
+   * message `target` of `epoch`, the target's own epoch (§7.6). Returns
+   * `{eventId, syncObjId, merge}` in JSON; `syncObjId` is the reaction's.
+   */
+  publish_reaction(epoch: Uint8Array, target: Uint8Array, emoji: string, add: boolean, now: number): string;
+  accept_invitation(epoch: Uint8Array, now: number): Uint8Array;
+  /**
+   * The accepted contacts declared, in JSON: `["<peer hex>", …]`.
+   */
+  accepted_contacts(): string;
+  /**
+   * As `create_group`, for an automatic group of this device and the one other member
+   * (§5.12): `migrate_from = 0` both for a migration of an earlier conversation and for the
+   * chat founded after an accepted contact request; `undefined` for "New group". Returns
+   * the group kept: the peer's own creation, when it is held and its owner sorts first
+   * ("two creations at once").
+   */
+  create_group_with(name: string, members: Uint8Array, migrate_from: number | null | undefined, now: number): Uint8Array;
+  /**
+   * Whether this device holds a direct chat with `peer` (an automatic group of the two,
+   * however it grew since): a later creation from it is then an ordinary invitation.
+   */
+  holds_direct_chat(peer_id: Uint8Array): boolean;
+  scan_shared_chats(peer_id: Uint8Array, now: number): void;
+  decline_invitation(epoch: Uint8Array, choice: string, now: number): void;
+  lookup_sync_object(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): void;
+  /**
+   * The results of the sync-object lookups completed since the last call, in JSON:
+   * `[{epoch, syncObjId, found}]`, `found` the event ID received or `null`. Removing them
+   * is a committed operation: take the batches after it.
+   */
+  take_lookup_results(now: number): string;
+  /**
+   * The consents not used yet, in JSON: `[["<peer hex>", "<expires at>"], …]`.
+   */
+  direct_chat_consents(): string;
+  /**
+   * Declares (`accepted`) or clears that `peer` is a contact the user accepted (§13.8): only
+   * such a peer gets a version notice for a plaintext of a later wire version. Call it when
+   * the user accepts a contact, when a contact is removed, and at open for every accepted
+   * contact.
+   */
+  set_accepted_contact(peer_id: Uint8Array, accepted: boolean, now: number): void;
+  /**
+   * Among `candidates` (concatenated 32-byte GossipIDs), those whose automatic connection
+   * may be revoked: no group shared, no held epoch lists them (§5.12). Concatenated.
+   */
+  connections_to_revoke(candidates: Uint8Array): Uint8Array;
+  /**
+   * The earlier conversations declared, in JSON: `[["<peer hex>", "<version>"], …]` (integers as decimal strings, as every view).
+   */
+  earlier_conversations(): string;
+  /**
+   * Gives (`consent`) or withdraws the consent to the group of two `peer` creates after
+   * its contact request was accepted (§5.12): one-shot, for 14 days. `timer` is the
+   * message timer the request announced, in milliseconds, if it announced one: the
+   * consent then covers only a root with that timer, and a root with another is an
+   * invitation that names it (`announced_timer`). Local, never sent.
+   */
+  consent_to_direct_chat(peer_id: Uint8Array, consent: boolean, now: number, timer?: number | null): void;
+  /**
+   * As `create_group_with`, with the message timer of the group in milliseconds (§7.7):
+   * each message is deleted on every device at its creation date plus the timer; 0 keeps
+   * messages forever. The owner changes it later with `change_group`
+   * (`{"t":"MessageTimer","timer":ms}`).
+   */
+  create_group_with_timer(name: string, members: Uint8Array, migrate_from: number | null | undefined, message_timer: number, now: number): Uint8Array;
+  /**
+   * The members of accepted groups with which no session is reported (`set_session`):
+   * the connections to open. Concatenated 32-byte GossipIDs.
+   */
+  peers_wanting_connection(): Uint8Array;
+  /**
+   * Records (`held`) or clears that this device holds an earlier conversation of format
+   * `version` with `peer` (§5.12, condition 3): stored, until cleared.
+   */
+  set_earlier_conversation(peer_id: Uint8Array, version: number, held: boolean, now: number): void;
+  /**
+   * This identity's GossipID.
+   */
+  me(): Uint8Array;
+  /**
+   * The verified keys held for `id`, if any.
+   */
+  keys(id: Uint8Array): Uint8Array | undefined;
+  /**
+   * Opens the engine of the identity from a snapshot of its stored records
+   * (`{rows, edges, objects, node}`, see `take_batches`; empty arrays for a new account).
+   * Only the ML-DSA signing key is copied out of the secret keys; the copy is erased
+   * when this object is freed. Fails with `groups:undecodable: …` when a stored record
+   * cannot be decoded (one written by an earlier build).
+   */
+  static open(public_keys: UserPublicKeys, secret_keys: UserSecretKeys, snapshot: any): GroupsNode;
+  tick(now: number): void;
+  /**
+   * The root of a held epoch in JSON: `{epoch, name, members, owner, created_at}`, or
+   * `null`.
+   */
+  epoch(epoch: Uint8Array): string;
+  /**
+   * One group by any of its epochs, in JSON (`null` when unknown).
+   */
+  group(epoch: Uint8Array): string;
+  /**
+   * The media message `sync_obj_id` of `epoch` with its data: `{mimetype, data}` (`data`
+   * a `Uint8Array`), or `null` when the message is not visible or holds no media.
+   */
+  media(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): any;
+  retry(epoch: Uint8Array, sync_obj_id: Uint8Array, now: number): string;
+  /**
+   * Every group, in JSON.
+   */
+  groups(): string;
+  abandon(handle: number): void;
+  /**
+   * Message records found without their epoch when opening, and dropped.
+   */
+  orphans(): number;
+  /**
+   * Every record as one batch of upserts.
+   */
+  snapshot(): any;
+  /**
+   * The timeline in JSON. A message lists `reactions` as `[[author, emoji], …]`; a media
+   * message (or a forwarded one) comes without its data, with `data_len`: read the data
+   * with `media`.
+   */
+  timeline(epoch: Uint8Array, now: number): string;
+  published(handle: number, now: number): void;
 }
 /**
  * Nonce for AEAD operations (AES-256-SIV).
@@ -516,6 +780,72 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
+  readonly __wbg_groupsnode_free: (a: number, b: number) => void;
+  readonly group_max_metadata_bytes: () => number;
+  readonly group_max_plaintext_bytes: () => number;
+  readonly group_metadata_bytes: (a: number, b: number) => [number, number, number];
+  readonly groupsnode_abandon: (a: number, b: number) => void;
+  readonly groupsnode_accept_invitation: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly groupsnode_accepted_contacts: (a: number) => [number, number];
+  readonly groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_connections_to_revoke: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_consent_to_direct_chat: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+  readonly groupsnode_create_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_create_group_with: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+  readonly groupsnode_create_group_with_timer: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+  readonly groupsnode_decline_invitation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_decode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_delete_group: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_direct_chat_consents: (a: number) => [number, number];
+  readonly groupsnode_dissolve_group: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly groupsnode_earlier_conversations: (a: number) => [number, number];
+  readonly groupsnode_encode_reply_to: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_epoch: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_group: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_groups: (a: number) => [number, number];
+  readonly groupsnode_handed_off: (a: number, b: number, c: number) => [number, number];
+  readonly groupsnode_handle_plaintext: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_holds_direct_chat: (a: number, b: number, c: number) => [number, number, number];
+  readonly groupsnode_invitations: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_is_co_member: (a: number, b: number, c: number) => [number, number, number];
+  readonly groupsnode_is_current: (a: number, b: number, c: number) => [number, number, number];
+  readonly groupsnode_keys: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_learn_keys: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly groupsnode_leave_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_link_groups: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+  readonly groupsnode_local_delete: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_local_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+  readonly groupsnode_lookup_sync_object: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_me: (a: number) => [number, number];
+  readonly groupsnode_media: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+  readonly groupsnode_next_wakeup: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_open: (a: number, b: number, c: any) => [number, number, number];
+  readonly groupsnode_orphans: (a: number) => number;
+  readonly groupsnode_peer_reconnected: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_peers_wanting_connection: (a: number) => [number, number];
+  readonly groupsnode_pending_batches: (a: number) => number;
+  readonly groupsnode_poll_outbox: (a: number, b: number) => [number, number, number];
+  readonly groupsnode_publish_deletion: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+  readonly groupsnode_publish_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
+  readonly groupsnode_publish_media: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+  readonly groupsnode_publish_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+  readonly groupsnode_publish_reaction: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+  readonly groupsnode_published: (a: number, b: number, c: number) => [number, number];
+  readonly groupsnode_ref_chat_id: (a: number, b: number, c: number) => [number, number, number, number];
+  readonly groupsnode_resend_root: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_retry: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+  readonly groupsnode_scan_shared_chats: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_set_accepted_contact: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly groupsnode_set_earlier_conversation: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_set_local_name: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+  readonly groupsnode_set_session: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly groupsnode_snapshot: (a: number) => [number, number, number];
+  readonly groupsnode_take_batches: (a: number) => [number, number, number];
+  readonly groupsnode_take_changes: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_take_lookup_results: (a: number, b: number) => [number, number, number, number];
+  readonly groupsnode_tick: (a: number, b: number) => [number, number];
+  readonly groupsnode_timeline: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly group_max_text_bytes: () => number;
   readonly __wbg_addressedannouncement_free: (a: number, b: number) => void;
   readonly __wbg_announcementresult_free: (a: number, b: number) => void;
   readonly __wbg_encryptionkey_free: (a: number, b: number) => void;
@@ -570,6 +900,7 @@ export interface InitOutput {
   readonly sessionmanagerwrapper_send_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
   readonly sessionmanagerwrapper_set_config: (a: number, b: number) => void;
   readonly sessionmanagerwrapper_to_encrypted_blob: (a: number, b: number) => [number, number, number, number];
+  readonly start: () => void;
   readonly userkeys_evm_address: (a: number) => [number, number];
   readonly userkeys_massa_address: (a: number) => [number, number];
   readonly userkeys_public_keys: (a: number) => [number, number, number];
@@ -587,13 +918,12 @@ export interface InitOutput {
   readonly usersecretkeys_kem_secret_key: (a: number) => [number, number];
   readonly usersecretkeys_massa_secret_key: (a: number) => [number, number];
   readonly usersecretkeys_to_bytes: (a: number) => [number, number, number, number];
-  readonly start: () => void;
-  readonly __wbindgen_exn_store: (a: number) => void;
-  readonly __externref_table_alloc: () => number;
-  readonly __wbindgen_export_2: WebAssembly.Table;
-  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+  readonly __wbindgen_exn_store: (a: number) => void;
+  readonly __externref_table_alloc: () => number;
+  readonly __wbindgen_export_4: WebAssembly.Table;
+  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
   readonly __externref_table_dealloc: (a: number) => void;
   readonly __wbindgen_start: () => void;
 }

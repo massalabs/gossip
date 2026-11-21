@@ -8,7 +8,8 @@
   "filter": {
     "all": "All",
     "unread": "Unread",
-    "pending": "Pending"
+    "pending": "Pending",
+    "archived": "Archived"
   },
   "message_input": {
     "replying_to": "Replying to",
@@ -21,7 +22,8 @@
     "input_label": "Message input",
     "send": "Send message",
     "emoji": "Emoji",
-    "emoji_search": "Search emoji…"
+    "emoji_search": "Search emoji…",
+    "size_counter": "{{used}} / {{max}} bytes"
   },
   "message": {
     "sent": "Sent",
@@ -93,8 +95,7 @@
   "new_discussion": {
     "title": "New discussion",
     "new_contact": "New contact",
-    "new_group": "New group (coming soon)",
-    "coming_soon": "Coming soon",
+    "new_group": "New group",
     "contacts": "Contacts",
     "search_contacts": "Search contacts",
     "loading_contacts": "Loading contacts…",

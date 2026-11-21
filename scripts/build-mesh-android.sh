@@ -83,6 +83,7 @@ for abi in "${ABI_LIST[@]}"; do
     upper="$(echo "$env_target" | tr '[:lower:]' '[:upper:]')"
     export "CC_${env_target}=$cc" "AR_${env_target}=$TOOLCHAIN/llvm-ar" "CARGO_TARGET_${upper}_LINKER=$cc"
     cargo build --locked -p gossip-mobile --target "$target" -j "${JOBS:-3}" \
+        --config "$(bash "$ROOT_DIR/scripts/rust-remap-flags.sh")" \
         ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
     so="$CARGO_TARGET_DIR/$target/$TARGET_DIR/libgossip_mobile.so"
     if ! file "$so" | grep -q "$expected"; then

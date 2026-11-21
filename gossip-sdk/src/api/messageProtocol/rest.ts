@@ -82,7 +82,11 @@ export class RestMessageProtocol
     });
 
     if (!response.success) {
-      throw new Error(response.error || 'Failed to send message');
+      // A 409 tells a seeker the server already holds: kept recognisable.
+      throw (
+        response.httpError ??
+        new Error(response.error || 'Failed to send message')
+      );
     }
   }
 

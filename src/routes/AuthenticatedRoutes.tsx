@@ -10,6 +10,10 @@ import Contact from '../pages/Contact';
 import ContactSharePage from '../pages/ContactSharePage';
 import SelfDiscussion from '../pages/SelfDiscussion';
 import DiscussionSettings from '../pages/DiscussionSettings';
+import GroupDiscussion from '../pages/GroupDiscussion';
+import GroupSettings from '../pages/GroupSettings';
+import NewGroup from '../pages/NewGroup';
+import Invitation from '../pages/Invitation';
 import SecuritySettings from '../pages/settings/SecuritySettings';
 import NotificationsSettings from '../pages/settings/NotificationsSettings';
 import AppearanceSettings from '../pages/settings/AppearanceSettings';
@@ -52,6 +56,10 @@ export const AuthenticatedRoutes: React.FC = () => {
         <Route path={ROUTES.discussion()} element={<Discussion />} />
         <Route path={ROUTES.newDiscussion()} element={<NewDiscussion />} />
         <Route path={ROUTES.newContact()} element={<NewContact />} />
+        <Route path={ROUTES.newGroup()} element={<NewGroup />} />
+        <Route path={ROUTES.group()} element={<GroupDiscussion />} />
+        <Route path={ROUTES.groupSettings()} element={<GroupSettings />} />
+        <Route path={ROUTES.invitation()} element={<Invitation />} />
         <Route path={ROUTES.settings()} element={<Settings />} />
         <Route path={ROUTES.portableBackup()} element={<PortableBackup />} />
         <Route path={ROUTES.invite()} element={<InvitePage />} />

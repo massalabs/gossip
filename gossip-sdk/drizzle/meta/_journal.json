@@ -71,6 +71,48 @@
       "when": 1794590816699,
       "tag": "0009_lowercase_user_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1795084958395,
+      "tag": "0010_group_chats",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795113424155,
+      "tag": "0011_group_conversations",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795186445695,
+      "tag": "0012_discussions_direct_chat_timer",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795190781560,
+      "tag": "0013_private_migration_session_reset",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1795192149885,
+      "tag": "0014_discussions_seeker_conflict",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1795223316032,
+      "tag": "0015_discussions_renewal_answer",
+      "breakpoints": true
     }
   ]
 }

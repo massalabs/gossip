@@ -11,6 +11,11 @@ export interface PrivateMigrationStateV1 {
   formatVersion: typeof PRIVATE_MIGRATION_FORMAT_VERSION;
   installationEpoch: string;
   completedPhase: number;
+  /**
+   * The journal came from another generation (a backup imported): the
+   * messaging sessions are given up and rebuilt, and the user is told once.
+   */
+  sessionReset: boolean;
 }
 
 function validateEpoch(epoch: string): void {
@@ -40,6 +45,7 @@ function validate(
     formatVersion: PRIVATE_MIGRATION_FORMAT_VERSION,
     installationEpoch: row.installationEpoch,
     completedPhase: row.completedPhase,
+    sessionReset: row.sessionReset,
   };
 }
 
@@ -68,6 +74,11 @@ export class PrivateMigrationQueries {
         if (current.installationEpoch === installationEpoch) return current;
       }
 
+      // A journal of another generation was copied here with the account (a
+      // backup imported, or a re-encryption whose carry-over was lost): its
+      // sessions may have moved on elsewhere. No journal at all is an account
+      // upgraded in place, whose sessions are its own.
+      const sessionReset = currentRow !== undefined;
       const row = await tx
         .insert(privateMigration)
         .values({
@@ -75,6 +86,7 @@ export class PrivateMigrationQueries {
           formatVersion: PRIVATE_MIGRATION_FORMAT_VERSION,
           installationEpoch,
           completedPhase: 0,
+          sessionReset,
         })
         .onConflictDoUpdate({
           target: privateMigration.id,
@@ -82,6 +94,7 @@ export class PrivateMigrationQueries {
             formatVersion: PRIVATE_MIGRATION_FORMAT_VERSION,
             installationEpoch,
             completedPhase: 0,
+            sessionReset,
           },
         })
         .returning()
@@ -105,6 +118,7 @@ export class PrivateMigrationQueries {
         formatVersion: PRIVATE_MIGRATION_FORMAT_VERSION,
         installationEpoch,
         completedPhase: PRIVATE_MIGRATION_PHASE_COUNT,
+        sessionReset: false,
       };
       const row = await tx
         .insert(privateMigration)
@@ -195,5 +209,22 @@ export class PrivateMigrationQueries {
       if (!row) throw new Error('Private migration phase lost its journal');
       return validate(row);
     });
+  }
+
+  /**
+   * The user was told that the sessions were rebuilt: the mark is cleared,
+   * if the journal is still the one of `installationEpoch`.
+   */
+  async acknowledgeSessionReset(installationEpoch: string): Promise<void> {
+    validateEpoch(installationEpoch);
+    await this.conn.db
+      .update(privateMigration)
+      .set({ sessionReset: false })
+      .where(
+        and(
+          eq(privateMigration.id, PRIVATE_MIGRATION_SINGLETON_ID),
+          eq(privateMigration.installationEpoch, installationEpoch)
+        )
+      );
   }
 }

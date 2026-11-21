@@ -58,6 +58,9 @@ export enum AppRoute {
   discussion = 'discussion',
   discussions = 'discussions',
   selfDiscussion = 'self-discussion',
+  group = 'group',
+  newGroup = 'new-group',
+  invitation = 'invitation',
 }
 
 export const ROUTES = {
@@ -91,6 +94,7 @@ export const ROUTES = {
   // Actions
   newContact: route(`/${AppRoute.newContact}`),
   newDiscussion: route(`/${AppRoute.newDiscussion}`),
+  newGroup: route(`/${AppRoute.newGroup}`),
 
   selfDiscussion: route(`/${AppRoute.selfDiscussion}`),
 
@@ -101,6 +105,12 @@ export const ROUTES = {
   discussionSettings: route(
     `/${AppRoute.discussion}/:discussionId/${AppRoute.settings}`
   ),
+
+  // `groupId` is the group key (hex)
+  group: route(`/${AppRoute.group}/:groupId`),
+  /** The invitation screen: `kind` is `group` (an epoch) or `contact`. */
+  invitation: route(`/${AppRoute.invitation}/:kind/:id`),
+  groupSettings: route(`/${AppRoute.group}/:groupId/${AppRoute.settings}`),
 
   // Default
   default: route(`/`),

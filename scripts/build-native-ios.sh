@@ -62,6 +62,7 @@ echo "[1/3] cargo build (aarch64-apple-ios + aarch64-apple-ios-sim)..."
 # `set -u` on macOS bash 3.2 (older bash treats `${arr[@]}` on an
 # empty array as an unset reference).
 cargo build -p secureStorage --features native --no-default-features \
+    --config "$(bash "$ROOT_DIR/scripts/rust-remap-flags.sh")" \
     ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"} \
     --target aarch64-apple-ios \
     --target aarch64-apple-ios-sim

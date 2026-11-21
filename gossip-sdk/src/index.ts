@@ -30,3 +30,40 @@ export * from './db/db.js';
 export * from './db/queries/index.js';
 export * from './db/sqlite.js';
 export { SELF_CONTACT_ID } from './services/selfMessage.js';
+export { GroupService } from './services/groups.js';
+export {
+  ConversationService,
+  MigrationUnavailableError,
+} from './services/conversations.js';
+export type {
+  GroupId,
+  GroupSummary,
+  GroupInvitation,
+  GroupMessage,
+  GroupMessageBody,
+  GroupMessageContent,
+  GroupReaction,
+  GroupLine,
+  GroupTimelineItem,
+  GroupChange,
+  GroupChangeKind,
+  GroupMemberStatus,
+  GroupPublished,
+  LeaveChoice,
+  GroupMessageRef,
+  GroupEpoch,
+  GroupLocalEdit,
+  GroupMessageLimits,
+  GroupEpochTimer,
+} from './services/groups.js';
+export type { DiscussionStartOptions } from './services/discussion.js';
+export {
+  GROUP_MAX_SCHEDULE_MS,
+  GROUP_DEVICE_KEY,
+  EARLIER_FORMAT_VERSION,
+  GroupMessageTooLargeError,
+  GroupInvalidReactionError,
+  GROUP_MAX_EMOJI_BYTES,
+  GROUP_TIMER_28_DAYS_MS,
+  retentionToMessageTimer,
+} from './services/groups.js';

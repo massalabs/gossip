@@ -63,7 +63,9 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
                 try bridgeNode.startCore(configJson: defaults.string(forKey: Self.configKey) ?? "{}")
                 bridgeNode.startRadio(mode: MeshPowerMode(name: defaults.string(forKey: Self.powerModeKey)))
             } catch {
+                #if DEBUG
                 CAPLog.print("[MeshNode] could not restore the mesh node: \(error.localizedDescription)")
+                #endif
             }
         }
     }

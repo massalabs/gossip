@@ -17,7 +17,7 @@ crossbeam = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
+tracing = { workspace = true, features = ["release_max_level_off"] }
 
 [features]
 # `impl gossip_repl::BlobStore for PoolsStore`

@@ -38,5 +38,9 @@
     "continue_web_instead": "Continue in Web App Instead",
     "open_failed": "Could not open the app. You can continue in the web app instead.",
     "learn_more": "Learn more about Gossip"
+  },
+  "instance": {
+    "open_elsewhere": "This account is open in another tab",
+    "open_elsewhere_hint": "Close this tab and continue in the other one."
   }
 }

@@ -1,0 +1,49 @@
+# Privacy checks of the build
+
+Gossip is a privacy-first messenger. Privacy comes before debugging and
+reporting: a release build writes no log, and the app contacts only the Gossip
+backend, mesh peers and a short list of hosts the project owner approved.
+`npm run build` enforces this with the checks below. Each one stops the build
+with a message that says what it found, why it matters and what to do.
+
+**Never weaken a check or extend one of its lists to make the build pass.**
+Find the cause and remove it, or override the library default that brings it.
+If something is truly needed, stop and ask the project owner, and change the
+list only with their explicit approval.
+
+## The checks
+
+| Script                                                | When               | What it enforces                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/audit-logging.mjs source`                    | before the build   | No `console` use (any method, `console[...]`, `console?.[...]`) in app source outside `src/utils/logger.ts` and `src/sw.ts`. No native log call (`Log.`, `println`, `printStackTrace`, `System.out`, `NSLog`, `os_log`, `Logger(`, `print(`, `CAPLog.print`) in the app's own Kotlin, Java and Swift outside `DebugLog` (Android) or `#if DEBUG` (iOS). `VITE_DEBUG_LOGS` is not `true` for a production build. No patch in `patches/` changes certificate or trust handling without a debug-only guard in the same hunk. Capacitor bridge logging is off. |
+| `scripts/audit-paths.mjs source`                      | before the build   | The committed wasm bundles hold no home directory path (`/home/`, `/Users/`, `C:\Users\`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `gossip-sdk/scripts/audit-production-worker.mjs dist` | after `vite build` | The production storage worker holds no test fault controls.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `scripts/audit-logging.mjs dist`                      | after the build    | No `console` use in the bundle, except the i18next default logger, which `src/i18n/index.ts` replaces by a silent one.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `scripts/audit-hosts.mjs dist`                        | after the build    | Every host named by a URL in `dist/**/*.{js,mjs,html,json,webmanifest}` is in `scripts/allowed-hosts.ts`, or is the host of the build's `VITE_GOSSIP_API_URL`.                                                                                                                                                                                                                                                                                                                                                                                             |
+| `scripts/audit-paths.mjs dist`                        | after the build    | No file of `dist/` holds a home directory path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+Their unit tests are in `test/scripts/`.
+
+## Native code
+
+- Android: the app logs through `net.massa.gossip.DebugLog`, which writes only
+  when `BuildConfig.DEBUG`. The background runner plugin is patched
+  (`patches/@capacitor+background-runner+3.0.0.patch`) to log only when the app
+  is debuggable.
+- iOS: every log line of the app and the share extension is inside
+  `#if DEBUG ... #endif`.
+- Rust: every build of a library the app ships passes `--remap-path-prefix`
+  through `scripts/rust-remap-flags.sh`, so no build path reaches the app. A new
+  Rust build must pass the same `--config`. The mesh crates compile their
+  `tracing` statements out of release builds (`release_max_level_off`).
+
+## Adding an allowed host
+
+1. Ask the project owner first. Say which host, what for, what the app sends
+   to it, and whether the user starts it with a tap.
+2. With their approval, add an entry to `scripts/allowed-hosts.ts`: under
+   `ALLOWED_HOSTS` with its kind, its purpose and who approved it, or under
+   `KNOWN_INERT_HOSTS` when a library carries it but the app never contacts it,
+   with the file that shows why.
+3. A page the user opens with a tap is announced before the tap, in simple
+   words, with what the website will learn.

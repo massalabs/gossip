@@ -20,6 +20,7 @@
     "privacy": "Privacy",
     "security": "Security",
     "feedback": "Send Feedback",
+    "feedback_external": "Opens an external website: cryptpad.fr",
     "mesh": "Offline mesh"
   },
   "delete_account": {
@@ -210,7 +211,7 @@
   "privacy": {
     "title": "Privacy",
     "default_retention_title": "Default message auto-delete",
-    "default_retention_description": "New discussions will automatically have this retention policy applied."
+    "default_retention_description": "New chats you start get this message timer. You can choose another one when you start a chat."
   },
   "web3": {
     "title": "Web3",
@@ -263,6 +264,7 @@
     "battery_settings": "Battery settings",
     "enable_autostart": "Enable AutoStart (MIUI)",
     "learn_more": "Learn more",
+    "learn_more_external": "This link opens an external website, dontkillmyapp.com. That website will learn the brand of your phone from the page you open, and your IP address.",
     "debug_info": "Debug Info",
     "refresh_status": "Refresh Status",
     "device_warnings": {

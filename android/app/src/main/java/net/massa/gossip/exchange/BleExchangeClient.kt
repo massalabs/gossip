@@ -17,7 +17,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.ParcelUuid
-import android.util.Log
+import net.massa.gossip.DebugLog
 import java.util.UUID
 
 /**
@@ -71,7 +71,7 @@ class BleExchangeClient(
                 scanner.startScan(filters, settings, scanCallback)
                 current.scanning = true
             } catch (e: SecurityException) {
-                Log.w(TAG, "Bluetooth permission missing", e)
+                DebugLog.w(TAG, "Bluetooth permission missing", e)
                 finish(current, Outcome.Failed("PERMISSION_DENIED"))
             }
         }
@@ -90,7 +90,7 @@ class BleExchangeClient(
                 it.disconnect()
                 it.close()
             } catch (e: SecurityException) {
-                Log.w(TAG, "Bluetooth permission missing while closing", e)
+                DebugLog.w(TAG, "Bluetooth permission missing while closing", e)
             }
         }
         current.gatt = null
@@ -106,7 +106,7 @@ class BleExchangeClient(
                 bluetoothManager.adapter.bluetoothLeScanner?.stopScan(scanCallback)
             }
         } catch (e: SecurityException) {
-            Log.w(TAG, "Bluetooth permission missing while stopping the scan", e)
+            DebugLog.w(TAG, "Bluetooth permission missing while stopping the scan", e)
         }
     }
 
@@ -117,7 +117,7 @@ class BleExchangeClient(
         }
 
         override fun onScanFailed(errorCode: Int) {
-            Log.w(TAG, "Scan failed: $errorCode")
+            DebugLog.w(TAG, "Scan failed: $errorCode")
             handler.post { attempt?.let { finish(it, Outcome.Failed("SCAN_FAILED")) } }
         }
     }
