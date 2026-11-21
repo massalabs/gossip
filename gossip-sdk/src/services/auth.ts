@@ -13,6 +13,9 @@ import type { Queries } from '../db/queries/index.js';
 export const PUBLIC_KEY_REPUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PUBLIC_KEY_TIMESTAMP_RETRY_INTERVAL_MS = 60 * 1000;
 
+export const PUBLIC_KEYS_MISMATCH_ERROR =
+  'The public keys received do not match this user id';
+
 export class AuthService {
   private publicationInFlight = new Map<string, Promise<number>>();
   private successfulPublicationTimes = new Map<string, number>();
@@ -25,15 +28,24 @@ export class AuthService {
    * @param userId - Bech32-encoded userId (e.g., "gossip1...")
    */
   async fetchPublicKeyByUserId(userId: string): Promise<UserPublicKeys> {
+    let publicKeys: UserPublicKeys;
+    let requestedId: Uint8Array;
     try {
-      const base64PublicKey = await this.authProtocol.fetchPublicKeyByUserId(
-        decodeUserId(userId)
-      );
-
-      return UserPublicKeys.from_bytes(decodeFromBase64(base64PublicKey));
+      requestedId = decodeUserId(userId);
+      const base64PublicKey =
+        await this.authProtocol.fetchPublicKeyByUserId(requestedId);
+      publicKeys = UserPublicKeys.from_bytes(decodeFromBase64(base64PublicKey));
     } catch (err) {
       throw new Error(getPublicKeyErrorMessage(err));
     }
+    // The user id is the hash of the keys: a node cannot pass off other keys.
+    // The ids are compared, not their text: the same id can be written in
+    // lowercase or in uppercase.
+    if (!sameBytes(publicKeys.derive_id(), requestedId)) {
+      publicKeys.free();
+      throw new Error(PUBLIC_KEYS_MISMATCH_ERROR);
+    }
+    return publicKeys;
   }
 
   /**
@@ -174,4 +186,8 @@ export function getPublicKeyErrorMessage(error: unknown): string {
   }
 
   return `${FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR}. ${errorMessage}`;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }

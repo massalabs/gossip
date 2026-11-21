@@ -81,5 +81,32 @@
     "file_modal_body": "将您的个人资料以文件形式分享给想要交流的人。对方可以在<newContactLink>新联系人</newContactLink>页面导入您的文件。",
     "file_modal_note": "与其他个人资料分享方式相比，即使您超过 2 周未登录应用，文件形式的个人资料仍然有效。",
     "share_file": "分享文件"
+  },
+  "contact_code": {
+    "mode_in_person": "面对面",
+    "mode_link": "邀请链接",
+    "qr_label": "你的动态联系人码",
+    "hold_phone": "把手机对准对方的摄像头",
+    "bluetooth_on": "蓝牙已开启：对方手机也可以通过蓝牙获取你的密钥。",
+    "bluetooth_off_hint": "无需联网。开启蓝牙会更快。",
+    "bluetooth_offer": "同时使用蓝牙",
+    "bluetooth_unavailable": "蓝牙未开启或未获授权。动态码无需蓝牙也能使用。",
+    "bluetooth_unavailable_simple": "简易码需要蓝牙。请开启蓝牙，或显示动态码。",
+    "bluetooth_stopped": "蓝牙已停止。",
+    "restart": "重新开始",
+    "shared": "已发送到附近的手机",
+    "simple_code": "显示简易码",
+    "animated_code": "显示动态码",
+    "simple_code_hint": "对方手机读取此码后，会通过蓝牙获取你的密钥。",
+    "point_camera": "将摄像头对准对方的码",
+    "reading": "正在读取对方的码… {{percent}}%",
+    "using_bluetooth": "正在使用蓝牙…",
+    "keep_close": "让两部手机靠近一些。",
+    "bluetooth_failed_keep_camera": "蓝牙没有成功。请继续用摄像头对准对方的码。",
+    "bluetooth_failed": "无法通过蓝牙获取对方的密钥。请让对方保持显示码，然后重试。",
+    "bluetooth_needed": "请允许蓝牙以读取简易码，或请对方显示动态码。",
+    "not_gossip_code": "这不是 Gossip 码",
+    "keys_mismatch": "此码中的密钥与其用户 ID 不符。未添加联系人。",
+    "web_simple_code": "此码需要蓝牙：请对方显示动态码。"
   }
 }

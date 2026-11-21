@@ -1,3 +1,5 @@
+import { useRekeyStore } from './stores/rekeyStore';
+import RekeyProgressScreen from './components/RekeyProgressScreen';
 import { logger } from './utils/logger.ts';
 import './i18n';
 import React, { useState, useEffect, useRef } from 'react';
@@ -28,6 +30,10 @@ import { useOnlineStore } from './stores/useOnlineStore';
 import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
+import { useRekeyCoordination } from './hooks/useRekeyCoordination';
+import { useSessionsResetNotice } from './hooks/useSessionsResetNotice';
+import { clearAccountTraces } from './services/accountTraces';
+import { SECURE_STORAGE_ENABLED } from './config/features';
 import PageLayout from './components/ui/Layout/PageLayout.tsx';
 import PortableBackupStartupGate from './components/PortableBackupStartupGate.tsx';
 import {
@@ -44,7 +50,10 @@ export const AppContent: React.FC = () => {
   const lockedStartupFallback = useAppStore(s => s.lockedStartupFallback);
   const routesInitialized = isInitialized || lockedStartupFallback;
   const [loginError, setLoginError] = useState<string | null>(null);
+  const rekeyStatus = useRekeyStore(state => state.status);
   useProfileLoader();
+  useRekeyCoordination();
+  useSessionsResetNotice();
   useStoreInit(); // Initialize all stores when user profile is available
   const existingAccountInfo = useAccountInfo();
 
@@ -64,12 +73,23 @@ export const AppContent: React.FC = () => {
     }
   }, [isLoading]);
 
+  // The app may have been killed, or locked natively, with an account open:
+  // nothing of it may stay outside the encrypted store while locked.
+  useEffect(() => {
+    if (SECURE_STORAGE_ENABLED) void clearAccountTraces();
+  }, []);
+
   // Setup service worker: register, listen for messages, start sync scheduler, and initialize background sync
   useEffect(() => {
     setupServiceWorker().catch(error => {
       logger.error('Failed to setup service worker:', error);
     });
   }, []); // Only run once on mount
+
+  // Storage is being re-encrypted (or just was): nothing else may open it.
+  if (rekeyStatus !== 'idle') {
+    return <RekeyProgressScreen />;
+  }
 
   // LoadingScreen only during the very first profile-loader pass — not
   // for subsequent actions that toggle isLoading (signup, login, etc.).

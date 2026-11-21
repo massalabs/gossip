@@ -4,6 +4,7 @@ import AccountCreationForm, {
   AccountCreationResult,
 } from './AccountCreationForm';
 import type { OnboardingStorageModeLease } from '../../services/portableImportAuthorization';
+import { generateDefaultUsername } from '../../utils/validation';
 
 interface ClassicAccountCreationProps {
   onComplete: () => void | Promise<void>;
@@ -19,7 +20,7 @@ const ClassicAccountCreation: React.FC<ClassicAccountCreationProps> = ({
   const initializeAccount = useAccountStore(state => state.initializeAccount);
 
   const handleSubmit = async (result: AccountCreationResult) => {
-    await initializeAccount(result.username, result.password);
+    await initializeAccount(generateDefaultUsername(), result.password);
     await onComplete();
   };
 

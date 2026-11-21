@@ -159,6 +159,8 @@ interface DbState {
   useNativePlugin: boolean;
   portableTransferActive: boolean;
   onboardingCandidateActive: boolean;
+  /** 'admitting' after beginRekey, 'candidate' once the candidate is built. */
+  rekeyPhase: 'idle' | 'admitting' | 'candidate';
   closeActive: boolean;
 }
 
@@ -190,6 +192,7 @@ function createDefaultState(): DbState {
     useNativePlugin: false,
     portableTransferActive: false,
     onboardingCandidateActive: false,
+    rekeyPhase: 'idle',
     closeActive: false,
   };
 }
@@ -221,17 +224,31 @@ async function isNativePlatform(): Promise<boolean> {
   }
 }
 
+/**
+ * Deleted content is overwritten with zeros, not left in the free space of
+ * the database: a message the group timer erases, or any deleted row, must
+ * not be recoverable from the file by someone who opens it (a user forced to
+ * unlock). `ON`, not `FAST`: `FAST` does not zero the pages a deletion frees
+ * whole (overflow pages of a long message, emptied leaves), which keep the
+ * old content. A per-connection setting: every connection sets it when it
+ * opens (secure storage in `finalize`). Content deleted before it was set
+ * stays in the free space until SQLite reuses those pages.
+ */
+const SECURE_DELETE = 'PRAGMA secure_delete = ON;';
+
 /** PRAGMAs applied before migrations (in-memory / browser worker). */
 const PRAGMAS = `
   PRAGMA journal_mode=MEMORY;
   PRAGMA temp_store=MEMORY;
   PRAGMA busy_timeout = 10000;
+  ${SECURE_DELETE}
 `;
 
 /** PRAGMAs for file-based persistence (Node.js). WAL gives crash recovery. */
 const PRAGMAS_FILE = `
   PRAGMA journal_mode=WAL;
   PRAGMA temp_store=MEMORY;
+  ${SECURE_DELETE}
 `;
 
 // ---------------------------------------------------------------------------
@@ -364,6 +381,56 @@ export class DatabaseConnection {
     } finally {
       release();
     }
+  }
+
+  /**
+   * One-round-trip atomic batch, available on the native plugin only: the
+   * whole `BEGIN … COMMIT` is a single bridge call instead of one per
+   * statement. Other backends use the generic per-statement transaction.
+   */
+  private atomicBatchExecutor():
+    | ((statements: { sql: string; params: unknown[] }[]) => Promise<void>)
+    | undefined {
+    if (!this.state.useNativePlugin || !this.state.nativePlugin) {
+      return undefined;
+    }
+    return async statements => {
+      const native = this.requireNativePlugin();
+      for (const statement of statements) {
+        assertNoUndefinedBindParams(statement.params);
+      }
+      const prev = this.state.dbLock;
+      let release!: () => void;
+      this.state.dbLock = new Promise<void>(r => (release = r));
+      await prev;
+      try {
+        if (this.state.txDepth > 0) {
+          throw new Error('Atomic batch cannot run inside a transaction');
+        }
+        try {
+          await native.execSqlBatch({
+            statements: [
+              { sql: 'BEGIN IMMEDIATE', params: [] },
+              ...statements,
+              { sql: 'COMMIT', params: [] },
+            ],
+          });
+        } catch (error) {
+          // The batch stops at the first failing statement, leaving the
+          // transaction open. Roll it back; a ROLLBACK with no open
+          // transaction (BEGIN itself failed) is harmless to ignore.
+          try {
+            await native.execSql({ sql: 'ROLLBACK', params: [] });
+          } catch {
+            // Nothing was left open.
+          }
+          throw error;
+        }
+        await native.flush();
+      } finally {
+        release();
+      }
+    };
   }
 
   private async execRawDirect(
@@ -658,7 +725,8 @@ export class DatabaseConnection {
       fn => {
         const txExecRaw = this.execRawDirect.bind(this);
         return this.withRawTransaction(() => fn(txExecRaw));
-      }
+      },
+      this.atomicBatchExecutor()
     );
 
     this.state.drizzleDb = this.createDrizzleInstance();
@@ -679,12 +747,18 @@ export class DatabaseConnection {
    * "database not open" error.
    */
   private async finalize(): Promise<void> {
+    // The secure-storage database is opened by the worker or the native
+    // plugin, with their own PRAGMAs; secure_delete is set here, on the
+    // connection they opened, before anything is written (one statement:
+    // both bridges take a single statement per call).
+    await this.execRaw(SECURE_DELETE);
     await runMigrations(
       (sql, params) => this.execRaw(sql, params),
       fn => {
         const txExecRaw = this.execRawDirect.bind(this);
         return this.withRawTransaction(() => fn(txExecRaw));
-      }
+      },
+      this.atomicBatchExecutor()
     );
     this.state.drizzleDb = this.createDrizzleInstance();
   }
@@ -829,6 +903,147 @@ export class DatabaseConnection {
     this.state.onboardingCandidateActive = false;
     this.state.accountGenerationEpoch = null;
     this.state.storageState = 'empty';
+  }
+
+  /**
+   * Start an in-place rekey of the committed store. Storage must be locked.
+   * See `GossipSdk.secureStorageBeginRekey` for the full sequence.
+   */
+  async secureStorageBeginRekey(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (
+      this.state.storageState !== 'locked' ||
+      this.state.accountGenerationState !== 'committed' ||
+      this.state.rekeyPhase !== 'idle'
+    ) {
+      throw new Error('Rekey requires locked, committed storage');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().beginRekey();
+    } else {
+      await this.requireSecureProxy().beginRekey();
+    }
+    this.state.rekeyPhase = 'admitting';
+  }
+
+  async secureStorageAdmitRekey(
+    password: string,
+    newPassword?: string
+  ): Promise<boolean> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (this.state.rekeyPhase !== 'admitting') {
+      throw new Error('Rekey is not accepting passwords');
+    }
+    if (password.length === 0 || newPassword?.length === 0) return false;
+    const encoder = new TextEncoder();
+    const pwBytes = encoder.encode(password);
+    const newBytes =
+      newPassword === undefined ? undefined : encoder.encode(newPassword);
+    try {
+      if (this.state.useNativePlugin) {
+        const result = await this.requireNativePlugin().admitRekey({
+          password: pwBytes,
+          newPassword: newBytes,
+        });
+        return result.admitted;
+      }
+      return await this.requireSecureProxy().admitRekey(
+        // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffers; the only post-transfer access is the `byteLength > 0` zeroize guard in the finally block.
+        Comlink.transfer(pwBytes, [pwBytes.buffer]),
+        newBytes === undefined
+          ? undefined
+          : // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: see above.
+            Comlink.transfer(newBytes, [newBytes.buffer])
+      );
+    } finally {
+      if (pwBytes.byteLength > 0) pwBytes.fill(0);
+      if (newBytes && newBytes.byteLength > 0) newBytes.fill(0);
+    }
+  }
+
+  /**
+   * Admit a new, empty account to the active rekey. It is created in the
+   * candidate at build time; unlock it with `password` to fill it.
+   */
+  async secureStorageAdmitRekeyNew(password: string): Promise<boolean> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (this.state.rekeyPhase !== 'admitting') {
+      throw new Error('Rekey is not accepting passwords');
+    }
+    if (password.length === 0) return false;
+    const pwBytes = new TextEncoder().encode(password);
+    try {
+      if (this.state.useNativePlugin) {
+        const result = await this.requireNativePlugin().admitRekeyNew({
+          password: pwBytes,
+        });
+        return result.admitted;
+      }
+      return await this.requireSecureProxy().admitRekeyNew(
+        // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; the only post-transfer access is the `byteLength > 0` zeroize guard in the finally block.
+        Comlink.transfer(pwBytes, [pwBytes.buffer])
+      );
+    } finally {
+      if (pwBytes.byteLength > 0) pwBytes.fill(0);
+    }
+  }
+
+  /**
+   * Re-encrypt the store into an in-memory candidate. Afterwards
+   * `secureStorageUnlock` / queries / `secureStorageLock` act on the
+   * candidate, not on the durable store.
+   */
+  async secureStorageBuildRekeyCandidate(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (
+      this.state.rekeyPhase !== 'admitting' ||
+      this.state.storageState !== 'locked'
+    ) {
+      throw new Error('Rekey is not accepting passwords');
+    }
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().buildRekeyCandidate();
+    } else {
+      await this.requireSecureProxy().buildRekeyCandidate();
+    }
+    this.state.rekeyPhase = 'candidate';
+  }
+
+  /** Atomically replace the committed generation with the candidate. */
+  async secureStorageCommitRekeyCandidate(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (
+      this.state.rekeyPhase !== 'candidate' ||
+      this.state.storageState !== 'locked'
+    ) {
+      throw new Error('Rekey candidate is not ready to commit');
+    }
+    this.state.drizzleDb = null;
+    const generationEpoch = this.state.useNativePlugin
+      ? (await this.requireNativePlugin().commitOnboardingCandidate()).epoch
+      : await this.requireSecureProxy().commitRekeyCandidate();
+    this.state.accountGenerationEpoch = generationEpoch;
+    this.state.rekeyPhase = 'idle';
+  }
+
+  /** Drop admission state and any candidate; the durable store is intact. */
+  async secureStorageAbortRekey(): Promise<void> {
+    this.assertNoSecureStorageOperationInTransactionCallback();
+    if (this.state.rekeyPhase === 'idle') return;
+    if (this.state.storageState === 'unlocked') {
+      throw new Error('Lock the rekey candidate before aborting');
+    }
+    this.state.drizzleDb = null;
+    if (this.state.useNativePlugin) {
+      const native = this.requireNativePlugin();
+      await native.endRekey();
+      if (this.state.rekeyPhase === 'candidate') {
+        await native.abortOnboardingCandidate();
+      }
+    } else {
+      await this.requireSecureProxy().abortRekey();
+    }
+    this.state.rekeyPhase = 'idle';
   }
 
   async secureStorageCreate(slot: number, password: string): Promise<void> {
@@ -1528,6 +1743,13 @@ export class DatabaseConnection {
       await tx.delete(schema.pendingAnnouncements);
       await tx.delete(schema.activeSeekers);
       await tx.delete(schema.announcementCursors);
+      await tx.delete(schema.discardedPeers);
+      await tx.delete(schema.transportCursors);
+      await tx.delete(schema.groupEventRows);
+      await tx.delete(schema.groupEdges);
+      await tx.delete(schema.groupObjects);
+      await tx.delete(schema.groupRecords);
+      await tx.delete(schema.groupOutbox);
     });
   }
 
@@ -1556,6 +1778,22 @@ export class DatabaseConnection {
       await tx
         .delete(schema.announcementCursors)
         .where(eq(schema.announcementCursors.userId, userId));
+      await tx
+        .delete(schema.transportCursors)
+        .where(eq(schema.transportCursors.userId, userId));
+      await tx
+        .delete(schema.discardedPeers)
+        .where(eq(schema.discardedPeers.ownerUserId, userId));
+      // Group engine records and outbox
+      for (const table of [
+        schema.groupEventRows,
+        schema.groupEdges,
+        schema.groupObjects,
+        schema.groupRecords,
+        schema.groupOutbox,
+      ]) {
+        await tx.delete(table).where(eq(table.ownerUserId, userId));
+      }
       // Session-specific tables (no user column — safe to clear for current session)
       await tx.delete(schema.pendingEncryptedMessages);
       await tx.delete(schema.pendingAnnouncements);
@@ -1568,6 +1806,11 @@ export class DatabaseConnection {
       await tx.delete(schema.messages);
       await tx.delete(schema.discussions);
       await tx.delete(schema.contacts);
+      await tx.delete(schema.groupEventRows);
+      await tx.delete(schema.groupEdges);
+      await tx.delete(schema.groupObjects);
+      await tx.delete(schema.groupRecords);
+      await tx.delete(schema.groupOutbox);
     });
   }
 }

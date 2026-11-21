@@ -1,3 +1,4 @@
+import toast from 'react-hot-toast';
 import { logger } from '../utils/logger.ts';
 import React, { useState, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
@@ -28,6 +29,7 @@ import {
   Clock,
   MessageSquare,
   Download,
+  Bluetooth,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -37,6 +39,7 @@ import { useNClicksTrigger } from '../hooks/useNClicksTrigger';
 import AccountBackup from '../components/account/AccountBackup';
 import ShareContact from '../components/settings/ShareContact';
 import UsernameEditModal from '../components/settings/UsernameEditModal';
+import { isMeshAvailable } from '../services/meshNode';
 
 enum SettingsView {
   MAIN = 'MAIN',
@@ -52,12 +55,22 @@ const TAP_TIMEOUT_MS = 2000; // Reset counter after 2 seconds of inactivity
 const SettingsRow: React.FC<{
   icon: React.ReactNode;
   label: string;
+  /** A short second line under the label. */
+  description?: string;
   onClick: () => void;
   /** Draw the divider under the row (all rows of a group except the last). */
   withDivider?: boolean;
   className?: string;
   trailing?: React.ReactNode;
-}> = ({ icon, label, onClick, withDivider = false, className, trailing }) => (
+}> = ({
+  icon,
+  label,
+  description,
+  onClick,
+  withDivider = false,
+  className,
+  trailing,
+}) => (
   <Button
     variant="outline"
     size="custom"
@@ -67,7 +80,14 @@ const SettingsRow: React.FC<{
     onClick={onClick}
   >
     <span className="mr-5 w-5 h-5 [&>svg]:w-5 [&>svg]:h-5">{icon}</span>
-    <span className="text-[15px] font-medium flex-1 text-left">{label}</span>
+    {description ? (
+      <span className="flex-1 flex flex-col text-left">
+        <span className="text-[15px] font-medium">{label}</span>
+        <span className="text-xs text-muted-foreground">{description}</span>
+      </span>
+    ) : (
+      <span className="text-[15px] font-medium flex-1 text-left">{label}</span>
+    )}
     {trailing}
   </Button>
 );
@@ -247,7 +267,16 @@ const Settings = (): React.ReactElement => {
             <SettingsRow
               icon={<Download />}
               label={t('menu.secure_backup')}
-              onClick={() => navigate(ROUTES.portableBackup())}
+              onClick={() => {
+                // The backup is locked by account passwords only. An
+                // account whose password is a device-generated secret could
+                // never be restored from it.
+                if (userProfile?.security.passwordless) {
+                  toast.error(t('portable_backup.set_password_first'));
+                  return;
+                }
+                navigate(ROUTES.portableBackup());
+              }}
               withDivider
             />
           )}
@@ -291,6 +320,17 @@ const Settings = (): React.ReactElement => {
           />
         </div>
 
+        {/* Offline mesh (native only) */}
+        {isMeshAvailable() && (
+          <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
+            <SettingsRow
+              icon={<Bluetooth />}
+              label={t('menu.mesh')}
+              onClick={() => navigate(ROUTES.settingsMesh())}
+            />
+          </div>
+        )}
+
         {/* Web 3 Group */}
         <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
           <SettingsRow
@@ -311,10 +351,12 @@ const Settings = (): React.ReactElement => {
           <SettingsRow
             icon={<MessageSquare />}
             label={t('menu.feedback')}
+            description={t('menu.feedback_external')}
             onClick={() =>
               window.open(
                 'https://cryptpad.fr/form/#/2/form/view/ZzlOcdHn5aACC2omt+QoCLoDohBgdZtWSIXjxmguPDs/embed/',
-                '_blank'
+                '_blank',
+                'noopener,noreferrer'
               )
             }
             withDivider={showDebugOption}

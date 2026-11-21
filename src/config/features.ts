@@ -14,6 +14,13 @@ export const SECURE_STORAGE_ENABLED =
   import.meta.env.VITE_SECURE_STORAGE === 'true';
 
 /**
+ * Offline Bluetooth mesh (native only). Offered in settings unless the build
+ * hides it with `VITE_MESH=false`; off until the user turns it on (see
+ * `services/meshNode.ts`).
+ */
+export const MESH_FEATURE_ENABLED = import.meta.env.VITE_MESH !== 'false';
+
+/**
  * Hardcoded password used by the dev secure storage bootstrap. Replaced
  * by the real user-supplied password in a later layer. Empty outside
  * DEV so that leaking this constant into a prod bundle is harmless.

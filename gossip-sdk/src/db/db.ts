@@ -5,6 +5,9 @@
  * Database operations use SQLite via Drizzle ORM (see sqlite.ts and schema.ts).
  */
 
+/** Whether the user accepted a contact, or it is an automatic connection (§5.12). */
+export type ContactConnection = 'accepted' | 'automatic';
+
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
 
@@ -28,6 +31,11 @@ export interface Contact {
   isOnline: boolean;
   lastSeen: Date;
   createdAt: Date;
+  /**
+   * Whether the user accepted this contact, or it is only an automatic
+   * connection to a member of a group (§5.12). Absent means accepted.
+   */
+  connection?: ContactConnection;
 }
 
 export interface Message {
@@ -80,6 +88,13 @@ export interface ProfileSecurityV1 {
 
   // iCloud Keychain sync preference (iOS only)
   iCloudSync?: boolean;
+
+  // Present (and true) only while the account password is a device-generated
+  // secret the user has never seen, i.e. the account was created with
+  // biometrics and no password has been set yet. Removed when one is set, so
+  // an account that has a password is indistinguishable from one created
+  // with it. Absent on every other account.
+  passwordless?: true;
 
   // Mnemonic backup details
   mnemonicBackup: {
@@ -143,6 +158,16 @@ export enum MessageType {
 export interface ReadyAnnouncement {
   announcement_bytes: Uint8Array;
   when_to_send: Date;
+  /**
+   * Board entry carrying the announcement to a peer we already exchanged
+   * announcements with, posted like a message alongside the board copy.
+   */
+  mailbox?: { seeker: Uint8Array; data: Uint8Array };
+  /**
+   * Only a mesh took it so far: post it to a server, alone (the mailbox entry
+   * never goes to one).
+   */
+  internetOnly?: boolean;
 }
 
 export type SendAnnouncement = null | ReadyAnnouncement;
@@ -151,9 +176,15 @@ export type SendAnnouncement = null | ReadyAnnouncement;
 export function serializeSendAnnouncement(
   announcement: ReadyAnnouncement
 ): string {
+  const { announcement_bytes, mailbox, internetOnly } = announcement;
   return JSON.stringify({
-    announcement_bytes: Array.from(announcement.announcement_bytes),
+    announcement_bytes: Array.from(announcement_bytes),
     when_to_send: announcement.when_to_send.toISOString(),
+    ...(internetOnly && { internet_only: true }),
+    ...(mailbox && {
+      mailbox_seeker: Array.from(mailbox.seeker),
+      mailbox_data: Array.from(mailbox.data),
+    }),
   });
 }
 
@@ -165,10 +196,21 @@ export function deserializeSendAnnouncement(json: string): ReadyAnnouncement {
     if (!parsed || !parsed.announcement_bytes || !parsed.when_to_send) {
       throw new Error('missing required fields');
     }
-    return {
-      announcement_bytes: new Uint8Array(parsed.announcement_bytes),
+    const announcement_bytes = new Uint8Array(parsed.announcement_bytes);
+    const ready: ReadyAnnouncement = {
+      announcement_bytes,
       when_to_send: new Date(parsed.when_to_send),
     };
+    if (parsed.internet_only === true) ready.internetOnly = true;
+    // entries saved before the mailbox was encrypted (mailbox_prefix) are
+    // dropped: the board copy still carries the announcement
+    if (parsed.mailbox_seeker && parsed.mailbox_data) {
+      ready.mailbox = {
+        seeker: new Uint8Array(parsed.mailbox_seeker),
+        data: new Uint8Array(parsed.mailbox_data),
+      };
+    }
+    return ready;
   } catch (e) {
     throw new Error(
       `Failed to deserialize SendAnnouncement: ${e instanceof Error ? e.message : e}`
@@ -231,6 +273,37 @@ export interface Discussion {
   killedNextRetryAt?: Date | null;
   saturatedRetryAt?: Date | null;
   saturatedRetryDone: boolean;
+
+  // Group chats (§5.12)
+  /** It holds an earlier one-to-one conversation, shown read-only. */
+  isArchive: boolean;
+  /** The user moved it to the archived list. */
+  archived: boolean;
+  /** The direct chat (group key) that continues it, if any. */
+  linkedGroupId: string | null;
+  /** This device sent the contact request and founds the direct chat. */
+  directChatOwed: boolean;
+  /**
+   * The message timer (ms, 0 = forever) chosen with the contact request, for
+   * the direct chat this device founds; null for the account's default. On
+   * the side that received the request: the timer it states, shown before
+   * it is accepted (null if it states none).
+   */
+  directChatTimer: number | null;
+  /**
+   * When the session was last renewed because the server refused a send at
+   * a seeker it already held (409); null if never.
+   */
+  seekerConflictRenewedAt: Date | null;
+  /**
+   * This device's latest announcement to the peer was made on its own
+   * initiative and the peer has not announced itself since.
+   */
+  awaitingAnswer: boolean;
+  /** When a new announcement of the peer was last answered; null if never. */
+  renewalAnsweredAt: Date | null;
+  /** A new announcement of the peer waits for the end of the ten minutes. */
+  renewalAnswerOwed: boolean;
 
   // Timestamps
   createdAt: Date;

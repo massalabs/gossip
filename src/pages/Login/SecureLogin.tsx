@@ -291,7 +291,7 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
             onClick={handleBiometricAuth}
             disabled={biometricLoading || passwordLoading}
             loading={biometricLoading}
-            variant="outline"
+            variant="primary"
             fullWidth
             className="h-[51px] rounded-full"
           >
@@ -337,9 +337,9 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
 
         <Button
           type="button"
-          variant="outline"
+          variant="danger"
           fullWidth
-          className="h-[51px] rounded-full border-destructive/40 text-destructive"
+          className="h-[51px] rounded-full"
           disabled={biometricLoading || passwordLoading}
           onClick={() => {
             setStorageResetFailed(false);

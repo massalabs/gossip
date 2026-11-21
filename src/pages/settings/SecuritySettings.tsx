@@ -12,6 +12,8 @@ import BiometricPasswordModal from '../../components/settings/BiometricPasswordM
 import { useAppStore } from '../../stores/appStore';
 import { useAccountStore } from '../../stores/accountStore';
 import { ROUTES } from '../../constants/routes';
+import { SECURE_STORAGE_ENABLED } from '../../config/features';
+import RekeyForm from '../../components/settings/RekeyForm';
 
 const TIMEOUT_OPTIONS: { labelKey: string; value: number | null }[] = [
   { labelKey: 'security.auto_lock_off', value: null },
@@ -31,6 +33,9 @@ const SecuritySettings: React.FC = () => {
     state => state.configureBiometricLogin
   );
 
+  const [rekeyMode, setRekeyMode] = useState<
+    'password' | 'refresh' | 'add' | null
+  >(null);
   const [isTimeoutModalOpen, setIsTimeoutModalOpen] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isICloudModalOpen, setIsICloudModalOpen] = useState(false);
@@ -86,6 +91,10 @@ const SecuritySettings: React.FC = () => {
     }
     await performBiometricSetup(password, false);
   };
+
+  if (rekeyMode) {
+    return <RekeyForm mode={rekeyMode} onBack={() => setRekeyMode(null)} />;
+  }
 
   return (
     <PageLayout
@@ -158,6 +167,84 @@ const SecuritySettings: React.FC = () => {
           <span className="text-accent-soft-foreground">{timeoutLabel}</span>
         </button>
       </div>
+
+      {SECURE_STORAGE_ENABLED && (
+        <>
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="px-4 pt-4 pb-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {t('security.password_title')}
+              </p>
+            </div>
+            <div className="px-4 pb-3">
+              <p className="text-sm text-muted-foreground">
+                {t('security.password_description')}
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t border-border">
+              <Button
+                onClick={() => setRekeyMode('password')}
+                variant="outline"
+                size="custom"
+                fullWidth
+                className="h-11 rounded-full text-sm font-medium"
+              >
+                {t('security.password_action')}
+              </Button>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="px-4 pt-4 pb-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {t('security.refresh_title')}
+              </p>
+            </div>
+            <div className="px-4 pb-3">
+              <p className="text-sm text-muted-foreground">
+                {t('security.refresh_description')}
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t border-border">
+              <Button
+                onClick={() => setRekeyMode('refresh')}
+                variant="outline"
+                size="custom"
+                fullWidth
+                className="h-11 rounded-full text-sm font-medium"
+              >
+                {t('security.refresh_action')}
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {SECURE_STORAGE_ENABLED && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="px-4 pt-4 pb-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              {t('security.hidden_accounts_title')}
+            </p>
+          </div>
+          <div className="px-4 pb-3">
+            <p className="text-sm text-muted-foreground">
+              {t('security.hidden_accounts_description')}
+            </p>
+          </div>
+          <div className="px-4 py-3 border-t border-border">
+            <Button
+              onClick={() => setRekeyMode('add')}
+              variant="outline"
+              size="custom"
+              fullWidth
+              className="h-11 rounded-full text-sm font-medium"
+            >
+              {t('security.hidden_accounts_action')}
+            </Button>
+          </div>
+        </div>
+      )}
 
       <OptionBottomSheet
         isOpen={isTimeoutModalOpen}

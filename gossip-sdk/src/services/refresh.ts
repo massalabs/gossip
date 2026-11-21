@@ -54,6 +54,8 @@ export class RefreshService {
   private queries: Queries;
   private config: SdkConfig;
   private sessionStatusMap: Map<string, SessionStatus> = new Map();
+  /** When a keep-alive was last queued for each peer while only a mesh was reachable. */
+  private meshKeepAliveAt: Map<string, number> = new Map();
 
   constructor(
     messageService: MessageService,
@@ -240,7 +242,8 @@ export class RefreshService {
           keepAliveSet.has(discussion.contactUserId) &&
           this.session.peerSessionStatus(
             decodeUserId(discussion.contactUserId)
-          ) === SessionStatus.Active
+          ) === SessionStatus.Active &&
+          this.keepAliveAllowed(discussion.contactUserId)
         ) {
           // Send keep alive message only if no messages are pending
           const pendingCount = await this.messageService.getPendingSendCount(
@@ -276,13 +279,37 @@ export class RefreshService {
           });
         }
       }
-      // Step 4: hard-delete messages that have exceeded retention duration
+      // Step 4: post to a server what only a mesh took
+      await this.messageService.repostMeshOnly();
+
+      // Step 5: hard-delete messages that have exceeded retention duration
       await this.messageService.deleteExpiredMessages(ownerUserId);
     } catch (error) {
       log.error('error in update_state', { error });
     } finally {
       this.isUpdating = false;
     }
+  }
+
+  /**
+   * Over a mesh only, keep-alives are spaced out: the session asks for one
+   * every day, and after each message it misses acknowledgements for.
+   */
+  private keepAliveAllowed(contactUserId: string): boolean {
+    if (this.messageService.getConnectivity() !== 'mesh-only') {
+      this.meshKeepAliveAt.delete(contactUserId);
+      return true;
+    }
+    const now = Date.now();
+    const last = this.meshKeepAliveAt.get(contactUserId);
+    if (
+      last !== undefined &&
+      now - last < this.config.messages.meshKeepAliveIntervalMs
+    ) {
+      return false;
+    }
+    this.meshKeepAliveAt.set(contactUserId, now);
+    return true;
   }
 
   private getJitteredDelayMs(baseMs: number, jitterMs: number): number {

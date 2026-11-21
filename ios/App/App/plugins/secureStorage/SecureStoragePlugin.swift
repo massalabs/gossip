@@ -20,7 +20,9 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
     /// `unlockSession`, `lockSession`, `flush`, or `close`.
     private static let worker: WorkerThread = WorkerThread(name: "secure-storage")
 
+    #if DEBUG
     private static let log = OSLog(subsystem: "secureStorage", category: "plugin")
+    #endif
 
     /// Single dispatcher. Every JS call is `{method, args}` where
     /// `args` is a JSON string. Rust does the parsing/encoding.
@@ -54,6 +56,21 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject(msg, code)
             } catch {
                 call.reject(error.localizedDescription, "INTERNAL")
+            }
+        }
+    }
+
+    /// Locks the unlocked account natively, without the WebView (the native
+    /// auto-lock): the VFS forgets its keys, as when the app locks. Queued
+    /// behind the calls in flight; a locked store stays locked.
+    static func lockNow() {
+        worker.enqueue {
+            do {
+                _ = try nativeCall(method: "lockSession", argsJson: "{}")
+            } catch {
+                #if DEBUG
+                os_log("native lock failed: %{public}@", log: Self.log, type: .error, error.localizedDescription)
+                #endif
             }
         }
     }
@@ -113,9 +130,11 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                 ofItemAtPath: fullPath)
         } catch {
+            #if DEBUG
             os_log(
                 "data protection class application failed: %{public}@",
                 log: Self.log, type: .error, error.localizedDescription)
+            #endif
         }
 
         // Backup exclusion: secureStorage must NOT ride iCloud backups.

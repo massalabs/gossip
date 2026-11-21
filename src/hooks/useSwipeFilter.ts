@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react';
 import { type DiscussionFilter } from '../stores/discussionStore';
 
-const FILTERS: DiscussionFilter[] = ['all', 'unread', 'pending'];
+const FILTERS: DiscussionFilter[] = ['all', 'unread', 'pending', 'archived'];
 const SWIPE_THRESHOLD = 50;
 
 /**

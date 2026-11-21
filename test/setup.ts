@@ -30,6 +30,7 @@ vi.mock('../src/services/notifications', () => ({
     cancelNotification: vi.fn(),
     requestPermission: vi.fn(),
     showNewDiscussionNotification: vi.fn(),
+    showGroupNotification: vi.fn(),
     showNewMessageNotification: vi.fn(),
   },
 }));

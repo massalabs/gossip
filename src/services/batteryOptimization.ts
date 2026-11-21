@@ -71,6 +71,8 @@ interface BatteryOptimizationPluginInterface {
   openBatteryOptimizationSettings(): Promise<void>;
   openAppSettings(): Promise<void>;
   openXiaomiAutoStartSettings(): Promise<void>;
+  isPowerSaveMode(): Promise<{ isPowerSave: boolean }>;
+  openBatterySaverSettings(): Promise<void>;
 
   // Comprehensive status (preferred for efficiency)
   getBackgroundSyncStatus(): Promise<BackgroundSyncStatus>;
@@ -287,6 +289,40 @@ class BatteryOptimizationService {
       return true;
     } catch (error) {
       logger.error('Failed to open battery optimization settings:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Whether battery saver is on (Android). It slows Bluetooth scanning while
+   * the screen is off.
+   */
+  async isPowerSaveMode(): Promise<boolean> {
+    if (!this.isAndroidNative()) {
+      return false;
+    }
+
+    try {
+      return (await BatteryOptimizationPlugin.isPowerSaveMode()).isPowerSave;
+    } catch (error) {
+      logger.error('Failed to check battery saver:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Open the battery saver settings; an app cannot turn it off itself.
+   */
+  async openBatterySaverSettings(): Promise<boolean> {
+    if (!this.isAndroidNative()) {
+      return false;
+    }
+
+    try {
+      await BatteryOptimizationPlugin.openBatterySaverSettings();
+      return true;
+    } catch (error) {
+      logger.error('Failed to open battery saver settings:', error);
       return false;
     }
   }

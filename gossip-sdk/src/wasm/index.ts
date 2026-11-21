@@ -6,7 +6,15 @@
  */
 
 // Export modules
-export { SessionModule, sessionStatusToString } from './session.js';
+export {
+  SessionModule,
+  sessionStatusToString,
+  SESSION_PACKET_MAX_BYTES,
+  SESSION_OVERHEAD_MAX_BYTES,
+  SESSION_MESSAGE_MAX_BYTES,
+  SessionMessageTooLargeError,
+} from './session.js';
+export type { SessionConfigSource } from './session.js';
 
 // Export initialization functions
 export {

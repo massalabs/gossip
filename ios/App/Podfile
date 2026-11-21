@@ -30,6 +30,11 @@ end
 target 'Gossip' do
   capacitor_pods
   # Add your Pods here
+  # Offline mesh node: only once scripts/build-mesh-ios.sh produced it;
+  # without it the app runs the mesh on the in-memory stub core.
+  if File.exist?(File.join(__dir__, 'GossipMobile/generated/swift/GossipMobile.swift'))
+    pod 'GossipMobile', :path => './GossipMobile'
+  end
 end
 
 post_install do |installer|

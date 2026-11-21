@@ -2,8 +2,13 @@
  * Migration runner for the Gossip SDK SQLite database.
  *
  * Tracks applied migrations in a `_migrations` table and runs only
- * pending ones. Each migration executes in its own transaction so
- * a failure at migration N leaves 0..N-1 committed.
+ * pending ones. On an existing database each migration executes in its own
+ * transaction so a failure at migration N leaves 0..N-1 committed.
+ *
+ * A brand-new database (no ledger table yet) has nothing to protect between
+ * migrations, so the ledger and every migration are applied in a single
+ * transaction. On the encrypted backend a commit costs hundreds of
+ * milliseconds, and this turns nine commits into one at account creation.
  */
 
 import { MIGRATIONS } from './generated-migrations.js';
@@ -12,6 +17,49 @@ export type ExecRaw = (sql: string, params?: unknown[]) => Promise<unknown[][]>;
 type WithTransaction = <T>(
   fn: (txExecRaw: ExecRaw) => Promise<T>
 ) => Promise<T>;
+export interface MigrationStatement {
+  sql: string;
+  params: unknown[];
+}
+/**
+ * Optional fast path: run all statements as ONE atomic transaction in a
+ * single round trip to the storage backend. Must roll back completely on
+ * any failure.
+ */
+export type ExecAtomicBatch = (
+  statements: MigrationStatement[]
+) => Promise<void>;
+
+const CREATE_LEDGER_SQL = `CREATE TABLE IF NOT EXISTS _migrations (
+      idx INTEGER PRIMARY KEY,
+      tag TEXT NOT NULL,
+      digest TEXT NOT NULL,
+      applied_at INTEGER NOT NULL
+    )`;
+const INSERT_LEDGER_SQL =
+  'INSERT INTO _migrations (idx, tag, digest, applied_at) VALUES (?, ?, ?, ?)';
+export const MIGRATION_LEDGER_EXISTS_QUERY =
+  "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migrations' LIMIT 1";
+
+function freshDatabaseStatements(): MigrationStatement[] {
+  const statements: MigrationStatement[] = [
+    { sql: CREATE_LEDGER_SQL, params: [] },
+  ];
+  const appliedAt = Date.now();
+  for (const migration of MIGRATIONS) {
+    for (const stmt of migration.statements) {
+      statements.push({
+        sql: makeCreateStatementsIdempotent(stmt),
+        params: [],
+      });
+    }
+    statements.push({
+      sql: INSERT_LEDGER_SQL,
+      params: [migration.idx, migration.tag, migration.digest, appliedAt],
+    });
+  }
+  return statements;
+}
 
 const MIGRATION_TAG_MAX_CHARS = 256;
 const MIGRATION_DIGEST_CHARS = 64;
@@ -61,16 +109,24 @@ function makeCreateStatementsIdempotent(statement: string): string {
 
 export async function runMigrations(
   execRaw: ExecRaw,
-  withTransaction: WithTransaction
+  withTransaction: WithTransaction,
+  execAtomicBatch?: ExecAtomicBatch
 ): Promise<void> {
-  await execRaw(
-    `CREATE TABLE IF NOT EXISTS _migrations (
-      idx INTEGER PRIMARY KEY,
-      tag TEXT NOT NULL,
-      digest TEXT NOT NULL,
-      applied_at INTEGER NOT NULL
-    )`
-  );
+  const ledgerExists =
+    (await execRaw(MIGRATION_LEDGER_EXISTS_QUERY)).length > 0;
+  if (!ledgerExists) {
+    const statements = freshDatabaseStatements();
+    if (execAtomicBatch) {
+      await execAtomicBatch(statements);
+    } else {
+      await withTransaction(async txExecRaw => {
+        for (const statement of statements) {
+          await txExecRaw(statement.sql, statement.params);
+        }
+      });
+    }
+    return;
+  }
 
   let rows: unknown[][];
   try {
@@ -120,10 +176,12 @@ export async function runMigrations(
       for (const stmt of migration.statements) {
         await txExecRaw(makeCreateStatementsIdempotent(stmt));
       }
-      await txExecRaw(
-        'INSERT INTO _migrations (idx, tag, digest, applied_at) VALUES (?, ?, ?, ?)',
-        [migration.idx, migration.tag, migration.digest, Date.now()]
-      );
+      await txExecRaw(INSERT_LEDGER_SQL, [
+        migration.idx,
+        migration.tag,
+        migration.digest,
+        Date.now(),
+      ]);
     });
   }
 }

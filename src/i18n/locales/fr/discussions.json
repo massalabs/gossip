@@ -8,7 +8,8 @@
   "filter": {
     "all": "Toutes",
     "unread": "Non lues",
-    "pending": "En attente"
+    "pending": "En attente",
+    "archived": "Archives"
   },
   "message_input": {
     "replying_to": "En réponse à",
@@ -21,7 +22,8 @@
     "input_label": "Saisie du message",
     "send": "Envoyer le message",
     "emoji": "Emoji",
-    "emoji_search": "Rechercher un emoji…"
+    "emoji_search": "Rechercher un emoji…",
+    "size_counter": "{{used}} / {{max}} octets"
   },
   "message": {
     "sent": "Envoyé",
@@ -93,8 +95,7 @@
   "new_discussion": {
     "title": "Nouvelle discussion",
     "new_contact": "Nouveau contact",
-    "new_group": "Nouveau groupe (bientôt disponible)",
-    "coming_soon": "Bientôt disponible",
+    "new_group": "Nouveau groupe",
     "contacts": "Contacts",
     "search_contacts": "Rechercher des contacts",
     "loading_contacts": "Chargement des contacts…",
@@ -167,7 +168,10 @@
     "delete": "Supprimer",
     "react": "Réagir",
     "add_reaction": "Ajouter une réaction",
-    "more_emojis": "Plus d’emojis"
+    "more_emojis": "Plus d’emojis",
+    "delayed": "en retard",
+    "delayed_hint": "Reçu longtemps après son envoi",
+    "sent_via_mesh": "Envoyé par le Réseau Mesh, en attente d'une passerelle"
   },
   "session_issue": {
     "message": "Tu as envoyé de nombreux messages qui n'ont pas encore été confirmés. Par sécurité, aucun autre message ne sera envoyé tant qu'une réponse ne sera pas reçue.",
@@ -177,6 +181,11 @@
   "retention_separator": "Suppression automatique activée : {{duration}}",
   "filter_label": "Filtrer les discussions",
   "waiting_connection": "En attente de connexion...",
+  "mesh_connected_one": "Connecté au mesh · {{count}} lien",
+  "mesh_connected_few": "Connecté au mesh · {{count}} liens",
+  "mesh_connected_many": "Connecté au mesh · {{count}} liens",
+  "mesh_connected_other": "Connecté au mesh · {{count}} liens",
+  "mesh_no_links": "Mesh activé · aucun téléphone à portée",
   "announcement": "Annonce",
   "lock_account": "Verrouiller"
 }

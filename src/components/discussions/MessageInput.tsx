@@ -8,28 +8,41 @@ import { Message } from '@massalabs/gossip-sdk';
 import { useKeyboardStore } from '../../stores/keyboardStore';
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea';
 import { useInitialValue } from '../../hooks/useInitialValue';
+import { nearByteLimit, utf8Bytes } from '../../utils/textBytes';
 
 const isWeb = !Capacitor.isNativePlatform();
 
-interface MessageInputProps {
+/** What the input previews of a message: its text and, for a reply, its id. */
+export interface InputMessage {
+  content: string;
+  id?: number;
+}
+
+interface MessageInputProps<M extends InputMessage = Message> {
   onSend: (message: string, replyToId?: number) => void;
   disabled?: boolean;
-  replyingTo?: Message | null;
+  replyingTo?: M | null;
   onCancelReply?: () => void;
   initialValue?: string;
   onFocus?: () => void;
   forwardPreview?: string | null;
   onCancelForward?: () => void;
   forwardMode?: 'forward' | 'reply';
-  editingMessage?: Message | null;
+  editingMessage?: M | null;
   onCancelEdit?: () => void;
-  onConfirmEdit?: (newContent: string, message: Message) => void;
+  onConfirmEdit?: (newContent: string, message: M) => void;
   containerRef?: React.RefObject<HTMLDivElement | null>;
   isSelecting?: boolean;
   placeholderKey?: string;
+  /**
+   * The largest text, in UTF-8 bytes. Near it a counter shows; over it the
+   * text stays in the input, nothing is sent and `onTooLong` is called.
+   */
+  maxBytes?: number;
+  onTooLong?: () => void;
 }
 
-const MessageInput: React.FC<MessageInputProps> = ({
+function MessageInput<M extends InputMessage = Message>({
   onSend,
   disabled = false,
   replyingTo,
@@ -45,7 +58,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
   containerRef,
   isSelecting = false,
   placeholderKey,
-}) => {
+  maxBytes,
+  onTooLong,
+}: MessageInputProps<M>) {
   const { t } = useTranslation('discussions');
   const isRefocusingRef = useRef(false);
   // True while a pointerdown-initiated send is in flight, so the click event
@@ -92,6 +107,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const isForwarding = !!forwardPreview;
   const sendButtonDisabled = disabled || (!newMessage.trim() && !isForwarding);
   const replyToId = replyingTo?.id;
+  // What a send would carry: the trimmed text.
+  const bytes = maxBytes === undefined ? 0 : utf8Bytes(newMessage.trim());
+  const tooLong = maxBytes !== undefined && bytes > maxBytes;
+  const showCounter = maxBytes !== undefined && nearByteLimit(bytes, maxBytes);
 
   const handleSendMessage = useCallback(
     (e: React.MouseEvent | React.KeyboardEvent) => {
@@ -100,6 +119,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
       if (sendButtonDisabled) return;
       const cleanedMessage = newMessage.trim();
       if (cleanedMessage.length === 0 && !isForwarding) return;
+      if (tooLong) {
+        // Kept in the input, to be shortened.
+        onTooLong?.();
+        return;
+      }
 
       if (editingMessage && onConfirmEdit) {
         onConfirmEdit(cleanedMessage, editingMessage);
@@ -123,6 +147,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
       editingMessage,
       onConfirmEdit,
       textareaRef,
+      tooLong,
+      onTooLong,
     ]
   );
 
@@ -268,6 +294,15 @@ const MessageInput: React.FC<MessageInputProps> = ({
           <Send className="w-4 h-4 md:w-5 md:h-5" />
         </button>
       </div>
+      {showCounter && (
+        <p
+          className={`mt-2 text-right text-xs ${tooLong ? 'text-destructive' : 'text-muted-foreground'}`}
+          data-testid="message-size-counter"
+          aria-live="polite"
+        >
+          {t('message_input.size_counter', { used: bytes, max: maxBytes })}
+        </p>
+      )}
 
       {isWeb && (
         <EmojiPickerModal
@@ -279,6 +314,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
       )}
     </div>
   );
-};
+}
 
 export default MessageInput;

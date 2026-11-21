@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger.ts';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Key, PlusCircle, Zap } from 'react-feather';
 import { validateMnemonic, validatePassword } from '@massalabs/gossip-sdk';
@@ -7,17 +7,18 @@ import {
   validateUsernameFormat,
   USERNAME_MAX_LENGTH,
 } from '../../utils/validation';
+import PasswordConfirmModal from './PasswordConfirmModal';
+import PrivacyNotice from './PrivacyNotice';
+import TabSwitcher from '../ui/TabSwitcher';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
-import PasswordConfirmModal from './PasswordConfirmModal';
-import PrivacyNotice from './PrivacyNotice';
 import { scrollFieldIntoView } from '../../utils/scrollFieldIntoView';
-import TabSwitcher from '../ui/TabSwitcher';
 
 export interface AccountCreationResult {
-  username: string;
+  /** Only set by the multi-account form; otherwise the caller picks one. */
+  username?: string;
   password: string;
   mnemonic?: string;
 }
@@ -27,11 +28,17 @@ interface AccountCreationFormProps {
   onBack?: () => void;
   /** When true, wraps in PageLayout with header. Default: true */
   standalone?: boolean;
-  /** Expose per-account create/import identity tabs. */
-  allowMnemonicImport?: boolean;
+  /** 'import' restores an identity from its recovery phrase. Default: 'create' */
+  mode?: 'create' | 'import';
+  /** Optional content rendered under the submit button. */
+  footer?: React.ReactNode;
+  /**
+   * Form for one of several deniable accounts: asks for a username (the only
+   * way to tell staged accounts apart), offers create/import tabs, warns
+   * that each account needs its own password, and confirms it is memorized.
+   */
+  multiAccount?: boolean;
 }
-
-type ValidationResult = { valid: boolean; error?: string };
 
 function FieldErrorHint({
   hasError,
@@ -91,25 +98,25 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
   onSubmit,
   onBack,
   standalone = true,
-  allowMnemonicImport = false,
+  mode = 'create',
+  footer,
+  multiAccount = false,
 }) => {
   const { t } = useTranslation('auth');
 
+  const [identityMode, setIdentityMode] = useState<'create' | 'import'>(mode);
   const [username, setUsername] = useState('');
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [showPasswordConfirmModal, setShowPasswordConfirmModal] =
+    useState(false);
+
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [isUsernameValid, setIsUsernameValid] = useState(false);
   const [isPasswordValid, setIsPasswordValid] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [usernameError, setUsernameError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [showPasswordConfirmModal, setShowPasswordConfirmModal] =
-    useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
-  const [identityMode, setIdentityMode] = useState<'create' | 'import'>(
-    'create'
-  );
   const [mnemonic, setMnemonic] = useState('');
   const [mnemonicError, setMnemonicError] = useState<string | null>(null);
 
@@ -122,47 +129,18 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
     [identityMode, mnemonic]
   );
 
-  const handleValidatedChange = useCallback(
-    (
-      validator: (value: string) => ValidationResult,
-      setValue: React.Dispatch<React.SetStateAction<string>>,
-      setValid: React.Dispatch<React.SetStateAction<boolean>>,
-      setFieldError: React.Dispatch<React.SetStateAction<string | null>>
-    ) =>
-      (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = e.target.value;
-        setValue(value);
-        const result = validator(value);
-        setValid(result.valid);
-        setFieldError(result.error || null);
-        setError(null);
-      },
-    []
-  );
-
-  const handleUsernameChange = useMemo(
-    () =>
-      handleValidatedChange(
-        validateUsernameFormat,
-        setUsername,
-        setIsUsernameValid,
-        setUsernameError
-      ),
-    [handleValidatedChange]
-  );
-
-  const handlePasswordChange = useMemo(
-    () =>
-      handleValidatedChange(
-        validatePassword,
-        setPassword,
-        setIsPasswordValid,
-        setPasswordError
-      ),
-    [handleValidatedChange]
-  );
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setPassword(value);
+    const result = validatePassword(value);
+    setIsPasswordValid(result.valid);
+    setPasswordError(result.error || null);
+    setError(null);
+  };
 
   const passwordsMatch = password === confirmPassword;
+  const isUsernameValid =
+    !multiAccount || validateUsernameFormat(username).valid;
   const canSubmit =
     isUsernameValid &&
     isPasswordValid &&
@@ -178,7 +156,7 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
 
     try {
       await onSubmit({
-        username,
+        ...(multiAccount ? { username } : {}),
         password,
         ...(identityMode === 'import'
           ? { mnemonic: normalizeMnemonic(mnemonic) }
@@ -198,20 +176,24 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
     e.preventDefault();
     e.stopPropagation();
 
-    const usernameResult = validateUsernameFormat(username);
-    if (!usernameResult.valid) {
-      setIsUsernameValid(false);
-      setUsernameError(usernameResult.error);
-      return;
-    }
-
     if (identityMode === 'import' && !mnemonicIsValid) {
       setMnemonicError(t('create.mnemonic_invalid'));
       return;
     }
+    if (multiAccount) {
+      const usernameResult = validateUsernameFormat(username);
+      if (!usernameResult.valid) {
+        setUsernameError(usernameResult.error ?? null);
+        return;
+      }
+    }
     if (!canSubmit) return;
 
-    setShowPasswordConfirmModal(true);
+    if (multiAccount) {
+      setShowPasswordConfirmModal(true);
+      return;
+    }
+    await doSubmit();
   };
 
   const handlePasswordConfirm = async () => {
@@ -221,7 +203,7 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
 
   const formContent = (
     <>
-      {allowMnemonicImport && (
+      {multiAccount && (
         <TabSwitcher
           options={[
             {
@@ -288,30 +270,41 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
             </FormFieldRow>
           )}
 
-          <FormFieldRow
-            label={t('create.username')}
-            errorHint={{
-              hasError: !!usernameError,
-              message: usernameError || '',
-            }}
-          >
-            <RoundedInput
-              type="text"
-              value={username}
-              onChange={handleUsernameChange}
-              placeholder={t('create.enter_username')}
-              error={!!usernameError}
-              maxLength={USERNAME_MAX_LENGTH}
-              disabled={isCreating}
-            />
-          </FormFieldRow>
+          {multiAccount && (
+            <>
+              <FormFieldRow
+                label={t('create.username')}
+                errorHint={{
+                  hasError: !!usernameError,
+                  message: usernameError || '',
+                }}
+              >
+                <RoundedInput
+                  type="text"
+                  value={username}
+                  onChange={e => {
+                    const value = e.target.value;
+                    setUsername(value);
+                    setUsernameError(
+                      validateUsernameFormat(value).error || null
+                    );
+                    setError(null);
+                  }}
+                  placeholder={t('create.enter_username')}
+                  error={!!usernameError}
+                  maxLength={USERNAME_MAX_LENGTH}
+                  disabled={isCreating}
+                />
+              </FormFieldRow>
 
-          <PrivacyNotice
-            tone="warning"
-            title={t('create.unique_password_title')}
-            content={t('create.unique_password_warning')}
-            className="mb-3"
-          />
+              <PrivacyNotice
+                tone="warning"
+                title={t('create.unique_password_title')}
+                content={t('create.unique_password_warning')}
+                className="mb-3"
+              />
+            </>
+          )}
 
           <FormFieldRow
             label={t('create.password')}
@@ -356,6 +349,10 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
             />
           </FormFieldRow>
 
+          <p className="text-xs text-muted-foreground text-center pb-3">
+            {t('create.password_hint')}
+          </p>
+
           {error && (
             <div className="p-4 bg-destructive/10 border border-destructive/30 rounded-lg">
               <p className="text-destructive text-sm">{error}</p>
@@ -382,18 +379,21 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
               </>
             )}
           </Button>
+          {footer}
         </form>
       </div>
-      <PasswordConfirmModal
-        isOpen={showPasswordConfirmModal}
-        onConfirm={handlePasswordConfirm}
-        onCancel={() => setShowPasswordConfirmModal(false)}
-        confirmLabel={
-          identityMode === 'import'
-            ? t('create.password_confirm_import')
-            : undefined
-        }
-      />
+      {multiAccount && (
+        <PasswordConfirmModal
+          isOpen={showPasswordConfirmModal}
+          onConfirm={handlePasswordConfirm}
+          onCancel={() => setShowPasswordConfirmModal(false)}
+          confirmLabel={
+            identityMode === 'import'
+              ? t('create.password_confirm_import')
+              : undefined
+          }
+        />
+      )}
     </>
   );
 
@@ -401,7 +401,14 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
 
   return (
     <PageLayout
-      header={<PageHeader title={t('create.title')} onBack={onBack} />}
+      header={
+        <PageHeader
+          title={t(
+            identityMode === 'import' ? 'create.import_account' : 'create.title'
+          )}
+          onBack={onBack}
+        />
+      }
       className="app-max-w mx-auto overflow-auto"
       contentClassName="p-4"
     >

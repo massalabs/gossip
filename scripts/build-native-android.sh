@@ -119,6 +119,7 @@ cargo ndk \
     "${NDK_TARGET_ARGS[@]}" \
     -o "$TMP_JNILIBS" \
     build -p secureStorage --features native --no-default-features \
+    --config "$(bash "$ROOT_DIR/scripts/rust-remap-flags.sh")" \
     ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
 
 # Belt-and-suspenders: cargo-ndk trusts the toolchain it picks up, so

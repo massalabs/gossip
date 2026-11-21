@@ -1,4 +1,5 @@
 import { logger } from '../utils/logs.js';
+import { HttpStatusError } from './errors.js';
 /**
  * Base REST client with retry and timeout support.
  * Shared by RestMessageProtocol and RestAuthProtocol.
@@ -8,6 +9,8 @@ export interface RestResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
+  /** The server's answer, when it refused the request. */
+  httpError?: HttpStatusError;
 }
 
 export class RestClient {
@@ -33,7 +36,14 @@ export class RestClient {
         });
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          const error = new HttpStatusError(
+            response.status,
+            response.statusText
+          );
+          // The server refused the request itself: sending it again gets the
+          // same answer. Only a timeout or rate limiting may pass later.
+          if (isFinalStatus(response.status)) return failure(error);
+          throw error;
         }
 
         const data = await response.json();
@@ -51,9 +61,19 @@ export class RestClient {
       }
     }
 
-    return {
-      success: false,
-      error: lastError?.message || 'Request failed after all retry attempts',
-    };
+    return failure(lastError);
   }
+}
+
+/** A 4xx answer other than a timeout (408) or rate limiting (429). */
+export function isFinalStatus(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+function failure<T>(error: Error | null): RestResponse<T> {
+  return {
+    success: false,
+    error: error?.message || 'Request failed after all retry attempts',
+    ...(error instanceof HttpStatusError && { httpError: error }),
+  };
 }

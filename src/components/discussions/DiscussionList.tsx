@@ -23,7 +23,18 @@ import {
   useFilteredContacts,
   useVirtualItems,
 } from './hooks/useDiscussionListItems';
-import type { Discussion } from '@massalabs/gossip-sdk';
+import type {
+  Discussion,
+  GroupInvitation,
+  LeaveChoice,
+} from '@massalabs/gossip-sdk';
+import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '../../constants/routes';
+import { useGroupStore } from '../../stores/groupStore';
+import {
+  isAcceptedContact,
+  isConversationRow,
+} from '../../utils/conversations';
 
 // =============================================================================
 // Types
@@ -99,9 +110,38 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   scrollRef.current = scrollParent;
 
   // Store selectors
-  const discussions = useDiscussionStore(s => s.discussions);
+  const allDiscussions = useDiscussionStore(s => s.discussions);
   const lastMessages = useDiscussionStore(s => s.lastMessages);
-  const contacts = useDiscussionStore(s => s.contacts);
+  const allContacts = useDiscussionStore(s => s.contacts);
+  const groups = useGroupStore(s => s.groups);
+  const invitations = useGroupStore(s => s.invitations);
+  // Automatic connections are no contacts (§5.12).
+  const contacts = React.useMemo(
+    () => allContacts.filter(isAcceptedContact),
+    [allContacts]
+  );
+  // Archives and requests are rows; a discussion continued by a direct chat
+  // held here is shown through that group. The archived list is apart.
+  const discussions = React.useMemo(() => {
+    const held = new Set(groups.map(g => g.summary.groupId));
+    return allDiscussions.filter(
+      d =>
+        isConversationRow(
+          d,
+          allContacts.find(c => c.userId === d.contactUserId),
+          held
+        ) && (filter === 'archived') === !!d.archived
+    );
+  }, [allDiscussions, allContacts, groups, filter]);
+  const migrationOf = React.useMemo(
+    () =>
+      new Map(
+        invitations
+          .filter(i => i.migrationOf && !i.continues)
+          .map(i => [i.migrationOf as string, i])
+      ),
+    [invitations]
+  );
   const patchDiscussion = useDiscussionStore(s => s.patchDiscussion);
 
   // Discussion actions
@@ -126,7 +166,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     lastMessages,
     activeUserId,
     isSearching,
-    filter
+    filter === 'archived' ? 'all' : filter
   );
 
   // Check for empty state
@@ -172,6 +212,40 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     [gossip, patchDiscussion, t]
   );
 
+  // The peer's migration, answered from the archive's row (§5.12).
+  const navigate = useNavigate();
+  const refreshGroups = useGroupStore(s => s.refresh);
+  const acceptMigration = useCallback(
+    async (inv: GroupInvitation) => {
+      try {
+        const groupId = await gossip.conversations.acceptInvitation(
+          inv.epochId
+        );
+        await refreshGroups();
+        navigate(ROUTES.group({ groupId }));
+      } catch {
+        toast.error(t('groups:invitation.failed'));
+      }
+    },
+    [gossip, refreshGroups, navigate, t]
+  );
+  const declineMigration = useCallback(
+    async (inv: GroupInvitation, choice: LeaveChoice) => {
+      try {
+        await gossip.conversations.declineInvitation(inv.epochId, choice);
+        await refreshGroups();
+      } catch {
+        toast.error(t('groups:invitation.failed'));
+      }
+    },
+    [gossip, refreshGroups, t]
+  );
+  const openInvitation = useCallback(
+    (d: Discussion) =>
+      navigate(ROUTES.invitation({ kind: 'contact', id: d.contactUserId })),
+    [navigate]
+  );
+
   // Item renderer
   const renderItem = useCallback(
     (item: (typeof virtualItems)[number]) => {
@@ -188,6 +262,12 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
               <DiscussionListItem
                 discussion={item.discussion}
                 contact={item.contact}
+                migrationInvitation={migrationOf.get(
+                  item.discussion.contactUserId
+                )}
+                onAcceptMigration={acceptMigration}
+                onDeclineMigration={declineMigration}
+                onOpenInvitation={openInvitation}
                 lastMessage={item.lastMessage}
                 onSelect={handleSelect}
                 onAccept={handleAcceptDiscussionRequest}
@@ -209,6 +289,10 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
       handleRefuseDiscussionRequest,
       handleEditName,
       handleTogglePin,
+      migrationOf,
+      acceptMigration,
+      declineMigration,
+      openInvitation,
     ]
   );
 

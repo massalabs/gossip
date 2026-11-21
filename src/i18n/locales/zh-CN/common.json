@@ -38,5 +38,9 @@
     "continue_web_instead": "改在网页版中继续",
     "open_failed": "无法打开应用，您可以改在网页版中继续。",
     "learn_more": "进一步了解 Gossip"
+  },
+  "instance": {
+    "open_elsewhere": "此账户已在另一个标签页中打开",
+    "open_elsewhere_hint": "请关闭此标签页，并在另一个标签页中继续。"
   }
 }

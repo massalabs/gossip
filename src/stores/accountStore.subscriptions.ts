@@ -7,12 +7,19 @@ import {
 import { useAppStore } from './appStore';
 import { getSdk } from './sdkStore';
 import { fetchMnsDomainsIfEnabled } from './utils/accountHelpers';
+import { lockMesh } from '../services/meshNode';
 import type { AccountStoreApi } from './accountStore';
 
 export function registerAccountStoreSubscriptions(store: AccountStoreApi) {
   store.subscribe(async (state, prevState) => {
     const current = state.userProfile;
     const previous = prevState.userProfile;
+
+    // Locked, logged out or switched: the mesh node must not keep serving
+    // the previous account's keys or waiting on its seekers.
+    if (previous && previous.userId !== current?.userId) {
+      void lockMesh();
+    }
 
     const sdk = getSdk();
     if (!current || !sdk.isSessionOpen) return;

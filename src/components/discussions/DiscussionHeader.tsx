@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, Clock, Search } from 'react-feather';
+import { ChevronLeft, Search } from 'react-feather';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { useDiscussionStore } from '../../stores/discussionStore';
@@ -9,8 +9,10 @@ import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
 import HeaderBar from '../ui/HeaderBar';
+import AutoDeleteChip from '../ui/AutoDeleteChip';
 import { ROUTES } from '../../constants/routes';
 import { useOnlineStore } from '../../stores/useOnlineStore';
+import { useOfflineLabel } from '../../hooks/useMeshLinks';
 
 interface DiscussionHeaderProps {
   contact?: Contact | null | undefined;
@@ -32,6 +34,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   title,
 }) => {
   const { t } = useTranslation('discussions');
+  const offline = useOfflineLabel();
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const navigate = useNavigate();
   const isOnline = useOnlineStore(s => s.isOnline);
@@ -138,7 +141,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
               <div className="flex flex-col gap-1.5 min-w-0">
                 {!isOnline && (
                   <p className="text-xs text-accent leading-relaxed">
-                    {t('waiting_connection')}
+                    {offline.label}
                   </p>
                 )}
                 {hasStatusChips && (
@@ -149,14 +152,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
                       </span>
                     )}
                     {retentionLabel && (
-                      <span className="inline-flex items-center gap-1.5 min-w-0 flex-1 text-xs text-muted-foreground overflow-hidden">
-                        <Clock className="w-3.5 h-3.5 shrink-0" />
-                        <span className="leading-snug truncate">
-                          {t('header.auto_delete_active', {
-                            duration: retentionLabel,
-                          })}
-                        </span>
-                      </span>
+                      <AutoDeleteChip duration={retentionLabel} />
                     )}
                   </div>
                 )}

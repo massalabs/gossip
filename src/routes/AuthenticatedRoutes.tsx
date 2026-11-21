@@ -10,6 +10,10 @@ import Contact from '../pages/Contact';
 import ContactSharePage from '../pages/ContactSharePage';
 import SelfDiscussion from '../pages/SelfDiscussion';
 import DiscussionSettings from '../pages/DiscussionSettings';
+import GroupDiscussion from '../pages/GroupDiscussion';
+import GroupSettings from '../pages/GroupSettings';
+import NewGroup from '../pages/NewGroup';
+import Invitation from '../pages/Invitation';
 import SecuritySettings from '../pages/settings/SecuritySettings';
 import NotificationsSettings from '../pages/settings/NotificationsSettings';
 import AppearanceSettings from '../pages/settings/AppearanceSettings';
@@ -20,11 +24,15 @@ import AccountBackupPage from '../pages/settings/AccountBackupPage';
 import QRCodeSwitcher from '../pages/settings/QRCodeSwitcher';
 import Web3Settings from '../pages/settings/Web3Settings';
 import PrivacySettings from '../pages/settings/PrivacySettings';
+import MeshSettings from '../pages/settings/MeshSettings';
+import MeshPrepareSettings from '../pages/settings/MeshPrepareSettings';
+import ShareAppSettings from '../pages/settings/ShareAppSettings';
 import PortableBackup from '../pages/PortableBackup';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { usePendingSharedContent } from '../hooks/usePendingSharedContent';
 import { ROUTES } from '../constants/routes';
 import MainLayout from '../components/ui/Layout/MainLayout';
+import { useNotificationPermissionPrompt } from '../hooks/useNotificationPermissionPrompt';
 import AnimatedRoutes from '../components/ui/AnimatedRoutes';
 
 /**
@@ -39,6 +47,7 @@ import AnimatedRoutes from '../components/ui/AnimatedRoutes';
 export const AuthenticatedRoutes: React.FC = () => {
   usePendingDeepLink();
   usePendingSharedContent();
+  useNotificationPermissionPrompt();
 
   return (
     <MainLayout>
@@ -47,6 +56,10 @@ export const AuthenticatedRoutes: React.FC = () => {
         <Route path={ROUTES.discussion()} element={<Discussion />} />
         <Route path={ROUTES.newDiscussion()} element={<NewDiscussion />} />
         <Route path={ROUTES.newContact()} element={<NewContact />} />
+        <Route path={ROUTES.newGroup()} element={<NewGroup />} />
+        <Route path={ROUTES.group()} element={<GroupDiscussion />} />
+        <Route path={ROUTES.groupSettings()} element={<GroupSettings />} />
+        <Route path={ROUTES.invitation()} element={<Invitation />} />
         <Route path={ROUTES.settings()} element={<Settings />} />
         <Route path={ROUTES.portableBackup()} element={<PortableBackup />} />
         <Route path={ROUTES.invite()} element={<InvitePage />} />
@@ -85,6 +98,15 @@ export const AuthenticatedRoutes: React.FC = () => {
         />
         <Route path={ROUTES.settingsWeb3()} element={<Web3Settings />} />
         <Route path={ROUTES.settingsPrivacy()} element={<PrivacySettings />} />
+        <Route path={ROUTES.settingsMesh()} element={<MeshSettings />} />
+        <Route
+          path={ROUTES.settingsMeshPrepare()}
+          element={<MeshPrepareSettings />}
+        />
+        <Route
+          path={ROUTES.settingsMeshShareApp()}
+          element={<ShareAppSettings />}
+        />
 
         {/* Default redirects */}
         <Route

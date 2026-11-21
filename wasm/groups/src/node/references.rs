@@ -1,0 +1,637 @@
+//! Replies that name an epoch by its reference (§4.5, §7.6, §12.7): the requester side of a
+//! chat lookup by reference, and the fetch of a target in an epoch this device holds.
+//!
+//! When a reply is received, each of its targets is placed against what the device holds:
+//! an installed epoch, an invitation not answered yet, or a chat the user closed. A target
+//! in an installed epoch whose message the device lacks is fetched by a sync-object lookup
+//! in that epoch (§12.5). A reference the device cannot place is looked up by reference, in
+//! rounds, from the members of the chat the reply was written in. All of it is local
+//! policy and local storage ([`RefLookup`]); nothing here adds to the wire format.
+//!
+//! **When.** Only on receipt of a reply, after a short random wait
+//! ([`REF_LOOKUP_DELAY_MS`]); never on display or reading, and no call of the engine starts
+//! it. Why: a lookup made when the user opens the message would tell a peer when it was
+//! read.
+//!
+//! **Never for what the device can place.** An installed epoch, an invitation not answered
+//! yet and a closed chat are never asked for. Why: a device that holds an invitation it has
+//! not answered never asks, and a device that closed the chat (with "Ignore and Delete" too)
+//! must look the same; if it asked, the root would come back and be dropped, and each new
+//! reply would make it ask again, so a peer could watch it throw the root away. The
+//! closed-chat marker keeps the reference for this ([`Marker`]).
+//!
+//! **What comes back** goes through the normal reception of a root (§4.8): a skipped epoch
+//! of a group the device is in joins that group's history without a prompt, a group the
+//! user was added to whose invitation never arrived becomes an invitation. Nothing is
+//! fetched in an epoch the user has not accepted.
+//!
+//! **Off in the first release** ([`super::timing::REF_LOOKUPS_SENT`]): no reply is noted,
+//! no record is examined and none left by an earlier run survives the opening of the
+//! engine, so nothing of the above is sent. The reference index and the references the markers keep are
+//! maintained all the same, so that turning it on later finds them.
+
+use super::records::{Marker, MarkerKind, RefLookup, RefReply, Target, TaskKey};
+use super::timing::{
+    REF_LOOKUP_DELAY_MS, REF_LOOKUP_INTERVAL_MS, REF_LOOKUP_PEERS, REF_LOOKUP_ROUNDS,
+    REF_LOOKUPS_PER_DEVICE, REF_LOOKUPS_PER_SENDER, REF_REPLIES_KEPT,
+};
+use super::{Cx, Node, NodeError};
+use crate::constants::METADATA_KEY_REPLY_TO;
+use crate::event::{MessageEvent, Payload, decode_reply_to};
+use crate::ids::{ChatId, GossipId, RefChatId, SyncObjId};
+use crate::rng::uniform_below;
+use crate::store::StoredResult;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// The references of the roots this device holds (installed or invitations) and of the
+/// markers that keep one, derived from the records, and the references whose place changed
+/// in this operation.
+#[derive(Debug, Default)]
+pub(crate) struct RefIndex {
+    /// Reference → the epoch record whose root it is.
+    pub(crate) epochs: BTreeMap<RefChatId, ChatId>,
+    /// Reference → the marker that keeps it.
+    pub(crate) markers: BTreeMap<RefChatId, ChatId>,
+    /// References whose place changed since the last pass.
+    pub(crate) moved: BTreeSet<RefChatId>,
+}
+
+/// Where a reference leads on this device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Placed {
+    /// An installed epoch.
+    Installed(ChatId),
+    /// An invitation not answered yet: what it names is fetched only once it is accepted.
+    Invitation,
+    /// A chat the user closed, or erased by "Dissolve & Delete" (§14.2).
+    Closed,
+}
+
+impl Node {
+    /// Rebuilds the reference index from the epoch records (after a load).
+    pub(crate) fn rebuild_ref_index(&mut self) {
+        self.rx = RefIndex::default();
+        for (c, r) in self.t.epochs.iter() {
+            self.rx.epochs.insert(r.root.ref_chat_id(), *c);
+        }
+        for (c, m) in self.t.markers.iter() {
+            if let Some(reference) = m.reference {
+                self.rx.markers.insert(reference, *c);
+            }
+        }
+    }
+
+    /// Records a marker for `chat`, with the reference of its root: `reference`, or the one
+    /// of the root still held, or the one of the marker it replaces.
+    pub(crate) fn put_marker(
+        &mut self,
+        chat: ChatId,
+        kind: MarkerKind,
+        reference: Option<RefChatId>,
+    ) {
+        let reference = reference
+            .or_else(|| self.held_root(&chat).map(crate::root::Root::ref_chat_id))
+            .or_else(|| self.t.markers.get(&chat).and_then(|m| m.reference));
+        self.take_marker(&chat);
+        if let Some(r) = reference {
+            self.rx.markers.insert(r, chat);
+            self.rx.moved.insert(r);
+        }
+        self.t.markers.insert(chat, Marker { kind, reference });
+    }
+
+    /// A root was refused for the marker of `chat`: a marker stored before markers kept a
+    /// reference takes the one of that root (its chat ID binds it, §4.5).
+    pub(crate) fn marker_reference(&mut self, chat: &ChatId, reference: RefChatId) {
+        let Some(m) = self.t.markers.get(chat).copied() else {
+            return;
+        };
+        if m.reference.is_none() {
+            self.put_marker(*chat, m.kind, Some(reference));
+        }
+    }
+
+    /// Removes the marker of `chat`.
+    pub(crate) fn take_marker(&mut self, chat: &ChatId) -> Option<Marker> {
+        let m = self.t.markers.remove(chat)?;
+        if let Some(r) = m.reference {
+            self.rx.markers.remove(&r);
+            self.rx.moved.insert(r);
+        }
+        Some(m)
+    }
+
+    /// What the marker of `chat` records, if there is one.
+    pub(crate) fn marker_kind(&self, chat: &ChatId) -> Option<MarkerKind> {
+        self.t.markers.get(chat).map(|m| m.kind)
+    }
+
+    /// An epoch record was stored: its reference now leads to it.
+    pub(crate) fn ref_stored(&mut self, id: ChatId, reference: RefChatId) {
+        self.rx.epochs.insert(reference, id);
+        self.rx.moved.insert(reference);
+    }
+
+    /// An epoch record was removed.
+    pub(crate) fn ref_removed(&mut self, reference: RefChatId) {
+        self.rx.epochs.remove(&reference);
+        self.rx.moved.insert(reference);
+    }
+
+    /// Where `reference` leads on this device, if anywhere.
+    pub(crate) fn placed(&self, reference: &RefChatId) -> Option<Placed> {
+        if let Some(chat) = self.rx.epochs.get(reference) {
+            return Some(if self.installed(chat) {
+                Placed::Installed(*chat)
+            } else {
+                Placed::Invitation
+            });
+        }
+        self.rx
+            .markers
+            .contains_key(reference)
+            .then_some(Placed::Closed)
+    }
+
+    /// Whether the device holds the message `target` of the installed epoch `chat`, deleted
+    /// or not.
+    fn holds_target(
+        &self,
+        cx: &mut Cx<'_>,
+        chat: &ChatId,
+        target: &SyncObjId,
+    ) -> Result<bool, NodeError> {
+        Ok(cx
+            .ov
+            .object(chat, target)?
+            .is_some_and(|o| o.current.is_some()))
+    }
+
+    /// Whether the reply `(chat, sync)` is still held and still names `target` under
+    /// `reference`: not deleted, not past its moment (§7.7), not edited to drop it.
+    fn reply_held(
+        &self,
+        cx: &mut Cx<'_>,
+        reference: &RefChatId,
+        (chat, sync, target): &(ChatId, SyncObjId, SyncObjId),
+    ) -> Result<bool, NodeError> {
+        if !self.epochs.contains_key(chat) {
+            return Ok(false);
+        }
+        let Some(o) = cx.ov.object(chat, sync)? else {
+            return Ok(false);
+        };
+        if o.expires_at.is_some_and(|m| m <= cx.now) {
+            return Ok(false);
+        }
+        let Some(StoredResult::Content(c)) = o.current else {
+            return Ok(false);
+        };
+        Ok(c.metadata
+            .get(METADATA_KEY_REPLY_TO)
+            .and_then(|v| decode_reply_to(v).ok())
+            .is_some_and(|ts| {
+                ts.iter()
+                    .any(|t| t.ref_chat_id == *reference && t.sync_obj_id == *target)
+            }))
+    }
+
+    /// A short random wait from now (see [`REF_LOOKUP_DELAY_MS`]).
+    fn ref_delay(&self, cx: &mut Cx<'_>) -> u64 {
+        let wait = uniform_below(
+            cx.rng,
+            usize::try_from(REF_LOOKUP_DELAY_MS + 1).unwrap_or(1),
+        );
+        cx.now.saturating_add(wait as u64)
+    }
+
+    /// A message event was accepted from `from` in `chat`: each target of its `replyTo`
+    /// that the device cannot show yet is noted, to be fetched or looked up after a short
+    /// random wait (§7.6). Only in a group where this device is active: a read-only group
+    /// starts nothing. Nothing at all while [`super::timing::REF_LOOKUPS_SENT`] is
+    /// off.
+    pub(crate) fn note_reply(
+        &mut self,
+        cx: &mut Cx<'_>,
+        chat: ChatId,
+        from: GossipId,
+        event: &MessageEvent,
+    ) -> Result<(), NodeError> {
+        if !self.ref_lookups {
+            return Ok(());
+        }
+        let Payload::Content(c) = event.payload() else {
+            return Ok(());
+        };
+        let Some(targets) = c
+            .metadata
+            .get(METADATA_KEY_REPLY_TO)
+            .and_then(|v| decode_reply_to(v).ok())
+        else {
+            return Ok(());
+        };
+        if !self.serves(&chat) {
+            return Ok(());
+        }
+        for t in targets {
+            match self.placed(&t.ref_chat_id) {
+                // Never asked for, never fetched (see the module documentation).
+                Some(Placed::Closed) => continue,
+                Some(Placed::Installed(e)) => {
+                    // Nothing to fetch: the target is held, or its group is read-only.
+                    if !self.serves(&e) || self.holds_target(cx, &e, &t.sync_obj_id)? {
+                        continue;
+                    }
+                }
+                Some(Placed::Invitation) | None => {}
+            }
+            let reply = (chat, c.sync_obj_id, t.sync_obj_id);
+            let note = RefReply {
+                from,
+                author: c.author,
+                at: cx.now,
+            };
+            self.note_ref(cx, t.ref_chat_id, reply, note)?;
+        }
+        Ok(())
+    }
+
+    /// Adds a reply to the record of `reference`, creating it if needed. A record whose
+    /// replies are all gone is forgotten first, so that the count of rounds belongs to the
+    /// replies still held.
+    fn note_ref(
+        &mut self,
+        cx: &mut Cx<'_>,
+        reference: RefChatId,
+        reply: (ChatId, SyncObjId, SyncObjId),
+        note: RefReply,
+    ) -> Result<(), NodeError> {
+        if let Some(mut rec) = self.t.ref_lookups.get(&reference).cloned() {
+            self.keep_held(cx, &reference, &mut rec)?;
+            if !rec.replies.is_empty() {
+                if rec.replies.len() < REF_REPLIES_KEPT || rec.replies.contains_key(&reply) {
+                    rec.replies.insert(reply, note);
+                }
+                self.t.ref_lookups.insert(reference, rec);
+                return Ok(());
+            }
+            self.forget_ref(&reference);
+        }
+        let mine = self
+            .t
+            .ref_lookups
+            .iter()
+            .filter(|(_, r)| latest(r).is_some_and(|l| l.from == note.from))
+            .count();
+        if mine >= REF_LOOKUPS_PER_SENDER || self.t.ref_lookups.len() >= REF_LOOKUPS_PER_DEVICE {
+            self.stats.capped += 1;
+            return Ok(());
+        }
+        let due = self.ref_delay(cx);
+        self.t.ref_lookups.insert(
+            reference,
+            RefLookup {
+                replies: BTreeMap::from([(reply, note)]),
+                rounds: 0,
+                last_round: None,
+                round: None,
+                asked: Vec::new(),
+                due,
+            },
+        );
+        Ok(())
+    }
+
+    /// Keeps only the replies of `rec` that are still held.
+    fn keep_held(
+        &self,
+        cx: &mut Cx<'_>,
+        reference: &RefChatId,
+        rec: &mut RefLookup,
+    ) -> Result<(), NodeError> {
+        let mut gone = Vec::new();
+        for k in rec.replies.keys() {
+            if !self.reply_held(cx, reference, k)? {
+                gone.push(*k);
+            }
+        }
+        for k in gone {
+            rec.replies.remove(&k);
+        }
+        Ok(())
+    }
+
+    /// Forgets the record of `reference` and stops its round.
+    fn forget_ref(&mut self, reference: &RefChatId) {
+        if let Some(rec) = self.t.ref_lookups.remove(reference)
+            && let Some(chat) = rec.round
+        {
+            let key = TaskKey {
+                chat_id: chat,
+                target: Target::Ref(*reference),
+            };
+            if self.t.tasks.remove(&key).is_some() {
+                self.reindex(key);
+            }
+        }
+    }
+
+    /// [`super::timing::REF_LOOKUPS_SENT`] is off: the records left by an earlier run that
+    /// had it on are dropped, with the task of the round each one ran, so that none of them
+    /// is examined or sent (a query entry already queued for such a task goes stale).
+    /// Dropped rather than kept: kept, they would never be examined, so never forgotten
+    /// either, and a running round's task would be continued by the retrieval scheduler.
+    pub(crate) fn drop_ref_lookups(&mut self) {
+        let all: Vec<RefChatId> = self.t.ref_lookups.keys().copied().collect();
+        for reference in &all {
+            self.forget_ref(reference);
+        }
+        let tasks: Vec<TaskKey> = self
+            .t
+            .tasks
+            .keys()
+            .filter(|k| matches!(k.target, Target::Ref(_)))
+            .copied()
+            .collect();
+        for k in tasks {
+            self.t.tasks.remove(&k);
+            self.reindex(k);
+        }
+    }
+
+    /// The messages of `chat` are erased (§14.2): the replies of it are forgotten, so that
+    /// nothing of a closed chat stays behind, and so is a record left with none.
+    pub(crate) fn forget_replies_in(&mut self, chat: &ChatId) {
+        let touched: Vec<RefChatId> = self
+            .t
+            .ref_lookups
+            .iter()
+            .filter(|(_, r)| r.replies.keys().any(|k| k.0 == *chat))
+            .map(|(k, _)| *k)
+            .collect();
+        for reference in touched {
+            let Some(mut rec) = self.t.ref_lookups.get(&reference).cloned() else {
+                continue;
+            };
+            rec.replies.retain(|k, _| k.0 != *chat);
+            if rec.replies.is_empty() {
+                self.forget_ref(&reference);
+            } else {
+                self.t.ref_lookups.insert(reference, rec);
+            }
+        }
+    }
+
+    /// The references whose place changed in this operation are examined again after a
+    /// short random wait: a root fetched by reference, or an invitation accepted, lets the
+    /// targets be fetched.
+    pub(crate) fn refs_moved(&mut self, cx: &mut Cx<'_>) {
+        let moved = core::mem::take(&mut self.rx.moved);
+        for reference in moved {
+            if self.t.ref_lookups.contains(&reference) {
+                let due = self.ref_delay(cx);
+                if let Some(rec) = self.t.ref_lookups.get_mut(&reference) {
+                    rec.due = rec.due.min(due);
+                }
+            }
+        }
+    }
+
+    /// Examines every record that is due.
+    pub(crate) fn ref_timers(&mut self, cx: &mut Cx<'_>) -> Result<(), NodeError> {
+        if !self.ref_lookups {
+            return Ok(());
+        }
+        let due: Vec<RefChatId> = self
+            .t
+            .ref_lookups
+            .iter()
+            .filter(|(_, r)| r.due <= cx.now)
+            .map(|(k, _)| *k)
+            .collect();
+        for reference in due {
+            self.examine_ref(cx, reference)?;
+        }
+        Ok(())
+    }
+
+    /// The earliest time a record is due.
+    pub(crate) fn ref_wakeup(&self) -> Option<u64> {
+        if !self.ref_lookups {
+            return None;
+        }
+        self.t.ref_lookups.iter().map(|(_, r)| r.due).min()
+    }
+
+    /// A record is due: the replies no longer held are dropped (none left: the record is
+    /// forgotten); then, by where the reference leads, the targets are fetched (an installed
+    /// epoch), the record waits (an invitation not answered yet), or a round of the lookup
+    /// by reference starts, at most once a week and at most [`REF_LOOKUP_ROUNDS`] times.
+    fn examine_ref(&mut self, cx: &mut Cx<'_>, reference: RefChatId) -> Result<(), NodeError> {
+        let Some(mut rec) = self.t.ref_lookups.get(&reference).cloned() else {
+            return Ok(());
+        };
+        self.keep_held(cx, &reference, &mut rec)?;
+        if rec.replies.is_empty() {
+            self.forget_ref(&reference);
+            return Ok(());
+        }
+        let running = rec.round.is_some_and(|chat| {
+            self.t.tasks.contains(&TaskKey {
+                chat_id: chat,
+                target: Target::Ref(reference),
+            })
+        });
+        match self.placed(&reference) {
+            Some(Placed::Closed) => {
+                self.forget_ref(&reference);
+                return Ok(());
+            }
+            Some(Placed::Installed(epoch)) => {
+                // §7.6: a resolved target is loaded by a sync-object lookup in its epoch.
+                if self.serves(&epoch) {
+                    for (_, _, target) in rec.replies.keys() {
+                        if !self.holds_target(cx, &epoch, target)? {
+                            self.trigger(
+                                cx,
+                                TaskKey {
+                                    chat_id: epoch,
+                                    target: Target::SyncObj(*target),
+                                },
+                                None,
+                            );
+                        }
+                    }
+                }
+                self.forget_ref(&reference);
+                return Ok(());
+            }
+            Some(Placed::Invitation) => {
+                // Nothing is fetched in an epoch the user has not accepted (§4.8); the
+                // record waits, and is examined again once the invitation is answered.
+                self.t.ref_lookups.insert(reference, rec);
+                self.stop_round(&reference);
+                if let Some(r) = self.t.ref_lookups.get_mut(&reference) {
+                    r.due = cx.now.saturating_add(REF_LOOKUP_INTERVAL_MS);
+                }
+                return Ok(());
+            }
+            None => {}
+        }
+        if running {
+            // A round that is still asking (its stages can last longer than a week).
+            rec.due = cx.now.saturating_add(REF_LOOKUP_INTERVAL_MS);
+            self.t.ref_lookups.insert(reference, rec);
+            return Ok(());
+        }
+        rec.round = None;
+        let next = rec
+            .last_round
+            .map_or(0, |t| t.saturating_add(REF_LOOKUP_INTERVAL_MS));
+        if rec.rounds >= REF_LOOKUP_ROUNDS || cx.now < next {
+            // After the last round the device stops for good for this reference; the record
+            // stays while a reply naming it is held, so that a new reply does not start the
+            // count again.
+            rec.due = if rec.rounds >= REF_LOOKUP_ROUNDS {
+                // Examined weekly only to forget it once no reply naming it is held.
+                cx.now.saturating_add(REF_LOOKUP_INTERVAL_MS)
+            } else {
+                next
+            };
+            self.t.ref_lookups.insert(reference, rec);
+            return Ok(());
+        }
+        // The members of the chat of the newest reply are asked.
+        let Some((&(chat, _, _), &newest)) = rec.replies.iter().max_by_key(|(k, r)| (r.at, **k))
+        else {
+            return Ok(());
+        };
+        let asked = self.ref_peers(cx, &chat, &newest);
+        rec.due = cx.now.saturating_add(REF_LOOKUP_INTERVAL_MS);
+        if asked.is_empty() {
+            // Nobody to ask: no round is counted.
+            self.t.ref_lookups.insert(reference, rec);
+            return Ok(());
+        }
+        let key = TaskKey {
+            chat_id: chat,
+            target: Target::Ref(reference),
+        };
+        rec.asked = asked;
+        self.t.ref_lookups.insert(reference, rec);
+        self.trigger(cx, key, None);
+        if !self.t.tasks.contains(&key) {
+            // Refused by a limit on retrieval: tried again later, not counted.
+            return Ok(());
+        }
+        if let Some(rec) = self.t.ref_lookups.get_mut(&reference) {
+            rec.rounds = rec.rounds.saturating_add(1);
+            rec.last_round = Some(cx.now);
+            rec.round = Some(chat);
+        }
+        self.stats.ref_rounds += 1;
+        Ok(())
+    }
+
+    /// The peers a round asks, in order, at most [`REF_LOOKUP_PEERS`], among the members of
+    /// the reply's epoch that may receive anything of it (this device and removed peers
+    /// excluded): the peer that delivered the reply; its author when that is another peer
+    /// (an unsigned claim, used only for the order); then the other members, those with a
+    /// session first, each drawn by score.
+    fn ref_peers(&self, cx: &mut Cx<'_>, chat: &ChatId, newest: &RefReply) -> Vec<GossipId> {
+        let eligible = self.eligible(chat);
+        let mut out: Vec<GossipId> = Vec::new();
+        for p in [newest.from, newest.author] {
+            if eligible.contains(&p) && !out.contains(&p) {
+                out.push(p);
+            }
+        }
+        let (with_session, others): (Vec<GossipId>, Vec<GossipId>) = eligible
+            .into_iter()
+            .filter(|p| !out.contains(p))
+            .partition(|p| self.sessions.contains(p));
+        let room = REF_LOOKUP_PEERS.saturating_sub(out.len());
+        let first = self.draw_by_score(cx.rng, with_session, room);
+        let room = room - first.len();
+        out.extend(first);
+        out.extend(self.draw_by_score(cx.rng, others, room));
+        out.truncate(REF_LOOKUP_PEERS);
+        out
+    }
+
+    /// Stops the round of `reference`, if one runs.
+    fn stop_round(&mut self, reference: &RefChatId) {
+        let Some(chat) = self.t.ref_lookups.get(reference).and_then(|r| r.round) else {
+            return;
+        };
+        let key = TaskKey {
+            chat_id: chat,
+            target: Target::Ref(*reference),
+        };
+        if self.t.tasks.remove(&key).is_some() {
+            self.reindex(key);
+        }
+        if let Some(r) = self.t.ref_lookups.get_mut(reference) {
+            r.round = None;
+        }
+    }
+
+    /// The task of a round ended: answered, or every peer of the round answered "not
+    /// available" or let its stages run out. The next round comes a week after this one
+    /// started, if any is left.
+    pub(crate) fn ref_round_over(&mut self, key: &TaskKey) {
+        let Target::Ref(reference) = key.target else {
+            return;
+        };
+        if self.t.tasks.remove(key).is_some() {
+            self.reindex(*key);
+        }
+        if let Some(r) = self.t.ref_lookups.get_mut(&reference) {
+            r.round = None;
+            r.due = r
+                .last_round
+                .unwrap_or(0)
+                .saturating_add(REF_LOOKUP_INTERVAL_MS);
+        }
+    }
+
+    /// The position of `peer` in the order of the round of `key`, if it is one of its peers
+    /// and may still be asked.
+    pub(crate) fn ref_position(&self, key: &TaskKey, peer: &GossipId) -> Option<usize> {
+        let Target::Ref(reference) = key.target else {
+            return None;
+        };
+        if !self.may_receive(&key.chat_id, peer, false) {
+            return None;
+        }
+        self.t
+            .ref_lookups
+            .get(&reference)?
+            .asked
+            .iter()
+            .position(|p| p == peer)
+    }
+
+    /// The peers the round of `key` may ask, in order.
+    pub(crate) fn ref_pool(&self, key: &TaskKey) -> Vec<GossipId> {
+        let Target::Ref(reference) = key.target else {
+            return Vec::new();
+        };
+        self.t
+            .ref_lookups
+            .get(&reference)
+            .map(|r| {
+                r.asked
+                    .iter()
+                    .filter(|p| self.may_receive(&key.chat_id, p, false))
+                    .copied()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// The newest reply of a record.
+fn latest(rec: &RefLookup) -> Option<&RefReply> {
+    rec.replies.values().max_by_key(|r| r.at)
+}

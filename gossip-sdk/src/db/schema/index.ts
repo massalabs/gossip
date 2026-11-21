@@ -17,3 +17,12 @@ export { pendingEncryptedMessages } from './pendingEncryptedMessages.js';
 export { pendingAnnouncements } from './pendingAnnouncements.js';
 export { activeSeekers } from './activeSeekers.js';
 export { announcementCursors } from './announcementCursors.js';
+export { discardedPeers } from './discardedPeers.js';
+export { transportCursors } from './transportCursors.js';
+export {
+  groupEventRows,
+  groupEdges,
+  groupObjects,
+  groupRecords,
+  groupOutbox,
+} from './groups.js';

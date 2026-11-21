@@ -132,7 +132,12 @@ vi.mock('../../src/hooks/usePendingSharedContent', () => ({
   usePendingSharedContent: vi.fn(),
 }));
 
+vi.mock('../../src/hooks/useNotificationPermissionPrompt', () => ({
+  useNotificationPermissionPrompt: vi.fn(),
+}));
+
 vi.mock('@capacitor/core', () => ({
+  registerPlugin: () => ({}),
   Capacitor: {
     getPlatform: vi.fn(() => 'web'),
     isNativePlatform: vi.fn(() => false),

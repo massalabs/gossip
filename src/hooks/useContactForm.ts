@@ -12,6 +12,7 @@ import { validateUsernameFormat } from '../utils/validation';
 import { useGossipSdk } from './useGossipSdk';
 import { useFileShareContact } from './useFileShareContact';
 import { useUserIdResolution, FieldState } from './useUserIdResolution';
+import { useDefaultMessageTimer } from './useDefaultMessageTimer';
 import toast from 'react-hot-toast';
 import { ROUTES } from '../constants/routes';
 
@@ -60,6 +61,12 @@ export function useContactForm() {
 
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // The message timer of the chat this device founds once the request is
+  // accepted (§7.7): the account's default, pre-selected.
+  const defaultMessageTimer = useDefaultMessageTimer();
+  const [chosenTimer, setChosenTimer] = useState<number | null>(null);
+  const messageTimer = chosenTimer ?? defaultMessageTimer;
 
   const canSubmit =
     !name.error &&
@@ -145,6 +152,19 @@ export function useContactForm() {
       cachePublicKey,
       setUserId,
     ]
+  );
+
+  /**
+   * A contact read in person (contact code): its keys were already checked
+   * against the user id, so no server lookup is needed.
+   */
+  const handleVerifiedContact = useCallback(
+    (contactUserId: string, keys: UserPublicKeys, contactName?: string) => {
+      cachePublicKey(contactUserId, keys);
+      void handleUserIdChange(contactUserId);
+      if (contactName) handleNameChange(contactName);
+    },
+    [cachePublicKey, handleUserIdChange, handleNameChange]
   );
 
   const handleSubmit = useCallback(async () => {
@@ -270,7 +290,8 @@ export function useContactForm() {
       };
 
       try {
-        await gossip.discussions.start(contact, payload);
+        // Remembered by the SDK until it founds the chat.
+        await gossip.discussions.start(contact, payload, { messageTimer });
       } catch (e) {
         logger.error(
           'Failed to initialize discussion after contact creation:',
@@ -296,6 +317,7 @@ export function useContactForm() {
     shareUsername,
     customUsername,
     message.value,
+    messageTimer,
     gossip,
     navigate,
     setUserId,
@@ -309,6 +331,7 @@ export function useContactForm() {
     shareUsername,
     customUsername,
     customUsernameError,
+    messageTimer,
 
     generalError,
     isSubmitting,
@@ -322,7 +345,9 @@ export function useContactForm() {
     handleMessageChange,
     handleShareUsernameChange,
     handleCustomUsernameChange,
+    handleMessageTimerChange: setChosenTimer,
     handleFileImport,
+    handleVerifiedContact,
     handleSubmit,
   };
 }

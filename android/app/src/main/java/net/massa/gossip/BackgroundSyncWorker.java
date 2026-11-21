@@ -1,7 +1,6 @@
 package net.massa.gossip;
 
 import android.content.Context;
-import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.work.Constraints;
@@ -51,7 +50,7 @@ public class BackgroundSyncWorker extends Worker {
             scheduleBackgroundRunnerSync(getApplicationContext());
             return Result.success();
         } catch (Exception e) {
-            Log.e(TAG, "BackgroundSyncWorker failed", e);
+            DebugLog.e(TAG, "BackgroundSyncWorker failed", e);
             return Result.retry();
         }
     }
@@ -88,13 +87,13 @@ public class BackgroundSyncWorker extends Worker {
             try {
                 runnerWorkerClass = Class.forName(BACKGROUND_RUNNER_WORKER);
             } catch (ClassNotFoundException e) {
-                Log.e(TAG, "BackgroundRunner worker class not found, skipping sync scheduling");
+                DebugLog.e(TAG, "BackgroundRunner worker class not found, skipping sync scheduling");
                 return false;
             }
 
             // Runtime type check to ensure the class is compatible with ListenableWorker
             if (!ListenableWorker.class.isAssignableFrom(runnerWorkerClass)) {
-                Log.e(TAG, "BackgroundRunner worker class is not a ListenableWorker: " + runnerWorkerClass.getName());
+                DebugLog.e(TAG, "BackgroundRunner worker class is not a ListenableWorker: " + runnerWorkerClass.getName());
                 return false;
             }
 
@@ -115,7 +114,7 @@ public class BackgroundSyncWorker extends Worker {
 
             return true;
         } catch (Exception e) {
-            Log.e(TAG, "Failed to schedule BackgroundRunner sync", e);
+            DebugLog.e(TAG, "Failed to schedule BackgroundRunner sync", e);
             return false;
         }
     }
@@ -147,13 +146,13 @@ public class BackgroundSyncWorker extends Worker {
             try {
                 runnerWorkerClass = Class.forName(BACKGROUND_RUNNER_WORKER);
             } catch (ClassNotFoundException e) {
-                Log.e(TAG, "BackgroundRunner worker class not found");
+                DebugLog.e(TAG, "BackgroundRunner worker class not found");
                 return;
             }
 
             // Runtime type check to ensure the class is compatible with ListenableWorker
             if (!ListenableWorker.class.isAssignableFrom(runnerWorkerClass)) {
-                Log.e(TAG, "BackgroundRunner worker class is not a ListenableWorker: " + runnerWorkerClass.getName());
+                DebugLog.e(TAG, "BackgroundRunner worker class is not a ListenableWorker: " + runnerWorkerClass.getName());
                 return;
             }
 
@@ -173,7 +172,7 @@ public class BackgroundSyncWorker extends Worker {
             );
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to schedule delayed sync", e);
+            DebugLog.e(TAG, "Failed to schedule delayed sync", e);
         }
     }
 }

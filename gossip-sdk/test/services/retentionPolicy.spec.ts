@@ -25,6 +25,8 @@ import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
 import { clearAllTables, getTestQueries } from '../testDb';
 import { MockMessageProtocol } from '../mocks';
 import { AnnouncementService } from '../../src/services/announcement';
+import { encodeToBase64 } from '../../src/utils/base64';
+import { POST_MESSAGE_TYPES } from '../../src/utils/message';
 
 const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
 const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
@@ -103,21 +105,12 @@ describe('DiscussionService.setRetentionPolicy', () => {
     const testQueries = getTestQueries();
     const mockSession = createMockSession();
 
-    const messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
     const discussionService = new DiscussionService(
       createMockAnnouncementService(),
       mockSession,
       new SdkEventEmitter(),
       testQueries
     );
-    discussionService.setMessageService(messageService);
 
     await discussionService.setRetentionPolicy(CONTACT_USER_ID, 86400);
 
@@ -133,21 +126,12 @@ describe('DiscussionService.setRetentionPolicy', () => {
     const testQueries = getTestQueries();
     const mockSession = createMockSession();
 
-    const messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
     const discussionService = new DiscussionService(
       createMockAnnouncementService(),
       mockSession,
       new SdkEventEmitter(),
       testQueries
     );
-    discussionService.setMessageService(messageService);
 
     await discussionService.setRetentionPolicy(CONTACT_USER_ID, null);
 
@@ -156,76 +140,6 @@ describe('DiscussionService.setRetentionPolicy', () => {
       CONTACT_USER_ID
     );
     expect(row?.messageRetentionDuration).toBeNull();
-  });
-
-  it('enqueues a RETENTION_POLICY control message for the peer', async () => {
-    await insertTestContactAndDiscussion();
-    const testQueries = getTestQueries();
-    const mockSession = createMockSession();
-
-    const messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
-    const discussionService = new DiscussionService(
-      createMockAnnouncementService(),
-      mockSession,
-      new SdkEventEmitter(),
-      testQueries
-    );
-    discussionService.setMessageService(messageService);
-
-    await discussionService.setRetentionPolicy(CONTACT_USER_ID, 604800);
-
-    // Active session triggers the fast path — the control message is sent
-    // immediately (status SENT) rather than staying in the send queue.
-    const allMessages = await testQueries.messages.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-    const controlMsg = allMessages.find(
-      m => m.type === MessageType.RETENTION_POLICY
-    );
-    expect(controlMsg).toBeDefined();
-    expect(controlMsg?.content).toBe('604800');
-    expect(controlMsg?.direction).toBe(MessageDirection.OUTGOING);
-  });
-
-  it('enqueues duration 0 when retention is disabled (null)', async () => {
-    await insertTestContactAndDiscussion();
-    const testQueries = getTestQueries();
-    const mockSession = createMockSession();
-
-    const messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
-    const discussionService = new DiscussionService(
-      createMockAnnouncementService(),
-      mockSession,
-      new SdkEventEmitter(),
-      testQueries
-    );
-    discussionService.setMessageService(messageService);
-
-    await discussionService.setRetentionPolicy(CONTACT_USER_ID, null);
-
-    const allMessages = await testQueries.messages.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-    const controlMsg = allMessages.find(
-      m => m.type === MessageType.RETENTION_POLICY
-    );
-    expect(controlMsg?.content).toBe('0');
   });
 });
 
@@ -339,20 +253,12 @@ describe('retentionPolicySetAt is stored when policy changes', () => {
     const mockSession = createMockSession();
     const before = Date.now();
 
-    const messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
     const discussionService = new DiscussionService(
       createMockAnnouncementService(),
       mockSession,
       new SdkEventEmitter(),
       testQueries
     );
-    discussionService.setMessageService(messageService);
 
     await discussionService.setRetentionPolicy(CONTACT_USER_ID, 3600);
 
@@ -375,20 +281,12 @@ describe('retentionPolicySetAt is stored when policy changes', () => {
       { retentionPolicySetAt: Date.now() - 60_000 }
     );
 
-    const messageService = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
     const discussionService = new DiscussionService(
       createMockAnnouncementService(),
       createMockSession(),
       new SdkEventEmitter(),
       testQueries
     );
-    discussionService.setMessageService(messageService);
 
     await discussionService.setRetentionPolicy(CONTACT_USER_ID, null);
 
@@ -459,14 +357,57 @@ describe('getVisibleMessages filters out RETENTION_POLICY control rows', () => {
 describe('MessageService.deleteExpiredMessages', () => {
   beforeEach(clearAllTables);
 
+  /**
+   * A row of an archive, as an earlier release stored it when the message
+   * was sent (the earlier format is no longer sent, §2.1): the message and
+   * the discussion's last message.
+   */
   const sendAndGetMessage = async (
     messageService: MessageService,
     message: Parameters<MessageService['sendMessage']>[0]
   ) => {
-    const sendResult = await messageService.sendMessage(message);
-    expect(sendResult.success).toBe(true);
-    expect(sendResult.message?.id).toBeDefined();
-    return sendResult.message!;
+    void messageService;
+    const queries = getTestQueries();
+    const messageId = crypto.getRandomValues(new Uint8Array(12));
+    const id = await queries.messages.insert({
+      ownerUserId: message.ownerUserId,
+      contactUserId: message.contactUserId,
+      content: message.content,
+      type: message.type,
+      direction: message.direction,
+      status: message.status,
+      timestamp: message.timestamp,
+      messageId,
+      replyTo: message.replyTo
+        ? JSON.stringify({
+            originalMsgId: encodeToBase64(message.replyTo.originalMsgId),
+          })
+        : null,
+      reactionOf: message.reactionOf
+        ? JSON.stringify({
+            originalMsgId: encodeToBase64(message.reactionOf.originalMsgId),
+          })
+        : null,
+      editOf: message.editOf
+        ? JSON.stringify({
+            originalMsgId: encodeToBase64(message.editOf.originalMsgId),
+          })
+        : null,
+    });
+    if (POST_MESSAGE_TYPES.includes(message.type) && !message.editOf) {
+      const d = await queries.discussions.getByOwnerAndContact(
+        message.ownerUserId,
+        message.contactUserId
+      );
+      if (d) {
+        await queries.discussions.updateById(d.id, {
+          lastMessageId: id,
+          lastMessageContent: message.content,
+          lastMessageTimestamp: message.timestamp,
+        });
+      }
+    }
+    return { ...message, id, messageId };
   };
 
   it('deletes expired message and removes related reaction/reply references', async () => {

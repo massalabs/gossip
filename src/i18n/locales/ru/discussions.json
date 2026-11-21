@@ -8,7 +8,8 @@
   "filter": {
     "all": "Все",
     "unread": "Непрочитанные",
-    "pending": "Ожидающие"
+    "pending": "Ожидающие",
+    "archived": "Архив"
   },
   "message_input": {
     "replying_to": "Ответ для",
@@ -21,7 +22,8 @@
     "input_label": "Ввод сообщения",
     "send": "Отправить сообщение",
     "emoji": "Эмодзи",
-    "emoji_search": "Поиск эмодзи…"
+    "emoji_search": "Поиск эмодзи…",
+    "size_counter": "{{used}} / {{max}} байт"
   },
   "message": {
     "sent": "Отправлено",
@@ -93,8 +95,7 @@
   "new_discussion": {
     "title": "Новый чат",
     "new_contact": "Новый контакт",
-    "new_group": "Новая группа (скоро)",
-    "coming_soon": "Скоро",
+    "new_group": "Новая группа",
     "contacts": "Контакты",
     "search_contacts": "Поиск контактов",
     "loading_contacts": "Загрузка контактов…",
@@ -167,7 +168,10 @@
     "delete": "Удалить",
     "react": "Реакция",
     "add_reaction": "Добавить реакцию",
-    "more_emojis": "Больше эмодзи"
+    "more_emojis": "Больше эмодзи",
+    "delayed": "с задержкой",
+    "delayed_hint": "Получено намного позже отправки",
+    "sent_via_mesh": "Отправлено через офлайн-сеть, ждёт моста"
   },
   "session_issue": {
     "message": "Вы отправили много сообщений, которые ещё не были подтверждены. В целях безопасности новые сообщения не будут отправлены, пока не будет получен ответ.",
@@ -177,6 +181,11 @@
   "retention_separator": "Автоудаление включено: {{duration}}",
   "filter_label": "Фильтр чатов",
   "waiting_connection": "Ожидание подключения...",
+  "mesh_connected_one": "Подключено к mesh-сети · {{count}} связь",
+  "mesh_connected_few": "Подключено к mesh-сети · {{count}} связи",
+  "mesh_connected_many": "Подключено к mesh-сети · {{count}} связей",
+  "mesh_connected_other": "Подключено к mesh-сети · {{count}} связи",
+  "mesh_no_links": "Mesh-сеть включена · рядом нет телефонов",
   "announcement": "Объявление",
   "lock_account": "Заблокировать"
 }

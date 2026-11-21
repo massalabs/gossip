@@ -42,6 +42,64 @@ export const discussions = sqliteTable(
     saturatedRetryDone: integer('saturatedRetryDone', { mode: 'boolean' })
       .notNull()
       .default(false),
+    /**
+     * It holds an earlier one-to-one conversation (format 0), shown read-only
+     * as an archive: every discussion that existed before group chats.
+     */
+    isArchive: integer('isArchive', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    /** The user moved it to the archived list. */
+    archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * The group key of the direct chat that continues it (§5.12): set when the
+     * archive is migrated, a migration accepted, or a new contact's chat
+     * founded or adopted.
+     */
+    linkedGroupId: text('linkedGroupId'),
+    /**
+     * This device sent the contact request: it founds the direct chat once
+     * the peer accepted (§5.12). Cleared when the chat is linked.
+     */
+    directChatOwed: integer('directChatOwed', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    /**
+     * The message timer (§7.7, milliseconds, 0 keeps messages forever) the
+     * user chose when sending the contact request, for the direct chat this
+     * device founds once it is accepted. Null: the account's default at that
+     * time. Cleared when the chat is linked. On the side that received the
+     * request: the timer the request states, shown before it is accepted
+     * (null if it states none).
+     */
+    directChatTimer: integer('directChatTimer'),
+    /**
+     * When the session was last renewed because the server refused a send
+     * at a seeker it already held (409): at most one such renewal an hour.
+     */
+    seekerConflictRenewedAt: integer('seekerConflictRenewedAt', {
+      mode: 'timestamp_ms',
+    }),
+    /**
+     * This device's latest announcement to the peer was made on its own
+     * initiative (a request, a renewal) and the peer has not announced
+     * itself since: the peer's next announcement answers it.
+     */
+    awaitingAnswer: integer('awaitingAnswer', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    /**
+     * When this device last answered a new announcement of the peer: it
+     * answers at most one in ten minutes. Null if never.
+     */
+    renewalAnsweredAt: integer('renewalAnsweredAt', { mode: 'timestamp_ms' }),
+    /**
+     * A new announcement of the peer came within those ten minutes and is
+     * answered once they end.
+     */
+    renewalAnswerOwed: integer('renewalAnswerOwed', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updatedAt', { mode: 'timestamp_ms' }).notNull(),
   },
