@@ -83,3 +83,23 @@ export function messageTimerSentence(ms: number, t: Translate): string {
       })
     : t('groups:timer.kept');
 }
+
+/**
+ * What the invitation of a chat of two says when its timer is not the one
+ * the contact request announced (§5.12): that it differs, then the timer
+ * announced, then the timer of this chat.
+ */
+export function announcedTimerLines(
+  name: string,
+  announced: number,
+  actual: number,
+  t: Translate
+): [string, string, string] {
+  return [
+    t('groups:timer.announced_differs', { name }),
+    t('groups:timer.announced', {
+      duration: messageTimerLabel(announced, t),
+    }),
+    t('groups:timer.this_chat', { duration: messageTimerLabel(actual, t) }),
+  ];
+}
