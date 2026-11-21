@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn f64_to_i64_rejects_non_integer() {
         assert_eq!(safe_f64_to_i64(1.5), None);
-        assert_eq!(safe_f64_to_i64(-3.14), None);
+        assert_eq!(safe_f64_to_i64(-3.25), None);
     }
 
     #[test]
