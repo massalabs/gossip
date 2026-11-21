@@ -1573,6 +1573,10 @@ leaves nothing to compare: the root is adopted as before. The announced timer is
 accepting device only, beside the consent: never sent, never hashed, and it expires with the
 consent.
 
+_Why (decided by the owner, D.89):_ the device compares in the engine and asks, so that the user
+decides before the chat is active, rather than learning afterwards that the chat keeps another
+timer than the one accepted.
+
 - It covers the first adoption only. The owner may change the timer afterwards with a new root,
   which the device follows as every member does (§7.7), and the timeline shows it. An owner can
   therefore announce a week, found the chat with a week and change it a minute later.
@@ -1580,9 +1584,15 @@ consent.
   declining it silently sends nothing. The requester can still tell it apart from an adoption:
   an adopted chat makes the device query and connect at once (§4.8), an invitation only once the
   user accepts. Only a requester that founds with another timer than it announced sees this; it
-  learns that the device compared, and when its user accepted, as for any invitation.
+  learns that the device compared, and when its user accepted, because a chat held as an
+  invitation sends nothing until it is answered. This cost is accepted (§16.12, D.89).
 - The tie rule below does not look at it: when the device holds its own chat too, the cases of the
-  table apply as they are.
+  table apply as they are, and the device can switch without a prompt to the other person's chat
+  whatever its timer. This is a decided, known gap (§16.12, D.89); the app does not reach it.
+- A new automatic chat from the owner of the chat of two the device holds (an account reinstalled
+  into an empty device, row 10 below) is never covered by a consent, since the device holds a chat
+  with that person: it is the ordinary invitation of that rule whatever its timer, and it names no
+  announced timer.
 
 **One automatic chat per pair.** Every group a device creates by itself, after a contact request
 or by migrating an earlier conversation, carries `migrate_from = 0`, and at most one such group
@@ -1638,6 +1648,13 @@ to continue below: one of the two ended the earlier chat on purpose, so the othe
 
 When both chats still list both people, the device first applies the tie rule: the chat whose
 owner's GossipID sorts first (raw bytes, ascending) is the one to keep.
+
+The tie rule does not compare the timer a contact request announced: when it decides, the device
+switches to the winning chat without a prompt whatever its timer, so in that one case a user can
+end in a chat whose timer differs from the one announced. This is a decided, known gap (D.89,
+§16.12). The app does not reach it: when two contact requests cross, each device sent one, so
+neither is asked to accept and neither gives a consent. It can arise only at engine level, for
+example with another client built on the engine.
 
 - **If mine is the one to keep,** the other chat becomes history, without a prompt, whatever the
   boolean says.
@@ -3983,6 +4000,27 @@ compared, by the owner's choice (D.88).
 This is accepted: a silent switch would let a device move a conversation without the user's
 consent.
 
+### 16.12 Known limitation: the timer a contact request announced
+
+A device that accepted a contact request adopts the chat its requester founds without a prompt
+only if that chat keeps the timer the request announced; otherwise the chat is an ordinary
+invitation that names both timers (§5.12, D.89).
+
+- **What the requester can learn.** A requester that announces one timer and founds the chat with
+  another can tell that the receiver's device compared them, and when the user accepted: a chat held
+  as an invitation sends nothing until it is answered, while an adopted chat queries and connects
+  at once. A requester that founds with the timer it announced learns nothing. This cost is
+  accepted.
+- **The first adoption only.** The owner can change the timer afterwards with a new root, as any
+  owner can; the timeline line shows the change.
+- **The tie rule.** When both people founded an automatic chat at once and the other person's chat
+  wins the tie rule, the device switches to it without a prompt whatever its timer, so a user can
+  end in a chat whose timer differs from the one announced. The app does not reach this case, as
+  no consent is given when two requests cross; it can arise only at engine level, for example with
+  another client built on the engine. Closing it means changing row 1 of the table in §5.12 and
+  deciding what the device's own chat becomes while the user is asked; this is left for after the
+  first release.
+
 ## 17. Readiness, validation and future work
 
 ### 17.1 Release prerequisites
@@ -6041,3 +6079,58 @@ _Alternatives not taken:_
   would rely on the creation date written in a root, which the sender chooses.
 - Only document the two chats: parallel chats of two with the same person would pile up with each
   reinstall.
+
+### D.89 The timer a contact request announced (§5.12, §16.12)
+
+_Context:_ a contact request states the message timer its sender chose, and the accepting user
+sees it before accepting. Accepting is the consent to the chat the requester then founds, which
+the device adopted without a prompt whatever timer it carried: a modified client could announce a
+week and found the chat with five minutes.
+
+_Settled:_
+
+- The consent carries the announced timer, on the accepting device only
+  (`consent_to_direct_chat(…, timer)`, engine tables `consent_timers` and `announced_timers`):
+  never sent, never hashed, gone with the consent. A root with that timer is adopted as before
+  (`0` and no timer are the same); a request that announced no timer adopts as before.
+- The first root the consent would cover with another timer uses the consent up and is an ordinary
+  invitation (Accept, Decline) that names both timers.
+- A reinstalled owner's new automatic chat (row 10) is never covered by a consent, since the device
+  holds a chat with that person: it is an ordinary invitation whatever its timer, naming no
+  announced timer.
+
+_Decision:_ compare in the engine and ask, chosen by the owner on 2026-11-21.
+
+_Why:_ the user decides before the chat is active. A chat that keeps another timer than the one
+accepted is not used until the user says so.
+
+_Accepted cost:_ a requester that announces one timer and creates the chat with another can tell
+that the receiver's device compared them, and when the user accepted, because a chat held as an
+invitation sends nothing until it is answered (§16.12). A requester that keeps its word learns
+nothing.
+
+_Limit:_ the check covers the first adoption only. An owner can change the timer afterwards with a
+new root, which every member follows (§7.7), and the timeline line shows the change.
+
+_Known gap, decided:_ the tie rule (§5.12, row 1) stays exactly as it is and the comparison is not
+applied on that path. When both people created an automatic chat at once and the other person's
+chat wins, a device switches to it without a prompt whatever its timer, so in that one case a user
+can end in a chat whose timer differs from the one announced. The app does not reach this case: when
+two requests cross, each device sent one (`initialize` in `gossip-sdk/src/services/discussion.ts`
+records it as accepted by this user and owing its own chat), the session becomes active without the
+Accept step (the app offers Accept only for a request whose session is `PeerRequested`, in
+`src/pages/Invitation.tsx` and `src/components/discussions/DiscussionListItem.tsx`), so `accept` in
+`gossip-sdk/src/services/discussion.ts`, the only place that consents, is not called; and even
+there a discussion that owes its own chat consents with no announced timer. It can arise only at
+engine level, for example with another client built on the engine. Closing it means changing row 1
+of the table and deciding what the device's own chat becomes while the user is asked: left for
+after the first release. The test `the_tie_rule_ignores_the_announced_timer` records the behaviour.
+
+_Alternatives not taken:_
+
+- Adopt the chat and show a notice in it afterwards: the chat would already be active, and its
+  first messages sent under a timer the user did not accept.
+- Show the announced timer without comparing it: the user would accept one timer and could get
+  another without being told.
+- Announce no timer in the request: the user would accept without knowing how long the messages
+  of the chat last.
