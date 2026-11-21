@@ -29,9 +29,6 @@ const ACCOUNT_OUTPUT_GENERATION_KEY = 'gossip-account-output-generation-v1';
 // Must match BACKGROUND_SYNC_PRESET_KV_KEY in src/utils/preferences.ts
 const SYNC_PRESET_KEY = 'gossip-sync-preset';
 
-// Fallback API URL if not stored in preferences
-const DEFAULT_API_BASE_URL = 'https://gossip.massa.net/api';
-
 // Minimum interval between syncs — depends on user preset (read from KV)
 const MIN_SYNC_INTERVAL_MAX_MS = 1 * 60 * 1000; // 1 minute — max reactivity
 const MIN_SYNC_INTERVAL_BALANCED_MS = 5 * 60 * 1000; // 5 minutes — fewer redundant fetches
@@ -101,7 +98,8 @@ function extractKVValue(rawValue) {
 }
 
 /**
- * Retrieve the API base URL from BackgroundRunner storage or use default.
+ * Retrieve the API base URL the app stored in BackgroundRunner storage.
+ * Returns null when none is stored: the runner then contacts no host.
  */
 async function getApiBaseUrl() {
   try {
@@ -118,7 +116,7 @@ async function getApiBaseUrl() {
       String(err)
     );
   }
-  return DEFAULT_API_BASE_URL;
+  return null;
 }
 
 /**
@@ -468,6 +466,11 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
 
     // Get API base URL
     const apiBaseUrl = await getApiBaseUrl();
+    if (!apiBaseUrl) {
+      logDebug('[BackgroundSync] No API URL stored, skipping sync');
+      resolve();
+      return;
+    }
 
     // Fetch messages from the protocol API
     let messages = [];
