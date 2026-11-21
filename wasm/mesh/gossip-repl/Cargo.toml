@@ -21,7 +21,7 @@ schnellru = { workspace = true }
 static_assertions = { workspace = true }
 rayon = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
+tracing = { workspace = true, features = ["release_max_level_off"] }
 
 [dev-dependencies]
 mockall = { workspace = true }
