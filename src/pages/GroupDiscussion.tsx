@@ -9,7 +9,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { Info, Users } from 'react-feather';
-import type { GroupMessage, GroupTimelineItem } from '@massalabs/gossip-sdk';
+import type {
+  GroupMessage,
+  GroupSummary,
+  GroupTimelineItem,
+} from '@massalabs/gossip-sdk';
 import DiscussionLayout from '../components/ui/Layout/DiscussionLayout';
 import HeaderBar from '../components/ui/HeaderBar';
 import BackButton from '../components/ui/BackButton';
@@ -119,6 +123,17 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     s.groups.find(g => g.summary.groupId === groupId)
   );
   const refresh = useGroupStore(s => s.refresh);
+  const allGroups = useGroupStore(s => s.groups);
+  // The group of each epoch held, for the quotes of another group.
+  const groupOfEpoch = useMemo(() => {
+    const m = new Map<string, GroupSummary>();
+    for (const { summary } of allGroups) {
+      m.set(summary.groupId, summary);
+      m.set(summary.currentEpoch, summary);
+      for (const e of summary.timers) m.set(e.epochId, summary);
+    }
+    return m;
+  }, [allGroups]);
   // A replaced chat of two opens the chat that continues it (§5.12).
   const supersededBy = useGroupStore(s => s.supersededBy[groupId]);
   // Another person's new chat that continues this one, to answer here.
@@ -399,6 +414,18 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
                     ? byKey.get(`${r.epochId}:${r.syncObjId}`)
                     : undefined);
                 return m ? messageText(m, t) : null;
+              })}
+              // "in <group>" for a quote of another group (§7.6).
+              replyGroups={item.replyTo.map(r => {
+                const other = r.epochId ? groupOfEpoch.get(r.epochId) : null;
+                return other && other.groupId !== groupId
+                  ? groupDisplayName(
+                      other,
+                      memberName,
+                      me,
+                      t('invitation.unnamed')
+                    )
+                  : null;
               })}
               canWrite={canWrite}
               memberName={memberName}

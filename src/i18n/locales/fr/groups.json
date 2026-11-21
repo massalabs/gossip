@@ -92,6 +92,7 @@
     "added_back": "{{owner}} vous a ajouté de nouveau",
     "edited": "Modifié",
     "reply_to": "Réponse à",
+    "reply_in_group": "dans « {{name}} »",
     "reply_unavailable": "Message indisponible",
     "empty": "Aucun message pour l'instant",
     "media": "Pièce jointe non prise en charge",
