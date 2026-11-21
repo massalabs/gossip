@@ -48,6 +48,7 @@ interface Internals {
   messageProtocol: { sendMessage: (m: unknown) => Promise<void> };
   session: { peerSessionStatus: (p: Uint8Array) => number };
   node: { poll_outbox: (now: number) => unknown[] } | null;
+  chain: Promise<void>;
 }
 const internals = (sdk: GossipSdk) => sdk.groups as unknown as Internals;
 const queriesOf = (sdk: GossipSdk) =>
@@ -340,6 +341,38 @@ describe('Group chats', { timeout: 120_000 }, () => {
     expect(localEdit).not.toHaveBeenCalled();
     await alice.groups.editMessage(groupId, sent.syncObjId, 'y'.repeat(16_384));
     expect(edit).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends every message of a burst sent at once, without waiting for other traffic', async () => {
+    const groupId = await alice.groups.createGroup('Trip', [
+      bob.userId,
+      carol.userId,
+    ]);
+    await deliver();
+    for (const p of [bob, carol]) {
+      await p.groups.acceptInvitation(
+        (await p.groups.invitations())[0].epochId
+      );
+    }
+    await deliver();
+
+    // Three messages sent before the first one's send has started, as a user
+    // typing fast does (the page does not wait for each send).
+    await Promise.all(
+      ['one', 'two', 'three'].map(t => alice.groups.sendMessage(groupId, t))
+    );
+    // Nothing else happens on Alice's device: no arrival, no timer, no new
+    // operation. Only what the sends themselves queued runs.
+    await internals(alice).chain;
+    for (const p of [bob, carol]) {
+      await p.messages.fetch();
+      await p.groups.settle();
+      expect((await texts(p.groups, groupId)).sort()).toEqual([
+        'one',
+        'three',
+        'two',
+      ]);
+    }
   });
 
   it('replies, edits locally and retries', async () => {
