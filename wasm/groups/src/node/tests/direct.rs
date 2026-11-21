@@ -1723,8 +1723,14 @@ fn a_consent_given_again_names_the_timer_of_the_last_request() {
 /// Two creations at once (§5.12, table row 1): the tie rule decides, as before, whatever
 /// the request announced. H consented with the timer L's request announced, founded its
 /// own chat, and L founded its chat with another timer: H switches to L's chat without a
-/// prompt, in either order of arrival. Left as it is: changing it changes a row of the
-/// table.
+/// prompt, in either order of arrival.
+///
+/// A decision, not an oversight (owner, 2026-11-21; D.89): the tie rule stays exactly as it
+/// is and the announced timer is not compared on that path, so H can end in a chat whose
+/// timer is not the one announced. The app does not reach it (the SDK gives no consent
+/// when two requests cross); closing it means changing row 1 of the table and deciding what
+/// H's own chat becomes while H is asked, left for after the first release. This test
+/// records the behaviour.
 #[test]
 fn the_tie_rule_ignores_the_announced_timer() {
     let (l, h) = sorted_pair();
