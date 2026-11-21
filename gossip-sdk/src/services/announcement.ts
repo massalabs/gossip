@@ -790,7 +790,9 @@ export class AnnouncementService {
 
     log.info('announcement intended for us — decrypting');
 
-    const { username, message } = decodeAnnouncementPayload(result.user_data);
+    const { username, message, messageTimer } = decodeAnnouncementPayload(
+      result.user_data
+    );
 
     const announcerPkeys = result.announcer_public_keys;
     const contactUserIdRaw = announcerPkeys.derive_id();
@@ -849,7 +851,8 @@ export class AnnouncementService {
       this.session.userIdEncoded,
       contactUserId,
       automatic ? undefined : message,
-      automatic
+      automatic,
+      automatic ? undefined : messageTimer
     );
 
     const row = await this.queries.discussions.getById(discussionId);
@@ -946,7 +949,8 @@ export class AnnouncementService {
     ownerUserId: string,
     contactUserId: string,
     message?: string,
-    automatic = false
+    automatic = false,
+    messageTimer?: number
   ): Promise<{ discussionId: number }> {
     const log = logger.forMethod('handleReceivedDiscussion');
 
@@ -958,6 +962,11 @@ export class AnnouncementService {
     if (existing) {
       const updateData: Record<string, unknown> = { updatedAt: new Date() };
       if (message) updateData.announcementMessage = message;
+      // The timer the request states, shown before it is accepted; never
+      // over the one of a request this device sent and founds the chat of.
+      if (messageTimer !== undefined && !existing.directChatOwed) {
+        updateData.directChatTimer = messageTimer;
+      }
 
       log.info('updating existing discussion', {
         discussionId: existing.id,
@@ -999,6 +1008,7 @@ export class AnnouncementService {
       contactUserId,
       direction: DiscussionDirection.RECEIVED,
       announcementMessage: message,
+      directChatTimer: messageTimer ?? null,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),

@@ -68,7 +68,9 @@ export const discussions = sqliteTable(
      * The message timer (§7.7, milliseconds, 0 keeps messages forever) the
      * user chose when sending the contact request, for the direct chat this
      * device founds once it is accepted. Null: the account's default at that
-     * time. Cleared when the chat is linked.
+     * time. Cleared when the chat is linked. On the side that received the
+     * request: the timer the request states, shown before it is accepted
+     * (null if it states none).
      */
     directChatTimer: integer('directChatTimer'),
     /**

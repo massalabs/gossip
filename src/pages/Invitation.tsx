@@ -244,6 +244,20 @@ const Invitation: React.FC = () => {
         </Section>
       )}
 
+      {request &&
+        request.directChatTimer !== null &&
+        request.directChatTimer !== undefined && (
+          <Section title={t('timer.label')} testId="invite-timer">
+            <p className="flex items-center gap-2 text-sm text-foreground">
+              <Clock className="w-4 h-4 shrink-0 text-muted-foreground" />
+              {messageTimerSentence(request.directChatTimer, t)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t('timer.owner_only')}
+            </p>
+          </Section>
+        )}
+
       {(invitation?.migrationOf || invitation?.continues) && (
         <Section title={t('invite.continues')} testId="invite-continues">
           <p className="text-sm text-foreground">
