@@ -15,7 +15,7 @@ rand = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
-tracing = { workspace = true }
+tracing = { workspace = true, features = ["release_max_level_off"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
