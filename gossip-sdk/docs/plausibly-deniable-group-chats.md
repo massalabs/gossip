@@ -1626,8 +1626,12 @@ owner's GossipID sorts first (raw bytes, ascending) is the one to keep.
   shown as an invitation to continue the conversation: _"[Name] wants to continue this
   conversation in a new group."_ Accepting makes their chat the current one; declining changes
   nothing.
-- A second automatic chat created by the owner of the chat I already hold is an ordinary
-  invitation.
+- A second automatic chat created by the owner of the chat I already hold (that person
+  reinstalled the account into an empty device, or restored a backup made before that chat) is an
+  ordinary invitation. Accepting it makes it the current chat: the chat I hold becomes its
+  read-only history, listed before it, as below. Declining changes nothing. This applies only while
+  the chat I hold still lists exactly the two of us and its current epoch is still owned by that
+  person; otherwise accepting links nothing.
 
 **Nothing is erased.** The chat that is not kept becomes read-only history of the same
 conversation: its messages stay on each device that holds them. The kept chat records, as local
@@ -1636,33 +1640,53 @@ identifier of the earlier one-to-one conversation and the chats it replaced. The
 one conversation, oldest first. This applies only to automatic chats of two people; no other
 groups are ever merged.
 
+**What a replaced chat still sends.** A device that supersedes a chat of two still sends what it
+had queued for it, so that the other person gets the chat it replaces, but of its roots and signed
+objects only those of its first epoch. A later epoch reaching a device that lacks its parent, such
+as an account reinstalled into an empty device, cannot be told from a new group there and would be
+shown as an ordinary invitation to a chat no longer used. Conversely, a device that holds the first
+root of an automatic chat only as the parent fetched for another invitation (a later epoch reached
+it first) treats that root as received directly: it pairs with the device's own chat as above.
+
 The cases, with L the person whose GossipID sorts first, H the other, and G_L and G_H the chats
 each created. "Asked" means the invitation to continue above.
 
-| #   | Situation                                                                         | L's device                             | H's device                                 | Continues in                              |
-| --- | --------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------ | ----------------------------------------- |
-| 1   | Both create at the same moment                                                    | not asked: keeps G_L                   | not asked: switches to G_L                 | G_L                                       |
-| 2a  | H creates after L accepted H's contact request; L has none yet                    | not asked: the contact was the consent |                                            | G_H                                       |
-| 2b  | H migrates an earlier conversation with history; L has none yet                   | asked                                  |                                            | G_H if L accepts                          |
-| 3   | H creates and writes in G_H while L is offline; L had created G_L                 | not asked: keeps G_L, G_H is history   | not asked: switches to G_L, G_H is history | G_L                                       |
-| 4a  | L ignored H's invitation without answering; later L creates G_L                   | not asked: keeps G_L                   | not asked: switches to G_L, G_H is history | G_L                                       |
-| 4b  | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L                   | asked                                      | G_L if H accepts                          |
-| 5   | L took part in G_H, then sends a new G_L                                          |                                        | asked                                      | G_H; G_L if H accepts                     |
-| 6   | H sends a new G_H, whether or not H took part in G_L                              | not asked: keeps G_L, G_H is history   |                                            | G_L                                       |
-| 7   | H joined G_L, then restores an old backup and creates G_H                         | not asked: keeps G_L                   | not asked: switches to G_L                 | G_L                                       |
-| 8   | L joined G_H, then restores an old backup and creates G_L                         | not asked: keeps G_L                   | asked                                      | each on its own until H accepts, then G_L |
-| 9   | H restores a backup from before L took part; L sends G_L                          |                                        | not asked: switches to G_L, G_H is history | G_L                                       |
+| #   | Situation                                                                         | L's device                             | H's device                                 | Continues in                               |
+| --- | --------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------ | ------------------------------------------ |
+| 1   | Both create at the same moment                                                    | not asked: keeps G_L                   | not asked: switches to G_L                 | G_L                                        |
+| 2a  | H creates after L accepted H's contact request; L has none yet                    | not asked: the contact was the consent |                                            | G_H                                        |
+| 2b  | H migrates an earlier conversation with history; L has none yet                   | asked                                  |                                            | G_H if L accepts                           |
+| 3   | H creates and writes in G_H while L is offline; L had created G_L                 | not asked: keeps G_L, G_H is history   | not asked: switches to G_L, G_H is history | G_L                                        |
+| 4a  | L ignored H's invitation without answering; later L creates G_L                   | not asked: keeps G_L                   | not asked: switches to G_L, G_H is history | G_L                                        |
+| 4b  | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L                   | asked                                      | G_L if H accepts                           |
+| 5   | L took part in G_H, then sends a new G_L                                          |                                        | asked                                      | G_H; G_L if H accepts                      |
+| 6   | H sends a new G_H, whether or not H took part in G_L                              | not asked: keeps G_L, G_H is history   |                                            | G_L                                        |
+| 7   | H joined G_L, then restores an old backup and creates G_H                         | not asked: keeps G_L                   | not asked: switches to G_L                 | G_L                                        |
+| 8   | L joined G_H, then restores an old backup and creates G_L                         | not asked: keeps G_L                   | asked                                      | each on its own until H accepts, then G_L  |
+| 9   | H restores a backup from before L took part; L sends G_L                          |                                        | not asked: switches to G_L, G_H is history | G_L                                        |
+| 10  | H holds G_L, which L created; L reinstalls into an empty device and creates G_L2  |                                        | asked (an ordinary invitation)             | each on its own until H accepts, then G_L2 |
 
 _Why:_ two people who start the same chat at the same moment must end on one chat without being
 asked, but a chat both have used must not be replaced by one of them without the other's consent,
 since owning the chat is what allows adding people to it. The other person's first traffic in my
 chat is the only sign I ever get that they accepted it.
 
+An account reinstalled from its recovery phrase into an empty device is a backup made before
+anything. When the other person holds its own chat, rows 7 to 9 apply; when it holds a chat the
+reinstalled person created, row 10 applies, and again after every later reinstall. Row 10 also
+holds with L and H swapped.
+
+_Why an ordinary invitation:_ a device cannot tell an owner that lost the chat it holds from one
+that starts a second one on purpose, so the user decides; accepting is the only sign, and the chat
+accepted last is the current one, with no date compared.
+
 **The invitation screen.** Every invitation uses one screen made of sections shown as they apply:
 who asks; adding that person as a contact; the group, its owner and its members; the earlier
 conversation it continues; warnings (§4.8, §5.11); and the choices.
 A person who is not a contact and asks for a chat is shown once, on that screen, as asking both to
 become a contact and to open the chat.
+An invitation is named as the conversation list would name that group: a chat of two without a
+name by the other person's name, never "Unnamed group".
 
 ## 6. Events
 
@@ -5904,3 +5928,42 @@ rewritten block for a short time, readable with the account's password (§16.10)
 left to the storage layer: flushing the old versions of a block, with a trigger that does not
 itself signal an erasure, or a format where every write uses a fresh key. Both are proposed
 separately from this protocol.
+
+### D.88 An account reinstalled into an empty device (§5.12)
+
+_Found in a live run: an account reinstalled from its recovery phrase into an empty device, a
+second time, left each of its contacts with two active chats of two with it, because a second
+automatic chat from the owner of the chat held was an ordinary invitation and accepting it kept
+both. The reinstalled account was also offered, as an "Unnamed group" invitation, a later epoch of
+a chat its contact had just replaced._
+
+_Settled:_
+
+- A new automatic chat from the owner of the chat of two a device holds stays an ordinary
+  invitation; accepting it supersedes the chat held, which becomes its read-only history (§5.12,
+  row 10). Declining changes nothing.
+- Superseding a chat of two pushes, of what was queued for it, only the roots and signed objects
+  of its first epoch; a first root fetched as the parent of another invitation pairs with the
+  device's own chat as one received directly.
+- An invitation is named as the conversation list names that group.
+
+_Points chosen:_
+
+- The invitation is not shown as an invitation to continue: it looks as before, and only the
+  acceptance links it.
+- Nothing is sent when a chat is superseded, or when the invitation is accepted, beyond what any
+  acceptance sends.
+
+_Known limits:_
+
+- Until the user accepts, the two devices are on different chats: messages written in the chat
+  held reach no device of the reinstalled person.
+- Each reinstall shows one more prompt; a hostile owner can show one per new chat, as with any
+  invitation, and an accepted one moves the conversation; every earlier chat stays readable and is
+  listed before the current one.
+- A later epoch that reached the reinstalled device while the chat was still active, and whose
+  first root it never fetched, stays an ordinary invitation there.
+- The other person's copy of a replaced chat lacks its later epochs when they were still queued
+  at the switch: what was written there after a timer change is missing from that copy.
+
+- **A (recommended):** keep as described.
