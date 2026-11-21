@@ -7,10 +7,13 @@ import Button from '../ui/Button';
 import SafeName from './SafeName';
 import LeaveGroupSheet, { type LeaveAction } from './LeaveGroupSheet';
 import { messageTimerSentence } from '../../constants/messageTimer';
+import { groupDisplayName } from '../../utils/groupName';
 
 interface GroupInvitationCardProps {
   invitation: GroupInvitation;
   memberName: (userId: string) => string;
+  /** The user's own ID, left out of a name built from the members. */
+  me?: string;
   onAccept: (epochId: string) => Promise<void>;
   onDecline: (
     epochId: string,
@@ -29,6 +32,7 @@ interface GroupInvitationCardProps {
 const GroupInvitationCard: React.FC<GroupInvitationCardProps> = ({
   invitation,
   memberName,
+  me,
   onAccept,
   onDecline,
   onOpen,
@@ -58,7 +62,16 @@ const GroupInvitationCard: React.FC<GroupInvitationCardProps> = ({
         {t('invitation.title')}
       </p>
       <h3 className="mt-1 text-sm font-medium text-foreground">
-        <SafeName name={invitation.name} fallback={t('invitation.unnamed')} />
+        {/* Named as the conversation list names a group: a chat of two
+            without a name by the other person (§5.11). */}
+        <SafeName
+          name={groupDisplayName(
+            { ...invitation, localName: null },
+            memberName,
+            me
+          )}
+          fallback={t('invitation.unnamed')}
+        />
       </h3>
       <p className="mt-2 flex items-center gap-1 text-xs text-foreground">
         <Shield className="w-3.5 h-3.5 text-success shrink-0" />

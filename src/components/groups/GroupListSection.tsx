@@ -173,6 +173,7 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
               key={inv.epochId}
               invitation={inv}
               memberName={memberName}
+              me={me}
               onAccept={accept}
               onDecline={decline}
               onOpen={() =>
