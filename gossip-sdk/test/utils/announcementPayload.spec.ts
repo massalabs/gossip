@@ -50,6 +50,31 @@ describe('announcement payload', () => {
     expect(decoded?.message).toBe('Hello: how are you?');
   });
 
+  it('round-trips the message timer a contact request states', () => {
+    const decoded = decodeAnnouncementPayload(
+      encodeAnnouncementPayload('Alice', 'hi', 3_600_000)
+    );
+    expect(decoded).toEqual({
+      username: 'Alice',
+      message: 'hi',
+      messageTimer: 3_600_000,
+    });
+    // Forever (0), with nothing else.
+    expect(
+      decodeAnnouncementPayload(encodeAnnouncementPayload('', '', 0))
+        .messageTimer
+    ).toBe(0);
+  });
+
+  it('reads a payload of an earlier version as stating no timer', () => {
+    const decoded = decodeAnnouncementPayload(
+      encodeAnnouncementPayload('Alice', 'hi')
+    );
+    expect(decoded.username).toBe('Alice');
+    expect(decoded.message).toBe('hi');
+    expect(decoded.messageTimer).toBeUndefined();
+  });
+
   it('returns undefined fields for invalid payloads', () => {
     expect(decodeAnnouncementPayload(new Uint8Array(0))).toEqual({
       username: undefined,

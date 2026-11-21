@@ -18,6 +18,7 @@ import { useGroupStore } from '../../../src/stores/groupStore';
 import { useAccountStore } from '../../../src/stores/accountStore';
 import { useAppStore } from '../../../src/stores/appStore';
 import { useDiscussionStore } from '../../../src/stores/discussionStore';
+import { SessionStatus } from '@massalabs/gossip-sdk';
 import {
   MESSAGE_TIMER_OPTIONS,
   messageTimerLabel,
@@ -375,6 +376,32 @@ describe('message timer screens', () => {
     ).find(p => p.textContent?.includes('invitation.owner_verified'));
     expect(line?.textContent).toBe('invitation.owner_verified Bob');
     useDiscussionStore.setState({ contacts: [] } as never);
+  });
+
+  it('shows the timer a contact request states before it is accepted', async () => {
+    useDiscussionStore.setState({
+      discussions: [
+        {
+          contactUserId: 'bob',
+          weAccepted: false,
+          directChatTimer: HOUR,
+        },
+      ] as never,
+      sessionsStatuses: new Map([['bob', SessionStatus.PeerRequested]]),
+    } as never);
+    const r = await renderAt(
+      <Invitation />,
+      '/invitation/contact/bob',
+      '/invitation/:kind/:id'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    const section = r.container.querySelector('[data-testid="invite-timer"]');
+    expect(section?.textContent).toContain('timer.disappear_after');
+    useDiscussionStore.setState({
+      discussions: [],
+      sessionsStatuses: new Map(),
+    } as never);
   });
 
   it('says on the invitation when messages are kept', async () => {
