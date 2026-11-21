@@ -23,6 +23,7 @@ import ReactionBar, {
 } from '../discussions/ReactionBar';
 import { useLongPress } from '../../hooks/useLongPress';
 import SafeName from './SafeName';
+import { isolate } from '../../utils/groupName';
 import { messageText, toDate } from '../../utils/groupTimeline';
 
 /** What the menu of a message can do; an absent handler hides its item. */
@@ -44,6 +45,11 @@ interface GroupMessageItemProps extends GroupMessageActions {
   authorName: string;
   /** The text of the messages it replies to, or null when not available. */
   replyPreviews: (string | null)[];
+  /**
+   * For each message it replies to, the name of the group it is in when
+   * that is another group (§7.6 "Display"), else null.
+   */
+  replyGroups?: (string | null)[];
   canWrite: boolean;
   /** The name shown for a member, for the list of who reacted. */
   memberName?: (userId: string) => string;
@@ -58,6 +64,7 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   isOutgoing,
   authorName,
   replyPreviews,
+  replyGroups,
   canWrite,
   memberName,
   onReply,
@@ -186,9 +193,16 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
         {replyPreviews.map((preview, i) => (
           <div
             key={i}
+            data-testid="group-reply-preview"
             className="mb-2 pl-2 border-l-2 border-current/40 text-xs opacity-80 truncate"
           >
-            <span className="font-medium">{t('timeline.reply_to')}: </span>
+            <span className="font-medium">
+              {t('timeline.reply_to')}
+              {preview !== null && replyGroups?.[i]
+                ? ` (${t('timeline.reply_in_group', { name: isolate(replyGroups[i]) })})`
+                : ''}
+              :{' '}
+            </span>
             {preview ?? t('timeline.reply_unavailable')}
           </div>
         ))}

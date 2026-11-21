@@ -92,6 +92,7 @@
     "added_back": "{{owner}} 重新添加了你",
     "edited": "已编辑",
     "reply_to": "回复",
+    "reply_in_group": "在“{{name}}”中",
     "reply_unavailable": "消息不可用",
     "empty": "暂无消息",
     "media": "不支持的附件",

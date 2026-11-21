@@ -92,6 +92,7 @@
     "added_back": "{{owner}} added you back",
     "edited": "Edited",
     "reply_to": "Reply to",
+    "reply_in_group": "in {{name}}",
     "reply_unavailable": "Message not available",
     "empty": "No messages yet",
     "media": "Unsupported attachment",
