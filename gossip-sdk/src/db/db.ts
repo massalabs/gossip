@@ -285,7 +285,9 @@ export interface Discussion {
   directChatOwed: boolean;
   /**
    * The message timer (ms, 0 = forever) chosen with the contact request, for
-   * the direct chat this device founds; null for the account's default.
+   * the direct chat this device founds; null for the account's default. On
+   * the side that received the request: the timer it states, shown before
+   * it is accepted (null if it states none).
    */
   directChatTimer: number | null;
   /**

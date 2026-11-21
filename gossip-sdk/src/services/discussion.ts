@@ -163,7 +163,14 @@ export class DiscussionService {
       if (payload) {
         payloadBytes = encodeAnnouncementPayload(
           payload.username,
-          payload.message
+          payload.message,
+          options.messageTimer
+        );
+      } else if (options.messageTimer !== undefined) {
+        payloadBytes = encodeAnnouncementPayload(
+          undefined,
+          undefined,
+          options.messageTimer
         );
       }
 
