@@ -1,116 +1,125 @@
 /**
- * E2E: Message edit & delete operations
+ * E2E: Message edit & delete operations in a chat of two
  *
- * Creates two accounts (Alice and Bob), establishes an encrypted session,
- * then verifies that edit and delete operations work correctly on real messages.
+ * Creates two accounts (Alice and Bob), makes them contacts so that the SDK
+ * founds their chat of two, then verifies that an edit and a deletion for
+ * everyone by Alice reach Bob through the real API.
  *
  * Requires network. Run with: npm run test:e2e
  */
 
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   createAccount,
-  establishSession,
+  startChatOfTwo,
   sendAndReceive,
+  messagesOf,
+  textOf,
   cleanup,
   pollUntil,
 } from './helpers';
 import type { GossipSdk } from '../../src/gossip';
-import { MessageType } from '../../src/db';
+import type { GroupId } from '../../src/services/groups';
 
-describe('E2E: Message edit & delete (real API)', () => {
-  let alice: GossipSdk;
-  let bob: GossipSdk;
+/** The chat's message timer: long enough to play no part here. */
+const ONE_HOUR = 3_600_000;
+
+describe('E2E: Message edit & delete in a chat of two (real API)', () => {
+  let alice: GossipSdk | undefined;
+  let bob: GossipSdk | undefined;
+  let groupId: GroupId;
+
+  beforeAll(async () => {
+    alice = await createAccount();
+    bob = await createAccount();
+    groupId = await startChatOfTwo(alice, bob, ONE_HOUR);
+  }, 180_000);
 
   afterAll(async () => {
     await cleanup(alice, bob);
   });
 
   it(
-    'edit message -> content updated, metadata.edited = true',
+    'edit message -> content updated and marked edited on both sides',
     { timeout: 120_000 },
     async () => {
-      // ── 1. Create Alice and Bob accounts ──
-      alice = await createAccount();
-      bob = await createAccount();
+      const [a, b] = [alice!, bob!];
+      expect((await a.groups.get(groupId))?.messageTimer).toBe(ONE_HOUR);
+      expect((await b.groups.get(groupId))?.messageTimer).toBe(ONE_HOUR);
 
-      // ── 2. Wait for public keys to propagate, then establish session ──
-      await pollUntil(
-        async () => {
-          try {
-            await alice.auth.fetchPublicKeyByUserId(bob.userId);
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        15_000,
-        1_000
+      // ── 1. Alice sends "Original text"; Bob receives it ──
+      const { sent, received } = await sendAndReceive(
+        a,
+        b,
+        groupId,
+        'Original text'
       );
+      expect(textOf(received)).toBe('Original text');
+      expect(received.author).toBe(a.userId);
+      expect(received.edited).toBe(false);
 
-      await establishSession(alice, bob);
+      // ── 2. Alice edits it ──
+      await a.groups.editMessage(sent.epochId, sent.syncObjId, 'Edited text');
 
-      // ── 3. Alice sends "Original text" to Bob ──
-      await sendAndReceive(alice, bob, 'Original text');
-
-      // ── 4. Find the message in Alice's DB ──
-      const aliceMessages = await alice.messages.getVisibleMessages(bob.userId);
-      const original = aliceMessages.find(m => m.content === 'Original text');
-      expect(original).toBeDefined();
-      expect(original!.id).toBeDefined();
-
-      // ── 5. Alice edits the message ──
-      const editResult = await alice.messages.editMessage(
-        original!.id!,
-        'Edited text'
-      );
-      expect(editResult).toBe(true);
-
-      // ── 6. Verify edited content and metadata ──
-      const edited = await alice.messages.get(original!.id!);
-      expect(edited).toBeDefined();
-      expect(edited!.content).toBe('Edited text');
-      expect(edited!.metadata?.edited).toBe(true);
+      // ── 3. Both show the new content, marked edited, in place ──
+      for (const p of [a, b]) {
+        const edited = await pollUntil(
+          async () =>
+            (await messagesOf(p, groupId)).find(
+              m => m.syncObjId === sent.syncObjId && m.edited
+            ),
+          60_000,
+          500,
+          'the edit'
+        );
+        expect(textOf(edited)).toBe('Edited text');
+        expect(
+          (await messagesOf(p, groupId)).filter(
+            m => m.syncObjId === sent.syncObjId
+          )
+        ).toHaveLength(1);
+      }
     }
   );
 
   it(
-    'delete message -> type becomes DELETED, not in visible messages',
+    'delete message for everyone -> no longer shown on either side',
     { timeout: 120_000 },
     async () => {
-      // Re-use the session from the previous test (alice & bob are still connected)
+      const [a, b] = [alice!, bob!];
 
-      // ── 1. Alice sends "Message to delete" to Bob ──
-      await sendAndReceive(alice, bob, 'Message to delete');
-
-      // ── 2. Find it in Alice's messages ──
-      const aliceMessages = await alice.messages.getMessages(bob.userId);
-      const toDelete = aliceMessages.find(
-        m => m.content === 'Message to delete'
+      // ── 1. Alice sends "Message to delete" and "Message kept"; Bob gets both ──
+      const { sent: toDelete } = await sendAndReceive(
+        a,
+        b,
+        groupId,
+        'Message to delete'
       );
-      expect(toDelete).toBeDefined();
-      expect(toDelete!.id).toBeDefined();
-
-      // ── 3. Delete the message ──
-      const deleteResult = await alice.messages.deleteMessage(toDelete!.id!);
-      expect(deleteResult).toBe(true);
-
-      // ── 4. Verify type is DELETED and content replaced ──
-      const deleted = await alice.messages.get(toDelete!.id!);
-      expect(deleted).toBeDefined();
-      expect(deleted!.type).toBe(MessageType.DELETED);
-      expect(deleted!.content).toBe('[Message deleted]');
-
-      // ── 5. Verify visible messages shows it as deleted (placeholder text) ──
-      // The original message stays in getVisibleMessages with the placeholder
-      // content — only the outgoing control message (empty content) is hidden.
-      const visibleMessages = await alice.messages.getVisibleMessages(
-        bob.userId
+      const { sent: kept } = await sendAndReceive(
+        a,
+        b,
+        groupId,
+        'Message kept'
       );
-      const found = visibleMessages.find(m => m.id === toDelete!.id);
-      expect(found).toBeDefined();
-      expect(found!.type).toBe(MessageType.DELETED);
-      expect(found!.content).toBe('[Message deleted]');
+
+      // ── 2. Alice deletes the first for everyone ──
+      await a.groups.deleteMessage(toDelete.epochId, toDelete.syncObjId);
+
+      // ── 3. Neither side shows it any more; the other message stays ──
+      for (const p of [a, b]) {
+        await pollUntil(
+          async () =>
+            !(await messagesOf(p, groupId)).some(
+              m => m.syncObjId === toDelete.syncObjId
+            ),
+          60_000,
+          500,
+          'the deletion'
+        );
+        const shown = await messagesOf(p, groupId);
+        expect(shown.map(textOf)).not.toContain('Message to delete');
+        expect(shown.some(m => m.syncObjId === kept.syncObjId)).toBe(true);
+      }
     }
   );
 });
