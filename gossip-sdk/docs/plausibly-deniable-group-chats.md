@@ -1680,6 +1680,29 @@ _Why an ordinary invitation:_ a device cannot tell an owner that lost the chat i
 that starts a second one on purpose, so the user decides; accepting is the only sign, and the chat
 accepted last is the current one, with no date compared.
 
+**Example (row 10).** Alice and Carol have a chat of two that Carol created. Carol reinstalls Gossip
+from her recovery phrase into an empty device. Her new device holds no chat with Alice, so it
+creates a new automatic chat of two, which Carol owns. Alice receives it as an ordinary invitation:
+it looks like any other invitation and is titled with Carol's name. If Alice accepts, the chat she
+already held with Carol becomes read-only history linked to the new chat: Alice sees one
+conversation with Carol, the earlier messages first, then the new chat. If Alice declines, nothing
+changes: she keeps the chat she held. Accepting or declining sends nothing beyond what any answer
+to an invitation sends, and nothing is erased on either side.
+
+_Why this rule (decided by the owner, D.88):_ a device must never switch a conversation to another
+chat silently, and it must not decide which chat is newer from the creation date written in a
+root, which the sender chooses. The user's acceptance is the link. The cost accepted: until Alice
+accepts, she and Carol are on different chats, and each reinstall shows one more invitation.
+
+_Known limits (also §16.11):_
+
+- If Alice declines, or never answers, she keeps an active chat that Carol's new device no longer
+  has: what Alice writes there does not reach Carol.
+- Several reinstalls in a row give one invitation each; each accepted one becomes the current chat,
+  and every earlier chat stays readable before it.
+- A later epoch of the old chat that reaches the empty device before that chat's first root may
+  stay an ordinary invitation there (D.88).
+
 **The invitation screen.** Every invitation uses one screen made of sections shown as they apply:
 who asks; adding that person as a contact; the group, its owner and its members; the earlier
 conversation it continues; warnings (§4.8, §5.11); and the choices.
@@ -3917,6 +3940,22 @@ every write uses a fresh key. The first would flush the old versions of a block,
 still to be designed so that the flush does not itself show that something was erased. Both are
 outside this protocol and are proposed separately (D.87).
 
+### 16.11 Known limitation: a reinstalled account and its contact are on different chats until the contact accepts
+
+When a person reinstalls the account into an empty device, the new device creates a new chat of two
+with each contact, and each contact receives it as an ordinary invitation (§5.12, row 10). Only the
+contact's acceptance links the two chats; no device switches on its own and no creation date is
+compared, by the owner's choice (D.88).
+
+- If the contact declines, or never answers, the contact keeps an active chat that the reinstalled
+  device no longer has: what the contact writes there does not reach the reinstalled person.
+- Several reinstalls in a row give one invitation each.
+- A later epoch of the old chat that reaches the empty device before that chat's first root may
+  stay an ordinary invitation there.
+
+This is accepted: a silent switch would let a device move a conversation without the user's
+consent.
+
 ## 17. Readiness, validation and future work
 
 ### 17.1 Release prerequisites
@@ -5970,7 +6009,8 @@ _Decision:_ link on accept, as described above, chosen by the owner on 2026-11-2
 
 _Alternatives not taken:_
 
-- Replace the chat held silently when the new one arrives: not wanted, as the conversation must
-  never switch without the user's consent.
+- Replace the chat held silently by the newer chat when it arrives: not wanted, as the
+  conversation must never switch without the user's consent, and telling which chat is newer
+  would rely on the creation date written in a root, which the sender chooses.
 - Only document the two chats: parallel chats of two with the same person would pile up with each
   reinstall.
