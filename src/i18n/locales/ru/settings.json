@@ -20,6 +20,7 @@
     "privacy": "Конфиденциальность",
     "security": "Безопасность",
     "feedback": "Отправить отзыв",
+    "feedback_external": "Открывает внешний сайт: cryptpad.fr",
     "mesh": "Офлайн-сеть"
   },
   "delete_account": {
@@ -263,6 +264,7 @@
     "battery_settings": "Настройки батареи",
     "enable_autostart": "Включить автозапуск (MIUI)",
     "learn_more": "Подробнее",
+    "learn_more_external": "Эта ссылка открывает внешний сайт dontkillmyapp.com. По открытой странице этот сайт узнает марку вашего телефона, а также ваш IP-адрес.",
     "debug_info": "Отладочная информация",
     "refresh_status": "Обновить статус",
     "device_warnings": {

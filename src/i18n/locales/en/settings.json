@@ -20,6 +20,7 @@
     "privacy": "Privacy",
     "security": "Security",
     "feedback": "Send Feedback",
+    "feedback_external": "Opens an external website: cryptpad.fr",
     "mesh": "Offline mesh"
   },
   "delete_account": {
@@ -263,6 +264,7 @@
     "battery_settings": "Battery settings",
     "enable_autostart": "Enable AutoStart (MIUI)",
     "learn_more": "Learn more",
+    "learn_more_external": "This link opens an external website, dontkillmyapp.com. That website will learn the brand of your phone from the page you open, and your IP address.",
     "debug_info": "Debug Info",
     "refresh_status": "Refresh Status",
     "device_warnings": {

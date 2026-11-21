@@ -325,16 +325,24 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                     )}
                   </p>
                   {deviceInfo.helpUrl && (
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={handleOpenHelp}
-                        aria-label={t('background_sync.learn_more')}
-                        className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        {t('background_sync.learn_more')}
-                        <ExternalLink className="w-3 h-3" aria-hidden="true" />
-                      </button>
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {t('background_sync.learn_more_external')}
+                      </p>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleOpenHelp}
+                          aria-label={t('background_sync.learn_more')}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {t('background_sync.learn_more')}
+                          <ExternalLink
+                            className="w-3 h-3"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
