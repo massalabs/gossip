@@ -570,6 +570,9 @@ impl Node {
     /// continues ([`Node::continued_by`]); otherwise the chats of two that same peer founded
     /// and this device holds, as an account reinstalled into an empty device founds its chat
     /// again. That invitation stays an ordinary one: only the user's acceptance links it.
+    /// Why (owner's decision, D.88): a device never switches a conversation to another chat
+    /// silently, and never judges which chat is newer by the creation date a root carries,
+    /// which its sender chooses; the cost is one invitation per reinstall.
     pub(crate) fn superseded_on_accept(&self, root: &Root) -> Vec<ChatId> {
         if let Some(c) = self.continued_by(root, false) {
             return vec![c];

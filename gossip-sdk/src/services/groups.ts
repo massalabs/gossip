@@ -1893,6 +1893,13 @@ export class GroupService {
     return this.run(node => node.delete_group(hexToBytes(groupId), this.now()));
   }
 
+  /**
+   * Accepts an invitation. Accepting a new automatic chat of two from the
+   * owner of the one held with that person (they reinstalled into an empty
+   * device) makes the one held its read-only history (§5.12, row 10): the
+   * user's acceptance is the only link, never a silent switch or a creation
+   * date (D.88). Declining changes nothing.
+   */
   acceptInvitation(epochId: GroupId): Promise<GroupId> {
     return this.run(node =>
       bytesToHex(node.accept_invitation(hexToBytes(epochId), this.now()))

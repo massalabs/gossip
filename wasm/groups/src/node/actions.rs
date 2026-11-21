@@ -357,7 +357,9 @@ impl Node {
                 n.changed(g, ChangeKind::Joined, cx.now);
                 Ok(g)
             } else {
-                // An invitation to continue a chat of two supersedes it (§5.12).
+                // An invitation to continue a chat of two supersedes it (§5.12), and so does
+                // a reinstalled owner's new automatic chat: the user's acceptance is the only
+                // link, never a silent switch or a creation date (D.88).
                 let continues = n.superseded_on_accept(&rec.root);
                 n.adopt(cx, rec.root, rec.from, Vec::new(), false)?;
                 n.changed(chat, ChangeKind::Joined, cx.now);
