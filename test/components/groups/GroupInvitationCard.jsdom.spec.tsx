@@ -49,6 +49,27 @@ describe('GroupInvitationCard', () => {
     expect(r.container.querySelector('bdi[dir="auto"]')).not.toBeNull();
   });
 
+  it('names a chat of two without a name as the conversation list does', async () => {
+    const r = await renderAt(
+      <GroupInvitationCard
+        invitation={{
+          ...invitation,
+          name: '',
+          members: ['me', 'owner'],
+          receivedFrom: null,
+          closedBefore: false,
+        }}
+        me="me"
+        memberName={id => `name-${id}`}
+        onAccept={vi.fn(async () => {})}
+        onDecline={vi.fn(async () => {})}
+      />
+    );
+    unmount = r.unmount;
+    expect(r.container.querySelector('h3')?.textContent).toBe('name-owner');
+    expect(r.container.textContent).not.toContain('invitation.unnamed');
+  });
+
   it('accepts, and declines with the chosen way', async () => {
     const onAccept = vi.fn(async () => {});
     const onDecline = vi.fn(async () => {});
