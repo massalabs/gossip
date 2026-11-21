@@ -1840,3 +1840,52 @@ fn the_frames_of_a_chat_of_another_timer_are_those_of_an_invitation() {
         "{accepted:?}"
     );
 }
+
+/// The announced timer and the reinstall rule (§5.12): `alice` adopted `carol`'s chat of two
+/// under a consent naming a week; `carol` is reinstalled into an empty device and founds the
+/// chat again, with the week, with another timer or with none. `alice` holds a chat of two
+/// with `carol`, so no consent applies, even a new one naming the week (`carol` sent a
+/// contact request again and `alice` accepted it): the new chat is the ordinary invitation of
+/// the reinstall rule whatever its timer, naming no announced timer, and accepting it leaves
+/// `alice` on the new chat alone with the one held superseded, its history kept.
+#[test]
+fn a_reinstalled_owners_new_chat_names_no_announced_timer() {
+    for fresh_consent in [false, true] {
+        for timer in [WEEK, 5 * MIN, 0] {
+            let ctx = format!("fresh consent {fresh_consent} timer {timer}");
+            let (alice, carol) = (0, 1);
+            let mut net = MNet::new(2, true);
+            net.consent_with(alice, carol, true, Some(WEEK));
+            let ga = net.create_timed(carol, alice, WEEK);
+            net.exchange();
+            assert_eq!(net.group_keys(alice), vec![ga], "{ctx}");
+            net.say(carol, &ga, "before");
+            net.run(2 * MIN);
+            net.reinstall(carol);
+            if fresh_consent {
+                net.consent_with(alice, carol, true, Some(WEEK));
+            }
+            let gc = net.create_timed(carol, alice, timer);
+            net.run(5 * MIN);
+            let inv = net.invitation(alice, &gc).expect(&ctx);
+            assert_eq!(inv.announced_timer, None, "{ctx}");
+            assert_eq!(inv.message_timer, timer, "{ctx}");
+            assert!(net.devs[alice].node.announced_timer(&gc).is_none(), "{ctx}");
+            assert_eq!(net.group_keys(alice), vec![ga], "{ctx}");
+            net.accept(alice, gc);
+            net.run(5 * MIN);
+            assert_eq!(net.group_keys(alice), vec![gc], "{ctx}");
+            assert_eq!(net.superseded(alice), vec![(ga, gc)], "{ctx}");
+            assert!(net.invitations_of(alice).is_empty(), "{ctx}");
+            assert!(
+                net.texts(alice, &ga).contains(&"before".to_owned()),
+                "{ctx}"
+            );
+            assert_eq!(
+                net.summary(alice, &gc).unwrap().message_timer,
+                timer,
+                "{ctx}"
+            );
+        }
+    }
+}
