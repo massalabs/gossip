@@ -338,6 +338,8 @@ describe('Group message timer', { timeout: 300_000 }, () => {
 
     await bob.announcements.fetch();
     const d = (await bob.discussions.get(alice.userId))!;
+    // Bob sees the timer before he accepts.
+    expect(d.directChatTimer).toBe(ONE_HOUR);
     expect((await bob.discussions.accept(d)).success).toBe(true);
     await deliver();
 
