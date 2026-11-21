@@ -1268,3 +1268,94 @@ fn a_migration_after_an_ignored_invitation_follows_the_tie_rule() {
         assert!(net.texts(owner, &keep).contains(&"together".to_owned()));
     }
 }
+
+// ── An account reinstalled into an empty device (§5.12) ──────────────────────────
+
+impl MNet {
+    /// Device `d` is reinstalled from its recovery phrase into an empty device: the same
+    /// identity, nothing held, the keys of the others known again from its contacts.
+    fn reinstall(&mut self, d: usize) {
+        let store = crate::store::MemoryStorage::new();
+        self.devs[d].node = Node::open(&store, gid(d)).unwrap();
+        self.devs[d].store = store;
+        let now = self.now;
+        for k in 0..self.devs.len() {
+            let bytes = ident(k).public.to_bytes();
+            let dev = &mut self.devs[d];
+            dev.node
+                .learn_keys(&mut dev.store, &bytes, now, &mut self.rng)
+                .unwrap();
+        }
+    }
+
+    /// The invitations of `d` due by then, of any kind.
+    fn invitations_of(&self, d: usize) -> Vec<InvitationSummary> {
+        self.devs[d]
+            .node
+            .invitations(self.now + crate::node::timing::PROMPT_DELAY_MS)
+    }
+}
+
+/// Found by a live run: the owner of a chat of two changes its timer (a second epoch) while
+/// no session with the other person works; that person reinstalls and founds a new chat,
+/// which the owner accepts as the continuation. The second epoch of the replaced chat, still
+/// queued, must not reach the empty device: lacking its parent, it would be shown there as an
+/// ordinary invitation to a chat the owner no longer uses.
+#[test]
+fn a_superseded_chat_of_two_pushes_no_later_epoch_to_its_peer() {
+    let (l, h) = sorted_pair();
+    let (alice, carol) = (h, l);
+    let mut net = MNet::new(2, true);
+    let ga = net.chat_taken_part_in(alice, carol);
+    net.devs[alice].node.set_session(gid(carol), false);
+    net.change(alice, ga, GroupChange::MessageTimer { timer: HOUR })
+        .unwrap();
+    net.run(5 * MIN);
+    net.reinstall(carol);
+    let gc = net.create_with(carol, &[alice], Some(0)).unwrap();
+    net.run(5 * MIN);
+    assert_eq!(
+        net.invitation(alice, &gc).and_then(|i| i.continues),
+        Some(ga)
+    );
+    net.accept(alice, gc);
+    assert_eq!(net.superseded(alice), vec![(ga, gc)]);
+    net.devs[alice].node.set_session(gid(carol), true);
+    net.run(HOUR);
+    assert!(net.invitations_of(carol).is_empty());
+    assert_eq!(net.group_keys(carol), vec![gc]);
+    assert_eq!(net.group_keys(alice), vec![gc]);
+}
+
+/// Found by a live run: the owner of a chat of two changes its timer after the other person
+/// reinstalled and before that person founds a new chat. The empty device holds the second
+/// epoch as an invitation and the first, fetched as its parent; once it founds its own chat,
+/// that first epoch is an automatic chat of the pair and settles with it as §5.12 says, in
+/// both orders of the GossipIDs: no invitation is left to a chat that is not continued.
+#[test]
+fn a_later_epoch_reaching_a_reinstalled_device_settles_with_its_new_chat() {
+    let (l, h) = sorted_pair();
+    for (alice, carol) in [(h, l), (l, h)] {
+        let mut net = MNet::new(2, true);
+        let ga = net.chat_taken_part_in(alice, carol);
+        net.reinstall(carol);
+        let second = net
+            .change(alice, ga, GroupChange::MessageTimer { timer: HOUR })
+            .unwrap();
+        net.run(5 * MIN);
+        assert!(net.invitation(carol, &second).is_some());
+        let gc = net.create_with(carol, &[alice], Some(0)).unwrap();
+        net.run(5 * MIN);
+        net.accept_all(alice);
+        net.run(HOUR);
+        let keep = if alice == l { ga } else { gc };
+        for d in [alice, carol] {
+            assert!(net.invitations_of(d).is_empty(), "alice {alice} device {d}");
+            assert_eq!(net.group_keys(d), vec![keep], "alice {alice} device {d}");
+        }
+        if alice == h {
+            assert_eq!(net.superseded(carol), vec![(ga, gc)]);
+            assert_eq!(net.current(carol, &ga), Some(second));
+        }
+    }
+}
