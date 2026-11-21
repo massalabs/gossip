@@ -10,7 +10,7 @@ export const groupsnode_accept_invitation: (a: number, b: number, c: number, d: 
 export const groupsnode_accepted_contacts: (a: number) => [number, number];
 export const groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const groupsnode_connections_to_revoke: (a: number, b: number, c: number) => [number, number, number, number];
-export const groupsnode_consent_to_direct_chat: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+export const groupsnode_consent_to_direct_chat: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const groupsnode_create_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const groupsnode_create_group_with: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
 export const groupsnode_create_group_with_timer: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];

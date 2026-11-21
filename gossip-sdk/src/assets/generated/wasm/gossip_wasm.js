@@ -1442,15 +1442,19 @@ export class GroupsNode {
     }
     /**
      * Gives (`consent`) or withdraws the consent to the group of two `peer` creates after
-     * its contact request was accepted (§5.12): one-shot, for 14 days.
+     * its contact request was accepted (§5.12): one-shot, for 14 days. `timer` is the
+     * message timer the request announced, in milliseconds, if it announced one: the
+     * consent then covers only a root with that timer, and a root with another is an
+     * invitation that names it (`announced_timer`). Local, never sent.
      * @param {Uint8Array} peer_id
      * @param {boolean} consent
      * @param {number} now
+     * @param {number | null} [timer]
      */
-    consent_to_direct_chat(peer_id, consent, now) {
+    consent_to_direct_chat(peer_id, consent, now, timer) {
         const ptr0 = passArray8ToWasm0(peer_id, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.groupsnode_consent_to_direct_chat(this.__wbg_ptr, ptr0, len0, consent, now);
+        const ret = wasm.groupsnode_consent_to_direct_chat(this.__wbg_ptr, ptr0, len0, consent, now, !isLikeNone(timer), isLikeNone(timer) ? 0 : timer);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }

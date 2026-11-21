@@ -348,9 +348,12 @@ export class GroupsNode {
   earlier_conversations(): string;
   /**
    * Gives (`consent`) or withdraws the consent to the group of two `peer` creates after
-   * its contact request was accepted (§5.12): one-shot, for 14 days.
+   * its contact request was accepted (§5.12): one-shot, for 14 days. `timer` is the
+   * message timer the request announced, in milliseconds, if it announced one: the
+   * consent then covers only a root with that timer, and a root with another is an
+   * invitation that names it (`announced_timer`). Local, never sent.
    */
-  consent_to_direct_chat(peer_id: Uint8Array, consent: boolean, now: number): void;
+  consent_to_direct_chat(peer_id: Uint8Array, consent: boolean, now: number, timer?: number | null): void;
   /**
    * As `create_group_with`, with the message timer of the group in milliseconds (§7.7):
    * each message is deleted on every device at its creation date plus the timer; 0 keeps
@@ -786,7 +789,7 @@ export interface InitOutput {
   readonly groupsnode_accepted_contacts: (a: number) => [number, number];
   readonly groupsnode_change_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
   readonly groupsnode_connections_to_revoke: (a: number, b: number, c: number) => [number, number, number, number];
-  readonly groupsnode_consent_to_direct_chat: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+  readonly groupsnode_consent_to_direct_chat: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly groupsnode_create_group: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
   readonly groupsnode_create_group_with: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
   readonly groupsnode_create_group_with_timer: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
