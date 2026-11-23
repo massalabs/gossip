@@ -177,31 +177,48 @@ class DebugLogFilePlugin : Plugin() {
         }
     }
 
-    // ── upload: gzip + cut natively, so that 1 GiB never sits in memory ──
+    // ── upload: gzip + encrypt + cut natively, so that 1 GiB never sits in memory ──
 
-    private fun uploadFile(): File = File(File(context.cacheDir, "debug-upload").apply { mkdirs() }, "upload.gz")
+    private fun uploadDir(): File = File(context.cacheDir, "debug-upload").apply { mkdirs() }
+
+    private fun uploadFile(): File = File(uploadDir(), "upload.gdl1")
 
     /**
      * Writes one gzip stream of the record (lines numbered `fromLine` and
-     * after; every segment keeps its header line) into the cache, removing
-     * `f.c` and `f.s` from every line when `strip`. Returns its size, piece
-     * count and SHA-256.
+     * after; every segment keeps its header line), encrypted (GDL1, see
+     * Gdl1.kt) to `recipientKey` (base64 DER of the developers' public key),
+     * into the cache, removing `f.c` and `f.s` from every line when `strip`
+     * (before compression). The plaintext never reaches the disk. Returns the
+     * encrypted file's size, piece count and SHA-256, and the gzip stream's
+     * size and SHA-256. Without a valid key nothing is written.
      */
     @PluginMethod
     fun prepareUpload(call: PluginCall) {
         worker.execute {
+            val target = uploadFile()
             try {
                 val strip = call.getBoolean("strip", false) == true
                 val fromLine = (call.getDouble("fromLine") ?: 0.0).toLong()
+                val recipient = Gdl1.recipient(
+                    call.getString("recipientKey")
+                        ?: throw IllegalArgumentException("no key to encrypt the logs: nothing is sent unencrypted"),
+                )
                 val segs = DebugLogWriter.snapshot() ?: throw IllegalStateException("record not ready")
-                val target = uploadFile()
-                val digest = MessageDigest.getInstance("SHA-256")
+                // An unencrypted file of an older version of this build.
+                File(uploadDir(), "upload.gz").delete()
+                target.delete()
+                val cipherDigest = MessageDigest.getInstance("SHA-256")
+                val plainDigest = MessageDigest.getInstance("SHA-256")
                 var firstN = -1L
                 var lastN = -1L
                 var rawBytes = 0L
                 var lines = 0L
-                val counting = DigestOutputStream(BufferedOutputStream(FileOutputStream(target), 256 * 1024), digest)
-                GZIPOutputStream(counting, 64 * 1024).use { gz ->
+                val encrypted = Gdl1.Writer(
+                    DigestOutputStream(BufferedOutputStream(FileOutputStream(target), 256 * 1024), cipherDigest),
+                    recipient,
+                )
+                val plain = DigestOutputStream(encrypted, plainDigest)
+                GZIPOutputStream(plain, 64 * 1024).use { gz ->
                     for ((file, length) in segs) {
                         var header: String? = null
                         var headerWritten = false
@@ -247,18 +264,21 @@ class DebugLogFilePlugin : Plugin() {
                     }
                 }
                 val size = target.length()
-                val sha = digest.digest().joinToString("") { "%02x".format(it) }
                 val r = JSObject()
+                r.put("enc", Gdl1.ENC)
                 r.put("size", size)
                 r.put("pieces", ((size + PIECE_SIZE - 1) / PIECE_SIZE).toInt())
                 r.put("pieceSize", PIECE_SIZE)
-                r.put("sha256", sha)
+                r.put("sha256", Gdl1.hex(cipherDigest.digest()))
+                r.put("plainSize", plain.count)
+                r.put("plainSha256", Gdl1.hex(plainDigest.digest()))
                 r.put("fromLine", if (firstN < 0) 0 else firstN)
                 r.put("toLine", if (lastN < 0) 0 else lastN)
                 r.put("rawBytes", rawBytes)
                 r.put("lines", lines)
                 call.resolve(r)
             } catch (t: Throwable) {
+                target.delete()
                 fail(call, t)
             }
         }
@@ -284,6 +304,7 @@ class DebugLogFilePlugin : Plugin() {
         worker.execute {
             try {
                 uploadFile().delete()
+                File(uploadDir(), "upload.gz").delete()
             } catch (t: Throwable) {}
             call.resolve()
         }
@@ -340,13 +361,17 @@ class DebugLogFilePlugin : Plugin() {
     }
 
     private class DigestOutputStream(private val inner: OutputStream, private val digest: MessageDigest) : OutputStream() {
+        var count = 0L
+            private set
         override fun write(b: Int) {
             inner.write(b)
             digest.update(b.toByte())
+            count++
         }
         override fun write(b: ByteArray, off: Int, len: Int) {
             inner.write(b, off, len)
             digest.update(b, off, len)
+            count += len
         }
         override fun flush() = inner.flush()
         override fun close() = inner.close()

@@ -30,10 +30,36 @@ object FullDebug {
                 false,
             )
             recordPreviousExits(context)
+            encryptionSelfTest()
             (context.applicationContext as? android.app.Application)?.let { PermissionLog.install(it) }
         } catch (t: Throwable) {
             // never into the app
         }
+    }
+
+    /**
+     * Runs the GDL1 test vectors (Gdl1.selfTest) on this device and records
+     * the result as `enc.selftest`: field evidence that what this phone sends
+     * can be decrypted. Off the main and writer threads.
+     */
+    private fun encryptionSelfTest() {
+        Thread({
+            val f = JSONObject()
+            val start = System.nanoTime()
+            val problem = try {
+                Gdl1.selfTest()
+            } catch (t: Throwable) {
+                t.javaClass.simpleName + ": " + (t.message ?: "")
+            }
+            f.put("ok", problem == null)
+            f.put("format", Gdl1.ENC)
+            if (problem != null) f.put("error", problem)
+            val ms = (System.nanoTime() - start) / 1_000_000
+            DebugLogWriter.appendLine(
+                DebugLogWriter.line("native", "enc.selftest", if (problem == null) "info" else "error", f, ms),
+                problem != null,
+            )
+        }, "gossip-debug-enc-selftest").apply { isDaemon = true }.start()
     }
 
     private fun installUncaughtHandler() {

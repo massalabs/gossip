@@ -128,6 +128,8 @@ if (fullDebug) {
     logger.lifecycle("FULL DEBUG build: net.massa.gossip.debug, records everything (src/fulldebug)")
     android.sourceSets.main.java.srcDirs += ['src/fulldebug/java']
     android.sourceSets.main.res.srcDirs += ['src/fulldebug/res']
+    // JVM tests of its code (Gdl1: the encryption of the sends)
+    android.sourceSets.test.java.srcDirs += ['src/fulldebugTest/java']
 }
 
 // Offline mesh node (gossip-mobile, in wasm/mesh). Built in by default.
