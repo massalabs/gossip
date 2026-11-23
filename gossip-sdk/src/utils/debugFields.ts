@@ -3,13 +3,22 @@
  * All of them are cheap and none of them throws.
  */
 
+import { decodeUserId } from './userId.js';
+
 const HEX = '0123456789abcdef';
 
-/** First 8 hex characters of an ID: enough to follow it, too short to be content. */
+/**
+ * First 8 hex characters of an ID: enough to follow it, too short to be
+ * content. A Gossip user ID (`gossip1…`) gives the same short ID as its
+ * bytes, so that a user reads the same in every line.
+ */
 export function shortId(id: Uint8Array | string | null | undefined): string {
   if (id == null) return '';
   try {
-    if (typeof id === 'string') return id.slice(0, 8);
+    if (typeof id === 'string') {
+      if (id.startsWith('gossip1')) return shortId(decodeUserId(id));
+      return id.slice(0, 8);
+    }
     let out = '';
     for (let i = 0; i < 4 && i < id.length; i++) {
       out += HEX[id[i] >> 4] + HEX[id[i] & 15];
