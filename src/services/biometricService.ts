@@ -1,4 +1,12 @@
 import { logger } from '../utils/logger.ts';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
+import { errFields, since } from '@massalabs/gossip-sdk/utils/debugFields.js';
+
+/** Error fields of a biometric failure, with the plugin's code if any. */
+function biometricError(error: unknown): Record<string, unknown> {
+  const code = (error as { code?: unknown } | null)?.code;
+  return { ...errFields(error), ...(code !== undefined && { code }) };
+}
 import { Capacitor } from '@capacitor/core';
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import {
@@ -176,11 +184,28 @@ function freeEncryptionKey(key: EncryptionKey): void {
  * device credential. The account-password form remains the fallback.
  */
 async function authenticateNative(reason: string): Promise<void> {
-  await BiometricAuth.authenticate({
-    reason,
-    allowDeviceCredential: false,
-    iosFallbackTitle: '',
-  });
+  const started = performance.now();
+  try {
+    await BiometricAuth.authenticate({
+      reason,
+      allowDeviceCredential: false,
+      iosFallbackTitle: '',
+    });
+  } catch (error) {
+    dlog(
+      'app',
+      'biometric.prompt',
+      { method: 'capacitor', ok: false, reason, ...biometricError(error) },
+      { lvl: 'warn', dur: since(started) }
+    );
+    throw error;
+  }
+  dlog(
+    'app',
+    'biometric.prompt',
+    { method: 'capacitor', ok: true, reason },
+    { lvl: 'info', dur: since(started) }
+  );
 }
 
 async function readNativePassword(
@@ -188,10 +213,33 @@ async function readNativePassword(
 ): Promise<string | null> {
   // Passwords are opaque strings. Date coercion would turn an ISO-looking
   // password into a Date and make a valid stored credential unreadable.
-  const value = await SecureStorage.get(
-    BIOMETRIC_STORAGE_KEY,
-    false,
-    syncFromICloud
+  const started = performance.now();
+  let value: unknown;
+  try {
+    value = await SecureStorage.get(
+      BIOMETRIC_STORAGE_KEY,
+      false,
+      syncFromICloud
+    );
+  } catch (error) {
+    dlog(
+      'app',
+      'biometric.keystore.read',
+      { iCloud: syncFromICloud, ok: false, ...biometricError(error) },
+      { lvl: 'error', dur: since(started) }
+    );
+    throw error;
+  }
+  dlog(
+    'app',
+    'biometric.keystore.read',
+    {
+      iCloud: syncFromICloud,
+      ok: true,
+      type: value === null ? 'null' : typeof value,
+      found: typeof value === 'string' && value.length > 0,
+    },
+    { dur: since(started), s: { password: value } }
   );
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -389,6 +437,13 @@ async function retrieveWebAuthnPassword(): Promise<string> {
 }
 
 export async function checkBiometricAvailability(): Promise<BiometricAvailability> {
+  const started = performance.now();
+  const result = await checkBiometricAvailabilityInner();
+  dlog('app', 'biometric.availability', { ...result }, { dur: since(started) });
+  return result;
+}
+
+async function checkBiometricAvailabilityInner(): Promise<BiometricAvailability> {
   if (isCapacitorAvailable()) {
     try {
       const { isAvailable, biometryType } = await BiometricAuth.checkBiometry();
@@ -401,6 +456,9 @@ export async function checkBiometricAvailability(): Promise<BiometricAvailabilit
       }
     } catch (error) {
       logger.warn('Capacitor biometric not available:', error);
+      dlog('app', 'biometric.check.failed', biometricError(error), {
+        lvl: 'warn',
+      });
     }
   }
 
@@ -452,6 +510,20 @@ export async function configureBiometricLoginWithRollback(
     throw new Error('Biometric authentication is not available');
   } catch (error) {
     logger.error('Biometric credential setup failed:', error);
+    dlog(
+      'app',
+      'biometric.setup.failed',
+      {
+        restorationRequired: error instanceof BiometricRestorationRequiredError,
+        class: classifyError(
+          error instanceof BiometricRestorationRequiredError
+            ? error.originalError
+            : error
+        ),
+        ...biometricError(error),
+      },
+      { lvl: 'error' }
+    );
     if (error instanceof BiometricRestorationRequiredError) {
       return {
         success: false,
@@ -529,6 +601,7 @@ export async function authenticateBiometricLogin(
     };
   }
 
+  const started = performance.now();
   try {
     if (method === 'capacitor' && isCapacitorAvailable()) {
       await authenticateNative('Authenticate to access your account');
@@ -541,17 +614,40 @@ export async function authenticateBiometricLogin(
       if (!password) {
         throw new Error('Biometric password not found');
       }
+      dlog(
+        'app',
+        'biometric.login',
+        { method, ok: true, iCloud: localPassword === null },
+        { lvl: 'info', dur: since(started) }
+      );
       return { success: true, data: { password } };
     }
 
     if (method === 'webauthn' && isWebAuthnSupported()) {
       const password = await retrieveWebAuthnPassword();
+      dlog(
+        'app',
+        'biometric.login',
+        { method, ok: true },
+        { lvl: 'info', dur: since(started) }
+      );
       return { success: true, data: { password } };
     }
 
     throw new Error(`Invalid or unavailable authentication method ${method}`);
   } catch (error) {
     logger.error('Biometric authentication failed:', error);
+    dlog(
+      'app',
+      'biometric.login',
+      {
+        method,
+        ok: false,
+        class: classifyError(error),
+        ...biometricError(error),
+      },
+      { lvl: 'warn', dur: since(started) }
+    );
     return { success: false, error: classifyError(error) };
   }
 }

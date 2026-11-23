@@ -43,6 +43,8 @@ import { GossipSqliteTx } from '../db/sqlite.js';
 import { POST_MESSAGE_TYPES } from '../utils/message.js';
 import { isSeekerConflict } from '../api/errors.js';
 import type { SeekerConflictHandler } from './seekerConflicts.js';
+import { debugLogEnabled, dlog } from '../utils/debugLog.js';
+import { errFields, hex, shortId, since } from '../utils/debugFields.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {
@@ -384,9 +386,16 @@ export class MessageService {
   async ingestMessages(messages: EncryptedMessage[]): Promise<number> {
     // anything at another seeker is not for us, or no longer readable
     const wanted = new Set(this.wantedSeekers().map(s => encodeToBase64(s)));
-    const added = await this.queries.pendingEncryptedMessages.insertNew(
-      messages.filter(m => wanted.has(encodeToBase64(m.seeker)))
-    );
+    const kept = messages.filter(m => wanted.has(encodeToBase64(m.seeker)));
+    const added = await this.queries.pendingEncryptedMessages.insertNew(kept);
+    if (debugLogEnabled()) {
+      dlog('sdk', 'message.pushed', {
+        offered: messages.length,
+        wanted: kept.length,
+        added,
+        seekers: kept.map(m => shortId(m.seeker)),
+      });
+    }
     if (added > 0) await this.fetchMessages();
     return added;
   }
@@ -404,6 +413,7 @@ export class MessageService {
     const log = logger.forMethod('fetchMessages');
 
     if (this.isFetchingMessages) {
+      dlog('sdk', 'message.fetch.skipped', { reason: 'in-progress' });
       log.info('fetch already in progress, skipping');
       return { success: true, newMessagesCount: 0 };
     }
@@ -449,6 +459,7 @@ export class MessageService {
         // message the network served is offered first.
         let encryptedMessages: EncryptedMessage[] = [];
         let networkError: unknown;
+        const fetchStarted = performance.now();
         try {
           encryptedMessages = await this.messageProtocol.fetchMessages(seekers);
         } catch (error) {
@@ -456,6 +467,37 @@ export class MessageService {
         }
         const pushed =
           await this.queries.pendingEncryptedMessages.getBySeekers(seekers);
+        if (debugLogEnabled()) {
+          dlog(
+            'sdk',
+            'message.fetch',
+            {
+              iteration: iterations,
+              seekers: seekers.length,
+              fetched: encryptedMessages.length,
+              pushed: pushed.length,
+              ...(networkError !== undefined && errFields(networkError)),
+            },
+            {
+              lvl: networkError !== undefined ? 'warn' : 'debug',
+              dur: since(fetchStarted),
+            }
+          );
+          for (const m of encryptedMessages) {
+            dlog('sdk', 'message.received', {
+              seeker: shortId(m.seeker),
+              size: m.ciphertext.length,
+              via: 'fetch',
+            });
+          }
+          for (const m of pushed) {
+            dlog('sdk', 'message.received', {
+              seeker: shortId(m.seeker),
+              size: m.ciphertext.length,
+              via: 'push',
+            });
+          }
+        }
         if (networkError !== undefined && pushed.length === 0) {
           if (iterations === 0) throw networkError;
           break;
@@ -480,6 +522,14 @@ export class MessageService {
         log.info('acknowledged seekers', {
           acknowledgedSeekers: Array.from(acknowledgedSeekers),
         });
+        if (acknowledgedSeekers.size > 0 && debugLogEnabled()) {
+          dlog('sessions', 'message.acknowledged', {
+            count: acknowledgedSeekers.size,
+            seekers: [...acknowledgedSeekers].map(s =>
+              shortId(decodeFromBase64(s))
+            ),
+          });
+        }
 
         if (acknowledgedSeekers.size > 0) {
           log.info('processing acknowledged seekers', {
@@ -529,6 +579,7 @@ export class MessageService {
       return { success: true, newMessagesCount };
     } catch (err) {
       log.error('fetch failed', err);
+      dlog('sdk', 'message.fetch.failed', errFields(err), { lvl: 'error' });
       return {
         success: false,
         newMessagesCount: 0,
@@ -633,12 +684,21 @@ export class MessageService {
     const acknowledgedSeekers: Set<string> = new Set();
 
     for (const msg of encrypted) {
+      const started = performance.now();
       try {
         const out = await this.session.feedIncomingMessageBoardRead(
           msg.seeker,
           msg.ciphertext
         );
-        if (!out) continue;
+        if (!out) {
+          dlog(
+            'sessions',
+            'message.decrypt.none',
+            { seeker: shortId(msg.seeker), size: msg.ciphertext.length },
+            { dur: since(started) }
+          );
+          continue;
+        }
 
         // Acknowledgements belong to the session, whatever the message holds.
         out.acknowledged_seekers.forEach((seeker: Uint8Array) =>
@@ -648,8 +708,41 @@ export class MessageService {
         let deserialized: ReturnType<typeof deserializeMessage>;
         try {
           deserialized = deserializeMessage(out.message);
-        } catch {
+        } catch (error) {
+          dlog(
+            'sessions',
+            'message.decrypted',
+            {
+              seeker: shortId(msg.seeker),
+              from: shortId(out.user_id),
+              size: out.message.length,
+              kind: 'undecodable',
+              acked: out.acknowledged_seekers.length,
+              ...errFields(error),
+            },
+            {
+              lvl: 'warn',
+              dur: since(started),
+              c: debugLogEnabled() ? { message: hex(out.message) } : undefined,
+            }
+          );
           continue;
+        }
+        if (debugLogEnabled()) {
+          dlog(
+            'sessions',
+            'message.decrypted',
+            {
+              seeker: shortId(msg.seeker),
+              from: shortId(out.user_id),
+              size: out.message.length,
+              kind: isGroupMessage(deserialized)
+                ? 'group'
+                : String(deserialized.type),
+              acked: out.acknowledged_seekers.length,
+            },
+            { dur: since(started) }
+          );
         }
 
         // A group message is handed to the group engine, which keeps its
@@ -661,8 +754,14 @@ export class MessageService {
                 out.user_id,
                 deserialized.groupPlaintext
               );
-            } catch {
+            } catch (error) {
               log.error('group plaintext not processed');
+              dlog(
+                'engine',
+                'engine.plaintext.failed',
+                { from: shortId(out.user_id), ...errFields(error) },
+                { lvl: 'error' }
+              );
             }
           }
         }
@@ -673,6 +772,25 @@ export class MessageService {
           error: e instanceof Error ? e.message : 'Unknown error',
           seeker: encodeToBase64(msg.seeker),
         });
+        if (debugLogEnabled()) {
+          dlog(
+            'sessions',
+            'message.decrypt.failed',
+            {
+              seeker: shortId(msg.seeker),
+              size: msg.ciphertext.length,
+              ...errFields(e),
+            },
+            {
+              lvl: 'error',
+              dur: since(started),
+              s: {
+                seeker: hex(msg.seeker),
+                ciphertext: hex(msg.ciphertext),
+              },
+            }
+          );
+        }
       }
     }
 
@@ -1033,6 +1151,7 @@ export class MessageService {
           //   - Persist failed → bubbles up, row stays
           //     WAITING_SESSION (no SENT update). The next session
           //     activation re-runs the loop.
+          const sendStarted = performance.now();
           try {
             await Promise.all([
               this.messageProtocol.sendMessage({
@@ -1041,7 +1160,33 @@ export class MessageService {
               }),
               this.persistFlusher(),
             ]);
+            dlog(
+              'sdk',
+              'message.sent',
+              {
+                row: msg.id,
+                type: msg.type,
+                to: shortId(contactUserId),
+                seeker: shortId(seeker),
+                size: encryptedMessage.length,
+                retry: false,
+              },
+              { dur: since(sendStarted) }
+            );
           } catch (error) {
+            dlog(
+              'sdk',
+              'message.send.failed',
+              {
+                row: msg.id,
+                type: msg.type,
+                to: shortId(contactUserId),
+                seeker: shortId(seeker),
+                conflict: isSeekerConflict(error),
+                ...errFields(error),
+              },
+              { lvl: 'warn', dur: since(sendStarted) }
+            );
             log.error('network send failed for fresh message', {
               messageId: msg.id,
               error,
@@ -1207,11 +1352,25 @@ export class MessageService {
           }
 
           /* Sending on network */
+          const sendStarted = performance.now();
           try {
             await this.messageProtocol.sendMessage({
               seeker,
               ciphertext: encryptedMessage,
             });
+            dlog(
+              'sdk',
+              'message.sent',
+              {
+                row: msg.id,
+                type: msg.type,
+                to: shortId(contactUserId),
+                seeker: shortId(seeker),
+                size: encryptedMessage.length,
+                retry: true,
+              },
+              { dur: since(sendStarted) }
+            );
 
             // update the db — check latest state to avoid race conditions
             const latestRow = await this.queries.messages.getById(msg.id);
@@ -1264,6 +1423,20 @@ export class MessageService {
               }
             }
           } catch (error) {
+            dlog(
+              'sdk',
+              'message.send.failed',
+              {
+                row: msg.id,
+                type: msg.type,
+                to: shortId(contactUserId),
+                seeker: shortId(seeker),
+                retry: true,
+                conflict: isSeekerConflict(error),
+                ...errFields(error),
+              },
+              { lvl: 'warn', dur: since(sendStarted) }
+            );
             log.error('network send failed for queued message', {
               messageId: msg.id,
               error,

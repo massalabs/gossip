@@ -28,6 +28,10 @@
     "./utils/debugLog.js": {
       "types": "./dist/utils/debugLog.d.ts",
       "import": "./dist/utils/debugLog.js"
+    },
+    "./utils/debugFields.js": {
+      "types": "./dist/utils/debugFields.d.ts",
+      "import": "./dist/utils/debugFields.js"
     }
   },
   "scripts": {

@@ -1,4 +1,15 @@
 import { logger } from './logger.ts';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
+import { errFields, since } from '@massalabs/gossip-sdk/utils/debugFields.js';
+
+function priceHost(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.host + parsed.pathname;
+  } catch {
+    return '';
+  }
+}
 interface PriceProvider {
   fetchPrice(base: string, quote: string): Promise<number | null>;
   fetchPrices(
@@ -14,8 +25,20 @@ abstract class BasePriceProvider implements PriceProvider {
     delay = 1000
   ): Promise<T | null> {
     for (let attempt = 1; attempt <= retries; attempt++) {
+      const started = performance.now();
       try {
         const response = await fetch(url);
+        dlog(
+          'api',
+          'api.request',
+          {
+            method: 'GET',
+            path: priceHost(url),
+            attempt,
+            status: response.status,
+          },
+          { dur: since(started), c: { url } }
+        );
 
         if (response.status === 429) {
           // Rate limit encountered, notify user and retry after delay
@@ -26,7 +49,13 @@ abstract class BasePriceProvider implements PriceProvider {
           continue;
         }
         return response.ok ? response.json() : null;
-      } catch {
+      } catch (error) {
+        dlog(
+          'api',
+          'api.request',
+          { method: 'GET', path: priceHost(url), attempt, ...errFields(error) },
+          { lvl: 'warn', dur: since(started), c: { url } }
+        );
         if (attempt === retries) return null;
         await new Promise(resolve => setTimeout(resolve, delay * attempt));
       }

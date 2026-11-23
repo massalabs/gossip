@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { extractInvitePath, tryParseInvite } from '../utils/invite';
 import { useAppStore } from '../stores/appStore';
 import { ROUTES } from '../constants/routes';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
 
 export const AppUrlListener: React.FC = () => {
   const navigate = useNavigate();
@@ -94,6 +95,11 @@ export const AppUrlListener: React.FC = () => {
         const handle = await LocalNotifications.addListener(
           'localNotificationActionPerformed',
           async event => {
+            dlog('app', 'notification.tapped', {
+              id: event.notification.id,
+              action: event.actionId,
+              native: true,
+            });
             try {
               // Dismiss the notification when clicked
               const notificationId = event.notification.id;

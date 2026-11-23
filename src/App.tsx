@@ -10,6 +10,7 @@ import { reconcileDebugLogsGeneration } from './stores/useDebugLogs';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
 import { DebugConsole } from './components/ui/DebugConsole';
 import { Toaster } from 'react-hot-toast';
+import { DebugRouteLogger } from './utils/debugUi.ts';
 
 // Hooks
 import { useProfileLoader } from './hooks/useProfileLoader';
@@ -196,6 +197,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <DebugRouteLogger />
       <ErrorBoundary>
         <KeyboardAwareWrapper>
           <AppUrlListener />

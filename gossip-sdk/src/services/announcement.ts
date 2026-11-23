@@ -32,6 +32,8 @@ import { Result } from '../utils/type.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { RefreshService } from './refresh.js';
 import { Queries } from '../db/queries/index.js';
+import { dlog } from '../utils/debugLog.js';
+import { errFields, shortId, since } from '../utils/debugFields.js';
 
 /** How many links of a peer's chain of addressed announcements one fetch follows. */
 const MAX_ADDRESSED_ROUNDS = 5;
@@ -163,18 +165,42 @@ export class AnnouncementService {
         );
       } catch (error) {
         log.warn('addressed copy not sent', error);
+        dlog(
+          'sessions',
+          'announcement.mailbox.failed',
+          { seeker: shortId(mailbox.seeker), ...errFields(error) },
+          { lvl: 'warn' }
+        );
       }
     }
 
+    const started = performance.now();
     try {
       const counter = await this.messageProtocol.sendAnnouncement(
         announcement,
         internetOnly ? { internetOnly: true } : undefined
       );
       log.info('broadcast successful', { counter });
+      dlog(
+        'sessions',
+        'announcement.posted',
+        {
+          size: announcement.length,
+          counter,
+          mailbox: mailbox !== undefined,
+          internetOnly,
+        },
+        { lvl: 'info', dur: since(started) }
+      );
       return { success: true, counter };
     } catch (error) {
       log.error('broadcast failed', error);
+      dlog(
+        'sessions',
+        'announcement.post.failed',
+        { size: announcement.length, internetOnly, ...errFields(error) },
+        { lvl: 'error', dur: since(started) }
+      );
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -214,6 +240,12 @@ export class AnnouncementService {
           };
     } catch (error) {
       log.error('empty announcement returned', { contactUserId, error });
+      dlog(
+        'sessions',
+        'announcement.establish.failed',
+        { peer: shortId(contactUserId), isAnswer, ...errFields(error) },
+        { lvl: 'error' }
+      );
       return {
         success: false,
         error: new Error(EstablishSessionError),
@@ -351,6 +383,7 @@ export class AnnouncementService {
     const errors: string[] = [];
     let announcements: Uint8Array[] = [];
     let fetchedCounters: string[] = [];
+    const cycleStarted = performance.now();
 
     this.isProcessingAnnouncements = true;
     try {
@@ -419,6 +452,23 @@ export class AnnouncementService {
         }
 
         await this._answerOwedRenewals();
+        dlog(
+          'sessions',
+          'announcement.cycle',
+          {
+            source: 'pending',
+            pending: pending.length,
+            processed: successfullyProcessedPendingIds.length,
+            new: newAnnouncementsCount,
+            addressed: addressedCount,
+            errors: errors.length,
+            ...(errors.length > 0 && { msg: errors.join(', ') }),
+          },
+          {
+            lvl: errors.length > 0 ? 'warn' : 'debug',
+            dur: since(cycleStarted),
+          }
+        );
         return {
           success: errors.length === 0 || newAnnouncementsCount > 0,
           newAnnouncementsCount: newAnnouncementsCount + addressedCount,
@@ -454,6 +504,13 @@ export class AnnouncementService {
 
           if (result.error) errors.push(result.error);
         } catch (error) {
+          // Not kept for a retry: the cursor moves past it below.
+          dlog(
+            'sessions',
+            'announcement.process.failed',
+            { size: announcement.length, retried: false, ...errFields(error) },
+            { lvl: 'error' }
+          );
           errors.push(error instanceof Error ? error.message : 'Unknown error');
         }
       }
@@ -475,6 +532,23 @@ export class AnnouncementService {
       }
       await this._persistTransportCursors();
       await this._answerOwedRenewals();
+      dlog(
+        'sessions',
+        'announcement.cycle',
+        {
+          source: 'fetch',
+          cursor: cursor ?? null,
+          fetched: announcements.length,
+          new: newAnnouncementsCount,
+          addressed: addressedCount,
+          errors: errors.length,
+          ...(errors.length > 0 && { msg: errors.join(', ') }),
+        },
+        {
+          lvl: errors.length > 0 ? 'warn' : 'debug',
+          dur: since(cycleStarted),
+        }
+      );
 
       return {
         success: errors.length === 0 || newAnnouncementsCount > 0,
@@ -483,6 +557,10 @@ export class AnnouncementService {
       };
     } catch (error) {
       log.error('unexpected error during fetch/process', error);
+      dlog('sessions', 'announcement.cycle.failed', errFields(error), {
+        lvl: 'error',
+        dur: since(cycleStarted),
+      });
       return {
         success: false,
         newAnnouncementsCount: 0,
@@ -872,6 +950,28 @@ export class AnnouncementService {
         this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, toDiscussion(row));
       }
     }
+    dlog(
+      'sessions',
+      'announcement.handled',
+      {
+        peer: shortId(contactUserId),
+        newContact: isNewContact,
+        automatic,
+        answersOurs,
+        status: statusNow,
+        action:
+          automatic && statusNow === SessionStatus.PeerRequested
+            ? 'answer'
+            : statusNow === SessionStatus.Active && !answersOurs
+              ? 'answer-renewal'
+              : statusNow === SessionStatus.PeerRequested
+                ? 'wait-for-user'
+                : 'none',
+        peerRenewed:
+          !isNewContact && statusNow === SessionStatus.Active && !answersOurs,
+      },
+      { lvl: 'info' }
+    );
     if (
       (automatic && statusNow === SessionStatus.PeerRequested) ||
       (statusNow === SessionStatus.Active && !answersOurs)

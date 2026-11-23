@@ -45,8 +45,65 @@ import { Logger } from '../utils/logs.js';
 import { isFinalStatus } from '../api/restClient.js';
 import { isSeekerConflict } from '../api/errors.js';
 import type { SeekerConflictHandler } from './seekerConflicts.js';
+import { debugLogEnabled, dlog } from '../utils/debugLog.js';
+import { errFields, hex, shortId, since } from '../utils/debugFields.js';
 
 const logger = new Logger('GroupService');
+
+/**
+ * Short ID of a group plaintext (first 8 hex of its SHA-256): the same on the
+ * sending and the receiving device, so that one packet can be followed across
+ * both devices' logs. Computed only when the debug log is on.
+ */
+function plaintextId(plaintext: Uint8Array): string {
+  try {
+    return shortId(sha256(plaintext));
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * A failure this service deliberately goes on after: recorded in the debug
+ * log, then ignored as before. Returns undefined.
+ */
+function swallowed(step: string): (error: unknown) => undefined {
+  return error => {
+    dlog(
+      'engine',
+      'engine.ignored_failure',
+      { step, ...errFields(error) },
+      { lvl: 'error' }
+    );
+    return undefined;
+  };
+}
+
+/** The kind of each change, counted (`{Messages: 2, Members: 1}`). */
+function changeKinds(changes: Raw[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const c of changes) {
+    try {
+      const kind =
+        typeof c.kind === 'string' ? c.kind : variant(c.kind)[0] || '?';
+      out[kind] = (out[kind] ?? 0) + 1;
+    } catch {
+      out['?'] = (out['?'] ?? 0) + 1;
+    }
+  }
+  return out;
+}
+
+/** Sizes of the batches an operation committed. */
+function batchFields(batches: GroupBatch[]): Record<string, unknown> {
+  let objects = 0;
+  let erase = 0;
+  for (const b of batches) {
+    objects += b.objects?.length ?? 0;
+    erase += b.erase?.length ?? 0;
+  }
+  return { batches: batches.length, objects, erase };
+}
 
 /** Group identifiers (group keys, epochs, sync objects) are lowercase hex. */
 export type GroupId = string;
@@ -860,18 +917,31 @@ export class GroupService {
       p.status === SessionStatus.Active &&
       before !== undefined &&
       before !== SessionStatus.Active;
-    void this.run(node => {
-      const peer = decodeUserId(p.contactUserId);
-      node.set_session(peer, p.status === SessionStatus.Active);
-      if (reconnected) node.peer_reconnected(peer, this.now());
-    }).catch(() => logger.error('session status not applied'));
+    void this.run(
+      node => {
+        const peer = decodeUserId(p.contactUserId);
+        node.set_session(peer, p.status === SessionStatus.Active);
+        if (reconnected) node.peer_reconnected(peer, this.now());
+      },
+      'set_session',
+      {
+        peer: shortId(p.contactUserId),
+        status: p.status,
+        before,
+        reconnected,
+      }
+    ).catch(() => logger.error('session status not applied'));
   };
   private readonly onSessionRenewed = (d: { contactUserId: string }) => {
-    void this.run(node => {
-      const peer = decodeUserId(d.contactUserId);
-      node.set_session(peer, true);
-      node.peer_reconnected(peer, this.now());
-    }).catch(() => logger.error('session renewal not applied'));
+    void this.run(
+      node => {
+        const peer = decodeUserId(d.contactUserId);
+        node.set_session(peer, true);
+        node.peer_reconnected(peer, this.now());
+      },
+      'session_renewed',
+      { peer: shortId(d.contactUserId) }
+    ).catch(() => logger.error('session renewal not applied'));
   };
 
   constructor(
@@ -917,6 +987,7 @@ export class GroupService {
   /** Opens the engine again from the database (after a failure). */
   private reopen(): Promise<void> {
     const opening = (async () => {
+      const started = performance.now();
       this.dropNode(true);
       this.expiries.clear();
       const node = await this.openNode();
@@ -951,8 +1022,34 @@ export class GroupService {
         return;
       }
       this.node = node;
+      if (debugLogEnabled()) {
+        let groups = 0;
+        try {
+          groups = (JSON.parse(node.groups()) as Raw[]).length;
+        } catch {
+          // Only a count for the log.
+        }
+        dlog(
+          'engine',
+          'engine.open',
+          {
+            groups,
+            pendingChanges: this.takenChanges.length,
+            retryDelay: this.reopenDelay,
+          },
+          { lvl: 'info', dur: since(started) }
+        );
+      }
       this.reopenDelay = 0;
     })();
+    opening.catch(error =>
+      dlog(
+        'engine',
+        'engine.open.failed',
+        { trap: isWasmTrap(error), ...errFields(error) },
+        { lvl: 'error' }
+      )
+    );
     this.opening = opening.finally(() => {
       if (this.opening === guarded) this.opening = null;
     });
@@ -981,6 +1078,7 @@ export class GroupService {
       if (!message.startsWith('groups:undecodable')) throw error;
     }
     logger.error('group records of an earlier version reset');
+    dlog('engine', 'engine.reset', { reason: 'undecodable' }, { lvl: 'error' });
     await this.queries.groups.resetEngine(this.owner);
     return GroupsNode.open(this.session.ourPk, this.session.ourSk, {
       rows: [],
@@ -1034,6 +1132,16 @@ export class GroupService {
    * fails.
    */
   private recover(error: unknown): void {
+    dlog(
+      'engine',
+      'engine.recover',
+      {
+        trap: isWasmTrap(error),
+        reopenDelay: this.reopenDelay,
+        ...errFields(error),
+      },
+      { lvl: 'error' }
+    );
     this.dropNode(!isWasmTrap(error));
     if (this.closed || this.reopenTimer) return;
     const attempt = () => {
@@ -1105,13 +1213,31 @@ export class GroupService {
    * that is durable. Sending what it produced continues in the background on
    * the same serialized chain, and its failures never reach the caller.
    */
-  private run<T>(op: (node: GroupsNode) => Promise<T> | T): Promise<T> {
+  private run<T>(
+    op: (node: GroupsNode) => Promise<T> | T,
+    name = 'op',
+    fields?: Record<string, unknown>
+  ): Promise<T> {
+    const queued = performance.now();
     const next = this.chain.then(async () => {
+      const started = performance.now();
       const node = await this.readyNode();
       let result: T;
       try {
         result = await op(node);
       } catch (error) {
+        dlog(
+          'engine',
+          'engine.op',
+          {
+            op: name,
+            ...fields,
+            wait: Math.round(started - queued),
+            trap: isWasmTrap(error),
+            ...errFields(error),
+          },
+          { lvl: 'error', dur: since(started) }
+        );
         if (isWasmTrap(error)) {
           this.recover(error);
           throw error;
@@ -1120,6 +1246,19 @@ export class GroupService {
         throw error;
       }
       await this.persist();
+      {
+        dlog(
+          'engine',
+          'engine.op',
+          {
+            op: name,
+            ...fields,
+            wait: Math.round(started - queued),
+            ...(typeof result === 'string' && { result: shortId(result) }),
+          },
+          { dur: since(started) }
+        );
+      }
       return result;
     });
     this.chain = next.catch(() => undefined);
@@ -1144,6 +1283,12 @@ export class GroupService {
       })
       .catch(error => {
         logger.error('group send failed');
+        dlog(
+          'engine',
+          'engine.pump.failed',
+          { trap: isWasmTrap(error), ...errFields(error) },
+          { lvl: 'error' }
+        );
         if (isWasmTrap(error)) this.recover(error);
       })
       .finally(() => this.schedule());
@@ -1161,15 +1306,33 @@ export class GroupService {
     try {
       batches = node.take_batches() as GroupBatch[];
     } catch (error) {
+      dlog(
+        'engine',
+        'engine.persist.failed',
+        { step: 'take_batches', trap: isWasmTrap(error), ...errFields(error) },
+        { lvl: 'error' }
+      );
       this.recover(error);
       throw error;
     }
+    const started = performance.now();
     try {
       await this.queries.groups.applyBatches(this.owner, batches, extra);
     } catch (error) {
+      dlog(
+        'engine',
+        'engine.persist.failed',
+        { step: 'apply', ...batchFields(batches), ...errFields(error) },
+        { lvl: 'error', dur: since(started) }
+      );
       // The engine is ahead of the database: start again from the database.
       this.recover(error);
       throw error;
+    }
+    if (batches.length > 0 && debugLogEnabled()) {
+      dlog('storage', 'engine.persist', batchFields(batches), {
+        dur: since(started),
+      });
     }
     this.noteExpiries(batches);
   }
@@ -1241,6 +1404,12 @@ export class GroupService {
       }
       this.takenChanges.push({ group, kind: 'Messages' });
     }
+    if (epochs.size > 0) {
+      dlog('engine', 'engine.timer.expired', {
+        epochs: epochs.size,
+        groups: [...groups].map(shortId),
+      });
+    }
   }
 
   /** Whether `node` is still the open engine (after an await). */
@@ -1253,6 +1422,7 @@ export class GroupService {
     await this.storeEncrypted();
     const node = this.node;
     if (!node || this.closed) return;
+    const pumpStarted = performance.now();
     node.tick(this.now());
     // The results of the lookups the engine made by itself (a quoted message
     // it fetches): nothing here uses them, the object found arrives as any
@@ -1266,6 +1436,22 @@ export class GroupService {
         plaintext: Uint8Array;
       }[];
       await this.persist();
+      if (out.length > 0 && debugLogEnabled()) {
+        for (const o of out) {
+          dlog(
+            'engine',
+            'engine.plaintext.out',
+            {
+              round,
+              handle: o.handle,
+              to: shortId(o.to),
+              size: o.plaintext.length,
+              pt: plaintextId(o.plaintext),
+            },
+            { c: { plaintext: hex(o.plaintext) } }
+          );
+        }
+      }
       if (out.length === 0) break;
       let sent = 0;
       let i = 0;
@@ -1280,6 +1466,13 @@ export class GroupService {
           for (let j = i; j < out.length; j++) node.abandon(out[j].handle);
         }
       }
+      if (sent < out.length) {
+        dlog('engine', 'engine.outbox.round', {
+          round,
+          assembled: out.length,
+          sent,
+        });
+      }
       // A round that sent nothing would only repeat itself.
       if (sent === 0) break;
     }
@@ -1291,6 +1484,18 @@ export class GroupService {
     await this.persist();
     const changes = this.takenChanges;
     this.takenChanges = [];
+    if (changes.length > 0 && debugLogEnabled()) {
+      dlog(
+        'engine',
+        'engine.changes',
+        {
+          count: changes.length,
+          kinds: changeKinds(changes),
+          groups: [...new Set(changes.map(c => shortId(c.group as string)))],
+        },
+        { dur: since(pumpStarted) }
+      );
+    }
     if (changes.length > 0) {
       this.eventEmitter.emit(SdkEventType.GROUPS_CHANGED, {
         changes: changes.map(c => {
@@ -1367,13 +1572,54 @@ export class GroupService {
    * no change for: the changes that arrived before it are taken first, and
    * what it changed becomes the reference.
    */
-  private ownMessageOp<T>(f: (node: GroupsNode) => T): Promise<T> {
-    return this.run(node => {
-      this.takeChanges(node);
-      const result = f(node);
-      this.lookAtMessages(node);
-      return result;
-    });
+  private ownMessageOp<T>(
+    f: (node: GroupsNode) => T,
+    name?: string,
+    fields?: Record<string, unknown>
+  ): Promise<T> {
+    return this.run(
+      node => {
+        this.takeChanges(node);
+        const result = f(node);
+        this.lookAtMessages(node);
+        return result;
+      },
+      name,
+      fields
+    );
+  }
+
+  /** `message.created`: one of this account's messages handed to the engine. */
+  private logCreated(
+    op: string,
+    groupId: GroupId,
+    epoch: GroupId,
+    published: GroupPublished,
+    b: GroupMessageBody | null,
+    extra?: Record<string, unknown>
+  ): void {
+    if (!debugLogEnabled()) return;
+    dlog(
+      'sdk',
+      'message.created',
+      {
+        op,
+        group: shortId(groupId),
+        epoch: shortId(epoch),
+        id: shortId(published.syncObjId),
+        event: shortId(published.eventId),
+        merge: published.merge,
+        ...(b && { type: b.type, size: b ? textBytes(b) : 0 }),
+        ...extra,
+      },
+      {
+        c: {
+          ...(b && { body: bodyJson(b) }),
+          syncObjId: published.syncObjId,
+          eventId: published.eventId,
+        },
+      }
+    );
   }
 
   /**
@@ -1386,27 +1632,71 @@ export class GroupService {
     o: { handle: number; to: Uint8Array; plaintext: Uint8Array }
   ): Promise<boolean> {
     if (this.session.peerSessionStatus(o.to) !== SessionStatus.Active) {
+      dlog('engine', 'engine.plaintext.abandoned', {
+        handle: o.handle,
+        to: shortId(o.to),
+        reason: 'no-active-session',
+        status: this.session.peerSessionStatus(o.to),
+      });
       // The engine's view was stale (a status change it was not told of).
       node.abandon(o.handle);
       node.set_session(o.to, false);
       return false;
     }
     if (!node.is_current(o.handle, this.now())) {
+      dlog('engine', 'engine.plaintext.abandoned', {
+        handle: o.handle,
+        to: shortId(o.to),
+        reason: 'not-current',
+      });
       node.abandon(o.handle);
       return false;
     }
     let sent: Awaited<ReturnType<SessionModule['sendMessage']>>;
+    const started = performance.now();
     try {
       sent = await this.session.sendMessage(
         o.to,
         serializeGroupPlaintext(o.plaintext)
       );
     } catch (error) {
+      dlog(
+        'sessions',
+        'message.encrypt.failed',
+        {
+          handle: o.handle,
+          to: shortId(o.to),
+          size: o.plaintext.length,
+          tooLarge: error instanceof SessionMessageTooLargeError,
+          ...errFields(error),
+        },
+        { lvl: 'error', dur: since(started) }
+      );
       // Refused before encryption (it may not fit one packet): the session
       // did not move. The engine never assembles one this large.
       if (!(error instanceof SessionMessageTooLargeError)) throw error;
       node.abandon(o.handle);
       return false;
+    }
+    if (debugLogEnabled()) {
+      dlog(
+        'sessions',
+        sent ? 'message.encrypted' : 'message.encrypt.refused',
+        {
+          handle: o.handle,
+          to: shortId(o.to),
+          pt: plaintextId(o.plaintext),
+          size: o.plaintext.length,
+          ...(sent && {
+            seeker: shortId(sent.seeker),
+            ctSize: sent.data.length,
+          }),
+          ...(!sent && {
+            reason: 'session refused (peer lags behind)',
+          }),
+        },
+        { lvl: sent ? 'debug' : 'warn', dur: since(started) }
+      );
     }
     if (!this.alive(node)) return false;
     if (!sent) {
@@ -1441,9 +1731,16 @@ export class GroupService {
    */
   private async storeEncrypted(): Promise<void> {
     if (this.encrypted.length === 0) return;
+    const persistStarted = performance.now();
     try {
       await this.persistSession();
-    } catch {
+    } catch (error) {
+      dlog(
+        'storage',
+        'session.persist.failed',
+        { waiting: this.encrypted.length, ...errFields(error) },
+        { lvl: 'error', dur: since(persistStarted) }
+      );
       return;
     }
     while (this.encrypted.length > 0) {
@@ -1471,29 +1768,74 @@ export class GroupService {
         } else {
           await this.queries.groups.applyBatches(this.owner, [], store);
         }
-      } catch {
+      } catch (error) {
+        dlog(
+          'storage',
+          'message.store.failed',
+          {
+            to: shortId(e.to),
+            seeker: shortId(e.seeker),
+            handOff,
+            ...errFields(error),
+          },
+          { lvl: 'error' }
+        );
         // The engine was reopened (its hand-off is lost and its work will be
         // assembled again); the ciphertext itself stays to be stored.
         e.handle = null;
         return;
       }
+      dlog('storage', 'message.queued', {
+        outbox: id,
+        to: shortId(e.to),
+        seeker: shortId(e.seeker),
+        size: e.ciphertext.length,
+        handOff,
+      });
       this.encrypted.shift();
+      const sendStarted = performance.now();
       try {
         await this.messageProtocol.sendMessage({
           seeker: e.seeker,
           ciphertext: e.ciphertext,
         });
       } catch (error) {
+        dlog(
+          'sdk',
+          'message.send.failed',
+          {
+            outbox: id,
+            to: shortId(e.to),
+            seeker: shortId(e.seeker),
+            size: e.ciphertext.length,
+            ...errFields(error),
+          },
+          { lvl: 'warn', dur: since(sendStarted) }
+        );
         if (id !== null) {
           await this.outboxFailed(id, encodeUserId(e.to), error).catch(
-            () => undefined
+            swallowed('outbox_failed')
           );
         }
         continue;
       }
+      dlog(
+        'sdk',
+        'message.sent',
+        {
+          outbox: id,
+          to: shortId(e.to),
+          seeker: shortId(e.seeker),
+          size: e.ciphertext.length,
+          retry: false,
+        },
+        { dur: since(sendStarted) }
+      );
       if (id !== null) {
         this.outboxFailures.delete(id);
-        await this.queries.groups.deleteOutbox(id).catch(() => undefined);
+        await this.queries.groups
+          .deleteOutbox(id)
+          .catch(swallowed('delete_outbox'));
       }
       if (handOff && this.alive(e.node)) {
         e.node.published(e.handle!, this.now());
@@ -1510,19 +1852,43 @@ export class GroupService {
     );
     for (const row of due) {
       if (this.closed) return;
+      const sendStarted = performance.now();
+      const rowFields = debugLogEnabled()
+        ? {
+            outbox: row.id,
+            to: shortId(row.contactUserId),
+            seeker: shortId(row.seeker),
+            size: row.ciphertext.length,
+            failures: this.outboxFailures.get(row.id) ?? 0,
+          }
+        : undefined;
       try {
         await this.messageProtocol.sendMessage({
           seeker: row.seeker,
           ciphertext: row.ciphertext,
         });
       } catch (error) {
+        dlog(
+          'sdk',
+          'message.send.failed',
+          { ...rowFields, retry: true, ...errFields(error) },
+          { lvl: 'warn', dur: since(sendStarted) }
+        );
         await this.outboxFailed(row.id, row.contactUserId, error).catch(
-          () => undefined
+          swallowed('outbox_failed')
         );
         continue;
       }
+      dlog(
+        'sdk',
+        'message.sent',
+        { ...rowFields, retry: true },
+        { dur: since(sendStarted) }
+      );
       this.outboxFailures.delete(row.id);
-      await this.queries.groups.deleteOutbox(row.id).catch(() => undefined);
+      await this.queries.groups
+        .deleteOutbox(row.id)
+        .catch(swallowed('delete_outbox'));
     }
   }
 
@@ -1543,6 +1909,12 @@ export class GroupService {
     error: unknown
   ): Promise<void> {
     if (isSeekerConflict(error)) {
+      dlog(
+        'sessions',
+        'session.conflict.409',
+        { outbox: id, peer: shortId(contactUserId), action: 'renew' },
+        { lvl: 'warn' }
+      );
       this.outboxFailures.delete(id);
       await this.queries.groups.deleteOutbox(id);
       // Not awaited: the renewal posts an announcement and tells this
@@ -1551,6 +1923,12 @@ export class GroupService {
       return;
     }
     if (isFinalSendError(error)) {
+      dlog(
+        'sdk',
+        'message.dropped',
+        { outbox: id, peer: shortId(contactUserId), reason: 'final-status' },
+        { lvl: 'error' }
+      );
       this.outboxFailures.delete(id);
       await this.queries.groups.deleteOutbox(id);
       return;
@@ -1561,6 +1939,12 @@ export class GroupService {
       MAX_OUTBOX_RETRY_MS,
       this.config.messages.retryDelayMs * 2 ** Math.min(failures - 1, 20)
     );
+    dlog('sdk', 'message.retry.scheduled', {
+      outbox: id,
+      peer: shortId(contactUserId),
+      failures,
+      delay,
+    });
     await this.queries.groups.rescheduleOutbox(
       id,
       new Date(this.now() + delay)
@@ -1585,11 +1969,18 @@ export class GroupService {
     }
     void this.queries.groups
       .nextOutboxRetry(this.owner)
-      .catch(() => null)
+      .catch(error => {
+        swallowed('next_outbox_retry')(error);
+        return null;
+      })
       .then(retry => {
         if (this.closed) return;
         const when = retry ? Math.min(at, retry.getTime()) : at;
         const delay = Math.min(MAX_WAKEUP_MS, Math.max(1000, when - now));
+        dlog('engine', 'engine.wakeup.armed', {
+          delay,
+          outboxRetry: retry !== null && retry !== undefined,
+        });
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => {
           this.timer = null;
@@ -1608,14 +1999,30 @@ export class GroupService {
   handlePlaintext(from: Uint8Array, plaintext: Uint8Array): Promise<void> {
     // The sender's keys are not added from its contact: a plaintext may be
     // for a group closed here, and the engine asks for the keys it needs.
-    return this.run(async node => {
-      node.handle_plaintext(from, plaintext, this.now());
-    });
+    if (debugLogEnabled()) {
+      dlog(
+        'engine',
+        'engine.plaintext.in',
+        {
+          from: shortId(from),
+          size: plaintext.length,
+          pt: plaintextId(plaintext),
+        },
+        { c: { plaintext: hex(plaintext) } }
+      );
+    }
+    return this.run(
+      async node => {
+        node.handle_plaintext(from, plaintext, this.now());
+      },
+      'handle_plaintext',
+      { from: shortId(from), size: plaintext.length }
+    );
   }
 
   /** Runs the engine's timers; sending follows in the background. */
   async tick(): Promise<void> {
-    await this.run(() => undefined);
+    await this.run(() => undefined, 'tick');
   }
 
   /**
@@ -1629,8 +2036,10 @@ export class GroupService {
 
   /** Adds the keys of a contact (when a contact or session is added). */
   learnKeys(publicKeys: Uint8Array): Promise<string> {
-    return this.run(node =>
-      encodeUserId(node.learn_keys(publicKeys, this.now()))
+    return this.run(
+      node => encodeUserId(node.learn_keys(publicKeys, this.now())),
+      'learn_keys',
+      { size: publicKeys.length }
     );
   }
 
@@ -1674,18 +2083,22 @@ export class GroupService {
   ): Promise<GroupId> {
     const timer = options.messageTimer ?? (await this.defaultMessageTimer());
     checkTimer(timer);
-    return this.run(async node => {
-      await this.learnMembers(node, members);
-      return bytesToHex(
-        node.create_group_with_timer(
-          name,
-          idsOf(members),
-          undefined,
-          timer,
-          this.now()
-        )
-      );
-    });
+    return this.run(
+      async node => {
+        await this.learnMembers(node, members);
+        return bytesToHex(
+          node.create_group_with_timer(
+            name,
+            idsOf(members),
+            undefined,
+            timer,
+            this.now()
+          )
+        );
+      },
+      'create_group',
+      { members: members.map(shortId), timer }
+    );
   }
 
   /**
@@ -1702,18 +2115,22 @@ export class GroupService {
   ): Promise<GroupId> {
     const timer = messageTimer ?? (await this.defaultMessageTimer());
     checkTimer(timer);
-    return this.run(async node => {
-      await this.learnMembers(node, [peer]);
-      return bytesToHex(
-        node.create_group_with_timer(
-          name,
-          idsOf([peer]),
-          EARLIER_FORMAT_VERSION,
-          timer,
-          this.now()
-        )
-      );
-    });
+    return this.run(
+      async node => {
+        await this.learnMembers(node, [peer]);
+        return bytesToHex(
+          node.create_group_with_timer(
+            name,
+            idsOf([peer]),
+            EARLIER_FORMAT_VERSION,
+            timer,
+            this.now()
+          )
+        );
+      },
+      'create_direct_chat',
+      { peer: shortId(peer), timer }
+    );
   }
 
   /**
@@ -1722,22 +2139,26 @@ export class GroupService {
    * are. Never cleared here: an archive stays an earlier conversation.
    */
   declareEarlierConversations(peers: string[]): Promise<void> {
-    return this.run(node => {
-      const declared = new Set(
-        (JSON.parse(node.earlier_conversations()) as [string, string][])
-          .filter(([, v]) => Number(v) === EARLIER_FORMAT_VERSION)
-          .map(([p]) => p)
-      );
-      for (const peer of peers) {
-        if (declared.has(hexOfUser(peer))) continue;
-        node.set_earlier_conversation(
-          decodeUserId(peer),
-          EARLIER_FORMAT_VERSION,
-          true,
-          this.now()
+    return this.run(
+      node => {
+        const declared = new Set(
+          (JSON.parse(node.earlier_conversations()) as [string, string][])
+            .filter(([, v]) => Number(v) === EARLIER_FORMAT_VERSION)
+            .map(([p]) => p)
         );
-      }
-    });
+        for (const peer of peers) {
+          if (declared.has(hexOfUser(peer))) continue;
+          node.set_earlier_conversation(
+            decodeUserId(peer),
+            EARLIER_FORMAT_VERSION,
+            true,
+            this.now()
+          );
+        }
+      },
+      'declare_earlier_conversations',
+      { peers: peers.length }
+    );
   }
 
   /**
@@ -1753,13 +2174,16 @@ export class GroupService {
     consent: boolean,
     announcedTimer?: number
   ): Promise<void> {
-    return this.run(node =>
-      node.consent_to_direct_chat(
-        decodeUserId(peer),
-        consent,
-        this.now(),
-        announcedTimer
-      )
+    return this.run(
+      node =>
+        node.consent_to_direct_chat(
+          decodeUserId(peer),
+          consent,
+          this.now(),
+          announcedTimer
+        ),
+      'consent_to_direct_chat',
+      { peer: shortId(peer), consent, announcedTimer }
     );
   }
 
@@ -1769,22 +2193,26 @@ export class GroupService {
    * full list. Automatic connections are never declared.
    */
   setAcceptedContacts(accepted: string[]): Promise<void> {
-    return this.run(node => {
-      const declared = new Set(
-        JSON.parse(node.accepted_contacts()) as string[]
-      );
-      const wanted = new Set(accepted.map(hexOfUser));
-      for (const peer of wanted) {
-        if (!declared.has(peer)) {
-          node.set_accepted_contact(hexToBytes(peer), true, this.now());
+    return this.run(
+      node => {
+        const declared = new Set(
+          JSON.parse(node.accepted_contacts()) as string[]
+        );
+        const wanted = new Set(accepted.map(hexOfUser));
+        for (const peer of wanted) {
+          if (!declared.has(peer)) {
+            node.set_accepted_contact(hexToBytes(peer), true, this.now());
+          }
         }
-      }
-      for (const peer of declared) {
-        if (!wanted.has(peer)) {
-          node.set_accepted_contact(hexToBytes(peer), false, this.now());
+        for (const peer of declared) {
+          if (!wanted.has(peer)) {
+            node.set_accepted_contact(hexToBytes(peer), false, this.now());
+          }
         }
-      }
-    });
+      },
+      'set_accepted_contacts',
+      { accepted: accepted.length }
+    );
   }
 
   /** Whether this device holds a direct chat with `peer` (§5.12). */
@@ -1818,18 +2246,27 @@ export class GroupService {
     groupId: GroupId,
     change: { add?: string[]; remove?: string[]; name?: string | null }
   ): Promise<GroupId> {
-    return this.run(async node => {
-      await this.learnMembers(node, change.add ?? []);
-      const json = JSON.stringify({
-        t: 'Successor',
-        add: (change.add ?? []).map(hexOfUser),
-        remove: (change.remove ?? []).map(hexOfUser),
-        name: change.name ?? null,
-      });
-      return bytesToHex(
-        node.change_group(hexToBytes(groupId), json, this.now())
-      );
-    });
+    return this.run(
+      async node => {
+        await this.learnMembers(node, change.add ?? []);
+        const json = JSON.stringify({
+          t: 'Successor',
+          add: (change.add ?? []).map(hexOfUser),
+          remove: (change.remove ?? []).map(hexOfUser),
+          name: change.name ?? null,
+        });
+        return bytesToHex(
+          node.change_group(hexToBytes(groupId), json, this.now())
+        );
+      },
+      'change_members',
+      {
+        group: shortId(groupId),
+        add: (change.add ?? []).map(shortId),
+        remove: (change.remove ?? []).map(shortId),
+        rename: change.name !== undefined && change.name !== null,
+      }
+    );
   }
 
   /**
@@ -1841,18 +2278,26 @@ export class GroupService {
     newOwner: string,
     options: { leave?: boolean; name?: string | null } = {}
   ): Promise<GroupId> {
-    return this.run(async node => {
-      await this.learnMembers(node, [newOwner]);
-      const json = JSON.stringify({
-        t: 'Handover',
-        new_owner: hexOfUser(newOwner),
+    return this.run(
+      async node => {
+        await this.learnMembers(node, [newOwner]);
+        const json = JSON.stringify({
+          t: 'Handover',
+          new_owner: hexOfUser(newOwner),
+          leave: options.leave ?? false,
+          name: options.name ?? null,
+        });
+        return bytesToHex(
+          node.change_group(hexToBytes(groupId), json, this.now())
+        );
+      },
+      'hand_over',
+      {
+        group: shortId(groupId),
+        newOwner: shortId(newOwner),
         leave: options.leave ?? false,
-        name: options.name ?? null,
-      });
-      return bytesToHex(
-        node.change_group(hexToBytes(groupId), json, this.now())
-      );
-    });
+      }
+    );
   }
 
   /**
@@ -1867,14 +2312,17 @@ export class GroupService {
     } catch (e) {
       return Promise.reject(e);
     }
-    return this.run(node =>
-      bytesToHex(
-        node.change_group(
-          hexToBytes(groupId),
-          JSON.stringify({ t: 'MessageTimer', timer: messageTimer }),
-          this.now()
-        )
-      )
+    return this.run(
+      node =>
+        bytesToHex(
+          node.change_group(
+            hexToBytes(groupId),
+            JSON.stringify({ t: 'MessageTimer', timer: messageTimer }),
+            this.now()
+          )
+        ),
+      'set_message_timer',
+      { group: shortId(groupId), timer: messageTimer }
     );
   }
 
@@ -1884,33 +2332,46 @@ export class GroupService {
     members: string[],
     name?: string | null
   ): Promise<GroupId> {
-    return this.run(node => {
-      const json = JSON.stringify({
-        t: 'Resolve',
-        members: members.map(hexOfUser),
-        name: name ?? null,
-      });
-      return bytesToHex(
-        node.change_group(hexToBytes(groupId), json, this.now())
-      );
-    });
+    return this.run(
+      node => {
+        const json = JSON.stringify({
+          t: 'Resolve',
+          members: members.map(hexOfUser),
+          name: name ?? null,
+        });
+        return bytesToHex(
+          node.change_group(hexToBytes(groupId), json, this.now())
+        );
+      },
+      'resolve_fork',
+      { group: shortId(groupId), members: members.length }
+    );
   }
 
   dissolve(groupId: GroupId, deleteMessages: boolean): Promise<void> {
-    return this.run(node =>
-      node.dissolve_group(hexToBytes(groupId), deleteMessages, this.now())
+    return this.run(
+      node =>
+        node.dissolve_group(hexToBytes(groupId), deleteMessages, this.now()),
+      'dissolve',
+      { group: shortId(groupId), deleteMessages }
     );
   }
 
   leave(groupId: GroupId, choice: LeaveChoice): Promise<void> {
-    return this.run(node =>
-      node.leave_group(hexToBytes(groupId), choice, this.now())
+    return this.run(
+      node => node.leave_group(hexToBytes(groupId), choice, this.now()),
+      'leave',
+      { group: shortId(groupId), choice }
     );
   }
 
   /** Deletes a kicked, left or dissolved group from this device. */
   deleteGroup(groupId: GroupId): Promise<void> {
-    return this.run(node => node.delete_group(hexToBytes(groupId), this.now()));
+    return this.run(
+      node => node.delete_group(hexToBytes(groupId), this.now()),
+      'delete_group',
+      { group: shortId(groupId) }
+    );
   }
 
   /**
@@ -1921,25 +2382,37 @@ export class GroupService {
    * date (D.88). Declining changes nothing.
    */
   acceptInvitation(epochId: GroupId): Promise<GroupId> {
-    return this.run(node =>
-      bytesToHex(node.accept_invitation(hexToBytes(epochId), this.now()))
+    return this.run(
+      node =>
+        bytesToHex(node.accept_invitation(hexToBytes(epochId), this.now())),
+      'accept_invitation',
+      { epoch: shortId(epochId) }
     );
   }
 
   declineInvitation(epochId: GroupId, choice: LeaveChoice): Promise<void> {
-    return this.run(node =>
-      node.decline_invitation(hexToBytes(epochId), choice, this.now())
+    return this.run(
+      node => node.decline_invitation(hexToBytes(epochId), choice, this.now()),
+      'decline_invitation',
+      { epoch: shortId(epochId), choice }
     );
   }
 
   /** Retry synchronisation: sends the current root again (§9.4). */
   resendRoot(groupId: GroupId): Promise<void> {
-    return this.run(node => node.resend_root(hexToBytes(groupId), this.now()));
+    return this.run(
+      node => node.resend_root(hexToBytes(groupId), this.now()),
+      'resend_root',
+      { group: shortId(groupId) }
+    );
   }
 
   setLocalName(groupId: GroupId, name: string | null): Promise<void> {
-    return this.run(node =>
-      node.set_local_name(hexToBytes(groupId), name ?? undefined, this.now())
+    return this.run(
+      node =>
+        node.set_local_name(hexToBytes(groupId), name ?? undefined, this.now()),
+      'set_local_name',
+      { group: shortId(groupId) }
     );
   }
 
@@ -1981,34 +2454,44 @@ export class GroupService {
     } catch (e) {
       return Promise.reject(e);
     }
-    return this.ownMessageOp(node => {
-      const epoch = this.currentEpoch(node, groupId);
-      const metadata = { ...(options.metadata ?? {}) };
-      if (options.replyTo && options.replyTo.length > 0) {
-        const targets = options.replyTo.map(t => {
-          const reference = node.ref_chat_id(hexToBytes(t.epochId));
-          if (!reference) {
-            throw new Error('groups:unknown-epoch: reply target');
-          }
-          return {
-            ref_chat_id: bytesToHex(reference),
-            sync_obj_id: t.syncObjId,
-          };
+    return this.ownMessageOp(
+      node => {
+        const epoch = this.currentEpoch(node, groupId);
+        const metadata = { ...(options.metadata ?? {}) };
+        if (options.replyTo && options.replyTo.length > 0) {
+          const targets = options.replyTo.map(t => {
+            const reference = node.ref_chat_id(hexToBytes(t.epochId));
+            if (!reference) {
+              throw new Error('groups:unknown-epoch: reply target');
+            }
+            return {
+              ref_chat_id: bytesToHex(reference),
+              sync_obj_id: t.syncObjId,
+            };
+          });
+          metadata.replyTo = node.encode_reply_to(JSON.stringify(targets));
+        }
+        const meta = metadataJson(metadata);
+        checkMetadata(meta);
+        const published = this.published(
+          node.publish_message(
+            hexToBytes(epoch),
+            bodyJson(b),
+            meta,
+            options.scheduledFor,
+            this.now()
+          )
+        );
+        this.logCreated('message', groupId, epoch, published, b, {
+          replies: options.replyTo?.length ?? 0,
+          scheduled: options.scheduledFor !== undefined,
+          metaSize: meta.length,
         });
-        metadata.replyTo = node.encode_reply_to(JSON.stringify(targets));
-      }
-      const meta = metadataJson(metadata);
-      checkMetadata(meta);
-      return this.published(
-        node.publish_message(
-          hexToBytes(epoch),
-          bodyJson(b),
-          meta,
-          options.scheduledFor,
-          this.now()
-        )
-      );
-    });
+        return published;
+      },
+      'publish_message',
+      { group: shortId(groupId) }
+    );
   }
 
   /**
@@ -2045,17 +2528,25 @@ export class GroupService {
     } catch (e) {
       return Promise.reject(e);
     }
-    return this.ownMessageOp(node =>
-      this.published(
-        node.publish_edit(
-          hexToBytes(epochId),
-          hexToBytes(syncObjId),
-          bodyJson(b),
-          meta,
-          options.scheduledFor,
-          this.now()
-        )
-      )
+    return this.ownMessageOp(
+      node => {
+        const published = this.published(
+          node.publish_edit(
+            hexToBytes(epochId),
+            hexToBytes(syncObjId),
+            bodyJson(b),
+            meta,
+            options.scheduledFor,
+            this.now()
+          )
+        );
+        this.logCreated('edit', epochId, epochId, published, b, {
+          target: shortId(syncObjId),
+        });
+        return published;
+      },
+      'publish_edit',
+      { epoch: shortId(epochId), id: shortId(syncObjId) }
     );
   }
 
@@ -2065,15 +2556,23 @@ export class GroupService {
     syncObjId: GroupId,
     scheduledFor?: number
   ): Promise<GroupPublished> {
-    return this.ownMessageOp(node =>
-      this.published(
-        node.publish_deletion(
-          hexToBytes(epochId),
-          hexToBytes(syncObjId),
-          scheduledFor,
-          this.now()
-        )
-      )
+    return this.ownMessageOp(
+      node => {
+        const published = this.published(
+          node.publish_deletion(
+            hexToBytes(epochId),
+            hexToBytes(syncObjId),
+            scheduledFor,
+            this.now()
+          )
+        );
+        this.logCreated('deletion', epochId, epochId, published, null, {
+          target: shortId(syncObjId),
+        });
+        return published;
+      },
+      'publish_deletion',
+      { epoch: shortId(epochId), id: shortId(syncObjId) }
     );
   }
 
@@ -2111,44 +2610,61 @@ export class GroupService {
     } catch (e) {
       return Promise.reject(e);
     }
-    return this.run(node => {
-      const now = this.now();
-      const g = JSON.parse(node.group(hexToBytes(groupId))) as Raw | null;
-      if (!g) throw new Error('groups:unknown-epoch: unknown group');
-      if (variant(g.status)[0] !== 'Member') {
-        throw new Error('groups:read-only: not a member of this group');
-      }
-      // The epoch the message is shown in; a deleted or hidden message is not.
-      let epoch: string | null = null;
-      for (const raw of JSON.parse(
-        node.timeline(hexToBytes(groupId), now)
-      ) as unknown[]) {
-        const [t, r] = variant(raw);
-        if (t === 'Line') continue;
-        const m = r.message as Raw;
-        if ((m.content as Raw).sync_obj_id === messageId) {
-          epoch = m.chat_id as string;
-          break;
+    return this.run(
+      node => {
+        const now = this.now();
+        const g = JSON.parse(node.group(hexToBytes(groupId))) as Raw | null;
+        if (!g) throw new Error('groups:unknown-epoch: unknown group');
+        if (variant(g.status)[0] !== 'Member') {
+          throw new Error('groups:read-only: not a member of this group');
         }
-      }
-      if (!epoch) throw new Error('groups:unknown-message: not shown');
-      return this.published(
-        node.publish_reaction(
-          hexToBytes(epoch),
-          hexToBytes(messageId),
-          emoji,
+        // The epoch the message is shown in; a deleted or hidden message is not.
+        let epoch: string | null = null;
+        for (const raw of JSON.parse(
+          node.timeline(hexToBytes(groupId), now)
+        ) as unknown[]) {
+          const [t, r] = variant(raw);
+          if (t === 'Line') continue;
+          const m = r.message as Raw;
+          if ((m.content as Raw).sync_obj_id === messageId) {
+            epoch = m.chat_id as string;
+            break;
+          }
+        }
+        if (!epoch) throw new Error('groups:unknown-message: not shown');
+        const published = this.published(
+          node.publish_reaction(
+            hexToBytes(epoch),
+            hexToBytes(messageId),
+            emoji,
+            add,
+            now
+          )
+        );
+        this.logCreated('reaction', groupId, epoch, published, null, {
+          target: shortId(messageId),
           add,
-          now
-        )
-      );
-    });
+        });
+        return published;
+      },
+      'publish_reaction',
+      { group: shortId(groupId), id: shortId(messageId) }
+    );
   }
 
   /** Deletes a message on this device only (§9.2). */
   deleteMessageLocally(epochId: GroupId, syncObjId: GroupId): Promise<void> {
-    return this.ownMessageOp(node => {
-      node.local_delete(hexToBytes(epochId), hexToBytes(syncObjId), this.now());
-    });
+    return this.ownMessageOp(
+      node => {
+        node.local_delete(
+          hexToBytes(epochId),
+          hexToBytes(syncObjId),
+          this.now()
+        );
+      },
+      'local_delete',
+      { epoch: shortId(epochId), id: shortId(syncObjId) }
+    );
   }
 
   /**
@@ -2181,23 +2697,62 @@ export class GroupService {
       metadata: null,
       edited: edit.edited ?? null,
     });
-    return this.ownMessageOp(node => {
-      node.local_edit(
-        hexToBytes(epochId),
-        hexToBytes(syncObjId),
-        json,
-        this.now()
-      );
-    });
+    return this.ownMessageOp(
+      node => {
+        node.local_edit(
+          hexToBytes(epochId),
+          hexToBytes(syncObjId),
+          json,
+          this.now()
+        );
+      },
+      'local_edit',
+      { epoch: shortId(epochId), id: shortId(syncObjId) }
+    );
   }
 
   /** Retry synchronisation of a message (§9.4): republishes its stored result. */
   retryMessage(epochId: GroupId, syncObjId: GroupId): Promise<GroupPublished> {
-    return this.ownMessageOp(node =>
-      this.published(
-        node.retry(hexToBytes(epochId), hexToBytes(syncObjId), this.now())
-      )
+    return this.ownMessageOp(
+      node =>
+        this.published(
+          node.retry(hexToBytes(epochId), hexToBytes(syncObjId), this.now())
+        ),
+      'retry_message',
+      { epoch: shortId(epochId), id: shortId(syncObjId) }
     );
+  }
+
+  /** Messages already reported as shown (debug log only). */
+  private shown = new Set<string>();
+
+  /**
+   * `message.shown`: the first time a timeline read for display holds a
+   * message, with the delay since its author wrote it.
+   */
+  private logShown(groupId: GroupId, items: GroupTimelineItem[]): void {
+    try {
+      const now = this.now();
+      for (const i of items) {
+        if (i.kind !== 'message') continue;
+        const key = `${i.epochId}:${i.syncObjId}`;
+        if (this.shown.has(key)) continue;
+        this.shown.add(key);
+        dlog('ui', 'message.shown', {
+          group: shortId(groupId),
+          epoch: shortId(i.epochId),
+          id: shortId(i.syncObjId),
+          author: shortId(i.author),
+          mine: i.author === this.owner,
+          type: i.body.type,
+          sinceWritten: now - Number(i.createdAt),
+          edited: i.edited,
+          reactions: i.reactions.length,
+        });
+      }
+    } catch {
+      // Only a log.
+    }
   }
 
   private currentEpoch(node: GroupsNode, groupId: GroupId): GroupId {
@@ -2217,6 +2772,12 @@ export class GroupService {
     try {
       return f(node);
     } catch (error) {
+      dlog(
+        'engine',
+        'engine.read.failed',
+        { trap: isWasmTrap(error), ...errFields(error) },
+        { lvl: 'error' }
+      );
       if (isWasmTrap(error)) this.recover(error);
       throw error;
     }
@@ -2288,6 +2849,7 @@ export class GroupService {
       raw.map(r => timelineItem(r, me)),
       group ? summary(group).timers : []
     );
+    if (debugLogEnabled()) this.logShown(groupId, items);
     const epochs = new Set<string>();
     for (const i of items) {
       if (i.kind === 'message') epochs.add(i.epochId);

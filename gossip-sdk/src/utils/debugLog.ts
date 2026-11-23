@@ -121,3 +121,7 @@ export function dtime<T>(
   done('ok');
   return result;
 }
+
+/** Same as {@link isDebugLogEnabled}: the name the call sites use. */
+export const debugLogEnabled = isDebugLogEnabled;
+export type DebugLogOpts = DebugLogOptions;
