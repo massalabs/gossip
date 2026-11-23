@@ -36,6 +36,12 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AppLockPlugin.class);
         registerPlugin(net.massa.gossip.exchange.ContactExchangePlugin.class);
         registerPlugin(net.massa.gossip.share.AppSharePlugin.class);
+        // Full debug build only (-PfullDebug=true): its code lives in
+        // src/fulldebug, absent from any other build, so it is reached by
+        // name. BuildConfig.FULL_DEBUG is a compile-time false elsewhere.
+        if (BuildConfig.FULL_DEBUG) {
+            registerFullDebug();
+        }
         
         super.onCreate(savedInstanceState);
 
@@ -82,6 +88,19 @@ public class MainActivity extends BridgeActivity {
         }
     }
     
+    @SuppressWarnings("unchecked")
+    private void registerFullDebug() {
+        try {
+            Class.forName("net.massa.gossip.fulldebug.FullDebug")
+                .getMethod("install", Context.class)
+                .invoke(null, getApplicationContext());
+            registerPlugin((Class<? extends com.getcapacitor.Plugin>)
+                Class.forName("net.massa.gossip.fulldebug.DebugLogFilePlugin"));
+        } catch (Throwable ignored) {
+            // the app runs without the record
+        }
+    }
+
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);

@@ -13,6 +13,7 @@
     "dev:host": "vite --host",
     "build:sdk": "cd gossip-sdk && npm run build",
     "build": "npm run audit:logging && npm run audit:paths && npm run build:sdk && tsc -b && vite build && npm run audit:production-worker:dist && npm run strip:logging:sw && npm run audit:logging:dist && npm run audit:hosts:dist && npm run audit:paths:dist",
+    "build:full-debug": "VITE_FULL_DEBUG=true VITE_DEBUG_LOGS=true sh -c 'npm run audit:paths && npm run build:sdk && tsc -b && vite build && npm run audit:production-worker:dist && npm run strip:logging:sw && npm run audit:hosts:dist && npm run audit:paths:dist'",
     "test": "vitest --silent='passed-only'",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
@@ -73,6 +74,7 @@
     "cap:copy:ios": "cap copy ios",
     "cap:copy:android": "cap copy android",
     "build:apk": "cd android && bundle exec fastlane build_debug",
+    "android:full-debug": "npm run build:full-debug && cap sync android && cd android && ./gradlew assembleDebug -PfullDebug=true",
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
