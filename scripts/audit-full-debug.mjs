@@ -17,7 +17,19 @@ export const FULL_DEBUG_MARKERS = [
   // its storage keys and overlay
   'gossip-full-debug',
   'full-debug-overlay',
+  // the HKDF label of its encryption of the debug logs (src/fullDebug/gdl1.ts)
+  'gossip-debug-logs v1',
 ];
+
+/**
+ * The markers, plus the developers' public key of the full debug build when
+ * the environment holds one (CI sets it as a repository variable): a normal
+ * bundle must not carry it.
+ */
+export function markersFor(env = process.env) {
+  const key = (env.VITE_DEBUG_LOGS_PUBLIC_KEY ?? '').replace(/\s+/g, '');
+  return key.length >= 40 ? [...FULL_DEBUG_MARKERS, key] : FULL_DEBUG_MARKERS;
+}
 
 const SHIPPED_FILE = /\.(js|mjs|html|json|webmanifest)$/;
 
@@ -53,13 +65,16 @@ async function main() {
     process.stderr.write(`Full-debug check: ${dir}/ does not exist.\n`);
     process.exit(1);
   }
-  const violations = auditFullDebug(walk(dir, process.cwd()));
+  const violations = auditFullDebug(walk(dir, process.cwd()), markersFor());
   if (violations.length > 0) {
     process.stderr.write(
       [
         'Full-debug check FAILED: the built app holds code of the full debug build.',
         '',
-        ...violations.map(v => `  - "${v.marker}" in ${v.path}`),
+        ...violations.map(
+          v =>
+            `  - "${v.marker.length > 40 ? 'VITE_DEBUG_LOGS_PUBLIC_KEY' : v.marker}" in ${v.path}`
+        ),
         '',
         'Why: the full debug build records everything, message content and keys',
         'included, and sends it to the developers. It must never ship.',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error — plain .mjs script without types
-import { auditFullDebug } from '../../scripts/audit-full-debug.mjs';
+import { auditFullDebug, markersFor } from '../../scripts/audit-full-debug.mjs';
 
 describe('audit-full-debug', () => {
   it('passes a normal bundle (the store key debug-logs-v1 is not the upload path)', () => {
@@ -23,6 +23,23 @@ describe('audit-full-debug', () => {
     expect(found.map((v: { marker: string }) => v.marker)).toEqual([
       '/debug-logs',
       'DebugLogFile',
+    ]);
+  });
+  it('finds the encryption of the debug logs and the built-in key', () => {
+    const key =
+      'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEzO6DCrZshIuSJZtrPLwMo1GyT4I9wjeNwu+xFkT5hCewuDGpHS55r+csLbBYg3X17Xt21umN8KcICmU4rOxWvg==';
+    const found = auditFullDebug(
+      [
+        {
+          path: 'dist/c.js',
+          text: `i=new TextEncoder().encode("gossip-debug-logs v1");k="${key}"`,
+        },
+      ],
+      markersFor({ VITE_DEBUG_LOGS_PUBLIC_KEY: key })
+    );
+    expect(found.map((v: { marker: string }) => v.marker)).toEqual([
+      'gossip-debug-logs v1',
+      key,
     ]);
   });
 });
