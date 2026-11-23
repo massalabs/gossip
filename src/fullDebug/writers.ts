@@ -90,7 +90,8 @@ export function nativeBackend(): RecordBackend {
     },
     setCap: bytes => plugin.setCap({ bytes }),
     clear: () => plugin.clear(),
-    takeNativeErrors: async () => (await plugin.takeNativeErrors()).errors ?? [],
+    takeNativeErrors: async () =>
+      (await plugin.takeNativeErrors()).errors ?? [],
     setWebInfo: info => plugin.setWebInfo(info),
   };
 }
@@ -197,9 +198,7 @@ export function memoryBackend(
     }),
     source: {
       prepare: async ({ strip, fromLine }) => {
-        const picked = lines.filter(
-          (l, i) => i === 0 || lineN(l) >= fromLine
-        );
+        const picked = lines.filter((l, i) => i === 0 || lineN(l) >= fromLine);
         const text =
           picked.map(l => (strip ? stripLine(l) : l)).join('\n') + '\n';
         const { data, sha256 } = await gzipAndHash(text);

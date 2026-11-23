@@ -188,7 +188,9 @@ export async function shareRecord(includeSecrets: boolean): Promise<void> {
   for (let n = 0; n < prepared.pieces; n++) {
     parts.push((await backend.source.readPiece(n)) as BlobPart);
   }
-  const url = URL.createObjectURL(new Blob(parts, { type: 'application/gzip' }));
+  const url = URL.createObjectURL(
+    new Blob(parts, { type: 'application/gzip' })
+  );
   const a = document.createElement('a');
   a.href = url;
   a.download = `gossip-debug-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl.gz`;

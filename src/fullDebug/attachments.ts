@@ -3,12 +3,7 @@
  * 512 KiB slices, never whole, with an incremental SHA-256.
  */
 import { sha256 } from '@noble/hashes/sha2';
-import {
-  attachmentName,
-  pieceCount,
-  PIECE,
-  type Attachment,
-} from './upload';
+import { attachmentName, pieceCount, PIECE, type Attachment } from './upload';
 
 function toHex(bytes: Uint8Array): string {
   let s = '';
@@ -18,7 +13,9 @@ function toHex(bytes: Uint8Array): string {
 
 async function slice(file: Blob, n: number): Promise<Uint8Array> {
   return new Uint8Array(
-    await file.slice(n * PIECE, Math.min(file.size, (n + 1) * PIECE)).arrayBuffer()
+    await file
+      .slice(n * PIECE, Math.min(file.size, (n + 1) * PIECE))
+      .arrayBuffer()
   );
 }
 

@@ -5,7 +5,13 @@
  * as a warning (never as an error, so it cannot open the pop-up again) and
  * hides them.
  */
-import { Component, StrictMode, useEffect, useState, type ReactNode } from 'react';
+import {
+  Component,
+  StrictMode,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
 import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import {
@@ -19,7 +25,10 @@ import {
 import { FULL_DEBUG_NS } from '../texts';
 import SendDialog from './SendDialog';
 
-class Guard extends Component<{ children: ReactNode; where: string }, { failed: boolean }> {
+class Guard extends Component<
+  { children: ReactNode; where: string },
+  { failed: boolean }
+> {
   state = { failed: false };
   static getDerivedStateFromError(): { failed: boolean } {
     return { failed: true };

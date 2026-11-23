@@ -22,7 +22,34 @@ list only with their explicit approval.
 | `scripts/audit-hosts.mjs dist`                        | after the build    | Every host named by a URL in `dist/**/*.{js,mjs,html,json,webmanifest}` is in `scripts/allowed-hosts.ts`, or is the host of the build's `VITE_GOSSIP_API_URL`.                                                                                                                                                                                                                                                                                                                                                                                             |
 | `scripts/audit-paths.mjs dist`                        | after the build    | No file of `dist/` holds a home directory path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
+| `scripts/audit-full-debug.mjs dist` | after the build | No file of `dist/` holds code of the full debug build: the upload path `/debug-logs`, the `DebugLogFile` plugin, its storage keys or its overlay. `scripts/audit-logging.mjs source` also fails when `VITE_FULL_DEBUG` is `true`. |
+
 Their unit tests are in `test/scripts/`.
+
+## The full debug build
+
+A separate app for testers on fresh accounts (`npm run build:full-debug`,
+`npm run android:full-debug`). It breaks the rules above on purpose: it
+records everything the app does, message content and keys included, in
+`filesDir/debug-logs/` (Android; memory only on the web), and sends the record
+to `<origin of VITE_GOSSIP_API_URL>/debug-logs/` with the secret
+`VITE_DEBUG_LOGS_UPLOAD_SECRET`. What keeps it out of a release:
+
+- One flag: `VITE_FULL_DEBUG=true` (web) and `-PfullDebug=true` (Gradle). All
+  its JS is in `src/fullDebug/`, reached only through `FULL_DEBUG`
+  (`src/config/fullDebug.ts`), a constant the bundler folds, so a normal
+  bundle drops it; `scripts/audit-full-debug.mjs` checks that it did. All its
+  native code is in `android/app/src/fulldebug/`, compiled only with the
+  Gradle flag; `DebugLog` and `MainActivity` reach it behind
+  `BuildConfig.FULL_DEBUG`, a compile-time false elsewhere.
+- A separate app: `net.massa.gossip.debug`, named "Gossip DEBUG", red icon. It
+  installs beside the real app and cannot replace it.
+- Gradle refuses a release or bundle task with `-PfullDebug=true`, and
+  `npm run build` refuses `VITE_FULL_DEBUG=true`.
+- A warning banner that cannot be dismissed on the login, onboarding and
+  settings screens.
+- The upload host is the backend's own host, already allowed: the allowed
+  hosts list is unchanged.
 
 ## Native code
 

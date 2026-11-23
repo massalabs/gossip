@@ -16,7 +16,9 @@ import type { UploadSource } from '../../src/fullDebug/writers';
 const SECRET = 'test-secret';
 
 /** A fake backend that follows the /debug-logs contract. */
-function fakeServer(opts: { failPieceOnce?: number; dropOnDone?: number } = {}) {
+function fakeServer(
+  opts: { failPieceOnce?: number; dropOnDone?: number } = {}
+) {
   const pieces = new Map<string, Uint8Array>();
   let failed = false;
   let dropped = false;
@@ -34,7 +36,10 @@ function fakeServer(opts: { failPieceOnce?: number; dropOnDone?: number } = {}) 
     if (!m) return res(404);
     const rest = m[3];
     let p: RegExpExecArray | null;
-    if ((p = /^(?:attachment\/([\w.-]+)\/)?piece\/(\d+)$/.exec(rest)) && init.method === 'PUT') {
+    if (
+      (p = /^(?:attachment\/([\w.-]+)\/)?piece\/(\d+)$/.exec(rest)) &&
+      init.method === 'PUT'
+    ) {
       const n = Number(p[2]);
       if (!p[1] && n === opts.failPieceOnce && !failed) {
         failed = true;
@@ -43,10 +48,15 @@ function fakeServer(opts: { failPieceOnce?: number; dropOnDone?: number } = {}) 
       pieces.set(`${p[1] ?? ''}#${n}`, new Uint8Array(init.body as Uint8Array));
       return res(204);
     }
-    if ((p = /^(?:attachment\/([\w.-]+)\/)?pieces$/.exec(rest)) && init.method === 'GET') {
+    if (
+      (p = /^(?:attachment\/([\w.-]+)\/)?pieces$/.exec(rest)) &&
+      init.method === 'GET'
+    ) {
       const prefix = `${p[1] ?? ''}#`;
       return res(200, {
-        pieces: [...pieces.keys()].filter(k => k.startsWith(prefix)).map(k => Number(k.slice(prefix.length))),
+        pieces: [...pieces.keys()]
+          .filter(k => k.startsWith(prefix))
+          .map(k => Number(k.slice(prefix.length))),
       });
     }
     if (rest === 'done' && init.method === 'POST') {
@@ -66,11 +76,13 @@ function fakeServer(opts: { failPieceOnce?: number; dropOnDone?: number } = {}) 
       };
       const log = join('', body.pieces);
       if (!log) return res(409, { missing: 'log' });
-      if (createHash('sha256').update(log).digest('hex') !== body.sha256) return res(400);
+      if (createHash('sha256').update(log).digest('hex') !== body.sha256)
+        return res(400);
       for (const a of body.attachments) {
         const data = join(a.name, a.pieces);
         if (!data) return res(409);
-        if (createHash('sha256').update(data).digest('hex') !== a.sha256) return res(400);
+        if (createHash('sha256').update(data).digest('hex') !== a.sha256)
+          return res(400);
       }
       return res(200, { size: log.length });
     }
@@ -133,19 +145,42 @@ describe('debug log upload', () => {
     };
     const progress: number[] = [];
     const size = await runUpload(
-      { base, secret: SECRET, source: source(data), fetch: server.fetch, sleep: noSleep, onProgress: d => progress.push(d) },
+      {
+        base,
+        secret: SECRET,
+        source: source(data),
+        fetch: server.fetch,
+        sleep: noSleep,
+        onProgress: d => progress.push(d),
+      },
       makeJob(data, [attachment])
     );
     expect(size).toBe(data.length);
-    expect(server.calls.filter(c => c.startsWith('PUT') && !c.includes('attachment')).length).toBe(pieceCount(data.length));
-    expect(server.calls.filter(c => c.includes('/attachment/a1-screen_shot.png/piece/')).length).toBe(2);
+    expect(
+      server.calls.filter(c => c.startsWith('PUT') && !c.includes('attachment'))
+        .length
+    ).toBe(pieceCount(data.length));
+    expect(
+      server.calls.filter(c =>
+        c.includes('/attachment/a1-screen_shot.png/piece/')
+      ).length
+    ).toBe(2);
     expect(progress.at(-1)).toBe(data.length + blob.length);
   });
 
   it('retries a failed piece', async () => {
     const data = bytes(3 * PIECE);
     const server = fakeServer({ failPieceOnce: 1 });
-    await runUpload({ base, secret: SECRET, source: source(data), fetch: server.fetch, sleep: noSleep }, makeJob(data));
+    await runUpload(
+      {
+        base,
+        secret: SECRET,
+        source: source(data),
+        fetch: server.fetch,
+        sleep: noSleep,
+      },
+      makeJob(data)
+    );
     expect(server.calls.filter(c => c.endsWith('/piece/1')).length).toBe(2);
   });
 
@@ -154,10 +189,29 @@ describe('debug log upload', () => {
     const server = fakeServer({ failPieceOnce: 2 });
     const job = makeJob(data);
     await expect(
-      runUpload({ base, secret: SECRET, source: source(data), fetch: server.fetch, sleep: noSleep, attempts: 1 }, job)
+      runUpload(
+        {
+          base,
+          secret: SECRET,
+          source: source(data),
+          fetch: server.fetch,
+          sleep: noSleep,
+          attempts: 1,
+        },
+        job
+      )
     ).rejects.toThrow();
     server.calls.length = 0;
-    await runUpload({ base, secret: SECRET, source: source(data), fetch: server.fetch, sleep: noSleep }, job);
+    await runUpload(
+      {
+        base,
+        secret: SECRET,
+        source: source(data),
+        fetch: server.fetch,
+        sleep: noSleep,
+      },
+      job
+    );
     expect(server.calls[0]).toContain('GET');
     const puts = server.calls.filter(c => c.startsWith('PUT'));
     expect(puts).toEqual([`PUT ${base}/inst_1/up-1/piece/2`]);
@@ -166,7 +220,16 @@ describe('debug log upload', () => {
   it('sends the missing pieces again on 409', async () => {
     const data = bytes(2 * PIECE + 5);
     const server = fakeServer({ dropOnDone: 1 });
-    const size = await runUpload({ base, secret: SECRET, source: source(data), fetch: server.fetch, sleep: noSleep }, makeJob(data));
+    const size = await runUpload(
+      {
+        base,
+        secret: SECRET,
+        source: source(data),
+        fetch: server.fetch,
+        sleep: noSleep,
+      },
+      makeJob(data)
+    );
     expect(size).toBe(data.length);
     expect(server.calls.filter(c => c.endsWith('/piece/1')).length).toBe(2);
     expect(server.calls.filter(c => c.endsWith('/done')).length).toBe(2);
@@ -176,13 +239,29 @@ describe('debug log upload', () => {
     const data = bytes(10);
     const server = fakeServer();
     await expect(
-      runUpload({ base, secret: 'wrong', source: source(data), fetch: server.fetch, sleep: noSleep }, makeJob(data))
+      runUpload(
+        {
+          base,
+          secret: 'wrong',
+          source: source(data),
+          fetch: server.fetch,
+          sleep: noSleep,
+        },
+        makeJob(data)
+      )
     ).rejects.toMatchObject({ status: 401 });
     expect(server.calls.length).toBe(1);
   });
 
   it('derives safe attachment names', () => {
-    for (const n of ['../../etc/passwd', '.hidden', 'Capture d’écran 2026.png', '', 'x'.repeat(200), '视频.mp4']) {
+    for (const n of [
+      '../../etc/passwd',
+      '.hidden',
+      'Capture d’écran 2026.png',
+      '',
+      'x'.repeat(200),
+      '视频.mp4',
+    ]) {
       expect(attachmentName(3, n)).toMatch(ATTACHMENT_NAME);
     }
     expect(attachmentName(2, 'clip.mp4')).toBe('a2-clip.mp4');

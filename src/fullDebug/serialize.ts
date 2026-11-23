@@ -44,7 +44,11 @@ function errorValue(
     if (cause !== undefined) out.cause = toJsonValue(cause, seen, depth + 1);
     for (const key of Object.keys(e)) {
       if (key in out) continue;
-      out[key] = toJsonValue((e as unknown as Record<string, unknown>)[key], seen, depth + 1);
+      out[key] = toJsonValue(
+        (e as unknown as Record<string, unknown>)[key],
+        seen,
+        depth + 1
+      );
     }
   } catch {
     // keep what we have
@@ -114,14 +118,19 @@ export function toJsonValue(
         );
       }
       if (obj instanceof Date) {
-        return Number.isNaN(obj.getTime()) ? '[invalid date]' : obj.toISOString();
+        return Number.isNaN(obj.getTime())
+          ? '[invalid date]'
+          : obj.toISOString();
       }
       if (obj instanceof Map) {
         const out: unknown[] = [];
         let i = 0;
         for (const [k, v] of obj) {
           if (i++ >= MAX_KEYS) break;
-          out.push([toJsonValue(k, seen, depth + 1), toJsonValue(v, seen, depth + 1)]);
+          out.push([
+            toJsonValue(k, seen, depth + 1),
+            toJsonValue(v, seen, depth + 1),
+          ]);
         }
         return { map: out, size: obj.size };
       }
@@ -137,7 +146,8 @@ export function toJsonValue(
       if (Array.isArray(obj)) {
         const n = Math.min(obj.length, MAX_KEYS);
         const out: unknown[] = new Array(n);
-        for (let i = 0; i < n; i++) out[i] = toJsonValue(obj[i], seen, depth + 1);
+        for (let i = 0; i < n; i++)
+          out[i] = toJsonValue(obj[i], seen, depth + 1);
         if (obj.length > n) out.push(`[${obj.length - n} more]`);
         return out;
       }
@@ -217,7 +227,9 @@ export function sourceOfMessage(message: unknown): 'app' | 'sdk' {
   if (typeof message !== 'string') return 'app';
   // The SDK's Logger instances prefix `[XxxService]` (gossip-sdk/src); the
   // shared logger cannot tell more, so anything else counts as the app.
-  return /^\[(?:\w*Service|SeekerConflicts|GossipSdk|SdkPolling|SecureStorage|SDK)[\]:]/.test(message)
+  return /^\[(?:\w*Service|SeekerConflicts|GossipSdk|SdkPolling|SecureStorage|SDK)[\]:]/.test(
+    message
+  )
     ? 'sdk'
     : 'app';
 }
@@ -232,7 +244,10 @@ export function logCallToEvent(
   let rest = args.slice(1);
   if (typeof msg !== 'string') {
     rest = args.slice();
-    msg = msg instanceof Error ? `${safeString(() => msg && (msg as Error).message)}` : '';
+    msg =
+      msg instanceof Error
+        ? `${safeString(() => msg && (msg as Error).message)}`
+        : '';
   }
   const f: Record<string, unknown> = { msg };
   if (rest.length > 0) f.args = rest;

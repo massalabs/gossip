@@ -91,9 +91,7 @@ export function dtime<T>(
     dlog(
       src,
       ev,
-      outcome === 'ok'
-        ? { ...fields, outcome }
-        : { ...fields, outcome, error },
+      outcome === 'ok' ? { ...fields, outcome } : { ...fields, outcome, error },
       { lvl: outcome === 'ok' ? 'debug' : 'error', dur }
     );
   };

@@ -34,7 +34,11 @@ describe('recorder', () => {
   it('batches by count and flushes at once on error', async () => {
     const { w, appended } = writer();
     const timers: (() => void)[] = [];
-    const r = new Recorder({ writer: w, maxLines: 3, setTimer: fn => timers.push(fn) });
+    const r = new Recorder({
+      writer: w,
+      maxLines: 3,
+      setTimer: fn => timers.push(fn),
+    });
     r.record({ src: 'app', ev: 'a', lvl: 'debug', f: {} });
     r.record({ src: 'app', ev: 'b', lvl: 'debug', f: {} });
     expect(appended.length).toBe(0);
@@ -60,7 +64,9 @@ describe('recorder', () => {
       r.record({ src: 'ui', ev: 'inner', lvl: 'error', f: {} });
       throw new Error('listener broken');
     });
-    expect(() => r.record({ src: 'app', ev: 'x', lvl: 'error', f: {} })).not.toThrow();
+    expect(() =>
+      r.record({ src: 'app', ev: 'x', lvl: 'error', f: {} })
+    ).not.toThrow();
     expect(calls).toBe(1);
     r.record({ src: 'app', ev: 'y', lvl: 'error', f: {} });
     expect(calls).toBe(2);

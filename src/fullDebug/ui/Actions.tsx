@@ -14,7 +14,11 @@ const GIB = 1024 * 1024 * 1024;
 const CAP_CHOICES = [1, 2, 5];
 const CAP_KEY = 'gossip-full-debug-cap-gib';
 
-export default function FullDebugActions({ settings = false }: { settings?: boolean }) {
+export default function FullDebugActions({
+  settings = false,
+}: {
+  settings?: boolean;
+}) {
   const { t } = useTranslation(FULL_DEBUG_NS);
   const [cap, setCap] = useState<number>(() => {
     try {

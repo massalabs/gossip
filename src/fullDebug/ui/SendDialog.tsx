@@ -173,7 +173,9 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
                     type="button"
                     disabled={busy}
                     className="underline text-muted-foreground"
-                    onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+                    onClick={() =>
+                      setFiles(prev => prev.filter((_, j) => j !== i))
+                    }
                   >
                     {t('remove_file')}
                   </button>
@@ -184,8 +186,10 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <p className="mt-3 text-xs text-muted-foreground">
-          {recordBytes !== null && t('size_logs', { size: formatBytes(recordBytes) })}
-          {files.length > 0 && ` · ${t('size_files', { size: formatBytes(filesSize) })}`}
+          {recordBytes !== null &&
+            t('size_logs', { size: formatBytes(recordBytes) })}
+          {files.length > 0 &&
+            ` · ${t('size_files', { size: formatBytes(filesSize) })}`}
         </p>
 
         {!configured && (
@@ -204,7 +208,9 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
         {status.kind === 'done' && (
-          <p className="mt-3 text-sm text-green-600">{t('success', { ref: status.ref })}</p>
+          <p className="mt-3 text-sm text-green-600">
+            {t('success', { ref: status.ref })}
+          </p>
         )}
         {status.kind === 'failed' && (
           <p className="mt-3 text-sm text-destructive break-words">

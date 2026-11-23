@@ -100,7 +100,9 @@ export async function bootFullDebug(): Promise<void> {
     void recorder.flushAll();
   };
   document.addEventListener('visibilitychange', () => {
-    lifecycle(document.visibilityState === 'hidden' ? 'background' : 'foreground');
+    lifecycle(
+      document.visibilityState === 'hidden' ? 'background' : 'foreground'
+    );
     if (document.visibilityState === 'visible') void checkNativeErrors();
   });
   window.addEventListener('pagehide', () => lifecycle('pagehide'));

@@ -6,14 +6,30 @@ import {
   toJsonValue,
   MAX_BYTES_HEX,
 } from '../../src/fullDebug/serialize';
-import { dlog, dtime, setDebugLogSink } from '../../gossip-sdk/src/utils/debugLog';
+import {
+  dlog,
+  dtime,
+  setDebugLogSink,
+} from '../../gossip-sdk/src/utils/debugLog';
 
 describe('full debug line serialiser', () => {
   it('writes the fields of the line format', () => {
     const line = JSON.parse(
-      serializeEvent({ src: 'engine', ev: 'x.y', lvl: 'debug', dur: 3, f: { a: 1 } })
+      serializeEvent({
+        src: 'engine',
+        ev: 'x.y',
+        lvl: 'debug',
+        dur: 3,
+        f: { a: 1 },
+      })
     );
-    expect(line).toMatchObject({ src: 'engine', ev: 'x.y', lvl: 'debug', dur: 3, f: { a: 1 } });
+    expect(line).toMatchObject({
+      src: 'engine',
+      ev: 'x.y',
+      lvl: 'debug',
+      dur: 3,
+      f: { a: 1 },
+    });
     expect(typeof line.t).toBe('number');
     expect(typeof line.up).toBe('number');
     expect(line.n).toBeUndefined();
@@ -55,10 +71,17 @@ describe('full debug line serialiser', () => {
       'x'.repeat(300_000),
     ];
     for (const value of odd) {
-      const s = serializeEvent({ src: 'app', ev: 'log', lvl: 'info', f: { value } });
+      const s = serializeEvent({
+        src: 'app',
+        ev: 'log',
+        lvl: 'info',
+        f: { value },
+      });
       expect(() => JSON.parse(s)).not.toThrow();
     }
-    const c = JSON.parse(serializeEvent({ src: 'app', ev: 'log', lvl: 'info', f: { circular } }));
+    const c = JSON.parse(
+      serializeEvent({ src: 'app', ev: 'log', lvl: 'info', f: { circular } })
+    );
     expect(c.f.circular.self).toBe('[circular]');
     const e = toJsonValue(err) as Record<string, unknown>;
     expect(e.name).toBe('Error');
@@ -68,7 +91,10 @@ describe('full debug line serialiser', () => {
   });
 
   it('writes bytes as hex, capped, with the real length', () => {
-    expect(toJsonValue(new Uint8Array([0, 15, 255]))).toEqual({ hex: '000fff', length: 3 });
+    expect(toJsonValue(new Uint8Array([0, 15, 255]))).toEqual({
+      hex: '000fff',
+      length: 3,
+    });
     const big = toJsonValue(new Uint8Array(MAX_BYTES_HEX + 10)) as {
       hex: string;
       length: number;
@@ -81,12 +107,24 @@ describe('full debug line serialiser', () => {
 
   it('keeps a value seen twice (not a cycle)', () => {
     const shared = { x: 1 };
-    expect(toJsonValue({ a: shared, b: shared })).toEqual({ a: { x: 1 }, b: { x: 1 } });
+    expect(toJsonValue({ a: shared, b: shared })).toEqual({
+      a: { x: 1 },
+      b: { x: 1 },
+    });
   });
 
   it('maps an existing logger call to ev:"log"', () => {
-    const ev = logCallToEvent('error', ['[GossipSdk] failed', new Error('e'), 3]);
-    expect(ev).toMatchObject({ src: 'sdk', ev: 'log', lvl: 'error', f: { msg: '[GossipSdk] failed' } });
+    const ev = logCallToEvent('error', [
+      '[GossipSdk] failed',
+      new Error('e'),
+      3,
+    ]);
+    expect(ev).toMatchObject({
+      src: 'sdk',
+      ev: 'log',
+      lvl: 'error',
+      f: { msg: '[GossipSdk] failed' },
+    });
     expect((ev.f.args as unknown[]).length).toBe(2);
     expect(logCallToEvent('info', ['plain']).src).toBe('app');
     expect(logCallToEvent('info', [new Error('only')]).f.msg).toBe('only');
@@ -95,8 +133,14 @@ describe('full debug line serialiser', () => {
 
 describe('strip of content and secrets', () => {
   it('removes f.c and f.s and keeps the rest', () => {
-    const line = '{"n":1,"src":"a","ev":"b","f":{"id":"x","c":{"text":"hi"},"s":{"key":"k"}}}';
-    expect(JSON.parse(stripLine(line))).toEqual({ n: 1, src: 'a', ev: 'b', f: { id: 'x' } });
+    const line =
+      '{"n":1,"src":"a","ev":"b","f":{"id":"x","c":{"text":"hi"},"s":{"key":"k"}}}';
+    expect(JSON.parse(stripLine(line))).toEqual({
+      n: 1,
+      src: 'a',
+      ev: 'b',
+      f: { id: 'x' },
+    });
   });
   it('leaves other lines unchanged, and lines that do not parse', () => {
     const plain = '{"n":2,"f":{"msg":"\\"c\\": not a field"}}';
@@ -113,8 +157,18 @@ describe('dlog / dtime', () => {
     expect(dtime('app', 'y', () => 5)).toBe(5);
     const seen: unknown[] = [];
     setDebugLogSink(e => seen.push(e));
-    dlog('sdk', 'ev', { a: 1 }, { lvl: 'warn', c: { text: 't' }, s: { key: 'k' } });
-    expect(seen[0]).toEqual({ src: 'sdk', ev: 'ev', lvl: 'warn', f: { a: 1, c: { text: 't' }, s: { key: 'k' } } });
+    dlog(
+      'sdk',
+      'ev',
+      { a: 1 },
+      { lvl: 'warn', c: { text: 't' }, s: { key: 'k' } }
+    );
+    expect(seen[0]).toEqual({
+      src: 'sdk',
+      ev: 'ev',
+      lvl: 'warn',
+      f: { a: 1, c: { text: 't' }, s: { key: 'k' } },
+    });
     await expect(dtime('a', 'b', async () => 7)).resolves.toBe(7);
     await expect(
       dtime('a', 'c', async () => {
@@ -122,7 +176,9 @@ describe('dlog / dtime', () => {
       })
     ).rejects.toThrow('no');
     expect(seen.length).toBe(3);
-    expect((seen[2] as { lvl: string; f: { outcome: string } }).f.outcome).toBe('error');
+    expect((seen[2] as { lvl: string; f: { outcome: string } }).f.outcome).toBe(
+      'error'
+    );
     setDebugLogSink(() => {
       throw new Error('sink broken');
     });

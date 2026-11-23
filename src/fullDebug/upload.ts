@@ -114,7 +114,10 @@ function headers(o: UploadOptions, type?: string): Record<string, string> {
   return h;
 }
 
-async function withRetry<T>(o: UploadOptions, fn: () => Promise<T>): Promise<T> {
+async function withRetry<T>(
+  o: UploadOptions,
+  fn: () => Promise<T>
+): Promise<T> {
   const attempts = o.attempts ?? 4;
   const sleep =
     o.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)));
