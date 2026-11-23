@@ -29,6 +29,7 @@ object FullDebug {
                 false,
             )
             recordPreviousExits(context)
+            (context.applicationContext as? android.app.Application)?.let { PermissionLog.install(it) }
         } catch (t: Throwable) {
             // never into the app
         }
