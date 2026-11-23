@@ -1,4 +1,5 @@
 import path from 'path';
+import { createPublicKey } from 'node:crypto';
 import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { transformSync } from 'esbuild';
@@ -90,6 +91,40 @@ function stripReleaseConsolePlugin(): Plugin {
       }
     },
   };
+}
+
+/**
+ * The full debug build encrypts every send to the developers' public key
+ * (src/fullDebug/gdl1.ts): without a valid key it must not build at all, so
+ * that no tester ever holds an app that cannot send, or that sends plaintext.
+ */
+function checkFullDebugKey(mode: string): void {
+  const env = loadEnv(mode, process.cwd(), 'VITE_');
+  if (env.VITE_FULL_DEBUG !== 'true') return;
+  const b64 = (env.VITE_DEBUG_LOGS_PUBLIC_KEY ?? '').replace(/\s+/g, '');
+  const fail = (why: string) => {
+    throw new Error(
+      `Full debug build refused: ${why}. Set VITE_DEBUG_LOGS_PUBLIC_KEY to the ` +
+        'base64 DER (SubjectPublicKeyInfo, the PEM body on one line) of the ' +
+        "developers' P-256 public key. The full debug app encrypts every send " +
+        'to it and has no plaintext fallback.'
+    );
+  };
+  if (!b64) fail('VITE_DEBUG_LOGS_PUBLIC_KEY is not set');
+  try {
+    const key = createPublicKey({
+      key: Buffer.from(b64, 'base64'),
+      format: 'der',
+      type: 'spki',
+    });
+    if (key.asymmetricKeyDetails?.namedCurve !== 'prime256v1') {
+      fail('VITE_DEBUG_LOGS_PUBLIC_KEY is not a P-256 key');
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Full debug'))
+      throw error;
+    fail('VITE_DEBUG_LOGS_PUBLIC_KEY is not a public key in base64 DER');
+  }
 }
 
 // https://vitejs.dev/config/
@@ -239,6 +274,7 @@ const config = defineConfig({
 });
 
 export default defineConfig(({ command, mode, isPreview }) => {
+  checkFullDebugKey(mode);
   // Native live reload uses DEV_SERVER_URL and retains its existing configuration.
   if (command !== 'serve' || isPreview || process.env.DEV_SERVER_URL)
     return config;

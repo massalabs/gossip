@@ -29,5 +29,6 @@
   "share_instead": "改为分享文件",
   "success": "已发送，谢谢。编号：{{ref}}",
   "failure": "发送失败：{{error}}",
-  "not_configured": "此版本没有上传地址或密钥：请使用“改为分享文件”。"
+  "not_configured": "此版本没有上传地址或密钥：请使用“改为分享文件”。",
+  "no_key": "无法发送：{{error}}"
 }

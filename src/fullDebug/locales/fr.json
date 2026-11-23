@@ -29,5 +29,6 @@
   "share_instead": "Partager le fichier à la place",
   "success": "Envoyé, merci. Référence : {{ref}}",
   "failure": "L'envoi a échoué : {{error}}",
-  "not_configured": "Cette version n'a pas d'adresse ou de secret d'envoi : utilisez « Partager le fichier à la place »."
+  "not_configured": "Cette version n'a pas d'adresse ou de secret d'envoi : utilisez « Partager le fichier à la place ».",
+  "no_key": "Envoi impossible : {{error}}"
 }

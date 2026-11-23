@@ -29,5 +29,6 @@
   "share_instead": "Share the file instead",
   "success": "Sent, thank you. Reference: {{ref}}",
   "failure": "The send failed: {{error}}",
-  "not_configured": "This build has no upload address or secret: use “Share the file instead”."
+  "not_configured": "This build has no upload address or secret: use “Share the file instead”.",
+  "no_key": "Sending is off: {{error}}"
 }

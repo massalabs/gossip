@@ -9,9 +9,11 @@
  *        {"pieces","sha256","attachments":[{"name","pieces","sha256"}],"meta"}
  *        -> 200 {"size"}; 409: pieces missing, send them again
  *
- * All with `Authorization: Bearer <secret>`. The log is one gzip stream and
- * each attachment one file, both cut into 512 KiB pieces; a failed send
- * resumes with the same upload id and only the pieces the server lacks.
+ * All with `Authorization: Bearer <secret>`. The log (one gzip stream) and
+ * each attachment are each one GDL1 file, encrypted to the developers' key
+ * (gdl1.ts) before this point: the server receives, hashes and stores only
+ * ciphertext. Each is cut into 512 KiB pieces; a failed send resumes with
+ * the same upload id and only the pieces the server lacks.
  */
 import type { UploadPrepared, UploadSource } from './writers';
 
@@ -27,13 +29,16 @@ export type FetchLike = (
   init: { method: string; headers: Record<string, string>; body?: BodyInit }
 ) => Promise<{ status: number; ok: boolean; json(): Promise<unknown> }>;
 
-/** One file to attach, read piece by piece (never whole). */
+/** One file to attach, read piece by piece (never whole), encrypted. */
 export interface Attachment {
   /** Safe name on the server, see attachmentName. */
   name: string;
   originalName: string;
   type: string;
+  /** Bytes sent: the GDL1 file. `pieces`, `sha256` and `readPiece` are of it. */
   size: number;
+  /** Bytes of the file as picked. */
+  plainSize: number;
   pieces: number;
   sha256: string;
   readPiece(n: number): Promise<Uint8Array>;

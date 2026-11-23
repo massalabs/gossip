@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { fullDebug, recordUiFailure } from '../state';
 import { FULL_DEBUG_NS } from '../texts';
 import {
+  debugLogsRecipient,
   lastSentLine,
   sendRecord,
   shareRecord,
@@ -12,7 +13,7 @@ import {
 } from '../send';
 import { MAX_ATTACHMENTS } from '../upload';
 
-export function formatBytes(n: number): string {
+function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`;
@@ -36,9 +37,18 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const input = useRef<HTMLInputElement>(null);
   const configured = uploadConfig() !== null;
+  // null: checking; '': the built-in key is valid; else why it is not.
+  const [keyProblem, setKeyProblem] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
+    debugLogsRecipient()
+      .then(() => live && setKeyProblem(''))
+      .catch(
+        (error: unknown) =>
+          live &&
+          setKeyProblem(error instanceof Error ? error.message : String(error))
+      );
     fullDebug.backend
       ?.stats()
       .then(s => live && setRecordBytes(s.bytes))
@@ -49,6 +59,7 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
   }, []);
 
   const busy = status.kind === 'busy';
+  const keyOk = keyProblem === '';
 
   const send = async () => {
     setStatus({ kind: 'busy', phase: { phase: 'preparing' } });
@@ -195,6 +206,11 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
         {!configured && (
           <p className="mt-2 text-xs text-destructive">{t('not_configured')}</p>
         )}
+        {keyProblem && (
+          <p className="mt-2 text-xs text-destructive break-words">
+            {t('no_key', { error: keyProblem })}
+          </p>
+        )}
 
         {progress && (
           <div className="mt-3">
@@ -222,8 +238,8 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
           {status.kind !== 'done' && (
             <button
               type="button"
-              className="rounded-full border border-border px-4 py-2 text-sm"
-              disabled={busy}
+              className="rounded-full border border-border px-4 py-2 text-sm disabled:opacity-50"
+              disabled={busy || !keyOk}
               onClick={() => void share()}
             >
               {t('share_instead')}
@@ -241,7 +257,7 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               className="rounded-full bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
-              disabled={busy}
+              disabled={busy || !keyOk}
               onClick={() => void send()}
             >
               {status.kind === 'failed' ? t('retry') : t('send')}

@@ -4,12 +4,22 @@
  */
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import type { RecordWriter } from './recorder';
+import { encryptBytes, GDL1, type Gdl1Recipient } from './gdl1';
 
+/**
+ * The prepared log: one gzip stream, encrypted (GDL1, see gdl1.ts). `size`,
+ * `pieces` and `sha256` are of the encrypted file, as sent; `plainSize` and
+ * `plainSha256` of the gzip stream inside it.
+ */
 export interface UploadPrepared {
+  /** "GDL1": the file is encrypted. Anything else is refused by send.ts. */
+  enc: string;
   size: number;
   pieces: number;
   pieceSize: number;
   sha256: string;
+  plainSize: number;
+  plainSha256: string;
   fromLine: number;
   toLine: number;
   rawBytes: number;
@@ -39,17 +49,25 @@ export interface DebugLogFilePlugin {
   clear(): Promise<void>;
   setWebInfo(o: Record<string, unknown>): Promise<void>;
   takeNativeErrors(): Promise<{ errors: string[] }>;
+  /** `recipientKey`: base64 DER of the public key to encrypt to. */
   prepareUpload(o: {
     strip: boolean;
     fromLine: number;
+    recipientKey: string;
   }): Promise<UploadPrepared>;
   readPiece(o: { n: number }): Promise<{ data: string }>;
   discardUpload(): Promise<void>;
 }
 
-/** Source of an upload: one gzip stream, read piece by piece. */
+export interface PrepareOptions {
+  strip: boolean;
+  fromLine: number;
+  recipient: Gdl1Recipient;
+}
+
+/** Source of an upload: one encrypted gzip stream, read piece by piece. */
 export interface UploadSource {
-  prepare(o: { strip: boolean; fromLine: number }): Promise<UploadPrepared>;
+  prepare(o: PrepareOptions): Promise<UploadPrepared>;
   readPiece(n: number): Promise<Uint8Array>;
   discard(): Promise<void>;
 }
@@ -84,7 +102,12 @@ export function nativeBackend(): RecordBackend {
     },
     stats: () => plugin.stats(),
     source: {
-      prepare: o => plugin.prepareUpload(o),
+      prepare: o =>
+        plugin.prepareUpload({
+          strip: o.strip,
+          fromLine: o.fromLine,
+          recipientKey: o.recipient.base64,
+        }),
       readPiece: async n => base64ToBytes((await plugin.readPiece({ n })).data),
       discard: () => plugin.discardUpload(),
     },
@@ -121,18 +144,39 @@ export function webInstallId(): string {
   }
 }
 
-/** gzip of `chunks`, with its SHA-256, in memory (web only: small). */
-export async function gzipAndHash(
-  text: string
-): Promise<{ data: Uint8Array; sha256: string }> {
+async function sha256Hex(data: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', data.slice().buffer as ArrayBuffer)
+  );
+  let s = '';
+  for (const b of digest) s += b.toString(16).padStart(2, '0');
+  return s;
+}
+
+/**
+ * gzip of `text`, encrypted to `recipient`, with both SHA-256, in memory
+ * (web only: small).
+ */
+export async function gzipEncryptAndHash(
+  text: string,
+  recipient: Gdl1Recipient
+): Promise<{
+  data: Uint8Array;
+  sha256: string;
+  plainSize: number;
+  plainSha256: string;
+}> {
   const stream = new Blob([text])
     .stream()
     .pipeThrough(new CompressionStream('gzip'));
-  const data = new Uint8Array(await new Response(stream).arrayBuffer());
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
-  let sha256 = '';
-  for (const b of digest) sha256 += b.toString(16).padStart(2, '0');
-  return { data, sha256 };
+  const gz = new Uint8Array(await new Response(stream).arrayBuffer());
+  const data = await encryptBytes(gz, recipient);
+  return {
+    data,
+    sha256: await sha256Hex(data),
+    plainSize: gz.length,
+    plainSha256: await sha256Hex(gz),
+  };
 }
 
 export function memoryBackend(
@@ -197,17 +241,21 @@ export function memoryBackend(
       cap: MEMORY_MAX_BYTES,
     }),
     source: {
-      prepare: async ({ strip, fromLine }) => {
+      prepare: async ({ strip, fromLine, recipient }) => {
         const picked = lines.filter((l, i) => i === 0 || lineN(l) >= fromLine);
         const text =
           picked.map(l => (strip ? stripLine(l) : l)).join('\n') + '\n';
-        const { data, sha256 } = await gzipAndHash(text);
+        const { data, sha256, plainSize, plainSha256 } =
+          await gzipEncryptAndHash(text, recipient);
         prepared = data;
         return {
+          enc: GDL1,
           size: data.length,
           pieces: Math.ceil(data.length / PIECE_SIZE),
           pieceSize: PIECE_SIZE,
           sha256,
+          plainSize,
+          plainSha256,
           fromLine: picked.length ? lineN(picked[0]) : 0,
           toLine: n,
           rawBytes: text.length,

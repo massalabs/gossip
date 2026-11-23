@@ -1,7 +1,12 @@
 /**
  * One send of the record, as the dialog drives it: prepare (flush, gzip,
- * cut), read the attached files' hashes, upload, remember what was sent.
- * Self-contained: no account, database, engine or SDK session.
+ * encrypt, cut), encrypt and hash the attached files, upload, remember what
+ * was sent. Self-contained: no account, database, engine or SDK session.
+ *
+ * Everything that leaves the phone, by upload or through "share the file
+ * instead", is encrypted to the developers' public key built in with
+ * VITE_DEBUG_LOGS_PUBLIC_KEY (GDL1, see gdl1.ts). Without a valid key
+ * nothing is sent: there is no plaintext fallback.
  */
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -15,6 +20,8 @@ import {
   type UploadJob,
 } from './upload';
 import { fileAttachment } from './attachments';
+import { GDL1, importRecipient, type Gdl1Recipient } from './gdl1';
+import type { UploadPrepared } from './writers';
 import { APP_BUILD_ID, APP_VERSION } from '../config/version';
 
 const LAST_SENT_KEY = 'gossip-full-debug-last-sent-line';
@@ -32,6 +39,20 @@ export function uploadConfig(): { base: string; secret: string } | null {
   const secret = import.meta.env.VITE_DEBUG_LOGS_UPLOAD_SECRET;
   if (!base || !secret) return null;
   return { base, secret };
+}
+
+/** The built-in public key; rejects when it is missing or invalid. */
+export function debugLogsRecipient(): Promise<Gdl1Recipient> {
+  return importRecipient(import.meta.env.VITE_DEBUG_LOGS_PUBLIC_KEY);
+}
+
+/** Refuses a prepared log that is not encrypted (an outdated native plugin). */
+function checkEncrypted(prepared: UploadPrepared): void {
+  if (prepared.enc !== GDL1) {
+    throw new Error(
+      'the log was not encrypted by this build: nothing was sent'
+    );
+  }
 }
 
 export interface SendRequest {
@@ -68,6 +89,7 @@ export async function sendRecord(
   if (!backend || !recorder) throw new Error('record not started');
   const config = uploadConfig();
   if (!config) throw new Error('no upload address or secret in this build');
+  const recipient = await debugLogsRecipient();
 
   let job: UploadJob;
   if (pending && sameRequest(pending.request, request)) {
@@ -82,6 +104,7 @@ export async function sendRecord(
         includeSecrets: request.includeSecrets,
         onlyNew: request.onlyNew,
         files: request.files.length,
+        keyFp: recipient.fingerprint,
       },
     });
     await recorder.flushAll();
@@ -89,14 +112,16 @@ export async function sendRecord(
     const prepared = await backend.source.prepare({
       strip: !request.includeSecrets,
       fromLine: request.onlyNew ? lastSentLine() + 1 : 0,
+      recipient,
     });
+    checkEncrypted(prepared);
     const total = request.files.reduce((s, f) => s + f.size, 0);
     let before = 0;
     const attachments: Attachment[] = [];
     for (let i = 0; i < request.files.length; i++) {
       const file = request.files[i];
       attachments.push(
-        await fileAttachment(i + 1, file, done =>
+        await fileAttachment(i + 1, file, recipient, done =>
           onPhase({ phase: 'hashing', done: before + done, total })
         )
       );
@@ -109,6 +134,13 @@ export async function sendRecord(
       attachments,
       meta: {
         note: request.note,
+        // The log and every attachment are GDL1 files encrypted to the key
+        // whose DER has this SHA-256; gzipSize/gzipSha256 are of the gzip
+        // stream inside the log's file, to check a decryption.
+        enc: GDL1,
+        keyFp: recipient.fingerprint,
+        gzipSize: prepared.plainSize,
+        gzipSha256: prepared.plainSha256,
         includeSecrets: request.includeSecrets,
         onlyNew: request.onlyNew,
         appVersion: APP_VERSION,
@@ -126,7 +158,8 @@ export async function sendRecord(
           name: a.name,
           originalName: a.originalName,
           type: a.type,
-          size: a.size,
+          size: a.plainSize,
+          encSize: a.size,
         })),
       },
     };
@@ -158,42 +191,85 @@ export async function sendRecord(
   return { upload: job.upload, size };
 }
 
-/** The fallback: the gzip of the record through the system share sheet. */
+/** `gossip-debug-log-<install>-<UTC time>.gdl1` */
+export function shareFileName(install: string, at: Date): string {
+  const time = at
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d+Z$/, 'Z');
+  return `gossip-debug-log-${install}-${time}.gdl1`;
+}
+
+const SHARE_DIR = 'debug-share';
+
+/**
+ * The fallback: the encrypted log (the same GDL1 file as an upload, never a
+ * plaintext export) through the system share sheet, or a download on the
+ * web. Decrypt with scripts/debug-logs-decrypt.mjs --gunzip.
+ */
 export async function shareRecord(includeSecrets: boolean): Promise<void> {
   const backend = fullDebug.backend;
   const recorder = fullDebug.recorder;
   if (!backend || !recorder) throw new Error('record not started');
+  const recipient = await debugLogsRecipient();
   await recorder.flushAll();
-  if (!pending) {
-    await backend.source.prepare({ strip: !includeSecrets, fromLine: 0 });
-  }
+  const install = (await backend.stats()).installId;
+  const name = shareFileName(install, new Date());
   if (backend.kind === 'native') {
+    let prepared = pending?.job.prepared;
+    if (!prepared) {
+      prepared = await backend.source.prepare({
+        strip: !includeSecrets,
+        fromLine: 0,
+        recipient,
+      });
+    }
+    checkEncrypted(prepared);
+    // Shared under its own name; the previous shared copy is removed.
+    await Filesystem.rmdir({
+      path: SHARE_DIR,
+      directory: Directory.Cache,
+      recursive: true,
+    }).catch(() => {});
+    await Filesystem.mkdir({
+      path: SHARE_DIR,
+      directory: Directory.Cache,
+      recursive: true,
+    }).catch(() => {});
+    await Filesystem.copy({
+      from: 'debug-upload/upload.gdl1',
+      directory: Directory.Cache,
+      to: `${SHARE_DIR}/${name}`,
+      toDirectory: Directory.Cache,
+    });
     const { uri } = await Filesystem.getUri({
-      path: 'debug-upload/upload.gz',
+      path: `${SHARE_DIR}/${name}`,
       directory: Directory.Cache,
     });
     await Share.share({
-      title: 'Gossip debug logs',
+      title: 'Gossip debug logs (encrypted)',
       files: [uri],
-      dialogTitle: 'Gossip debug logs',
+      dialogTitle: 'Gossip debug logs (encrypted)',
     });
     return;
   }
-  // Web: download the gzip.
+  // Web: download the encrypted file.
   const prepared = await backend.source.prepare({
     strip: !includeSecrets,
     fromLine: 0,
+    recipient,
   });
+  checkEncrypted(prepared);
   const parts: BlobPart[] = [];
   for (let n = 0; n < prepared.pieces; n++) {
     parts.push((await backend.source.readPiece(n)) as BlobPart);
   }
   const url = URL.createObjectURL(
-    new Blob(parts, { type: 'application/gzip' })
+    new Blob(parts, { type: 'application/octet-stream' })
   );
   const a = document.createElement('a');
   a.href = url;
-  a.download = `gossip-debug-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl.gz`;
+  a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
