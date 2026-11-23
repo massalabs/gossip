@@ -11,6 +11,7 @@ import { useAppStore } from './stores/appStore';
 import { establishFirstInstallCreationGrant } from './hooks/useProfileLoader';
 import { protocolConfig } from './config/protocol';
 import { SECURE_STORAGE_ENABLED } from './config/features';
+import { FULL_DEBUG } from './config/fullDebug';
 import {
   attachMeshArrivals,
   createMeshTransport,
@@ -129,6 +130,16 @@ const renderOpenElsewhere = () => {
 };
 
 async function start() {
+  // Full debug build only: the record starts before anything else, so that
+  // it holds a failed start, a failed login or a broken database.
+  if (FULL_DEBUG) {
+    try {
+      const { bootFullDebug } = await import('./fullDebug/boot');
+      await bootFullDebug();
+    } catch {
+      // the app runs without the record
+    }
+  }
   // One tab of the web app at a time, decided before any storage is opened.
   if (!isNative) {
     await runSingleInstance(startApp, renderOpenElsewhere);
