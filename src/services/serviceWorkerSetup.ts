@@ -15,6 +15,7 @@ import { logSyncDiagnostics } from '../utils/syncDiagnostics';
 import { protocolConfig } from '../config/protocol';
 import { Capacitor } from '@capacitor/core';
 import { networkObserverService } from './networkObserver';
+import { logPermission } from '../utils/debugPermissions';
 
 /**
  * Setup service worker: register, listen for messages, and start sync scheduler
@@ -236,6 +237,11 @@ async function registerPeriodicSync(): Promise<void> {
         permissionStatus = await (navigator as any).permissions.query({
           name: 'periodic-background-sync',
         });
+        logPermission(
+          'permission.check',
+          'periodic-background-sync',
+          permissionStatus?.state
+        );
       } catch {
         // Permission query not supported - expected on most browsers
         return;

@@ -21,6 +21,7 @@ import {
 } from '../utils/contactExchange';
 import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
 import { errFields } from '@massalabs/gossip-sdk/utils/debugFields.js';
+import { logPermission } from '../utils/debugPermissions';
 
 export type BluetoothPermission = 'granted' | 'denied' | 'prompt';
 
@@ -90,17 +91,28 @@ export function isBluetoothExchangeSupported(): boolean {
 export async function checkBluetoothPermission(): Promise<BluetoothPermission> {
   if (!isBluetoothExchangeSupported()) return 'denied';
   try {
-    return (await ContactExchange.checkBluetooth()).state;
-  } catch {
+    const { state } = await ContactExchange.checkBluetooth();
+    logPermission('permission.check', 'bluetooth', state);
+    return state;
+  } catch (error) {
+    logPermission('permission.check', 'bluetooth', 'error', {
+      msg: error instanceof Error ? error.message : String(error),
+    });
     return 'denied';
   }
 }
 
 export async function requestBluetoothPermission(): Promise<BluetoothPermission> {
   if (!isBluetoothExchangeSupported()) return 'denied';
+  logPermission('permission.request', 'bluetooth');
   try {
-    return (await ContactExchange.requestBluetooth()).state;
-  } catch {
+    const { state } = await ContactExchange.requestBluetooth();
+    logPermission('permission.result', 'bluetooth', state);
+    return state;
+  } catch (error) {
+    logPermission('permission.result', 'bluetooth', 'error', {
+      msg: error instanceof Error ? error.message : String(error),
+    });
     return 'denied';
   }
 }

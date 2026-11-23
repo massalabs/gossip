@@ -16,6 +16,7 @@ import {
   type PermissionStatus as LocalNotificationPermissionStatus,
 } from '@capacitor/local-notifications';
 import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
+import { logPermission } from '../utils/debugPermissions';
 
 const NOTIFICATION_ENABLED_KEY = 'gossip-notifications-enabled';
 const directNotifications = new Set<Notification>();
@@ -103,6 +104,7 @@ export class NotificationService {
     try {
       const status: LocalNotificationPermissionStatus =
         await LocalNotifications.checkPermissions();
+      logPermission('permission.check', 'notifications', status.display);
 
       this.permission = {
         granted: status.display === 'granted',
@@ -261,12 +263,15 @@ export class NotificationService {
       // Ensure we have permission for native notifications
       let status: LocalNotificationPermissionStatus =
         await LocalNotifications.checkPermissions();
+      logPermission('permission.check', 'notifications', status.display);
 
       if (
         status.display === 'prompt' ||
         status.display === 'prompt-with-rationale'
       ) {
+        logPermission('permission.request', 'notifications');
         status = await LocalNotifications.requestPermissions();
+        logPermission('permission.result', 'notifications', status.display);
       }
 
       if (status.display !== 'granted') {
@@ -405,12 +410,15 @@ export class NotificationService {
       try {
         let status: LocalNotificationPermissionStatus =
           await LocalNotifications.checkPermissions();
+        logPermission('permission.check', 'notifications', status.display);
 
         if (
           status.display === 'prompt' ||
           status.display === 'prompt-with-rationale'
         ) {
+          logPermission('permission.request', 'notifications');
           status = await LocalNotifications.requestPermissions();
+          logPermission('permission.result', 'notifications', status.display);
         }
 
         this.permission = {
@@ -438,8 +446,14 @@ export class NotificationService {
     }
 
     try {
+      logPermission('permission.request', 'notifications');
       await Notification.requestPermission();
       this.updatePermissionStatus();
+      logPermission(
+        'permission.result',
+        'notifications',
+        Notification.permission
+      );
       return this.permission;
     } catch (error) {
       logger.error('Failed to request notification permission:', error);
