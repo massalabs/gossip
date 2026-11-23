@@ -20,6 +20,10 @@ pub mod seal;
 pub mod store;
 pub mod upstream;
 
+// Full-debug build only: forwards the mesh log lines to the app
+#[cfg(feature = "full-debug")]
+mod full_debug_log;
+
 use std::sync::Arc;
 
 use gossip_wire::BlobKind;
