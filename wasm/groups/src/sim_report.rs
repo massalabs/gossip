@@ -44,6 +44,13 @@ pub(crate) fn run_seeds<C: Send>(
     std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| {
+                // The full debug build runs its simulations with a sink that builds every
+                // line and drops it: logging must not change any outcome.
+                #[cfg(feature = "full-debug")]
+                crate::debug::set_sink(Some(Box::new(|e| {
+                    std::hint::black_box(e.to_json());
+                    DEBUG_EVENTS.fetch_add(1, Ordering::Relaxed);
+                })));
                 loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some(&seed) = seeds.get(i) else { return };
@@ -54,8 +61,17 @@ pub(crate) fn run_seeds<C: Send>(
             });
         }
     });
+    #[cfg(feature = "full-debug")]
+    eprintln!(
+        "debug events built (no-op sink): {}",
+        DEBUG_EVENTS.load(Ordering::Relaxed)
+    );
     results.into_inner().unwrap()
 }
+
+/// Debug events built by the simulations' no-op sink.
+#[cfg(feature = "full-debug")]
+static DEBUG_EVENTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// The first line of a panic's message.
 fn reason(panic: &(dyn Any + Send)) -> String {

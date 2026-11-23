@@ -52,6 +52,8 @@ pub use timing as policy;
 
 mod actions;
 mod backoff;
+#[cfg(feature = "full-debug")]
+mod debug;
 mod direct;
 mod group;
 mod hints;
@@ -607,6 +609,7 @@ impl Node {
 
     /// Runs `f` as one operation: what is due in the epochs is applied first, then `f`, then
     /// the scheduling pass; all their writes are committed together, or not at all.
+    #[cfg_attr(feature = "full-debug", track_caller)]
     fn run<S: NodeStorage, T>(
         &mut self,
         store: &mut S,
@@ -614,6 +617,15 @@ impl Node {
         rng: &mut dyn Randomness,
         f: impl FnOnce(&mut Self, &mut Cx<'_>) -> Result<T, NodeError>,
     ) -> Result<T, NodeError> {
+        dbg_do! {
+            // The operation, by the line of the engine that called `run`.
+            let dbg_op = {
+                let l = core::panic::Location::caller();
+                let file = l.file().rsplit(['/', '\\']).next().unwrap_or("");
+                format!("{file}:{}", l.line())
+            };
+            let dbg_before = crate::debug::enabled().then(|| self.dbg_snapshot());
+        }
         let result = {
             let mut ov = Overlay::new(&*store);
             let r = {
@@ -636,6 +648,15 @@ impl Node {
             r.map(|v| (v, ov.into_changes()))
         };
         let outcome = result.and_then(|(v, epochs)| {
+            dbg_do! {
+                for c in epochs.iter().filter(|c| !c.removed_objects.is_empty()) {
+                    dbg_event!(Info, "engine.timer.erased", {
+                        "epoch" => crate::debug::short(&c.chat_id),
+                        "group" => crate::debug::short(&self.group_of(&c.chat_id)),
+                        "objects" => c.removed_objects.len(), "rows" => c.removed_rows.len(),
+                    });
+                }
+            }
             self.forget_erased(&epochs);
             let erased: usize = epochs.iter().map(|c| c.removed_objects.len()).sum();
             let node = self.t.take_changes();
@@ -652,6 +673,19 @@ impl Node {
                     v
                 })
         });
+        dbg_do! {
+            match &outcome {
+                Err(e) => dbg_event!(Error, "engine.op.failed", {
+                    "op" => dbg_op.clone(), "err" => crate::debug::dbg(e),
+                    "committed" => false,
+                }),
+                Ok(_) => {
+                    if let Some(b) = &dbg_before {
+                        self.dbg_diff(b, &dbg_op);
+                    }
+                }
+            }
+        }
         if outcome.is_err() {
             self.reload(store)?;
         }
@@ -667,7 +701,25 @@ impl Node {
             .map(|(c, e)| (*c, Arc::clone(e)))
             .collect();
         for (chat, entry) in entries {
+            dbg_do! {
+                // A scheduled version, deletion or expiry that comes due now is released.
+                let dbg_due = if crate::debug::enabled() {
+                    cx.ov.first_pending(&chat).ok().flatten().filter(|i| i.due <= cx.now)
+                } else {
+                    None
+                };
+            }
             let pruned = entry.epoch().tick(cx.ov, cx.now)?;
+            dbg_do! {
+                if let Some(item) = dbg_due {
+                    dbg_event!(Info, "engine.held.released", {
+                        "type" => "pending", "epoch" => crate::debug::short(&chat),
+                        "id" => crate::debug::short(&item.event_id),
+                        "kind" => crate::debug::dbg(&item.kind), "due" => item.due,
+                        "late" => cx.now.saturating_sub(item.due), "pruned" => pruned.len(),
+                    });
+                }
+            }
             self.invalidate(chat, &pruned);
         }
         Ok(())
@@ -751,12 +803,25 @@ impl Node {
                     n.version_notice(cx, from, v);
                     return Ok(());
                 }
-                Err(_) => return Ok(()),
+                Err(ref _e) => {
+                    dbg_event!(Warn, "engine.event.in", {
+                        "type" => "plaintext", "from" => crate::debug::short(&from),
+                        "size" => bytes.len(), "verdict" => "malformed",
+                        "reason" => "plaintext_undecodable", "err" => crate::debug::dbg(&_e),
+                    }, c { "raw" => crate::debug::hex(bytes) });
+                    return Ok(());
+                }
             };
             for frame in pt.frames() {
                 match frame {
                     Ok(frame) => n.handle_frame(cx, from, pt.version, frame)?,
-                    Err(_) => {
+                    Err(ref _e) => {
+                        dbg_event!(Warn, "engine.event.in", {
+                            "type" => "frame", "from" => crate::debug::short(&from),
+                            "size" => bytes.len(), "verdict" => "malformed",
+                            "reason" => "frame_unparseable", "err" => crate::debug::dbg(&_e),
+                            "penalized" => n.shares_epoch(&from),
+                        }, c { "raw" => crate::debug::hex(bytes) });
                         // An unparseable frame is rejected (§13.7); a member is penalised
                         // as for one malformed item.
                         if n.shares_epoch(&from) {
@@ -1236,6 +1301,7 @@ impl Node {
         blob: &[u8],
         version: u64,
     ) -> Result<retrieval::Answer, NodeError> {
+        dbg_ctx!("frame", blob.len());
         let event = match wire::decode_event_blob(blob, version) {
             Ok(EventObject::Message(e)) => {
                 // A message event frame is taking part in a chat of two (§5.12).
@@ -1256,7 +1322,13 @@ impl Node {
             Ok(EventObject::Dissolve(d)) => {
                 return self.receive_signed(cx, from, records::SignedObject::Dissolve(d), None);
             }
-            Err(_) => {
+            Err(ref _e) => {
+                dbg_event!(Warn, "engine.event.in", {
+                    "type" => "event_blob", "from" => crate::debug::short(&from),
+                    "size" => blob.len(), "via" => "frame", "verdict" => "malformed",
+                    "reason" => "event_blob_undecodable", "err" => crate::debug::dbg(_e),
+                    "penalized" => self.shares_epoch(&from),
+                }, c { "raw" => crate::debug::hex(blob) });
                 if self.shares_epoch(&from) {
                     self.stats.invalid += 1;
                     self.penalize(&from, PENALTY_MALFORMED);
@@ -1280,6 +1352,13 @@ impl Node {
         let chat = event.chat_id();
         // Frames for unknown epochs are dropped without staging (§13.7).
         let Some(entry) = self.epochs.get(&chat).cloned() else {
+            dbg_event!(Info, "engine.event.in", {
+                "type" => "message", "epoch" => crate::debug::short(&chat),
+                "id" => crate::debug::short(&event.event_id()),
+                "from" => crate::debug::short(&from), "via" => crate::debug::ctx().0,
+                "size" => crate::debug::ctx().1, "verdict" => "ignored",
+                "reason" => "unknown_epoch",
+            }, c { "id" => crate::debug::hex(&event.event_id()) });
             return Ok(retrieval::Answer::Invalid);
         };
         let id = event.event_id();
@@ -1290,6 +1369,9 @@ impl Node {
         let received = entry
             .epoch()
             .receive(cx.ov, sender, event.clone(), cx.now)?;
+        dbg_do! {
+            self.dbg_verdict(&chat, &from, &event, &received);
+        }
         self.invalidate(chat, &received.pruned);
         match received.outcome {
             Outcome::Rejected(Rejection::Invalid(_)) => {

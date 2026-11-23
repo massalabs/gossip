@@ -284,6 +284,11 @@ impl Node {
             .filter(|(_, r)| latest(r).is_some_and(|l| l.from == note.from))
             .count();
         if mine >= REF_LOOKUPS_PER_SENDER || self.t.ref_lookups.len() >= REF_LOOKUPS_PER_DEVICE {
+            dbg_event!(Warn, "engine.held.dropped", {
+                "type" => "reference", "ref" => crate::debug::short(&reference),
+                "from" => crate::debug::short(&note.from),
+                "limit" => if mine >= REF_LOOKUPS_PER_SENDER { "ref_lookups_per_sender" } else { "ref_lookups_per_device" },
+            });
             self.stats.capped += 1;
             return Ok(());
         }
