@@ -620,6 +620,7 @@ public final class PortableBackupFilePlugin: CAPPlugin, CAPBridgedPlugin,
 
     private func reject(_ call: CAPPluginCall, _ error: Error, code: String) {
         _ = error
+        DebugLog.e("portableBackup", "portable backup operation failed: " + code, error)
         call.reject("Portable backup operation failed", code)
     }
 }
