@@ -65,7 +65,7 @@ to `<origin of VITE_GOSSIP_API_URL>/debug-logs/` with the secret
   `tracing` statements out of release builds (`release_max_level_off`, through
   their default feature `quiet-release`). Only the full debug app
   (`-PfullDebug=true`) builds gossip-mobile with `--no-default-features
-  --features full-debug`, which keeps the lines and sends them to the Android
+--features full-debug`, which keeps the lines and sends them to the Android
   log (tag `GossipMesh`). `scripts/build-mesh-android.sh` stops a normal build
   whose library holds the tag `GossipMesh` or the text of a mesh log line, and a
   full-debug build whose library lacks them.
