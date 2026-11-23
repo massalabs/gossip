@@ -23,6 +23,7 @@ object FullDebug {
         try {
             DebugLogWriter.init(context)
             DebugLog.sink = { lvl, tag, msg, tr -> DebugLogWriter.native(lvl, tag, msg, tr) }
+            MeshLogPump.start()
             installUncaughtHandler()
             DebugLogWriter.appendLine(
                 DebugLogWriter.line("native", "app.start", "info", JSONObject().put("process", context.packageName)),
