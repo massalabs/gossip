@@ -15,6 +15,7 @@ import {
   LocalNotifications,
   type PermissionStatus as LocalNotificationPermissionStatus,
 } from '@capacitor/local-notifications';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
 
 const NOTIFICATION_ENABLED_KEY = 'gossip-notifications-enabled';
 const directNotifications = new Set<Notification>();
@@ -269,6 +270,11 @@ export class NotificationService {
       }
 
       if (status.display !== 'granted') {
+        dlog('app', 'notification.skipped', {
+          tag,
+          reason: 'permission',
+          permission: status.display,
+        });
         // Permission not granted, do not attempt to show native notification
         return;
       }
@@ -294,7 +300,24 @@ export class NotificationService {
           },
         ],
       });
+      dlog(
+        'app',
+        'notification.scheduled',
+        { id, tag, native: true },
+        { c: { title, body } }
+      );
     } catch (error) {
+      dlog(
+        'app',
+        'notification.failed',
+        {
+          tag,
+          native: this.isNativePlatform(),
+          err: error instanceof Error ? error.name : typeof error,
+          msg: error instanceof Error ? error.message : String(error),
+        },
+        { lvl: 'error' }
+      );
       // The `Notification` constructor doesn't exist in iOS/Android WebViews,
       // so the browser-based fallback would always throw on native platforms.
       // Only fall back when not running natively; otherwise just log.
@@ -347,9 +370,16 @@ export class NotificationService {
     });
 
     directNotifications.add(notification);
+    dlog(
+      'app',
+      'notification.shown',
+      { tag, native: false },
+      { c: { title, body } }
+    );
 
     // Handle notification click
     notification.onclick = () => {
+      dlog('app', 'notification.tapped', { tag, native: false });
       window.focus();
       if (onClick) {
         onClick();

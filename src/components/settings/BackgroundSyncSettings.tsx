@@ -36,6 +36,7 @@ import {
   setBackgroundSyncPreset,
 } from '../../utils/preferences';
 import { ForegroundSync } from '../../services/foregroundSync';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
 
 interface BackgroundSyncSettingsProps {
   showDebugInfo?: boolean;
@@ -154,6 +155,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
           await ForegroundSync.stop();
         }
         setForegroundHighReliability(enabled);
+        dlog('app', 'sync.foreground_service', { enabled }, { lvl: 'info' });
       } catch (error) {
         logger.error('Failed to toggle foreground sync:', error);
       }
