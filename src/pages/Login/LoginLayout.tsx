@@ -1,5 +1,6 @@
 import React from 'react';
 import { PrivacyGraphic } from '../../components/graphics';
+import { FullDebugActions, FullDebugBanner } from '../../fullDebug/lazy';
 
 interface LoginLayoutProps {
   title: string;
@@ -16,6 +17,7 @@ export const LoginLayout: React.FC<LoginLayoutProps> = ({
 }) => {
   return (
     <div className="bg-background max-h-full flex min-h-0 w-full app-max-w flex-col overflow-y-auto overflow-x-hidden px-4 py-8 md:py-0">
+      {FullDebugBanner && <FullDebugBanner />}
       {/* Gentle entrance for the whole auth card */}
       <div className="flex min-h-full w-full flex-col items-center justify-center animate-fade-in-up">
         <div className="w-full max-w-md text-center">
@@ -46,6 +48,11 @@ export const LoginLayout: React.FC<LoginLayoutProps> = ({
         </div>
 
         <div className="w-full max-w-md space-y-2 px-4 pt-4">{children}</div>
+        {FullDebugActions && (
+          <div className="w-full max-w-md px-4 pt-4">
+            <FullDebugActions />
+          </div>
+        )}
       </div>
     </div>
   );

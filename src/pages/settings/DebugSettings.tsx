@@ -12,6 +12,7 @@ import { clearAppStorage } from '../../utils/localStorage';
 import { useAccountStore } from '../../stores/accountStore';
 import { useVersionCheck } from '../../hooks/useVersionCheck';
 import { ROUTES } from '../../constants/routes';
+import { FullDebugActions } from '../../fullDebug/lazy';
 import {
   AlertTriangle,
   Settings as SettingsIconFeather,
@@ -68,6 +69,7 @@ const DebugSettings: React.FC = () => {
       contentClassName="px-6 py-6"
     >
       <div className="space-y-6">
+        {FullDebugActions && <FullDebugActions settings />}
         <div className="bg-card rounded-xl border border-border overflow-hidden">
           <div className="h-[54px] flex items-center px-4 justify-between border-b border-border">
             <div className="flex items-center flex-1">

@@ -40,6 +40,7 @@ import AccountBackup from '../components/account/AccountBackup';
 import ShareContact from '../components/settings/ShareContact';
 import UsernameEditModal from '../components/settings/UsernameEditModal';
 import { isMeshAvailable } from '../services/meshNode';
+import { FullDebugBanner } from '../fullDebug/lazy';
 
 enum SettingsView {
   MAIN = 'MAIN',
@@ -185,6 +186,11 @@ const Settings = (): React.ReactElement => {
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6"
     >
+      {FullDebugBanner && (
+        <div className="-mx-6 -mt-6 mb-6">
+          <FullDebugBanner />
+        </div>
+      )}
       {/* Account Profile Hero — pro chat-app style */}
       <div className="bg-card rounded-2xl border border-border shadow-sm dark:shadow-none p-5 mb-6">
         <div className="flex items-center gap-4">
