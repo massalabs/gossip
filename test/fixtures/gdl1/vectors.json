@@ -1,0 +1,60 @@
+{
+  "warning": "TEST ONLY. The recipient key pair (TEST-ONLY-recipient-*.pem) and the ephemeral key are public test values: never build them into an app.",
+  "format": "GDL1",
+  "plaintext": "byte i = (i * 31 + 7) & 0xff",
+  "recipientSpkiB64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEzO6DCrZshIuSJZtrPLwMo1GyT4I9wjeNwu+xFkT5hCewuDGpHS55r+csLbBYg3X17Xt21umN8KcICmU4rOxWvg==",
+  "recipientPoint": "04ccee830ab66c848b92259b6b3cbc0ca351b24f823dc2378dc2efb11644f98427b0b831a91d2e79afe72c2db0588375f5ed7b76d6e98df0a7080a6538acec56be",
+  "keyFp": "7f3eb357091a6ca25bf4d55cd2c09ee26e07ff67f4fd0473de917d89003186aa",
+  "ephemeralD": "16557eb229e3416543632cf48b0f8154bd2d2961029baf2f8aa192dad549cea9",
+  "ephemeralPoint": "044fb11200caf95d55f6975c1de397b9a5468ad241f88cb545f267a3052137a64d5ce6091933fd5f5ae4eac875630e08fbde6a20258bbbb7dc27ab7dfdfb3fb2e2",
+  "noncePrefix": "9b5b8a83",
+  "shared": "a2bd43c82d6ea6b6d28aa51e2e700653b5684efda71fa8ab1e9722f208e680ff",
+  "key": "46e937760b95e772ac77b290ab8203846ae813fdadc8dbc22bf1123c4acba797",
+  "header": "47444c31044fb11200caf95d55f6975c1de397b9a5468ad241f88cb545f267a3052137a64d5ce6091933fd5f5ae4eac875630e08fbde6a20258bbbb7dc27ab7dfdfb3fb2e29b5b8a83",
+  "cases": [
+    {
+      "size": 0,
+      "plainSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "ciphertextSize": 93,
+      "sha256": "4e3afe052db0925cb166d400202cb1d1bab1ddbcc7c1a447b04975ee4a261e5d",
+      "hex": "47444c31044fb11200caf95d55f6975c1de397b9a5468ad241f88cb545f267a3052137a64d5ce6091933fd5f5ae4eac875630e08fbde6a20258bbbb7dc27ab7dfdfb3fb2e29b5b8a830000001008cb2d090a60d5b8747d48928293b08a",
+      "tailHex": "e4eac875630e08fbde6a20258bbbb7dc27ab7dfdfb3fb2e29b5b8a830000001008cb2d090a60d5b8747d48928293b08a"
+    },
+    {
+      "size": 1,
+      "plainSha256": "ca358758f6d27e6cf45272937977a748fd88391db679ceda7dc7bf1f005ee879",
+      "ciphertextSize": 94,
+      "sha256": "019795c84717f755076afb7e5741fe7ca2e1d8d555194e48664239fdea79583f",
+      "hex": "47444c31044fb11200caf95d55f6975c1de397b9a5468ad241f88cb545f267a3052137a64d5ce6091933fd5f5ae4eac875630e08fbde6a20258bbbb7dc27ab7dfdfb3fb2e29b5b8a8300000011578e1b4b9921430e60304744d186b8abfb",
+      "tailHex": "eac875630e08fbde6a20258bbbb7dc27ab7dfdfb3fb2e29b5b8a8300000011578e1b4b9921430e60304744d186b8abfb"
+    },
+    {
+      "size": 65535,
+      "plainSha256": "91d0a03af0efeeb5568bbdcf2bd7fe1c9d932c4d22db3643c7586c1bd1afbeb1",
+      "ciphertextSize": 65628,
+      "sha256": "2f102ca9594569c5eee6f36759188c5b05141ec5d544e668bfa155b348ac768e",
+      "tailHex": "6ba38fe19f3f302adc0820549984a5e98aad2fdc6ce5991426afb1363a8d65512e2d16838c7de2d0a7fb20337e7bb4f1"
+    },
+    {
+      "size": 65536,
+      "plainSha256": "ef4636928161808e87035fa51983821677527ccd9661991c5d0126a778b2268a",
+      "ciphertextSize": 65629,
+      "sha256": "b980390e9f67817e48974bf6a889ecdb3036d46bb34e2aaeebcf0f78ad34a51e",
+      "tailHex": "a38fe19f3f302adc0820549984a5e98aad2fdc6ce5991426afb1363a8d6551c9b67b2c23a7840840ed0bee6d3317d7cf"
+    },
+    {
+      "size": 65537,
+      "plainSha256": "74f3260f4a9adaf7271c910ba2d111dbae7a176afb487e1b7f655897eadf1093",
+      "ciphertextSize": 65650,
+      "sha256": "fb1c071c6eab54d5af2a22300206093345ba346af43c97196268f3129b81c036",
+      "tailHex": "991426afb1363a8d6551c98c87d1581c861e9a471549ad8bf6a15e00000011a1d56792ce2b8579349e09a0c684b0968c"
+    },
+    {
+      "size": 200000,
+      "plainSha256": "8f9d1bf454d63cd9fc6edbe8f3f2331cc1f9b195c7ec90533717bf243ae966c7",
+      "ciphertextSize": 200153,
+      "sha256": "96dfc2cef7acc90a95570c266cc5c73d05b428943e602802eda307d0a59dbe11",
+      "tailHex": "427edb8f21e5927f29b125a1f0150c19544c4a8037cd2fceb903f6613322a67c62c300492e7865438208bb0b38b803db"
+    }
+  ]
+}
