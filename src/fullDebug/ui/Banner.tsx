@@ -2,7 +2,7 @@
  * The warning of the full debug build, rendered once above every screen of
  * the app (FullDebugFrame in ../lazy.tsx), so that no screen can miss it. It
  * starts below the status bar (top safe-area inset; Android 15
- * edge-to-edge, iOS notch) and pushes the app down. Near-black on amber in
+ * edge-to-edge, iOS notch) and pushes the app down. Black on amber in
  * both themes, for contrast. Before login (login, onboarding) it shows the
  * full text; after login one line, with the full text on tap, so that it
  * takes little of the chat screens.
@@ -22,7 +22,7 @@ export default function FullDebugBanner() {
   return (
     <div
       role="alert"
-      className="w-full shrink-0 bg-[#fbbf24] text-[#111111] text-[11px] font-semibold leading-tight px-3 pb-1 pt-[calc(var(--sat)+0.25rem)] text-center"
+      className="w-full shrink-0 bg-[#fbbf24] text-[#000] text-[11px] font-semibold leading-tight px-3 pb-1 pt-[calc(var(--sat)+0.25rem)] text-center"
       onClick={loggedIn ? () => setOpen(o => !o) : undefined}
       aria-expanded={loggedIn ? open : undefined}
     >
