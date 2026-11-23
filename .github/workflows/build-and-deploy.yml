@@ -60,6 +60,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
           REF_TYPE: ${{ github.ref_type }}
+          DEBUG_LOGS_PUBLIC_KEY: ${{ vars.DEBUG_LOGS_PUBLIC_KEY }}
         run: |
           if [ "$FULL_DEBUG" != "true" ]; then
             echo "Not a full debug build."
@@ -67,6 +68,12 @@ jobs:
           fi
           if [ "$EVENT_NAME" = "release" ] || [ "$REF" = "refs/heads/main" ] || [ "$REF_TYPE" = "tag" ]; then
             echo "❌ full_debug is refused on a release, on main and on a tag (event: $EVENT_NAME, ref: $REF)"
+            exit 1
+          fi
+          # Every send of the full debug app is encrypted to this public key
+          # (base64 DER, the PEM body on one line); without it there is no build.
+          if [ -z "$DEBUG_LOGS_PUBLIC_KEY" ]; then
+            echo "❌ full_debug needs the repository variable DEBUG_LOGS_PUBLIC_KEY (the developers' P-256 public key, base64 DER): the app encrypts every send to it"
             exit 1
           fi
           echo "⚠️ FULL DEBUG build from $REF: records everything, secrets included"
@@ -113,6 +120,7 @@ jobs:
           VITE_FULL_DEBUG: 'true'
           VITE_DEBUG_LOGS: 'true'
           VITE_DEBUG_LOGS_UPLOAD_SECRET: ${{ secrets.DEBUG_LOGS_UPLOAD_SECRET }}
+          VITE_DEBUG_LOGS_PUBLIC_KEY: ${{ vars.DEBUG_LOGS_PUBLIC_KEY }}
         run: |
           export VITE_APP_BUILD_ID=$(git rev-parse --short=7 HEAD)
           echo "🚀 Building FULL DEBUG bundle... BUILD_ID: $VITE_APP_BUILD_ID"
