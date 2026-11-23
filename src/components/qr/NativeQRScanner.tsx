@@ -3,6 +3,7 @@ import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { QrScanner, isQrScanCancelled } from '../../services/qrScanner';
 import { QRScannerProps } from './types';
+import { logPermission } from '../../utils/debugPermissions';
 
 const NativeQRScanner: React.FC<QRScannerProps> = ({
   onScan,
@@ -70,6 +71,10 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
           return;
         }
         logger.warn('[QRScan] native scan failed', err);
+        // The native scanner asks for the camera itself; a refusal ends here.
+        logPermission('permission.result', 'camera', 'error', {
+          msg: err instanceof Error ? err.message : String(err),
+        });
         handlersRef.current.onError(
           err instanceof Error ? err.message : String(err)
         );

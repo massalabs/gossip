@@ -6,6 +6,7 @@ import type { IDetectedBarcode } from '@yudiel/react-qr-scanner';
 import zxingReaderWasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url';
 import { QRScannerProps } from './types';
 import ScannerBackButton from './ScannerBackButton';
+import { logPermission } from '../../utils/debugPermissions';
 
 // By default barcode-detector fetches the ZXing wasm from a public CDN
 // (jsdelivr). Serve the bundled copy instead so scanning never leaves the app:
@@ -51,6 +52,11 @@ const WebQRScanner: React.FC<QRScannerProps> = ({
     (error: unknown) => {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
+      // A refused camera reaches the scanner as NotAllowedError.
+      logPermission('permission.result', 'camera', 'error', {
+        err: error instanceof Error ? error.name : typeof error,
+        msg: errorMessage,
+      });
       onError?.(errorMessage);
     },
     [onError]

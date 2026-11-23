@@ -36,6 +36,7 @@ import {
   WEBAUTHN_PASSWORD_KEY,
   getBiometricSalt,
 } from '../constants/biometric';
+import { logPermission } from '../utils/debugPermissions';
 
 export async function clearBiometricLoginCredential(): Promise<void> {
   if (isNative) {
@@ -447,6 +448,9 @@ async function checkBiometricAvailabilityInner(): Promise<BiometricAvailability>
   if (isCapacitorAvailable()) {
     try {
       const { isAvailable, biometryType } = await BiometricAuth.checkBiometry();
+      logPermission('permission.check', 'biometrics', isAvailable, {
+        biometryType,
+      });
       if (isAvailable) {
         return {
           available: true,

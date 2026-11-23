@@ -16,6 +16,7 @@ import {
   isXiaomiManufacturer,
   type DeviceReliabilityInfo,
 } from '../utils/deviceInfo';
+import { logPermission } from '../utils/debugPermissions';
 
 // Storage key for dismissing battery optimization prompt
 const BATTERY_OPTIMIZATION_DISMISSED_KEY =
@@ -156,6 +157,9 @@ class BatteryOptimizationService {
   private async doRefreshStatus(): Promise<BackgroundSyncStatus | null> {
     try {
       const status = await BatteryOptimizationPlugin.getBackgroundSyncStatus();
+      logPermission('permission.check', 'battery-optimization', null, {
+        ...status,
+      });
       this.cachedStatus = status;
       this.lastCheckTime = Date.now();
 
