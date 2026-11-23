@@ -16,6 +16,8 @@ import {
 import { MESH_FEATURE_ENABLED } from '../config/features';
 import { protocolConfig } from '../config/protocol';
 import { logger } from '../utils/logger';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
+import { errFields } from '@massalabs/gossip-sdk/utils/debugFields.js';
 
 export type MeshPowerMode = 'performance' | 'balanced' | 'power_saver';
 
@@ -116,9 +118,11 @@ export async function probeMeshAvailability(): Promise<boolean> {
     const capabilities = await MeshNode.capabilities();
     rustCoreAvailable = capabilities.rustCore;
     installId = capabilities.installId || null;
-  } catch {
+  } catch (error) {
+    dlog('mesh', 'mesh.probe.failed', errFields(error), { lvl: 'warn' });
     rustCoreAvailable = false;
   }
+  dlog('mesh', 'mesh.probe', { rustCore: rustCoreAvailable }, { lvl: 'info' });
   return rustCoreAvailable;
 }
 
@@ -292,9 +296,26 @@ export function isMeshActive(): boolean {
 export async function startMesh(): Promise<void> {
   if (!switchable) throw new Error('The offline mesh is not available');
   const settings = await getMeshSettings();
-  await MeshNode.start({ powerMode: settings.powerMode });
-  await applyUpstream(settings.bridgeEnabled);
-  await switchable.activate();
+  const started = performance.now();
+  try {
+    await MeshNode.start({ powerMode: settings.powerMode });
+    await applyUpstream(settings.bridgeEnabled);
+    await switchable.activate();
+  } catch (error) {
+    dlog(
+      'mesh',
+      'mesh.start.failed',
+      { ...settings, ...errFields(error) },
+      { lvl: 'error', dur: performance.now() - started }
+    );
+    throw error;
+  }
+  dlog(
+    'mesh',
+    'mesh.start',
+    { ...settings },
+    { lvl: 'info', dur: performance.now() - started }
+  );
 }
 
 async function applyUpstream(bridgeEnabled: boolean): Promise<void> {
@@ -302,6 +323,7 @@ async function applyUpstream(bridgeEnabled: boolean): Promise<void> {
 }
 
 export async function stopMesh(): Promise<void> {
+  dlog('mesh', 'mesh.stop', {}, { lvl: 'info' });
   switchable?.deactivate();
   if (isMeshAvailable()) await MeshNode.stop().catch(() => undefined);
 }
@@ -361,6 +383,7 @@ export async function lockMesh(): Promise<void> {
   try {
     await MeshNode.lock();
   } catch (error) {
+    dlog('mesh', 'mesh.lock.failed', errFields(error), { lvl: 'warn' });
     // a stopped node holds no wanted list and no keys
     if (import.meta.env.DEV) {
       logger.warn('[MeshNode] could not lock the node', error);
@@ -386,6 +409,7 @@ const WIPE_MAX_RETRIES = 2;
  */
 export async function wipeMesh(): Promise<void> {
   if (!isMeshAvailable()) return;
+  dlog('mesh', 'mesh.wipe', {}, { lvl: 'warn' });
   // seekers the previous session left for the next activation
   switchable?.forgetWanted();
   await wipeNodeStore();
@@ -429,6 +453,12 @@ async function wipeNodeStore(): Promise<void> {
         throw new Error(`The offline mesh could not be wiped: ${reason}`);
       }
       logger.warn('[MeshNode] failed to wipe the node, trying again', error);
+      dlog(
+        'mesh',
+        'mesh.wipe.failed',
+        { retries, ranBefore, ...errFields(error) },
+        { lvl: 'error' }
+      );
       // TODO: have the native side report its own error code when it stopped
       // the node and deleted its directory (every wipe failure is NODE_ERROR
       // today), and decide from the error instead of asking for the status.
@@ -452,9 +482,26 @@ export async function attachMeshArrivals(
   mesh: MeshNodeProtocol
 ): Promise<{ remove(): Promise<void> }> {
   return mesh.onArrival(({ messages, announcements }) => {
-    if (!sdk.isSessionOpen) return;
+    if (!sdk.isSessionOpen) {
+      dlog('mesh', 'mesh.arrival.dropped', {
+        reason: 'no-session',
+        messages: messages.length,
+        announcements: announcements.length,
+      });
+      return;
+    }
     if (messages.length > 0) {
       sdk.messages.ingestMessages(messages).catch(error => {
+        dlog(
+          'mesh',
+          'mesh.ingest.failed',
+          {
+            kind: 'messages',
+            count: messages.length,
+            ...errFields(error),
+          },
+          { lvl: 'error' }
+        );
         if (import.meta.env.DEV) {
           logger.warn('[MeshNode] failed to ingest messages', error);
         }
@@ -462,6 +509,16 @@ export async function attachMeshArrivals(
     }
     if (announcements.length > 0) {
       sdk.announcements.ingestAnnouncements(announcements).catch(error => {
+        dlog(
+          'mesh',
+          'mesh.ingest.failed',
+          {
+            kind: 'announcements',
+            count: announcements.length,
+            ...errFields(error),
+          },
+          { lvl: 'error' }
+        );
         if (import.meta.env.DEV) {
           logger.warn('[MeshNode] failed to ingest announcements', error);
         }
