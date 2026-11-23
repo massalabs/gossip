@@ -175,6 +175,9 @@ private final class BluetoothAuthorizer: NSObject, CBCentralManagerDelegate {
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         guard CBManager.authorization != .notDetermined else { return }
+        DebugLog.event("contactExchange", "permission.result", [
+            "permission": "bluetooth", "authorization": CBManager.authorization.rawValue,
+        ])
         let callback = onDecided
         onDecided = nil
         manager?.delegate = nil

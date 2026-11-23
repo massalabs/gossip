@@ -39,6 +39,7 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
             self.closeRequested = false
         }
         AVCaptureDevice.requestAccess(for: .video) { granted in
+            DebugLog.event("qrScanner", "permission.result", ["permission": "camera", "granted": granted])
             DispatchQueue.main.async {
                 let closeRequested = self.closeRequested
                 self.opening = false

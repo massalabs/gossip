@@ -119,6 +119,7 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
     /// iOS shows its prompt when the radio first creates its managers, which `start` does;
     /// this reports the state without prompting.
     @objc override public func requestPermissions(_ call: CAPPluginCall) {
+        DebugLog.event("mesh", "permission.result", ["permission": "bluetooth", "state": Self.permissionState()])
         call.resolve(["bluetooth": Self.permissionState()])
     }
 
