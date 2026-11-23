@@ -1,11 +1,5 @@
-import {
-  Capacitor,
-  SystemBars,
-  SystemBarsStyle,
-  SystemBarType,
-} from '@capacitor/core';
+import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core';
 import { useUiStore } from '../stores/uiStore';
-import { FULL_DEBUG } from '../config/fullDebug';
 
 // Subscribe to the store only once, no matter how often initStatusBar runs
 let themeSubscribed = false;
@@ -21,14 +15,6 @@ export const initStatusBar = async () => {
     const style =
       theme === 'dark' ? SystemBarsStyle.Dark : SystemBarsStyle.Light;
     await SystemBars.setStyle({ style });
-    // Full debug build: its amber banner is behind the status bar on every
-    // screen, whatever the theme, so the status bar icons are dark there.
-    if (FULL_DEBUG) {
-      await SystemBars.setStyle({
-        style: SystemBarsStyle.Light,
-        bar: SystemBarType.StatusBar,
-      });
-    }
   };
 
   await updateStyle(useUiStore.getState().resolvedTheme);
