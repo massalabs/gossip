@@ -24,6 +24,14 @@
     "./utils/logs.js": {
       "types": "./dist/utils/logs.d.ts",
       "import": "./dist/utils/logs.js"
+    },
+    "./utils/debugLog.js": {
+      "types": "./dist/utils/debugLog.d.ts",
+      "import": "./dist/utils/debugLog.js"
+    },
+    "./utils/debugFields.js": {
+      "types": "./dist/utils/debugFields.d.ts",
+      "import": "./dist/utils/debugFields.js"
     }
   },
   "scripts": {
