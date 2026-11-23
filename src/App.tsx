@@ -196,6 +196,14 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const toaster = (
+    <Toaster
+      position="top-center"
+      containerStyle={toasterContainerStyle}
+      toastOptions={toastOptions}
+    />
+  );
+
   const appScreens = (
     <>
       <AppUrlListener />
@@ -215,16 +223,16 @@ function App() {
       <ErrorBoundary>
         <KeyboardAwareWrapper>
           {FullDebugFrame ? (
-            <FullDebugFrame>{appScreens}</FullDebugFrame>
+            // Full debug build: toasts too stay below its banner.
+            <FullDebugFrame>
+              {appScreens}
+              {toaster}
+            </FullDebugFrame>
           ) : (
             appScreens
           )}
         </KeyboardAwareWrapper>
-        <Toaster
-          position="top-center"
-          containerStyle={toasterContainerStyle}
-          toastOptions={toastOptions}
-        />
+        {!FullDebugFrame && toaster}
       </ErrorBoundary>
     </BrowserRouter>
   );
