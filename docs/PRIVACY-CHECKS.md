@@ -35,7 +35,13 @@ Their unit tests are in `test/scripts/`.
 - Rust: every build of a library the app ships passes `--remap-path-prefix`
   through `scripts/rust-remap-flags.sh`, so no build path reaches the app. A new
   Rust build must pass the same `--config`. The mesh crates compile their
-  `tracing` statements out of release builds (`release_max_level_off`).
+  `tracing` statements out of release builds (`release_max_level_off`, through
+  their default feature `quiet-release`). Only the full debug app
+  (`-PfullDebug=true`) builds gossip-mobile with `--no-default-features
+  --features full-debug`, which keeps the lines and sends them to the Android
+  log (tag `GossipMesh`). `scripts/build-mesh-android.sh` stops a normal build
+  whose library holds the tag `GossipMesh` or the text of a mesh log line, and a
+  full-debug build whose library lacks them.
 
 ## Adding an allowed host
 
