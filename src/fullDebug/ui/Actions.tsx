@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FULL_DEBUG_NS, registerFullDebugTexts } from '../texts';
 import { fullDebug, openSendDialog } from '../state';
+import { recentSends } from '../sentRefs';
+import CopyRef from './CopyRef';
 
 registerFullDebugTexts();
 
@@ -77,8 +79,29 @@ export default function FullDebugActions({
               ))}
             </select>
           </label>
+          <LastSends />
         </>
       )}
+    </div>
+  );
+}
+
+/** The references of the last sends, to give to the developers. */
+function LastSends() {
+  const { t } = useTranslation(FULL_DEBUG_NS);
+  const [sends] = useState(recentSends);
+  if (sends.length === 0) return null;
+  return (
+    <div className="px-1 pt-2 text-sm">
+      <p className="font-medium">{t('last_sends')}</p>
+      <ul className="space-y-2">
+        {sends.map(s => (
+          <li key={s.ref} className="text-xs text-muted-foreground">
+            {new Date(s.at).toLocaleString()}
+            <CopyRef value={s.ref} />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

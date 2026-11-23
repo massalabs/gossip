@@ -27,8 +27,14 @@
   "close": "Close",
   "retry": "Try again",
   "share_instead": "Share the file instead",
-  "success": "Sent, thank you. Reference: {{ref}}",
+  "success": "Sent, thank you. Reference of this send:",
   "failure": "The send failed: {{error}}",
   "not_configured": "This build has no upload address or secret: use “Share the file instead”.",
-  "no_key": "Sending is off: {{error}}"
+  "no_key": "Sending is off: {{error}}",
+  "copy_ref": "Tap to copy",
+  "copied": "Copied",
+  "copy_failed": "Copy failed",
+  "last_sends": "Last sends",
+  "banner_short": "DEBUG build: everything is recorded",
+  "banner_more": "Tap for details"
 }

@@ -28,6 +28,7 @@ import {
   PRIVATE_DOC_NAME,
 } from './private';
 import { GDL1, importRecipient, type Gdl1Recipient } from './gdl1';
+import { rememberSend, uploadRef } from './sentRefs';
 import type { UploadPrepared } from './writers';
 import { APP_BUILD_ID, APP_VERSION } from '../config/version';
 
@@ -90,7 +91,7 @@ function sameRequest(a: SendRequest, b: SendRequest): boolean {
 export async function sendRecord(
   request: SendRequest,
   onPhase: (p: SendPhase) => void
-): Promise<{ upload: string; size: number }> {
+): Promise<{ upload: string; size: number; ref: string }> {
   const backend = fullDebug.backend;
   const recorder = fullDebug.recorder;
   if (!backend || !recorder) throw new Error('record not started');
@@ -202,7 +203,9 @@ export async function sendRecord(
     f: { upload: job.upload, size, toLine: job.prepared.toLine },
   });
   void backend.source.discard().catch(() => {});
-  return { upload: job.upload, size };
+  const ref = uploadRef(job.install, job.upload);
+  rememberSend(ref);
+  return { upload: job.upload, size, ref };
 }
 
 /** `gossip-debug-log-<install>-<UTC time>.gdl1` */

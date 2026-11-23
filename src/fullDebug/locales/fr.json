@@ -27,8 +27,14 @@
   "close": "Fermer",
   "retry": "Réessayer",
   "share_instead": "Partager le fichier à la place",
-  "success": "Envoyé, merci. Référence : {{ref}}",
+  "success": "Envoyé, merci. Référence de cet envoi :",
   "failure": "L'envoi a échoué : {{error}}",
   "not_configured": "Cette version n'a pas d'adresse ou de secret d'envoi : utilisez « Partager le fichier à la place ».",
-  "no_key": "Envoi impossible : {{error}}"
+  "no_key": "Envoi impossible : {{error}}",
+  "copy_ref": "Touchez pour copier",
+  "copied": "Copié",
+  "copy_failed": "Copie impossible",
+  "last_sends": "Derniers envois",
+  "banner_short": "Version DEBUG : tout est enregistré",
+  "banner_more": "Touchez pour les détails"
 }

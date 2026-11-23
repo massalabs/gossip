@@ -12,6 +12,7 @@ import {
   type SendPhase,
 } from '../send';
 import { MAX_USER_FILES } from '../upload';
+import CopyRef from './CopyRef';
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -64,11 +65,11 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
   const send = async () => {
     setStatus({ kind: 'busy', phase: { phase: 'preparing' } });
     try {
-      const { upload } = await sendRecord(
+      const { ref } = await sendRecord(
         { note, includeSecrets, onlyNew, files },
         phase => setStatus({ kind: 'busy', phase })
       );
-      setStatus({ kind: 'done', ref: upload.slice(0, 8) });
+      setStatus({ kind: 'done', ref });
     } catch (error) {
       // A failed send is a warning: it must not open the error pop-up.
       recordUiFailure('send', error);
@@ -224,9 +225,10 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
         {status.kind === 'done' && (
-          <p className="mt-3 text-sm text-green-600">
-            {t('success', { ref: status.ref })}
-          </p>
+          <div className="mt-3 text-sm text-green-600">
+            {t('success')}
+            <CopyRef value={status.ref} />
+          </div>
         )}
         {status.kind === 'failed' && (
           <p className="mt-3 text-sm text-destructive break-words">

@@ -27,8 +27,14 @@
   "close": "关闭",
   "retry": "重试",
   "share_instead": "改为分享文件",
-  "success": "已发送，谢谢。编号：{{ref}}",
+  "success": "已发送，谢谢。本次发送的编号：",
   "failure": "发送失败：{{error}}",
   "not_configured": "此版本没有上传地址或密钥：请使用“改为分享文件”。",
-  "no_key": "无法发送：{{error}}"
+  "no_key": "无法发送：{{error}}",
+  "copy_ref": "点按复制",
+  "copied": "已复制",
+  "copy_failed": "复制失败",
+  "last_sends": "最近的发送",
+  "banner_short": "调试版本：所有内容都会被记录",
+  "banner_more": "点按查看详情"
 }
