@@ -146,6 +146,8 @@ export class SessionModule {
    */
   /** The last status seen of each peer, by hex ID (debug log only). */
   private seenStatus = new Map<string, number>();
+  /** When each peer entered the status last seen (debug log only). */
+  private seenSince = new Map<string, number>();
 
   /**
    * `session.state`: logs each change of a peer's session status, with the
@@ -159,6 +161,9 @@ export class SessionModule {
       const before = this.seenStatus.get(key);
       if (before === status) return;
       this.seenStatus.set(key, status);
+      const now = Date.now();
+      const entered = this.seenSince.get(key);
+      this.seenSince.set(key, now);
       dlog(
         'sessions',
         'session.state',
@@ -167,6 +172,7 @@ export class SessionModule {
           from: before === undefined ? null : STATUS_NAMES[before],
           to: STATUS_NAMES[status] ?? status,
           why,
+          inPreviousMs: entered === undefined ? null : now - entered,
         },
         { lvl: 'info' }
       );
@@ -240,6 +246,7 @@ export class SessionModule {
       }
       if (debugLogEnabled()) {
         this.seenStatus.clear();
+        this.seenSince.clear();
         dlog(
           'sessions',
           'session.load',
@@ -576,7 +583,21 @@ export class SessionModule {
     }
 
     const result = this.sessionManager.send_message(peerId, message);
-    if (debugLogEnabled()) this.observe(peerId, 'send');
+    if (debugLogEnabled()) {
+      dlog(
+        'sessions',
+        'session.send',
+        {
+          peer: shortId(peerId),
+          size: message.length,
+          ok: !!result,
+          ...(result && { seeker: shortId(result.seeker) }),
+          status: STATUS_NAMES[this.sessionManager.peer_session_status(peerId)],
+        },
+        { lvl: result ? 'debug' : 'warn' }
+      );
+      this.observe(peerId, 'send');
+    }
     // CRITICAL: Persist session state BEFORE returning
     // This ensures state is saved before the encrypted message goes on the network
     await this.persistIfNeeded();
