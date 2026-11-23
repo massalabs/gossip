@@ -161,3 +161,12 @@ extern "C" fn install() {
 #[used]
 #[unsafe(link_section = ".init_array")]
 static INSTALL: extern "C" fn() = install;
+
+/// Same on Apple targets (Mach-O): the iOS app reads the stderr lines back into its
+/// debug record (`DebugLogWriter.swift`). The library is static there: the object
+/// holding this entry is linked only if it is the crate's single codegen unit, which
+/// `scripts/build-mesh-ios.sh --full-debug` sets.
+#[cfg(target_vendor = "apple")]
+#[used]
+#[unsafe(link_section = "__DATA,__mod_init_func")]
+static INSTALL_APPLE: extern "C" fn() = install;

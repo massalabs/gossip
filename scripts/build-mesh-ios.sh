@@ -27,7 +27,14 @@ esac
 FEATURE_FLAGS=()
 case "${2:-}" in
     "") ;;
-    --full-debug) FEATURE_FLAGS=("--no-default-features" "--features" "full-debug") ;;
+    --full-debug)
+        FEATURE_FLAGS=("--no-default-features" "--features" "full-debug")
+        # One codegen unit: the static library's single gossip-mobile object then
+        # carries the __mod_init_func entry that installs the log forwarder (an
+        # archive member nothing references would not be linked into the app).
+        export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+        export CARGO_PROFILE_DEV_CODEGEN_UNITS=1
+        ;;
     *) echo "error: unknown option '$2'" >&2; exit 2 ;;
 esac
 
