@@ -11,7 +11,7 @@ import {
   uploadConfig,
   type SendPhase,
 } from '../send';
-import { MAX_ATTACHMENTS } from '../upload';
+import { MAX_USER_FILES } from '../upload';
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -158,20 +158,20 @@ export default function SendDialog({ onClose }: { onClose: () => void }) {
             className="hidden"
             onChange={e => {
               const picked = Array.from(e.target.files ?? []);
-              setFiles(prev => [...prev, ...picked].slice(0, MAX_ATTACHMENTS));
+              setFiles(prev => [...prev, ...picked].slice(0, MAX_USER_FILES));
               e.target.value = '';
             }}
           />
           <button
             type="button"
-            disabled={busy || files.length >= MAX_ATTACHMENTS}
+            disabled={busy || files.length >= MAX_USER_FILES}
             className="rounded-full border border-border px-3 py-1.5 text-sm disabled:opacity-50"
             onClick={() => input.current?.click()}
           >
             {t('add_files')}
           </button>
           <span className="ml-2 text-xs text-muted-foreground">
-            {t('files_limit', { count: MAX_ATTACHMENTS })}
+            {t('files_limit', { count: MAX_USER_FILES })}
           </span>
           {files.length > 0 && (
             <ul className="mt-2 space-y-1">

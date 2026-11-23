@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
-  attachmentName,
   ATTACHMENT_NAME,
+  MAX_USER_FILES,
   PIECE,
   pieceCount,
   runUpload,
@@ -12,6 +12,12 @@ import {
   type UploadJob,
 } from '../../src/fullDebug/upload';
 import type { UploadSource } from '../../src/fullDebug/writers';
+import {
+  attachmentName,
+  privateDoc,
+  publicMeta,
+  PRIVATE_DOC_NAME,
+} from '../../src/fullDebug/private';
 
 const SECRET = 'test-secret';
 
@@ -138,9 +144,7 @@ describe('debug log upload', () => {
     const server = fakeServer();
     const blob = bytes(PIECE + 10, 7);
     const attachment: Attachment = {
-      name: attachmentName(1, 'screen shot.png'),
-      originalName: 'screen shot.png',
-      type: 'image/png',
+      name: attachmentName(1),
       size: blob.length,
       plainSize: blob.length,
       pieces: pieceCount(blob.length),
@@ -165,9 +169,7 @@ describe('debug log upload', () => {
         .length
     ).toBe(pieceCount(data.length));
     expect(
-      server.calls.filter(c =>
-        c.includes('/attachment/a1-screen_shot.png/piece/')
-      ).length
+      server.calls.filter(c => c.includes('/attachment/a1/piece/')).length
     ).toBe(2);
     expect(progress.at(-1)).toBe(data.length + blob.length);
   });
@@ -257,17 +259,107 @@ describe('debug log upload', () => {
     expect(server.calls.length).toBe(1);
   });
 
-  it('derives safe attachment names', () => {
-    for (const n of [
-      '../../etc/passwd',
-      '.hidden',
-      'Capture d’écran 2026.png',
-      '',
-      'x'.repeat(200),
-      '视频.mp4',
-    ]) {
-      expect(attachmentName(3, n)).toMatch(ATTACHMENT_NAME);
+  it('sends files under opaque names, with one slot for m0', () => {
+    for (const i of [1, 2, 7]) {
+      expect(attachmentName(i)).toMatch(ATTACHMENT_NAME);
+      expect(attachmentName(i)).toBe(`a${i}`);
     }
-    expect(attachmentName(2, 'clip.mp4')).toBe('a2-clip.mp4');
+    expect(PRIVATE_DOC_NAME).toMatch(ATTACHMENT_NAME);
+    expect(MAX_USER_FILES).toBe(7);
+  });
+
+  it('keeps everything typed, picked or device-specific out of meta', () => {
+    const doc = privateDoc({
+      note: 'NOTE-SECRET',
+      files: [
+        {
+          name: 'a1',
+          file: { name: 'Screenshot_2026.png', type: 'image/png', size: 12 },
+        },
+      ],
+      userAgent: 'UA-SECRET',
+      gzipSha256: 'abc',
+    });
+    expect(doc.attachments).toEqual([
+      {
+        name: 'a1',
+        originalName: 'Screenshot_2026.png',
+        mime: 'image/png',
+        size: 12,
+      },
+    ]);
+    const meta = publicMeta({
+      enc: 'GDL1',
+      keyFp: 'fp',
+      appVersion: '0.1.1',
+      commit: 'c',
+      platform: 'android',
+      includeSecrets: true,
+      onlyNew: false,
+      fromLine: 1,
+      toLine: 2,
+      lines: 2,
+      rawBytes: 10,
+      recordBytes: 10,
+      gzipSize: 5,
+      sentAt: 't',
+    });
+    const text = JSON.stringify(meta);
+    for (const secret of [
+      'NOTE-SECRET',
+      'Screenshot',
+      'image/png',
+      'UA-SECRET',
+      'abc',
+      'note',
+      'userAgent',
+    ]) {
+      expect(text).not.toContain(secret);
+    }
+    expect(Object.keys(meta).sort()).toEqual(
+      [
+        'enc',
+        'keyFp',
+        'appVersion',
+        'commit',
+        'platform',
+        'includeSecrets',
+        'onlyNew',
+        'fromLine',
+        'toLine',
+        'lines',
+        'rawBytes',
+        'recordBytes',
+        'gzipSize',
+        'sentAt',
+      ].sort()
+    );
+  });
+
+  it('refuses more attachments than the backend takes', async () => {
+    const data = bytes(10);
+    const one: Attachment = {
+      name: 'a1',
+      size: 1,
+      plainSize: 1,
+      pieces: 1,
+      sha256: '',
+      readPiece: async () => new Uint8Array(1),
+    };
+    await expect(
+      runUpload(
+        {
+          base,
+          secret: SECRET,
+          source: source(data),
+          fetch: fakeServer().fetch,
+          sleep: noSleep,
+        },
+        makeJob(
+          data,
+          Array.from({ length: 9 }, (_, i) => ({ ...one, name: `a${i}` }))
+        )
+      )
+    ).rejects.toThrow(/too many/);
   });
 });

@@ -22,19 +22,23 @@ export const ATTACHMENT_NAME = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,63}$/;
 export const PIECE = 512 * 1024;
 export const MAX_LOG_PIECES = 16384;
 export const MAX_ATTACHMENT_PIECES = 4096;
+/** Attachments per upload on the backend (MAX_ATTACHMENTS in gossip-api). */
 export const MAX_ATTACHMENTS = 8;
+/** Files a tester may attach: one slot carries the private document `m0`. */
+export const MAX_USER_FILES = MAX_ATTACHMENTS - 1;
 
 export type FetchLike = (
   url: string,
   init: { method: string; headers: Record<string, string>; body?: BodyInit }
 ) => Promise<{ status: number; ok: boolean; json(): Promise<unknown> }>;
 
-/** One file to attach, read piece by piece (never whole), encrypted. */
+/**
+ * One file to attach, read piece by piece (never whole), encrypted. Its
+ * original name and type are never sent readable (private.ts).
+ */
 export interface Attachment {
-  /** Safe name on the server, see attachmentName. */
+  /** Opaque name on the server: `m0`, `a1`, `a2`, … */
   name: string;
-  originalName: string;
-  type: string;
   /** Bytes sent: the GDL1 file. `pieces`, `sha256` and `readPiece` are of it. */
   size: number;
   /** Bytes of the file as picked. */
@@ -92,16 +96,6 @@ export function uploadBase(apiUrl: string | undefined): string | null {
   } catch {
     return null;
   }
-}
-
-/** `a<index>-<original name, sanitised>`, matching ATTACHMENT_NAME. */
-export function attachmentName(index: number, original: string): string {
-  const cleaned = original
-    .replace(/[^A-Za-z0-9_.-]+/g, '_')
-    .replace(/^[.]+/, '')
-    .slice(-50);
-  const name = `a${index}-${cleaned || 'file'}`.slice(0, 64);
-  return ATTACHMENT_NAME.test(name) ? name : `a${index}-file`;
 }
 
 /** Number of pieces of `size` bytes (an empty file is one empty piece). */
@@ -243,12 +237,15 @@ export async function runUpload(
   if (!ID_PATTERN.test(job.install) || !ID_PATTERN.test(job.upload)) {
     throw new UploadError('bad install or upload id');
   }
+  if (job.attachments.length > MAX_ATTACHMENTS) {
+    throw new UploadError('too many attachments', 413);
+  }
   if (job.prepared.pieces > MAX_LOG_PIECES) {
     throw new UploadError('the log is too large to send', 413);
   }
   for (const a of job.attachments) {
     if (!ATTACHMENT_NAME.test(a.name) || a.pieces > MAX_ATTACHMENT_PIECES) {
-      throw new UploadError(`attachment ${a.originalName} cannot be sent`, 413);
+      throw new UploadError(`attachment ${a.name} cannot be sent`, 413);
     }
   }
   const list = jobStreams(o, job);

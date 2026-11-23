@@ -16,10 +16,17 @@ import {
   randomUploadId,
   runUpload,
   uploadBase,
+  MAX_USER_FILES,
   type Attachment,
   type UploadJob,
 } from './upload';
 import { fileAttachment } from './attachments';
+import {
+  attachmentName,
+  privateDoc,
+  publicMeta,
+  PRIVATE_DOC_NAME,
+} from './private';
 import { GDL1, importRecipient, type Gdl1Recipient } from './gdl1';
 import type { UploadPrepared } from './writers';
 import { APP_BUILD_ID, APP_VERSION } from '../config/version';
@@ -115,53 +122,60 @@ export async function sendRecord(
       recipient,
     });
     checkEncrypted(prepared);
+    if (request.files.length > MAX_USER_FILES) {
+      throw new Error(`at most ${MAX_USER_FILES} files per send`);
+    }
     const total = request.files.reduce((s, f) => s + f.size, 0);
     let before = 0;
-    const attachments: Attachment[] = [];
+    const files: Attachment[] = [];
     for (let i = 0; i < request.files.length; i++) {
       const file = request.files[i];
-      attachments.push(
-        await fileAttachment(i + 1, file, recipient, done =>
+      files.push(
+        await fileAttachment(attachmentName(i + 1), file, recipient, done =>
           onPhase({ phase: 'hashing', done: before + done, total })
         )
       );
       before += file.size;
     }
+    // The note, the files' names and types and the user agent: encrypted,
+    // as the attachment m0 (private.ts).
+    const doc = privateDoc({
+      note: request.note,
+      files: request.files.map((file, i) => ({ name: files[i].name, file })),
+      userAgent: navigator.userAgent,
+      gzipSha256: prepared.plainSha256,
+    });
+    const docFile = new Blob([JSON.stringify(doc)], {
+      type: 'application/json',
+    });
+    const attachments = [
+      await fileAttachment(PRIVATE_DOC_NAME, docFile, recipient),
+      ...files,
+    ];
     job = {
       install: stats.installId,
       upload: randomUploadId(),
       prepared,
       attachments,
-      meta: {
-        note: request.note,
-        // The log and every attachment are GDL1 files encrypted to the key
-        // whose DER has this SHA-256; gzipSize/gzipSha256 are of the gzip
-        // stream inside the log's file, to check a decryption.
+      // Readable on the backend: only what finds and decrypts an upload. The
+      // log and every attachment are GDL1 files encrypted to the key whose
+      // DER has the SHA-256 keyFp.
+      meta: publicMeta({
         enc: GDL1,
         keyFp: recipient.fingerprint,
-        gzipSize: prepared.plainSize,
-        gzipSha256: prepared.plainSha256,
+        appVersion: APP_VERSION,
+        commit: import.meta.env.VITE_APP_BUILD_ID ?? APP_BUILD_ID,
+        platform: Capacitor.getPlatform(),
         includeSecrets: request.includeSecrets,
         onlyNew: request.onlyNew,
-        appVersion: APP_VERSION,
-        build: APP_BUILD_ID,
-        commit: import.meta.env.VITE_APP_BUILD_ID ?? 'unknown',
-        platform: Capacitor.getPlatform(),
-        userAgent: navigator.userAgent,
         fromLine: prepared.fromLine,
         toLine: prepared.toLine,
         lines: prepared.lines,
         rawBytes: prepared.rawBytes,
         recordBytes: stats.bytes,
+        gzipSize: prepared.plainSize,
         sentAt: new Date().toISOString(),
-        attachments: attachments.map(a => ({
-          name: a.name,
-          originalName: a.originalName,
-          type: a.type,
-          size: a.plainSize,
-          encSize: a.size,
-        })),
-      },
+      }),
     };
     pending = { request, job };
   }

@@ -2,6 +2,8 @@ import { createHash, createPrivateKey, generateKeyPairSync } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   mkdtempSync,
+  mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -156,7 +158,7 @@ describe('GDL1 round trip through the decrypt script', async () => {
     const plain = new Uint8Array(PIECE * 2 + 12345);
     crypto.getRandomValues(plain.subarray(0, 65536));
     const file = new File([plain], 'clip.mp4', { type: 'video/mp4' });
-    const a = await fileAttachment(1, file, recipient);
+    const a = await fileAttachment('a1', file, recipient);
     expect(a.plainSize).toBe(plain.length);
     expect(a.size).toBe(gdl1Size(plain.length));
     const pieces: Uint8Array[] = [];
@@ -352,5 +354,89 @@ describe('the built-in key', () => {
       .publicKey.export({ type: 'spki', format: 'der' })
       .toString('base64');
     await expect(importRecipient(p384)).rejects.toThrow(/P-256/);
+  });
+});
+
+describe('decrypting a downloaded upload directory', async () => {
+  const recipient = await importRecipient(vectors.recipientSpkiB64);
+
+  it('decrypts log, m0 and attachments, under safe original names inside the directory', async () => {
+    const root = join(tmp, 'up');
+    const dir = join(root, 'inst', 'upload');
+    mkdirSync(dir, { recursive: true });
+    const lines = Buffer.from('{"n":1}\n{"n":2}\n');
+    const files = {
+      a1: Buffer.from('first file'),
+      a2: Buffer.from('second file'),
+      a3: Buffer.from('third file'),
+      a4: Buffer.from('fourth file'),
+    };
+    const doc = {
+      v: 1,
+      note: 'the note',
+      attachments: [
+        {
+          name: 'a1',
+          originalName: '../../evil.txt',
+          mime: 'text/plain',
+          size: 10,
+        },
+        {
+          name: 'a2',
+          originalName: 'Screen shot.png',
+          mime: 'image/png',
+          size: 11,
+        },
+        {
+          name: 'a3',
+          originalName: 'Screen shot.png',
+          mime: 'image/png',
+          size: 10,
+        },
+        { name: 'a4', originalName: '..', mime: 'x', size: 11 },
+      ],
+      userAgent: 'ua',
+      gzipSha256: '',
+    };
+    writeFileSync(
+      join(dir, 'log.gdl1'),
+      await encryptBytes(new Uint8Array(gzipSync(lines)), recipient)
+    );
+    // the server's own names work too
+    writeFileSync(
+      join(dir, 'att-m0'),
+      await encryptBytes(
+        new Uint8Array(Buffer.from(JSON.stringify(doc))),
+        recipient
+      )
+    );
+    for (const [k, v] of Object.entries(files)) {
+      writeFileSync(
+        join(dir, `${k}.gdl1`),
+        await encryptBytes(new Uint8Array(v), recipient)
+      );
+    }
+    const run = () =>
+      execFileSync('node', [SCRIPT, '--upload-dir', dir], {
+        env: { ...process.env, DEBUG_LOGS_PRIVATE_KEY: TEST_PRIVATE_PEM },
+        stdio: 'pipe',
+      });
+    run();
+    expect(readFileSync(join(dir, 'log.jsonl')).equals(lines)).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, 'm0.json'), 'utf8')).note).toBe(
+      'the note'
+    );
+    expect(readFileSync(join(dir, 'evil.txt')).equals(files.a1)).toBe(true);
+    expect(readFileSync(join(dir, 'Screen shot.png')).equals(files.a2)).toBe(
+      true
+    );
+    expect(readFileSync(join(dir, 'a3-Screen shot.png')).equals(files.a3)).toBe(
+      true
+    );
+    expect(readFileSync(join(dir, 'a4')).equals(files.a4)).toBe(true);
+    expect(readdirSync(root)).toEqual(['inst']);
+    expect(readdirSync(join(root, 'inst'))).toEqual(['upload']);
+    // a second run leaves what exists
+    run();
   });
 });

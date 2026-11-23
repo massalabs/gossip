@@ -5,6 +5,14 @@
 // against vectors made with `encryptGdl1` below (test/fixtures/gdl1/).
 //
 //   node scripts/debug-logs-decrypt.mjs [--gunzip] [--key-file <pem>] <in.gdl1> <out>
+//   node scripts/debug-logs-decrypt.mjs [--key-file <pem>] --upload-dir <dir>
+//
+// --upload-dir: a downloaded upload directory (log.gdl1, m0.gdl1, a1.gdl1,
+// ...; the server's names log.gz, att-m0, att-a1 work too). Decrypts it all:
+// the log to log.jsonl (gunzipped), the private document m0 (note, original
+// file names and types, user agent) to m0.json, and each attachment to its
+// original name read from m0, sanitised and kept inside <dir>. An output that
+// exists already is left as it is.
 //
 // The private key (PEM, P-256) comes from the env variable
 // DEBUG_LOGS_PRIVATE_KEY, or from the file given with --key-file, or, when
@@ -38,10 +46,13 @@ import {
 import {
   createReadStream,
   createWriteStream,
+  existsSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
 } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
@@ -307,25 +318,126 @@ function usage(message) {
   process.stderr.write(
     (message ? `${message}\n\n` : '') +
       'usage: node scripts/debug-logs-decrypt.mjs [--gunzip] [--key-file <private.pem>] <in.gdl1> <out>\n' +
+      '       node scripts/debug-logs-decrypt.mjs [--key-file <private.pem>] --upload-dir <dir>\n' +
       '  private key: env DEBUG_LOGS_PRIVATE_KEY, or --key-file, or stdin\n'
   );
   process.exit(2);
 }
 
+/**
+ * Decrypts the file `inPath` to `outPath` (through `<outPath>.part`, renamed
+ * only once authenticated to the end; removed on failure).
+ */
+export async function decryptFile(inPath, outPath, privateKey, gunzip) {
+  const part = `${outPath}.part`;
+  try {
+    const plain = Readable.from(
+      decryptGdl1(createReadStream(inPath), privateKey)
+    );
+    if (gunzip) await pipeline(plain, createGunzip(), createWriteStream(part));
+    else await pipeline(plain, createWriteStream(part));
+    renameSync(part, outPath);
+  } catch (error) {
+    rmSync(part, { force: true });
+    throw error;
+  }
+}
+
+/**
+ * A file name from an upload's private document, made safe: no directory
+ * part, no control or path characters, no leading dot, at most 120 bytes.
+ */
+export function safeName(name, fallback) {
+  let n = basename(String(name ?? '').replaceAll('\\', '/'))
+    .replace(/[\u0000-\u001f\u007f/:*?"<>|]+/g, '_')
+    .replace(/^[.\s]+/, '')
+    .trim();
+  while (Buffer.byteLength(n) > 120) n = n.slice(0, -1);
+  return n && n !== '.' && n !== '..' ? n : fallback;
+}
+
+const UPLOAD_PART = /^(?:att-)?(log|m0|a\d+)(?:\.gz)?(?:\.gdl1)?$/;
+
+/**
+ * Decrypts a downloaded upload directory (see the head of this file).
+ * Returns what was written; throws on the first file that fails.
+ */
+export async function decryptUploadDir(dir, privateKey, log = () => {}) {
+  const root = resolve(dir);
+  const parts = new Map();
+  for (const f of readdirSync(root)) {
+    const m = UPLOAD_PART.exec(f);
+    if (!m) continue;
+    const head = readFileSync(join(root, f)).subarray(0, 4);
+    if (!head.equals(MAGIC)) continue;
+    parts.set(m[1], f);
+  }
+  const written = [];
+  const inside = name => {
+    const out = resolve(root, name);
+    if (dirname(out) !== root) throw new Gdl1Error(`unsafe name ${name}`);
+    return out;
+  };
+  if (parts.has('log')) {
+    const out = inside('log.jsonl');
+    if (!existsSync(out)) {
+      await decryptFile(join(root, parts.get('log')), out, privateKey, true);
+      written.push(out);
+      log(`ok   ${out}`);
+    }
+  }
+  let doc = null;
+  if (parts.has('m0')) {
+    const out = inside('m0.json');
+    if (!existsSync(out)) {
+      await decryptFile(join(root, parts.get('m0')), out, privateKey, false);
+      written.push(out);
+      log(`ok   ${out}`);
+    }
+    doc = JSON.parse(readFileSync(out, 'utf8'));
+  }
+  const originals = new Map(
+    (doc?.attachments ?? []).map(a => [a.name, a.originalName])
+  );
+  const taken = new Set();
+  for (const [key, f] of [...parts].sort()) {
+    if (key === 'log' || key === 'm0') continue;
+    let name = safeName(originals.get(key), key);
+    if (
+      taken.has(name) ||
+      name === 'log.jsonl' ||
+      name === 'm0.json' ||
+      (name !== key && UPLOAD_PART.test(name))
+    ) {
+      name = `${key}-${name}`;
+    }
+    taken.add(name);
+    const out = inside(name);
+    if (existsSync(out)) continue;
+    await decryptFile(join(root, f), out, privateKey, false);
+    written.push(out);
+    log(`ok   ${out}`);
+  }
+  return { written, doc };
+}
+
 async function main(argv) {
   let gunzip = false;
   let keyFile = null;
+  let uploadDir = null;
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--gunzip') gunzip = true;
     else if (a === '--key-file')
       keyFile = argv[++i] ?? usage('--key-file needs a path');
+    else if (a === '--upload-dir')
+      uploadDir = argv[++i] ?? usage('--upload-dir needs a directory');
     else if (a === '-h' || a === '--help') usage();
     else if (a.startsWith('--')) usage(`unknown option ${a}`);
     else positional.push(a);
   }
-  if (positional.length !== 2) usage();
+  if (uploadDir ? positional.length !== 0 : positional.length !== 2) usage();
   const [inPath, outPath] = positional;
   const fromEnv = process.env.DEBUG_LOGS_PRIVATE_KEY;
   if (fromEnv && keyFile) {
@@ -338,16 +450,15 @@ async function main(argv) {
     `key fingerprint (keyFp): ${keyFingerprint(createPublicKey(privateKey))}\n`
   );
 
-  const part = `${outPath}.part`;
   try {
-    const plain = Readable.from(
-      decryptGdl1(createReadStream(inPath), privateKey)
-    );
-    if (gunzip) await pipeline(plain, createGunzip(), createWriteStream(part));
-    else await pipeline(plain, createWriteStream(part));
-    renameSync(part, outPath);
+    if (uploadDir) {
+      await decryptUploadDir(uploadDir, privateKey, l =>
+        process.stderr.write(`${l}\n`)
+      );
+      return;
+    }
+    await decryptFile(inPath, outPath, privateKey, gunzip);
   } catch (error) {
-    rmSync(part, { force: true });
     process.stderr.write(
       `DECRYPTION FAILED: ${error instanceof Error ? error.message : error}\n`
     );

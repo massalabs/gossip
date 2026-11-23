@@ -12,7 +12,7 @@
  * instead of sending a second ciphertext under the same nonce.
  */
 import { sha256 } from '@noble/hashes/sha2';
-import { attachmentName, pieceCount, PIECE, type Attachment } from './upload';
+import { pieceCount, PIECE, type Attachment } from './upload';
 import {
   createSealer,
   gdl1Size,
@@ -110,10 +110,13 @@ export async function encryptedFile(
   };
 }
 
-/** Encrypts and hashes `file` once; its pieces are encrypted again when sent. */
+/**
+ * Encrypts and hashes `file` once, to be sent under the opaque `name`; its
+ * pieces are encrypted again when sent.
+ */
 export async function fileAttachment(
-  index: number,
-  file: File,
+  name: string,
+  file: Blob,
   recipient: Gdl1Recipient,
   onHashProgress?: (done: number) => void,
   test?: Gdl1TestOverride
@@ -121,9 +124,7 @@ export async function fileAttachment(
   const enc = await encryptedFile(file, recipient, test);
   const digest = await enc.hashAll(onHashProgress);
   return {
-    name: attachmentName(index, file.name || 'file'),
-    originalName: file.name,
-    type: file.type || 'application/octet-stream',
+    name,
     size: enc.size,
     plainSize: enc.plainSize,
     pieces: pieceCount(enc.size),

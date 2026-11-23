@@ -84,10 +84,17 @@ file instead" shares the same encrypted file
 A fresh ephemeral key and nonce prefix for every file of every send; the
 ephemeral private key is never stored or logged. A reader that reaches the end
 without a chunk marked last fails, so a truncated file is detected. The
-`done` call's `meta` carries `enc: "GDL1"`, `keyFp` (hex SHA-256 of the
-recipient key's DER: which private key decrypts) and `gzipSize`/`gzipSha256`
-of the log's gzip stream. The backend is unchanged: its SHA-256 check is over
-the ciphertext it receives.
+backend is unchanged: its SHA-256 check is over the ciphertext it receives.
+
+Nothing the tester types or picks travels readable (`src/fullDebug/private.ts`).
+The note, the attached files' original names, types and sizes, the user agent
+and the SHA-256 of the log's gzip stream go into one small JSON document,
+encrypted as its own GDL1 file and sent as the attachment `m0`. The files
+travel under the opaque names `a1`, `a2`, … (7 at most: the backend takes 8
+attachments, one is `m0`). The `done` call's `meta` keeps only what finds and
+decrypts an upload: `enc: "GDL1"`, `keyFp` (hex SHA-256 of the recipient key's
+DER: which private key decrypts), app version, commit, platform, the two
+options, line range and count, sizes of the log, and the time of the send.
 
 Where: the log natively in `prepareUpload` (`Gdl1.kt`, and `Gdl1` in
 `DebugLogFilePlugin.swift`), streamed to the upload file; attachments and the
@@ -104,7 +111,10 @@ dependency; it is also the reference implementation):
 ```sh
 # the private key from a file, from DEBUG_LOGS_PRIVATE_KEY, or from stdin
 node scripts/debug-logs-decrypt.mjs --gunzip --key-file private.pem log.gz log.jsonl
-node scripts/debug-logs-decrypt.mjs att-a1-clip.mp4 clip.mp4 < private.pem
+node scripts/debug-logs-decrypt.mjs att-a1 a1.bin < private.pem
+# a whole downloaded upload: log.jsonl, m0.json, and the files under their
+# original names (read from m0, sanitised, kept inside the directory)
+node scripts/debug-logs-decrypt.mjs --key-file private.pem --upload-dir <install>/<upload>
 ```
 
 It prints the `keyFp` of the key it was given, writes `<out>.part` and renames
