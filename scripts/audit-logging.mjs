@@ -84,6 +84,13 @@ const RULE_HELP = {
     'unchanged. If a release build truly needs it, STOP and ask the project',
     'owner.',
   ],
+  fullDebug: [
+    'Why: VITE_FULL_DEBUG=true builds the full debug app, which records',
+    'everything (message content and keys included) and can send it to the',
+    'developers. It must never be built as the real app.',
+    'What to do: unset VITE_FULL_DEBUG (environment and .env files). Build the',
+    'debug app with npm run build:full-debug / android:full-debug only.',
+  ],
   capacitor: [
     'Why: the Capacitor bridge logs every plugin call and its data.',
     "What to do: keep loggingBehavior: 'none' in capacitor.config.ts.",
@@ -240,6 +247,18 @@ export function auditDebugLogsSetting(values) {
     }));
 }
 
+/** A production build must not be the full debug build. */
+export function auditFullDebugSetting(values) {
+  return values
+    .filter(({ value }) => String(value).trim().toLowerCase() === 'true')
+    .map(({ source }) => ({
+      file: source,
+      line: 1,
+      rule: 'VITE_FULL_DEBUG=true in a production build',
+      help: 'fullDebug',
+    }));
+}
+
 const TRUST_MARKERS =
   /ServerTrust|URLCredential\(trust|rejectProtectionSpace|TrustManager|HostnameVerifier|onReceivedSslError|setWebContentsDebuggingEnabled/;
 const DEBUG_GUARD = /#if\s+DEBUG\b|BuildConfig\.DEBUG\b|FLAG_DEBUGGABLE\b/;
@@ -307,27 +326,29 @@ export function formatViolations(violations) {
 
 const read = path => ({ path, text: readFileSync(path, 'utf8') });
 
-async function debugLogsValues() {
+async function envValues(key) {
   const values = [];
-  if (process.env.VITE_DEBUG_LOGS !== undefined) {
+  if (process.env[key] !== undefined) {
     values.push({
-      source: 'environment (VITE_DEBUG_LOGS)',
-      value: process.env.VITE_DEBUG_LOGS,
+      source: `environment (${key})`,
+      value: process.env[key],
     });
     // Vite gives the environment precedence over .env files.
     return values;
   }
   // `vite build` runs in production mode and reads these .env files.
   const { loadEnv } = await import('vite');
-  const env = loadEnv('production', root, 'VITE_DEBUG_LOGS');
-  if (env.VITE_DEBUG_LOGS !== undefined) {
+  const env = loadEnv('production', root, key);
+  if (env[key] !== undefined) {
     values.push({
-      source: '.env files of production mode (VITE_DEBUG_LOGS)',
-      value: env.VITE_DEBUG_LOGS,
+      source: `.env files of production mode (${key})`,
+      value: env[key],
     });
   }
   return values;
 }
+
+const debugLogsValues = () => envValues('VITE_DEBUG_LOGS');
 
 async function main() {
   const mode = process.argv[2] ?? 'source';
@@ -364,6 +385,9 @@ async function main() {
     violations.push(...auditNativeLogs(nativeFiles.map(read)));
 
     violations.push(...auditDebugLogsSetting(await debugLogsValues()));
+    violations.push(
+      ...auditFullDebugSetting(await envValues('VITE_FULL_DEBUG'))
+    );
 
     violations.push(
       ...auditPatches(
