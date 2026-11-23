@@ -22,7 +22,7 @@ list only with their explicit approval.
 | `scripts/audit-hosts.mjs dist`                        | after the build    | Every host named by a URL in `dist/**/*.{js,mjs,html,json,webmanifest}` is in `scripts/allowed-hosts.ts`, or is the host of the build's `VITE_GOSSIP_API_URL`.                                                                                                                                                                                                                                                                                                                                                                                             |
 | `scripts/audit-paths.mjs dist`                        | after the build    | No file of `dist/` holds a home directory path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
-| `scripts/audit-full-debug.mjs dist` | after the build | No file of `dist/` holds code of the full debug build: the upload path `/debug-logs`, the `DebugLogFile` plugin, its storage keys or its overlay. `scripts/audit-logging.mjs source` also fails when `VITE_FULL_DEBUG` is `true`. |
+| `scripts/audit-full-debug.mjs dist` | after the build | No file of `dist/` holds code of the full debug build: the upload path `/debug-logs`, the `DebugLogFile` plugin, its storage keys, its overlay, the label of its encryption (`gossip-debug-logs v1`), or the value of `VITE_DEBUG_LOGS_PUBLIC_KEY` when the environment holds one. `scripts/audit-logging.mjs source` also fails when `VITE_FULL_DEBUG` is `true`. |
 
 Their unit tests are in `test/scripts/`.
 
@@ -50,6 +50,57 @@ to `<origin of VITE_GOSSIP_API_URL>/debug-logs/` with the secret
   settings screens.
 - The upload host is the backend's own host, already allowed: the allowed
   hosts list is unchanged.
+- Every send is encrypted to the developers' public key (next section): the
+  backend, and anyone holding its read secret, stores and sees only
+  ciphertext.
+
+### Encryption of the sends (GDL1)
+
+The log (one gzip stream) and every attached file are each encrypted, on the
+phone, to a P-256 public key whose private half only the developers hold. The
+key is built in from `VITE_DEBUG_LOGS_PUBLIC_KEY` (base64 of the DER
+SubjectPublicKeyInfo, i.e. the PEM body on one line; in CI the repository
+variable `DEBUG_LOGS_PUBLIC_KEY`). A full debug build without a valid key
+fails (`vite.config.ts`, and the CI step before it), and a send without a
+valid key fails with a message: there is no plaintext fallback. "Share the
+file instead" shares the same encrypted file
+(`gossip-debug-log-<install>-<time>.gdl1`).
+
+| Part   | Bytes                                                                                                                                                                                                                         |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| header | `GDL1` (4), ephemeral P-256 public key uncompressed `04‖X‖Y` (65), nonce prefix (4)                                                                                                                                           |
+| key    | HKDF-SHA256, ikm = ECDH x coordinate (32), salt = ephemeral public (65) ‖ recipient public (65), info = `gossip-debug-logs v1`, 32 bytes                                                                                      |
+| chunks | the plaintext in 65,536-byte chunks (the last may be shorter, empty only if the whole is). Each: u32 BE length ‖ AES-256-GCM ciphertext ‖ 16-byte tag; nonce = prefix ‖ u64 BE index; AAD = `01` for the last, `00` otherwise |
+
+A fresh ephemeral key and nonce prefix for every file of every send; the
+ephemeral private key is never stored or logged. A reader that reaches the end
+without a chunk marked last fails, so a truncated file is detected. The
+`done` call's `meta` carries `enc: "GDL1"`, `keyFp` (hex SHA-256 of the
+recipient key's DER: which private key decrypts) and `gzipSize`/`gzipSha256`
+of the log's gzip stream. The backend is unchanged: its SHA-256 check is over
+the ciphertext it receives.
+
+Where: the log natively in `prepareUpload` (`Gdl1.kt`, and `Gdl1` in
+`DebugLogFilePlugin.swift`), streamed to the upload file; attachments and the
+web log in `src/fullDebug/gdl1.ts` (WebCrypto). Each implementation is checked
+against the vectors `test/fixtures/gdl1/vectors.json` (made with TEST-ONLY
+keys by `test/fixtures/gdl1/make-vectors.mjs`): JS by
+`test/fullDebug/gdl1.node.spec.ts`, Kotlin by `Gdl1Test`
+(`./gradlew testDebugUnitTest -PfullDebug=true`), and both native ones again
+on the device at every start (record line `enc.selftest`).
+
+Decrypt a download (`scripts/debug-logs-decrypt.mjs`, Node only, no
+dependency; it is also the reference implementation):
+
+```sh
+# the private key from a file, from DEBUG_LOGS_PRIVATE_KEY, or from stdin
+node scripts/debug-logs-decrypt.mjs --gunzip --key-file private.pem log.gz log.jsonl
+node scripts/debug-logs-decrypt.mjs att-a1-clip.mp4 clip.mp4 < private.pem
+```
+
+It prints the `keyFp` of the key it was given, writes `<out>.part` and renames
+it only when every chunk authenticates and the last one is seen; otherwise it
+deletes the partial output and exits with status 1.
 
 ## Native code
 
