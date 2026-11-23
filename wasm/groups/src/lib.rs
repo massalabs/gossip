@@ -22,10 +22,79 @@
 
 #![warn(missing_docs)]
 
+// ── Debug events of the full debug build ─────────────────────────────────────
+//
+// `dbg_event!`, `dbg_do!` and `dbg_ctx!` exist in both configurations. Without the cargo
+// feature `full-debug` they expand to nothing, arguments included: nothing is evaluated,
+// allocated or compiled in, so a normal build is the same as one without them. See
+// `debug.rs`.
+
+/// `dbg_event!(Level, "name", { "k" => v, … } [, c { … }] [, s { … }])`: one debug event.
+#[cfg(feature = "full-debug")]
+macro_rules! dbg_event {
+    ($lvl:ident, $ev:literal, { $($k:literal => $v:expr),* $(,)? } $(,)?) => {
+        dbg_event!(@emit $lvl, $ev, { $($k => $v),* }, { }, { })
+    };
+    ($lvl:ident, $ev:literal, { $($k:literal => $v:expr),* $(,)? },
+        c { $($ck:literal => $cv:expr),* $(,)? } $(,)?) => {
+        dbg_event!(@emit $lvl, $ev, { $($k => $v),* }, { $($ck => $cv),* }, { })
+    };
+    ($lvl:ident, $ev:literal, { $($k:literal => $v:expr),* $(,)? },
+        s { $($sk:literal => $sv:expr),* $(,)? } $(,)?) => {
+        dbg_event!(@emit $lvl, $ev, { $($k => $v),* }, { }, { $($sk => $sv),* })
+    };
+    ($lvl:ident, $ev:literal, { $($k:literal => $v:expr),* $(,)? },
+        c { $($ck:literal => $cv:expr),* $(,)? },
+        s { $($sk:literal => $sv:expr),* $(,)? } $(,)?) => {
+        dbg_event!(@emit $lvl, $ev, { $($k => $v),* }, { $($ck => $cv),* }, { $($sk => $sv),* })
+    };
+    (@emit $lvl:ident, $ev:literal, { $($k:literal => $v:expr),* },
+        { $($ck:literal => $cv:expr),* }, { $($sk:literal => $sv:expr),* }) => {
+        if $crate::debug::enabled() {
+            $crate::debug::emit(&$crate::debug::DebugEvent {
+                ev: $ev,
+                lvl: $crate::debug::Level::$lvl,
+                f: vec![$(($k, $crate::debug::IntoVal::into_val($v))),*],
+                c: vec![$(($ck, $crate::debug::IntoVal::into_val($cv))),*],
+                s: vec![$(($sk, $crate::debug::IntoVal::into_val($sv))),*],
+            });
+        }
+    };
+}
+#[cfg(not(feature = "full-debug"))]
+macro_rules! dbg_event {
+    ($($t:tt)*) => {};
+}
+
+/// `dbg_do! { statements }`: statements that exist only in the full debug build (counters of
+/// a debug event). They must not change anything the engine reads.
+#[cfg(feature = "full-debug")]
+macro_rules! dbg_do {
+    ($($t:tt)*) => { $($t)* };
+}
+#[cfg(not(feature = "full-debug"))]
+macro_rules! dbg_do {
+    ($($t:tt)*) => {};
+}
+
+/// `dbg_ctx!(via, size)`: how the item being received arrived, for its verdict line.
+#[cfg(feature = "full-debug")]
+macro_rules! dbg_ctx {
+    ($via:expr, $size:expr) => {
+        $crate::debug::set_ctx($via, $size)
+    };
+}
+#[cfg(not(feature = "full-debug"))]
+macro_rules! dbg_ctx {
+    ($($t:tt)*) => {};
+}
+
 pub mod cbor;
 pub mod constants;
 pub use constants as fixed;
 pub mod dag;
+#[cfg(feature = "full-debug")]
+pub mod debug;
 pub mod display;
 mod epoch;
 mod error;
