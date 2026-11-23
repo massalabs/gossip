@@ -22,7 +22,7 @@ function guarded<P extends object>(
 // `FULL_DEBUG ? ... : null` (not a test inside guarded) lets the bundler
 // drop the import and its chunk from a normal build.
 export const FullDebugBanner = FULL_DEBUG
-  ? guarded(() => import('./ui/Banner'))
+  ? guarded<{ safeTop?: boolean }>(() => import('./ui/Banner'))
   : null;
 export const FullDebugActions = FULL_DEBUG
   ? guarded<{ settings?: boolean }>(() => import('./ui/Actions'))
