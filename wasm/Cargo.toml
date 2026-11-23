@@ -43,9 +43,12 @@ massa_signature = { git = "https://github.com/massalabs/massa.git", rev = "28887
 massa_serialization = { git = "https://github.com/massalabs/massa.git", rev = "28887a62a655757751f5de5c79c10ad841a770ae", package = "massa_serialization" }
 
 gossip-wire = { path = "mesh/gossip-wire" }
-gossip-trust = { path = "mesh/gossip-trust" }
-gossip-repl = { path = "mesh/gossip-repl" }
-gossip-pools = { path = "mesh/gossip-pools" }
+# Without default features, so that the full-debug build of gossip-mobile can leave
+# out `quiet-release` in every mesh crate (cargo features only add up): each
+# dependent forwards `quiet-release` itself, see mesh/gossip-mobile/Cargo.toml.
+gossip-trust = { path = "mesh/gossip-trust", default-features = false }
+gossip-repl = { path = "mesh/gossip-repl", default-features = false }
+gossip-pools = { path = "mesh/gossip-pools", default-features = false }
 
 nom = "=7.1"
 unsigned-varint = { version = "0.8", features = ["nom"] }

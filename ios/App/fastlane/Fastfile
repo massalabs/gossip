@@ -66,8 +66,24 @@ platform :ios do
       bundle_identifier: "net.massa.gossip.GossipShareExtension"
     )
     
+    # Full debug build (GOSSIP_FULL_DEBUG=true, set by CI only when the
+    # full_debug input is ticked): compiles the record (Swift condition
+    # FULL_DEBUG, see App/DebugLogWriter.swift) into the Gossip target only,
+    # and names the app "Gossip DEBUG". Same bundle ID and signing: the
+    # profiles exist only for net.massa.gossip. Unset: unchanged build.
+    full_debug = ENV['GOSSIP_FULL_DEBUG'] == 'true'
+    if full_debug
+      UI.important("FULL DEBUG build: records everything, secrets included")
+      update_info_plist(
+        xcodeproj: "App.xcodeproj",
+        plist_path: "App/Info.plist",
+        display_name: "Gossip DEBUG"
+      )
+    end
+
     # Build the app with manual signing using Match certificates
     build_app(
+      xcargs: full_debug ? "GOSSIP_SWIFT_CONDITIONS=FULL_DEBUG" : nil,
       workspace: "App.xcworkspace",
       scheme: "Gossip",
       configuration: "Release",

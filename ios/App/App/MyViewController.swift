@@ -14,6 +14,12 @@ class MyViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(AppLockPlugin())
         bridge?.registerPluginInstance(ContactExchangePlugin())
 
+        // Full debug build only (FULL_DEBUG, set by fastlane when
+        // GOSSIP_FULL_DEBUG=true): its record, absent from any other build.
+        #if FULL_DEBUG
+        bridge?.registerPluginInstance(DebugLogFilePlugin())
+        #endif
+
         #if DEBUG
         bridge?.registerPluginInstance(SSLBypassPlugin())
         if #available(iOS 16.4, *) {

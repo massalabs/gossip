@@ -3,15 +3,17 @@
 # Android: .so files into jniLibs and UniFFI Kotlin bindings into
 # android/app/src/meshffi/generated. Both outputs are gitignored.
 #
-# Usage: bash scripts/build-mesh-android.sh [--release|--debug|-h]
+# Usage: bash scripts/build-mesh-android.sh [--release|--debug|-h] [--full-debug]
 
 set -Eeuo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: build-mesh-android.sh [--release|--debug] [-h|--help]
-  --release  Optimised build (default)
-  --debug    Unoptimised build with symbols
+Usage: build-mesh-android.sh [--release|--debug] [--full-debug] [-h|--help]
+  --release     Optimised build (default)
+  --debug       Unoptimised build with symbols
+  --full-debug  Full debug app only (-PfullDebug=true): the mesh log lines are
+                compiled in and sent to the Android log, tag GossipMesh
 Env: GOSSIP_MOBILE_TARGET_DIR, JOBS (default 3)
 EOF
 }
@@ -22,6 +24,14 @@ case "$PROFILE" in
     --debug)   CARGO_FLAGS=();             TARGET_DIR="debug" ;;
     -h|--help) usage; exit 0 ;;
     *) echo "error: unknown profile '$PROFILE'" >&2; usage >&2; exit 2 ;;
+esac
+# Full debug: no quiet-release anywhere in the mesh crates (see
+# wasm/mesh/gossip-mobile/Cargo.toml). Without it, the command is unchanged.
+FEATURE_FLAGS=()
+case "${2:-}" in
+    "") ;;
+    --full-debug) FEATURE_FLAGS=("--no-default-features" "--features" "full-debug") ;;
+    *) echo "error: unknown option '$2'" >&2; usage >&2; exit 2 ;;
 esac
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,7 +66,7 @@ API=24
 
 IFS=',' read -ra ABI_LIST <<< "$(read_prop 'gossip.abis')"
 
-echo "=== Building gossip-mobile for Android ($PROFILE) ==="
+echo "=== Building gossip-mobile for Android ($PROFILE${2:+ $2}) ==="
 echo "Workspace:   $WASM_DIR"
 echo "NDK:         $NDK"
 echo "ABIs:        ${ABI_LIST[*]}"
@@ -84,12 +94,27 @@ for abi in "${ABI_LIST[@]}"; do
     export "CC_${env_target}=$cc" "AR_${env_target}=$TOOLCHAIN/llvm-ar" "CARGO_TARGET_${upper}_LINKER=$cc"
     cargo build --locked -p gossip-mobile --target "$target" -j "${JOBS:-3}" \
         --config "$(bash "$ROOT_DIR/scripts/rust-remap-flags.sh")" \
-        ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
+        ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"} \
+        ${FEATURE_FLAGS[@]+"${FEATURE_FLAGS[@]}"}
     so="$CARGO_TARGET_DIR/$target/$TARGET_DIR/libgossip_mobile.so"
     if ! file "$so" | grep -q "$expected"; then
         echo "error: $so does not look like $expected (file: $(file -b "$so"))" >&2
         exit 1
     fi
+    # Privacy check: a normal library holds no log line and no log writer. The
+    # markers are the full-debug subscriber's logcat tag and the message of a
+    # tracing line of gossip-mobile (lib.rs, `guarded`); both must be present in a
+    # full-debug library, so that a renamed marker cannot pass silently.
+    for marker in GossipMesh "the host callback failed"; do
+        if grep -qaF "$marker" "$so"; then found=1; else found=0; fi
+        if (( ${#FEATURE_FLAGS[@]} == 0 && found )); then
+            echo "error: $so holds '$marker': a log line is compiled into a normal build (see docs/PRIVACY-CHECKS.md)" >&2
+            exit 1
+        elif (( ${#FEATURE_FLAGS[@]} > 0 && !found )); then
+            echo "error: $so lacks '$marker': the full-debug log lines are not compiled in (or the marker moved)" >&2
+            exit 1
+        fi
+    done
     mkdir -p "$TMP_JNILIBS/$abi"
     cp "$so" "$TMP_JNILIBS/$abi/"
     LIB="$so"

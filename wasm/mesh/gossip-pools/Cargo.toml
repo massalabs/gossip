@@ -17,9 +17,15 @@ crossbeam = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true, features = ["release_max_level_off"] }
+tracing = { workspace = true }
 
 [features]
+# No log line in a release build (privacy rule): `quiet-release` compiles every
+# `tracing` line out of the release profile. Only the full-debug build of the app
+# leaves it out (`--no-default-features --features full-debug` on gossip-mobile).
+default = ["quiet-release"]
+quiet-release = ["tracing/release_max_level_off", "gossip-repl?/quiet-release"]
+full-debug = ["gossip-repl?/full-debug"]
 # `impl gossip_repl::BlobStore for PoolsStore`
 blob-store = ["dep:gossip-repl"]
 

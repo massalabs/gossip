@@ -640,8 +640,10 @@ impl Core {
     /// The radio connected a link.
     pub fn link_up(&self, link: i32, mtu: i32) {
         if !self.running() {
+            tracing::debug!(link, mtu, "mesh link up while the node is stopped: ignored");
             return;
         }
+        tracing::debug!(link, mtu, "mesh link up from the radio: handshake starts");
         let caps = {
             let u = self.upstream.lock();
             if u.reachable && u.bridge {
@@ -682,6 +684,10 @@ impl Core {
         }
         let old = self.links.links.lock().insert(link, state);
         if let Some(old) = old {
+            tracing::warn!(
+                link,
+                "mesh link id reused by the radio: the old link is dropped"
+            );
             if let Phase::Ready(peer) = old.phase {
                 self.peer_gone(peer);
             }
@@ -692,6 +698,12 @@ impl Core {
     /// The radio lost a link.
     pub fn link_down(&self, link: i32) {
         let old = self.links.links.lock().remove(&link);
+        tracing::debug!(
+            link,
+            known = old.is_some(),
+            ready = matches!(old.as_ref().map(|s| &s.phase), Some(Phase::Ready(_))),
+            "mesh link down from the radio"
+        );
         if let Some(LinkState {
             phase: Phase::Ready(peer),
             ..
@@ -758,9 +770,12 @@ impl Core {
             self.registry.release_tags(&peer);
             self.limits.remove(&peer);
             self.trust.remove(&peer);
-            let _ = self
+            if let Err(e) = self
                 .retrieval
-                .try_send(RetrievalCommand::PeerDisconnected(peer));
+                .try_send(RetrievalCommand::PeerDisconnected(peer))
+            {
+                tracing::warn!(error = %e, "retrieval not told of a gone mesh peer");
+            }
         }
     }
 
@@ -891,6 +906,7 @@ impl Core {
             match outcome {
                 None => continue,
                 Some(Err(why)) => {
+                    tracing::debug!(link, why = %why, verdict_sent = !send.is_empty(), "mesh handshake failed");
                     if send.is_empty() {
                         self.close(link, &why);
                     }
@@ -911,6 +927,7 @@ impl Core {
             Some(Phase::Handshaking(..))
         );
         if !still_up {
+            tracing::debug!(link, "mesh handshake ended on a link already closed");
             self.registry.release_tags(&done.peer);
             return;
         }
@@ -959,6 +976,7 @@ impl Core {
             refusal
         };
         if let Some(why) = refusal {
+            tracing::debug!(link, why, "mesh link refused after the handshake");
             self.registry.release_tags(&done.peer);
             // our last handshake message (the initiator's verdict) still leaves, so
             // that the peer completes too and reaches the same decision
@@ -992,10 +1010,20 @@ impl Core {
         self.limits.set(done.peer, done.their_limits);
         self.mesh.clock.record(done.peer, done.clock_offset_ms);
         self.registry.peer_alive(&done.peer, UnixMillis::now());
-        let _ = self
+        if let Err(e) = self
             .retrieval
-            .try_send(RetrievalCommand::PeerConnected(done.peer));
-        tracing::debug!(link, trust = done.record.value, "mesh link up");
+            .try_send(RetrievalCommand::PeerConnected(done.peer))
+        {
+            tracing::warn!(link, error = %e, "retrieval not told of a new mesh peer");
+        }
+        tracing::debug!(
+            link,
+            trust = done.record.value,
+            compact = done.compact_link_up.is_some(),
+            clock_offset_ms = done.clock_offset_ms,
+            pending = pending.as_ref().map_or(0, |m| m.len()),
+            "mesh link up"
+        );
         match pending {
             Ok(messages) => {
                 for m in messages {
@@ -1010,10 +1038,21 @@ impl Core {
         let Ok((rest, id)) =
             MessageTypeIdDeserializer::new().deserialize::<DeserializeError>(message)
         else {
+            tracing::warn!(
+                len = message.len(),
+                "mesh message without a readable type: dropped"
+            );
             return;
         };
         if id == MessageTypeId::Blob {
-            let _ = self.inbound.try_send((peer, rest.to_vec()));
+            if let Err(e) = self.inbound.try_send((peer, rest.to_vec())) {
+                tracing::warn!(len = rest.len(), error = %e, "mesh inbound queue full or closed: blob dropped");
+            }
+        } else {
+            tracing::debug!(
+                ?id,
+                "mesh message of a type mesh links do not carry: ignored"
+            );
         }
         // peer management does not exist on mesh links
     }

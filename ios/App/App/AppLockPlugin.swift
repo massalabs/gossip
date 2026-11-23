@@ -50,6 +50,7 @@ public class AppLockPlugin: CAPPlugin, CAPBridgedPlugin {
     /// `timeoutSeconds` while an account is open, null once none is.
     @objc func configure(_ call: CAPPluginCall) {
         let timeout = call.getInt("timeoutSeconds")
+        DebugLog.event("appLock", "lock.configure", ["timeoutSeconds": timeout ?? -1])
         DispatchQueue.main.async {
             self.timeoutSeconds = timeout
             if timeout == nil { self.disarm() }
@@ -58,6 +59,7 @@ public class AppLockPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func lockNow(_ call: CAPPluginCall) {
+        DebugLog.event("appLock", "lock.now", [:])
         call.resolve()
         DispatchQueue.main.async { self.lock() }
     }
@@ -66,6 +68,7 @@ public class AppLockPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc private func didEnterBackground() {
         guard let timeout = timeoutSeconds, timeout >= 0 else { return }
+        DebugLog.event("appLock", "lock.armed", ["timeoutSeconds": timeout])
         deadline = Self.now() + UInt64(timeout) * 1_000_000_000
         endBackgroundTask()
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "gossip-auto-lock") { [weak self] in
@@ -83,6 +86,7 @@ public class AppLockPlugin: CAPPlugin, CAPBridgedPlugin {
         lockIfDue()
         disarm()
         if reloadPending {
+            DebugLog.event("appLock", "lock.reload_pending", [:])
             reloadPending = false
             bridge?.webView?.reload()
         }
@@ -93,6 +97,9 @@ public class AppLockPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func lock() {
+        DebugLog.event("appLock", "lock.locked", [
+            "state": UIApplication.shared.applicationState.rawValue,
+        ])
         timeoutSeconds = nil
         disarm()
         MeshNodeBridge.shared.lockNode()
