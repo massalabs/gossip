@@ -33,8 +33,16 @@ serde_json = { workspace = true }
 base64 = { workspace = true }
 ureq = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true, features = ["release_max_level_off"] }
+tracing = { workspace = true }
 uniffi = { workspace = true }
+
+[features]
+# No log line in a release build (privacy rule): `quiet-release` compiles every
+# `tracing` line out of the release profile. Only the full-debug build of the app
+# leaves it out (`--no-default-features --features full-debug` on gossip-mobile).
+default = ["quiet-release"]
+quiet-release = ["tracing/release_max_level_off", "gossip-trust/quiet-release", "gossip-repl/quiet-release", "gossip-pools/quiet-release"]
+full-debug = ["gossip-trust/full-debug", "gossip-repl/full-debug", "gossip-pools/full-debug"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

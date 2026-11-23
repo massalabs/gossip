@@ -223,7 +223,11 @@ if (hasMeshCore) {
         def rootDir = project.rootProject.projectDir.parentFile
         workingDir rootDir
         def rustProfileEnv = System.getenv('MESH_RUST_PROFILE') ?: 'release'
-        commandLine 'bash', 'scripts/build-mesh-android.sh', rustProfileEnv == 'debug' ? '--debug' : '--release'
+        // -PfullDebug=true (the full debug app): the mesh log lines are compiled in
+        def meshFullDebug = project.findProperty('fullDebug') == 'true'
+        def meshArgs = ['bash', 'scripts/build-mesh-android.sh', rustProfileEnv == 'debug' ? '--debug' : '--release']
+        if (meshFullDebug) meshArgs += '--full-debug'
+        commandLine meshArgs
         outputs.files(
             fileTree("${project.projectDir}/src/main/jniLibs") { include '*/libgossip_mobile.so' },
             fileTree("${project.projectDir}/src/meshffi/generated") { include '**/*.kt' }
@@ -236,6 +240,7 @@ if (hasMeshCore) {
         inputs.property 'ndkVersion', gossipNdkVersion
         inputs.property 'abis', gossipAbis.join(',')
         inputs.property 'rustProfile', rustProfileEnv
+        inputs.property 'meshFullDebug', meshFullDebug
     }
 }
 
