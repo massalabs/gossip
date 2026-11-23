@@ -235,7 +235,9 @@ export function memoryBackend(
 export function createBackend(
   stripLine: (line: string) => string
 ): RecordBackend {
-  return Capacitor.getPlatform() === 'android' &&
+  // Android and iOS carry the same DebugLogFile plugin; the web keeps the
+  // record in memory.
+  return Capacitor.isNativePlatform() &&
     Capacitor.isPluginAvailable('DebugLogFile')
     ? nativeBackend()
     : memoryBackend(stripLine);
