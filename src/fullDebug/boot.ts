@@ -9,6 +9,7 @@ import { setDebugLogSink } from '@massalabs/gossip-sdk/utils/debugLog.js';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { Recorder } from './recorder';
+import { StorageLockWindow } from './promptGate';
 import { logCallToEvent, stripLine, type Level } from './serialize';
 import { createBackend } from './writers';
 import { fullDebug, recordUiFailure, requestErrorPrompt } from './state';
@@ -36,7 +37,29 @@ export async function bootFullDebug(): Promise<void> {
   fullDebug.backend = backend;
   fullDebug.recorder = recorder;
 
-  recorder.onError(event => requestErrorPrompt(errorReason(event.f)));
+  // No pop-up for the errors of a re-login's closed storage (promptGate.ts);
+  // the line stays in the record, and popup.suppressed says it was spared.
+  const lockWindow = new StorageLockWindow();
+  recorder.onEvent(event => lockWindow.observe(event));
+  recorder.onError(event => {
+    const verdict = lockWindow.check(() =>
+      requestErrorPrompt(errorReason(event.f))
+    );
+    if (verdict === 'prompt') requestErrorPrompt(errorReason(event.f));
+    else {
+      recorder.record({
+        src: 'app',
+        ev: 'popup.suppressed',
+        lvl: 'debug',
+        f: {
+          reason: 'storage_locked',
+          verdict,
+          src: event.src,
+          ev: event.ev,
+        },
+      });
+    }
+  });
 
   // The ~390 existing logger calls: `ev:"log"`, `f:{msg,args}`.
   addLogSink((level, _message, args) => {

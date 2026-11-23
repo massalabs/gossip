@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PromptGate } from '../../src/fullDebug/promptGate';
+import { PromptGate, StorageLockWindow } from '../../src/fullDebug/promptGate';
 import { Recorder, type RecordWriter } from '../../src/fullDebug/recorder';
 
 describe('error pop-up gate', () => {
@@ -86,5 +86,87 @@ describe('recorder', () => {
     });
     r.record({ src: 'app', ev: 'x', lvl: 'error', f: {} });
     await expect(r.flushAll()).resolves.toBeUndefined();
+  });
+});
+
+describe('storage-lock window of the pop-up', () => {
+  function setup() {
+    let now = 0;
+    const timers: { at: number; fn: () => void; live: boolean }[] = [];
+    const w = new StorageLockWindow(
+      () => now,
+      (fn, ms) => {
+        const t = { at: now + ms, fn, live: true };
+        timers.push(t);
+        return t;
+      },
+      t => {
+        (t as { live: boolean }).live = false;
+      }
+    );
+    const advance = (to: number) => {
+      now = to;
+      for (const t of timers) {
+        if (t.live && t.at <= now) {
+          t.live = false;
+          t.fn();
+        }
+      }
+    };
+    let prompts = 0;
+    const prompt = () => prompts++;
+    return { w, advance, prompt, prompts: () => prompts };
+  }
+  const lock = { src: 'storage', ev: 'storage.lock', f: {} };
+  const unlock = { src: 'storage', ev: 'storage.unlock', f: { ok: true } };
+
+  it('suppresses errors between lock and unlock, and up to 2 s after', () => {
+    const s = setup();
+    s.advance(1000);
+    s.w.observe(lock);
+    s.advance(1200);
+    expect(s.w.check(s.prompt)).toBe('deferred');
+    s.advance(1400);
+    s.w.observe(unlock);
+    s.advance(3000);
+    expect(s.w.check(s.prompt)).toBe('suppressed');
+    s.advance(40_000);
+    expect(s.prompts()).toBe(0); // the held one was dropped by the unlock
+  });
+
+  it('does not suppress before the lock', () => {
+    const s = setup();
+    s.advance(500);
+    expect(s.w.check(s.prompt)).toBe('prompt');
+  });
+
+  it('does not suppress more than 2 s after the unlock', () => {
+    const s = setup();
+    s.w.observe(lock);
+    s.advance(100);
+    s.w.observe({ src: 'storage', ev: 'storage.open', f: { native: true } });
+    s.advance(2101);
+    expect(s.w.check(s.prompt)).toBe('prompt');
+  });
+
+  it('a failed unlock does not end the lock', () => {
+    const s = setup();
+    s.w.observe(lock);
+    s.w.observe({ src: 'storage', ev: 'storage.unlock', f: { ok: false } });
+    s.advance(10);
+    expect(s.w.check(s.prompt)).toBe('deferred');
+  });
+
+  it('prompts when no unlock follows within 30 s', () => {
+    const s = setup();
+    s.w.observe(lock);
+    s.advance(5000);
+    expect(s.w.check(s.prompt)).toBe('deferred');
+    s.advance(29_999);
+    expect(s.prompts()).toBe(0);
+    s.advance(30_000);
+    expect(s.prompts()).toBe(1);
+    s.advance(31_000);
+    expect(s.w.check(s.prompt)).toBe('prompt');
   });
 });

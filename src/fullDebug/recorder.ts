@@ -28,6 +28,7 @@ export class Recorder {
   private readonly maxLines: number;
   private readonly setTimer: (fn: () => void, ms: number) => unknown;
   private errorListeners: ErrorListener[] = [];
+  private eventListeners: ErrorListener[] = [];
   /** > 0 while an error listener runs: its own errors do not call it again. */
   private inListener = 0;
   private writing: Promise<void> = Promise.resolve();
@@ -43,9 +44,21 @@ export class Recorder {
     this.errorListeners.push(listener);
   }
 
+  /** Every event, before the error listeners (for state such as a lock). */
+  onEvent(listener: ErrorListener): void {
+    this.eventListeners.push(listener);
+  }
+
   record(event: RecordEvent): void {
     try {
       this.buffer.push(serializeEvent(event));
+      for (const listener of this.eventListeners) {
+        try {
+          listener(event);
+        } catch {
+          // never into the app
+        }
+      }
       if (event.lvl === 'error') {
         void this.flush(true);
         this.notifyError(event);
