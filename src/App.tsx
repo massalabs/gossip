@@ -26,6 +26,7 @@ import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions, toasterContainerStyle } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
+import { FullDebugFrame } from './fullDebug/lazy';
 import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore';
 import { useTheme } from './hooks/useTheme.ts';
@@ -195,19 +196,29 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const appScreens = (
+    <>
+      <AppUrlListener />
+      <PortableBackupStartupGate>
+        <AppContent />
+        <CleanupGatedDebugConsole />
+      </PortableBackupStartupGate>
+      {/* <div className="hidden">
+        <PWABadge />
+      </div> */}
+    </>
+  );
+
   return (
     <BrowserRouter>
       <DebugRouteLogger />
       <ErrorBoundary>
         <KeyboardAwareWrapper>
-          <AppUrlListener />
-          <PortableBackupStartupGate>
-            <AppContent />
-            <CleanupGatedDebugConsole />
-          </PortableBackupStartupGate>
-          {/* <div className="hidden">
-            <PWABadge />
-          </div> */}
+          {FullDebugFrame ? (
+            <FullDebugFrame>{appScreens}</FullDebugFrame>
+          ) : (
+            appScreens
+          )}
         </KeyboardAwareWrapper>
         <Toaster
           position="top-center"

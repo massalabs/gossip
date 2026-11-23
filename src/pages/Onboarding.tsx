@@ -19,7 +19,6 @@ import {
 } from '../services/portableImportAuthorization';
 import { restartAfterPortableBackup } from '../services/portableBackup';
 import { ROUTES } from '../constants/routes';
-import { FullDebugBanner } from '../fullDebug/lazy';
 
 type View = 'welcome' | 'terms' | 'restore' | 'import';
 
@@ -212,15 +211,5 @@ const OnboardingFlow: React.FC = () => {
   );
 };
 
-/** The full debug build shows its warning above every onboarding screen. */
-export const Onboarding: React.FC = () =>
-  FullDebugBanner ? (
-    <div className="flex h-full min-h-0 w-full flex-col">
-      <FullDebugBanner safeTop />
-      <div className="flex min-h-0 flex-1 flex-col">
-        <OnboardingFlow />
-      </div>
-    </div>
-  ) : (
-    <OnboardingFlow />
-  );
+/** (The full debug build's warning is above every screen: FullDebugFrame.) */
+export const Onboarding: React.FC = () => <OnboardingFlow />;
