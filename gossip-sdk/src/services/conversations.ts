@@ -51,6 +51,8 @@ import { EARLIER_FORMAT_VERSION, retentionToMessageTimer } from './groups.js';
 import type { DiscussionService } from './discussion.js';
 import { SELF_CONTACT_ID } from './selfMessage.js';
 import { Logger } from '../utils/logs.js';
+import { dlog } from '../utils/debugLog.js';
+import { errFields } from '../utils/debugFields.js';
 
 const logger = new Logger('ConversationService');
 
@@ -579,7 +581,14 @@ export class ConversationService {
     if (this.retryTimer || !this.started) return;
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
-      void this.enqueue(() => this.openConnections()).catch(() => undefined);
+      void this.enqueue(() => this.openConnections()).catch(error =>
+        dlog(
+          'engine',
+          'engine.ignored_failure',
+          { step: 'open_connections', ...errFields(error) },
+          { lvl: 'error' }
+        )
+      );
     }, CONNECTION_RETRY_MS);
     (this.retryTimer as { unref?: () => void }).unref?.();
   }
@@ -648,7 +657,14 @@ export class ConversationService {
     if (this.revokeTimer || !this.started) return;
     this.revokeTimer = setTimeout(() => {
       this.revokeTimer = null;
-      void this.enqueue(() => this.revokeConnections()).catch(() => undefined);
+      void this.enqueue(() => this.revokeConnections()).catch(error =>
+        dlog(
+          'engine',
+          'engine.ignored_failure',
+          { step: 'revoke_connections', ...errFields(error) },
+          { lvl: 'error' }
+        )
+      );
     }, CONNECTION_RETRY_MS);
     (this.revokeTimer as { unref?: () => void }).unref?.();
   }

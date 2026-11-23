@@ -63,6 +63,22 @@ function plaintextId(plaintext: Uint8Array): string {
   }
 }
 
+/**
+ * A failure this service deliberately goes on after: recorded in the debug
+ * log, then ignored as before. Returns undefined.
+ */
+function swallowed(step: string): (error: unknown) => undefined {
+  return error => {
+    dlog(
+      'engine',
+      'engine.ignored_failure',
+      { step, ...errFields(error) },
+      { lvl: 'error' }
+    );
+    return undefined;
+  };
+}
+
 /** The kind of each change, counted (`{Messages: 2, Members: 1}`). */
 function changeKinds(changes: Raw[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -1798,7 +1814,7 @@ export class GroupService {
         );
         if (id !== null) {
           await this.outboxFailed(id, encodeUserId(e.to), error).catch(
-            () => undefined
+            swallowed('outbox_failed')
           );
         }
         continue;
@@ -1817,7 +1833,9 @@ export class GroupService {
       );
       if (id !== null) {
         this.outboxFailures.delete(id);
-        await this.queries.groups.deleteOutbox(id).catch(() => undefined);
+        await this.queries.groups
+          .deleteOutbox(id)
+          .catch(swallowed('delete_outbox'));
       }
       if (handOff && this.alive(e.node)) {
         e.node.published(e.handle!, this.now());
@@ -1857,7 +1875,7 @@ export class GroupService {
           { lvl: 'warn', dur: since(sendStarted) }
         );
         await this.outboxFailed(row.id, row.contactUserId, error).catch(
-          () => undefined
+          swallowed('outbox_failed')
         );
         continue;
       }
@@ -1868,7 +1886,9 @@ export class GroupService {
         { dur: since(sendStarted) }
       );
       this.outboxFailures.delete(row.id);
-      await this.queries.groups.deleteOutbox(row.id).catch(() => undefined);
+      await this.queries.groups
+        .deleteOutbox(row.id)
+        .catch(swallowed('delete_outbox'));
     }
   }
 
@@ -1949,7 +1969,10 @@ export class GroupService {
     }
     void this.queries.groups
       .nextOutboxRetry(this.owner)
-      .catch(() => null)
+      .catch(error => {
+        swallowed('next_outbox_retry')(error);
+        return null;
+      })
       .then(retry => {
         if (this.closed) return;
         const when = retry ? Math.min(at, retry.getTime()) : at;
