@@ -19,7 +19,7 @@ export default function FullDebugBanner({
   return (
     <div
       role="alert"
-      className={`w-full shrink-0 bg-amber-400 text-neutral-950 text-[11px] font-semibold leading-tight px-3 pb-1.5 text-center ${
+      className={`w-full shrink-0 bg-[#fbbf24] text-[#111111] text-[11px] font-semibold leading-tight px-3 pb-1.5 text-center ${
         safeTop ? 'pt-[calc(var(--sat)+0.375rem)]' : 'pt-1.5'
       }`}
     >
