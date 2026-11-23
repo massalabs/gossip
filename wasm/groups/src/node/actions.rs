@@ -1023,6 +1023,11 @@ impl Node {
     /// still owns its current epoch.
     pub(crate) fn handle_leave_request(&mut self, cx: &mut Cx<'_>, from: GossipId, chat: ChatId) {
         let Some(rec) = self.t.epochs.get(&chat) else {
+            dbg_event!(Debug, "engine.event.in", {
+                "type" => "leave_request", "epoch" => crate::debug::short(&chat),
+                "from" => crate::debug::short(&from), "verdict" => "ignored",
+                "reason" => "unknown_epoch",
+            });
             return;
         };
         if rec.status != EpochStatus::Installed
@@ -1030,10 +1035,22 @@ impl Node {
             || !rec.root.is_member(&from)
             || from == self.me
         {
+            dbg_event!(Debug, "engine.event.in", {
+                "type" => "leave_request", "epoch" => crate::debug::short(&chat),
+                "from" => crate::debug::short(&from), "verdict" => "ignored",
+                "reason" => if rec.status != EpochStatus::Installed { "invitation" }
+                    else if rec.root.owner_id() != self.me { "not_owner" }
+                    else { "not_member" },
+            });
             return;
         }
         let group = rec.group;
         let Some(cur) = self.current_epoch(&group) else {
+            dbg_event!(Debug, "engine.event.in", {
+                "type" => "leave_request", "epoch" => crate::debug::short(&chat),
+                "from" => crate::debug::short(&from), "verdict" => "ignored",
+                "reason" => "no_current_epoch",
+            });
             return;
         };
         let owns = self
@@ -1042,8 +1059,18 @@ impl Node {
             .get(&cur)
             .is_some_and(|r| r.root.owner_id() == self.me && r.root.is_member(&from));
         if !owns || self.group_status(&group) != GroupStatus::Active {
+            dbg_event!(Debug, "engine.event.in", {
+                "type" => "leave_request", "epoch" => crate::debug::short(&chat),
+                "from" => crate::debug::short(&from), "verdict" => "ignored",
+                "reason" => if owns { "inactive_device" } else { "not_owner_of_current" },
+            });
             return;
         }
+        dbg_event!(Info, "engine.event.in", {
+            "type" => "leave_request", "epoch" => crate::debug::short(&chat),
+            "group" => crate::debug::short(&group), "from" => crate::debug::short(&from),
+            "verdict" => "accepted", "reason" => "pending_removal",
+        });
         self.stats.leave_requests += 1;
         self.group_rec_mut(group)
             .pending_removals

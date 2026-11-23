@@ -45,7 +45,11 @@ import { Logger } from '../utils/logs.js';
 import { isFinalStatus } from '../api/restClient.js';
 import { isSeekerConflict } from '../api/errors.js';
 import type { SeekerConflictHandler } from './seekerConflicts.js';
-import { debugLogEnabled, dlog } from '../utils/debugLog.js';
+import {
+  debugLogEnabled,
+  dlog,
+  type DebugLogLevel,
+} from '../utils/debugLog.js';
 import { errFields, hex, shortId, since } from '../utils/debugFields.js';
 
 const logger = new Logger('GroupService');
@@ -1065,6 +1069,7 @@ export class GroupService {
    */
   private async openNode(): Promise<GroupsNode> {
     const snapshot = await this.queries.groups.loadSnapshot(this.owner);
+    installEngineDebugSink();
     try {
       const node = GroupsNode.open(
         this.session.ourPk,
@@ -2939,5 +2944,42 @@ export class GroupService {
       });
     }
     return items;
+  }
+}
+
+/** A debug event of the group engine, as `set_debug_sink` hands it over. */
+interface EngineDebugEvent {
+  ev: string;
+  lvl?: DebugLogLevel;
+  f?: Record<string, unknown>;
+  c?: Record<string, unknown>;
+  s?: Record<string, unknown>;
+}
+
+/**
+ * Full debug build: forwards the group engine's debug events (verdicts,
+ * retrieval, membership, tip sync) to the debug log. Only a wasm bundle built
+ * with the cargo feature `full-debug` has `GroupsNode.set_debug_sink`; with the
+ * normal bundle, or without a debug log, nothing is installed.
+ */
+export function installEngineDebugSink(): void {
+  if (!debugLogEnabled()) return;
+  const setter = (
+    GroupsNode as unknown as {
+      set_debug_sink?: (cb: ((json: string) => void) | null) => void;
+    }
+  ).set_debug_sink;
+  if (typeof setter !== 'function') return;
+  try {
+    setter((json: string) => {
+      try {
+        const e = JSON.parse(json) as EngineDebugEvent;
+        dlog('engine', e.ev, e.f, { lvl: e.lvl, c: e.c, s: e.s });
+      } catch {
+        // A debug line never breaks the engine.
+      }
+    });
+  } catch {
+    // Same.
   }
 }

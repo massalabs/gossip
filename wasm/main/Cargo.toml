@@ -24,6 +24,11 @@ console_error_panic_hook = "0.1"
 web-time = "1.1"
 massa_signature = { git = "https://github.com/massalabs/massa.git", package = "massa_signature", default-features = false }
 
+[features]
+# The full debug build of the app: the group engine's debug events, handed to a JS callback
+# (see `GroupsNode::set_debug_sink`). Off in every normal build.
+full-debug = ["groups/full-debug"]
+
 [dependencies.web-sys]
 version = "0.3"
 features = ["console"]

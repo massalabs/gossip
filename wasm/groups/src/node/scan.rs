@@ -75,6 +75,10 @@ impl Node {
             busy: 0,
             lanes: lane.into_iter().collect(),
         };
+        dbg_event!(Debug, "engine.tipsync.start", {
+            "group" => crate::debug::short(&chat), "peer" => crate::debug::short(&peer),
+            "lane" => lane, "shared_chats" => chat == SHARED_SCAN,
+        });
         self.t.scans_out.insert(key, op);
         self.stats.scans_started += 1;
         self.queue_work(
@@ -388,6 +392,16 @@ impl Node {
             return;
         };
         let (chat, peer) = key;
+        dbg_event!(Info, "engine.tipsync.end", {
+            "group" => crate::debug::short(&chat), "peer" => crate::debug::short(&peer),
+            "end" => match end {
+                ScanEnd::Final => "complete",
+                ScanEnd::NotAvailable => "not_available",
+                ScanEnd::Ended => "ended",
+            },
+            "offset" => op.offset, "total" => op.total, "stage" => op.stage,
+            "restarts" => op.restarts,
+        });
         if end == ScanEnd::Final {
             self.stats.scans_completed += 1;
         } else {
@@ -431,6 +445,11 @@ impl Node {
                     local_deadline,
                     sent_at,
                 } if local_deadline <= cx.now => {
+                    dbg_event!(Debug, "engine.tipsync.page", {
+                        "group" => crate::debug::short(&key.0), "peer" => crate::debug::short(&key.1),
+                        "offset" => op.offset, "result" => "timeout", "stage" => op.stage,
+                        "dur" => cx.now.saturating_sub(sent_at),
+                    });
                     self.stats.timeouts += 1;
                     self.note_query_timeout(&key.1, sent_at, cx.now);
                     self.next_scan_stage(cx, key);

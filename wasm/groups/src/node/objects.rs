@@ -157,13 +157,16 @@ impl Node {
     ) -> Result<Answer, NodeError> {
         let key = obj.key();
         if expected.is_some_and(|e| e != key) {
+            dbg_do! { self.dbg_signed(&from, &obj, "malformed", "not_what_was_asked"); }
             return Ok(Answer::Invalid);
         }
         let chat = key.0;
         if self.marker_kind(&chat) == Some(MarkerKind::Dissolved) {
+            dbg_do! { self.dbg_signed(&from, &obj, "ignored", "dissolved_and_deleted"); }
             return Ok(Answer::Refused);
         }
         let Some(rec) = self.t.epochs.get(&chat).cloned() else {
+            dbg_do! { self.dbg_signed(&from, &obj, "ignored", "unknown_epoch"); }
             // An epoch this device does not hold cannot be checked: dropped (§5.6).
             return Ok(Answer::Refused);
         };
@@ -176,15 +179,19 @@ impl Node {
         ) && self.removes_me(&obj, &chat)
             && self.holds_nothing_around(&chat, &rec.root);
         if rec.status != EpochStatus::Installed && !removal_of_invitation {
+            dbg_do! { self.dbg_signed(&from, &obj, "ignored", "epoch_is_invitation"); }
             return Ok(Answer::Refused);
         }
         let root = rec.root;
         // Any member of the epoch may carry it, a removed peer of it included (§10.4): the
         // signature proves the object, not the carrier (see `object_announced`).
         if !root.is_member(&from) {
+            dbg_do! { self.dbg_signed(&from, &obj, "ignored", "sender_not_member"); }
             return Ok(Answer::Refused);
         }
         if self.t.signed.contains(&key) {
+            dbg_do! { self.dbg_signed(&from, &obj, "duplicate", "stored_already"); }
+
             if let SignedObject::Leave(l) = &obj
                 && l.leaver() == self.me
             {
@@ -196,6 +203,7 @@ impl Node {
             SignedObject::Leave(l) => {
                 let Some(keys) = self.keys_of(&l.leaver()) else {
                     if !root.is_member(&l.leaver()) {
+                        dbg_do! { self.dbg_signed(&from, &obj, "malformed", "leaver_not_member"); }
                         return Ok(Answer::Invalid);
                     }
                     // The keys are not carried (§5.3): fetched, then verified. Kept per
@@ -205,6 +213,18 @@ impl Node {
                     if self.t.unverified.len() >= UNVERIFIED_LEAVES
                         || mine >= super::timing::UNVERIFIED_LEAVES_PER_SENDER
                     {
+                        dbg_do! {
+                            self.dbg_signed(&from, &obj, "ignored", "limit_unverified_leaves");
+                            dbg_event!(Warn, "engine.held.dropped", {
+                                "type" => "leave", "epoch" => crate::debug::short(&chat),
+                                "from" => crate::debug::short(&from),
+                                "limit" => if mine >= super::timing::UNVERIFIED_LEAVES_PER_SENDER {
+                                    "unverified_leaves_per_sender"
+                                } else {
+                                    "unverified_leaves"
+                                },
+                            });
+                        }
                         self.stats.capped += 1;
                         return Ok(Answer::Refused);
                     }
@@ -226,6 +246,7 @@ impl Node {
                             None,
                         );
                     }
+                    dbg_do! { self.dbg_signed(&from, &obj, "held", "leaver_keys_unknown"); }
                     return Ok(Answer::Supplied);
                 };
                 l.verify(&root, &keys).is_ok()
@@ -236,10 +257,13 @@ impl Node {
             SignedObject::Dissolve(d) => d.verify(&root).is_ok(),
         };
         if !valid {
+            dbg_do! { self.dbg_signed(&from, &obj, "malformed", "bad_signature"); }
             self.stats.invalid += 1;
             self.penalize(&from, PENALTY_MALFORMED);
             return Ok(Answer::Invalid);
         }
+        dbg_do! { self.dbg_signed(&from, &obj, "accepted", "verified"); }
+
         self.t.signed.insert(
             key,
             SignedRecord {

@@ -379,8 +379,24 @@ impl Node {
         rng: &mut dyn Randomness,
     ) -> Result<(), NodeError> {
         let Some(p) = self.outbox.sent.get(&handle).cloned() else {
+            dbg_event!(Error, "engine.event.out", {
+                "handle" => handle, "verdict" => "unknown_handle",
+            });
             return Err(NodeError::UnknownHandle);
         };
+        dbg_do! {
+            // What the plaintext carries, read before its work leaves the queue.
+            let dbg_items: Vec<crate::debug::Val> = if crate::debug::enabled() {
+                let to = p.peer.unwrap_or(self.me);
+                p.items
+                    .iter()
+                    .filter_map(|k| self.t.queue.get(k))
+                    .map(|w| self.dbg_work(w, &to))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        }
         let r = self.run(store, now, rng, |n, cx| {
             let peer = p.peer.expect("assembled for a peer");
             for k in &p.items {
@@ -422,6 +438,13 @@ impl Node {
             self.outbox.items.extend(p.items.iter().copied());
             return Err(e);
         }
+        dbg_event!(Debug, "engine.event.out", {
+            "handle" => handle, "to" => p.peer.map(|x| crate::debug::short(&x)),
+            "size" => p.bytes, "full" => p.full.len(), "notices" => p.notices,
+            "lookups" => p.lookups, "scans" => p.scans, "answers" => p.answers,
+            "queries" => p.queries.len(), "wait" => now.saturating_sub(p.assembled_at),
+            "items" => dbg_items,
+        });
         self.outbox.sent.remove(&handle);
         self.outbox.stale.remove(&handle);
         let s = &mut self.stats;
