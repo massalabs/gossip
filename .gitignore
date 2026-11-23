@@ -4,6 +4,9 @@ wasm/target
 
 # wasm-bindgen / wasm-pack output that should not land in git
 gossip-sdk/src/assets/generated/**/*.map
+# The wasm bundle of the full debug build (npm run wasm:build:main:full-debug):
+# never committed, the committed bundle is the normal build's.
+gossip-sdk/src/assets/generated/wasm-full-debug/
 
 # coverage
 coverage/

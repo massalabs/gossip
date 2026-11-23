@@ -22,7 +22,7 @@ list only with their explicit approval.
 | `scripts/audit-hosts.mjs dist`                        | after the build    | Every host named by a URL in `dist/**/*.{js,mjs,html,json,webmanifest}` is in `scripts/allowed-hosts.ts`, or is the host of the build's `VITE_GOSSIP_API_URL`.                                                                                                                                                                                                                                                                                                                                                                                             |
 | `scripts/audit-paths.mjs dist`                        | after the build    | No file of `dist/` holds a home directory path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
-| `scripts/audit-full-debug.mjs dist` | after the build | No file of `dist/` holds code of the full debug build: the upload path `/debug-logs`, the `DebugLogFile` plugin, its storage keys or its overlay. `scripts/audit-logging.mjs source` also fails when `VITE_FULL_DEBUG` is `true`. |
+| `scripts/audit-full-debug.mjs dist` | after the build | No file of `dist/` holds code of the full debug build: the upload path `/debug-logs`, the `DebugLogFile` plugin, its storage keys or its overlay, and no `.wasm` file holds the group engine's debug event names (`engine.event.in`, `engine.retrieval.ask`: a bundle built with the cargo feature `full-debug`). `scripts/audit-logging.mjs source` also fails when `VITE_FULL_DEBUG` is `true`. `npm run build:full-debug` runs it with `--expect-debug-wasm`, which fails when the full debug app lacks those names. |
 
 Their unit tests are in `test/scripts/`.
 
@@ -42,6 +42,15 @@ to `<origin of VITE_GOSSIP_API_URL>/debug-logs/` with the secret
   native code is in `android/app/src/fulldebug/`, compiled only with the
   Gradle flag; `DebugLog` and `MainActivity` reach it behind
   `BuildConfig.FULL_DEBUG`, a compile-time false elsewhere.
+- The group engine (`wasm/groups`) logs its decisions (the verdict on each
+  received event, retrieval, membership changes, tip sync) only when built with
+  the cargo feature `full-debug`; without it the log macros expand to nothing
+  and the normal wasm bundle has the same code section. `npm run build:full-debug`
+  builds that bundle into `gossip-sdk/src/assets/generated/wasm-full-debug/`
+  (never committed) and Vite uses it in place of the committed one; the SDK
+  forwards its events to the debug log only when the bundle has
+  `GroupsNode.set_debug_sink`. The committed bundle stays the normal build's
+  (the generated-files check of `rust-wasm.yml`).
 - A separate app: `net.massa.gossip.debug`, named "Gossip DEBUG", red icon. It
   installs beside the real app and cannot replace it.
 - Gradle refuses a release or bundle task with `-PfullDebug=true`, and
@@ -65,7 +74,7 @@ to `<origin of VITE_GOSSIP_API_URL>/debug-logs/` with the secret
   `tracing` statements out of release builds (`release_max_level_off`, through
   their default feature `quiet-release`). Only the full debug app
   (`-PfullDebug=true`) builds gossip-mobile with `--no-default-features
-  --features full-debug`, which keeps the lines and sends them to the Android
+--features full-debug`, which keeps the lines and sends them to the Android
   log (tag `GossipMesh`). `scripts/build-mesh-android.sh` stops a normal build
   whose library holds the tag `GossipMesh` or the text of a mesh log line, and a
   full-debug build whose library lacks them.

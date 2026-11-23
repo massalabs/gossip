@@ -92,9 +92,38 @@ function stripReleaseConsolePlugin(): Plugin {
   };
 }
 
+/**
+ * The full debug build (npm run build:full-debug) uses the wasm bundle built
+ * with the group engine's debug events (npm run wasm:build:main:full-debug,
+ * cargo feature `full-debug`) instead of the committed normal one. The SDK
+ * names the bundle as `../assets/generated/wasm/…` both in imports
+ * (bindings.ts) and in `new URL(…, import.meta.url)` (loader.ts), which an
+ * alias does not reach: the path is rewritten in the source of
+ * gossip-sdk/src/wasm/ before Vite resolves either. Only that build adds this
+ * plugin, to the app and to the service worker.
+ */
+function fullDebugWasmPlugin(): Plugin {
+  const dir = path.resolve(__dirname, 'gossip-sdk/src/wasm') + path.sep;
+  return {
+    name: 'full-debug-wasm',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.startsWith(dir)) return null;
+      return {
+        code: code.replaceAll(
+          '../assets/generated/wasm/',
+          '../assets/generated/wasm-full-debug/'
+        ),
+        map: null,
+      };
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 const config = defineConfig({
   plugins: [
+    ...(process.env.VITE_FULL_DEBUG === 'true' ? [fullDebugWasmPlugin()] : []),
     stripReleaseConsolePlugin(),
     react(),
     tailwindcss(),
@@ -195,6 +224,11 @@ const config = defineConfig({
         // load their binary at runtime, so an offline start fails without it.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,txt,wasm}'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024, // 6MB (crypto polyfills, QR scanner, WASM)
+        // The service worker is a build of its own: it gets the same wasm
+        // bundle as the app (see fullDebugWasmPlugin).
+        ...(process.env.VITE_FULL_DEBUG === 'true'
+          ? { buildPlugins: { vite: [fullDebugWasmPlugin()] } }
+          : {}),
       },
 
       devOptions: {
