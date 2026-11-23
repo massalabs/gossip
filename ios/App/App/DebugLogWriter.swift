@@ -1,7 +1,10 @@
 #if FULL_DEBUG
+import AVFoundation
+import CoreBluetooth
 import Foundation
 import Security
 import UIKit
+import UserNotifications
 
 /// The record of the full debug build (`FULL_DEBUG`, absent from every other
 /// build): JSON lines in `Application Support/debug-logs/NNNNNN.jsonl`,
@@ -574,6 +577,7 @@ enum FullDebug {
         writer.event(
             "app.previous_run", lvl: wasRunning ? "error" : "info",
             f: ["clean": !wasRunning], dur: nil)
+        FullDebug.logPermissions("start")
         if wasRunning {
             writer.addError("Previous run ended without a clean exit (crash, watchdog or kill in the foreground)")
         }
@@ -590,6 +594,7 @@ enum FullDebug {
         observe(UIApplication.willEnterForegroundNotification) {
             FullDebug.setMarker(true)
             writer.event("app.foreground", lvl: "info", f: [:], dur: nil)
+            FullDebug.logPermissions("foreground")
         }
         observe(UIApplication.didBecomeActiveNotification) {
             writer.event("app.active", lvl: "debug", f: [:], dur: nil)
@@ -616,6 +621,69 @@ enum FullDebug {
         }
         observe(ProcessInfo.thermalStateDidChangeNotification) {
             writer.event("app.thermal", lvl: "info", f: ["state": ProcessInfo.processInfo.thermalState.rawValue], dur: nil)
+        }
+    }
+
+    /// One `permission.state` line: Bluetooth, camera, notifications,
+    /// background refresh, low-power mode. Local network: iOS has no API to
+    /// read it, so "unknown". The notification settings arrive
+    /// asynchronously, so the line is written from their callback.
+    static func logPermissions(_ trigger: String) {
+        var base: [String: Any] = [
+            "trigger": trigger,
+            "bluetooth": bluetoothName(CBManager.authorization),
+            "camera": cameraName(AVCaptureDevice.authorizationStatus(for: .video)),
+            "localNetwork": "unknown",
+            "lowPower": ProcessInfo.processInfo.isLowPowerModeEnabled,
+        ]
+        DispatchQueue.main.async {
+            base["backgroundRefresh"] = FullDebug.refreshName(UIApplication.shared.backgroundRefreshStatus)
+            let snapshot = base
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                var f = snapshot
+                f["notifications"] = FullDebug.notificationName(settings.authorizationStatus)
+                DebugLogWriter.shared.event("permission.state", lvl: "info", f: f, dur: nil)
+            }
+        }
+    }
+
+    static func bluetoothName(_ a: CBManagerAuthorization) -> String {
+        switch a {
+        case .allowedAlways: return "granted"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "notDetermined"
+        @unknown default: return "unknown"
+        }
+    }
+
+    static func cameraName(_ a: AVAuthorizationStatus) -> String {
+        switch a {
+        case .authorized: return "granted"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "notDetermined"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static func refreshName(_ s: UIBackgroundRefreshStatus) -> String {
+        switch s {
+        case .available: return "available"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static func notificationName(_ s: UNAuthorizationStatus) -> String {
+        switch s {
+        case .authorized: return "granted"
+        case .denied: return "denied"
+        case .notDetermined: return "notDetermined"
+        case .provisional: return "provisional"
+        case .ephemeral: return "ephemeral"
+        @unknown default: return "unknown"
         }
     }
 
