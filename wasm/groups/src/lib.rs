@@ -34,6 +34,7 @@ pub mod hash;
 mod ids;
 mod keys;
 pub mod node;
+pub mod radio;
 mod redact;
 mod rng;
 mod root;

@@ -1649,6 +1649,7 @@ version = "0.1.0"
 dependencies = [
  "auth",
  "blake3",
+ "crypto-aead",
  "crypto-dsa",
  "hex",
  "prost",

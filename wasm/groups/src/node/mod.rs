@@ -75,7 +75,8 @@ use crate::epoch::{Epoch, GroupState, Merge, Outcome, Rejection, Sender};
 use crate::error::Error;
 use crate::event::{Body, MessageEvent, Payload};
 use crate::ids::{ChatId, EventId, GossipId, SyncObjId};
-use crate::rng::{Randomness, uniform_below};
+use crate::radio;
+use crate::rng::{Randomness, bytes, uniform_below};
 use crate::root::Root;
 use crate::store::overlay::Overlay;
 use crate::store::{Storage, StorageError};
@@ -284,6 +285,24 @@ enum Form {
     Full,
     /// Notices only.
     Notice,
+}
+
+/// What [`Node::receive_radio`] found in a datagram.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadioReceived {
+    /// The epoch the message belongs to.
+    pub chat_id: ChatId,
+    /// Its group.
+    pub group_id: ChatId,
+    /// The rebuilt event's ID.
+    pub event_id: EventId,
+    /// Its author, as identified by the radio tag.
+    pub author: GossipId,
+    /// The epoch is not this device's current one: written with an older group key, which
+    /// removed members hold too. Shown with a warning and not relayed online.
+    pub older_key: bool,
+    /// Newly accepted; `false` for a replay or a message the epoch refuses.
+    pub accepted: bool,
 }
 
 /// The engine of one device. See the module documentation.
@@ -904,6 +923,114 @@ impl Node {
         self.publish_with(store, chat_id, now, rng, move |e, ov, now, rng| {
             e.publish_message(ov, now, rng, me, body, metadata, scheduled_for)
         })
+    }
+
+    /// Publishes a text message in its radio form (see [`crate::radio`]): the event is stored
+    /// and disseminated online like any own message, and the datagram for the radio is
+    /// returned with it. Only in the current epoch of the group, like any new message.
+    ///
+    /// # Errors
+    ///
+    /// [`NodeError`]; nothing was committed.
+    pub fn publish_radio_text<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        chat_id: ChatId,
+        text: &str,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<(Published, Vec<u8>), NodeError> {
+        let me = self.me;
+        if self.current_epoch(&chat_id).is_some_and(|c| c != chat_id) {
+            return Err(NodeError::NotAllowed);
+        }
+        let mut datagram = None;
+        let published = self.publish_with(store, chat_id, now, rng, |e, ov, now, rng| {
+            let sealed = radio::seal_text(e.root(), me, now, bytes(rng), text)
+                .map_err(ChangeError::Invalid)?;
+            datagram = Some(sealed.datagram);
+            e.publish_prepared(ov, now, sealed.event)
+        })?;
+        let datagram = datagram.ok_or(NodeError::NotAllowed)?;
+        Ok((published, datagram))
+    }
+
+    /// Receives a radio datagram: opens it against every epoch this device holds, then
+    /// receives the rebuilt event with no deliverer. A newly accepted event of this device's
+    /// current epoch is relayed online by notices, like any relayed event (§10.2); one of an
+    /// older epoch is kept and not relayed, since removed members hold that epoch's radio key
+    /// and a datagram names no deliverer that the rule of §10.4 could check.
+    ///
+    /// `None` when the datagram opens against no epoch held here.
+    ///
+    /// # Errors
+    ///
+    /// [`NodeError`]; nothing was committed.
+    pub fn receive_radio<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        datagram: &[u8],
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<Option<RadioReceived>, NodeError> {
+        let Some(opened) = radio::open(datagram, self.epochs.values().map(|e| &e.root)) else {
+            return Ok(None);
+        };
+        let chat_id = opened.event.chat_id();
+        let group_id = self.group_of(&chat_id);
+        let older_key = self.current_epoch(&group_id).is_some_and(|c| c != chat_id);
+        let event_id = opened.event.event_id();
+        let event = opened.event;
+        let accepted = self.run(store, now, rng, |n, cx| {
+            n.receive_radio_event(cx, event, older_key)
+        })?;
+        Ok(Some(RadioReceived {
+            chat_id,
+            group_id,
+            event_id,
+            author: opened.author,
+            older_key,
+            accepted,
+        }))
+    }
+
+    fn receive_radio_event(
+        &mut self,
+        cx: &mut Cx<'_>,
+        event: MessageEvent,
+        older_key: bool,
+    ) -> Result<bool, NodeError> {
+        let chat = event.chat_id();
+        let Some(entry) = self.epochs.get(&chat).cloned() else {
+            return Ok(false);
+        };
+        let id = event.event_id();
+        let received = entry
+            .epoch()
+            .receive(cx.ov, Sender::Radio, event.clone(), cx.now)?;
+        self.invalidate(chat, &received.pruned);
+        let Outcome::Accepted(merge) = received.outcome else {
+            return Ok(false);
+        };
+        self.resolve(TaskKey {
+            chat_id: chat,
+            target: Target::Event(id),
+        });
+        let shareable = cx
+            .ov
+            .object(&chat, &event.payload().sync_obj_id())?
+            .is_some_and(|o| o.shareable);
+        if !older_key
+            && self.serves(&chat)
+            && merge != Merge::Lost
+            && shareable
+            && entry.epoch().serve(cx.ov, &id, cx.now)?.is_some()
+        {
+            self.disseminate(cx, &entry, &event, Form::Notice, false)?;
+        }
+        let group = self.group_of(&chat);
+        self.changed(group, records::ChangeKind::Messages, cx.now);
+        Ok(true)
     }
 
     /// Publishes a media message (§7.6): `data` of the type `mimetype`, any bytes the event

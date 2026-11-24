@@ -49,6 +49,9 @@ pub enum GroupState {
 pub enum Sender {
     /// This device created it (§9).
     Local,
+    /// A radio datagram, rebuilt into the event (see [`crate::radio`]): no deliverer is
+    /// known, so no peer check applies; membership was proven by the epoch's radio key.
+    Radio,
     /// The immediate, authenticated Agraphon peer.
     Peer {
         /// Its GossipID.

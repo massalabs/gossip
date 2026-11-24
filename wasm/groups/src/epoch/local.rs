@@ -364,6 +364,37 @@ impl Epoch<'_> {
         })
     }
 
+    /// Publishes a message event the caller built, with its own event ID and parents: a
+    /// radio message (see [`crate::radio`]), whose ID and `syncObjId` are derived so that
+    /// every member rebuilds the same event. Same checks and commit as a normal publication.
+    ///
+    /// # Errors
+    ///
+    /// [`ChangeError`]; nothing was committed then.
+    pub fn publish_prepared<S: Storage + ?Sized>(
+        &self,
+        store: &mut S,
+        now: u64,
+        event: MessageEvent,
+    ) -> Result<Published, ChangeError> {
+        self.check_can_send()?;
+        debug_assert_eq!(event.chat_id(), self.chat_id());
+        let mut tx = self.tx(&*store);
+        tick(&mut tx, now)?;
+        if tx.row(&event.event_id())?.is_some() {
+            return Err(ChangeError::IdCollision);
+        }
+        let merge = apply_new(&mut tx, event.clone(), now)?;
+        expire(&mut tx, now)?;
+        let (changes, pruned) = tx.finish()?;
+        store.commit(changes)?;
+        Ok(Published {
+            event,
+            merge,
+            pruned,
+        })
+    }
+
     /// A local-only edit (§9.1), then the withdrawal of shareability (§9.3): the stored
     /// result is replaced, nothing is sent, and every content event of the message (carriers
     /// of the old result and pending versions) is pruned to a stub.

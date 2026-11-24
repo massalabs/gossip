@@ -8,6 +8,7 @@ description = "Plausibly deniable group chats: identifiers, roots, signed object
 [dependencies]
 auth = { path = "../auth" }
 crypto-dsa = { path = "../crypto-dsa" }
+crypto-aead = { path = "../crypto-aead" }
 blake3 = { workspace = true }
 zeroize = { workspace = true }
 thiserror = { workspace = true }

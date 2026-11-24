@@ -502,6 +502,27 @@ impl GroupsNode {
             .map_err(js)
     }
 
+    /// A text message in its radio form, at most `groups::radio::MAX_TEXT` bytes of UTF-8:
+    /// stored and sent online like any message. Returns `{eventId, syncObjId, merge,
+    /// datagram}` in JSON, `datagram` in hex, for the MeshCore radio.
+    pub fn publish_radio_text(
+        &mut self,
+        epoch: &[u8],
+        text: &str,
+        now: f64,
+    ) -> Result<String, JsValue> {
+        self.core
+            .publish_radio_text(chat(epoch)?, text, ms(now)?)
+            .map_err(js)
+    }
+
+    /// Receives a datagram from the MeshCore radio. Returns `null` in JSON when it is not
+    /// for any epoch held here, otherwise `{chatId, groupId, eventId, author, olderKey,
+    /// accepted}`.
+    pub fn receive_radio(&mut self, datagram: &[u8], now: f64) -> Result<String, JsValue> {
+        self.core.receive_radio(datagram, ms(now)?).map_err(js)
+    }
+
     /// A media message (§7.6): `mimetype` is `type/subtype` (lowercase, no parameters, at most
     /// 127 bytes), `data` any bytes the event can hold; `metadata` as for `publish_message`
     /// (a name or a caption). Returns `{eventId, syncObjId, merge}` in JSON.

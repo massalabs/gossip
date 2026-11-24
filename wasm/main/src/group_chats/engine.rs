@@ -425,6 +425,44 @@ impl Core {
             .map_err(err)
     }
 
+    /// A text message in its radio form (MeshCore channel datagram, see `groups::radio`).
+    /// Returns `{eventId, syncObjId, merge, datagram}`, the datagram in hex.
+    pub fn publish_radio_text(&mut self, chat: ChatId, text: &str, now: u64) -> R<String> {
+        self.node
+            .publish_radio_text(&mut self.store, chat, text, now, &mut rng)
+            .map(|(p, datagram)| {
+                J::Obj(vec![
+                    ("eventId".into(), p.event.event_id().enc()),
+                    ("syncObjId".into(), p.event.payload().sync_obj_id().enc()),
+                    ("merge".into(), p.merge.enc()),
+                    ("datagram".into(), J::Str(hex(&datagram))),
+                ])
+                .to_text()
+            })
+            .map_err(err)
+    }
+
+    /// Receives a radio datagram. Returns `null` when it opens against no epoch held here,
+    /// otherwise `{chatId, groupId, eventId, author, olderKey, accepted}`.
+    pub fn receive_radio(&mut self, datagram: &[u8], now: u64) -> R<String> {
+        let received = self
+            .node
+            .receive_radio(&mut self.store, datagram, now, &mut rng)
+            .map_err(err)?;
+        Ok(match received {
+            None => J::Null,
+            Some(r) => J::Obj(vec![
+                ("chatId".into(), r.chat_id.enc()),
+                ("groupId".into(), r.group_id.enc()),
+                ("eventId".into(), r.event_id.enc()),
+                ("author".into(), r.author.enc()),
+                ("olderKey".into(), r.older_key.enc()),
+                ("accepted".into(), r.accepted.enc()),
+            ]),
+        }
+        .to_text())
+    }
+
     /// A media message of `data` (any bytes) and `mimetype` (`type/subtype`, §7.6), with
     /// `metadata` as for [`Self::publish_message`].
     pub fn publish_media(
