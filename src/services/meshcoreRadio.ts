@@ -143,6 +143,13 @@ export async function connectRadio(): Promise<void> {
   useRadioStore.setState({ status: 'connecting', error: null });
   try {
     await BleClient.initialize({ androidNeverForLocation: true });
+    // With Bluetooth off the device picker would scan forever and find nothing.
+    if (!(await BleClient.isEnabled())) {
+      // Android asks the user; elsewhere this is not supported.
+      await BleClient.requestEnable().catch(() => undefined);
+      if (!(await BleClient.isEnabled()))
+        throw new Error('radio:bluetooth-off');
+    }
     const device = await BleClient.requestDevice({ services: [SERVICE] });
     const c = new CapacitorBleConnection(device.deviceId);
     c.on('disconnected', () => {

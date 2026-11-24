@@ -374,6 +374,7 @@
     "connect": "Connect a radio",
     "disconnect": "Disconnect",
     "connect_failed": "Could not connect to the radio.",
+    "bluetooth_off": "Turn on Bluetooth to connect a radio.",
     "no_free_channel": "The radio has no free channel slot for Gossip.",
     "note_visible": "Anyone in range can tell that Gossip messages are being sent, but not their content, sender or group.",
     "note_name": "Your radio broadcasts its own name: give it one that does not identify you, and keep its location off.",

@@ -374,6 +374,7 @@
     "connect": "连接无线电",
     "disconnect": "断开连接",
     "connect_failed": "无法连接到无线电。",
+    "bluetooth_off": "请打开蓝牙以连接无线电。",
     "no_free_channel": "无线电上没有可供 Gossip 使用的空闲频道槽位。",
     "note_visible": "范围内的任何人都能看出有人在发送 Gossip 消息，但看不到内容、发送者或群组。",
     "note_name": "你的无线电会广播自己的名称：请起一个不会暴露你身份的名称，并保持位置关闭。",

@@ -11,6 +11,8 @@ const radio = vi.hoisted(() => ({
   writes: [] as number[][],
   slots: [] as { name: string; secret: number[] }[],
   disconnects: 0,
+  enabled: true,
+  enableOnRequest: true,
 }));
 
 const sdk = vi.hoisted(() => ({
@@ -38,6 +40,10 @@ function cstring(s: string, size: number): number[] {
 vi.mock('@capacitor-community/bluetooth-le', () => ({
   BleClient: {
     initialize: vi.fn(async () => undefined),
+    isEnabled: vi.fn(async () => radio.enabled),
+    requestEnable: vi.fn(async () => {
+      radio.enabled = radio.enableOnRequest;
+    }),
     requestDevice: vi.fn(async () => ({
       deviceId: 'dev-1',
       name: 'MeshCore-Test',
@@ -141,6 +147,8 @@ beforeEach(async () => {
   await disconnectRadio();
   radio.writes.length = 0;
   radio.disconnects = 0;
+  radio.enabled = true;
+  radio.enableOnRequest = true;
   sdk.received.length = 0;
   radio.slots = [
     { name: 'Public', secret: new Array(16).fill(7) },
@@ -216,6 +224,18 @@ describe('meshcoreRadio', () => {
     await settle();
     expect(useRadioStore.getState().status).toBe('disconnected');
     expect(radio.disconnects).toBeGreaterThan(0);
+  });
+
+  it('asks to turn Bluetooth on, and says so when it stays off', async () => {
+    radio.enabled = false;
+    await connectRadio();
+    expect(useRadioStore.getState().status).toBe('connected');
+
+    await disconnectRadio();
+    radio.enabled = false;
+    radio.enableOnRequest = false;
+    await expect(connectRadio()).rejects.toThrow('radio:bluetooth-off');
+    expect(useRadioStore.getState().status).toBe('disconnected');
   });
 
   it('refuses to send without a radio', async () => {

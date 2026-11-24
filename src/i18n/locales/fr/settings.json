@@ -374,6 +374,7 @@
     "connect": "Connecter une radio",
     "disconnect": "Déconnecter",
     "connect_failed": "Impossible de se connecter à la radio.",
+    "bluetooth_off": "Active le Bluetooth pour connecter une radio.",
     "no_free_channel": "La radio n’a plus d’emplacement de canal libre pour Gossip.",
     "note_visible": "Toute personne à portée peut voir que des messages Gossip sont envoyés, mais pas leur contenu, leur expéditeur ni leur groupe.",
     "note_name": "Ta radio diffuse son propre nom : donne-lui un nom qui ne t’identifie pas et laisse sa position désactivée.",

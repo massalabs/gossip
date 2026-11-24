@@ -31,7 +31,9 @@ const RadioSettings: React.FC = () => {
       toast.error(
         message === 'radio:no-free-channel'
           ? t('radio.no_free_channel')
-          : t('radio.connect_failed')
+          : message === 'radio:bluetooth-off'
+            ? t('radio.bluetooth_off')
+            : t('radio.connect_failed')
       );
     });
   };
