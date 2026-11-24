@@ -91,6 +91,9 @@ vi.mock('../../src/pages/Invitation', () => ({
 vi.mock('../../src/pages/settings/SecuritySettings', () => ({
   default: stubPage('page-settings-security'),
 }));
+vi.mock('../../src/pages/settings/RadioSettings', () => ({
+  default: stubPage('page-settings-radio'),
+}));
 vi.mock('../../src/pages/settings/NotificationsSettings', () => ({
   default: stubPage('page-settings-notifications'),
 }));

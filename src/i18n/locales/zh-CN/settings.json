@@ -21,7 +21,8 @@
     "security": "安全",
     "feedback": "发送反馈",
     "feedback_external": "打开外部网站：cryptpad.fr",
-    "mesh": "离线网络"
+    "mesh": "离线网络",
+    "radio": "LoRa 无线电（MeshCore）"
   },
   "delete_account": {
     "button": "删除所有账户",
@@ -363,5 +364,20 @@
     "page_android_steps": "点按“下载”，然后打开 Gossip.apk。如果 Android 询问，请允许浏览器安装应用，然后点按“安装”。如果这部手机上已经有 Gossip，则无需这样做。",
     "page_download": "下载 Gossip（{{size}} MB）",
     "page_ios_steps": "iPhone 无法在这里安装 Gossip。有互联网后，在 Safari 中打开此地址，然后点按“分享”→“添加到主屏幕”。网页版应用只能在有互联网时使用。"
+  },
+  "radio": {
+    "title": "LoRa 无线电（MeshCore）",
+    "description": "配对一台 MeshCore 无线电，即可在没有互联网时继续收发群组消息。一条无线电消息最多包含 {{bytes}} 字节文本，通过其他成员自己的无线电送达；收到消息的成员会通过互联网转发。",
+    "connected_to": "已连接到 {{name}}（频道槽位 {{slot}}）",
+    "connecting": "正在连接…",
+    "not_connected": "未连接无线电",
+    "connect": "连接无线电",
+    "disconnect": "断开连接",
+    "connect_failed": "无法连接到无线电。",
+    "no_free_channel": "无线电上没有可供 Gossip 使用的空闲频道槽位。",
+    "note_visible": "范围内的任何人都能看出有人在发送 Gossip 消息，但看不到内容、发送者或群组。",
+    "note_name": "你的无线电会广播自己的名称：请起一个不会暴露你身份的名称，并保持位置关闭。",
+    "note_pin": "请修改无线电默认的蓝牙 PIN 码。",
+    "note_no_kick": "移除成员只能通过互联网生效。使用旧群组密钥通过无线电发送的消息会带有警告。"
   }
 }

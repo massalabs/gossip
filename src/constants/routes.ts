@@ -88,6 +88,7 @@ export const ROUTES = {
   settingsWeb3: route(`/${AppRoute.settings}/web3`),
   settingsPrivacy: route(`/${AppRoute.settings}/privacy`),
   settingsMesh: route(`/${AppRoute.settings}/mesh`),
+  settingsRadio: route(`/${AppRoute.settings}/radio`),
   settingsMeshPrepare: route(`/${AppRoute.settings}/mesh/prepare`),
   settingsMeshShareApp: route(`/${AppRoute.settings}/mesh/share-app`),
 

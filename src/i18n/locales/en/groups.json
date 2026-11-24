@@ -261,5 +261,13 @@
     "weeks_few": "{{count}} weeks",
     "weeks_many": "{{count}} weeks",
     "weeks_other": "{{count}} weeks"
+  },
+  "radio": {
+    "via": "via radio",
+    "older_key_warning": "Sent with an older group key: a removed member may have read it.",
+    "toggle_on": "Sending by radio ({{bytes}} bytes)",
+    "toggle_off": "Send by radio",
+    "send_failed": "Could not send by radio.",
+    "too_long": "Too long for a radio message."
   }
 }

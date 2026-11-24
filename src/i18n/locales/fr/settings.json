@@ -21,7 +21,8 @@
     "security": "Sécurité",
     "feedback": "Envoyer des commentaires",
     "feedback_external": "Ouvre un site web externe : cryptpad.fr",
-    "mesh": "Réseau Mesh"
+    "mesh": "Réseau Mesh",
+    "radio": "Radio LoRa (MeshCore)"
   },
   "delete_account": {
     "button": "Supprimer tous les comptes",
@@ -363,5 +364,20 @@
     "page_android_steps": "Touchez Télécharger, puis ouvrez Gossip.apk. Si Android le demande, autorisez votre navigateur à installer des applications, puis touchez Installer. Si Gossip est déjà sur ce téléphone, inutile de le faire.",
     "page_download": "Télécharger Gossip ({{size}} Mo)",
     "page_ios_steps": "Un iPhone ne peut pas installer Gossip ici. Dès que vous avez internet, ouvrez cette adresse dans Safari, puis touchez Partager → Sur l'écran d'accueil. L'application web ne fonctionne qu'avec internet."
+  },
+  "radio": {
+    "title": "Radio LoRa (MeshCore)",
+    "description": "Associe une radio MeshCore pour continuer à échanger des messages de groupe sans internet. Un message radio contient jusqu’à {{bytes}} octets de texte et atteint les autres membres par leurs propres radios ; les membres qui le reçoivent le transmettent par internet.",
+    "connected_to": "Connecté à {{name}} (emplacement de canal {{slot}})",
+    "connecting": "Connexion…",
+    "not_connected": "Aucune radio connectée",
+    "connect": "Connecter une radio",
+    "disconnect": "Déconnecter",
+    "connect_failed": "Impossible de se connecter à la radio.",
+    "no_free_channel": "La radio n’a plus d’emplacement de canal libre pour Gossip.",
+    "note_visible": "Toute personne à portée peut voir que des messages Gossip sont envoyés, mais pas leur contenu, leur expéditeur ni leur groupe.",
+    "note_name": "Ta radio diffuse son propre nom : donne-lui un nom qui ne t’identifie pas et laisse sa position désactivée.",
+    "note_pin": "Change le code PIN Bluetooth par défaut de la radio.",
+    "note_no_kick": "Retirer un membre ne prend effet que par internet. Les messages envoyés par radio avec une ancienne clé du groupe sont affichés avec un avertissement."
   }
 }

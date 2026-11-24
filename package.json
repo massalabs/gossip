@@ -78,6 +78,7 @@
   "dependencies": {
     "@aparajita/capacitor-biometric-auth": "^9.1.2",
     "@aparajita/capacitor-secure-storage": "^7.1.6",
+    "@capacitor-community/bluetooth-le": "8.3.0",
     "@capacitor-community/privacy-screen": "^6.0.0",
     "@capacitor/android": "^8.0.0",
     "@capacitor/app": "^8.0.0",
@@ -92,6 +93,7 @@
     "@capacitor/preferences": "^8.0.0",
     "@capacitor/share": "^8.0.0",
     "@capacitor/status-bar": "^8.0.0",
+    "@liamcottle/meshcore.js": "1.15.0",
     "@massalabs/gossip-sdk": "workspace:*",
     "@massalabs/massa-web3": "^5.4.0",
     "@noble/ciphers": "2.0.1",

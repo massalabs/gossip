@@ -15,6 +15,7 @@ import GroupSettings from '../pages/GroupSettings';
 import NewGroup from '../pages/NewGroup';
 import Invitation from '../pages/Invitation';
 import SecuritySettings from '../pages/settings/SecuritySettings';
+import RadioSettings from '../pages/settings/RadioSettings';
 import NotificationsSettings from '../pages/settings/NotificationsSettings';
 import AppearanceSettings from '../pages/settings/AppearanceSettings';
 import LanguageSettings from '../pages/settings/LanguageSettings';
@@ -99,6 +100,7 @@ export const AuthenticatedRoutes: React.FC = () => {
         <Route path={ROUTES.settingsWeb3()} element={<Web3Settings />} />
         <Route path={ROUTES.settingsPrivacy()} element={<PrivacySettings />} />
         <Route path={ROUTES.settingsMesh()} element={<MeshSettings />} />
+        <Route path={ROUTES.settingsRadio()} element={<RadioSettings />} />
         <Route
           path={ROUTES.settingsMeshPrepare()}
           element={<MeshPrepareSettings />}

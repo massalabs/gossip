@@ -261,5 +261,13 @@
     "weeks_few": "{{count}} 周",
     "weeks_many": "{{count}} 周",
     "weeks_other": "{{count}} 周"
+  },
+  "radio": {
+    "via": "经无线电",
+    "older_key_warning": "使用旧群组密钥发送：已被移除的成员可能读到过。",
+    "toggle_on": "正在通过无线电发送（{{bytes}} 字节）",
+    "toggle_off": "通过无线电发送",
+    "send_failed": "无法通过无线电发送。",
+    "too_long": "对无线电消息来说太长。"
   }
 }

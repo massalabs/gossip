@@ -2102,6 +2102,12 @@ Source: https://registry.npmjs.org/@babel/runtime/-/runtime-7.28.6.tgz
 Integrity: sha512-05WQkdpL9COIMz4LjTxGpPNCdlpyimKppYNoJ5Di5EUObifl8t4tuLuUBBZEpoLYOmfvIWrsp9fCl0HoPRVTdA==
 License text references: 117da2af0d4ce0fe
 
+npm: @capacitor-community/bluetooth-le@8.3.0
+License: MIT
+Source: https://registry.npmjs.org/@capacitor-community/bluetooth-le/-/bluetooth-le-8.3.0.tgz
+Integrity: sha512-bjI+m8mZ2AB9xIgwPu9T40QoAC7NErYt6q13zMHBzW3hIAITqQKFiElKOUsX813ItXzb81GoRqjlbSeHlKEzQg==
+License text references: 4acd52bcd9d94a25
+
 npm: @capacitor-community/privacy-screen@6.0.0
 License: MIT
 Source: node_modules/@capacitor-community/privacy-screen
@@ -2573,6 +2579,12 @@ License: MIT
 Source: node_modules/@jridgewell/trace-mapping
 License text references: 769d154fbde32a91
 
+npm: @liamcottle/meshcore.js@1.15.0
+License: MIT
+Source: https://registry.npmjs.org/@liamcottle/meshcore.js/-/meshcore.js-1.15.0.tgz
+Integrity: sha512-2QiugXWjB+hW83YfhDTTZJ7hchQ3Urs0Fu50c3gsEyUUlT20oZpKP1pq5V4q2ZgxkoVDMXXZILnuoGwXlwmKIg==
+License text references: 53523b0fbea19a7f
+
 npm: @massalabs/massa-web3@5.4.0
 License: MIT
 Source: https://registry.npmjs.org/@massalabs/massa-web3/-/massa-web3-5.4.0.tgz
@@ -2589,6 +2601,12 @@ License: MIT
 Source: https://registry.npmjs.org/@noble/ciphers/-/ciphers-2.0.1.tgz
 Integrity: sha512-xHK3XHPUW8DTAobU+G0XT+/w+JLM7/8k1UFdB5xg/zTFPnFCobhftzw8wl4Lw2aq/Rvir5pxfZV5fEazmeCJ2g==
 License text references: 24d0608c3320a3e2
+
+npm: @noble/curves@1.9.7
+License: MIT
+Source: https://registry.npmjs.org/@noble/curves/-/curves-1.9.7.tgz
+Integrity: sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw==
+License text references: 3239e134eb6e6d64
 
 npm: @noble/curves@2.0.1
 License: MIT
@@ -2788,6 +2806,102 @@ Source: https://registry.npmjs.org/@scure/bip39/-/bip39-2.0.1.tgz
 Integrity: sha512-PsxdFj/d2AcJcZDX1FXN3dDgitDDTmwf78rKZq1a6c1P1Nan1X/Sxc7667zU3U+AN60g7SxxP0YCVw2H/hBycg==
 License text references: 1565efd0ec4580bf
 
+npm: @serialport/binding-mock@10.2.2
+License: MIT
+Source: https://registry.npmjs.org/@serialport/binding-mock/-/binding-mock-10.2.2.tgz
+Integrity: sha512-HAFzGhk9OuFMpuor7aT5G1ChPgn5qSsklTFOTUX72Rl6p0xwcSVsRtG/xaGp6bxpN7fI9D/S8THLBWbBgS6ldw==
+License text references: 043e85e0a83eca4b
+
+npm: @serialport/bindings-cpp@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/bindings-cpp/-/bindings-cpp-13.0.0.tgz
+Integrity: sha512-r25o4Bk/vaO1LyUfY/ulR6hCg/aWiN6Wo2ljVlb4Pj5bqWGcSRC4Vse4a9AcapuAu/FeBzHCbKMvRQeCuKjzIQ==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/bindings-interface@1.2.2
+License: MIT
+Source: https://registry.npmjs.org/@serialport/bindings-interface/-/bindings-interface-1.2.2.tgz
+Integrity: sha512-CJaUd5bLvtM9c5dmO9rPBHPXTa9R2UwpkJ0wdh9JCYcbrPWsKz+ErvR0hBLeo7NPeiFdjFO4sonRljiw4d2XiA==
+License text references: 043e85e0a83eca4b
+
+npm: @serialport/parser-byte-length@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-byte-length/-/parser-byte-length-13.0.0.tgz
+Integrity: sha512-32yvqeTAqJzAEtX5zCrN1Mej56GJ5h/cVFsCDPbF9S1ZSC9FWjOqNAgtByseHfFTSTs/4ZBQZZcZBpolt8sUng==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-cctalk@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-cctalk/-/parser-cctalk-13.0.0.tgz
+Integrity: sha512-RErAe57g9gvnlieVYGIn1xymb1bzNXb2QtUQd14FpmbQQYlcrmuRnJwKa1BgTCujoCkhtaTtgHlbBWOxm8U2uA==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-delimiter@12.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-delimiter/-/parser-delimiter-12.0.0.tgz
+Integrity: sha512-gu26tVt5lQoybhorLTPsH2j2LnX3AOP2x/34+DUSTNaUTzu2fBXw+isVjQJpUBFWu6aeQRZw5bJol5X9Gxjblw==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-delimiter@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-delimiter/-/parser-delimiter-13.0.0.tgz
+Integrity: sha512-Qqyb0FX1avs3XabQqNaZSivyVbl/yl0jywImp7ePvfZKLwx7jBZjvL+Hawt9wIG6tfq6zbFM24vzCCK7REMUig==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-inter-byte-timeout@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-inter-byte-timeout/-/parser-inter-byte-timeout-13.0.0.tgz
+Integrity: sha512-a0w0WecTW7bD2YHWrpTz1uyiWA2fDNym0kjmPeNSwZ2XCP+JbirZt31l43m2ey6qXItTYVuQBthm75sPVeHnGA==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-packet-length@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-packet-length/-/parser-packet-length-13.0.0.tgz
+Integrity: sha512-60ZDDIqYRi0Xs2SPZUo4Jr5LLIjtb+rvzPKMJCohrO6tAqSDponcNpcB1O4W21mKTxYjqInSz+eMrtk0LLfZIg==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-readline@12.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-readline/-/parser-readline-12.0.0.tgz
+Integrity: sha512-O7cywCWC8PiOMvo/gglEBfAkLjp/SENEML46BXDykfKP5mTPM46XMaX1L0waWU6DXJpBgjaL7+yX6VriVPbN4w==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-readline@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-readline/-/parser-readline-13.0.0.tgz
+Integrity: sha512-dov3zYoyf0dt1Sudd1q42VVYQ4WlliF0MYvAMA3MOyiU1IeG4hl0J6buBA2w4gl3DOCC05tGgLDN/3yIL81gsA==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-ready@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-ready/-/parser-ready-13.0.0.tgz
+Integrity: sha512-JNUQA+y2Rfs4bU+cGYNqOPnNMAcayhhW+XJZihSLQXOHcZsFnOa2F9YtMg9VXRWIcnHldHYtisp62Etjlw24bw==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-regex@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-regex/-/parser-regex-13.0.0.tgz
+Integrity: sha512-m7HpIf56G5XcuDdA3DB34Z0pJiwxNRakThEHjSa4mG05OnWYv0IG8l2oUyYfuGMowQWaVnQ+8r+brlPxGVH+eA==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-slip-encoder@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-slip-encoder/-/parser-slip-encoder-13.0.0.tgz
+Integrity: sha512-fUHZEExm6izJ7rg0A1yjXwu4sOzeBkPAjDZPfb+XQoqgtKAk+s+HfICiYn7N2QU9gyaeCO8VKgWwi+b/DowYOg==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/parser-spacepacket@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/parser-spacepacket/-/parser-spacepacket-13.0.0.tgz
+Integrity: sha512-DoXJ3mFYmyD8X/8931agJvrBPxqTaYDsPoly9/cwQSeh/q4EjQND9ySXBxpWz5WcpyCU4jOuusqCSAPsbB30Eg==
+License text references: 12b8f57dbef74249
+
+npm: @serialport/stream@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/@serialport/stream/-/stream-13.0.0.tgz
+Integrity: sha512-F7xLJKsjGo2WuEWMSEO1SimRcOA+WtWICsY13r0ahx8s2SecPQH06338g28OT7cW7uRXI7oEQAk62qh5gHJW3g==
+License text references: 12b8f57dbef74249
+
 npm: @tailwindcss/node@4.1.18
 License: MIT
 Source: node_modules/@tailwindcss/node
@@ -2897,6 +3011,12 @@ License text references: c2cfccb812fe4821
 npm: @types/react@19.2.7
 License: MIT
 Source: node_modules/@types/react
+License text references: c2cfccb812fe4821
+
+npm: @types/web-bluetooth@0.0.20
+License: MIT
+Source: https://registry.npmjs.org/@types/web-bluetooth/-/web-bluetooth-0.0.20.tgz
+Integrity: sha512-g9gZnnXVq7gM7v3tJCWV/qw7w+KeOlSHAhgF9RytFyifW6AF61hdT2ucrYhPq9hLs5JIryeupHV3qGk95dH9ow==
 License text references: c2cfccb812fe4821
 
 npm: @yudiel/react-qr-scanner@2.5.0
@@ -3030,6 +3150,17 @@ npm: currency.js@2.0.4
 License: MIT
 Source: node_modules/currency.js
 License text references: 42cd4f58f854bf4c
+
+npm: debug@4.4.0
+License: MIT
+Source: https://registry.npmjs.org/debug/-/debug-4.4.0.tgz
+Integrity: sha512-6WTZ/IxCY/T6BALoZHaE4ctp9xm+Z5kY/pzYaCHRFeyVhojxlrm+46y68HA6hr0TcwEssoxNiDEUJQjfPZ/RYA==
+License text references: 23eb8602cd5902bc
+
+npm: debug@4.4.3
+License: MIT
+Source: node_modules/debug
+License text references: 23eb8602cd5902bc
 
 npm: define-data-property@1.1.4
 License: MIT
@@ -3371,10 +3502,21 @@ Source: https://registry.npmjs.org/mitt/-/mitt-3.0.1.tgz
 Integrity: sha512-vKivATfr97l2/QBCYAkXYDbrIWPM2IIKEl7YPhjCvKlG3kE2gm+uBo6nEXK3M5/Ffh/FLpKExzOQ3JJoJGFKBw==
 License text references: 1cab22f196264195
 
+npm: ms@2.1.3
+License: MIT
+Source: node_modules/ms
+License text references: 1662fae9b5314d11
+
 npm: nanoid@3.3.11
 License: MIT
 Source: node_modules/nanoid
 License text references: da4db1480d9beea3
+
+npm: node-addon-api@8.3.0
+License: MIT
+Source: https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.3.0.tgz
+Integrity: sha512-8VOpLHFrOQlAH+qA0ZzuGRlALRA6/LVh8QJldbrC4DY0hXoMP0l4Acq8TzFC018HztWiRqyCEj2aTWY2UvnJUg==
+License text references: 89024017b88a9f2b
 
 npm: node-gyp-build@4.8.4
 License: MIT
@@ -3522,6 +3664,12 @@ npm: sdp@3.2.1
 License: MIT
 Source: node_modules/sdp
 License text references: 798e82590af6a84b
+
+npm: serialport@13.0.0
+License: MIT
+Source: https://registry.npmjs.org/serialport/-/serialport-13.0.0.tgz
+Integrity: sha512-PHpnTd8isMGPfFTZNCzOZp9m4mAJSNWle9Jxu6BPTcWq7YXl5qN7tp8Sgn0h+WIGcD6JFz5QDgixC2s4VW7vzg==
+License text references: 12b8f57dbef74249
 
 npm: set-cookie-parser@2.7.2
 License: MIT
@@ -4623,6 +4771,35 @@ SOFTWARE.
 
 ------------------------------------------------------------------------------
 
+Text reference: 043e85e0a83eca4b
+SHA-256: 043e85e0a83eca4b33f6bc4e1f02e6382e1d9cf72a7a07dec36ddf0e83fe4254
+File names: LICENSE
+Used by: npm:@serialport/binding-mock@10.2.2, npm:@serialport/bindings-interface@1.2.2
+
+MIT License
+
+Copyright (c) 2021 Francis Gulotta
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------
+
 Text reference: 0444c6991eead682
 SHA-256: 0444c6991eead6822f7b9102e654448d51624431119546492e8b231db42c48bb
 File names: LICENSE-MIT
@@ -5456,6 +5633,35 @@ SOFTWARE.
 
 ------------------------------------------------------------------------------
 
+Text reference: 12b8f57dbef74249
+SHA-256: 12b8f57dbef742496d1356e7773fdf32924724bf1cdb2cd833c448611d04a525
+File names: LICENSE
+Used by: npm:@serialport/bindings-cpp@13.0.0, npm:@serialport/parser-byte-length@13.0.0, npm:@serialport/parser-cctalk@13.0.0, npm:@serialport/parser-delimiter@12.0.0, npm:@serialport/parser-delimiter@13.0.0, npm:@serialport/parser-inter-byte-timeout@13.0.0, npm:@serialport/parser-packet-length@13.0.0, npm:@serialport/parser-readline@12.0.0, npm:@serialport/parser-readline@13.0.0, npm:@serialport/parser-ready@13.0.0, npm:@serialport/parser-regex@13.0.0, npm:@serialport/parser-slip-encoder@13.0.0, npm:@serialport/parser-spacepacket@13.0.0, npm:@serialport/stream@13.0.0, npm:serialport@13.0.0
+
+The MIT License (MIT)
+
+Copyright 2010 Christopher Williams. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+------------------------------------------------------------------------------
+
 Text reference: 13f4cc9fbc8d4a44
 SHA-256: 13f4cc9fbc8d4a447b28aa84019c10ad4abf4b5f6919db061bf6690ccc23bc02
 File names: LICENSE.txt
@@ -5986,6 +6192,35 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+------------------------------------------------------------------------------
+
+Text reference: 1662fae9b5314d11
+SHA-256: 1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801
+File names: license.md
+Used by: npm:ms@2.1.3
+
+The MIT License (MIT)
+
+Copyright (c) 2020 Vercel, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ------------------------------------------------------------------------------
 
@@ -6679,6 +6914,33 @@ license <LICENSE-MIT or http://opensource.org/licenses/MIT>,
 at your option. All files in the project carrying such
 notice may not be copied, modified, or distributed except
 according to those terms.
+
+------------------------------------------------------------------------------
+
+Text reference: 23eb8602cd5902bc
+SHA-256: 23eb8602cd5902bcfca56b23aa08e8672a809f5a12eaf8bb56abfa9d44e1a4fd
+File names: LICENSE
+Used by: npm:debug@4.4.0, npm:debug@4.4.3
+
+(The MIT License)
+
+Copyright (c) 2014-2017 TJ Holowaychuk <tj@vision-media.ca>
+Copyright (c) 2018-2021 Josh Junon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+and associated documentation files (the 'Software'), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 
@@ -9889,7 +10151,7 @@ the individual files for PD/CC0-dedicated sections).
 Text reference: 3239e134eb6e6d64
 SHA-256: 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429
 File names: LICENSE
-Used by: npm:@noble/curves@2.0.1, npm:@noble/hashes@1.8.0, npm:@noble/hashes@2.0.1, npm:@scure/base@2.0.0
+Used by: npm:@noble/curves@1.9.7, npm:@noble/curves@2.0.1, npm:@noble/hashes@1.8.0, npm:@noble/hashes@2.0.1, npm:@scure/base@2.0.0
 
 The MIT License (MIT)
 
@@ -12661,6 +12923,35 @@ DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 
+Text reference: 4acd52bcd9d94a25
+SHA-256: 4acd52bcd9d94a25b6b56c8663a149d626e3227b912b2295f7b21ce8279c1586
+File names: LICENSE
+Used by: npm:@capacitor-community/bluetooth-le@8.3.0
+
+MIT License
+
+Copyright (c) 2021 Capacitor plugin for Bluetooth Low Energy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------
+
 Text reference: 4c00005ebc3ac93c
 SHA-256: 4c00005ebc3ac93ca30f8b3680c360173749537fce1462c52d35901c557163e6
 File names: LICENSE-APACHE
@@ -13139,6 +13430,35 @@ If the Work includes a "NOTICE" text file as part of its distribution, then any 
 9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
 
 END OF TERMS AND CONDITIONS
+
+------------------------------------------------------------------------------
+
+Text reference: 53523b0fbea19a7f
+SHA-256: 53523b0fbea19a7f23721cc02a320fc5c30c2dc99b01a86ed218be26a6034109
+File names: LICENSE
+Used by: npm:@liamcottle/meshcore.js@1.15.0
+
+MIT License
+
+Copyright (c) 2025-2026 Liam Cottle
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ------------------------------------------------------------------------------
 
@@ -17657,6 +17977,23 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+------------------------------------------------------------------------------
+
+Text reference: 89024017b88a9f2b
+SHA-256: 89024017b88a9f2b763f79b941a4f2db3b4428edfcacdc0b23866b2da633ad0c
+File names: LICENSE.md
+Used by: npm:node-addon-api@8.3.0
+
+The MIT License (MIT)
+
+Copyright (c) 2017 [Node.js API collaborators](https://github.com/nodejs/node-addon-api#collaborators)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 
@@ -22962,7 +23299,7 @@ SOFTWARE.
 Text reference: c2cfccb812fe4821
 SHA-256: c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
 File names: LICENSE, license-mit
-Used by: Cargo:windows-link@0.2.1, Cargo:windows-sys@0.52.0, Cargo:windows-sys@0.61.2, Cargo:windows-targets@0.52.6, Cargo:windows_aarch64_gnullvm@0.52.6, Cargo:windows_aarch64_msvc@0.52.6, Cargo:windows_i686_gnu@0.52.6, Cargo:windows_i686_gnullvm@0.52.6, Cargo:windows_i686_msvc@0.52.6, Cargo:windows_x86_64_gnu@0.52.6, Cargo:windows_x86_64_gnullvm@0.52.6, Cargo:windows_x86_64_msvc@0.52.6, npm:@types/emscripten@1.41.5, npm:@types/estree@1.0.8, npm:@types/node@24.10.4, npm:@types/react@19.2.7
+Used by: Cargo:windows-link@0.2.1, Cargo:windows-sys@0.52.0, Cargo:windows-sys@0.61.2, Cargo:windows-targets@0.52.6, Cargo:windows_aarch64_gnullvm@0.52.6, Cargo:windows_aarch64_msvc@0.52.6, Cargo:windows_i686_gnu@0.52.6, Cargo:windows_i686_gnullvm@0.52.6, Cargo:windows_i686_msvc@0.52.6, Cargo:windows_x86_64_gnu@0.52.6, Cargo:windows_x86_64_gnullvm@0.52.6, Cargo:windows_x86_64_msvc@0.52.6, npm:@types/emscripten@1.41.5, npm:@types/estree@1.0.8, npm:@types/node@24.10.4, npm:@types/react@19.2.7, npm:@types/web-bluetooth@0.0.20
 
     MIT License
 

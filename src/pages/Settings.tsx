@@ -30,6 +30,7 @@ import {
   MessageSquare,
   Download,
   Bluetooth,
+  Radio,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -330,6 +331,15 @@ const Settings = (): React.ReactElement => {
             />
           </div>
         )}
+
+        {/* LoRa radio (MeshCore), for group messages without internet */}
+        <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
+          <SettingsRow
+            icon={<Radio />}
+            label={t('menu.radio')}
+            onClick={() => navigate(ROUTES.settingsRadio())}
+          />
+        </div>
 
         {/* Web 3 Group */}
         <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">

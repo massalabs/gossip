@@ -53,6 +53,11 @@ interface GroupMessageItemProps extends GroupMessageActions {
   canWrite: boolean;
   /** The name shown for a member, for the list of who reacted. */
   memberName?: (userId: string) => string;
+  /**
+   * The message travelled by radio (MeshCore); `olderKey` when it was received
+   * under a group key older than the current one.
+   */
+  radio?: { olderKey: boolean } | null;
 }
 
 /**
@@ -67,6 +72,7 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   replyGroups,
   canWrite,
   memberName,
+  radio,
   onReply,
   onCopy,
   onEdit,
@@ -215,7 +221,20 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
             }
           />
         </p>
+        {radio?.olderKey && (
+          <p
+            className="mt-1 text-[11px] text-amber-600 dark:text-amber-400"
+            data-testid="radio-older-key"
+          >
+            {t('radio.older_key_warning')}
+          </p>
+        )}
         <p className="mt-1 text-[11px] opacity-70 text-right">
+          {radio && (
+            <span className="mr-1" data-testid="radio-marker">
+              {t('radio.via')}
+            </span>
+          )}
           {message.edited && (
             <span className="mr-1">{t('timeline.edited')}</span>
           )}

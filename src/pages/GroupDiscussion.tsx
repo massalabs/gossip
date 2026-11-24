@@ -41,6 +41,8 @@ import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { groupDisplayName } from '../utils/groupName';
 import { nearByteLimit, utf8Bytes } from '../utils/textBytes';
 import { ROUTES } from '../constants/routes';
+import { sendRadioText, useRadioStore } from '../services/meshcoreRadio';
+import { RADIO_MAX_TEXT_BYTES } from '@massalabs/gossip-sdk';
 
 /** What the input shows of a group message being replied to or edited. */
 interface InputTarget {
@@ -182,6 +184,32 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     if (el) el.scrollTop = el.scrollHeight;
   }, [timeline.length]);
 
+  // Which messages travelled by radio, for their marker and warning.
+  const [radioRecords, setRadioRecords] = useState<
+    Map<string, { olderKey: boolean }>
+  >(new Map());
+  useEffect(() => {
+    let alive = true;
+    const ids = timeline.flatMap(i =>
+      i.kind === 'message' ? [i.syncObjId] : []
+    );
+    // Optional: a service without radio support (an older engine) has no records.
+    getGroupService()
+      ?.radioRecords?.(ids)
+      .then(records => {
+        if (alive) setRadioRecords(records);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [timeline]);
+
+  // Sending by radio, when a MeshCore radio is connected (Settings → Radio).
+  const radioConnected = useRadioStore(s => s.status === 'connected');
+  const [byRadio, setByRadio] = useState(false);
+  const viaRadio = byRadio && radioConnected;
+
   const byKey = useMemo(() => {
     const map = new Map<string, GroupMessage>();
     for (const item of timeline) {
@@ -253,6 +281,19 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
 
   const send = (text: string) => {
     if (!service) return;
+    if (viaRadio) {
+      void sendRadioText(group.groupId, text).then(
+        () => {
+          setDraft(null);
+          refresh();
+        },
+        () => {
+          setDraft(d => ({ text, n: (d?.n ?? 0) + 1 }));
+          toast.error(t('radio.send_failed'));
+        }
+      );
+      return;
+    }
     const reply = replyingTo?.message;
     setReplyingTo(null);
     void service
@@ -320,29 +361,58 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     </HeaderBar>
   );
 
+  const radioToggle = radioConnected ? (
+    <div className="px-4 pt-2 flex justify-end">
+      <button
+        type="button"
+        onClick={() => {
+          setByRadio(on => !on);
+          setReplyingTo(null);
+        }}
+        aria-pressed={viaRadio}
+        data-testid="radio-toggle"
+        className={`text-xs font-medium rounded-full px-3 py-1 border ${
+          viaRadio
+            ? 'bg-accent text-primary-foreground border-transparent'
+            : 'border-border text-muted-foreground'
+        }`}
+      >
+        {viaRadio
+          ? t('radio.toggle_on', { bytes: RADIO_MAX_TEXT_BYTES })
+          : t('radio.toggle_off')}
+      </button>
+    </div>
+  ) : null;
+
   const composer = canWrite ? (
-    <MessageInput
-      key={draft?.n ?? 0}
-      initialValue={draft?.text}
-      onSend={send}
-      // A chat of two is no "group" to its users.
-      placeholderKey={
-        group.members.length === 2 ? undefined : 'groups:composer.placeholder'
-      }
-      maxBytes={maxTextBytes}
-      onTooLong={() => toast.error(t('composer.too_long'))}
-      replyingTo={replyingTo}
-      onCancelReply={() => setReplyingTo(null)}
-      editingMessage={editing}
-      onCancelEdit={() => setEditing(null)}
-      onConfirmEdit={(text, m) => {
-        setEditing(null);
-        if (!service) return;
-        void run(() =>
-          service.editMessage(m.message.epochId, m.message.syncObjId, text)
-        );
-      }}
-    />
+    <>
+      {radioToggle}
+      <MessageInput
+        key={draft?.n ?? 0}
+        initialValue={draft?.text}
+        onSend={send}
+        // A chat of two is no "group" to its users.
+        placeholderKey={
+          group.members.length === 2 ? undefined : 'groups:composer.placeholder'
+        }
+        maxBytes={viaRadio ? RADIO_MAX_TEXT_BYTES : maxTextBytes}
+        onTooLong={() =>
+          toast.error(viaRadio ? t('radio.too_long') : t('composer.too_long'))
+        }
+        // A radio message carries text only: no reply.
+        replyingTo={viaRadio ? null : replyingTo}
+        onCancelReply={() => setReplyingTo(null)}
+        editingMessage={editing}
+        onCancelEdit={() => setEditing(null)}
+        onConfirmEdit={(text, m) => {
+          setEditing(null);
+          if (!service) return;
+          void run(() =>
+            service.editMessage(m.message.epochId, m.message.syncObjId, text)
+          );
+        }}
+      />
+    </>
   ) : (
     <div
       className="bg-card border-t border-border px-4 py-4 text-center text-sm text-muted-foreground"
@@ -428,6 +498,7 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
                   : null;
               })}
               canWrite={canWrite}
+              radio={radioRecords.get(item.syncObjId) ?? null}
               memberName={memberName}
               onToggleReaction={toggleReaction}
               onReply={m => {

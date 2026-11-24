@@ -21,7 +21,8 @@
     "security": "Security",
     "feedback": "Send Feedback",
     "feedback_external": "Opens an external website: cryptpad.fr",
-    "mesh": "Offline mesh"
+    "mesh": "Offline mesh",
+    "radio": "LoRa radio (MeshCore)"
   },
   "delete_account": {
     "button": "Delete All Accounts",
@@ -363,5 +364,20 @@
     "page_android_steps": "Tap Download, then open Gossip.apk. If Android asks, allow your browser to install apps, then tap Install. If Gossip is already on this phone, you do not need this.",
     "page_download": "Download Gossip ({{size}} MB)",
     "page_ios_steps": "An iPhone cannot install Gossip here. Once you have internet, open this address in Safari, then tap Share → Add to Home Screen. The web app only works with internet."
+  },
+  "radio": {
+    "title": "LoRa radio (MeshCore)",
+    "description": "Pair a MeshCore radio to keep exchanging group messages without internet. A radio message holds up to {{bytes}} bytes of text and reaches the other members through their own radios; members who receive it pass it on over the internet.",
+    "connected_to": "Connected to {{name}} (channel slot {{slot}})",
+    "connecting": "Connecting…",
+    "not_connected": "No radio connected",
+    "connect": "Connect a radio",
+    "disconnect": "Disconnect",
+    "connect_failed": "Could not connect to the radio.",
+    "no_free_channel": "The radio has no free channel slot for Gossip.",
+    "note_visible": "Anyone in range can tell that Gossip messages are being sent, but not their content, sender or group.",
+    "note_name": "Your radio broadcasts its own name: give it one that does not identify you, and keep its location off.",
+    "note_pin": "Change the radio’s default Bluetooth PIN.",
+    "note_no_kick": "Removing a member only takes effect over the internet. Messages sent by radio with an older group key are shown with a warning."
   }
 }
