@@ -443,7 +443,7 @@ impl Core {
     }
 
     /// Receives a radio datagram. Returns `null` when it opens against no epoch held here,
-    /// otherwise `{chatId, groupId, eventId, author, olderKey, accepted}`.
+    /// otherwise `{chatId, groupId, eventId, syncObjId, author, olderKey, accepted}`.
     pub fn receive_radio(&mut self, datagram: &[u8], now: u64) -> R<String> {
         let received = self
             .node
@@ -455,6 +455,7 @@ impl Core {
                 ("chatId".into(), r.chat_id.enc()),
                 ("groupId".into(), r.group_id.enc()),
                 ("eventId".into(), r.event_id.enc()),
+                ("syncObjId".into(), r.sync_obj_id.enc()),
                 ("author".into(), r.author.enc()),
                 ("olderKey".into(), r.older_key.enc()),
                 ("accepted".into(), r.accepted.enc()),

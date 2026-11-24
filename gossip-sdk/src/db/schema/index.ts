@@ -19,6 +19,7 @@ export { activeSeekers } from './activeSeekers.js';
 export { announcementCursors } from './announcementCursors.js';
 export { discardedPeers } from './discardedPeers.js';
 export { transportCursors } from './transportCursors.js';
+export { radioMessages } from './radioMessages.js';
 export {
   groupEventRows,
   groupEdges,

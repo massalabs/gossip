@@ -196,4 +196,14 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'ALTER TABLE `discussions` ADD `renewalAnswerOwed` integer DEFAULT false NOT NULL;',
     ],
   },
+  {
+    idx: 16,
+    tag: '0016_radio_messages',
+    when: 1795550211985,
+    digest: 'ca28c8f30e4cbaa5fbbee5f09ec612ed7ec5b7d5679fed1003016de7ffb6e337',
+    statements: [
+      'CREATE TABLE `radioMessages` (\n\t`ownerUserId` text NOT NULL,\n\t`eventId` text NOT NULL,\n\t`syncObjId` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`direction` text NOT NULL,\n\t`olderKey` integer NOT NULL,\n\t`atMillis` integer NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `eventId`)\n);',
+      'CREATE INDEX `radioMessages_sync_obj_idx` ON `radioMessages` (`ownerUserId`,`syncObjId`);',
+    ],
+  },
 ];

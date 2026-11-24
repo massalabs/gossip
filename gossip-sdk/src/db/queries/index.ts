@@ -13,6 +13,7 @@ import { MessagingSessionRecoveryQueries } from './messagingSessionRecovery.js';
 import { DiscardedPeerQueries } from './discardedPeers.js';
 import { TransportCursorQueries } from './transportCursors.js';
 import { GroupQueries } from './groups.js';
+import { RadioMessageQueries } from './radioMessages.js';
 
 export type { AccountSettingsV1 } from './accountSettings.js';
 export type { ContactRow } from './contacts.js';
@@ -24,6 +25,7 @@ export type { PendingAnnouncementRow } from './pendingAnnouncements.js';
 export type { PendingEncryptedMessageRow } from './pendingEncryptedMessages.js';
 export type { PrivateMigrationStateV1 } from './privateMigration.js';
 export type { GroupBatch, GroupSnapshot, GroupOutboxRow } from './groups.js';
+export type { RadioMessageRecord } from './radioMessages.js';
 
 /**
  * Bundle of all query classes, scoped to a single DatabaseConnection.
@@ -46,6 +48,7 @@ export class Queries {
   readonly discardedPeers: DiscardedPeerQueries;
   readonly transportCursors: TransportCursorQueries;
   readonly groups: GroupQueries;
+  readonly radioMessages: RadioMessageQueries;
 
   constructor(readonly conn: DatabaseConnection) {
     this.accountSettings = new AccountSettingsQueries(conn);
@@ -62,5 +65,6 @@ export class Queries {
     this.discardedPeers = new DiscardedPeerQueries(conn);
     this.transportCursors = new TransportCursorQueries(conn);
     this.groups = new GroupQueries(conn);
+    this.radioMessages = new RadioMessageQueries(conn);
   }
 }

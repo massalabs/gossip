@@ -296,6 +296,8 @@ pub struct RadioReceived {
     pub group_id: ChatId,
     /// The rebuilt event's ID.
     pub event_id: EventId,
+    /// Its message (sync object).
+    pub sync_obj_id: SyncObjId,
     /// Its author, as identified by the radio tag.
     pub author: GossipId,
     /// The epoch is not this device's current one: written with an older group key, which
@@ -980,6 +982,7 @@ impl Node {
         let group_id = self.group_of(&chat_id);
         let older_key = self.current_epoch(&group_id).is_some_and(|c| c != chat_id);
         let event_id = opened.event.event_id();
+        let sync_obj_id = opened.event.payload().sync_obj_id();
         let event = opened.event;
         let accepted = self.run(store, now, rng, |n, cx| {
             n.receive_radio_event(cx, event, older_key)
@@ -988,6 +991,7 @@ impl Node {
             chat_id,
             group_id,
             event_id,
+            sync_obj_id,
             author: opened.author,
             older_key,
             accepted,

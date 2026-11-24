@@ -49,6 +49,8 @@ export type {
   GroupChangeKind,
   GroupMemberStatus,
   GroupPublished,
+  GroupRadioPublished,
+  GroupRadioReceived,
   LeaveChoice,
   GroupMessageRef,
   GroupEpoch,
@@ -66,4 +68,5 @@ export {
   GROUP_MAX_EMOJI_BYTES,
   GROUP_TIMER_28_DAYS_MS,
   retentionToMessageTimer,
+  RADIO_MAX_TEXT_BYTES,
 } from './services/groups.js';

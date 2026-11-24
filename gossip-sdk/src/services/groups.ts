@@ -779,6 +779,32 @@ export interface GroupPublished {
   merge: string;
 }
 
+/** Largest text a radio message carries, in UTF-8 bytes (`groups::radio::MAX_TEXT`). */
+export const RADIO_MAX_TEXT_BYTES = 131;
+
+/** A message sent by radio: the group publication and the MeshCore datagram. */
+export interface GroupRadioPublished extends GroupPublished {
+  datagram: Uint8Array;
+}
+
+/** What a datagram from the radio was. */
+export interface GroupRadioReceived {
+  epochId: GroupId;
+  groupId: GroupId;
+  eventId: GroupId;
+  /** The message, as the timeline names it. */
+  syncObjId: GroupId;
+  /** The author's user ID. */
+  author: string;
+  /**
+   * Written under an epoch this device knows to be superseded: shown with a
+   * warning and not relayed online.
+   */
+  olderKey: boolean;
+  /** Newly accepted; `false` for a replay or a refused message. */
+  accepted: boolean;
+}
+
 /** How long logout waits for the operation in progress (sending is cut short). */
 const CLOSE_WAIT_MS = 5_000;
 /** First and longest delay before opening the engine again after a failure. */
@@ -2009,6 +2035,83 @@ export class GroupService {
         )
       );
     });
+  }
+
+  /**
+   * Sends a text message by radio: the group event is stored and sent online
+   * like any message, and the returned datagram is for the MeshCore radio. The
+   * text is at most {@link RADIO_MAX_TEXT_BYTES} bytes of UTF-8.
+   */
+  sendRadioText(groupId: GroupId, text: string): Promise<GroupRadioPublished> {
+    if (new TextEncoder().encode(text).length > RADIO_MAX_TEXT_BYTES) {
+      return Promise.reject(new Error('groups:radio-text-too-long'));
+    }
+    return this.ownMessageOp(node => {
+      const epoch = this.currentEpoch(node, groupId);
+      const raw = JSON.parse(
+        node.publish_radio_text(hexToBytes(epoch), text, this.now())
+      ) as Raw;
+      return {
+        ...this.published(JSON.stringify(raw)),
+        datagram: hexToBytes(raw.datagram as string),
+        epochId: epoch,
+      };
+    }).then(async published => {
+      await this.queries.radioMessages.record(this.owner, {
+        eventId: published.eventId,
+        syncObjId: published.syncObjId,
+        chatId: published.epochId,
+        direction: 'sent',
+        olderKey: false,
+        atMillis: this.now(),
+      });
+      return {
+        eventId: published.eventId,
+        syncObjId: published.syncObjId,
+        merge: published.merge,
+        datagram: published.datagram,
+      };
+    });
+  }
+
+  /**
+   * A datagram received from the MeshCore radio. Resolves `null` when it is
+   * for no group held here; otherwise the message is stored, and relayed
+   * online when it belongs to the group's current epoch.
+   */
+  async receiveRadio(datagram: Uint8Array): Promise<GroupRadioReceived | null> {
+    const raw = await this.run(node => {
+      this.takeChanges(node);
+      const json = node.receive_radio(datagram, this.now());
+      this.lookAtMessages(node);
+      return JSON.parse(json) as Raw | null;
+    });
+    if (!raw) return null;
+    const received: GroupRadioReceived = {
+      epochId: raw.chatId as string,
+      groupId: raw.groupId as string,
+      eventId: raw.eventId as string,
+      syncObjId: raw.syncObjId as string,
+      author: encodeUserId(hexToBytes(raw.author as string)),
+      olderKey: raw.olderKey === true,
+      accepted: raw.accepted === true,
+    };
+    if (received.accepted) {
+      await this.queries.radioMessages.record(this.owner, {
+        eventId: received.eventId,
+        syncObjId: received.syncObjId,
+        chatId: received.epochId,
+        direction: 'received',
+        olderKey: received.olderKey,
+        atMillis: this.now(),
+      });
+    }
+    return received;
+  }
+
+  /** Which of these messages (sync object IDs) travelled by radio, and with which key. */
+  radioRecords(syncObjIds: GroupId[]) {
+    return this.queries.radioMessages.bySyncObjIds(this.owner, syncObjIds);
   }
 
   /**

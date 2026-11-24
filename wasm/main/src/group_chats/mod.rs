@@ -517,8 +517,8 @@ impl GroupsNode {
     }
 
     /// Receives a datagram from the MeshCore radio. Returns `null` in JSON when it is not
-    /// for any epoch held here, otherwise `{chatId, groupId, eventId, author, olderKey,
-    /// accepted}`.
+    /// for any epoch held here, otherwise `{chatId, groupId, eventId, syncObjId, author,
+    /// olderKey, accepted}`.
     pub fn receive_radio(&mut self, datagram: &[u8], now: f64) -> Result<String, JsValue> {
         self.core.receive_radio(datagram, ms(now)?).map_err(js)
     }
