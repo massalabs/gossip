@@ -9,6 +9,8 @@ import { useSdkStore } from '../../../src/stores/sdkStore';
 import { useGroupStore } from '../../../src/stores/groupStore';
 import { useAccountStore } from '../../../src/stores/accountStore';
 import { useDiscussionStore } from '../../../src/stores/discussionStore';
+import { useOnlineStoreBase } from '../../../src/stores/useOnlineStore';
+import { useRadioStore } from '../../../src/services/meshcoreRadio';
 import { flush, makeFakeGroups, summary } from '../../helpers/fakeGroups';
 import { byText, click, renderAt } from './render';
 import enGroups from '../../../src/i18n/locales/en/groups.json';
@@ -375,6 +377,33 @@ describe('group pages', () => {
     });
     // Back to automatic for the next message.
     expect(choice().dataset.priority).toBe('auto');
+  });
+
+  it('sends by radio by itself with a radio and no internet, unless turned off', async () => {
+    useOnlineStoreBase.setState({ isOnline: false });
+    useRadioStore.setState({ status: 'connected' });
+    try {
+      const r = await openGroup('member');
+      unmount = r.unmount;
+      const toggle = () =>
+        r.container.querySelector(
+          '[data-testid="radio-toggle"]'
+        ) as HTMLElement;
+      expect(toggle().getAttribute('aria-pressed')).toBe('true');
+      await act(async () => toggle().click());
+      expect(toggle().getAttribute('aria-pressed')).toBe('false');
+      // Turned off by hand, it stays off while nothing changes.
+      await act(flush);
+      expect(toggle().getAttribute('aria-pressed')).toBe('false');
+      // Back online, then offline again: on again.
+      await act(async () => useOnlineStoreBase.setState({ isOnline: true }));
+      expect(toggle().getAttribute('aria-pressed')).toBe('false');
+      await act(async () => useOnlineStoreBase.setState({ isOnline: false }));
+      expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    } finally {
+      useOnlineStoreBase.setState({ isOnline: true });
+      useRadioStore.setState({ status: 'disconnected' });
+    }
   });
 
   /** Types `text` into `textarea` as a paste would. */

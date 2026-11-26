@@ -37,6 +37,7 @@ import AutoDeleteChip from '../components/ui/AutoDeleteChip';
 import { messageTimerLabel } from '../constants/messageTimer';
 import { useGroupMemberName } from '../hooks/useGroupMemberName';
 import { useAccountStore } from '../stores/accountStore';
+import { useOnlineStore } from '../stores/useOnlineStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { groupDisplayName } from '../utils/groupName';
 import { nearByteLimit, utf8Bytes } from '../utils/textBytes';
@@ -246,7 +247,12 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
 
   // Sending by radio, when a MeshCore radio is connected (Settings → Radio).
   const radioConnected = useRadioStore(s => s.status === 'connected');
-  const [byRadio, setByRadio] = useState(false);
+  // On by itself while there is a radio but no internet; the user may still
+  // turn it off, until either changes.
+  const isOnline = useOnlineStore(s => s.isOnline);
+  const radioOnly = radioConnected && !isOnline;
+  const [byRadio, setByRadio] = useState(radioOnly);
+  useEffect(() => setByRadio(radioOnly), [radioOnly]);
   const viaRadio = byRadio && radioConnected;
   // Whether members with a radio relay the next message sent online for
   // members who only have radio (back to `auto` after each message).
