@@ -268,6 +268,12 @@
     "toggle_on": "Sending by radio ({{bytes}} bytes)",
     "toggle_off": "Send by radio",
     "send_failed": "Could not send by radio.",
-    "too_long": "Too long for a radio message."
+    "too_long": "Too long for a radio message.",
+    "relayed": "relayed by radio · temporary",
+    "relayed_cut": "relayed by radio, shortened · temporary",
+    "priority_auto": "Radio: auto",
+    "priority_priority": "Radio: priority",
+    "priority_none": "Radio: off",
+    "priority_hint": "Whether members with a radio relay this message to members who only have radio"
   }
 }

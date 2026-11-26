@@ -110,8 +110,15 @@ vi.mock('@capacitor-community/bluetooth-le', () => ({
   },
 }));
 
+vi.mock('../../src/stores/groupStore', () => ({
+  useGroupStore: { getState: () => ({ groups: [] }) },
+}));
+
 vi.mock('../../src/stores/sdkStore', () => ({
   getSdk: () => ({
+    userId: 'gossip1me',
+    on: () => undefined,
+    off: () => undefined,
     groups: {
       receiveRadio: async (d: Uint8Array) => {
         sdk.received.push(d);

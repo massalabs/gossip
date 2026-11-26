@@ -3,10 +3,17 @@ import { BleClient } from '@capacitor-community/bluetooth-le';
 import { sha256 } from '@noble/hashes/sha256';
 import Connection from '@liamcottle/meshcore.js/src/connection/connection.js';
 import Constants from '@liamcottle/meshcore.js/src/constants.js';
-import type { GroupRadioReceived } from '@massalabs/gossip-sdk';
+import { SdkEventType } from '@massalabs/gossip-sdk';
+import type {
+  GroupChange,
+  GroupRadioReceived,
+  GroupRadioRelay,
+} from '@massalabs/gossip-sdk';
 import { getSdk } from '../stores/sdkStore';
 import { useAccountStore } from '../stores/accountStore';
+import { useGroupStore } from '../stores/groupStore';
 import { logger } from '../utils/logger.ts';
+import { RadioForwarder } from './radioForwarder';
 
 /**
  * Group messages over a MeshCore companion radio, paired over Bluetooth.
@@ -24,8 +31,9 @@ export const GOSSIP_CHANNEL_NAME = 'gossip';
 export const GOSSIP_CHANNEL_SECRET = sha256(
   new TextEncoder().encode('#gossip-radio-1')
 ).slice(0, 16);
-/** `path_len` for a flood send. */
+/** `path_len` for a flood send; 0 is zero-hop (no repeater carries it). */
 const FLOOD = 0xff;
+const ZERO_HOP = 0;
 /** MeshCore boards have 1, 8 or 40 channel slots. */
 const MAX_SLOTS = 64;
 
@@ -80,6 +88,9 @@ export const useRadioStore = create<RadioState>(() => ({
 }));
 
 let connection: CapacitorBleConnection | null = null;
+/** Relays online messages for members who only have radio, while connected. */
+let forwarder: RadioForwarder | null = null;
+let stopForwarding: (() => void) | null = null;
 /** Datagrams are handed to the engine one at a time, in arrival order. */
 let incoming: Promise<unknown> = Promise.resolve();
 
@@ -115,17 +126,85 @@ async function ensureGossipChannel(c: Connection): Promise<number> {
   return empty;
 }
 
+/** Hops a datagram took: `0xFF` is a direct (zero-hop) send. */
+export function hopsOf(pathLen: number): number {
+  return pathLen === 0xff ? 0 : pathLen & 63;
+}
+
 function onDatagram(raw: unknown): void {
-  const d = raw as { channelIdx: number; dataType: number; data: Uint8Array };
+  const d = raw as {
+    channelIdx: number;
+    dataType: number;
+    data: Uint8Array;
+    snr?: number;
+    pathLen?: number;
+  };
   const { channelIdx } = useRadioStore.getState();
   if (d.channelIdx !== channelIdx || d.dataType !== GOSSIP_DATA_TYPE) return;
   const data = new Uint8Array(d.data);
+  const snr = d.snr ?? 0;
+  const hops = hopsOf(d.pathLen ?? 0);
   incoming = incoming
     .then(() => getSdk().groups.receiveRadio(data))
-    .then((r: GroupRadioReceived | null) => {
-      if (r?.accepted) logger.info('[radio] group message received');
+    .then((r: GroupRadioReceived | GroupRadioRelay | null) => {
+      if (!r) return;
+      forwarder?.heardOnRadio(r, snr, hops);
+      if (r.kind === 'message' && r.accepted) {
+        logger.info('[radio] group message received');
+      }
     })
     .catch(error => logger.error('[radio] receive failed:', error));
+}
+
+/**
+ * This account sent a message online: the engine reports no change for its
+ * own messages, so the relay rules are applied here (the author's device
+ * relays first).
+ */
+export function radioMessageSent(groupId: string): void {
+  void forwarder
+    ?.groupChanged(groupId)
+    .catch(error => logger.error('[radio] relay failed:', error));
+}
+
+/** Starts relaying online messages of the groups for radio-only members. */
+function startForwarding(c: Connection, channelIdx: number): void {
+  const sdk = getSdk();
+  const f = new RadioForwarder({
+    groups: sdk.groups,
+    me: sdk.userId,
+    memberCount: groupId =>
+      useGroupStore.getState().groups.find(g => g.summary.groupId === groupId)
+        ?.summary.members.length ?? Number.MAX_SAFE_INTEGER,
+    send: async (datagram, zeroHop) => {
+      await c.sendChannelData(
+        channelIdx,
+        zeroHop ? ZERO_HOP : FLOOD,
+        new Uint8Array(0),
+        GOSSIP_DATA_TYPE,
+        datagram
+      );
+    },
+  });
+  const onChanged = ({ changes }: { changes: GroupChange[] }) => {
+    for (const change of changes) {
+      if (change.kind === 'Messages') {
+        void f
+          .groupChanged(change.groupId)
+          .catch(error => logger.error('[radio] relay failed:', error));
+      }
+    }
+  };
+  sdk.on(SdkEventType.GROUPS_CHANGED, onChanged);
+  forwarder = f;
+  stopForwarding = () => {
+    f.stop();
+    try {
+      sdk.off(SdkEventType.GROUPS_CHANGED, onChanged);
+    } catch {
+      // The SDK may already be gone.
+    }
+  };
 }
 
 function drain(): void {
@@ -155,6 +234,9 @@ export async function connectRadio(): Promise<void> {
     c.on('disconnected', () => {
       if (connection === c) {
         connection = null;
+        stopForwarding?.();
+        stopForwarding = null;
+        forwarder = null;
         useRadioStore.setState({
           status: 'disconnected',
           deviceName: null,
@@ -167,6 +249,7 @@ export async function connectRadio(): Promise<void> {
     const channelIdx = await ensureGossipChannel(c);
     c.on(Constants.ResponseCodes.ChannelDataRecv, onDatagram);
     c.on(Constants.PushCodes.MsgWaiting, drain);
+    startForwarding(c, channelIdx);
     useRadioStore.setState({
       status: 'connected',
       deviceName: device.name ?? device.deviceId,
@@ -186,6 +269,9 @@ export async function connectRadio(): Promise<void> {
 export async function disconnectRadio(): Promise<void> {
   const c = connection;
   connection = null;
+  stopForwarding?.();
+  stopForwarding = null;
+  forwarder = null;
   useRadioStore.setState({
     status: 'disconnected',
     deviceName: null,

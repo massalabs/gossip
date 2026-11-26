@@ -268,6 +268,12 @@
     "toggle_on": "正在通过无线电发送（{{bytes}} 字节）",
     "toggle_off": "通过无线电发送",
     "send_failed": "无法通过无线电发送。",
-    "too_long": "对无线电消息来说太长。"
+    "too_long": "对无线电消息来说太长。",
+    "relayed": "经无线电转发 · 临时",
+    "relayed_cut": "经无线电转发，已截短 · 临时",
+    "priority_auto": "无线电：自动",
+    "priority_priority": "无线电：优先",
+    "priority_none": "无线电：关闭",
+    "priority_hint": "有无线电的成员是否将此消息转发给只有无线电的成员"
   }
 }

@@ -337,6 +337,46 @@ describe('group pages', () => {
     ).toBe('a very long text');
   });
 
+  it('lets the author choose, per message, whether it is relayed by radio', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    const choice = () =>
+      r.container.querySelector(
+        '[data-testid="radio-priority"]'
+      ) as HTMLElement;
+    expect(choice().dataset.priority).toBe('auto');
+    await act(async () => choice().click());
+    expect(choice().dataset.priority).toBe('priority');
+    await act(async () => choice().click());
+    await act(async () => choice().click());
+    expect(choice().dataset.priority).toBe('auto');
+    await act(async () => choice().click());
+
+    const textarea = r.container.querySelector(
+      'textarea'
+    ) as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value'
+      )!.set!;
+      setter.call(textarea, 'urgent');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+    });
+    await act(flush);
+    expect(fake.service.sendMessage).toHaveBeenCalledWith('g1', 'urgent', {
+      replyTo: undefined,
+      metadata: { radio: Uint8Array.of(1) },
+    });
+    // Back to automatic for the next message.
+    expect(choice().dataset.priority).toBe('auto');
+  });
+
   /** Types `text` into `textarea` as a paste would. */
   async function typeInto(textarea: HTMLTextAreaElement, text: string) {
     await act(async () => {

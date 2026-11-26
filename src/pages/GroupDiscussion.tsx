@@ -41,8 +41,20 @@ import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { groupDisplayName } from '../utils/groupName';
 import { nearByteLimit, utf8Bytes } from '../utils/textBytes';
 import { ROUTES } from '../constants/routes';
-import { sendRadioText, useRadioStore } from '../services/meshcoreRadio';
-import { RADIO_MAX_TEXT_BYTES } from '@massalabs/gossip-sdk';
+import {
+  radioMessageSent,
+  sendRadioText,
+  useRadioStore,
+} from '../services/meshcoreRadio';
+import {
+  RADIO_MAX_TEXT_BYTES,
+  radioPriorityMetadata,
+} from '@massalabs/gossip-sdk';
+import type { RadioPriority, RadioRelayRecord } from '@massalabs/gossip-sdk';
+import RadioRelayItem from '../components/groups/RadioRelayItem';
+
+/** The order the per-message radio choice cycles through. */
+const RADIO_PRIORITIES: RadioPriority[] = ['auto', 'priority', 'none'];
 
 /** What the input shows of a group message being replied to or edited. */
 interface InputTarget {
@@ -184,31 +196,61 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     if (el) el.scrollTop = el.scrollHeight;
   }, [timeline.length]);
 
-  // Which messages travelled by radio, for their marker and warning.
+  // Which messages travelled by radio, for their marker and warning, and the
+  // temporary copies heard on the radio of messages not arrived yet.
   const [radioRecords, setRadioRecords] = useState<
     Map<string, { olderKey: boolean }>
   >(new Map());
+  const [relays, setRelays] = useState<RadioRelayRecord[]>([]);
   useEffect(() => {
     let alive = true;
     const ids = timeline.flatMap(i =>
       i.kind === 'message' ? [i.syncObjId] : []
     );
     // Optional: a service without radio support (an older engine) has no records.
-    getGroupService()
+    const service = getGroupService();
+    service
       ?.radioRecords?.(ids)
       .then(records => {
         if (alive) setRadioRecords(records);
       })
       .catch(() => {});
+    service
+      ?.radioRelays?.(groupId, ids)
+      .then(found => {
+        if (alive) setRelays(found);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [timeline]);
+  }, [timeline, groupId]);
+
+  // The timeline with the temporary copies in their place by time.
+  const shown = useMemo(() => {
+    type Row =
+      | { kind: 'item'; item: GroupTimelineItem; i: number }
+      | { kind: 'relay'; relay: RadioRelayRecord };
+    const rows: Row[] = [];
+    let r = 0;
+    timeline.forEach((item, i) => {
+      const at = Number(item.kind === 'line' ? item.at : item.createdAt);
+      while (r < relays.length && relays[r].createdAt < at) {
+        rows.push({ kind: 'relay', relay: relays[r++] });
+      }
+      rows.push({ kind: 'item', item, i });
+    });
+    while (r < relays.length) rows.push({ kind: 'relay', relay: relays[r++] });
+    return rows;
+  }, [timeline, relays]);
 
   // Sending by radio, when a MeshCore radio is connected (Settings → Radio).
   const radioConnected = useRadioStore(s => s.status === 'connected');
   const [byRadio, setByRadio] = useState(false);
   const viaRadio = byRadio && radioConnected;
+  // Whether members with a radio relay the next message sent online for
+  // members who only have radio (back to `auto` after each message).
+  const [radioPriority, setRadioPriority] = useState<RadioPriority>('auto');
 
   const byKey = useMemo(() => {
     const map = new Map<string, GroupMessage>();
@@ -296,16 +338,22 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     }
     const reply = replyingTo?.message;
     setReplyingTo(null);
+    const priority = radioPriority;
+    setRadioPriority('auto');
     void service
       .sendMessage(group.groupId, text, {
         replyTo: reply
           ? [{ epochId: reply.epochId, syncObjId: reply.syncObjId }]
           : undefined,
+        // An ordinary message carries nothing about the radio.
+        metadata:
+          priority === 'auto' ? undefined : radioPriorityMetadata(priority),
       })
       .then(
         () => {
           setDraft(null);
           refresh();
+          radioMessageSent(group.groupId);
         },
         (e: unknown) => {
           // The composer was cleared on send: give the text back.
@@ -361,28 +409,53 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     </HeaderBar>
   );
 
-  const radioToggle = radioConnected ? (
-    <div className="px-4 pt-2 flex justify-end">
-      <button
-        type="button"
-        onClick={() => {
-          setByRadio(on => !on);
-          setReplyingTo(null);
-        }}
-        aria-pressed={viaRadio}
-        data-testid="radio-toggle"
-        className={`text-xs font-medium rounded-full px-3 py-1 border ${
-          viaRadio
-            ? 'bg-accent text-primary-foreground border-transparent'
-            : 'border-border text-muted-foreground'
-        }`}
-      >
-        {viaRadio
-          ? t('radio.toggle_on', { bytes: RADIO_MAX_TEXT_BYTES })
-          : t('radio.toggle_off')}
-      </button>
+  const radioToggle = (
+    <div className="px-4 pt-2 flex justify-end gap-2">
+      {!viaRadio && (
+        <button
+          type="button"
+          onClick={() =>
+            setRadioPriority(
+              p =>
+                RADIO_PRIORITIES[
+                  (RADIO_PRIORITIES.indexOf(p) + 1) % RADIO_PRIORITIES.length
+                ]
+            )
+          }
+          data-testid="radio-priority"
+          data-priority={radioPriority}
+          title={t('radio.priority_hint')}
+          className={`text-xs font-medium rounded-full px-3 py-1 border ${
+            radioPriority === 'auto'
+              ? 'border-border text-muted-foreground'
+              : 'bg-accent text-primary-foreground border-transparent'
+          }`}
+        >
+          {t(`radio.priority_${radioPriority}`)}
+        </button>
+      )}
+      {radioConnected && (
+        <button
+          type="button"
+          onClick={() => {
+            setByRadio(on => !on);
+            setReplyingTo(null);
+          }}
+          aria-pressed={viaRadio}
+          data-testid="radio-toggle"
+          className={`text-xs font-medium rounded-full px-3 py-1 border ${
+            viaRadio
+              ? 'bg-accent text-primary-foreground border-transparent'
+              : 'border-border text-muted-foreground'
+          }`}
+        >
+          {viaRadio
+            ? t('radio.toggle_on', { bytes: RADIO_MAX_TEXT_BYTES })
+            : t('radio.toggle_off')}
+        </button>
+      )}
     </div>
-  ) : null;
+  );
 
   const composer = canWrite ? (
     <>
@@ -461,8 +534,19 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
               {t('timeline.empty')}
             </p>
           )}
-        {timeline.map((item, i) =>
-          item.kind === 'line' ? (
+        {shown.map(row => {
+          if (row.kind === 'relay') {
+            return (
+              <RadioRelayItem
+                key={`relay-${row.relay.syncRef}`}
+                relay={row.relay}
+                isOutgoing={row.relay.author === me}
+                authorName={memberName(row.relay.author)}
+              />
+            );
+          }
+          const { item, i } = row;
+          return item.kind === 'line' ? (
             <GroupTimelineLine
               key={`line-${i}`}
               line={item.line}
@@ -536,8 +620,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
                 )
               }
             />
-          )
-        )}
+          );
+        })}
       </div>
       <BaseModal
         isOpen={
