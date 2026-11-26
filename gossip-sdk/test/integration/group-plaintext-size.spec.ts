@@ -62,6 +62,7 @@ async function openPeer(net: MockMessageProtocol): Promise<GossipSdk> {
 /** The group service's private parts this test drives. */
 interface Internals {
   node: unknown;
+  sending: Promise<void> | null;
   sendOne: (
     node: unknown,
     o: { handle: number; to: Uint8Array; plaintext: Uint8Array }
@@ -132,6 +133,8 @@ describe('Group plaintext size on the wire', { timeout: 300_000 }, () => {
         plaintext,
       });
       expect(ok).toBe(true);
+      // Stored, it is posted by the sender, off the engine's chain.
+      while (groups.sending) await groups.sending;
     } finally {
       groups.node = real;
     }

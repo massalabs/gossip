@@ -124,6 +124,46 @@ describe('Group messages by radio', { timeout: 120_000 }, () => {
     expect((await carol.groups.radioRecords([sent.syncObjId])).size).toBe(0);
   });
 
+  it('handles radio messages while the network hangs', async () => {
+    const groupId = await trip();
+
+    // The server stops answering: every post waits until released.
+    let release!: () => void;
+    const back = new Promise<void>(r => (release = r));
+    const post = net.sendMessage.bind(net);
+    net.sendMessage = async m => {
+      await back;
+      return post(m);
+    };
+    const soon = <T>(p: Promise<T>) =>
+      Promise.race([
+        p,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('held back by the network')), 3000)
+        ),
+      ]);
+
+    // Both have sends waiting on the network.
+    await soon(bob.groups.sendMessage(groupId, 'online from bob'));
+    await soon(alice.groups.sendMessage(groupId, 'online from alice'));
+    await new Promise(r => setTimeout(r, 50));
+
+    const sent = await soon(alice.groups.sendRadioText(groupId, 'by radio'));
+    expect((await soon(bob.groups.receiveRadio(sent.datagram)))?.accepted).toBe(
+      true
+    );
+    expect(await texts(bob.groups, groupId)).toContain('by radio');
+
+    // Once the server answers again, everything gets through.
+    release();
+    await deliver();
+    for (const p of peers) {
+      expect((await texts(p.groups, groupId)).sort()).toEqual(
+        ['by radio', 'online from alice', 'online from bob'].sort()
+      );
+    }
+  });
+
   it('refuses a radio text over its limit, and ignores datagrams of other groups', async () => {
     const groupId = await trip();
     await expect(

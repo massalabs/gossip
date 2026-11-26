@@ -832,6 +832,21 @@ export class GroupService {
   /** Failed sends of each outbox row since this service opened. */
   private outboxFailures = new Map<number, number>();
   /**
+   * The pass posting the outbox, when one runs. Posting is kept off the
+   * chain: a slow or absent network must not hold back what only the engine
+   * and storage do (a radio message, a local action).
+   */
+  private sending: Promise<void> | null = null;
+  /** Something became due while a pass was running: run another. */
+  private sendAgain = false;
+  /** The outbox read of the last `schedule`, which `close` waits for. */
+  private scheduling: Promise<void> = Promise.resolve();
+  /**
+   * The outbox rows stored here whose hand-off went to the engine still
+   * open: their publication is confirmed to it (§10.3). Memory only.
+   */
+  private handOffs = new Map<number, { node: GroupsNode; handle: number }>();
+  /**
    * The end of the chain when it is a send that has not started yet: a kick
    * then adds nothing, since that send runs after everything queued so far.
    */
@@ -1104,6 +1119,9 @@ export class GroupService {
     // at logout, and a ciphertext left behind would block its chain.
     this.chain = this.chain
       .then(() => this.storeEncrypted())
+      .then(() => this.sending)
+      .then(() => this.sendOutbox(true))
+      .then(() => this.scheduling)
       .catch(() => undefined);
     let waited: ReturnType<typeof setTimeout> | null = null;
     await Promise.race([
@@ -1310,8 +1328,7 @@ export class GroupService {
       if (sent === 0) break;
     }
     if (!this.alive(node)) return;
-    await this.retryOutbox();
-    if (!this.alive(node)) return;
+    this.wakeSender();
     this.takeChanges(node);
     this.takeExpiries(node);
     await this.persist();
@@ -1504,38 +1521,61 @@ export class GroupService {
         return;
       }
       this.encrypted.shift();
-      try {
-        await this.messageProtocol.sendMessage({
-          seeker: e.seeker,
-          ciphertext: e.ciphertext,
-        });
-      } catch (error) {
-        if (id !== null) {
-          await this.outboxFailed(id, encodeUserId(e.to), error).catch(
-            () => undefined
-          );
-        }
-        continue;
-      }
-      if (id !== null) {
-        this.outboxFailures.delete(id);
-        await this.queries.groups.deleteOutbox(id).catch(() => undefined);
-      }
-      if (handOff && this.alive(e.node)) {
-        e.node.published(e.handle!, this.now());
-        await this.persist();
+      if (handOff && id !== null) {
+        this.handOffs.set(id, { node: e.node, handle: e.handle! });
       }
     }
+    // Stored, it is due now: the sender posts it.
+    this.wakeSender();
   }
 
-  /** Sends again, as stored, the ciphertexts that failed. */
-  private async retryOutbox(): Promise<void> {
+  /** Starts a pass posting the outbox, or asks the running one for another. */
+  private wakeSender(): void {
+    if (this.closed) return;
+    if (this.sending) {
+      this.sendAgain = true;
+      return;
+    }
+    this.sending = (async () => {
+      do {
+        this.sendAgain = false;
+        await this.sendOutbox(false);
+      } while (this.sendAgain && !this.closed);
+    })()
+      .catch(() => logger.error('group send failed'))
+      .finally(() => {
+        this.sending = null;
+        this.schedule();
+      });
+  }
+
+  /** Tells the engine, on the chain, that the backend published a hand-off. */
+  private confirmPublished(row: number): void {
+    const h = this.handOffs.get(row);
+    if (!h) return;
+    this.handOffs.delete(row);
+    this.chain = this.chain
+      .then(async () => {
+        if (!this.alive(h.node)) return;
+        h.node.published(h.handle, this.now());
+        await this.persist();
+      })
+      .catch(error => {
+        if (isWasmTrap(error)) this.recover(error);
+      });
+  }
+
+  /**
+   * Posts, as stored, the ciphertexts due: new ones and those that failed.
+   * Runs off the chain (`wakeSender`), but for the last pass of `close`.
+   */
+  private async sendOutbox(closing: boolean): Promise<void> {
     const due = await this.queries.groups.dueOutbox(
       this.owner,
       new Date(this.now())
     );
     for (const row of due) {
-      if (this.closed) return;
+      if (this.closed && !closing) return;
       try {
         await this.messageProtocol.sendMessage({
           seeker: row.seeker,
@@ -1549,6 +1589,7 @@ export class GroupService {
       }
       this.outboxFailures.delete(row.id);
       await this.queries.groups.deleteOutbox(row.id).catch(() => undefined);
+      this.confirmPublished(row.id);
     }
   }
 
@@ -1570,6 +1611,7 @@ export class GroupService {
   ): Promise<void> {
     if (isSeekerConflict(error)) {
       this.outboxFailures.delete(id);
+      this.handOffs.delete(id);
       await this.queries.groups.deleteOutbox(id);
       // Not awaited: the renewal posts an announcement and tells this
       // service, which must not wait for its own queue.
@@ -1578,6 +1620,7 @@ export class GroupService {
     }
     if (isFinalSendError(error)) {
       this.outboxFailures.delete(id);
+      this.handOffs.delete(id);
       await this.queries.groups.deleteOutbox(id);
       return;
     }
@@ -1609,7 +1652,7 @@ export class GroupService {
     } catch (error) {
       if (isWasmTrap(error)) this.recover(error);
     }
-    void this.queries.groups
+    this.scheduling = this.queries.groups
       .nextOutboxRetry(this.owner)
       .catch(() => null)
       .then(retry => {
@@ -1651,6 +1694,10 @@ export class GroupService {
   async settle(): Promise<void> {
     this.kick();
     await this.chain;
+    while (this.sending) {
+      await this.sending;
+      await this.chain;
+    }
   }
 
   /** Adds the keys of a contact (when a contact or session is added). */

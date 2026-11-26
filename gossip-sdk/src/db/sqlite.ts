@@ -1712,6 +1712,9 @@ export class DatabaseConnection {
     }
     this.state.closeActive = true;
     try {
+      // The queries already queued finish first: closing under one fails
+      // ("unfinalized statements") and loses what it was writing.
+      await Promise.resolve(this.state.dbLock).catch(() => undefined);
       if (this.state.useNativePlugin && this.state.nativePlugin) {
         await this.state.nativePlugin.close();
       } else if (this.state.secureProxy && this.state.worker) {
