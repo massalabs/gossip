@@ -771,6 +771,7 @@ class GossipSdk {
       try {
         await groups.open();
         this._groups = groups;
+        this._refresh?.setInternetBackHandler(() => groups.internetBack());
         this._message.setGroupPlaintextHandler((from, plaintext) =>
           groups.handlePlaintext(from, plaintext)
         );

@@ -1,0 +1,1 @@
+ALTER TABLE `groupOutbox` ADD `meshTook` integer DEFAULT false NOT NULL;

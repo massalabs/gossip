@@ -188,6 +188,22 @@ export class GroupQueries {
       .where(eq(schema.groupOutbox.id, id));
   }
 
+  /** Only a mesh took it: from now on it is posted to a server alone. */
+  async markOutboxMeshTook(id: number, whenToSend: Date): Promise<void> {
+    await this.conn.db
+      .update(schema.groupOutbox)
+      .set({ meshTook: true, whenToSend })
+      .where(eq(schema.groupOutbox.id, id));
+  }
+
+  /** Makes every stored ciphertext due at `now` (the internet is back). */
+  async rescheduleAllOutbox(ownerUserId: string, now: Date): Promise<void> {
+    await this.conn.db
+      .update(schema.groupOutbox)
+      .set({ whenToSend: now })
+      .where(eq(schema.groupOutbox.ownerUserId, ownerUserId));
+  }
+
   async rescheduleOutbox(id: number, whenToSend: Date): Promise<void> {
     await this.conn.db
       .update(schema.groupOutbox)

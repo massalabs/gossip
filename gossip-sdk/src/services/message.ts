@@ -679,19 +679,6 @@ export class MessageService {
     return { acknowledgedSeekers };
   }
 
-  /**
-   * Metadata marking `msg` as sent over the mesh only (no internet node took
-   * it), for the UI to show it waits for a bridge; undefined otherwise.
-   */
-  private meshOnlyMetadata(
-    msg: Message,
-    seeker: Uint8Array
-  ): Record<string, unknown> | undefined {
-    const kinds = this.messageProtocol.takeAcceptedBy?.(seeker);
-    if (!kinds || kinds.includes('internet')) return undefined;
-    return { ...(msg.metadata ?? {}), via: 'mesh' };
-  }
-
   async findMessageByMsgId(
     messageId: Uint8Array,
     ownerUserId: string,
@@ -1119,7 +1106,6 @@ export class MessageService {
           //     mostly in tap-to-sent perception, not raw
           //     throughput on rapid bursts.
           sentCount++;
-          const freshMeshMetadata = this.meshOnlyMetadata(msg, seeker);
           log.debug('message sent (skipped READY)', {
             messageId: msg.id,
             status: MessageStatus.SENT,
@@ -1133,7 +1119,6 @@ export class MessageService {
               this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
                 ...msg,
                 status: MessageStatus.SENT,
-                ...(freshMeshMetadata && { metadata: freshMeshMetadata }),
               });
             } catch (error) {
               log.error('failed to emit message sent event', {
@@ -1152,13 +1137,9 @@ export class MessageService {
             .updateById(msgId!, {
               status: MessageStatus.SENT,
               seeker,
-              // only a mesh took it: kept for a server (repostMeshOnly)
-              encryptedMessage: freshMeshMetadata ? encryptedMessage : null,
+              encryptedMessage: null,
               serializedContent: null,
               whenToSend: null,
-              ...(freshMeshMetadata && {
-                metadata: serializeMetadata(freshMeshMetadata),
-              }),
             })
             .catch(error => {
               log.error(
@@ -1217,20 +1198,15 @@ export class MessageService {
             const latestRow = await this.queries.messages.getById(msg.id);
 
             let sent = false;
-            const queuedMeshMetadata = this.meshOnlyMetadata(msg, seeker);
             if (
               latestRow && // ensure the discussion has not been deleted
               latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
             ) {
               await this.queries.messages.updateById(msg.id, {
                 status: MessageStatus.SENT,
-                // only a mesh took it: kept for a server (repostMeshOnly)
-                encryptedMessage: queuedMeshMetadata ? encryptedMessage : null,
+                encryptedMessage: null,
                 serializedContent: null,
                 whenToSend: null,
-                ...(queuedMeshMetadata && {
-                  metadata: serializeMetadata(queuedMeshMetadata),
-                }),
               });
               sent = true;
             }
@@ -1253,7 +1229,6 @@ export class MessageService {
                   this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
                     ...msg,
                     status: MessageStatus.SENT,
-                    ...(queuedMeshMetadata && { metadata: queuedMeshMetadata }),
                   });
                 } catch (error) {
                   log.error('failed to emit message sent event', {
@@ -1294,74 +1269,6 @@ export class MessageService {
     }
   }
 
-  /**
-   * Posts to a server the sent messages that only a mesh took, so that they
-   * reach the peer even when no bridge carries them; a mesh node uploads
-   * nothing unless it bridges. Their ciphertext stays in the account's own
-   * storage until then (and goes once the peer acknowledges them). Stops at
-   * the first failure: no server answers. Returns how many were posted.
-   */
-  async repostMeshOnly(): Promise<number> {
-    const log = logger.forMethod('repostMeshOnly');
-    const ownerUserId = this.session.userIdEncoded;
-    if (!ownerUserId || this.getConnectivity() === 'offline') return 0;
-    const rows = await this.queries.messages.getMeshOnlySent(ownerUserId);
-    let posted = 0;
-    for (const row of rows) {
-      if (!row.seeker || !row.encryptedMessage) continue;
-      // a 4xx but 429 is final: the server never takes it. A 409 means it
-      // holds another value at the seeker (an identical one is accepted):
-      // the session is behind what was already published, and is renewed.
-      let onServer = true;
-      try {
-        await this.messageProtocol.sendMessage(
-          { seeker: row.seeker, ciphertext: row.encryptedMessage },
-          { internetOnly: true }
-        );
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : '';
-        if (!/HTTP 4(?!29)\d\d/.test(reason)) {
-          log.info('no server took a mesh-only message; retried later', {
-            messageId: row.id,
-            error,
-          });
-          break;
-        }
-        onServer = false;
-        // Renewed: the message waits for the new session and is sent again.
-        if (
-          isSeekerConflict(error) &&
-          (await this.seekerConflicts?.handle(row.contactUserId))
-        ) {
-          continue;
-        }
-      }
-      const latest = await this.queries.messages.getById(row.id);
-      if (!latest || latest.status !== MessageStatus.SENT) continue;
-      const metadata = deserializeMetadata(latest.metadata) ?? {};
-      if (onServer) delete metadata.via;
-      await this.queries.messages.updateById(row.id, {
-        encryptedMessage: null,
-        metadata: serializeMetadata(
-          Object.keys(metadata).length > 0 ? metadata : undefined
-        ),
-      });
-      if (onServer) posted++;
-      const updated = await this.queries.messages.getById(row.id);
-      if (updated) {
-        this.eventEmitter.emit(SdkEventType.MESSAGE_UPDATED, {
-          messages: [rowToMessage(updated)],
-        });
-      }
-    }
-    return posted;
-  }
-
-  /**
-   * Count the outgoing messages for a contact that will still be sent
-   * (WAITING_SESSION/READY): a row of the earlier one-to-one format never
-   * encrypted stays unsent in its archive (§2.1) and does not count.
-   */
   async getPendingSendCount(contactUserId: string): Promise<number> {
     const ownerUserId = this.session.userIdEncoded;
     const rows = await this.queries.messages.getSendQueue(

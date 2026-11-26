@@ -56,6 +56,13 @@ export class RefreshService {
   private sessionStatusMap: Map<string, SessionStatus> = new Map();
   /** When a keep-alive was last queued for each peer while only a mesh was reachable. */
   private meshKeepAliveAt: Map<string, number> = new Map();
+  /** The connectivity seen at the last state update. */
+  private lastConnectivity: string | null = null;
+  /** Called when the internet answers again (the group outbox). */
+  private onInternetBack?: () => Promise<void>;
+  setInternetBackHandler(handler: () => Promise<void>): void {
+    this.onInternetBack = handler;
+  }
 
   constructor(
     messageService: MessageService,
@@ -279,8 +286,13 @@ export class RefreshService {
           });
         }
       }
-      // Step 4: post to a server what only a mesh took
-      await this.messageService.repostMeshOnly();
+      // Step 4: back on the internet, the group outbox goes out at once
+      // (with what only a mesh took)
+      const connectivity = this.messageService.getConnectivity();
+      if (connectivity === 'internet' && this.lastConnectivity !== 'internet') {
+        await this.onInternetBack?.();
+      }
+      this.lastConnectivity = connectivity;
 
       // Step 5: hard-delete messages that have exceeded retention duration
       await this.messageService.deleteExpiredMessages(ownerUserId);

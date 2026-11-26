@@ -35,7 +35,7 @@ export interface MessageRouting {
   meshOnly?: boolean;
   /**
    * Only the internet transports take part: posting to a server what only a
-   * mesh took before (see `MessageService.repostMeshOnly`).
+   * mesh took before (see the group outbox, `GroupService.internetBack`).
    */
   internetOnly?: boolean;
 }

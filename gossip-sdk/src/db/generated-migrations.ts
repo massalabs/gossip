@@ -216,4 +216,13 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'CREATE INDEX `radioRelays_group_idx` ON `radioRelays` (`ownerUserId`,`groupId`);',
     ],
   },
+  {
+    idx: 18,
+    tag: '0018_group_outbox_mesh_took',
+    when: 1795714935811,
+    digest: '3c8086388bc9fb35c66d80e6108d253fbf230b26b3ad70bf48ab86bc892a1219',
+    statements: [
+      'ALTER TABLE `groupOutbox` ADD `meshTook` integer DEFAULT false NOT NULL;',
+    ],
+  },
 ];

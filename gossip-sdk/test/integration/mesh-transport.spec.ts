@@ -160,6 +160,69 @@ describe('Messaging over internet and mesh transports', () => {
     await bob.sdk.destroy();
   });
 
+  async function deliverGroups(rounds = 4) {
+    for (let r = 0; r < rounds; r++) {
+      for (const p of [alice, bob]) {
+        await p.sdk.groups.tick();
+        await p.sdk.groups.settle();
+        await p.sdk.messages.fetch();
+        await p.sdk.groups.settle();
+      }
+    }
+  }
+
+  async function texts(p: Peer, groupId: string): Promise<string[]> {
+    return (await p.sdk.groups.timeline(groupId)).flatMap(i =>
+      i.kind === 'message' && i.body.type === 'text' ? [i.body.text] : []
+    );
+  }
+
+  it('posts to the internet a group message only the mesh took, once the internet is back', async () => {
+    const groupId = await alice.sdk.groups.createGroup('Two', [bob.sdk.userId]);
+    await deliverGroups();
+    const [invitation] = await bob.sdk.groups.invitations();
+    await bob.sdk.groups.acceptInvitation(invitation.epochId);
+    await deliverGroups();
+
+    // Alice reaches the mesh only; Bob reads the internet only.
+    alice.internet.down = true;
+    bob.mesh.down = true;
+    await alice.sdk.groups.sendMessage(groupId, 'over the mesh');
+    await alice.sdk.groups.settle();
+    await deliverGroups(2);
+    expect(await texts(bob, groupId)).toEqual([]);
+
+    // Back on the internet: what only the mesh took goes to the server.
+    alice.internet.down = false;
+    await alice.sdk.groups.internetBack();
+    await alice.sdk.groups.settle();
+    await deliverGroups(2);
+    expect(await texts(bob, groupId)).toEqual(['over the mesh']);
+  }, 60_000);
+
+  it('sends the group outbox at once when the internet is back, whatever the waits', async () => {
+    const groupId = await alice.sdk.groups.createGroup('Two', [bob.sdk.userId]);
+    await deliverGroups();
+    const [invitation] = await bob.sdk.groups.invitations();
+    await bob.sdk.groups.acceptInvitation(invitation.epochId);
+    await deliverGroups();
+
+    alice.internet.down = true;
+    alice.mesh.down = true;
+    await alice.sdk.groups.sendMessage(groupId, 'written offline');
+    // Many failed tries: the next one would wait a long time.
+    for (let i = 0; i < 12; i++) {
+      await alice.sdk.groups.internetBack();
+      await alice.sdk.groups.settle();
+    }
+    alice.internet.down = false;
+    alice.mesh.down = false;
+    await alice.sdk.groups.internetBack();
+    await alice.sdk.groups.settle();
+    await deliverGroups(2);
+    expect(await texts(bob, groupId)).toEqual(['written offline']);
+  }, 60_000);
+
   it('posts to the internet node an announcement only the mesh took', async () => {
     alice.internet.down = true;
     const boardBefore = internetStore.getStoredAnnouncements().length;

@@ -1640,20 +1640,55 @@ export class GroupService {
     for (const row of due) {
       if (this.closed && !closing) return;
       try {
-        await this.messageProtocol.sendMessage({
-          seeker: row.seeker,
-          ciphertext: row.ciphertext,
-        });
+        await this.messageProtocol.sendMessage(
+          { seeker: row.seeker, ciphertext: row.ciphertext },
+          // What a mesh took already goes to a server alone.
+          row.meshTook ? { internetOnly: true } : undefined
+        );
       } catch (error) {
         await this.outboxFailed(row.id, row.contactUserId, error).catch(
           () => undefined
         );
         continue;
       }
+      const kinds = this.messageProtocol.takeAcceptedBy?.(row.seeker);
+      if (!row.meshTook && kinds && !kinds.includes('internet')) {
+        // Only a mesh took it: members on the internet still wait for it.
+        await this.queries.groups
+          .markOutboxMeshTook(
+            row.id,
+            new Date(this.now() + this.retryDelay(row.id))
+          )
+          .catch(() => undefined);
+        continue;
+      }
       this.outboxFailures.delete(row.id);
       await this.queries.groups.deleteOutbox(row.id).catch(() => undefined);
       this.confirmPublished(row.id);
     }
+  }
+
+  /**
+   * The internet answers again: every stored ciphertext is due now, what
+   * only a mesh took included, and the waits start over.
+   */
+  async internetBack(): Promise<void> {
+    if (this.closed) return;
+    this.outboxFailures.clear();
+    await this.queries.groups
+      .rescheduleAllOutbox(this.owner, new Date(this.now()))
+      .catch(() => undefined);
+    this.wakeSender();
+  }
+
+  /** The wait before the next try of an outbox row, twice the one before. */
+  private retryDelay(id: number): number {
+    const failures = (this.outboxFailures.get(id) ?? 0) + 1;
+    this.outboxFailures.set(id, failures);
+    return Math.min(
+      MAX_OUTBOX_RETRY_MS,
+      this.config.messages.retryDelayMs * 2 ** Math.min(failures - 1, 20)
+    );
   }
 
   /**
@@ -1687,15 +1722,9 @@ export class GroupService {
       await this.queries.groups.deleteOutbox(id);
       return;
     }
-    const failures = (this.outboxFailures.get(id) ?? 0) + 1;
-    this.outboxFailures.set(id, failures);
-    const delay = Math.min(
-      MAX_OUTBOX_RETRY_MS,
-      this.config.messages.retryDelayMs * 2 ** Math.min(failures - 1, 20)
-    );
     await this.queries.groups.rescheduleOutbox(
       id,
-      new Date(this.now() + delay)
+      new Date(this.now() + this.retryDelay(id))
     );
   }
 
