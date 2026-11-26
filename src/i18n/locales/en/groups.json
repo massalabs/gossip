@@ -268,6 +268,7 @@
     "toggle_on": "Sending by radio ({{bytes}} bytes)",
     "toggle_off": "Send by radio",
     "send_failed": "Could not send by radio.",
+    "not_confirmed": "Saved, but the radio did not confirm sending it.",
     "too_long": "Too long for a radio message.",
     "relayed": "relayed by radio · temporary",
     "relayed_cut": "relayed by radio, shortened · temporary",

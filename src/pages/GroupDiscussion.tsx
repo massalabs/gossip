@@ -330,12 +330,19 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const send = (text: string) => {
     if (!service) return;
     if (viaRadio) {
-      void sendRadioText(group.groupId, text).then(
+      let stored = false;
+      void sendRadioText(group.groupId, text, () => {
+        stored = true;
+        setDraft(null);
+        refresh();
+      }).then(
+        () => refresh(),
         () => {
-          setDraft(null);
-          refresh();
-        },
-        () => {
+          if (stored) {
+            // In the chat already: only the radio did not say it sent it.
+            toast.error(t('radio.not_confirmed'));
+            return;
+          }
           setDraft(d => ({ text, n: (d?.n ?? 0) + 1 }));
           toast.error(t('radio.send_failed'));
         }

@@ -13,6 +13,7 @@ const radio = vi.hoisted(() => ({
   disconnects: 0,
   enabled: true,
   enableOnRequest: true,
+  silent: false,
 }));
 
 const sdk = vi.hoisted(() => ({
@@ -98,7 +99,7 @@ vi.mock('@capacitor-community/bluetooth-le', () => ({
           frame([0x00]);
           break;
         case 0x3e: // channel datagram
-          frame([0x00]);
+          if (!radio.silent) frame([0x00]);
           break;
         case 0x0a: // sync next message → none
           frame([0x0a]);
@@ -145,6 +146,7 @@ import {
   connectRadio,
   disconnectRadio,
   sendRadioText,
+  RADIO_ANSWER_MS,
   useRadioStore,
 } from '../../src/services/meshcoreRadio';
 
@@ -200,6 +202,26 @@ describe('meshcoreRadio', () => {
       0xbb,
       0xcc,
     ]);
+  });
+
+  it('gives up on a radio that does not answer, the message kept', async () => {
+    await connectRadio();
+    radio.silent = true;
+    vi.useFakeTimers();
+    try {
+      const stored = vi.fn();
+      const sending = sendRadioText('group-1', 'hello', stored);
+      const outcome = sending.then(
+        () => 'sent',
+        (e: Error) => e.message
+      );
+      await vi.advanceTimersByTimeAsync(RADIO_ANSWER_MS + 1);
+      expect(await outcome).toBe('radio:no-answer');
+      expect(stored).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+      radio.silent = false;
+    }
   });
 
   it('hands Gossip datagrams of its channel to the groups, and nothing else', async () => {

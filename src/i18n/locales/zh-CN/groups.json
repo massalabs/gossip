@@ -268,6 +268,7 @@
     "toggle_on": "正在通过无线电发送（{{bytes}} 字节）",
     "toggle_off": "通过无线电发送",
     "send_failed": "无法通过无线电发送。",
+    "not_confirmed": "已保存，但无线电未确认发送。",
     "too_long": "对无线电消息来说太长。",
     "relayed": "经无线电转发 · 临时",
     "relayed_cut": "经无线电转发，已截短 · 临时",

@@ -176,15 +176,8 @@ function startForwarding(c: Connection, channelIdx: number): void {
     memberCount: groupId =>
       useGroupStore.getState().groups.find(g => g.summary.groupId === groupId)
         ?.summary.members.length ?? Number.MAX_SAFE_INTEGER,
-    send: async (datagram, zeroHop) => {
-      await c.sendChannelData(
-        channelIdx,
-        zeroHop ? ZERO_HOP : FLOOD,
-        new Uint8Array(0),
-        GOSSIP_DATA_TYPE,
-        datagram
-      );
-    },
+    send: (datagram, zeroHop) =>
+      onAir(c, channelIdx, zeroHop ? ZERO_HOP : FLOOD, datagram),
   });
   const onChanged = ({ changes }: { changes: GroupChange[] }) => {
     for (const change of changes) {
@@ -284,19 +277,55 @@ export async function disconnectRadio(): Promise<void> {
  * Sends a text message to a group by radio. The message is also published
  * online by the group engine, as the same event.
  */
-export async function sendRadioText(groupId: string, text: string) {
+export async function sendRadioText(
+  groupId: string,
+  text: string,
+  onStored?: () => void
+) {
   const c = connection;
   const { channelIdx } = useRadioStore.getState();
   if (!c || channelIdx === null) throw new Error('radio:not-connected');
   const sent = await getSdk().groups.sendRadioText(groupId, text);
-  await c.sendChannelData(
-    channelIdx,
-    FLOOD,
-    new Uint8Array(0),
-    GOSSIP_DATA_TYPE,
-    sent.datagram
-  );
+  // Kept in the chat from here, whatever the radio does next.
+  onStored?.();
+  await onAir(c, channelIdx, FLOOD, sent.datagram);
   return sent;
+}
+
+/** How long the radio has to take a frame before it is given up on. */
+export const RADIO_ANSWER_MS = 10_000;
+
+/**
+ * Hands a datagram to the radio. Its library waits for the radio's answer
+ * with no end: a radio gone silent (reset, out of reach) would hold the
+ * sender forever.
+ */
+async function onAir(
+  c: Connection,
+  channelIdx: number,
+  pathLen: number,
+  datagram: Uint8Array
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      c.sendChannelData(
+        channelIdx,
+        pathLen,
+        new Uint8Array(0),
+        GOSSIP_DATA_TYPE,
+        datagram
+      ),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('radio:no-answer')),
+          RADIO_ANSWER_MS
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Locking closes the radio link: nothing of an account stays reachable.
