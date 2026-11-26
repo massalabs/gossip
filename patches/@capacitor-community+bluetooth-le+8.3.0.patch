@@ -1,0 +1,51 @@
+diff --git a/node_modules/@capacitor-community/bluetooth-le/android/src/main/java/com/capacitorjs/community/plugins/bluetoothle/BluetoothLe.kt b/node_modules/@capacitor-community/bluetooth-le/android/src/main/java/com/capacitorjs/community/plugins/bluetoothle/BluetoothLe.kt
+index c0b0cb0..9581ee9 100644
+--- a/node_modules/@capacitor-community/bluetooth-le/android/src/main/java/com/capacitorjs/community/plugins/bluetoothle/BluetoothLe.kt
++++ b/node_modules/@capacitor-community/bluetooth-le/android/src/main/java/com/capacitorjs/community/plugins/bluetoothle/BluetoothLe.kt
+@@ -507,6 +507,23 @@ class BluetoothLe : Plugin() {
+         call.resolve(result)
+     }
+ 
++    /**
++     * The activity goes away (the app locked natively, or its task was
++     * removed) while the process may live on: its links go with it, or the
++     * devices stay connected to nothing and stop advertising.
++     */
++    override fun handleOnDestroy() {
++        for (device in deviceMap.values) {
++            try {
++                device.closeNow()
++            } catch (e: Exception) {
++                Logger.error(TAG, "Could not close a device on destroy", e)
++            }
++        }
++        deviceMap.clear()
++        super.handleOnDestroy()
++    }
++
+     @PluginMethod
+     fun disconnect(call: PluginCall) {
+         val device = getOrCreateDevice(call) ?: return
+diff --git a/node_modules/@capacitor-community/bluetooth-le/android/src/main/java/com/capacitorjs/community/plugins/bluetoothle/Device.kt b/node_modules/@capacitor-community/bluetooth-le/android/src/main/java/com/capacitorjs/community/plugins/bluetoothle/Device.kt
+index fc7a80e..9c588c4 100644
+--- a/node_modules/@capacitor-community/bluetooth-le/android/src/main/java/com/capacitorjs/community/plugins/bluetoothle/Device.kt
++++ b/node_modules/@capacitor-community/bluetooth-le/android/src/main/java/com/capacitorjs/community/plugins/bluetoothle/Device.kt
+@@ -495,6 +495,18 @@ class Device(
+         setTimeout(key, "Disconnection timeout.", timeout)
+     }
+ 
++    /**
++     * Drops the link at once, with no callback: for when the plugin goes away
++     * and no one is left to wait for the disconnection.
++     */
++    fun closeNow() {
++        connectionState = STATE_DISCONNECTED
++        bluetoothGatt?.disconnect()
++        bluetoothGatt?.close()
++        bluetoothGatt = null
++        cleanup()
++    }
++
+     fun getServices(): MutableList<BluetoothGattService> {
+         return bluetoothGatt?.services ?: mutableListOf()
+     }
