@@ -23,9 +23,14 @@ fn radio_receive(
 ) -> Option<crate::node::RadioReceived> {
     let now = net.now;
     let dev = &mut net.devs[d];
-    dev.node
+    match dev
+        .node
         .receive_radio(&mut dev.store, datagram, now, &mut net.rng)
-        .unwrap()
+        .unwrap()?
+    {
+        crate::node::RadioIn::Message(r) => Some(r),
+        crate::node::RadioIn::Relay(r) => panic!("a relay: {r:?}"),
+    }
 }
 
 fn count(net: &membership::MNet, d: usize, group: &ChatId, text: &str) -> usize {
@@ -112,4 +117,55 @@ fn a_device_outside_the_group_opens_nothing() {
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+fn a_relay_carries_an_online_message_to_a_member_with_radio_only() {
+    let (mut net, g) = founded(3);
+    // Device 0 writes online; device 2 relays it; device 1 only has radio.
+    net.offline[1] = true;
+    let chat = net.current(0, &g).unwrap();
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    let published = dev
+        .node
+        .publish_message(
+            &mut dev.store,
+            chat,
+            crate::event::Body::Text("online only".into()),
+            BTreeMap::new(),
+            None,
+            now,
+            &mut net.rng,
+        )
+        .unwrap();
+    let sync = published.event.payload().sync_obj_id();
+    let relay = net.devs[2]
+        .node
+        .seal_radio_relay(chat, gid(0), now, &sync, "online only", &mut net.rng)
+        .unwrap();
+
+    let now = net.now;
+    let dev = &mut net.devs[1];
+    let Some(crate::node::RadioIn::Relay(r)) = dev
+        .node
+        .receive_radio(&mut dev.store, &relay, now, &mut net.rng)
+        .unwrap()
+    else {
+        panic!("not a relay");
+    };
+    assert_eq!(r.group_id, g);
+    assert_eq!(r.author, gid(0));
+    assert_eq!(r.created_at, now);
+    assert_eq!(&r.sync_ref[..], &sync.as_bytes()[..crate::radio::RELAY_REF_SIZE]);
+    assert_eq!(r.text, "online only");
+    assert!(!r.older_key);
+    // Nothing was stored: the message itself arrives once device 1 is back online.
+    assert_eq!(count(&net, 1, &g, "online only"), 0);
+
+    // An outsider's author is refused.
+    assert!(net.devs[2]
+        .node
+        .seal_radio_relay(chat, gid(7), now, &sync, "x", &mut net.rng)
+        .is_err());
 }

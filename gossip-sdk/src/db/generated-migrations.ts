@@ -206,4 +206,14 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'CREATE INDEX `radioMessages_sync_obj_idx` ON `radioMessages` (`ownerUserId`,`syncObjId`);',
     ],
   },
+  {
+    idx: 17,
+    tag: '0017_radio_relays',
+    when: 1795707673619,
+    digest: '71e6cd24e84b4d7c89bc117c7f1d8ac62269df99fe34c01bc0a343e1d1d0eed7',
+    statements: [
+      'CREATE TABLE `radioRelays` (\n\t`ownerUserId` text NOT NULL,\n\t`groupId` text NOT NULL,\n\t`syncRef` text NOT NULL,\n\t`chatId` text NOT NULL,\n\t`author` text NOT NULL,\n\t`createdAt` integer NOT NULL,\n\t`text` text NOT NULL,\n\t`truncated` integer NOT NULL,\n\t`olderKey` integer NOT NULL,\n\t`atMillis` integer NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `syncRef`)\n);',
+      'CREATE INDEX `radioRelays_group_idx` ON `radioRelays` (`ownerUserId`,`groupId`);',
+    ],
+  },
 ];

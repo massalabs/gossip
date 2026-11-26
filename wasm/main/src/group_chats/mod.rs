@@ -517,10 +517,29 @@ impl GroupsNode {
     }
 
     /// Receives a datagram from the MeshCore radio. Returns `null` in JSON when it is not
-    /// for any epoch held here, otherwise `{chatId, groupId, eventId, syncObjId, author,
-    /// olderKey, accepted}`.
+    /// for any epoch held here; a radio message is received as an event and gives `{kind:
+    /// "message", chatId, groupId, eventId, syncObjId, author, olderKey, accepted}`; a relay
+    /// is not stored and gives `{kind: "relay", chatId, groupId, author, createdAt, syncRef,
+    /// text, truncated, olderKey}`.
     pub fn receive_radio(&mut self, datagram: &[u8], now: f64) -> Result<String, JsValue> {
         self.core.receive_radio(datagram, ms(now)?).map_err(js)
+    }
+
+    /// A relay of the text message `sync_obj` (32 bytes) of `author` (32-byte user ID),
+    /// created at `created_at`, for members who only have radio: a temporary copy their
+    /// device shows until the message itself arrives. Only in the current epoch. Returns the
+    /// datagram in hex, as a JSON string.
+    pub fn seal_radio_relay(
+        &mut self,
+        epoch: &[u8],
+        author: &[u8],
+        created_at: f64,
+        sync_obj: &[u8],
+        text: &str,
+    ) -> Result<String, JsValue> {
+        self.core
+            .seal_radio_relay(chat(epoch)?, peer(author)?, ms(created_at)?, sync(sync_obj)?, text)
+            .map_err(js)
     }
 
     /// A media message (§7.6): `mimetype` is `type/subtype` (lowercase, no parameters, at most

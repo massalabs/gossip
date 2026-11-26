@@ -51,6 +51,8 @@ export type {
   GroupPublished,
   GroupRadioPublished,
   GroupRadioReceived,
+  GroupRadioRelay,
+  RadioPriority,
   LeaveChoice,
   GroupMessageRef,
   GroupEpoch,
@@ -69,4 +71,9 @@ export {
   GROUP_TIMER_28_DAYS_MS,
   retentionToMessageTimer,
   RADIO_MAX_TEXT_BYTES,
+  RADIO_MAX_RELAY_TEXT_BYTES,
+  RADIO_PRIORITY_METADATA_KEY,
+  radioPriorityMetadata,
+  radioPriorityOf,
 } from './services/groups.js';
+export type { RadioRelayRecord } from './db/queries/index.js';

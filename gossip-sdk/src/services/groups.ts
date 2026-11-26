@@ -36,7 +36,11 @@ import {
   type SessionModule,
 } from '../wasm/session.js';
 import type { IMessageProtocol } from '../api/messageProtocol/types.js';
-import type { Queries, GroupBatch } from '../db/queries/index.js';
+import type {
+  Queries,
+  GroupBatch,
+  RadioRelayRecord,
+} from '../db/queries/index.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { SdkConfig } from '../config/sdk.js';
 import { serializeGroupPlaintext } from '../utils/messageSerialization.js';
@@ -787,8 +791,67 @@ export interface GroupRadioPublished extends GroupPublished {
   datagram: Uint8Array;
 }
 
+/**
+ * Largest text a relay carries (UTF-8 bytes); a longer message is cut, and
+ * shown as cut, until the message itself arrives.
+ */
+export const RADIO_MAX_RELAY_TEXT_BYTES = 122;
+
+/**
+ * The author's choice of whether members with a radio put a message sent
+ * online on the air for members who only have radio: `auto` (when one is
+ * heard nearby), `priority` (always, before other messages) or `none`
+ * (never). Carried in the message metadata under
+ * {@link RADIO_PRIORITY_METADATA_KEY}; absent is `auto`.
+ */
+export type RadioPriority = 'auto' | 'priority' | 'none';
+export const RADIO_PRIORITY_METADATA_KEY = 'radio';
+const RADIO_PRIORITY_BYTES: Record<RadioPriority, number | null> = {
+  auto: null,
+  priority: 1,
+  none: 2,
+};
+
+/** The metadata entries that carry `priority` (none for `auto`). */
+export function radioPriorityMetadata(
+  priority: RadioPriority
+): Record<string, Uint8Array> {
+  const b = RADIO_PRIORITY_BYTES[priority];
+  return b === null ? {} : { [RADIO_PRIORITY_METADATA_KEY]: Uint8Array.of(b) };
+}
+
+/** The radio priority a message's metadata asks for. */
+export function radioPriorityOf(
+  metadata: Record<string, Uint8Array>
+): RadioPriority {
+  const b = metadata[RADIO_PRIORITY_METADATA_KEY]?.[0];
+  return b === 1 ? 'priority' : b === 2 ? 'none' : 'auto';
+}
+
+/**
+ * A relay heard on the radio: a temporary copy of a message sent online,
+ * shown until the message itself arrives (`syncRef` is the start of its
+ * `syncObjId`).
+ */
+export interface GroupRadioRelay {
+  kind: 'relay';
+  epochId: GroupId;
+  groupId: GroupId;
+  /** The first 8 bytes of the message's `syncObjId`, lowercase hex. */
+  syncRef: string;
+  author: string;
+  createdAt: number;
+  text: string;
+  /** Cut to fit the radio. */
+  truncated: boolean;
+  olderKey: boolean;
+  /** Heard for the first time (another member may have relayed it before). */
+  isNew: boolean;
+}
+
 /** What a datagram from the radio was. */
 export interface GroupRadioReceived {
+  kind: 'message';
   epochId: GroupId;
   groupId: GroupId;
   eventId: GroupId;
@@ -2126,7 +2189,9 @@ export class GroupService {
    * for no group held here; otherwise the message is stored, and relayed
    * online when it belongs to the group's current epoch.
    */
-  async receiveRadio(datagram: Uint8Array): Promise<GroupRadioReceived | null> {
+  async receiveRadio(
+    datagram: Uint8Array
+  ): Promise<GroupRadioReceived | GroupRadioRelay | null> {
     const raw = await this.run(node => {
       this.takeChanges(node);
       const json = node.receive_radio(datagram, this.now());
@@ -2134,7 +2199,39 @@ export class GroupService {
       return JSON.parse(json) as Raw | null;
     });
     if (!raw) return null;
+    if (raw.kind === 'relay') {
+      const relay: GroupRadioRelay = {
+        kind: 'relay',
+        epochId: raw.chatId as string,
+        groupId: raw.groupId as string,
+        syncRef: raw.syncRef as string,
+        author: encodeUserId(hexToBytes(raw.author as string)),
+        createdAt: Number(raw.createdAt),
+        text: raw.text as string,
+        truncated: raw.truncated === true,
+        olderKey: raw.olderKey === true,
+        isNew: false,
+      };
+      relay.isNew = await this.queries.radioRelays.record(this.owner, {
+        groupId: relay.groupId,
+        syncRef: relay.syncRef,
+        chatId: relay.epochId,
+        author: relay.author,
+        createdAt: relay.createdAt,
+        text: relay.text,
+        truncated: relay.truncated,
+        olderKey: relay.olderKey,
+        atMillis: this.now(),
+      });
+      if (relay.isNew) {
+        this.eventEmitter.emit(SdkEventType.GROUPS_CHANGED, {
+          changes: [{ groupId: relay.groupId, kind: 'Messages' }],
+        });
+      }
+      return relay;
+    }
     const received: GroupRadioReceived = {
+      kind: 'message',
       epochId: raw.chatId as string,
       groupId: raw.groupId as string,
       eventId: raw.eventId as string,
@@ -2154,6 +2251,46 @@ export class GroupService {
       });
     }
     return received;
+  }
+
+  /**
+   * A relay of `message`, sent online, for members who only have radio: its
+   * text cut to {@link RADIO_MAX_RELAY_TEXT_BYTES} bytes. `null` for anything
+   * but a text message of a group's current epoch.
+   */
+  async sealRadioRelay(message: GroupMessage): Promise<Uint8Array | null> {
+    if (message.body.type !== 'text') return null;
+    const text = message.body.text;
+    const node = await this.readyNode().catch(() => null);
+    if (!node) return null;
+    try {
+      const hex = JSON.parse(
+        node.seal_radio_relay(
+          hexToBytes(message.epochId),
+          decodeUserId(message.author),
+          Number(message.createdAt),
+          hexToBytes(message.syncObjId),
+          text
+        )
+      ) as string;
+      return hexToBytes(hex);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The relays heard for a group whose message has not arrived yet: those of
+   * `held` (the sync object IDs the timeline shows) are left out.
+   */
+  async radioRelays(
+    groupId: GroupId,
+    held: GroupId[]
+  ): Promise<RadioRelayRecord[]> {
+    const relays = await this.queries.radioRelays.byGroup(this.owner, groupId);
+    if (relays.length === 0) return relays;
+    const refs = new Set(held.map(id => id.slice(0, 16)));
+    return relays.filter(r => !refs.has(r.syncRef));
   }
 
   /** Which of these messages (sync object IDs) travelled by radio, and with which key. */

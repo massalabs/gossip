@@ -181,9 +181,32 @@ function debugString(val) {
     // TODO we could test for more things here, like `Set`s and `Map`s.
     return className;
 }
+/**
+ * The largest group plaintext, in bytes (§13.10).
+ * @returns {number}
+ */
+export function group_max_plaintext_bytes() {
+    const ret = wasm.group_max_plaintext_bytes();
+    return ret >>> 0;
+}
 
-export function start() {
-    wasm.start();
+/**
+ * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
+ * forward of text. A longer one is refused by the engine and by every receiver.
+ * @returns {number}
+ */
+export function group_max_text_bytes() {
+    const ret = wasm.group_max_metadata_bytes();
+    return ret >>> 0;
+}
+
+/**
+ * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
+ * @returns {number}
+ */
+export function group_max_metadata_bytes() {
+    const ret = wasm.group_max_metadata_bytes();
+    return ret >>> 0;
 }
 
 function takeFromExternrefTable0(idx) {
@@ -191,6 +214,39 @@ function takeFromExternrefTable0(idx) {
     wasm.__externref_table_dealloc(idx);
     return value;
 }
+/**
+ * The size of message metadata, given as `publish_message` takes it (a list of
+ * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
+ * @param {string} metadata
+ * @returns {number}
+ */
+export function group_metadata_bytes(metadata) {
+    const ptr0 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.group_metadata_bytes(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] >>> 0;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+
+export function start() {
+    wasm.start();
+}
+
 /**
  * Generates user keys from a passphrase.
  *
@@ -209,18 +265,6 @@ export function generate_user_keys(passphrase) {
     return UserKeys.__wrap(ret[0]);
 }
 
-function _assertClass(instance, klass) {
-    if (!(instance instanceof klass)) {
-        throw new Error(`expected instance of ${klass.name}`);
-    }
-}
-
-function passArray8ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 1, 1) >>> 0;
-    getUint8ArrayMemory0().set(arg, ptr / 1);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
@@ -323,50 +367,6 @@ export function aead_decrypt(key, nonce, ciphertext, aad) {
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     }
     return v3;
-}
-
-/**
- * The largest group plaintext, in bytes (§13.10).
- * @returns {number}
- */
-export function group_max_plaintext_bytes() {
-    const ret = wasm.group_max_plaintext_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The largest text of a message version, in UTF-8 bytes: a text body, or the content of a
- * forward of text. A longer one is refused by the engine and by every receiver.
- * @returns {number}
- */
-export function group_max_text_bytes() {
-    const ret = wasm.group_max_metadata_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The largest metadata of a message version, in bytes as [`group_metadata_bytes`] counts.
- * @returns {number}
- */
-export function group_max_metadata_bytes() {
-    const ret = wasm.group_max_metadata_bytes();
-    return ret >>> 0;
-}
-
-/**
- * The size of message metadata, given as `publish_message` takes it (a list of
- * `[name, hex]` pairs in JSON): its encoded size, every entry's framing included.
- * @param {string} metadata
- * @returns {number}
- */
-export function group_metadata_bytes(metadata) {
-    const ptr0 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.group_metadata_bytes(ptr0, len0);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return ret[0] >>> 0;
 }
 
 /**
@@ -1029,8 +1029,10 @@ export class GroupsNode {
     }
     /**
      * Receives a datagram from the MeshCore radio. Returns `null` in JSON when it is not
-     * for any epoch held here, otherwise `{chatId, groupId, eventId, syncObjId, author,
-     * olderKey, accepted}`.
+     * for any epoch held here; a radio message is received as an event and gives `{kind:
+     * "message", chatId, groupId, eventId, syncObjId, author, olderKey, accepted}`; a relay
+     * is not stored and gives `{kind: "relay", chatId, groupId, author, createdAt, syncRef,
+     * text, truncated, olderKey}`.
      * @param {Uint8Array} datagram
      * @param {number} now
      * @returns {string}
@@ -1261,6 +1263,44 @@ export class GroupsNode {
             return getStringFromWasm0(ptr4, len4);
         } finally {
             wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
+    }
+    /**
+     * A relay of the text message `sync_obj` (32 bytes) of `author` (32-byte user ID),
+     * created at `created_at`, for members who only have radio: a temporary copy their
+     * device shows until the message itself arrives. Only in the current epoch. Returns the
+     * datagram in hex, as a JSON string.
+     * @param {Uint8Array} epoch
+     * @param {Uint8Array} author
+     * @param {number} created_at
+     * @param {Uint8Array} sync_obj
+     * @param {string} text
+     * @returns {string}
+     */
+    seal_radio_relay(epoch, author, created_at, sync_obj, text) {
+        let deferred6_0;
+        let deferred6_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(author, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passArray8ToWasm0(sync_obj, wasm.__wbindgen_malloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ptr3 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len3 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_seal_radio_relay(this.__wbg_ptr, ptr0, len0, ptr1, len1, created_at, ptr2, len2, ptr3, len3);
+            var ptr5 = ret[0];
+            var len5 = ret[1];
+            if (ret[3]) {
+                ptr5 = 0; len5 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred6_0 = ptr5;
+            deferred6_1 = len5;
+            return getStringFromWasm0(ptr5, len5);
+        } finally {
+            wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
         }
     }
     /**

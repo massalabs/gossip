@@ -307,6 +307,37 @@ pub struct RadioReceived {
     pub accepted: bool,
 }
 
+/// A relay found by [`Node::receive_radio`]: a temporary copy of a message sent online
+/// (see [`crate::radio`]), shown until the message itself arrives. Nothing is stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadioRelay {
+    /// The epoch it was opened with.
+    pub chat_id: ChatId,
+    /// Its group.
+    pub group_id: ChatId,
+    /// The message's author.
+    pub author: GossipId,
+    /// The message's creation time.
+    pub created_at: u64,
+    /// The first bytes of the message's `syncObjId`.
+    pub sync_ref: [u8; radio::RELAY_REF_SIZE],
+    /// Its text, possibly cut.
+    pub text: String,
+    /// The text was cut.
+    pub truncated: bool,
+    /// Written with an older group key (see [`RadioReceived::older_key`]).
+    pub older_key: bool,
+}
+
+/// What a radio datagram held.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RadioIn {
+    /// A radio message, received as an event.
+    Message(RadioReceived),
+    /// A relay.
+    Relay(RadioRelay),
+}
+
 /// The engine of one device. See the module documentation.
 pub struct Node {
     me: GossipId,
@@ -974,28 +1005,76 @@ impl Node {
         datagram: &[u8],
         now: u64,
         rng: &mut dyn Randomness,
-    ) -> Result<Option<RadioReceived>, NodeError> {
+    ) -> Result<Option<RadioIn>, NodeError> {
         let Some(opened) = radio::open(datagram, self.epochs.values().map(|e| &e.root)) else {
             return Ok(None);
         };
-        let chat_id = opened.event.chat_id();
+        let (event, author) = match opened {
+            radio::Opened::Message { event, author } => (event, author),
+            radio::Opened::Relay(r) => {
+                let group_id = self.group_of(&r.chat_id);
+                let older_key = self.current_epoch(&group_id).is_some_and(|c| c != r.chat_id);
+                return Ok(Some(RadioIn::Relay(RadioRelay {
+                    chat_id: r.chat_id,
+                    group_id,
+                    author: r.author,
+                    created_at: r.ts,
+                    sync_ref: r.sync_ref,
+                    text: r.text,
+                    truncated: r.truncated,
+                    older_key,
+                })));
+            }
+        };
+        let chat_id = event.chat_id();
         let group_id = self.group_of(&chat_id);
         let older_key = self.current_epoch(&group_id).is_some_and(|c| c != chat_id);
-        let event_id = opened.event.event_id();
-        let sync_obj_id = opened.event.payload().sync_obj_id();
-        let event = opened.event;
+        let event_id = event.event_id();
+        let sync_obj_id = event.payload().sync_obj_id();
         let accepted = self.run(store, now, rng, |n, cx| {
             n.receive_radio_event(cx, event, older_key)
         })?;
-        Ok(Some(RadioReceived {
+        Ok(Some(RadioIn::Message(RadioReceived {
             chat_id,
             group_id,
             event_id,
             sync_obj_id,
-            author: opened.author,
+            author,
             older_key,
             accepted,
-        }))
+        })))
+    }
+
+    /// A relay of the text message `sync_obj_id` of `author`, created at `created_at`, for
+    /// members who only have radio (see [`crate::radio`]). Only in the current epoch of its
+    /// group: a relay with an older key would reach removed members. Nothing is stored.
+    ///
+    /// # Errors
+    ///
+    /// [`NodeError::UnknownEpoch`], [`NodeError::NotAllowed`] for an older epoch, and
+    /// [`NodeError::Root`] when `author` is not a member of the epoch.
+    pub fn seal_radio_relay(
+        &self,
+        chat_id: ChatId,
+        author: GossipId,
+        created_at: u64,
+        sync_obj_id: &SyncObjId,
+        text: &str,
+        rng: &mut dyn Randomness,
+    ) -> Result<Vec<u8>, NodeError> {
+        let entry = self.epochs.get(&chat_id).ok_or(NodeError::UnknownEpoch)?;
+        let group_id = self.group_of(&chat_id);
+        if self.current_epoch(&group_id).is_some_and(|c| c != chat_id) {
+            return Err(NodeError::NotAllowed);
+        }
+        Ok(radio::seal_relay(
+            &entry.root,
+            author,
+            created_at,
+            bytes(rng),
+            sync_obj_id,
+            text,
+        )?)
     }
 
     fn receive_radio_event(

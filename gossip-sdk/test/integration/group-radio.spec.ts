@@ -12,7 +12,13 @@ import { generateMnemonic } from '../../src/crypto/bip39';
 import { generateEncryptionKey } from '../../src/wasm/encryption';
 import { getTestStorageConfig } from '../testDb';
 import type { GroupService } from '../../src/services/groups';
-import { RADIO_MAX_TEXT_BYTES } from '../../src/services/groups';
+import {
+  RADIO_MAX_RELAY_TEXT_BYTES,
+  RADIO_MAX_TEXT_BYTES,
+  radioPriorityMetadata,
+  radioPriorityOf,
+} from '../../src/services/groups';
+import type { GroupMessage } from '../../src/services/groups';
 
 let clock = 1_800_000_000_000;
 
@@ -97,6 +103,7 @@ describe('Group messages by radio', { timeout: 120_000 }, () => {
     // Bob's radio hears it: the message is there before any network delivery.
     const received = await bob.groups.receiveRadio(sent.datagram);
     expect(received).toMatchObject({
+      kind: 'message',
       groupId,
       eventId: sent.eventId,
       syncObjId: sent.syncObjId,
@@ -107,9 +114,10 @@ describe('Group messages by radio', { timeout: 120_000 }, () => {
     expect(await texts(bob.groups, groupId)).toEqual(['by radio']);
 
     // A replay changes nothing.
-    expect((await bob.groups.receiveRadio(sent.datagram))?.accepted).toBe(
-      false
-    );
+    expect(await bob.groups.receiveRadio(sent.datagram)).toMatchObject({
+      kind: 'message',
+      accepted: false,
+    });
 
     await deliver();
     for (const p of peers) {
@@ -162,6 +170,57 @@ describe('Group messages by radio', { timeout: 120_000 }, () => {
         ['by radio', 'online from alice', 'online from bob'].sort()
       );
     }
+  });
+
+  it('relays a message sent online to a member with radio only, until it arrives', async () => {
+    const groupId = await trip();
+
+    // Alice writes online and asks for radio priority; Bob has a radio.
+    const long =
+      'online, for the radio: ' + 'x'.repeat(RADIO_MAX_RELAY_TEXT_BYTES);
+    await alice.groups.sendMessage(groupId, long, {
+      metadata: radioPriorityMetadata('priority'),
+    });
+    await alice.groups.settle();
+    await bob.messages.fetch();
+    await bob.groups.settle();
+    const message = (await bob.groups.timeline(groupId)).find(
+      (i): i is GroupMessage => i.kind === 'message'
+    )!;
+    expect(radioPriorityOf(message.metadata)).toBe('priority');
+    const relay = await bob.groups.sealRadioRelay(message);
+    expect(relay!.length).toBeLessThanOrEqual(165);
+
+    // Carol, offline, hears it: a temporary copy, cut, not a stored message.
+    const heard = await carol.groups.receiveRadio(relay!);
+    expect(heard).toMatchObject({
+      kind: 'relay',
+      groupId,
+      author: alice.userId,
+      createdAt: Number(message.createdAt),
+      truncated: true,
+      olderKey: false,
+      isNew: true,
+    });
+    expect(heard?.kind === 'relay' && heard.text).toBe(
+      long.slice(0, RADIO_MAX_RELAY_TEXT_BYTES)
+    );
+    expect(await texts(carol.groups, groupId)).toEqual([]);
+    expect(await carol.groups.radioRelays(groupId, [])).toHaveLength(1);
+    // Another member's relay of the same message is not new.
+    const again = await alice.groups.sealRadioRelay(message);
+    expect(await carol.groups.receiveRadio(again!)).toMatchObject({
+      kind: 'relay',
+      isNew: false,
+    });
+
+    // Back online, the message itself replaces the copy.
+    await deliver();
+    const held = (await carol.groups.timeline(groupId)).flatMap(i =>
+      i.kind === 'message' ? [i.syncObjId] : []
+    );
+    expect(await texts(carol.groups, groupId)).toEqual([long]);
+    expect(await carol.groups.radioRelays(groupId, held)).toEqual([]);
   });
 
   it('refuses a radio text over its limit, and ignores datagrams of other groups', async () => {

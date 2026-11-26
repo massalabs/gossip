@@ -443,7 +443,9 @@ impl Core {
     }
 
     /// Receives a radio datagram. Returns `null` when it opens against no epoch held here,
-    /// otherwise `{chatId, groupId, eventId, syncObjId, author, olderKey, accepted}`.
+    /// `{kind: "message", chatId, groupId, eventId, syncObjId, author, olderKey, accepted}`
+    /// for a radio message, and `{kind: "relay", chatId, groupId, author, createdAt, syncRef,
+    /// text, truncated, olderKey}` for a relay (`syncRef` in hex).
     pub fn receive_radio(&mut self, datagram: &[u8], now: u64) -> R<String> {
         let received = self
             .node
@@ -451,7 +453,19 @@ impl Core {
             .map_err(err)?;
         Ok(match received {
             None => J::Null,
-            Some(r) => J::Obj(vec![
+            Some(groups::node::RadioIn::Relay(r)) => J::Obj(vec![
+                ("kind".into(), J::Str("relay".into())),
+                ("chatId".into(), r.chat_id.enc()),
+                ("groupId".into(), r.group_id.enc()),
+                ("author".into(), r.author.enc()),
+                ("createdAt".into(), r.created_at.enc()),
+                ("syncRef".into(), J::Str(hex(&r.sync_ref))),
+                ("text".into(), J::Str(r.text)),
+                ("truncated".into(), r.truncated.enc()),
+                ("olderKey".into(), r.older_key.enc()),
+            ]),
+            Some(groups::node::RadioIn::Message(r)) => J::Obj(vec![
+                ("kind".into(), J::Str("message".into())),
                 ("chatId".into(), r.chat_id.enc()),
                 ("groupId".into(), r.group_id.enc()),
                 ("eventId".into(), r.event_id.enc()),
@@ -462,6 +476,22 @@ impl Core {
             ]),
         }
         .to_text())
+    }
+
+    /// A relay of the text message `sync` of `author` created at `created_at`, for members
+    /// who only have radio; the datagram in hex.
+    pub fn seal_radio_relay(
+        &mut self,
+        chat: ChatId,
+        author: GossipId,
+        created_at: u64,
+        sync: SyncObjId,
+        text: &str,
+    ) -> R<String> {
+        self.node
+            .seal_radio_relay(chat, author, created_at, &sync, text, &mut rng)
+            .map(|d| J::Str(hex(&d)).to_text())
+            .map_err(err)
     }
 
     /// A media message of `data` (any bytes) and `mimetype` (`type/subtype`, §7.6), with

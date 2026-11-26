@@ -42,8 +42,13 @@ version (1) ‖ ts (8) ‖ nonce (4) ‖ tag (4) ‖ AES-256-SIV(key, nonce = 0�
 | `nonce`   | 4    | fresh random bytes chosen by the author                            |
 | `tag`     | 4    | lets members find the epoch and the author (§4 below)              |
 | sealed    | rest | AES-256-SIV with a 16-byte tag; the header (first 17 bytes) as AAD |
-| `type`    | 1    | `0` = text; any other value is ignored                             |
+| `type`    | 1    | `0` = text, `1` = relay (§6.1); any other value is ignored         |
 | `text`    | rest | UTF-8, at most **131 bytes**                                       |
+
+A relay's sealed part is `type (1) ‖ flags (1) ‖ ref (8) ‖ text`: `flags` bit 0 says the text
+was cut, `ref` is the first 8 bytes of the message's `syncObjId`, and the text is at most
+**122 bytes**, cut at a character boundary. Its header carries the message's own `ts`, and its
+tag is computed with the message's author; the nonce is fresh.
 
 ## 4. Keys and derived values
 
@@ -101,6 +106,31 @@ membership was shown by the epoch's radio key. Every other check of §6.3 applie
 - **Replays** rebuild the same event ID and are ignored (§7.1).
 - A device sends by radio only in its current epoch.
 
+### 6.1 Relays: online messages for members who only have radio
+
+A message sent online has parents and metadata, so it cannot travel as §5. A member with a
+radio may instead put a **relay** of it on the air: a temporary copy that a device shows (cut,
+marked "relayed by radio") until the message itself arrives, whose `syncObjId` starts with
+`ref`. A relay is not an event: nothing of it is merged, stored by the engine or relayed
+online. Only text messages of the device's current epoch are relayed.
+
+The author chooses per message under the metadata key `radio` (one byte): absent is _auto_,
+`1` is _priority_, `2` is _none_. A device with a radio relays a message:
+
+- never when it is _none_, when it travelled by radio already, or when it was written more
+  than 10 minutes ago or before the radio was connected;
+- for _auto_, only while a member of the group other than the author was heard **by radio
+  only** in the last 30 minutes: a radio message of theirs this device accepted as new, so
+  that no internet copy had reached it first;
+- for _priority_, always.
+
+Waiting relays go in this order: _priority_, replies to a radio-only member, chats of at most
+4 members, then the newest and the shortest; at most one every 2 seconds. Every device with
+a radio may relay; each waits longer the worse it heard the radio-only members (the author's
+own device first) and gives up when it hears the relay or the message on the air. When every
+radio-only member was heard directly (0 hops), the relay is sent **zero-hop** (a direct send
+with an empty path), which repeaters do not forward; otherwise it is flooded.
+
 ## 7. Security properties
 
 - Only members of the epoch read or write radio messages; the radio and the MeshCore mesh
@@ -114,10 +144,13 @@ membership was shown by the epoch's radio key. Every other check of §6.3 applie
   default channel shows that Gossip is in use; messages are flooded.
 - Not provided: radio acknowledgements, kicks by radio, catch-up over radio (missed events
   are fetched once another transport returns).
+- A relay is as private as a radio message: the same header and keys. Any member can forge
+  one, as any member can forge a radio message; it stays a temporary copy until the real
+  message arrives, and a cut text is shown as cut.
 
 ## 8. Open points
 
 1. Register a MeshCore `data_type`.
 2. Edits, deletions and reactions by radio (a type byte is reserved for them).
-3. Forwarding internet messages to radio-only members.
+3. Regional flood scopes (MeshCore transport codes) for floods that should stay in an area.
 4. Per-message forward secrecy against device compromise.
