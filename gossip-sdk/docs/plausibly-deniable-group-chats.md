@@ -2024,6 +2024,15 @@ Arrivals under an already-known, pruned event ID follow §9.5.
   `last_modified_at = max(now, previous last_modified_at + 1)`, where the previous value is that of
   the **current applied** result, never of a pending scheduled version (§7.3).
   A scheduled edit uses its chosen time `S` instead.
+- A published edit keeps the author, or sets it to any member of the epoch (D.97).
+  _Why:_ the edit event already carries the whole result, author included, and receivers accept
+  any member as the author of any version, so this is a choice of the publisher only: no format
+  or merge change, and unmodified devices accept it; the latest modification wins as for any
+  edit.
+  How such an edit is sent is in §10.2.
+- A reaction's author cannot be changed by an edit: its ID is derived from its author (§7.6).
+  The same result is reached by removing the reaction as one member and adding it as another;
+  this is documented, not implemented yet.
 - Every new event's timestamp `ts` is the creator's `now`.
 - A message event's timestamp `ts` MUST be at most local `now + 5 minutes`, both for outgoing
   events and on receipt.
@@ -2624,10 +2633,21 @@ so it cannot leak the alteration or contradict it.
 The UI offers **Retry synchronisation** on messages of any accepted group, regardless of whether
 they were altered; eligibility is rechecked when the action runs.
 
+The UI MUST show a warning before every Retry of a message, and act only on confirmation: it sends
+to everyone the version this device holds, including anything changed or created only on this
+device (D.94).
+_Why:_ a local-only edit (§9.1) or a local-only message (§9.7) keeps no marker, so the device cannot
+tell which messages are concerned; a warning shown only for some messages would itself be such a
+marker.
+
 - **Message:** republish the stored complete result in a fresh event of the message's own epoch
   (new event ID with the current timestamp, current tips as parents), unchanged, to the peers
   allowed by §10.4.
   Peers merge it normally.
+  It is sent by the rule of §10.2: in full only when the result's author is the user, like a
+  relay otherwise.
+  A Retry of a local-only message (§9.7) publishes it to everyone as a new message with its
+  original date.
 - **Group:** resend the exact root of the group's current epoch to its other members.
 
 ### 9.5 Events arriving under an already-known ID
@@ -2660,6 +2680,56 @@ Reactivation uses the normal retry renewal (§11.5).
 The marker is cleared on the first valid acceptance of that event.
 The marker lives while the group is retained; if capacity forces it out, a later advertisement may
 recreate the work.
+
+### 9.7 Local-only messages
+
+A user may create a new message on this device only ("only for me"), under any member of the epoch
+as author, in the current epoch of an active group.
+It is created with `created_at = last_modified_at = now`, `edited = false` and a fresh random
+sync-object ID; scheduling is refused.
+Nothing is sent, announced, listed or named as a parent, ever.
+The result must pass every rule a published version passes (§6.2, §7.2), so that a Retry of it
+stays valid.
+
+**No marker.** No flag, field, table, log (outside a full debug build) or UI mark records that a
+message was created this way (D.92).
+_Why:_ deniability. It must be indistinguishable from a message whose events this device evicted
+while keeping its result (§8.2, §9.3); a marker would prove the opposite.
+
+**Storage shape** (D.93, chosen on 2026-11-27, **may be revised**): it takes the shape a message
+of this device has once all its events were pruned.
+
+- **Epoch with no message timer:** the result only: no event row, no stub, no parent edge.
+  Without a timer the stubs of a real message are not linked to its record (§14.1), so a result
+  with no event is an ordinary state; a fabricated stub would be a permanent object that need not
+  exist.
+- **Epoch with a message timer:** the result plus **one** fabricated stub: a fresh event ID dated
+  now, parent links to the current eligible tips chosen as a publication would (§6.1), listed in
+  the record's stubs, with the record's moment and erasure as for a real message (§7.7).
+  _Why:_ under a timer a real message always lists at least one carrier or stub, so an empty list
+  would be a structural mark on that device; the timer erases the stub with the message.
+
+The stub is a pruned row like any other: never a tip, never a parent, never announced or listed,
+and a request for it is answered "not available", the answer given for an unknown ID (§9.3,
+§11.7).
+
+**No special rule** (D.94). Since nothing marks it, everything that applies to a message the device
+no longer serves applies unchanged: replies and reactions for everyone, local-only edits and
+deletions, and Retry (§9.4), which publishes it to everyone as a new message with its original
+date.
+A reply or a reaction for everyone to it tells the other members that this device holds a message
+they do not hold; "a member sent it to this device only" explains it as well (§16.13).
+
+**What remains detectable**, accepted for now:
+
+- Only by someone reading this device's storage, and only statistically.
+  Under a timer: no later event ever names the stub as a parent; no delivery hint exists for it
+  (hints are kept 28 days for real events, §10.3); the stub is unusually recent for an eviction
+  (already true of any local-only edit, D.35).
+  With no timer: no event row has a timestamp equal to the message's `created_at`, as every
+  unscheduled real message has on devices that received its first version.
+- By someone comparing two devices: the message's ID exists on one device only, in every design;
+  the innocent explanation is that a member sent it to this device only.
 
 ## 10. Dissemination
 
@@ -2704,9 +2774,39 @@ objects §4.6 and §5).
 
 - **Own messages:** send the full event to every neighbor that is a member of the event's epoch.
   _Why:_ neighbors hold copies even if the sender goes offline right after sending.
+  An edit (or a Retry) is "own" only when the message's author is the user both before it and after
+  it (D.97); a new message or a reaction is own when its author is the user.
 - **Relayed events and fabricated messages** (attributed to another member): send gossip notices
   only, and answer explicit requests with the full event.
   _Why:_ fabrication then looks like an honest relay.
+- **What this device publishes that is not its own** (D.95, D.96, D.97): a new message or a Retry
+  under another member's name, an edit that sets the author to another member, an edit of another
+  member's message that keeps that author, and an edit that changes the author to the user
+  ("re-appropriation") are handled as if another member had delivered the event to this device
+  and this device relayed it:
+  1. the event keeps its **true** timestamp and is shown on this device at once;
+  2. the device waits a random time, uniform between 0.5 s and 5 s (provisional), durably: an app
+     closed during the wait still sends the notices afterwards;
+  3. then it records one hint (§10.3) and sends notices to exactly the set of an ordinary
+     dissemination: the eligible neighbors plus the extra random recipients below; nothing is
+     added or removed for anyone;
+  4. explicit requests are answered with the full event, whoever asks, the peer named by the hint
+     included.
+
+  _Why a wait:_ a relay announces an event some time after its author wrote it.
+  _Why a wait and not a backdated timestamp:_ the event keeps its true date, which stays safe with
+  features that set dates on purpose (a message prepared for a later date); the cost is that such a
+  message leaves a few seconds late.
+  The range is provisional, to be tuned from the one-hop travel times measured by the debug build
+  (a phone fetches from the backend every 5 s; the mesh is usually under 2 s; the engine adds no
+  delay when it relays).
+  _Why the claimed author is not forced into the notice set:_ in a chat of 500, notices that always
+  take a route through the claimed author would be observable.
+  _Why re-appropriation is not pushed in full:_ honest devices push in full only what they author,
+  so a full push of an edit naming the user would tell the user's neighbors that the user took the
+  message; as notices it reads as someone re-attributing it and this device relaying it.
+  Deletions are not concerned: they are sent as before.
+
 - **Roots and signed objects:** their first send is defined in §4.6, §5.3, §5.6 and §5.8.
   A device that received one relays it by notice only, and answers explicit requests with the full
   object.
@@ -2736,6 +2836,24 @@ by Bob when:
 - Bob sends it a gossip notice for E (honest peers announce only events they hold in full).
 
 Sending a notice, query requests and N/A answers never create hints.
+
+**Hint of a publication that is not the user's own** (§10.2, D.95, D.97): when the wait is over,
+the device records one hint for the event only, with no ancestor sample, naming:
+
+- the claimed author, when the event is attributed to another member ("they sent it to me"),
+  whether or not that member is a neighbor;
+- for a re-appropriation, **one peer drawn uniformly inside the notice set**: not the previous
+  author, which would name who gave the message up; and not a member outside the set, whom the
+  hint would then keep from ever being notified.
+  An entry only says "this peer has this event", which becomes true once that peer fetched it.
+  In a chat of two that peer is necessarily the previous author, who knows anyway.
+
+The hint is recorded after the notices are queued, and does not suppress the one notice to the peer
+it names when that peer is in the set: a relay announces to its neighbors whoever handed the event
+over.
+Its first time is never rewritten afterwards (it tells "arrived here before I passed it on").
+_Why no ancestor sample:_ the claimed author may lack those ancestors, and the hints would then
+skip real notices to that member.
 Query requests never clear hints, and an event with older parents never clears hints for other
 branches.
 
@@ -3901,7 +4019,7 @@ Every member can create a valid message attributed to any other member, and can 
 proof of any event.
 Agraphon authenticates only the immediate peer.
 Fabricated messages are sent like relays (notice, then answer requests), so the sending pattern
-does not single out the fabricator.
+does not single out the fabricator; the residual differences are listed in §16.13.
 
 The create event's `author` is likewise an unauthenticated claim.
 A member can show others the create event, but it proves nothing about who made it.
@@ -4100,6 +4218,54 @@ rule it described has no announced timer left to differ from.
 What a peer can still observe is what any invitation shows: the person who starts the chat learns
 whether and when the other accepts it, as for any group (§4.8).
 
+### 16.13 Known limitations: publishing under another member's name, local-only messages and edits
+
+Accepted on 2026-11-27 with D.92 to D.97; each is to analyse (the file named is the issue that
+tracks it).
+
+**On the publishing device** (someone reading its storage; the owner considers a snapshot of an
+unlocked device taken while it impersonates someone to be at the edge of the threat model):
+
+- No ancestor hints for the claimed author, where a real arrival marks a sample of up to 31
+  ancestors as seen by the deliverer (§10.3). To analyse:
+  `gossip-fabricated-message-leaves-other-local-records-unlike-a-relay.md`.
+- No peer-score credit for a deliverer, where a real arrival credits one (§11.8). To analyse:
+  `gossip-fabricated-message-leaves-other-local-records-unlike-a-relay.md`.
+- During the random wait, a pending relay record exists for the event, and after it, until the
+  notice to the peer named by the hint has left the queue, a record that keeps the hint from
+  suppressing that notice. Both hold no content and live seconds. To analyse with the previous
+  item.
+
+**Over the network:**
+
+- The claimed author, when it is in the notice set, receives a notice for a message under its own
+  name. It already knows it did not write it, and cannot tell a fabricator from a relay. To
+  analyse: `gossip-send-as-claimed-author-may-get-a-notice-for-its-own-name.md`.
+- The parents named by the event are the publisher's tips, not the claimed author's. To analyse:
+  `gossip-send-as-parents-are-the-publishers-tips.md`.
+- The claimed author's neighbors never receive the message in full directly, as they would for
+  that member's real messages; this reads as a loss or as that member being offline. To analyse:
+  `gossip-send-as-claimed-authors-neighbours-never-get-a-full-push.md`.
+- A version announced by notices and replaced soon after on this device is answered "not
+  available" to the peers that ask for it, which penalises this device in their peer score
+  (§11.8); a full push never caused such a request. Seen in the network simulation (an honest
+  device ending below the credible score). To analyse:
+  `gossip-relay-like-publications-lower-the-publishers-peer-score.md`.
+- A reply or a reaction for everyone to a local-only message (§9.7) tells the other members that
+  this device holds a message they lack (not that it was made up: "a member sent it to me only"
+  explains it too). To analyse:
+  `gossip-local-only-message-replies-and-reactions-reveal-a-message-others-lack.md`.
+
+**Sequences of edits.** The rule "in full only when the user is the author before and after the
+edit" (§10.2) looks at the author stored at the moment of each edit, which earlier edits set, by
+the user or by anyone.
+Across a sequence of more than two edits, the way successive edits leave the device (in full, or as
+notices) can reveal more than each edit does alone.
+Example: a message of Bob's is re-attributed to the user, as notices, deniably; the user then edits
+it again: the author is now the user before and after, so that edit is pushed in full, which shows
+the user's neighbors that the user treats the message as their own.
+To analyse and fix: `gossip-edit-sequences-reveal-more-than-single-edits.md`.
+
 ## 17. Readiness, validation and future work
 
 ### 17.1 Release prerequisites
@@ -4290,6 +4456,7 @@ accept and relay such a root unchanged.
 | Scheduled-delete timers                                                                 | wait ≤ 2 h; fallback 30 min (5 min when open)                                                                                      |
 | Message timer                                                                           | per epoch, in its root: a message is deleted at `created_at + T` (§7.7)                                                            |
 | Hint expiry                                                                             | 28 days                                                                                                                            |
+| Wait before announcing what is published under another name (local policy, provisional) | uniform in [0.5 s, 5 s] (§10.2)                                                                                                    |
 | Invitation delay `PROMPT_DELAY`                                                         | 5 min after receiving the root (§4.8)                                                                                              |
 | Successor after a leave or request                                                      | 30 s without a new one; at most 5 min after the first (§5.5)                                                                       |
 | Owner-only request resend                                                               | every 24 h (§5.4)                                                                                                                  |
@@ -6303,3 +6470,127 @@ _Alternatives not taken:_
 - Declare every contact the user added: the version notice becomes a probe of who added whom.
 - Answer every peer with a version notice: it would tell anyone which version this device speaks,
   which §13.8 limits to contacts on purpose.
+
+### D.92 No marker on a local-only message (§9.7, §9.3, §16.3)
+
+_Context:_ the engine gains a new message created on this device only (§9.7). The interface's
+design marked such a message ("Only for you", a dashed outline).
+
+_Decision:_ decided by the owner on 2026-11-27. No marker of any kind: no flag, field, table or
+log outside a full debug build in the engine, and no label, outline or remembered state in the
+app. The message is stored so that it cannot be told apart from an evicted message whose result
+is still on the device, as §9.3 already requires for local changes. The designer's label is
+dropped, for new messages as it was for edits.
+
+_Why:_ plausible deniability; the owner considers this point very important. Any marker would
+prove what the message is.
+
+### D.93 The shape of a local-only message (§9.7, §7.7, §14.1), may be revised
+
+_Context:_ after a local change or an eviction, the engine keeps the message's result and, for
+each event that carried it, a bare stub (an ID and its parent links); both go through the same
+code. Event retention (14 days) and the message timer are separate: with no timer stubs are not
+linked to their message; with a timer the message's record lists them, and a real message always
+has at least one carrier or stub.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice C), **open to revision** in the coming days
+or weeks. With no message timer: the result only, no stub. With a timer: the result plus one
+fabricated stub (fresh ID dated now, parents the current tips chosen as a publication would,
+listed in the record's stubs), erased with the message by the timer.
+
+_Why:_ without a timer a result with no identifiable stub is an ordinary state and a fabricated
+stub would be a permanent object that need not exist; under a timer an empty list would be a
+structural mark.
+
+_Impacts accepted:_ only someone reading the device's storage, and only statistically, can notice
+it: under a timer no later event names the stub as a parent, no hint exists for it, and the stub
+is recent for an eviction (as for any local edit, D.35); with no timer no event row has the
+message's `created_at` as its timestamp. Two devices compared show the ID on one only, in every
+design ("a member sent it to me only").
+
+_Alternatives not taken:_
+
+- Always a stub (A): a needless permanent object when there is no timer.
+- Never a stub (B): a structural mark under a timer, which is the default (28 days).
+
+### D.94 No special rule for a local-only message, and a warning on Retry (§9.4, §9.7)
+
+_Context:_ with no marker (D.92), the engine cannot tell a local-only message from any message it
+no longer serves.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A). Everything that applies to a message
+the device no longer serves applies unchanged: replies and reactions for everyone, local edits and
+deletions, Retry. "Retry synchronisation" always shows a warning first, on every message: it sends
+to everyone the version this device holds, including anything changed only on this device.
+
+_Why:_ the case cannot be detected by construction, so no rule can depend on it, and a warning
+shown only for some messages would be a marker.
+
+_Impacts accepted:_ a reply or a reaction for everyone to such a message tells the other members
+that this device holds a message they lack (§16.13). A Retry publishes it to everyone as a new
+message with its original date.
+
+_Alternatives not taken:_ forbidding replies and reactions for everyone to any message the device
+no longer serves: it would forbid replying to any message older than 14 days.
+
+### D.95 A message published under another member's name looks delivered by that member (§10.2, §10.3)
+
+_Context:_ §10.2 already sends fabricated messages as notices. The engine lacked the author
+parameter from the node to the SDK; no wire change is needed.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice D). The message is handled as if the claimed
+author had delivered it: after a random wait (D.96) the device records the hint "the claimed author
+has this event", for the event only (no ancestor sample), whether or not that member is a neighbor,
+and its first time is never rewritten; then notices go to exactly the normal set of a
+dissemination (selected neighbors plus the random extra recipients), nothing added or removed for
+the claimed author, who is notified only if in that set, despite the hint. A request for the event
+is answered whoever asks.
+
+_Why:_ fabrication then looks like an honest relay. Forcing the claimed author into the set would
+be observable in a large chat (a chat of 500). Ancestor hints are not written because the claimed
+author may lack them and real notices to that member would be skipped.
+
+_Impacts accepted:_ the known limits of §16.13 (no ancestor hints, no score credit; the claimed
+author may get a notice; parents are the publisher's tips; the claimed author's neighbors never get
+a full push).
+
+### D.96 The random time is a wait, not a backdated timestamp (§10.2, Appendix B)
+
+_Decision:_ decided by the owner on 2026-11-27 (choice B). The message keeps its true timestamp;
+the device waits a random time, uniform between 0.5 s and 5 s, before it records the hint and sends
+the notices. The wait survives the app closing. The range is provisional, to be tuned from the
+one-hop travel times recorded by the debug build.
+
+_Why:_ safer against future features that set dates on purpose, such as preparing a message to be
+sent at a later date, which the protocol allows.
+
+_Impacts accepted:_ a message sent as someone else leaves a few seconds late.
+
+_Alternatives not taken:_ backdating the timestamp by the random value and sending at once, which
+dates the message before the moment it was sent and can show it before a message that arrived in
+those seconds. Kept as a possible improvement if that drawback can be fixed:
+`gossip-fabricated-message-backdate-the-timestamp-instead-of-waiting.md`.
+
+### D.97 One rule for everything attributed to another member, edits and re-appropriation included (§7.2, §10.2, §10.3)
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A, then A'). An edit for everyone may set the
+message's author to any member (publisher side only; reactions excluded, their ID is bound to the
+author). An edit is pushed in full, as the user's own, only when the author was the user before
+the edit and is the user after it. Every other edit is handled as in D.95 and D.96: an edit that
+sets the author to another member (the hint names that member), an edit of another member's
+message that keeps that author (until now a notice sent at once, now a few seconds later, with the
+hint for that author), and an edit that gives the message to the user (re-appropriation), whose
+hint names one peer drawn at random inside the notice set, who is notified anyway. In a chat of two
+that peer is necessarily the previous author. Deletions are sent as before.
+
+_Why:_ honest devices push in full only what they author. A full push of a re-appropriation would
+tell the user's neighbors that the user took the message; as notices it reads as someone else
+re-attributing it and this device relaying it. The random peer is picked inside the notice set
+because a peer outside it is one the device never notifies, whom the hint would then keep from
+ever being told; an entry only says "this peer has this event", which becomes true once it fetched
+the edit.
+
+_Impacts accepted:_ the rule looks at the author stored at each edit, so across sequences of more
+than two edits the forms in which they leave can reveal more than each edit alone (§16.13):
+`gossip-edit-sequences-reveal-more-than-single-edits.md`. Changing a reaction's author (remove as
+one member, add as another) is documented and left for later.
