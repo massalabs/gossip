@@ -3,7 +3,7 @@ import { useMinuteTick } from '../../hooks/useMinuteTick';
 import { useTranslation } from 'react-i18next';
 import { Contact, SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
-import { BellOff, Bookmark, Edit2 } from 'react-feather';
+import { Archive, BellOff, Bookmark, Edit2 } from 'react-feather';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { BookOpen } from 'react-feather';
 import { formatRelativeTime } from '../../utils/timeUtils';
@@ -39,6 +39,8 @@ interface DiscussionListItemProps {
   onOpenInvitation?: (discussion: Discussion) => void;
   onEditName?: (discussion: Discussion, newName: string) => void;
   onTogglePin?: (discussion: Discussion) => void;
+  /** Moves an archive to the archived list, or back (Lucas's screen 14). */
+  onToggleArchived?: (discussion: Discussion) => void;
 }
 
 const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
@@ -53,6 +55,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   onOpenInvitation,
   onEditName,
   onTogglePin,
+  onToggleArchived,
 }) => {
   const { t } = useTranslation('discussions');
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
@@ -286,6 +289,17 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
             icon: <Edit2 className="w-4 h-4" />,
             onClick: () => setIsEditNameModalOpen(true),
           },
+          ...(discussion.isArchive && onToggleArchived
+            ? [
+                {
+                  label: discussion.archived
+                    ? t('groups:archive.unarchive')
+                    : t('groups:archive.archive'),
+                  icon: <Archive className="w-4 h-4" />,
+                  onClick: () => onToggleArchived(discussion),
+                },
+              ]
+            : []),
         ]}
         isOpen={isContextMenuOpen}
         onClose={() => setIsContextMenuOpen(false)}

@@ -1,4 +1,5 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
+import { Trash2 } from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { GroupInvitation, LeaveChoice } from '@massalabs/gossip-sdk';
@@ -19,6 +20,9 @@ import GroupInvitationCard from './GroupInvitationCard';
 import ContinuationPrompt from './ContinuationPrompt';
 import SafeName from './SafeName';
 import GroupAvatar from './GroupAvatar';
+import ContextMenu from '../ui/ContextMenu';
+import { useLongPress } from '../../hooks/useLongPress';
+import { canDeleteChat, useDeleteChat } from '../../hooks/useDeleteChat';
 
 interface GroupListSectionProps {
   /** Only groups whose name matches (the list's search). */
@@ -38,6 +42,8 @@ const GroupRow: React.FC<{
   /** Another person's new chat that continues this one (§5.12). */
   continuation?: GroupInvitation;
   onOpen: () => void;
+  /** "Delete chat", with its confirmation, when the engine allows it. */
+  onDelete?: () => void;
 }> = ({
   entry,
   name,
@@ -47,18 +53,34 @@ const GroupRow: React.FC<{
   memberName,
   continuation,
   onOpen,
+  onDelete,
 }) => {
   const { t } = useTranslation('groups');
   const readOnly = entry.summary.status !== 'member';
+  // The long press offers what Lucas's design lists for a chat and the engine
+  // allows here: "Delete chat" once the user is out of it. Archiving a chat
+  // has no engine support yet.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const longPress = useLongPress({
+    onLongPress: () => setMenuOpen(true),
+    disabled: !onDelete,
+  });
   return (
     <div
       className="w-full text-left bg-card rounded-2xl shadow-sm dark:shadow-none dark:border dark:border-border/60 mb-2 hover:bg-muted/60 hover:shadow-md dark:hover:border-border active:scale-[0.99] transition-all cursor-pointer p-4"
       role="button"
       tabIndex={0}
-      onClick={onOpen}
+      onClick={() => {
+        if (longPress.longPressTriggered.current) return;
+        onOpen();
+      }}
       onKeyDown={e => {
         if (e.key === 'Enter') onOpen();
       }}
+      onTouchStart={longPress.onTouchStart}
+      onTouchMove={longPress.onTouchMove}
+      onTouchEnd={longPress.onTouchEnd}
+      onContextMenu={longPress.onContextMenu}
       data-testid="group-row"
     >
       <div className="flex items-center space-x-3">
@@ -110,6 +132,22 @@ const GroupRow: React.FC<{
           )}
         </div>
       </div>
+      {onDelete && (
+        <div onClick={e => e.stopPropagation()}>
+          <ContextMenu
+            items={[
+              {
+                label: t('details.delete_locally'),
+                icon: <Trash2 className="w-4 h-4" />,
+                onClick: onDelete,
+                danger: true,
+              },
+            ]}
+            isOpen={menuOpen}
+            onClose={() => setMenuOpen(false)}
+          />
+        </div>
+      )}
     </div>
   );
 };
@@ -134,6 +172,7 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
     i => !i.migrationOf && !i.continues
   );
   const refresh = useGroupStore(s => s.refresh);
+  const deleteChat = useDeleteChat();
   const me = useAccountStore(s => s.userProfile?.userId);
   const memberName = useGroupMemberName();
   const discussions = useDiscussionStore(s => s.discussions);
@@ -235,11 +274,17 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
                 onOpen={() =>
                   navigate(ROUTES.group({ groupId: entry.summary.groupId }))
                 }
+                onDelete={
+                  canDeleteChat(entry.summary.status)
+                    ? () => deleteChat.ask(entry.summary.groupId)
+                    : undefined
+                }
               />
             );
           })}
         </>
       )}
+      {deleteChat.sheet}
     </section>
   );
 };

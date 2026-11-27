@@ -404,4 +404,47 @@ describe('chat screens', () => {
       expect(buttonsNamed('details.delete_locally')).toHaveLength(0);
     });
   });
+
+  describe('the long press on a chat (screen 03)', () => {
+    async function longPress(el: Element | null) {
+      await act(async () => {
+        el!.dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+        );
+      });
+    }
+
+    async function openList(status: 'member' | 'left') {
+      fake.state.groups = [summary({ status })];
+      useGroupStore.getState().init();
+      await act(flush);
+      const r = await renderAt(<GroupListSection />);
+      unmount = r.unmount;
+      await act(flush);
+      return r.container;
+    }
+
+    it('offers "Delete chat" on a chat the user is out of, with the confirmation of the settings', async () => {
+      const c = await openList('left');
+      await longPress(c.querySelector('[data-testid="group-row"]'));
+      const item = Array.from(
+        document.querySelectorAll('[role="menuitem"]')
+      ).find(e => e.textContent === 'details.delete_locally');
+      await click(item);
+      // The row did not open the chat.
+      expect(c.querySelector('[data-testid="elsewhere"]')).toBeNull();
+      expect(document.body.textContent).toContain('details.delete_title');
+      expect(fake.service.deleteGroup).not.toHaveBeenCalled();
+      const del = buttonsNamed('common:delete');
+      await click(del[del.length - 1]);
+      await act(flush);
+      expect(fake.service.deleteGroup).toHaveBeenCalledWith('g1');
+    });
+
+    it('offers nothing on a chat the user is in: it cannot be deleted or archived here', async () => {
+      const c = await openList('member');
+      await longPress(c.querySelector('[data-testid="group-row"]'));
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+    });
+  });
 });
