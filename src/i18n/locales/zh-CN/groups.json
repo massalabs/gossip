@@ -218,7 +218,8 @@
     "open_settings": "打开聊天详情：{{name}}",
     "archive": "归档聊天",
     "archive_hint": "已归档的聊天会从你的列表中隐藏，但你仍是成员。",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "save_for_me_hint": "此名称仅保存在本设备上。"
   },
   "resolve": {
     "title": "处理相互竞争的版本",

@@ -1337,6 +1337,29 @@ describe('group pages', () => {
       expect(fake.service.setLocalName).not.toHaveBeenCalled();
     });
 
+    it("clears the owner's own name when the shared name is saved, so that the owner sees what they typed", async () => {
+      await settingsOf({ owner: 'me', localName: 'Holidays' });
+      await click(document.querySelector('[data-testid="chat-name-edit"]'));
+      await type(nameField(), 'Summer trip');
+      await click(byText('details.save_for_everyone'));
+      await act(flush);
+      expect(fake.service.changeMembers).toHaveBeenCalledWith('g1', {
+        name: 'Summer trip',
+      });
+      expect(fake.service.setLocalName).toHaveBeenCalledWith('g1', null);
+      expect(
+        fake.service.changeMembers.mock.invocationCallOrder[0]
+      ).toBeLessThan(fake.service.setLocalName.mock.invocationCallOrder[0]);
+    });
+
+    it('says under "Save for me" that the name stays on this device', async () => {
+      await settingsOf({ owner: 'me' });
+      await click(document.querySelector('[data-testid="chat-name-edit"]'));
+      expect(
+        document.querySelector('[data-testid="save-for-me-hint"]')?.textContent
+      ).toBe('details.save_for_me_hint');
+    });
+
     it('refuses a name over 256 bytes', async () => {
       await settingsOf({ owner: 'me' });
       await click(document.querySelector('[data-testid="chat-name-edit"]'));

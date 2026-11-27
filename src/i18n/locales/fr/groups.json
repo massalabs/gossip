@@ -218,7 +218,8 @@
     "open_settings": "Ouvrir les détails du Chat {{name}}",
     "archive": "Archiver le Chat",
     "archive_hint": "Les Chats archivés sont masqués de votre liste, mais vous en restez membre.",
-    "unarchive": "Désarchiver"
+    "unarchive": "Désarchiver",
+    "save_for_me_hint": "Ce nom est conservé sur cet appareil uniquement."
   },
   "resolve": {
     "title": "Résoudre les versions concurrentes",

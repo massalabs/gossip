@@ -218,7 +218,8 @@
     "open_settings": "Open the chat details of {{name}}",
     "archive": "Archive chat",
     "archive_hint": "Archived chats are hidden from your list but you stay a member.",
-    "unarchive": "Unarchive"
+    "unarchive": "Unarchive",
+    "save_for_me_hint": "This name is kept on this device only."
   },
   "resolve": {
     "title": "Resolve competing versions",
