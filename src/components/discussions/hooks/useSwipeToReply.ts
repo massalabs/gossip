@@ -19,22 +19,22 @@ const TOUCH_SLOP = 15;
 const TOUCH_SLOP_OUTGOING = 12;
 const POST_GESTURE_SUPPRESS_MS = 700;
 
-interface UseSwipeToReplyOptions {
+interface UseSwipeToReplyOptions<M = Message> {
   isOutgoing: boolean;
   isDeleted: boolean;
   isSelecting: boolean;
   isTextSelectable: boolean;
   canReply: boolean;
   canForward: boolean;
-  onReplyTo?: (message: Message) => void;
-  message: Message;
+  onReplyTo?: (message: M) => void;
+  message: M;
   longPress: ReturnType<typeof useLongPress>;
   suppressClickRef: React.MutableRefObject<boolean>;
   suppressClicksUntilRef: React.MutableRefObject<number>;
   longPressPosRef: React.MutableRefObject<{ x: number; y: number } | null>;
 }
 
-export function useSwipeToReply({
+export function useSwipeToReply<M = Message>({
   isOutgoing,
   isDeleted,
   isSelecting,
@@ -47,7 +47,7 @@ export function useSwipeToReply({
   suppressClickRef,
   suppressClicksUntilRef,
   longPressPosRef,
-}: UseSwipeToReplyOptions) {
+}: UseSwipeToReplyOptions<M>) {
   const [swipeOffset, setSwipeOffset] = useState(0);
   const swipeOffsetRef = useRef(0);
   const [isAnimatingBack, setIsAnimatingBack] = useState(false);
