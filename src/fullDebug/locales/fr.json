@@ -1,5 +1,5 @@
 {
-  "banner": "Version DEBUG : tout est enregistré, y compris les messages et les clés, et peut être envoyé aux développeurs. Utilisez un compte neuf. Installez la version normale pour un usage réel.",
+  "banner": "Version DEBUG : tout est enregistré, y compris les messages et les clés, et peut être envoyé aux développeurs. Utilisez un compte neuf. Installez la version normale pour un usage réel. Réservé à l'équipe de développement et aux partenaires autorisés. La distribution de cette version n'est pas autorisée.",
   "send_button": "Envoyer les journaux de débogage",
   "test_error_button": "Provoquer une erreur de test",
   "test_error_message": "Erreur de test provoquée depuis les réglages de débogage",

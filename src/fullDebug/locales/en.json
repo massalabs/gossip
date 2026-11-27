@@ -1,5 +1,5 @@
 {
-  "banner": "DEBUG build: everything is recorded, including messages and keys, and can be sent to the developers. Use a fresh account. Install the normal version for real use.",
+  "banner": "DEBUG build: everything is recorded, including messages and keys, and can be sent to the developers. Use a fresh account. Install the normal version for real use. For the development team and authorised partners only. Distributing this build is not authorised.",
   "send_button": "Send debug logs",
   "test_error_button": "Force a test error",
   "test_error_message": "Test error forced from the debug settings",

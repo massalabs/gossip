@@ -28,6 +28,13 @@ Their unit tests are in `test/scripts/`.
 
 ## The full debug build
 
+**Who it is for.** The debug build is for the development team and for partners who have
+accepted all the associated risks, and for nobody else. It is not for users and not for field
+tests with outside people. Distributing a debug build to anyone else is not authorised. The app
+says so itself, in the banner it shows on every screen: a person who installs a copy they were
+given learns at the first launch that they should not have it. Always use a fresh account on a
+debug build; never log in with, restore or import a real account.
+
 A separate app for testers on fresh accounts (`npm run build:full-debug`,
 `npm run android:full-debug`). It breaks the rules above on purpose: it
 records everything the app does, message content and keys included, in
