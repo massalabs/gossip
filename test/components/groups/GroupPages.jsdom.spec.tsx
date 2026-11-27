@@ -523,6 +523,94 @@ describe('group pages', () => {
     });
   });
 
+  /** Types `value` in the input `el`, as a user would. */
+  async function type(el: Element | null, value: string) {
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value'
+      )!.set!;
+      setter.call(el, value);
+      el!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  async function openSettings(members: string[]) {
+    fake.state.groups = [summary({ members })];
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <GroupSettings />,
+      '/group/g1/settings',
+      '/group/:groupId/settings'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    return r;
+  }
+
+  /** The member rows that offer "Add as contact", by the name they show. */
+  function addContactRows(): string[] {
+    return Array.from(
+      document.querySelectorAll('[data-testid="member-add-contact"]')
+    ).map(b => b.closest('li')!.querySelector('span')!.textContent ?? '');
+  }
+
+  it('offers "Add as contact" only for members who are no accepted contact, and adds them under the name given', async () => {
+    useDiscussionStore.setState({
+      contacts: [
+        { userId: 'bob', name: '', connection: 'automatic' },
+        { userId: 'carl', name: 'Carl', connection: 'accepted' },
+        { userId: 'dana', name: 'Dana', connection: 'requested' },
+      ] as never,
+    });
+    await openSettings(['me', 'bob', 'carl', 'dana', 'erin']);
+    // Bob (automatic), Dana (a request waiting) and Erin (no row yet); never
+    // the user, never Carl.
+    expect(addContactRows()).toHaveLength(3);
+    const rows = Array.from(
+      document.querySelectorAll('[data-testid="member-add-contact"]')
+    ).map(b => b.closest('li')!.textContent ?? '');
+    expect(rows.some(t => t.includes('Carl'))).toBe(false);
+    expect(rows.some(t => t.includes('list.you'))).toBe(false);
+
+    await click(document.querySelector('[data-testid="member-add-contact"]'));
+    expect(document.body.textContent).toContain('details.add_as_contact_hint');
+    // The name rule of the new-contact form: Carl is taken.
+    await type(document.querySelector('input[type="text"]'), 'carl');
+    const confirm = () =>
+      Array.from(document.querySelectorAll('button')).filter(
+        b => b.textContent?.trim() === 'details.add_as_contact'
+      );
+    await click(confirm()[confirm().length - 1]);
+    expect(fake.sdk.conversations.addAsContact).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('details.contact_name_taken');
+
+    await type(document.querySelector('input[type="text"]'), 'Bobby');
+    await click(confirm()[confirm().length - 1]);
+    await act(flush);
+    expect(fake.sdk.conversations.addAsContact).toHaveBeenCalledWith(
+      'bob',
+      'Bobby'
+    );
+  });
+
+  it('lists only accepted contacts to add to a chat, as "New group" does', async () => {
+    useDiscussionStore.setState({
+      contacts: [
+        { userId: 'carl', name: 'Carl' },
+        { userId: 'zed', name: 'Zed', connection: 'automatic' },
+        { userId: 'yan', name: 'Yan', connection: 'requested' },
+      ] as never,
+    });
+    await openSettings(['me', 'bob']);
+    await click(byText('details.add_members'));
+    const boxes = Array.from(
+      document.querySelectorAll('input[type="checkbox"]')
+    ).map(b => b.getAttribute('aria-label'));
+    expect(boxes).toEqual(['Carl']);
+  });
+
   it("shows former owners' branches as information and lets the owner merge them", async () => {
     fake.state.groups = [
       summary({ members: ['me', 'bob', 'old'], formerOwnerBranches: ['f1'] }),
