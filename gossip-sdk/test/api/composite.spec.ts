@@ -80,7 +80,12 @@ describe('CompositeMessageProtocol', () => {
     expect(protocol.takeAcceptedBy(bytes(1))).toBeUndefined();
 
     internet.down = false;
-    await protocol.sendMessage({ seeker: bytes(2), ciphertext: bytes(9) });
+    const outcome = await protocol.sendMessageTracked({
+      seeker: bytes(2),
+      ciphertext: bytes(9),
+    });
+    // once every transport answered, the record has them all
+    await outcome.settled;
     expect(protocol.takeAcceptedBy(bytes(2))).toEqual(['internet', 'mesh']);
   });
 
