@@ -274,32 +274,68 @@ describe('group pages', () => {
     expect(blocked?.textContent).toContain('details.resolve_open');
   });
 
-  it("offers only local actions on someone else's message, and confirms them", async () => {
+  /** Opens the menu of the `i`-th message. */
+  async function openMenu(r: { container: HTMLDivElement }, i: number) {
+    const rows = r.container.querySelectorAll('[data-testid="group-message"]');
+    await click(rows[i].querySelector('[role="button"]'));
+  }
+
+  it("offers one Edit and one Delete on every message, someone else's included", async () => {
     const r = await openGroup('member');
     unmount = r.unmount;
-    const bubble = r.container
-      .querySelectorAll('[data-testid="group-message"]')[1]
-      .querySelector('[role="button"]');
-    await click(bubble);
-    expect(byText('message_menu.edit')).toBeUndefined();
-    expect(byText('message_menu.delete_everyone')).toBeUndefined();
-    await click(byText('message_menu.delete_locally'));
-    expect(fake.service.deleteMessageLocally).not.toHaveBeenCalled();
-    expect(byText('message_menu.delete_locally_body')).toBeDefined();
-    await click(byText('choices.confirm'));
-    expect(fake.service.deleteMessageLocally).toHaveBeenCalledWith('g1', 's2');
+    for (const i of [0, 1]) {
+      await openMenu(r, i);
+      expect(byText('message_menu.edit')).toBeDefined();
+      expect(byText('message_menu.delete')).toBeDefined();
+      for (const gone of [
+        'message_menu.delete_everyone',
+        'message_menu.delete_locally',
+        'message_menu.edit_locally',
+      ]) {
+        expect(byText(gone)).toBeUndefined();
+      }
+      await act(async () => {
+        document.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+        );
+      });
+      await act(flush);
+    }
   });
 
-  it('lets the author delete for everyone after a confirmation', async () => {
+  it('asks for whom a deletion is, and each button calls its method', async () => {
     const r = await openGroup('member');
     unmount = r.unmount;
-    const bubble = r.container
-      .querySelectorAll('[data-testid="group-message"]')[0]
-      .querySelector('[role="button"]');
-    await click(bubble);
+    // Someone else's message, for everyone (the first, main button).
+    await openMenu(r, 1);
+    await click(byText('message_menu.delete'));
+    expect(fake.service.deleteMessage).not.toHaveBeenCalled();
+    const confirm = document.querySelector('[data-testid="delete-confirm"]')!;
+    const buttons = Array.from(confirm.querySelectorAll('button')).map(b =>
+      b.textContent?.trim()
+    );
+    expect(buttons).toEqual([
+      'message_menu.delete_everyone',
+      'message_menu.delete_on_device',
+      'choices.cancel',
+    ]);
     await click(byText('message_menu.delete_everyone'));
-    await click(byText('choices.confirm'));
-    expect(fake.service.deleteMessage).toHaveBeenCalledWith('g1', 's1');
+    await act(flush);
+    expect(fake.service.deleteMessage).toHaveBeenCalledWith('g1', 's2');
+    expect(fake.service.deleteMessageLocally).not.toHaveBeenCalled();
+    // Only on this device.
+    await openMenu(r, 0);
+    await click(byText('message_menu.delete'));
+    await click(byText('message_menu.delete_on_device'));
+    await act(flush);
+    expect(fake.service.deleteMessageLocally).toHaveBeenCalledWith('g1', 's1');
+    // Cancel deletes nothing.
+    await openMenu(r, 0);
+    await click(byText('message_menu.delete'));
+    await click(byText('choices.cancel'));
+    await act(flush);
+    expect(fake.service.deleteMessage).toHaveBeenCalledTimes(1);
+    expect(fake.service.deleteMessageLocally).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the text of a message the group refuses, and says it is too long', async () => {
@@ -404,10 +440,7 @@ describe('group pages', () => {
   it('keeps an edit over the limit in the input', async () => {
     const r = await openGroup('member');
     unmount = r.unmount;
-    const bubble = r.container
-      .querySelectorAll('[data-testid="group-message"]')[0]
-      .querySelector('[role="button"]');
-    await click(bubble);
+    await openMenu(r, 0);
     await click(byText('message_menu.edit'));
     const textarea = r.container.querySelector(
       'textarea'
@@ -419,35 +452,199 @@ describe('group pages', () => {
     expect(fake.service.editMessage).not.toHaveBeenCalled();
     expect(await toastErrors()).toEqual(['composer.too_long']);
     expect(textarea.value).toBe(long);
-    expect(byText('message_input.editing')).toBeDefined();
+    expect(byText('composer.editing_own')).toBeDefined();
   });
 
-  it('does not save a local edit over the limit, and keeps its text', async () => {
+  const sendButton = () =>
+    document.querySelector('[data-testid="send-button"]') as HTMLElement;
+  const textOf = (r: { container: HTMLDivElement }) =>
+    (r.container.querySelector('textarea') as HTMLTextAreaElement).value;
+
+  /** Holds the Send button down for longer than a long press. */
+  async function longPress(el: Element) {
+    await act(async () => {
+      el.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, button: 0 })
+      );
+      await new Promise(res => setTimeout(res, 600));
+      el.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    });
+  }
+
+  it("edits someone else's message from the text box, with its text and author, for everyone by a plain tap", async () => {
     const r = await openGroup('member');
     unmount = r.unmount;
-    const bubble = r.container
-      .querySelectorAll('[data-testid="group-message"]')[1]
-      .querySelector('[role="button"]');
-    await click(bubble);
-    await click(byText('message_menu.edit_locally'));
-    const field = document.getElementById('local-edit') as HTMLTextAreaElement;
-    expect(field.value).toBe('answer');
-    const long = '\u00e9'.repeat(8_193);
-    await typeInto(field, long);
-    expect(byText('composer.edit_too_long')).toBeDefined();
-    const save = byText('common:save') as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
-    await click(save);
+    const textarea = r.container.querySelector(
+      'textarea'
+    ) as HTMLTextAreaElement;
+    await typeInto(textarea, 'half typed');
+    await openMenu(r, 1);
+    await click(byText('message_menu.edit'));
+    await act(flush);
+    expect(textOf(r)).toBe('answer');
+    // The author is shown, and stays the message's author.
+    expect(byText('composer.editing_by')).toBeDefined();
+    expect(sendButton().getAttribute('aria-label')).toBe('composer.save_edit');
+    await typeInto(
+      r.container.querySelector('textarea') as HTMLTextAreaElement,
+      'better answer'
+    );
+    await click(sendButton());
+    await act(flush);
+    expect(fake.service.editMessage).toHaveBeenCalledWith(
+      'g1',
+      's2',
+      'better answer'
+    );
     expect(fake.service.editMessageLocally).not.toHaveBeenCalled();
-    expect(field.value).toBe(long);
-    // Near the limit the size shows; within it, it saves.
-    await typeInto(field, '\u00e9'.repeat(8_000));
-    expect(byText('composer.edit_too_long')).toBeUndefined();
-    expect(byText('discussions:message_input.size_counter')).toBeDefined();
-    await click(byText('common:save'));
+    // What was typed before the edit comes back.
+    expect(textOf(r)).toBe('half typed');
+    expect(byText('composer.editing_by')).toBeUndefined();
+  });
+
+  it('gives the typed text back when an edit is cancelled', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    await typeInto(
+      r.container.querySelector('textarea') as HTMLTextAreaElement,
+      'draft'
+    );
+    await openMenu(r, 0);
+    await click(byText('message_menu.edit'));
+    await act(flush);
+    expect(textOf(r)).toBe('question');
+    await click(
+      document.querySelector('[aria-label="message_input.cancel_edit"]')
+    );
+    await act(flush);
+    expect(textOf(r)).toBe('draft');
+    expect(fake.service.editMessage).not.toHaveBeenCalled();
+  });
+
+  it('opens the scope menu by a long press on Send without sending, and saves an edit only for me', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    await openMenu(r, 1);
+    await click(byText('message_menu.edit'));
+    await act(flush);
+    await longPress(sendButton());
+    expect(document.querySelector('[data-testid="scope-menu"]')).not.toBeNull();
+    expect(fake.service.editMessage).not.toHaveBeenCalled();
+    // "For everyone" is the one checked.
+    expect(
+      document
+        .querySelector('[data-testid="scope-everyone"]')!
+        .getAttribute('aria-checked')
+    ).toBe('true');
+    await click(document.querySelector('[data-testid="scope-me"]'));
+    expect(document.querySelector('[data-testid="scope-menu"]')).toBeNull();
+    expect(document.querySelector('[data-testid="send-mark"]')).not.toBeNull();
+    expect(sendButton().getAttribute('aria-label')).toBe(
+      'composer.save_edit_me'
+    );
+    await typeInto(
+      r.container.querySelector('textarea') as HTMLTextAreaElement,
+      'my version'
+    );
+    await click(sendButton());
+    await act(flush);
     expect(fake.service.editMessageLocally).toHaveBeenCalledWith('g1', 's2', {
-      body: { type: 'text', text: '\u00e9'.repeat(8_000) },
+      body: { type: 'text', text: 'my version' },
     });
+    expect(fake.service.editMessage).not.toHaveBeenCalled();
+    // Back to "for everyone" after the send.
+    expect(document.querySelector('[data-testid="send-mark"]')).toBeNull();
+  });
+
+  it('opens the scope menu by a right-click and by a button for the keyboard', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    await openMenu(r, 0);
+    await click(byText('message_menu.edit'));
+    await act(flush);
+    await act(async () => {
+      sendButton().dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      );
+    });
+    expect(document.querySelector('[data-testid="scope-menu"]')).not.toBeNull();
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+      );
+    });
+    expect(document.querySelector('[data-testid="scope-menu"]')).toBeNull();
+    const options = document.querySelector('[data-testid="send-options"]')!;
+    expect(options.getAttribute('aria-haspopup')).toBe('menu');
+    expect(options.getAttribute('aria-label')).toBe('composer.scope_title');
+    await click(options);
+    expect(document.querySelector('[data-testid="scope-menu"]')).not.toBeNull();
+    expect(fake.service.editMessage).not.toHaveBeenCalled();
+  });
+
+  it('offers no "only for me" for a new message, which the engine cannot keep on this device only', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    expect(document.querySelector('[data-testid="send-options"]')).toBeNull();
+    await longPress(
+      r.container.querySelector('button[aria-label="message_input.send"]')!
+    );
+    expect(document.querySelector('[data-testid="scope-menu"]')).toBeNull();
+    // No author button either: the SDK sends under the user's name only.
+    expect(document.querySelector('[data-testid="author-button"]')).toBeNull();
+  });
+
+  it('shows no "only for you" label on an edited message', async () => {
+    fake.state.groups = [summary()];
+    fake.state.timelines.set('g1', [
+      message({ edited: true, lastModifiedAt: 2_000n }),
+      message({ syncObjId: 's2', author: 'bob', edited: true }),
+    ]);
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <GroupDiscussion />,
+      '/group/g1',
+      '/group/:groupId'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    const timeline = r.container.querySelector(
+      '[data-testid="group-timeline"]'
+    )!.textContent!;
+    expect(timeline).toContain('timeline.edited');
+    expect(timeline).not.toMatch(/only|scope|local/i);
+  });
+
+  it('in a read-only chat, edits and deletes on this device only', async () => {
+    const r = await openGroup('removed');
+    unmount = r.unmount;
+    expect(r.container.querySelector('textarea')).toBeNull();
+    await openMenu(r, 1);
+    await click(byText('message_menu.edit'));
+    await act(flush);
+    expect(textOf(r)).toBe('answer');
+    // Nothing to choose: the mark says it stays on this device.
+    expect(document.querySelector('[data-testid="send-mark"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="send-options"]')).toBeNull();
+    await click(sendButton());
+    await act(flush);
+    expect(fake.service.editMessageLocally).toHaveBeenCalledWith('g1', 's2', {
+      body: { type: 'text', text: 'answer' },
+    });
+    expect(fake.service.editMessage).not.toHaveBeenCalled();
+    expect(r.container.querySelector('textarea')).toBeNull();
+    await openMenu(r, 1);
+    await click(byText('message_menu.delete'));
+    const buttons = Array.from(
+      document
+        .querySelector('[data-testid="delete-confirm"]')!
+        .querySelectorAll('button')
+    ).map(b => b.textContent?.trim());
+    expect(buttons).toEqual([
+      'message_menu.delete_on_device',
+      'choices.cancel',
+    ]);
   });
 
   describe('a message being sent (D5)', () => {
@@ -530,7 +727,7 @@ describe('group pages', () => {
       // No menu on it while it is being sent.
       await click(local.querySelector('[role="button"]'));
       expect(byText('message_menu.reply')).toBeUndefined();
-      expect(byText('message_menu.delete_locally')).toBeUndefined();
+      expect(byText('message_menu.delete')).toBeUndefined();
 
       record('s9', 'hello');
       await sent.resolve('s9');

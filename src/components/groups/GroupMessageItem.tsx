@@ -5,7 +5,6 @@ import {
   Copy,
   CornerUpLeft,
   Edit2,
-  EyeOff,
   RefreshCw,
   Smile,
   Trash2,
@@ -31,10 +30,13 @@ import { messageText, toDate } from '../../utils/groupTimeline';
 export interface GroupMessageActions {
   onReply?: (m: GroupMessage) => void;
   onCopy?: (m: GroupMessage) => void;
+  /**
+   * Edits the message, anyone's (UI4, UI7): who sees the edit is chosen
+   * where it is written, not here.
+   */
   onEdit?: (m: GroupMessage) => void;
-  onDeleteForEveryone?: (m: GroupMessage) => void;
-  onEditLocally?: (m: GroupMessage) => void;
-  onDeleteLocally?: (m: GroupMessage) => void;
+  /** Deletes the message, anyone's: a confirmation asks for whom (UI3). */
+  onDelete?: (m: GroupMessage) => void;
   onRetry?: (m: GroupMessage) => void;
   /** Adds this account's reaction `emoji`, or removes it if there is one. */
   onToggleReaction?: (m: GroupMessage, emoji: string) => void;
@@ -77,9 +79,7 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   onReply,
   onCopy,
   onEdit,
-  onDeleteForEveryone,
-  onEditLocally,
-  onDeleteLocally,
+  onDelete,
   onRetry,
   onToggleReaction,
 }) => {
@@ -139,30 +139,11 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   if (canWrite)
     add(onReply, t('message_menu.reply'), <CornerUpLeft className="w-4 h-4" />);
   if (isText) add(onCopy, t('message_menu.copy'), <Copy className="w-4 h-4" />);
-  if (canWrite && isOutgoing && isText) {
+  // One Edit and one Delete, on every message: in a read-only chat they act
+  // on this device only, which the screen behind them says.
+  if (isText)
     add(onEdit, t('message_menu.edit'), <Edit2 className="w-4 h-4" />);
-  }
-  if (canWrite && isOutgoing) {
-    add(
-      onDeleteForEveryone,
-      t('message_menu.delete_everyone'),
-      <Trash2 className="w-4 h-4" />,
-      true
-    );
-  }
-  if (isText) {
-    add(
-      onEditLocally,
-      t('message_menu.edit_locally'),
-      <EyeOff className="w-4 h-4" />
-    );
-  }
-  add(
-    onDeleteLocally,
-    t('message_menu.delete_locally'),
-    <EyeOff className="w-4 h-4" />,
-    true
-  );
+  add(onDelete, t('message_menu.delete'), <Trash2 className="w-4 h-4" />, true);
   if (canWrite)
     add(onRetry, t('message_menu.retry'), <RefreshCw className="w-4 h-4" />);
 

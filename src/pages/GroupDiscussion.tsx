@@ -19,8 +19,10 @@ import HeaderBar from '../components/ui/HeaderBar';
 import BackButton from '../components/ui/BackButton';
 import Button from '../components/ui/Button';
 import BaseModal from '../components/ui/BaseModal';
-import FormInput from '../components/ui/FormInput';
-import MessageInput from '../components/discussions/MessageInput';
+import GroupComposer, {
+  type InputTarget,
+  type Scope,
+} from '../components/groups/GroupComposer';
 import GroupMessageItem from '../components/groups/GroupMessageItem';
 import {
   composerBlockedReason,
@@ -39,15 +41,24 @@ import { useGroupMemberName } from '../hooks/useGroupMemberName';
 import { useAccountStore } from '../stores/accountStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { groupDisplayName } from '../utils/groupName';
-import { nearByteLimit, utf8Bytes } from '../utils/textBytes';
 import { ROUTES } from '../constants/routes';
 
-/** What the input shows of a group message being replied to or edited. */
-interface InputTarget {
-  content: string;
-  id?: number;
-  message: GroupMessage;
-}
+/**
+ * The SDK publishes a message, and an edit, under this account's own name
+ * only: the engine's node API (`publish_message`, `publish_edit`) takes no
+ * author, although the protocol lets a member write as any member. Until it
+ * does, the author button (UI5, UI6) is not shown. A local edit can change
+ * the author (`local_edit`), but one control that works for one scope only
+ * would mislead.
+ */
+const SEND_AS_SUPPORTED = false;
+
+/**
+ * The engine has no message kept on this device only (`local_edit` and
+ * `local_delete` exist, no local send): "only for me" is offered for edits
+ * and deletions, never for a new message.
+ */
+const LOCAL_SEND_SUPPORTED = false;
 
 /**
  * A message sent from this screen and not yet read back from the engine's
@@ -103,70 +114,6 @@ function stillSending(
   });
 }
 
-type Confirm =
-  | { kind: 'deleteEveryone'; message: GroupMessage }
-  | { kind: 'deleteLocally'; message: GroupMessage }
-  | { kind: 'editLocally'; message: GroupMessage; text: string }
-  | null;
-
-/**
- * The text of a local-only edit. Over `maxBytes` it says so and cannot be
- * saved, and the text stays as typed or pasted.
- */
-const LocalEdit: React.FC<{
-  text: string;
-  maxBytes?: number;
-  onChange: (text: string) => void;
-  onSave: () => void;
-  onCancel: () => void;
-}> = ({ text, maxBytes, onChange, onSave, onCancel }) => {
-  const { t } = useTranslation('groups');
-  const bytes = utf8Bytes(text);
-  const tooLong = maxBytes !== undefined && bytes > maxBytes;
-  const near = maxBytes !== undefined && nearByteLimit(bytes, maxBytes);
-  return (
-    <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
-        {t('message_menu.edit_locally_body')}
-      </p>
-      <FormInput
-        id="local-edit"
-        type="textarea"
-        value={text}
-        onChange={onChange}
-        error={tooLong ? t('composer.edit_too_long') : null}
-        helperText={
-          near
-            ? t('discussions:message_input.size_counter', {
-                used: bytes,
-                max: maxBytes,
-              })
-            : undefined
-        }
-      />
-      <div className="flex gap-3">
-        <Button
-          variant="primary"
-          size="custom"
-          className="flex-1 h-11 rounded-lg font-semibold"
-          disabled={tooLong}
-          onClick={onSave}
-        >
-          {t('common:save')}
-        </Button>
-        <Button
-          variant="secondary"
-          size="custom"
-          className="flex-1 h-11 rounded-lg font-semibold"
-          onClick={onCancel}
-        >
-          {t('choices.cancel')}
-        </Button>
-      </div>
-    </div>
-  );
-};
-
 const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const { t } = useTranslation('groups');
   const navigate = useNavigate();
@@ -201,7 +148,10 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const setCurrentGroup = useGroupStore(s => s.setCurrentGroup);
   const [replyingTo, setReplyingTo] = useState<InputTarget | null>(null);
   const [editing, setEditing] = useState<InputTarget | null>(null);
-  const [confirm, setConfirm] = useState<Confirm>(null);
+  // What was typed before an edit filled the text box, given back after it.
+  const typedBeforeEdit = useRef('');
+  // The message whose deletion asks for whom.
+  const [deleting, setDeleting] = useState<GroupMessage | null>(null);
   // The text of a send that failed, put back in a fresh composer (`n` keys it).
   const [draft, setDraft] = useState<{ text: string; n: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -321,8 +271,29 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     );
   };
 
-  const send = (text: string) => {
+  /** The text in the text box now. */
+  const typed = () =>
+    composerRef.current?.querySelector('textarea')?.value ?? '';
+  const putInComposer = (text: string) =>
+    setDraft(d => ({ text, n: (d?.n ?? 0) + 1 }));
+
+  const startEdit = (m: GroupMessage) => {
+    setReplyingTo(null);
+    if (!editing) typedBeforeEdit.current = typed();
+    const t0 = target(m);
+    setEditing(t0);
+    putInComposer(t0.content);
+  };
+  const endEdit = () => {
+    setEditing(null);
+    putInComposer(typedBeforeEdit.current);
+    typedBeforeEdit.current = '';
+  };
+
+  const send = (text: string, options: { author: string; scope: Scope }) => {
     if (!service) return;
+    // Neither is offered yet (see SEND_AS_SUPPORTED, LOCAL_SEND_SUPPORTED).
+    if (options.author !== me || options.scope !== 'everyone') return;
     const reply = replyingTo?.message ?? null;
     setReplyingTo(null);
     const n = ++sent.current;
@@ -348,10 +319,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
           setSending(rows => rows.filter(r => r.n !== n));
           // The composer was cleared on send: give the text back, after
           // what was typed since, so that nothing typed is lost.
-          const typed =
-            composerRef.current?.querySelector('textarea')?.value ?? '';
-          const back = typed.trim() ? `${typed}\n${text}` : text;
-          setDraft(d => ({ text: back, n: (d?.n ?? 0) + 1 }));
+          const now = typed();
+          putInComposer(now.trim() ? `${now}\n${text}` : text);
           toast.error(
             isTooLargeError(e)
               ? t('composer.too_long')
@@ -403,49 +372,69 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     </HeaderBar>
   );
 
-  const composer = canWrite ? (
-    <div ref={composerRef} className="contents">
-      <MessageInput
-        key={draft?.n ?? 0}
-        initialValue={draft?.text}
-        onSend={send}
-        // A chat of two is no "group" to its users.
-        placeholderKey={
-          group.members.length === 2 ? undefined : 'groups:composer.placeholder'
-        }
-        maxBytes={maxTextBytes}
-        onTooLong={() => toast.error(t('composer.too_long'))}
-        replyingTo={replyingTo}
-        onCancelReply={() => setReplyingTo(null)}
-        editingMessage={editing}
-        onCancelEdit={() => setEditing(null)}
-        onConfirmEdit={(text, m) => {
-          setEditing(null);
-          if (!service) return;
-          void run(() =>
-            service.editMessage(m.message.epochId, m.message.syncObjId, text)
-          );
-        }}
-      />
-    </div>
-  ) : (
-    <div
-      className="bg-card border-t border-border px-4 py-4 text-center text-sm text-muted-foreground"
-      role="status"
-      data-testid="composer-blocked"
-    >
-      <p>{t(blocked)}</p>
-      {group.mustResolve && (
-        <Button
-          onClick={() => navigate(ROUTES.groupSettings({ groupId }))}
-          variant="link"
-          className="mt-1"
-        >
-          {t('details.resolve_open')}
-        </Button>
-      )}
-    </div>
-  );
+  // A read-only chat shows the composer only to edit a message on this
+  // device, the one scope left to it.
+  const composer =
+    canWrite || editing ? (
+      <div ref={composerRef} className="contents">
+        <GroupComposer
+          me={me ?? ''}
+          members={group.members}
+          memberName={memberName}
+          canChooseAuthor={SEND_AS_SUPPORTED}
+          canSendLocally={LOCAL_SEND_SUPPORTED}
+          localOnly={!canWrite}
+          draft={draft}
+          // A chat of two is no "group" to its users.
+          placeholderKey={
+            group.members.length === 2
+              ? undefined
+              : 'groups:composer.placeholder'
+          }
+          maxBytes={maxTextBytes}
+          onTooLong={() => toast.error(t('composer.too_long'))}
+          replyingTo={replyingTo}
+          onCancelReply={() => setReplyingTo(null)}
+          editing={editing}
+          onCancelEdit={endEdit}
+          onSend={send}
+          onEdit={(m, text, scope) => {
+            setEditing(null);
+            // What was typed before the edit comes back.
+            if (typedBeforeEdit.current) putInComposer(typedBeforeEdit.current);
+            typedBeforeEdit.current = '';
+            if (!service) return;
+            const { epochId, syncObjId } = m.message;
+            // A local edit is stored like any other version: nothing marks
+            // it, by design (it cannot be told apart from a normal edit).
+            void run(() =>
+              scope === 'me'
+                ? service.editMessageLocally(epochId, syncObjId, {
+                    body: { type: 'text', text },
+                  })
+                : service.editMessage(epochId, syncObjId, text)
+            );
+          }}
+        />
+      </div>
+    ) : (
+      <div
+        className="bg-card border-t border-border px-4 py-4 text-center text-sm text-muted-foreground"
+        role="status"
+        data-testid="composer-blocked"
+      >
+        <p>{t(blocked)}</p>
+        {group.mustResolve && (
+          <Button
+            onClick={() => navigate(ROUTES.groupSettings({ groupId }))}
+            variant="link"
+            className="mt-1"
+          >
+            {t('details.resolve_open')}
+          </Button>
+        )}
+      </div>
+    );
   const footer = continuation ? (
     <>
       <ContinuationPrompt invitation={continuation} />
@@ -526,23 +515,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
                   .then(() => toast.success(t('message_menu.copied')))
                   .catch(() => {});
               }}
-              onEdit={m => {
-                setReplyingTo(null);
-                setEditing(target(m));
-              }}
-              onDeleteForEveryone={m =>
-                setConfirm({ kind: 'deleteEveryone', message: m })
-              }
-              onEditLocally={m =>
-                setConfirm({
-                  kind: 'editLocally',
-                  message: m,
-                  text: messageText(m, t),
-                })
-              }
-              onDeleteLocally={m =>
-                setConfirm({ kind: 'deleteLocally', message: m })
-              }
+              onEdit={startEdit}
+              onDelete={setDeleting}
               onRetry={m =>
                 service &&
                 void run(
@@ -578,80 +552,60 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
         ))}
       </div>
       <BaseModal
-        isOpen={
-          confirm?.kind === 'deleteEveryone' ||
-          confirm?.kind === 'deleteLocally'
-        }
-        onClose={() => setConfirm(null)}
-        title={
-          confirm?.kind === 'deleteLocally'
-            ? t('message_menu.delete_locally_title')
-            : t('message_menu.delete_confirm_title')
-        }
+        isOpen={deleting !== null}
+        onClose={() => setDeleting(null)}
+        title={t('message_menu.delete_title')}
       >
-        <div className="space-y-4">
-          <p className="text-sm text-foreground">
-            {confirm?.kind === 'deleteLocally'
-              ? t('message_menu.delete_locally_body')
-              : t('message_menu.delete_confirm_body')}
-          </p>
-          <div className="flex gap-3">
+        <div className="space-y-3" data-testid="delete-confirm">
+          {canWrite && (
+            <div>
+              <Button
+                variant="danger"
+                size="custom"
+                className="w-full h-11 rounded-lg font-semibold"
+                onClick={() => {
+                  const m = deleting;
+                  setDeleting(null);
+                  if (!m || !service) return;
+                  void run(() => service.deleteMessage(m.epochId, m.syncObjId));
+                }}
+              >
+                {t('message_menu.delete_everyone')}
+              </Button>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t('message_menu.delete_confirm_body')}
+              </p>
+            </div>
+          )}
+          <div>
             <Button
-              variant="danger"
+              variant={canWrite ? 'secondary' : 'danger'}
               size="custom"
-              className="flex-1 h-11 rounded-lg font-semibold"
+              className="w-full h-11 rounded-lg font-semibold"
               onClick={() => {
-                const c = confirm;
-                setConfirm(null);
-                if (!c || !service || c.kind === 'editLocally') return;
-                const { epochId, syncObjId } = c.message;
+                const m = deleting;
+                setDeleting(null);
+                if (!m || !service) return;
                 void run(() =>
-                  c.kind === 'deleteLocally'
-                    ? service.deleteMessageLocally(epochId, syncObjId)
-                    : service.deleteMessage(epochId, syncObjId)
+                  service.deleteMessageLocally(m.epochId, m.syncObjId)
                 );
               }}
             >
-              {t('choices.confirm')}
+              {t('message_menu.delete_on_device')}
             </Button>
-            <Button
-              variant="secondary"
-              size="custom"
-              className="flex-1 h-11 rounded-lg font-semibold"
-              onClick={() => setConfirm(null)}
-            >
-              {t('choices.cancel')}
-            </Button>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('message_menu.delete_locally_body')}
+            </p>
           </div>
+          <Button
+            variant="ghost"
+            size="custom"
+            className="w-full h-11 rounded-lg font-semibold"
+            onClick={() => setDeleting(null)}
+          >
+            {t('choices.cancel')}
+          </Button>
         </div>
-      </BaseModal>
-      <BaseModal
-        isOpen={confirm?.kind === 'editLocally'}
-        onClose={() => setConfirm(null)}
-        title={t('message_menu.edit_locally_title')}
-      >
-        {confirm?.kind === 'editLocally' && (
-          <LocalEdit
-            text={confirm.text}
-            maxBytes={maxTextBytes}
-            onChange={text => setConfirm({ ...confirm, text })}
-            onSave={() => {
-              const c = confirm;
-              setConfirm(null);
-              if (!service) return;
-              void run(() =>
-                service.editMessageLocally(
-                  c.message.epochId,
-                  c.message.syncObjId,
-                  {
-                    body: { type: 'text', text: c.text },
-                  }
-                )
-              );
-            }}
-            onCancel={() => setConfirm(null)}
-          />
-        )}
       </BaseModal>
     </DiscussionLayout>
   );
