@@ -5,8 +5,12 @@
  * Database operations use SQLite via Drizzle ORM (see sqlite.ts and schema.ts).
  */
 
-/** Whether the user accepted a contact, or it is an automatic connection (§5.12). */
-export type ContactConnection = 'accepted' | 'automatic';
+/**
+ * Whether the user accepted a contact, or it is an automatic connection
+ * (§5.12), or an automatic connection whose peer also asked to become a
+ * contact and waits for the user's answer (`requested`).
+ */
+export type ContactConnection = 'accepted' | 'automatic' | 'requested';
 
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
@@ -33,7 +37,8 @@ export interface Contact {
   createdAt: Date;
   /**
    * Whether the user accepted this contact, or it is only an automatic
-   * connection to a member of a group (§5.12). Absent means accepted.
+   * connection to a member of a group (§5.12), or such a connection whose
+   * peer asked to become a contact, not answered yet. Absent means accepted.
    */
   connection?: ContactConnection;
 }

@@ -27,6 +27,11 @@
  *   kicked or left, needs none, its history kept or not), once nothing waits
  *   for the peer in the group outbox. A contact the user accepted is never
  *   revoked.
+ * - **Adding a member as a contact.** A member who is no contact is made one
+ *   on this device only (`addAsContact`): nothing is sent, the session
+ *   already exists. A member who also asks to become a contact keeps the
+ *   connection the chats need while the request waits (`requested`), and
+ *   declining the request keeps it (`declineContactRequest`).
  *
  * Nothing is stored about group traffic: a link names a group key next to a
  * peer the engine's own records already list as its member.
@@ -35,7 +40,7 @@
 import { type Contact, type Discussion, type Queries } from '../db/index.js';
 import { toDiscussion } from '../utils/discussions.js';
 import { deleteContact, isTemporaryContactName } from '../utils/contacts.js';
-import { decodeUserId } from '../utils/userId.js';
+import { canonicalUserId, decodeUserId } from '../utils/userId.js';
 import type { SessionModule } from '../wasm/session.js';
 import { SessionStatus } from '../wasm/bindings.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
@@ -54,8 +59,34 @@ import { Logger } from '../utils/logs.js';
 
 const logger = new Logger('ConversationService');
 
+/**
+ * Whether a request waiting from `contact` is a contact request: it stated a
+ * name, a message or a timer. The announcement of a connection states none
+ * and leaves the temporary name (`openConnection`).
+ */
+function carriesRequest(contact: Contact, d: Discussion): boolean {
+  return (
+    !!d.announcementMessage ||
+    (d.directChatTimer !== null && d.directChatTimer !== undefined) ||
+    (contact.name !== '' && !isTemporaryContactName(contact.name))
+  );
+}
+
 /** How long before trying again a connection whose keys were missing. */
 const CONNECTION_RETRY_MS = 30_000;
+
+/** What `addAsContact` did. */
+export type AddAsContactResult =
+  | { success: true }
+  | {
+      success: false;
+      /**
+       * `already-contact`: the user accepted this person already (or a
+       * request of theirs is waiting as an ordinary request); `unknown`: no
+       * contact row and no keys from any chat held; `empty-name`.
+       */
+      reason: 'already-contact' | 'unknown' | 'empty-name';
+    };
 
 /** Why "Migrate" is not done. */
 export class MigrationUnavailableError extends Error {
@@ -488,36 +519,179 @@ export class ConversationService {
 
   /**
    * Makes `contactUserId` a contact the user accepted: an automatic contact
-   * is upgraded, and a member who is no contact is added with the keys the
-   * engine holds (and no name: it is shown by its user ID until renamed).
+   * (a request waiting included) is upgraded, and a member who is no contact
+   * is added with the keys the engine holds (and no name unless `name` is
+   * given: it is shown by its user ID until renamed). Local: sends nothing.
+   * False when the person is neither a contact nor known by a chat held.
    */
-  private async acceptAsContact(contactUserId: string): Promise<void> {
+  private async acceptAsContact(
+    contactUserId: string,
+    name?: string
+  ): Promise<boolean> {
     const c = await this.queries.contacts.getByOwnerAndUser(
       this.owner,
       contactUserId
     );
     if (c) {
-      if (c.connection === 'automatic') {
+      if (c.connection === 'automatic' || c.connection === 'requested') {
         await this.queries.contacts.updateByOwnerAndUser(
           this.owner,
           contactUserId,
-          { connection: 'accepted' }
+          { connection: 'accepted', ...(name ? { name } : {}) }
         );
+        this.eventEmitter.emit(SdkEventType.CONTACT_UPDATED, {
+          contactUserId,
+        });
       }
-      return;
+      return true;
     }
+    // The keys the engine fetched from the chat's members (§12.9), never
+    // from the backend, which would learn who shares a chat.
     const keys = await this.groups.keysOf(contactUserId);
-    if (!keys) return;
+    if (!keys) return false;
     await this.queries.contacts.insert({
       ownerUserId: this.owner,
       userId: contactUserId,
-      name: '',
+      name: name ?? '',
       publicKeys: keys,
       isOnline: false,
       lastSeen: new Date(),
       createdAt: new Date(),
       connection: 'accepted',
     });
+    this.eventEmitter.emit(SdkEventType.CONTACT_UPDATED, { contactUserId });
+    return true;
+  }
+
+  /**
+   * "Add as contact" (§5.12): makes a member of a chat held, who is no
+   * contact (an automatic connection, or no connection yet), a contact the
+   * user accepted, named `name`, on this device only.
+   *
+   * Nothing is sent: the session the chats need already exists or is opened
+   * as for any member, and declaring the contact to the engine only changes
+   * who would get a version notice (§13.8). _Why:_ privacy first: no message
+   * exists that tells the other person, or anyone, who added whom; they
+   * learn nothing until a chat is started with them, which reaches them as
+   * an ordinary invitation. Being a contact is then one-sided until the
+   * other adds back or accepts a chat.
+   *
+   * A member whose own contact request waits (`requested`) is added by
+   * accepting that request, as the request screen does: the consent to the
+   * chat it asked for, with the timer it announced. A contact the user
+   * accepted, or an ordinary request waiting, is refused (`already-contact`).
+   */
+  async addAsContact(
+    contactUserId: string,
+    name: string
+  ): Promise<AddAsContactResult> {
+    contactUserId = canonicalUserId(contactUserId);
+    const trimmed = name.trim();
+    if (!trimmed) return { success: false, reason: 'empty-name' };
+    if (contactUserId === this.owner) {
+      return { success: false, reason: 'already-contact' };
+    }
+    const result = await this.enqueue(async (): Promise<AddAsContactResult> => {
+      const c = await this.queries.contacts.getByOwnerAndUser(
+        this.owner,
+        contactUserId
+      );
+      if (c && c.connection !== 'automatic' && c.connection !== 'requested') {
+        return { success: false, reason: 'already-contact' };
+      }
+      if (c?.connection === 'requested') {
+        await this.queries.contacts.updateByOwnerAndUser(
+          this.owner,
+          contactUserId,
+          { name: trimmed }
+        );
+        const d = await this.discussionOf(contactUserId);
+        if (d) {
+          const accepted = await this.discussions.accept(d);
+          if (!accepted.success) {
+            return { success: false, reason: 'unknown' };
+          }
+          return { success: true };
+        }
+      }
+      if (!(await this.acceptAsContact(contactUserId, trimmed))) {
+        return { success: false, reason: 'unknown' };
+      }
+      await this.syncAcceptedContacts();
+      return { success: true };
+    });
+    return result ?? { success: false, reason: 'unknown' };
+  }
+
+  /**
+   * Declines a contact request. An ordinary request goes with its contact,
+   * as before. The request of a member of a chat held (`requested`) is
+   * declined, but its connection stays automatic, so that the chats keep
+   * flowing; it is revoked as any other once no chat needs it. Nothing is
+   * sent either way. _Why:_ the connection was answered when the request
+   * arrived, whatever the user would choose, and it lives as long as the
+   * chats need it, so neither the requester nor anyone else can tell a
+   * declined request from one not answered yet.
+   */
+  async declineContactRequest(contactUserId: string): Promise<void> {
+    contactUserId = canonicalUserId(contactUserId);
+    // Not started (no group engine): an ordinary request is still declined.
+    if (!this.started) return this.declineRequest(contactUserId);
+    await this.enqueue(() => this.declineRequest(contactUserId));
+  }
+
+  private async declineRequest(contactUserId: string): Promise<void> {
+    const c = await this.queries.contacts.getByOwnerAndUser(
+      this.owner,
+      contactUserId
+    );
+    if (!c) return;
+    if (c.connection !== 'requested') {
+      const result = await deleteContact(
+        this.owner,
+        contactUserId,
+        this.session,
+        this.queries
+      );
+      if (result.success) {
+        this.eventEmitter.emit(SdkEventType.CONTACT_DELETED, {
+          contactUserId,
+        });
+      }
+      return;
+    }
+    await this.queries.contacts.updateByOwnerAndUser(
+      this.owner,
+      contactUserId,
+      {
+        connection: 'automatic',
+        // Hidden again, as an automatic connection is.
+        ...(isTemporaryContactName(c.name) ? { name: '' } : {}),
+      }
+    );
+    const d = await this.discussionOf(contactUserId);
+    if (d?.id !== undefined) {
+      await this.queries.discussions.updateById(d.id, {
+        announcementMessage: null,
+        directChatTimer: d.directChatOwed ? d.directChatTimer : null,
+        updatedAt: new Date(),
+      });
+    }
+    // The request's message is gone with the request, as a declined
+    // request's is.
+    for (const m of await this.queries.messages.getAnnouncementsByContact(
+      this.owner,
+      contactUserId
+    )) {
+      if (m.id !== undefined) await this.queries.messages.deleteById(m.id);
+    }
+    this.eventEmitter.emit(SdkEventType.CONTACT_UPDATED, { contactUserId });
+    // A connection no chat needs any more goes now, as an automatic one does.
+    if (this.started) {
+      await this.syncConnections().catch(() =>
+        logger.error('connections not synced')
+      );
+    }
   }
 
   private async applyChanges(changes: GroupChange[]): Promise<void> {
@@ -617,15 +791,29 @@ export class ConversationService {
         );
       }
       if (!contact) continue;
-      if (d && contact.connection !== 'automatic') {
+      if (
+        d &&
+        contact.connection !== 'automatic' &&
+        contact.connection !== 'requested'
+      ) {
         // This member asked for a session before this device accepted the
         // group, so it arrived as a request from someone who is no contact,
         // and the user never accepted it. Accepting it now opens a
-        // connection (§5.12): it stays out of the contacts and the lists,
-        // and is revoked once no group needs it.
+        // connection (§5.12), answered below as for any member.
+        // - A connection asked without a request (no name, message or
+        //   timer: another member's device connecting) stays out of the
+        //   contacts and the lists, and is revoked once no group needs it.
+        // - A contact request stays shown until the user answers it
+        //   (`requested`): joining a chat never removes it.
+        const asked = carriesRequest(contact, d);
         await this.queries.contacts.updateByOwnerAndUser(this.owner, peer, {
-          connection: 'automatic',
-          ...(isTemporaryContactName(contact.name) ? { name: '' } : {}),
+          connection: asked ? 'requested' : 'automatic',
+          ...(!asked && isTemporaryContactName(contact.name)
+            ? { name: '' }
+            : {}),
+        });
+        this.eventEmitter.emit(SdkEventType.CONTACT_UPDATED, {
+          contactUserId: peer,
         });
       }
       const result = d
@@ -654,15 +842,28 @@ export class ConversationService {
   }
 
   private async revokeConnections(): Promise<void> {
-    const automatic = (await this.queries.contacts.getByOwner(this.owner))
-      .filter(c => c.connection === 'automatic')
+    const contacts = await this.queries.contacts.getByOwner(this.owner);
+    const automatic = contacts
+      .filter(c => c.connection === 'automatic' || c.connection === 'requested')
       .map(c => c.userId);
+    const requested = new Set(
+      contacts.filter(c => c.connection === 'requested').map(c => c.userId)
+    );
     for (const peer of await this.groups.connectionsToRevoke(automatic)) {
       // A ciphertext still waiting for this peer, such as the signed leave
       // pushed once a chat is closed, would be deleted with the contact: the
       // connection goes once it is sent (§5.12, D.86).
       if (await this.queries.groups.hasOutboxFor(this.owner, peer)) {
         this.revokeLater();
+        continue;
+      }
+      if (requested.has(peer)) {
+        // A request still waits: the connection goes as any automatic one
+        // does, whatever the user will answer, so that its lifetime tells
+        // nothing of the answer; the request stays shown, now as an
+        // ordinary request with no session (accepting it announces anew).
+        await this.dropSessionKeepRequest(peer);
+        this.opened.delete(peer);
         continue;
       }
       const result = await deleteContact(
@@ -678,6 +879,29 @@ export class ConversationService {
         });
       }
     }
+  }
+
+  /**
+   * Drops the session with `peer` and keeps its contact request: the
+   * discussion stays, as a request this device has not answered, with
+   * nothing to send.
+   */
+  private async dropSessionKeepRequest(peer: string): Promise<void> {
+    const d = await this.discussionOf(peer);
+    // Dropped already, or a new announcement of the peer waits as an
+    // ordinary request: nothing to drop.
+    if (!d?.weAccepted) return;
+    if (d.id !== undefined) {
+      await this.queries.discussions.updateById(d.id, {
+        weAccepted: false,
+        sendAnnouncement: null,
+        updatedAt: new Date(),
+      });
+    }
+    await this.session.peerDiscard(decodeUserId(peer));
+    this.eventEmitter.emit(SdkEventType.CONTACT_UPDATED, {
+      contactUserId: peer,
+    });
   }
 
   /** Whether `contactUserId` is only an automatic connection. */

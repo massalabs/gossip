@@ -69,6 +69,7 @@ export function makeFakeGroups() {
       acceptInvitation: vi.fn(async (e: string) => e),
       declineInvitation: vi.fn(async () => {}),
       setArchived: vi.fn(async () => {}),
+      addAsContact: vi.fn(async () => ({ success: true })),
     },
   };
   return { state, service, sdk };

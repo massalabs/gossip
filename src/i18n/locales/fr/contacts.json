@@ -40,7 +40,9 @@
     "share_username_hint": "Le destinataire verra ce nom lorsqu'il recevra ta demande",
     "share_username_placeholder": "Saisir le nom d'utilisateur à partager",
     "share_username_aria": "Nom d'utilisateur à partager avec le contact",
-    "import_file_aria": "Importer un contact depuis un fichier YAML"
+    "import_file_aria": "Importer un contact depuis un fichier YAML",
+    "connected_non_contact": "Vous êtes déjà en lien avec cette personne par une discussion commune. L'ajouter l'enregistre comme contact sur cet appareil uniquement : rien n'est envoyé, il n'y a donc ni message ni minuteur à choisir.",
+    "already_contact": "Cet utilisateur est déjà dans vos contacts"
   },
   "privacy_notice": {
     "title": "Avis de confidentialité",

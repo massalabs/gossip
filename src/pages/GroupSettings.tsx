@@ -30,6 +30,7 @@ import { useDiscussionStore } from '../stores/discussionStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { ROUTES } from '../constants/routes';
 import { GROUP_NAME_MAX_BYTES } from './NewGroup';
+import { isAcceptedContact, isDisplayNameTaken } from '../utils/conversations';
 
 type Modal =
   | { kind: 'localName' }
@@ -37,6 +38,7 @@ type Modal =
   | { kind: 'add' }
   | { kind: 'transfer' }
   | { kind: 'remove'; member: string }
+  | { kind: 'addContact'; member: string }
   | null;
 
 const Row: React.FC<{ label: string; children: React.ReactNode }> = ({
@@ -89,6 +91,7 @@ const GroupSettings: React.FC = () => {
   const [modal, setModal] = useState<Modal>(null);
   const [leaving, setLeaving] = useState(false);
   const [toAdd, setToAdd] = useState<Set<string>>(new Set());
+  const [contactNameError, setContactNameError] = useState<string | null>(null);
   const service = getGroupService();
 
   const [ownedEnds, setOwnedEnds] = useState<GroupEpoch[]>([]);
@@ -172,11 +175,39 @@ const GroupSettings: React.FC = () => {
   const isOwner = group.owner === me;
   const active = group.status === 'member';
   const others = group.members.filter(m => m !== me);
+  // As "New group": contacts the user accepted, with an active session. A
+  // member of another chat who is no contact is added as a contact first
+  // (§5.12): putting someone in a chat the user owns shows them to every
+  // member, which only a contact the user chose should get.
   const addable = contacts.filter(
     c =>
+      isAcceptedContact(c) &&
       !group.members.includes(c.userId) &&
       gossip.discussions.getStatus(c.userId) === SessionStatus.Active
   );
+  // "Add as contact" for a member who is no contact the user accepted.
+  const canAddAsContact = (m: string) => {
+    if (m === me) return false;
+    const c = contacts.find(x => x.userId === m);
+    return !c || !isAcceptedContact(c);
+  };
+  const addAsContact = async (member: string, name?: string) => {
+    const trimmed = name?.trim() ?? '';
+    if (!trimmed) {
+      setContactNameError(t('contacts:name_empty'));
+      return;
+    }
+    if (isDisplayNameTaken(contacts, trimmed, member)) {
+      setContactNameError(t('details.contact_name_taken'));
+      return;
+    }
+    setModal(null);
+    // Local: nothing is sent (§5.12).
+    await run(async () => {
+      const result = await gossip.conversations.addAsContact(member, trimmed);
+      if (!result.success) throw new Error(result.reason);
+    }, t('details.contact_added'));
+  };
 
   const onLeaveAction = async (action: LeaveAction) => {
     setLeaving(false);
@@ -293,15 +324,30 @@ const GroupSettings: React.FC = () => {
                   </span>
                 )}
               </span>
-              {isOwner && active && m !== me && (
-                <Button
-                  variant="link"
-                  size="sm"
-                  onClick={() => setModal({ kind: 'remove', member: m })}
-                >
-                  {t('details.remove')}
-                </Button>
-              )}
+              <span className="flex items-center gap-1 shrink-0">
+                {canAddAsContact(m) && (
+                  <Button
+                    variant="link"
+                    size="sm"
+                    data-testid="member-add-contact"
+                    onClick={() => {
+                      setContactNameError(null);
+                      setModal({ kind: 'addContact', member: m });
+                    }}
+                  >
+                    {t('details.add_as_contact')}
+                  </Button>
+                )}
+                {isOwner && active && m !== me && (
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={() => setModal({ kind: 'remove', member: m })}
+                  >
+                    {t('details.remove')}
+                  </Button>
+                )}
+              </span>
             </li>
           ))}
         </ul>
@@ -474,6 +520,19 @@ const GroupSettings: React.FC = () => {
           }
           setModal(null);
           void run(() => service.changeMembers(groupId, { name: next }));
+        }}
+      />
+      <ContactNameModal
+        isOpen={modal?.kind === 'addContact'}
+        onClose={() => setModal(null)}
+        title={t('details.add_as_contact')}
+        initialName=""
+        confirmLabel={t('details.add_as_contact')}
+        hint={t('details.add_as_contact_hint')}
+        error={contactNameError}
+        onConfirm={name => {
+          if (modal?.kind !== 'addContact') return;
+          void addAsContact(modal.member, name);
         }}
       />
       <BaseModal

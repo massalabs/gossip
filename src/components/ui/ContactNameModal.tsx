@@ -9,6 +9,8 @@ interface ContactNameModalProps {
   confirmLabel: string;
   allowEmpty?: boolean;
   showSkip?: boolean;
+  /** A line shown under the name field. */
+  hint?: string;
   error?: string | null;
   onConfirm: (name?: string) => void;
   onClose: () => void;
@@ -22,6 +24,7 @@ const ContactNameModal: React.FC<ContactNameModalProps> = ({
   confirmLabel,
   allowEmpty = false,
   showSkip = false,
+  hint,
   error,
   onConfirm,
   onClose,
@@ -86,6 +89,7 @@ const ContactNameModal: React.FC<ContactNameModalProps> = ({
             enterKeyHint="done"
           />
           {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+          {hint && <p className="mt-2 text-xs text-muted-foreground">{hint}</p>}
         </div>
         <div className="flex gap-3">
           <Button
