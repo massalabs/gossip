@@ -85,8 +85,12 @@ describe('Debug log of a message', { timeout: 300_000 }, () => {
       asNewContact: true,
     });
     await deliver();
-    const [groupId] = (await alice.groups.list()).map(g => g.groupId);
-    expect(groupId).toBeDefined();
+    // Adding a contact starts no chat (§5.12): Alice starts it, Bob accepts.
+    const groupId = await alice.conversations.startDirectChat(bob.userId);
+    await deliver();
+    await bob.conversations.acceptInvitation(groupId);
+    await deliver();
+    expect((await alice.groups.list()).map(g => g.groupId)).toContain(groupId);
     // What was shown before is not the message followed here.
     await alice.groups.timeline(groupId);
     return [alice, bob, groupId];
@@ -145,6 +149,10 @@ describe('Debug log of a message', { timeout: 300_000 }, () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(evs).toContain('engine.op');
     expect(lines[sent].dur).toEqual(expect.any(Number));
+    // A single transport is taken as the backend: the send resolved there,
+    // so the row was deleted rather than kept for a later post.
+    expect(lines[sent].f?.by).toEqual(['internet']);
+    expect(evs).not.toContain('message.mesh_only');
     expect(lines[shown].f?.mine).toBe(false);
   });
 
