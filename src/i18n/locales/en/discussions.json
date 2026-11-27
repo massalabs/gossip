@@ -39,10 +39,10 @@
     "pin_discussion": "Pin",
     "unpin_discussion": "Unpin",
     "edit_name": "Edit Name",
-    "edit_name_title": "Edit discussion name",
+    "edit_name_title": "Edit chat name",
     "name_updated": "Name updated",
     "name_update_failed": "Failed to update name",
-    "pin_failed": "Failed to pin discussion",
+    "pin_failed": "Failed to pin chat",
     "no_chat": "No chat yet",
     "chat_invitation": "Invites you to a chat"
   },
@@ -71,10 +71,10 @@
   "test_messages_sent": "Sent {{count}} test messages!",
   "test_messages_failed": "Failed to send some test messages",
   "settings": {
-    "title": "Discussion Settings",
-    "loading": "Loading discussion…",
-    "name_section": "Discussion Name",
-    "edit_name": "Edit discussion name",
+    "title": "Chat settings",
+    "loading": "Loading chat…",
+    "name_section": "Chat name",
+    "edit_name": "Edit chat name",
     "reset_connection": "Reset Connection",
     "reset_description": "If you think you're disconnected from your peer, you can reset the connection. Some messages may be resent but your history will be preserved.",
     "reconnected": "Reconnected!",
@@ -112,7 +112,7 @@
   "header": {
     "contact_not_found": "Contact not found",
     "waiting_approval": "Waiting approval",
-    "discussion_settings": "Discussion settings",
+    "discussion_settings": "Chat settings",
     "search_messages": "Search messages",
     "auto_delete_active": "Deletes after {{duration}}"
   },
@@ -125,7 +125,7 @@
     "refuse_title": "Refuse connection?",
     "refuse_body": "Refusing will close this discussion request.",
     "sections": {
-      "discussions": "Discussions",
+      "discussions": "Earlier chats",
       "contacts": "Contacts",
       "pinned": "Pinned",
       "pending": "Pending",

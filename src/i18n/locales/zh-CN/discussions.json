@@ -39,10 +39,10 @@
     "pin_discussion": "置顶",
     "unpin_discussion": "取消置顶",
     "edit_name": "编辑名称",
-    "edit_name_title": "编辑会话名称",
+    "edit_name_title": "编辑聊天名称",
     "name_updated": "名称已更新",
     "name_update_failed": "更新名称失败",
-    "pin_failed": "置顶会话失败",
+    "pin_failed": "置顶聊天失败",
     "no_chat": "还没有聊天",
     "chat_invitation": "邀请你聊天"
   },
@@ -71,10 +71,10 @@
   "test_messages_sent": "已发送 {{count}} 条测试消息！",
   "test_messages_failed": "部分测试消息发送失败",
   "settings": {
-    "title": "会话设置",
-    "loading": "正在加载会话…",
-    "name_section": "会话名称",
-    "edit_name": "编辑会话名称",
+    "title": "聊天设置",
+    "loading": "正在加载聊天…",
+    "name_section": "聊天名称",
+    "edit_name": "编辑聊天名称",
     "reset_connection": "重置连接",
     "reset_description": "如果你认为与对方的连接已断开，可以重置连接。部分消息可能会被重新发送，但聊天记录将会保留。",
     "reconnected": "已重新连接！",
@@ -112,7 +112,7 @@
   "header": {
     "contact_not_found": "未找到联系人",
     "waiting_approval": "等待批准",
-    "discussion_settings": "会话设置",
+    "discussion_settings": "聊天设置",
     "search_messages": "搜索消息",
     "auto_delete_active": "{{duration}}后删除"
   },
@@ -125,7 +125,7 @@
     "refuse_title": "拒绝连接？",
     "refuse_body": "拒绝将关闭此会话请求。",
     "sections": {
-      "discussions": "讨论",
+      "discussions": "早先的聊天",
       "contacts": "联系人",
       "pinned": "已置顶",
       "pending": "待处理",
