@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Clock,
   Copy,
   CornerUpLeft,
   Edit2,
@@ -53,6 +54,11 @@ interface GroupMessageItemProps extends GroupMessageActions {
   canWrite: boolean;
   /** The name shown for a member, for the list of who reacted. */
   memberName?: (userId: string) => string;
+  /**
+   * Shown by this screen while it is being sent, before the engine has it:
+   * a clock, and no menu, as nothing can be done with it yet.
+   */
+  sending?: boolean;
 }
 
 /**
@@ -67,6 +73,7 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   replyGroups,
   canWrite,
   memberName,
+  sending = false,
   onReply,
   onCopy,
   onEdit,
@@ -95,7 +102,10 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   );
   const reactors =
     message.reactions.find(r => r.emoji === reactorsOf)?.authors ?? [];
-  const longPress = useLongPress({ onLongPress: () => setMenuOpen(true) });
+  const openMenu = () => {
+    if (!sending) setMenuOpen(true);
+  };
+  const longPress = useLongPress({ onLongPress: openMenu });
   const text = messageText(message, t);
   const segments = useMemo(() => parseLinks(text), [text]);
 
@@ -162,8 +172,9 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
     <div
       className={`flex flex-col max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] my-1 ${
         isOutgoing ? 'ml-auto mr-3' : 'ml-3 mr-auto'
-      }`}
+      } ${sending ? 'opacity-70' : ''}`}
       data-testid="group-message"
+      data-sending={sending || undefined}
     >
       {!isOutgoing && (
         <p className="px-1 pb-0.5 text-xs font-medium text-muted-foreground">
@@ -180,10 +191,10 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
         tabIndex={0}
         onClick={() => {
           if (longPress.longPressTriggered.current) return;
-          setMenuOpen(true);
+          openMenu();
         }}
         onKeyDown={e => {
-          if (e.key === 'Enter') setMenuOpen(true);
+          if (e.key === 'Enter') openMenu();
         }}
         onTouchStart={longPress.onTouchStart}
         onTouchMove={longPress.onTouchMove}
@@ -220,6 +231,13 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
             <span className="mr-1">{t('timeline.edited')}</span>
           )}
           {formatTime(toDate(shownTime))}
+          {sending && (
+            <Clock
+              className="inline w-3 h-3 ml-1 align-[-2px]"
+              aria-label={td('message_item.sending')}
+              data-testid="group-message-sending"
+            />
+          )}
         </p>
       </div>
       <ReactionBar

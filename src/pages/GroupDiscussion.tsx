@@ -49,6 +49,60 @@ interface InputTarget {
   message: GroupMessage;
 }
 
+/**
+ * A message sent from this screen and not yet read back from the engine's
+ * timeline (D5). It lives in this component only: nothing is stored or sent
+ * because of it, and it is gone when the screen is left.
+ */
+interface Sending {
+  n: number;
+  text: string;
+  reply: GroupMessage | null;
+  at: bigint;
+  /** Its id, once `sendMessage` gave it. */
+  id?: string;
+  /** How many timeline reads had started when `sendMessage` resolved. */
+  readsAtResolve?: number;
+}
+
+/**
+ * The rows still to show once the timeline read `read` gave `items`, so that
+ * the real message replaces its row in the same render. A sent row goes when
+ * its id is in the timeline, or at the latest with the first read started
+ * after the send resolved (that read sees what the send recorded). A row not
+ * resolved yet goes when the timeline already shows an own message with its
+ * text that was not there before (`claimed`) and no other row took.
+ */
+function stillSending(
+  rows: Sending[],
+  items: GroupTimelineItem[],
+  read: number,
+  me: string | undefined,
+  claimed: Set<string>
+): Sending[] {
+  if (rows.length === 0) return rows;
+  const ids = new Set<string>();
+  for (const i of items) if (i.kind === 'message') ids.add(i.syncObjId);
+  const taken = new Set(claimed);
+  for (const r of rows) if (r.id !== undefined) taken.add(r.id);
+  return rows.filter(r => {
+    if (r.id !== undefined) {
+      return !ids.has(r.id) && read <= (r.readsAtResolve ?? Infinity);
+    }
+    const shown = items.find(
+      i =>
+        i.kind === 'message' &&
+        i.author === me &&
+        !taken.has(i.syncObjId) &&
+        i.body.type === 'text' &&
+        i.body.text === r.text
+    );
+    if (!shown || shown.kind !== 'message') return true;
+    taken.add(shown.syncObjId);
+    return false;
+  });
+}
+
 type Confirm =
   | { kind: 'deleteEveryone'; message: GroupMessage }
   | { kind: 'deleteLocally'; message: GroupMessage }
@@ -151,6 +205,13 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   // The text of a send that failed, put back in a fresh composer (`n` keys it).
   const [draft, setDraft] = useState<{ text: string; n: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  const [sending, setSending] = useState<Sending[]>([]);
+  const sent = useRef(0);
+  const reads = useRef(0);
+  // The own messages the timeline already showed, or a send returned: a row
+  // still sending is never matched with one of them.
+  const claimed = useRef<Set<string> | null>(null);
 
   useEffect(() => {
     setCurrentGroup(groupId);
@@ -166,21 +227,30 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const [timeline, setTimeline] = useState<GroupTimelineItem[]>([]);
   useEffect(() => {
     let alive = true;
+    const read = ++reads.current;
     getGroupService()
       ?.timeline(groupId)
       .then(items => {
-        if (alive) setTimeline(items);
+        if (!alive) return;
+        const shown = items.flatMap(i =>
+          i.kind === 'message' ? [i.syncObjId] : []
+        );
+        // The first read only tells what was there before any send.
+        const before = new Set(claimed.current ?? shown);
+        claimed.current = new Set([...before, ...shown]);
+        setTimeline(items);
+        setSending(rows => stillSending(rows, items, read, me, before));
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [groupId, version]);
+  }, [groupId, version, me]);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [timeline.length]);
+  }, [timeline.length, sending.length]);
 
   const byKey = useMemo(() => {
     const map = new Map<string, GroupMessage>();
@@ -253,8 +323,10 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
 
   const send = (text: string) => {
     if (!service) return;
-    const reply = replyingTo?.message;
+    const reply = replyingTo?.message ?? null;
     setReplyingTo(null);
+    const n = ++sent.current;
+    setSending(rows => [...rows, { n, text, reply, at: BigInt(Date.now()) }]);
     void service
       .sendMessage(group.groupId, text, {
         replyTo: reply
@@ -262,13 +334,24 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
           : undefined,
       })
       .then(
-        () => {
-          setDraft(null);
+        ({ syncObjId }) => {
+          claimed.current?.add(syncObjId);
+          const readsAtResolve = reads.current;
+          setSending(rows =>
+            rows.map(r =>
+              r.n === n ? { ...r, id: syncObjId, readsAtResolve } : r
+            )
+          );
           refresh();
         },
         (e: unknown) => {
-          // The composer was cleared on send: give the text back.
-          setDraft(d => ({ text, n: (d?.n ?? 0) + 1 }));
+          setSending(rows => rows.filter(r => r.n !== n));
+          // The composer was cleared on send: give the text back, after
+          // what was typed since, so that nothing typed is lost.
+          const typed =
+            composerRef.current?.querySelector('textarea')?.value ?? '';
+          const back = typed.trim() ? `${typed}\n${text}` : text;
+          setDraft(d => ({ text: back, n: (d?.n ?? 0) + 1 }));
           toast.error(
             isTooLargeError(e)
               ? t('composer.too_long')
@@ -321,28 +404,30 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   );
 
   const composer = canWrite ? (
-    <MessageInput
-      key={draft?.n ?? 0}
-      initialValue={draft?.text}
-      onSend={send}
-      // A chat of two is no "group" to its users.
-      placeholderKey={
-        group.members.length === 2 ? undefined : 'groups:composer.placeholder'
-      }
-      maxBytes={maxTextBytes}
-      onTooLong={() => toast.error(t('composer.too_long'))}
-      replyingTo={replyingTo}
-      onCancelReply={() => setReplyingTo(null)}
-      editingMessage={editing}
-      onCancelEdit={() => setEditing(null)}
-      onConfirmEdit={(text, m) => {
-        setEditing(null);
-        if (!service) return;
-        void run(() =>
-          service.editMessage(m.message.epochId, m.message.syncObjId, text)
-        );
-      }}
-    />
+    <div ref={composerRef} className="contents">
+      <MessageInput
+        key={draft?.n ?? 0}
+        initialValue={draft?.text}
+        onSend={send}
+        // A chat of two is no "group" to its users.
+        placeholderKey={
+          group.members.length === 2 ? undefined : 'groups:composer.placeholder'
+        }
+        maxBytes={maxTextBytes}
+        onTooLong={() => toast.error(t('composer.too_long'))}
+        replyingTo={replyingTo}
+        onCancelReply={() => setReplyingTo(null)}
+        editingMessage={editing}
+        onCancelEdit={() => setEditing(null)}
+        onConfirmEdit={(text, m) => {
+          setEditing(null);
+          if (!service) return;
+          void run(() =>
+            service.editMessage(m.message.epochId, m.message.syncObjId, text)
+          );
+        }}
+      />
+    </div>
   ) : (
     <div
       className="bg-card border-t border-border px-4 py-4 text-center text-sm text-muted-foreground"
@@ -385,6 +470,7 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
           version={version}
         />
         {timeline.length === 0 &&
+          sending.length === 0 &&
           !archivePeer &&
           group.earlier.length === 0 && (
             <p className="text-center text-sm text-muted-foreground mt-8">
@@ -467,6 +553,29 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
             />
           )
         )}
+        {sending.map(r => (
+          <GroupMessageItem
+            key={`sending-${r.n}`}
+            sending
+            message={{
+              kind: 'message',
+              epochId: '',
+              syncObjId: '',
+              author: me ?? '',
+              createdAt: r.at,
+              lastModifiedAt: r.at,
+              edited: false,
+              body: { type: 'text', text: r.text },
+              metadata: {},
+              replyTo: [],
+              reactions: [],
+            }}
+            isOutgoing
+            authorName=""
+            replyPreviews={r.reply ? [messageText(r.reply, t)] : []}
+            canWrite={false}
+          />
+        ))}
       </div>
       <BaseModal
         isOpen={
