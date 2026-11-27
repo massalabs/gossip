@@ -80,8 +80,9 @@ The characteristic UUID is the same for every version.
 
 When two phones see each other, the one whose advertised device address compares lower
 connects as central; the other only accepts. If the platform hides the address, both may
-connect: a node that ends up with two links to the same peer id keeps the one whose
-handshake completed first and closes the other.
+connect: a node that ends up with two links to the same phone keeps the one with the lower
+link key and closes the other. Both ends compute the same link key from the two peer ids of a
+link, so both close the same one.
 
 The central writes chunks to the characteristic; the peripheral sends chunks as
 notifications. Both directions use the same chunk format. The platform guarantees order
