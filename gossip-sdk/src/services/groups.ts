@@ -520,6 +520,18 @@ function hexOfUser(userId: string): string {
   return bytesToHex(decodeUserId(userId));
 }
 
+/**
+ * The author of a new message as the engine takes it: absent for this
+ * account (`owner`), otherwise the member's 32-byte ID.
+ */
+function authorBytes(
+  author: string | undefined,
+  owner: string
+): Uint8Array | undefined {
+  if (author === undefined || author === owner) return undefined;
+  return decodeUserId(author);
+}
+
 function variant(v: unknown): [string, Raw] {
   if (typeof v === 'string') return [v, {}];
   const r = v as Raw;
@@ -2638,7 +2650,45 @@ export class GroupService {
     };
   }
 
-  /** Sends a message to the group's current epoch, possibly as a reply. */
+  /**
+   * The metadata of a new message as the engine takes it: `metadata`, with
+   * `replyTo` encoded from the reply targets.
+   */
+  private newMessageMetadata(
+    node: GroupsNode,
+    options: {
+      metadata?: Record<string, Uint8Array>;
+      replyTo?: GroupMessageRef[];
+    }
+  ): string {
+    const metadata = { ...(options.metadata ?? {}) };
+    if (options.replyTo && options.replyTo.length > 0) {
+      const targets = options.replyTo.map(t => {
+        const reference = node.ref_chat_id(hexToBytes(t.epochId));
+        if (!reference) {
+          throw new Error('groups:unknown-epoch: reply target');
+        }
+        return {
+          ref_chat_id: bytesToHex(reference),
+          sync_obj_id: t.syncObjId,
+        };
+      });
+      metadata.replyTo = node.encode_reply_to(JSON.stringify(targets));
+    }
+    const meta = metadataJson(metadata);
+    checkMetadata(meta);
+    return meta;
+  }
+
+  /**
+   * Sends a message to the group's current epoch, possibly as a reply.
+   *
+   * `author`: this account when absent, or any member of the chat (a user
+   * ID). A message under another member's name is handled as if that member
+   * had delivered it to this device (§10.2): it keeps its true date and is
+   * shown here at once, and after a short random wait it is announced like a
+   * relayed message, never pushed in full.
+   */
   sendMessage(
     groupId: GroupId,
     message: GroupMessageBody | string,
@@ -2646,42 +2696,31 @@ export class GroupService {
       metadata?: Record<string, Uint8Array>;
       scheduledFor?: number;
       replyTo?: GroupMessageRef[];
+      author?: string;
     } = {}
   ): Promise<GroupPublished> {
     const b =
       typeof message === 'string'
         ? { type: 'text' as const, text: message }
         : message;
+    let author: Uint8Array | undefined;
     try {
       checkText(b);
+      author = authorBytes(options.author, this.owner);
     } catch (e) {
       return Promise.reject(e);
     }
     return this.ownMessageOp(
       node => {
         const epoch = this.currentEpoch(node, groupId);
-        const metadata = { ...(options.metadata ?? {}) };
-        if (options.replyTo && options.replyTo.length > 0) {
-          const targets = options.replyTo.map(t => {
-            const reference = node.ref_chat_id(hexToBytes(t.epochId));
-            if (!reference) {
-              throw new Error('groups:unknown-epoch: reply target');
-            }
-            return {
-              ref_chat_id: bytesToHex(reference),
-              sync_obj_id: t.syncObjId,
-            };
-          });
-          metadata.replyTo = node.encode_reply_to(JSON.stringify(targets));
-        }
-        const meta = metadataJson(metadata);
-        checkMetadata(meta);
+        const meta = this.newMessageMetadata(node, options);
         const published = this.published(
           node.publish_message(
             hexToBytes(epoch),
             bodyJson(b),
             meta,
             options.scheduledFor,
+            author,
             this.now()
           )
         );
@@ -2689,6 +2728,7 @@ export class GroupService {
           replies: options.replyTo?.length ?? 0,
           scheduled: options.scheduledFor !== undefined,
           metaSize: meta.length,
+          asOther: author !== undefined,
         });
         return published;
       },
@@ -2698,10 +2738,70 @@ export class GroupService {
   }
 
   /**
-   * Edits one of this account's messages, in the epoch that holds it. The
-   * edit keeps the message's metadata (§2.2: entries this client does not
-   * know, `replyTo` included): `metadata` sets entries and `removeMetadata`
-   * removes them; neither keeps everything.
+   * Creates a message on this device only (§9.7), in the group's current
+   * epoch, possibly as a reply and under any member's name (`author`, this
+   * account when absent). Nothing is sent, announced or listed, ever, and no
+   * marker is kept anywhere: it is stored as a message this device no longer
+   * serves, and cannot be told apart from one afterwards. No scheduling.
+   * Returns the message's sync-object ID.
+   */
+  sendMessageLocally(
+    groupId: GroupId,
+    message: GroupMessageBody | string,
+    options: {
+      metadata?: Record<string, Uint8Array>;
+      replyTo?: GroupMessageRef[];
+      author?: string;
+    } = {}
+  ): Promise<{ syncObjId: string }> {
+    const b =
+      typeof message === 'string'
+        ? { type: 'text' as const, text: message }
+        : message;
+    let author: Uint8Array | undefined;
+    try {
+      checkText(b);
+      author = authorBytes(options.author, this.owner);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return this.ownMessageOp(
+      node => {
+        const epoch = this.currentEpoch(node, groupId);
+        const meta = this.newMessageMetadata(node, options);
+        const r = JSON.parse(
+          node.local_message(
+            hexToBytes(epoch),
+            bodyJson(b),
+            meta,
+            author,
+            this.now()
+          )
+        ) as Raw;
+        // Only the full debug build logs this (`dlog` is a no-op and stripped
+        // from every other build).
+        dlog('sdk', 'message.created.local', {
+          group: shortId(groupId),
+          epoch: shortId(epoch),
+          id: shortId(r.syncObjId as string),
+          asOther: author !== undefined,
+        });
+        return { syncObjId: r.syncObjId as string };
+      },
+      'local_message',
+      { group: shortId(groupId) }
+    );
+  }
+
+  /**
+   * Edits a message for everyone, in the epoch that holds it. The edit keeps
+   * the message's metadata (§2.2: entries this client does not know,
+   * `replyTo` included): `metadata` sets entries and `removeMetadata` removes
+   * them; neither keeps everything. `author` sets the message's author to any
+   * member of the chat (a user ID); absent, the author is kept (§7.2). The
+   * edit is pushed in full only when this account is the author before and
+   * after it; any other edit is announced like a relayed message after a
+   * short random wait (§10.2).
    */
   editMessage(
     epochId: GroupId,
@@ -2711,6 +2811,7 @@ export class GroupService {
       metadata?: Record<string, Uint8Array>;
       removeMetadata?: string[];
       scheduledFor?: number;
+      author?: string;
     } = {}
   ): Promise<GroupPublished> {
     const b =
@@ -2725,9 +2826,14 @@ export class GroupService {
         : options.metadata && Object.keys(options.metadata).length > 0
           ? set
           : 'null';
+    let author: Uint8Array | undefined;
     try {
       checkText(b);
       checkMetadata(set);
+      author =
+        options.author === undefined
+          ? undefined
+          : hexToBytes(hexOfUser(options.author));
     } catch (e) {
       return Promise.reject(e);
     }
@@ -2740,11 +2846,13 @@ export class GroupService {
             bodyJson(b),
             meta,
             options.scheduledFor,
+            author,
             this.now()
           )
         );
         this.logCreated('edit', epochId, epochId, published, b, {
           target: shortId(syncObjId),
+          author: author === undefined ? 'kept' : 'set',
         });
         return published;
       },
