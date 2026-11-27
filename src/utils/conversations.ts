@@ -31,10 +31,17 @@ export function isConversationRow(
 
 /**
  * Whether a contact is one the user accepted: not an automatic connection,
- * nor a member of a shared chat whose contact request waits.
+ * nor a member of a shared chat whose contact request waits. A member the
+ * user added on this device only (`added`) is a contact for the user in
+ * every list and choice; only what the peer can observe treats it as an
+ * automatic connection, in the SDK (§5.12, D.91).
  */
 export function isAcceptedContact(contact: Contact): boolean {
-  return contact.connection === undefined || contact.connection === 'accepted';
+  return (
+    contact.connection === undefined ||
+    contact.connection === 'accepted' ||
+    contact.connection === 'added'
+  );
 }
 
 /**
