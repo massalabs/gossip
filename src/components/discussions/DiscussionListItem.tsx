@@ -28,6 +28,8 @@ interface DiscussionListItemProps {
   onRefuse?: (discussion: Discussion) => void;
   /** The peer's migration of this archive, pending (§5.12). */
   migrationInvitation?: GroupInvitation;
+  /** The contact started the pair's chat; its invitation waits (§5.12). */
+  chatInvitation?: boolean;
   onAcceptMigration?: (invitation: GroupInvitation) => Promise<void>;
   onDeclineMigration?: (
     invitation: GroupInvitation,
@@ -45,6 +47,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   lastMessage,
   onSelect,
   migrationInvitation,
+  chatInvitation = false,
   onAcceptMigration,
   onDeclineMigration,
   onOpenInvitation,
@@ -79,6 +82,13 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
     SessionStatus.SelfRequested;
 
   const isPending = isPendingIncoming || isPendingOutgoing;
+  // A contact with no chat (§5.12): adding a contact starts none. Its row
+  // says so, or that the contact invites to the pair's chat, rather than
+  // the request's message, which belongs to the request only.
+  const noChat =
+    discussion.contactUserId !== SELF_CONTACT_ID &&
+    !discussion.isArchive &&
+    !isPending;
 
   const longPress = useLongPress({
     onLongPress: () => setIsContextMenuOpen(true),
@@ -234,10 +244,21 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
               </div>
             ) : (
               <div className="flex items-center justify-between mt-1">
-                {discussion.contactUserId !== SELF_CONTACT_ID && (
-                  <p className="text-sm text-muted-foreground truncate">
-                    {lastMessage?.content || ''}
+                {noChat ? (
+                  <p
+                    className="text-sm text-muted-foreground truncate"
+                    data-testid="no-chat-yet"
+                  >
+                    {chatInvitation
+                      ? t('list_item.chat_invitation')
+                      : t('list_item.no_chat')}
                   </p>
+                ) : (
+                  discussion.contactUserId !== SELF_CONTACT_ID && (
+                    <p className="text-sm text-muted-foreground truncate">
+                      {lastMessage?.content || ''}
+                    </p>
+                  )
                 )}
                 {discussion.unreadCount > 0 && (
                   <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full animate-badge-pop">

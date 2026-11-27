@@ -39,7 +39,9 @@
     "edit_name_title": "Modifier le nom de la discussion",
     "name_updated": "Nom mis à jour",
     "name_update_failed": "Échec de la mise à jour du nom",
-    "pin_failed": "Échec de l'épinglage de la discussion"
+    "pin_failed": "Échec de l'épinglage de la discussion",
+    "no_chat": "Pas encore de discussion",
+    "chat_invitation": "Vous invite à une discussion"
   },
   "scroll_to_bottom": "Aller aux derniers messages",
   "search": {

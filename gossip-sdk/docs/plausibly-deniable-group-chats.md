@@ -1567,15 +1567,39 @@ from the chat's members (§12.9), and the connection opens as for any member. No
 because of it. The other person learns nothing until a chat is started with them, which reaches
 them as an ordinary invitation.
 
+Such a contact is one-sided until the relationship is mutual and known to the other person: they
+accept a chat of two the user started with them, the user accepts their chat invitation or their
+contact request, or they accept the user's request. Until then it is a contact for the user (listed,
+named, offered for new chats and members), but everything the other person can observe treats it
+exactly as a member who is no contact:
+
+- It is not declared as an accepted contact to the engine, so it gets no version notice (§13.8).
+- Its connection follows the automatic rule above, in what is sent and in timing: it is revoked
+  with the last chat that keeps it, and the contact and its name stay, without a session.
+
+_Why (decided by the owner, D.91):_ privacy first, adding someone must stay invisible. The engine
+answers a plaintext of a newer, unsupported version with a version notice to accepted contacts only
+(§13.8). A modified client could send such a plaintext on purpose and learn from the answer that it
+was added, and a connection kept alive past the last shared chat would show the same.
+_Impacts accepted:_
+
+- A contact added this way that runs a newer version is not told that this user's device cannot
+  read their messages, until the relationship is mutual.
+- The connection to such a contact can lapse when no shared chat remains. Opening it again needs a
+  new announcement, which the other person sees as a contact request: the addition then becomes
+  known, as the user chose to reach them.
+- Starting a chat of two with that person reveals the relationship, by design: the invitation says
+  who asks.
+
 A contact request from a member of a chat this device has accepted is always shown. A request
-states a name, a message or a timer; the announcement that opens a connection, answers one or
-renews one states none.
+always carries a payload, a name and a message that may both be empty (a request of 0.1.0 or 0.1.1
+also carried a timer, now ignored); the announcement that opens a connection, answers one or renews
+one carries none.
 
 - The connection is answered at once, exactly as for any member, so that the chats keep flowing.
-  The request, its message and the timer it announced are kept and shown for the user to accept
-  or decline.
-- Accepting makes that person a contact and gives the consent of a new contact below, with the
-  announced timer. Nothing more is sent: the session is open.
+  The request and its message are kept and shown for the user to accept or decline.
+- Accepting makes that person a contact, as accepting any request does (below): it starts no chat
+  and consents to none. Nothing more is sent: the session is open.
 - Declining refuses the contact, not the connection: it stays automatic, and is revoked by the
   rule above once no chat needs it.
 - A request waiting is never removed by joining a chat: when the device accepts a chat that lists
@@ -1588,31 +1612,48 @@ _Why (decided by the owner):_ privacy first. No message exists that tells the ot
 or anyone, who added whom: adding a member is local, and the answer to a member's request is the
 same announcement, at the same moment, whatever the user later chooses, while the connection lives
 exactly as long as the chats need it. The requester can therefore not tell a request accepted,
-declined or not answered yet, except by what accepting does anyway: the chat it asked for is
-adopted (§4.8). _Cost accepted:_ being a contact is one-sided until the other person adds this
-user back or accepts a chat; a declined requester keeps a working connection while a chat is
-shared; and the requester's device founds the chat it asked for as soon as the connection is
-answered, so the user is shown both the request and that chat's invitation: accepting either
-accepts both, declining one leaves the other.
+declined or not answered yet: accepting starts no chat (below), so nothing follows from it.
+_Cost accepted:_ being a contact is one-sided until the other person adds this user back or
+accepts a chat; a declined requester keeps a working connection while a chat is shared.
 
-**A new contact.** Accepting a contact request is the consent for a chat with that person.
-An accepted contact counts as an earlier conversation of format version 0 with that person, even
-when it holds nothing but the request. The requester's device then creates a group of the two,
-which it owns, with `migrate_from = 0`, and the accepting device adopts that root without a prompt.
+**A new contact.** Adding a contact and starting a chat are two steps (D.90).
 
-**The timer the request announced.** A contact request may state the message timer (§7.7) its
-sender chose for that chat, and the accepting device shows it before the user accepts. The consent
-then covers only a root that carries that timer; `0` and a root without a timer are the same. The
-first root from that person that the consent would cover, but with another timer, uses the consent
-up and is shown as an ordinary invitation, with Accept and Decline, saying which timer was
-announced and which the chat keeps. A request that states no timer (from an earlier version)
-leaves nothing to compare: the root is adopted as before. The announced timer is kept by the
-accepting device only, beside the consent: never sent, never hashed, and it expires with the
-consent.
+1. A contact request asks only to become a contact. It may carry a short message and the
+   requester's username, and nothing else. Accepting it makes each the other's contact and opens
+   the session; it creates no chat, and records no consent to one. Nobody owes a chat.
+2. Later, either person opens the contact and starts the pair's chat explicitly, choosing its
+   message timer (§7.7) as for any new chat. That device creates a group of the two, which it
+   owns, with `migrate_from = 0`. The other person receives it as an ordinary invitation, with
+   Accept and Decline, showing the chat's timer (§4.8, case 5). Accepting it links it to that
+   contact on both sides. Until then, the other person's screen for that contact shows the
+   invitation instead of "Start a chat".
 
-_Why (decided by the owner, D.89):_ the device compares in the engine and asks, so that the user
-decides before the chat is active, rather than learning afterwards that the chat keeps another
-timer than the one accepted.
+Whoever starts the chat owns it. Two people who start it at the same moment end with one chat, by
+the tie rule below (row 1).
+
+_Why (decided by the owner, D.90):_ who owns a chat is who started it, which the user chose; a
+contact request no longer commits anyone to a chat; and the race that let the accepter's device
+found its own chat before the requester's arrived, and so become the owner by the tie rule, is
+gone, as there is no automatic chat to race against. The request's message stays apart from any
+chat: it is written before the session exists, with other plausible deniability properties than a
+chat message, so it is shown only on the contact request screen.
+_Cost accepted:_ starting a chat is one more step, and the other person is asked to accept it.
+
+An accepted contact is not an earlier conversation of format version 0 by itself: only an archive
+is (below), so the pair's chat of a new contact is never shown as a migration.
+
+**The timer the request announced (withdrawn).** Until 0.1.1 a contact request stated the message
+timer its sender chose for the chat that accepting it started, and accepting gave the engine a
+one-shot consent covering only a root with that timer (D.89). Since a contact request starts no
+chat (D.90), no timer is sent and no consent is recorded: the timer is chosen when the chat is
+started and shown on its invitation. A request of 0.1.0 or 0.1.1 that states a timer is accepted
+and its timer ignored. The engine's consent and announced-timer code is unused from this version
+and is scheduled for removal; until then a consent recorded by 0.1.1 still applies for its two
+weeks. What follows describes that unused code, kept for its history.
+
+_Why (decided by the owner, D.89, withdrawn by D.90):_ the device compares in the engine and asks,
+so that the user decides before the chat is active, rather than learning afterwards that the chat
+keeps another timer than the one accepted.
 
 - It covers the first adoption only. The owner may change the timer afterwards with a new root,
   which the device follows as every member does (§7.7), and the timeline shows it. An owner can
@@ -1631,8 +1672,8 @@ timer than the one accepted.
   with that person: it is the ordinary invitation of that rule whatever its timer, and it names no
   announced timer.
 
-**One automatic chat per pair.** Every group a device creates by itself, after a contact request
-or by migrating an earlier conversation, carries `migrate_from = 0`, and at most one such group
+**One automatic chat per pair.** Every chat of two a device creates for a contact, started from
+that contact or by migrating an earlier conversation, carries `migrate_from = 0`, and at most one such group
 exists between two people. A group a user creates deliberately never carries the field: it is
 always a new conversation, and a user may have any number of them with the same single person.
 
@@ -1686,12 +1727,10 @@ to continue below: one of the two ended the earlier chat on purpose, so the othe
 When both chats still list both people, the device first applies the tie rule: the chat whose
 owner's GossipID sorts first (raw bytes, ascending) is the one to keep.
 
-The tie rule does not compare the timer a contact request announced: when it decides, the device
-switches to the winning chat without a prompt whatever its timer, so in that one case a user can
-end in a chat whose timer differs from the one announced. This is a decided, known gap (D.89,
-§16.12). The app does not reach it: when two contact requests cross, each device sent one, so
-neither is asked to accept and neither gives a consent. It can arise only at engine level, for
-example with another client built on the engine.
+The tie rule compares no timer: when it decides, the device switches to the winning chat without a
+prompt whatever its timer. Since a contact request announces no timer (D.90), there is no announced
+timer it could differ from; two people who start the pair's chat at once each chose a timer, and
+the chat kept has the timer its owner chose.
 
 - **If mine is the one to keep,** the other chat becomes history, without a prompt, whatever the
   boolean says.
@@ -1726,23 +1765,23 @@ it first) treats that root as received directly: it pairs with the device's own 
 The cases, with L the person whose GossipID sorts first, H the other, and G_L and G_H the chats
 each created. "Asked" means the invitation to continue above.
 
-| #   | Situation                                                                         | L's device                              | H's device                                 | Continues in                               |
-| --- | --------------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------ | ------------------------------------------ |
-| 1   | Both create at the same moment                                                    | not asked: keeps G_L                    | not asked: switches to G_L                 | G_L                                        |
-| 2a  | H creates after L accepted H's contact request; L has none yet                    | not asked: the contact was the consent¹ |                                            | G_H                                        |
-| 2b  | H migrates an earlier conversation with history; L has none yet                   | asked                                   |                                            | G_H if L accepts                           |
-| 3   | H creates and writes in G_H while L is offline; L had created G_L                 | not asked: keeps G_L, G_H is history    | not asked: switches to G_L, G_H is history | G_L                                        |
-| 4a  | L ignored H's invitation without answering; later L creates G_L                   | not asked: keeps G_L                    | not asked: switches to G_L, G_H is history | G_L                                        |
-| 4b  | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L                    | asked                                      | G_L if H accepts                           |
-| 5   | L took part in G_H, then sends a new G_L                                          |                                         | asked                                      | G_H; G_L if H accepts                      |
-| 6   | H sends a new G_H, whether or not H took part in G_L                              | not asked: keeps G_L, G_H is history    |                                            | G_L                                        |
-| 7   | H joined G_L, then restores an old backup and creates G_H                         | not asked: keeps G_L                    | not asked: switches to G_L                 | G_L                                        |
-| 8   | L joined G_H, then restores an old backup and creates G_L                         | not asked: keeps G_L                    | asked                                      | each on its own until H accepts, then G_L  |
-| 9   | H restores a backup from before L took part; L sends G_L                          |                                         | not asked: switches to G_L, G_H is history | G_L                                        |
-| 10  | H holds G_L, which L created; L reinstalls into an empty device and creates G_L2  |                                         | asked (an ordinary invitation)²            | each on its own until H accepts, then G_L2 |
+| #   | Situation                                                                         | L's device                           | H's device                                 | Continues in                               |
+| --- | --------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------ | ------------------------------------------ |
+| 1   | Both create at the same moment                                                    | not asked: keeps G_L                 | not asked: switches to G_L                 | G_L                                        |
+| 2a  | H starts the chat with L, a contact; L has none yet                               | asked (an ordinary invitation)¹      |                                            | G_H if L accepts                           |
+| 2b  | H migrates an earlier conversation with history; L has none yet                   | asked                                |                                            | G_H if L accepts                           |
+| 3   | H creates and writes in G_H while L is offline; L had created G_L                 | not asked: keeps G_L, G_H is history | not asked: switches to G_L, G_H is history | G_L                                        |
+| 4a  | L ignored H's invitation without answering; later L creates G_L                   | not asked: keeps G_L                 | not asked: switches to G_L, G_H is history | G_L                                        |
+| 4b  | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L                 | asked                                      | G_L if H accepts                           |
+| 5   | L took part in G_H, then sends a new G_L                                          |                                      | asked                                      | G_H; G_L if H accepts                      |
+| 6   | H sends a new G_H, whether or not H took part in G_L                              | not asked: keeps G_L, G_H is history |                                            | G_L                                        |
+| 7   | H joined G_L, then restores an old backup and creates G_H                         | not asked: keeps G_L                 | not asked: switches to G_L                 | G_L                                        |
+| 8   | L joined G_H, then restores an old backup and creates G_L                         | not asked: keeps G_L                 | asked                                      | each on its own until H accepts, then G_L  |
+| 9   | H restores a backup from before L took part; L sends G_L                          |                                      | not asked: switches to G_L, G_H is history | G_L                                        |
+| 10  | H holds G_L, which L created; L reinstalls into an empty device and creates G_L2  |                                      | asked (an ordinary invitation)²            | each on its own until H accepts, then G_L2 |
 
-¹ Unless G_H carries another timer than H's request announced: then G_H is an ordinary invitation
-on L's device (above).
+¹ Accepting a contact request gives no consent (D.90): G_H is asked with its timer, whoever sent
+the request. Until 0.1.1 the contact was the consent and G_H was adopted without a prompt.
 
 ² Whatever timer G_L2 carries: H holds a chat of two with L, so no consent applies and the
 invitation names no announced timer.
@@ -1762,8 +1801,9 @@ that starts a second one on purpose, so the user decides; accepting is the only 
 accepted last is the current one, with no date compared.
 
 **Example (row 10).** Alice and Carol have a chat of two that Carol created. Carol reinstalls Gossip
-from her recovery phrase into an empty device. Her new device holds no chat with Alice, so it
-creates a new automatic chat of two, which Carol owns. Alice receives it as an ordinary invitation:
+from her recovery phrase into an empty device. Her new device holds no chat with Alice: Carol adds
+Alice again and starts a chat with her (two steps, D.90), a new automatic chat of two, which Carol
+owns. Alice receives it as an ordinary invitation:
 it looks like any other invitation and is titled with Carol's name. If Alice accepts, the chat she
 already held with Carol becomes read-only history linked to the new chat: Alice sees one
 conversation with Carol, the earlier messages first, then the new chat. If Alice declines, nothing
@@ -1785,12 +1825,17 @@ _Known limits (also §16.11):_
   stay an ordinary invitation there (D.88).
 
 **The invitation screen.** Every invitation uses one screen made of sections shown as they apply:
-who asks; adding that person as a contact; the group, its owner and its members; the earlier
-conversation it continues; warnings (§4.8, §5.11); and the choices.
-A person who is not a contact and asks for a chat is shown once, on that screen, as asking both to
-become a contact and to open the chat.
-An invitation is named as the conversation list would name that group: a chat of two without a
-name by the other person's name, never "Unnamed group".
+who asks; adding that person as a contact; the group, its owner and its members; its message
+timer; the earlier conversation it continues; warnings (§4.8, §5.11); and the choices.
+Who asks is said for each case:
+
+- a contact request asks only to become a contact, with its message if any; accepting starts no
+  chat, which the screen says;
+- a chat of two from a contact invites to a chat, and says nothing of becoming a contact;
+- a chat of two from someone who is not a contact invites to a chat and asks to become a contact:
+  accepting does both.
+  An invitation is named as the conversation list would name that group: a chat of two without a
+  name by the other person's name, never "Unnamed group".
 
 ## 6. Events
 
@@ -3549,7 +3594,10 @@ it; it is never relayed and never answered.
   one plaintext at its own highest version holding one response frame, with an empty `request_id`,
   `idx = 0` and status **unsupported**.
   - It is sent **only to a peer the user explicitly accepted as a contact** (§5.12), whether or
-    not they share a group. A peer whose connection is automatic, or any other peer, gets silence.
+    not they share a group, and only once that relationship is mutual and known to that peer: the
+    user accepted their contact request or chat invitation, or they accepted the user's. A peer
+    whose connection is automatic, a member the user added as a contact on this device only, or
+    any other peer, gets silence (D.91).
   - The version prefix is read **before** any other check, the size check included: a later
     version may use a larger container, and must still be answered.
   - It is sent at most once per peer and received version per 24 hours (a default, §2.2).
@@ -3563,7 +3611,10 @@ it; it is never relayed and never answered.
   A later version could do without it, by sending both versions to a peer whose version it does
   not know; the notice saves that, and it could not be added to version 1 after its release.
 - **What the notice reveals.** That this device speaks version 1 of this protocol, to a contact its
-  user accepted. Nothing about any group, and nothing to anyone else.
+  user accepted. Nothing about any group, and nothing to anyone else. Because only a contact
+  already known to be one gets it, the notice cannot be used as a probe: a modified client that
+  sends a plaintext of a higher version on purpose learns nothing about whether it was added as a
+  contact on this device (D.91).
 - A device that receives the notice takes no action required by this version; it MUST NOT treat it
   as an error or penalise its sender (§2.2).
 - Events carried under a newer prefix follow the version rules of §13.1.
@@ -4037,26 +4088,17 @@ compared, by the owner's choice (D.88).
 This is accepted: a silent switch would let a device move a conversation without the user's
 consent.
 
-### 16.12 Known limitation: the timer a contact request announced
+### 16.12 Withdrawn: the timer a contact request announced
 
-A device that accepted a contact request adopts the chat its requester founds without a prompt
-only if that chat keeps the timer the request announced; otherwise the chat is an ordinary
-invitation that names both timers (§5.12, D.89).
+Until 0.1.1 a device that accepted a contact request adopted the chat its requester founded without
+a prompt only if that chat kept the timer the request announced, and the requester could tell from
+the device's traffic whether it compared them (D.89). Since 0.1.2 a contact request starts no chat
+and announces no timer, and accepting it records no consent (§5.12, D.90): every chat of two is an
+ordinary invitation showing its own timer, so this limitation no longer applies. The gap of the tie
+rule it described has no announced timer left to differ from.
 
-- **What the requester can learn.** A requester that announces one timer and founds the chat with
-  another can tell that the receiver's device compared them, and when the user accepted: a chat held
-  as an invitation sends nothing until it is answered, while an adopted chat queries and connects
-  at once. A requester that founds with the timer it announced learns nothing. This cost is
-  accepted.
-- **The first adoption only.** The owner can change the timer afterwards with a new root, as any
-  owner can; the timeline line shows the change.
-- **The tie rule.** When both people founded an automatic chat at once and the other person's chat
-  wins the tie rule, the device switches to it without a prompt whatever its timer, so a user can
-  end in a chat whose timer differs from the one announced. The app does not reach this case, as
-  no consent is given when two requests cross; it can arise only at engine level, for example with
-  another client built on the engine. Closing it means changing row 1 of the table in §5.12 and
-  deciding what the device's own chat becomes while the user is asked; this is left for after the
-  first release.
+What a peer can still observe is what any invitation shows: the person who starts the chat learns
+whether and when the other accepts it, as for any group (§4.8).
 
 ## 17. Readiness, validation and future work
 
@@ -6117,7 +6159,11 @@ _Alternatives not taken:_
 - Only document the two chats: parallel chats of two with the same person would pile up with each
   reinstall.
 
-### D.89 The timer a contact request announced (§5.12, §16.12)
+### D.89 The timer a contact request announced (§5.12, §16.12), withdrawn
+
+_Withdrawn by D.90 (2026-11-27):_ a contact request no longer starts a chat nor states a timer, and
+accepting it records no consent, so there is nothing to compare. The engine code stays unused until
+its removal. The entry is kept as written, for its history.
 
 _Context:_ a contact request states the message timer its sender chose, and the accepting user
 sees it before accepting. Accepting is the consent to the chat the requester then founds, which
@@ -6171,3 +6217,89 @@ _Alternatives not taken:_
   another without being told.
 - Announce no timer in the request: the user would accept without knowing how long the messages
   of the chat last.
+
+### D.90 Adding a contact and starting a chat are two steps (§5.12, §16.12)
+
+_Context:_ accepting a contact request was the consent to a chat of two that the requester's device
+founded as soon as the session was active, and the accepter's device adopted it without a prompt
+(D.89). A user who opened the new contact before that chat arrived made their own device found one,
+and the tie rule then kept the chat of the person whose GossipID sorts first, so the accepter could
+end as the owner of a chat the other person started. Crossing requests gave the same.
+
+_Decision:_ adding a contact and starting a chat are two steps, decided by the owner on 2026-11-27.
+
+- A contact request asks only to become a contact. It carries the requester's username if they
+  choose and a short message, and no message timer. Accepting it records no consent and creates no
+  chat on either side.
+- A chat is started explicitly, from the contact, with the message timer chosen then. The device
+  that starts it owns it (`migrate_from = 0`, unchanged), and the other person receives an ordinary
+  invitation that shows that timer. While such an invitation waits, the app shows it on the
+  contact's screen instead of "Start a chat"; two people who start at the same moment still end with
+  one chat by the tie rule (row 1).
+- A request of 0.1.0 or 0.1.1 that states a timer is accepted, and its timer ignored. A discussion of
+  those versions that still owes the chat of a request it sent founds nothing.
+
+_Why:_
+
+- Who owns a chat is who started it: owning a chat allows adding people to it, so it follows the
+  user's own action, not the order in which two devices happened to act.
+- The request no longer commits anyone to a chat, nor to a timer chosen before the session exists.
+- The race that made the accepter the owner disappears: there is no automatic chat to race against.
+- The request's message stays apart from any chat: it is sent with the announcement, before the
+  session exists, and has other plausible deniability properties than a chat message (it could be
+  decrypted if the keys were later compromised). Linking it to the first chat of two is left for
+  later.
+- The engine's consent and announced-timer code (D.89) is unused from this version and scheduled for
+  removal; it stays in place meanwhile.
+
+_What a peer or the backend can newly observe:_ nothing that was hidden before. Less is sent: the
+requester's device no longer founds and sends a chat when the session becomes active, and the
+accepter's device no longer adopts one and queries its members at once. A chat started later sends
+what any new chat sends, at the moment the user chooses.
+
+_Accepted cost:_ starting a chat is one more step, and the other person is asked to accept it.
+
+_Alternatives not taken:_
+
+- Offer "Start a chat with X?" right after the contact is accepted: a prompt at a moment the user
+  did not choose.
+- Keep one step and only fix the race: the request would still commit both people to a chat whose
+  owner depends on timing.
+- Keep the timer in the request as a suggestion: a value that commits nobody and can differ from the
+  chat's real timer.
+
+### D.91 A contact added on this device only stays silent to the version probe (§5.12, §13.8)
+
+_Context:_ a member of a shared chat can be added as a contact on this device only, sending nothing
+(§5.12). The engine answers a plaintext of a higher, unsupported version with a version notice to
+the peers declared as accepted contacts, and stays silent toward everyone else (§13.8). Declaring a
+contact added this way therefore let a modified client send such a plaintext on purpose and learn
+from the notice that this user added it, which contradicts "adding sends nothing and reveals
+nothing".
+
+_Decision:_ decided by the owner on 2026-11-27. A contact the user added on their own (`added`)
+stays silent toward that probe, exactly like a chat member who is not a contact. The version notice
+is given only where the other person already knows the two are contacts: the user accepted their
+contact request or chat invitation, or they accepted the user's request or the chat of two the user
+started. The contact then becomes `accepted` and is declared to the engine.
+
+- For the user an `added` contact is a contact: listed, named, offered for new chats and members.
+- For anything the other person can observe it is an automatic connection: not declared to the
+  engine, and its connection kept and revoked by the automatic rule, in what is sent and in timing.
+  The contact and its name stay when the connection goes.
+
+_Why:_ privacy first: adding someone must stay invisible, to them and to anyone else.
+
+_Impacts accepted:_
+
+- A contact added this way that runs a newer version is not told that this user's device cannot
+  read their messages, until the relationship is mutual.
+- The connection to such a contact can lapse when no shared chat remains; reaching them again needs
+  a new announcement, which they see as a contact request.
+- Starting a chat of two with that person reveals the relationship, by design.
+
+_Alternatives not taken:_
+
+- Declare every contact the user added: the version notice becomes a probe of who added whom.
+- Answer every peer with a version notice: it would tell anyone which version this device speaks,
+  which §13.8 limits to contacts on purpose.

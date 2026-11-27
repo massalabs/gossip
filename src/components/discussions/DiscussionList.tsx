@@ -31,9 +31,11 @@ import type {
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../../constants/routes';
 import { useGroupStore } from '../../stores/groupStore';
+import { useAccountStore } from '../../stores/accountStore';
 import {
   isAcceptedContact,
   isConversationRow,
+  isDirectChatInvitationFrom,
 } from '../../utils/conversations';
 
 // =============================================================================
@@ -133,6 +135,17 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
         ) && (filter === 'archived') === !!d.archived
     );
   }, [allDiscussions, allContacts, groups, filter]);
+  // The contacts whose invitation to the pair's chat waits (§5.12).
+  const me = useAccountStore(s => s.userProfile?.userId);
+  const chatInvitationFrom = React.useMemo(
+    () =>
+      new Set(
+        invitations
+          .filter(i => isDirectChatInvitationFrom(i, i.owner, me))
+          .map(i => i.owner)
+      ),
+    [invitations, me]
+  );
   const migrationOf = React.useMemo(
     () =>
       new Map(
@@ -265,6 +278,9 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                 migrationInvitation={migrationOf.get(
                   item.discussion.contactUserId
                 )}
+                chatInvitation={chatInvitationFrom.has(
+                  item.discussion.contactUserId
+                )}
                 onAcceptMigration={acceptMigration}
                 onDeclineMigration={declineMigration}
                 onOpenInvitation={openInvitation}
@@ -290,6 +306,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
       handleEditName,
       handleTogglePin,
       migrationOf,
+      chatInvitationFrom,
       acceptMigration,
       declineMigration,
       openInvitation,

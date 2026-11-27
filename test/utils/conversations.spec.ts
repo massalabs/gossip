@@ -87,6 +87,15 @@ describe('conversation rows (§5.12)', () => {
     expect(isConnectedNonContact(undefined)).toBe(false);
   });
 
+  it('treats a member added on this device only as a contact of the user, listed in the conversations', () => {
+    const added = contact({ connection: 'added' });
+    expect(isAcceptedContact(added)).toBe(true);
+    expect(isConnectedNonContact(added)).toBe(false);
+    expect(
+      isConversationRow(discussion({ isArchive: false }), added, new Set())
+    ).toBe(true);
+  });
+
   it('takes a display name used by another contact, whatever its case', () => {
     const list = [
       contact({ userId: 'alice', name: 'Alice' }),

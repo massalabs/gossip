@@ -261,10 +261,14 @@ describe('A device restored from a backup', { timeout: 300_000 }, () => {
       asNewContact: true,
     });
     await deliver();
-    const chat = (await alice.sdk.conversations.directChatWith(
-      bob.sdk.userId
-    ))!;
-    expect(chat).toBeDefined();
+    // Adding a contact starts no chat (§5.12): Alice starts it, Bob accepts.
+    const chat = await alice.sdk.conversations.startDirectChat(bob.sdk.userId);
+    await deliver();
+    await bob.sdk.conversations.acceptInvitation(chat);
+    await deliver();
+    expect(await alice.sdk.conversations.directChatWith(bob.sdk.userId)).toBe(
+      chat
+    );
     await alice.sdk.groups.sendMessage(chat, 'before');
     await deliver();
     return { alice, bob, chat };

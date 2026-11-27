@@ -154,6 +154,22 @@ describe('useContactForm with a member of a shared chat', () => {
     expect(sdk.conversations.addAsContact).not.toHaveBeenCalled();
   });
 
+  it('sends the request with its message and username and no message timer: it starts no chat', async () => {
+    await act(async () => f().handleUserIdChange('bob'));
+    await act(async () => f().handleNameChange('Bobby'));
+    await act(async () => f().handleMessageChange('hello Bob'));
+    await act(async () => f().handleSubmit());
+    expect(sdk.discussions.start).toHaveBeenCalledTimes(1);
+    const args = sdk.discussions.start.mock.calls[0] as unknown[];
+    // The contact and the payload only: no options carrying a timer.
+    expect(args).toHaveLength(2);
+    expect(args[1]).toEqual({
+      username: 'alice_tester',
+      message: 'hello Bob',
+    });
+    expect(f()).not.toHaveProperty('messageTimer');
+  });
+
   it('imports the file of a hidden automatic contact, and refuses a contact with a translated message', async () => {
     importFileContact.mockResolvedValue({
       userPubKeys: new Uint8Array([1]),

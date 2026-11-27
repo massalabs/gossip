@@ -22,7 +22,7 @@ import {
 } from '../utils/discussions.js';
 import {
   AnnouncementPayload,
-  encodeAnnouncementPayload,
+  encodeContactRequestPayload,
 } from '../utils/announcementPayload.js';
 import { UserPublicKeys, SessionStatus } from '../wasm/bindings.js';
 import { AnnouncementService } from './announcement.js';
@@ -41,16 +41,6 @@ const logger = new Logger('DiscussionService');
 export interface DiscussionInitializationResult {
   discussionId: number;
   announcement: Uint8Array;
-}
-
-/** What a contact request carries besides its announcement. */
-export interface DiscussionStartOptions {
-  /**
-   * The message timer (§7.7, milliseconds, 0 = forever) of the direct chat
-   * this device founds once the request is accepted; the account's default
-   * when absent.
-   */
-  messageTimer?: number;
 }
 
 /**
@@ -101,7 +91,9 @@ export class DiscussionService {
   }
 
   /**
-   * Initialize a discussion with a contact using SessionManager
+   * Initialize a discussion with a contact using SessionManager: the contact
+   * request (§5.12). It opens a session and starts no chat: either person
+   * starts one later (`conversations.startDirectChat`).
    * @param contact - The contact to start a discussion with
    * @param payload - Optional payload to include in the announcement (username and message)
    * @returns The discussion ID and the created announcement
@@ -119,8 +111,7 @@ export class DiscussionService {
    */
   async initialize(
     contact: Contact,
-    payload?: AnnouncementPayload,
-    options: DiscussionStartOptions = {}
+    payload?: AnnouncementPayload
   ): Promise<Result<DiscussionInitializationResult, Error>> {
     const log = logger.forMethod('initialize');
 
@@ -148,35 +139,17 @@ export class DiscussionService {
         weAccepted: true,
         direction: DiscussionDirection.INITIATED,
         unreadCount: 0,
-        // A contact request: once accepted, this device founds the direct
-        // chat (§5.12).
-        directChatOwed: true,
-        // Its message timer, remembered until the chat is founded.
-        directChatTimer: options.messageTimer ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
 
       log.info(`discussion created with id: ${discussionId}`);
 
-      let payloadBytes: Uint8Array | undefined;
-      if (payload) {
-        payloadBytes = encodeAnnouncementPayload(
-          payload.username,
-          payload.message,
-          options.messageTimer
-        );
-      } else if (options.messageTimer !== undefined) {
-        payloadBytes = encodeAnnouncementPayload(
-          undefined,
-          undefined,
-          options.messageTimer
-        );
-      }
-
+      // Never empty: a contact request is told from a connection by its
+      // payload (§5.12). No message timer: the request starts no chat.
       const result = await this.createSessionForContact(
         contact.userId,
-        payloadBytes ?? new Uint8Array(0)
+        encodeContactRequestPayload(payload?.username, payload?.message)
       );
 
       if (!result.success) {
@@ -256,26 +229,22 @@ export class DiscussionService {
 
   /**
    * Called when the user accepts a contact request, before the session is
-   * accepted: the consent to the chat its requester founds (§5.12), with
-   * the message timer the request announced, shown to the user, if any.
+   * accepted: the requester becomes a contact the user accepted (§5.12).
+   * It gives no consent to a chat: accepting a contact starts none.
    */
-  private onContactAccepted?: (
-    contactUserId: string,
-    announcedTimer?: number
-  ) => Promise<void>;
+  private onContactAccepted?: (contactUserId: string) => Promise<void>;
 
   setOnContactAccepted(
-    hook:
-      | ((contactUserId: string, announcedTimer?: number) => Promise<void>)
-      | undefined
+    hook: ((contactUserId: string) => Promise<void>) | undefined
   ): void {
     this.onContactAccepted = hook;
   }
 
   /**
    * Accept a discussion request from a contact using SessionManager.
-   * Accepting a contact request is the consent to the chat with that person
-   * (§5.12): its requester founds it and this device adopts it.
+   * Accepting a contact request makes the requester a contact and opens the
+   * session; it starts no chat and consents to none (§5.12): either person
+   * starts one later, which the other receives as an ordinary invitation.
    * @param discussion - The discussion to accept
    */
   async accept(discussion: Discussion): Promise<Result<Uint8Array, Error>> {
@@ -300,17 +269,9 @@ export class DiscussionService {
         ) === SessionStatus.Active;
 
       try {
-        // The timer the request announced, as the screen showed it; none
-        // when this device sent a request too (it then holds its own).
-        const announcedTimer = discussion.directChatOwed
-          ? undefined
-          : (discussion.directChatTimer ?? undefined);
-        await this.onContactAccepted?.(
-          discussion.contactUserId,
-          announcedTimer
-        );
+        await this.onContactAccepted?.(discussion.contactUserId);
       } catch {
-        log.error('consent to the direct chat not recorded');
+        log.error('contact not marked accepted');
       }
 
       if (connected) {
@@ -467,10 +428,9 @@ export class DiscussionService {
    */
   async start(
     contact: Contact,
-    payload?: AnnouncementPayload,
-    options: DiscussionStartOptions = {}
+    payload?: AnnouncementPayload
   ): Promise<Result<DiscussionInitializationResult, Error>> {
-    const result = await this.initialize(contact, payload, options);
+    const result = await this.initialize(contact, payload);
     if (result.success) {
       await this.refreshService?.stateUpdate();
       this.eventEmitter.emit(
@@ -489,8 +449,7 @@ export class DiscussionService {
   async startByUserId(
     contactUserId: string,
     name: string,
-    payload?: AnnouncementPayload,
-    options: DiscussionStartOptions = {}
+    payload?: AnnouncementPayload
   ): Promise<Result<DiscussionInitializationResult, Error>> {
     if (!this.authService) {
       return { success: false, error: new Error('AuthService not set') };
@@ -525,7 +484,7 @@ export class DiscussionService {
       contact = addResult.contact;
     }
 
-    const result = await this.initialize(contact, payload, options);
+    const result = await this.initialize(contact, payload);
     if (result.success) await this.refreshService?.stateUpdate();
     return result;
   }

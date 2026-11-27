@@ -193,10 +193,9 @@ export function cleanupTestSessions(sessions: TestSessionData[]): void {
  * The first SDK initiates the discussion, the second accepts it.
  *
  * By default the two discussions are then what an upgrade leaves of a
- * one-to-one conversation from before group chats: archives, with no direct
- * chat owed, so that only the session is set up. With `asNewContact` they
- * stay a new contact (§5.12): the initiator founds the direct chat once the
- * acceptance is read, and the acceptor adopts it.
+ * one-to-one conversation from before group chats: archives, so that only
+ * the session is set up. With `asNewContact` they stay a new contact
+ * (§5.12): contacts with no chat, until either starts one.
  *
  * @param initiatorSdk - SDK instance that will start the discussion
  * @param acceptorSdk - SDK instance that will accept the discussion
@@ -267,11 +266,9 @@ export async function setupSession(
       await sdk.queries.discussions.updateByOwnerAndContact(
         sdk.userId,
         peer.userId,
-        { isArchive: true, directChatOwed: false }
+        { isArchive: true }
       );
     }
-    // Accepted long ago: no consent to a new chat is pending.
-    await acceptorSdk.groups.consentToDirectChat(initiatorSdk.userId, false);
   }
 
   // Initiator fetches acceptor's acceptance

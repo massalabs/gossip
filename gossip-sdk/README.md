@@ -194,14 +194,24 @@ await sdk.messages.markAsRead(messageId);
 ### Discussions
 
 ```typescript
-// Start a new discussion
+// Send a contact request (it starts no chat)
 const result = await sdk.discussions.startByUserId(contactUserId, 'Alice', {
   username: 'Alice',
   message: 'Hi!',
 });
 
-// Accept an incoming discussion request
+// Accept an incoming contact request (it starts no chat either)
 await sdk.discussions.accept(discussion);
+
+// Start the chat with a contact, explicitly: this device owns it, and the
+// other person receives an ordinary invitation showing its message timer.
+const groupId = await sdk.conversations.startDirectChat(contactUserId, {
+  messageTimer: 24 * 60 * 60_000,
+});
+
+// The other person's side: the invitation waiting, then accepted.
+const invitation = await sdk.conversations.directChatInvitation(peerUserId);
+if (invitation) await sdk.conversations.acceptInvitation(invitation.epochId);
 
 // Renew a broken session
 await sdk.discussions.renew(contactUserId);
@@ -236,7 +246,9 @@ await sdk.contacts.delete(contactUserId);
 
 // A member of a shared chat who is no contact (connection 'automatic', or
 // 'requested' while their own contact request waits): add them as a contact
-// on this device only. Nothing is sent.
+// on this device only. Nothing is sent. The contact stays 'added' (not
+// declared to the engine, its connection kept by the automatic rule) until
+// the relationship is mutual, then 'accepted'.
 const added = await sdk.conversations.addAsContact(contactUserId, 'Alice');
 
 // Decline a contact request. A member of a shared chat keeps the connection

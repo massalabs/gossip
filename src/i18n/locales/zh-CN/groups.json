@@ -207,7 +207,7 @@
     "invitation": "{{name}} 邀请你在新聊天中继续此对话。",
     "junction": "以上为早先的对话 · 此聊天是它的延续",
     "waiting_contact": "正在等待 {{name}} 接受你的请求。",
-    "request_received": "{{name}} 请求成为你的联系人并与你聊天。",
+    "request_received": "{{name}} 请求成为你的联系人。",
     "continue_invitation": "{{name}} 希望在新群组中继续此对话。",
     "earlier_junction": "以上为之前的聊天 · 只读",
     "unsent": "未发送"
@@ -215,7 +215,6 @@
   "invite": {
     "title": "邀请",
     "who_asks": "请求者",
-    "asks_contact_and_chat": "{{name}} 请求成为你的联系人并与你开始聊天。",
     "their_message": "对方的留言",
     "add_contact": "联系人",
     "add_contact_hint": "接受后会将 {{name}} 加入你的联系人。",
@@ -228,13 +227,16 @@
     "untrusted_names": "名称由发送者自行选择，可能冒充他人：请核对用户 ID。",
     "choices": "你的回复",
     "open": "打开",
-    "not_found": "此邀请已不再等待回复。"
+    "not_found": "此邀请已不再等待回复。",
+    "asks_contact": "{{name}} 请求成为你的联系人。",
+    "asks_chat_and_contact": "{{name}} 邀请你聊天，并请求成为你的联系人。",
+    "invites_to_chat": "{{name}} 邀请你聊天。",
+    "add_contact_request_hint": "接受后会将 {{name}} 加入你的联系人。这不会开始聊天：你们任何一方之后都可以发起聊天。"
   },
   "timer": {
     "label": "消息定时",
     "choose_hint": "消息在发送后经过这段时间，会在所有设备上消失。更改只对之后发送的消息有效。",
     "new_chat_hint": "此聊天中的消息在发送后经过这段时间消失。",
-    "contact_request_hint": "用于对方接受后开始的聊天。",
     "migration_hint": "用于新聊天。早先的消息保留自己的规则。",
     "change_hint": "只有更改后发送的消息使用新的定时。",
     "owner_only": "只有群主可以更改。",
@@ -265,5 +267,14 @@
     "weeks_few": "{{count}} 周",
     "weeks_many": "{{count}} 周",
     "weeks_other": "{{count}} 周"
+  },
+  "start_chat": {
+    "action": "发起聊天",
+    "no_chat": "还没有与 {{name}} 的聊天。",
+    "hint": "{{name}} 会收到一个可以接受或拒绝的邀请。你是这个聊天的所有者。",
+    "connecting": "正在与 {{name}} 建立连接…",
+    "started": "聊天已发起",
+    "failed": "无法发起聊天",
+    "open_failed": "无法打开此聊天"
   }
 }

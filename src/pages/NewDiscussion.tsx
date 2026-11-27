@@ -74,7 +74,8 @@ const NewDiscussion: React.FC = () => {
   const onSelectContact = async (contact: Contact) => {
     if (!userProfile?.userId) return;
     try {
-      // Its direct chat, founded if there is none (§5.12).
+      // Its direct chat, or the contact's screen, which offers "Start a
+      // chat": opening a contact starts none (§5.12).
       if (
         gossip.discussions.getStatus(contact.userId) === SessionStatus.Active
       ) {

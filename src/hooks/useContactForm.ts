@@ -12,7 +12,6 @@ import { validateUsernameFormat } from '../utils/validation';
 import { useGossipSdk } from './useGossipSdk';
 import { useFileShareContact } from './useFileShareContact';
 import { useUserIdResolution, FieldState } from './useUserIdResolution';
-import { useDefaultMessageTimer } from './useDefaultMessageTimer';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { ROUTES } from '../constants/routes';
@@ -69,12 +68,6 @@ export function useContactForm() {
 
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // The message timer of the chat this device founds once the request is
-  // accepted (§7.7): the account's default, pre-selected.
-  const defaultMessageTimer = useDefaultMessageTimer();
-  const [chosenTimer, setChosenTimer] = useState<number | null>(null);
-  const messageTimer = chosenTimer ?? defaultMessageTimer;
 
   const canSubmit =
     !name.error &&
@@ -265,9 +258,8 @@ export function useContactForm() {
       const existing = await gossip.contacts.get(effectiveUserId);
       if (isConnectedNonContact(existing)) {
         // A member of a shared chat (§5.12): made a contact on this device
-        // only. No request is sent, so no message, username or timer: the
-        // session exists already, and no message tells anyone who added
-        // whom.
+        // only. No request is sent, so no message or username: the session
+        // exists already, and no message tells anyone who added whom.
         const added = await gossip.conversations.addAsContact(
           effectiveUserId,
           trimmedName
@@ -316,8 +308,9 @@ export function useContactForm() {
       };
 
       try {
-        // Remembered by the SDK until it founds the chat.
-        await gossip.discussions.start(contact, payload, { messageTimer });
+        // A contact request starts no chat (§5.12): either person starts
+        // one later from the contact's screen, with its message timer.
+        await gossip.discussions.start(contact, payload);
       } catch (e) {
         logger.error(
           'Failed to initialize discussion after contact creation:',
@@ -343,7 +336,6 @@ export function useContactForm() {
     shareUsername,
     customUsername,
     message.value,
-    messageTimer,
     connectedNonContact,
     gossip,
     navigate,
@@ -358,7 +350,6 @@ export function useContactForm() {
     shareUsername,
     customUsername,
     customUsernameError,
-    messageTimer,
     connectedNonContact,
 
     generalError,
@@ -373,7 +364,6 @@ export function useContactForm() {
     handleMessageChange,
     handleShareUsernameChange,
     handleCustomUsernameChange,
-    handleMessageTimerChange: setChosenTimer,
     handleFileImport,
     handleVerifiedContact,
     handleSubmit,

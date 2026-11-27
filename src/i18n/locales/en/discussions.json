@@ -39,7 +39,9 @@
     "edit_name_title": "Edit discussion name",
     "name_updated": "Name updated",
     "name_update_failed": "Failed to update name",
-    "pin_failed": "Failed to pin discussion"
+    "pin_failed": "Failed to pin discussion",
+    "no_chat": "No chat yet",
+    "chat_invitation": "Invites you to a chat"
   },
   "scroll_to_bottom": "Scroll to latest messages",
   "search": {
