@@ -635,6 +635,8 @@ export class ConversationService {
    */
   async declineContactRequest(contactUserId: string): Promise<void> {
     contactUserId = canonicalUserId(contactUserId);
+    // Not started (no group engine): an ordinary request is still declined.
+    if (!this.started) return this.declineRequest(contactUserId);
     await this.enqueue(() => this.declineRequest(contactUserId));
   }
 
@@ -685,7 +687,11 @@ export class ConversationService {
     }
     this.eventEmitter.emit(SdkEventType.CONTACT_UPDATED, { contactUserId });
     // A connection no chat needs any more goes now, as an automatic one does.
-    await this.syncConnections();
+    if (this.started) {
+      await this.syncConnections().catch(() =>
+        logger.error('connections not synced')
+      );
+    }
   }
 
   private async applyChanges(changes: GroupChange[]): Promise<void> {
