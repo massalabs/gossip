@@ -27,8 +27,8 @@ interface GroupComposerProps {
   members: string[];
   memberName: (userId: string) => string;
   /**
-   * The SDK can publish a message under another member's name (UI5, UI6).
-   * Without it there is no author button.
+   * The author button (UI5, UI6): a new message, or an edit, under any
+   * member's name. Without it the user writes as themselves.
    */
   canChooseAuthor: boolean;
   /** The SDK can keep a new message on this device only (scope "me"). */
@@ -49,7 +49,16 @@ interface GroupComposerProps {
   onCancelEdit: () => void;
   /** `author` is the user unless another member was chosen. */
   onSend: (text: string, options: { author: string; scope: Scope }) => void;
-  onEdit: (target: InputTarget, text: string, scope: Scope) => void;
+  /**
+   * `author` is the author the message has after the edit: its current one
+   * unless another member was chosen.
+   */
+  onEdit: (
+    target: InputTarget,
+    text: string,
+    scope: Scope,
+    author: string
+  ) => void;
 }
 
 /** A row of the author selector. */
@@ -87,13 +96,19 @@ const AuthorRow: React.FC<{
  * The composer of a chat (UI5, UI6, UI2, UI4, UI7): the text box of the
  * one-to-one chats, with the author button next to Send, the banner that
  * says when the message goes out under another member's name, and the scope
- * chosen by a long press on Send. Editing a message uses the same controls.
+ * chosen by a long press on Send. Editing a message uses the same controls:
+ * the author button starts on the message's author and can change it.
  *
- * The chosen author goes back to the user after each message or edit sent,
- * unless "Keep sending as" is on; that switch is off each time the selector
- * opens (it never remembers "on"), and the whole state goes with the screen.
- * The scope goes back to "for everyone" after each send: acting only for
- * oneself is possible but never the default.
+ * The chosen author goes back to the user after each message sent, unless
+ * "Keep sending as" is on; that switch is off each time the selector opens
+ * (it never remembers "on"), and the whole state goes with the screen. An
+ * edit's author is chosen for that edit only. The scope goes back to "for
+ * everyone" after each send: acting only for oneself is possible but never
+ * the default.
+ *
+ * Nothing here, or anywhere in the app, remembers which messages were sent or
+ * edited only for this device: no mark, no label, no stored state. The engine
+ * keeps no marker either; that is what makes it deniable.
  */
 const GroupComposer: React.FC<GroupComposerProps> = ({
   me,
@@ -119,13 +134,17 @@ const GroupComposer: React.FC<GroupComposerProps> = ({
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [scope, setScope] = useState<Scope>('everyone');
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
+  // The author chosen for the edit in progress; null keeps the message's.
+  const [editAuthor, setEditAuthor] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // A new edit, or its end, starts again from "for everyone".
+  // A new edit, or its end, starts again from "for everyone", with the
+  // message's own author.
   const editKey = editing?.message.syncObjId ?? null;
   useEffect(() => {
     setScope('everyone');
     setScopeMenuOpen(false);
+    setEditAuthor(null);
   }, [editKey]);
 
   // The scope menu closes on Escape and on a press outside it.
@@ -153,8 +172,10 @@ const GroupComposer: React.FC<GroupComposerProps> = ({
   // "Only for me" is offered for an edit; for a new message only when the
   // SDK can keep one on this device.
   const scopeChoice = !localOnly && (editing !== null || canSendLocally);
-  const authorShown = editing ? editing.message.author : author;
+  const authorShown = editing ? (editAuthor ?? editing.message.author) : author;
   const sendingAsOther = !editing && author !== me;
+  const changingAuthor =
+    editing !== null && authorShown !== editing.message.author;
 
   const afterSend = () => {
     setScope('everyone');
@@ -249,8 +270,6 @@ const GroupComposer: React.FC<GroupComposerProps> = ({
         e.stopPropagation();
         openSelector();
       }}
-      // An edit keeps its author: the protocol's edit carries none.
-      disabled={editing !== null}
       aria-haspopup="dialog"
       aria-label={t('composer.author_button', {
         name: isolate(memberName(authorShown)),
@@ -274,7 +293,42 @@ const GroupComposer: React.FC<GroupComposerProps> = ({
     </button>
   ) : null;
 
-  const banner = sendingAsOther ? (
+  const editBanner = changingAuthor ? (
+    <div
+      className="mb-2 flex items-center gap-3 px-3 py-2 rounded-xl border border-accent-soft bg-accent-soft/30"
+      role="status"
+      data-testid="edit-author-banner"
+    >
+      <ContactAvatar
+        contact={{
+          userId: authorShown,
+          name: memberName(authorShown),
+          avatar: undefined,
+        }}
+        size={8}
+      />
+      <p className="flex-1 min-w-0 text-sm text-foreground">
+        {t('composer.edit_as', { name: isolate(memberName(authorShown)) })}
+      </p>
+      <button
+        type="button"
+        onClick={e => {
+          e.stopPropagation();
+          setEditAuthor(null);
+        }}
+        aria-label={t('composer.edit_keep_author')}
+        title={t('composer.edit_keep_author')}
+        className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full hover:bg-muted"
+        data-testid="edit-author-reset"
+      >
+        <X className="w-4 h-4 text-muted-foreground" />
+      </button>
+    </div>
+  ) : null;
+
+  const banner = editing ? (
+    editBanner
+  ) : sendingAsOther ? (
     <div
       className="mb-2 flex items-center gap-3 px-3 py-2 rounded-xl border border-accent-soft bg-accent-soft/30"
       role="status"
@@ -342,8 +396,11 @@ const GroupComposer: React.FC<GroupComposerProps> = ({
         onCancelEdit={onCancelEdit}
         onConfirmEdit={(text, target) => {
           const s = effectiveScope;
-          afterSend();
-          onEdit(target, text, s);
+          const a = authorShown;
+          // The author chosen for new messages is not touched by an edit.
+          setScope('everyone');
+          setEditAuthor(null);
+          onEdit(target, text, s, a);
         }}
         aboveInput={banner}
         beforeSend={authorButton}
@@ -366,7 +423,9 @@ const GroupComposer: React.FC<GroupComposerProps> = ({
           >
             <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-border">
               <h3 className="text-lg font-semibold text-foreground">
-                {t('composer.send_as_title')}
+                {editing
+                  ? t('composer.edit_as_title')
+                  : t('composer.send_as_title')}
               </h3>
               <button
                 type="button"
@@ -379,28 +438,33 @@ const GroupComposer: React.FC<GroupComposerProps> = ({
             </div>
             <div className="px-6 py-4 space-y-4">
               <p className="text-sm text-muted-foreground">
-                {t('composer.send_as_hint')}
+                {editing
+                  ? t('composer.edit_as_hint')
+                  : t('composer.send_as_hint')}
               </p>
-              <div className="flex items-center gap-3">
-                <span className="flex-1 min-w-0">
-                  <span
-                    id="keep-sending-as"
-                    className="block text-sm font-medium text-foreground"
-                  >
-                    {t('composer.keep_sending_as')}
+              {/* "Keep sending as" is about the next messages, not an edit. */}
+              {!editing && (
+                <div className="flex items-center gap-3">
+                  <span className="flex-1 min-w-0">
+                    <span
+                      id="keep-sending-as"
+                      className="block text-sm font-medium text-foreground"
+                    >
+                      {t('composer.keep_sending_as')}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {keepAuthor
+                        ? t('composer.keep_sending_as_on')
+                        : t('composer.keep_sending_as_off')}
+                    </span>
                   </span>
-                  <span className="block text-xs text-muted-foreground">
-                    {keepAuthor
-                      ? t('composer.keep_sending_as_on')
-                      : t('composer.keep_sending_as_off')}
-                  </span>
-                </span>
-                <Toggle
-                  checked={keepAuthor}
-                  onChange={setKeepAuthor}
-                  ariaLabel={t('composer.keep_sending_as')}
-                />
-              </div>
+                  <Toggle
+                    checked={keepAuthor}
+                    onChange={setKeepAuthor}
+                    ariaLabel={t('composer.keep_sending_as')}
+                  />
+                </div>
+              )}
               <ul
                 role="menu"
                 aria-label={t('composer.send_as_title')}
@@ -418,10 +482,14 @@ const GroupComposer: React.FC<GroupComposerProps> = ({
                             name: isolate(memberName(m)),
                           })
                     }
-                    selected={author === m}
+                    selected={authorShown === m}
                     onSelect={() => {
-                      setAuthor(m);
-                      if (m === me) setKeepAuthor(false);
+                      if (editing) {
+                        setEditAuthor(m);
+                      } else {
+                        setAuthor(m);
+                        if (m === me) setKeepAuthor(false);
+                      }
                       setSelectorOpen(false);
                     }}
                   />

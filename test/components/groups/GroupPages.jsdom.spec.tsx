@@ -553,6 +553,7 @@ describe('group pages', () => {
     await act(flush);
     expect(fake.service.editMessageLocally).toHaveBeenCalledWith('g1', 's2', {
       body: { type: 'text', text: 'my version' },
+      author: undefined,
     });
     expect(fake.service.editMessage).not.toHaveBeenCalled();
     // Back to "for everyone" after the send.
@@ -585,16 +586,213 @@ describe('group pages', () => {
     expect(fake.service.editMessage).not.toHaveBeenCalled();
   });
 
-  it('offers no "only for me" for a new message, which the engine cannot keep on this device only', async () => {
+  it('offers "only for me" for a new message by a long press, and sends it locally', async () => {
     const r = await openGroup('member');
     unmount = r.unmount;
-    expect(document.querySelector('[data-testid="send-options"]')).toBeNull();
-    await longPress(
-      r.container.querySelector('button[aria-label="message_input.send"]')!
+    expect(
+      document.querySelector('[data-testid="send-options"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="author-button"]')
+    ).not.toBeNull();
+    const textarea = r.container.querySelector(
+      'textarea'
+    ) as HTMLTextAreaElement;
+    await typeInto(textarea, 'a note to myself');
+    await longPress(sendButton());
+    expect(document.querySelector('[data-testid="scope-menu"]')).not.toBeNull();
+    expect(fake.service.sendMessage).not.toHaveBeenCalled();
+    await click(document.querySelector('[data-testid="scope-me"]'));
+    expect(sendButton().getAttribute('aria-label')).toBe('composer.send_me');
+    await click(sendButton());
+    await act(flush);
+    expect(fake.service.sendMessageLocally).toHaveBeenCalledWith(
+      'g1',
+      'a note to myself',
+      { replyTo: undefined, author: undefined }
     );
-    expect(document.querySelector('[data-testid="scope-menu"]')).toBeNull();
-    // No author button either: the SDK sends under the user's name only.
-    expect(document.querySelector('[data-testid="author-button"]')).toBeNull();
+    expect(fake.service.sendMessage).not.toHaveBeenCalled();
+    // Back to "for everyone" for the next one.
+    expect(document.querySelector('[data-testid="send-mark"]')).toBeNull();
+    await typeInto(
+      r.container.querySelector('textarea') as HTMLTextAreaElement,
+      'to all'
+    );
+    await click(sendButton());
+    await act(flush);
+    expect(fake.service.sendMessage).toHaveBeenCalledWith('g1', 'to all', {
+      replyTo: undefined,
+      author: undefined,
+    });
+  });
+
+  it('sends a message as another member chosen with the author button', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    await click(document.querySelector('[data-testid="author-button"]'));
+    const bob = Array.from(
+      document.querySelectorAll('[data-testid="author-option"]')
+    ).find(b => b.textContent?.includes('bob'));
+    await click(bob);
+    await typeInto(
+      r.container.querySelector('textarea') as HTMLTextAreaElement,
+      'signed bob'
+    );
+    await click(sendButton());
+    await act(flush);
+    expect(fake.service.sendMessage).toHaveBeenCalledWith('g1', 'signed bob', {
+      replyTo: undefined,
+      author: 'bob',
+    });
+    // The next one is the user's again.
+    await typeInto(
+      r.container.querySelector('textarea') as HTMLTextAreaElement,
+      'me again'
+    );
+    await click(sendButton());
+    await act(flush);
+    expect(fake.service.sendMessage).toHaveBeenLastCalledWith(
+      'g1',
+      'me again',
+      { replyTo: undefined, author: undefined }
+    );
+  });
+
+  it('edits with the author preselected, and changes it for everyone or only for me', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    // Bob's message: the selector starts on Bob.
+    await openMenu(r, 1);
+    await click(byText('message_menu.edit'));
+    await act(flush);
+    await click(document.querySelector('[data-testid="author-button"]'));
+    const rows = () =>
+      Array.from(document.querySelectorAll('[data-testid="author-option"]'));
+    const checked = rows().find(b => b.getAttribute('aria-checked') === 'true');
+    expect(checked?.textContent).toContain('bob');
+    // No "Keep sending as" for an edit.
+    expect(document.querySelector('[role="switch"]')).toBeNull();
+    // The user takes it.
+    await click(rows()[0]);
+    expect(
+      document.querySelector('[data-testid="edit-author-banner"]')
+    ).not.toBeNull();
+    await typeInto(
+      r.container.querySelector('textarea') as HTMLTextAreaElement,
+      'mine now'
+    );
+    await click(sendButton());
+    await act(flush);
+    expect(fake.service.editMessage).toHaveBeenCalledWith(
+      'g1',
+      's2',
+      'mine now',
+      { author: 'me' }
+    );
+    // The user's own message, given to Bob only for me.
+    await openMenu(r, 0);
+    await click(byText('message_menu.edit'));
+    await act(flush);
+    await click(document.querySelector('[data-testid="author-button"]'));
+    await click(rows().find(b => b.textContent?.includes('bob')));
+    await longPress(sendButton());
+    await click(document.querySelector('[data-testid="scope-me"]'));
+    await click(sendButton());
+    await act(flush);
+    expect(fake.service.editMessageLocally).toHaveBeenCalledWith('g1', 's1', {
+      body: { type: 'text', text: 'question' },
+      author: 'bob',
+    });
+    // The next edit starts again from the message's own author.
+    await openMenu(r, 1);
+    await click(byText('message_menu.edit'));
+    await act(flush);
+    expect(
+      document.querySelector('[data-testid="edit-author-banner"]')
+    ).toBeNull();
+  });
+
+  it('warns before every "Retry synchronisation", and retries only on confirmation', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    for (const i of [0, 1]) {
+      await openMenu(r, i);
+      await click(byText('message_menu.retry'));
+      await act(flush);
+      expect(document.body.textContent).toContain('message_menu.retry_title');
+      expect(byText('message_menu.retry_body')).toBeDefined();
+      expect(fake.service.retryMessage).not.toHaveBeenCalled();
+      await click(byText('choices.cancel'));
+      await act(flush);
+      expect(fake.service.retryMessage).not.toHaveBeenCalled();
+    }
+    await openMenu(r, 1);
+    await click(byText('message_menu.retry'));
+    await click(byText('message_menu.retry_confirm'));
+    await act(flush);
+    expect(fake.service.retryMessage).toHaveBeenCalledWith('g1', 's2');
+    expect(fake.service.retryMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks no message sent only for me, and keeps nothing that tells which one it was', async () => {
+    const r = await openGroup('member');
+    unmount = r.unmount;
+    fake.service.sendMessageLocally.mockResolvedValueOnce({
+      syncObjId: 'zz9',
+    });
+    await typeInto(
+      r.container.querySelector('textarea') as HTMLTextAreaElement,
+      'just here'
+    );
+    await longPress(sendButton());
+    await click(document.querySelector('[data-testid="scope-me"]'));
+    await click(sendButton());
+    await act(flush);
+    // The engine now shows it like any message: the timeline gives it back.
+    fake.state.timelines.set('g1', [
+      ...(fake.state.timelines.get('g1') ?? []),
+      message({
+        syncObjId: 'zz9',
+        createdAt: 3_000n,
+        lastModifiedAt: 3_000n,
+        body: { type: 'text', text: 'just here' },
+      }),
+    ]);
+    await act(async () => {
+      useGroupStore.getState().refresh();
+    });
+    await act(flush);
+    const timeline = r.container.querySelector(
+      '[data-testid="group-timeline"]'
+    )!;
+    const rows = Array.from(
+      timeline.querySelectorAll('[data-testid="group-message"]')
+    );
+    const local = rows.find(x => x.textContent?.includes('just here'))!;
+    const other = rows.find(x => x.textContent?.includes('question'))!;
+    expect(local).toBeDefined();
+    // No label, no dashed outline, no attribute that differs from a message
+    // sent to everyone.
+    expect(local.textContent).not.toMatch(/only|scope|local|composer\./i);
+    expect(local.outerHTML).not.toMatch(/dashed|only|scope_me|EyeOff/i);
+    const attrs = (e: Element) =>
+      Array.from(e.querySelectorAll('*'))
+        .concat(e)
+        .map(
+          n =>
+            (n.getAttribute('class') ?? '') +
+            (n.getAttribute('data-testid') ?? '')
+        )
+        .join('|');
+    expect(attrs(local)).toBe(attrs(other));
+    // Nothing in the app's stores names it.
+    const after = JSON.stringify(useGroupStore.getState(), (_k, v) =>
+      typeof v === 'bigint' ? v.toString() : v
+    );
+    // Its ID is in no store; the chat list shows it as the last message, as
+    // it would any message the engine shows.
+    expect(after).not.toContain('zz9');
+    expect(after).not.toMatch(/only|scope|local(?!Name)/i);
   });
 
   it('shows no "only for you" label on an edited message', async () => {

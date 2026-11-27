@@ -128,7 +128,11 @@
     "save_edit": "为所有人保存编辑",
     "save_edit_me": "仅为我保存编辑",
     "editing_own": "正在编辑你的消息",
-    "editing_by": "正在编辑 {{name}} 的消息"
+    "editing_by": "正在编辑 {{name}} 的消息",
+    "edit_as_title": "消息作者",
+    "edit_as_hint": "选择编辑后的消息看起来由谁发送。",
+    "edit_as": "编辑后，消息将显示为由 {{name}} 发送",
+    "edit_keep_author": "保留当前作者"
   },
   "message_menu": {
     "react": "回应",
@@ -144,7 +148,10 @@
     "retried": "已重试同步",
     "delete": "删除",
     "delete_title": "删除这条消息？",
-    "delete_on_device": "仅在本设备删除"
+    "delete_on_device": "仅在本设备删除",
+    "retry_title": "重试同步？",
+    "retry_body": "这会把本设备上这条消息的版本发送给聊天中的所有人，包括仅在本设备上更改的任何内容。",
+    "retry_confirm": "发送给所有人"
   },
   "reactions": {
     "title": "表情回应"

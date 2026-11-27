@@ -11,9 +11,8 @@ vi.mock('react-i18next', () => ({
 }));
 
 /**
- * The author controls (UI5, UI6) of the chat's composer. The chat screen does
- * not show them yet: the SDK cannot publish under another member's name. They
- * are tested here, ready for when it can.
+ * The author controls (UI5, UI6) of the chat's composer, on their own; the
+ * chat screen's use of them is tested in GroupPages.
  */
 describe('the author of a message (send as)', () => {
   let unmount: () => Promise<void> = async () => {};

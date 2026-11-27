@@ -128,7 +128,11 @@
     "save_edit": "Enregistrer la modification pour tous",
     "save_edit_me": "Enregistrer la modification seulement pour moi",
     "editing_own": "Modification de votre message",
-    "editing_by": "Modification d'un message de {{name}}"
+    "editing_by": "Modification d'un message de {{name}}",
+    "edit_as_title": "Auteur du message",
+    "edit_as_hint": "Choisissez de qui le message modifié semblera venir.",
+    "edit_as": "Après cette modification, le message apparaîtra comme envoyé par {{name}}",
+    "edit_keep_author": "Garder l'auteur actuel"
   },
   "message_menu": {
     "react": "Réagir",
@@ -144,7 +148,10 @@
     "retried": "Synchronisation relancée",
     "delete": "Supprimer",
     "delete_title": "Supprimer ce message ?",
-    "delete_on_device": "Supprimer seulement sur cet appareil"
+    "delete_on_device": "Supprimer seulement sur cet appareil",
+    "retry_title": "Relancer la synchronisation ?",
+    "retry_body": "Cela envoie à tous les membres du Chat la version de ce message qui se trouve sur cet appareil, y compris tout ce qui a été modifié seulement sur cet appareil.",
+    "retry_confirm": "Envoyer à tous"
   },
   "reactions": {
     "title": "Réactions"

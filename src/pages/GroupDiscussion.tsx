@@ -37,6 +37,7 @@ import EarlierChats from '../components/groups/EarlierChats';
 import ContinuationPrompt from '../components/groups/ContinuationPrompt';
 import { useDiscussionStore } from '../stores/discussionStore';
 import SafeName from '../components/groups/SafeName';
+import ConfirmSheet from '../components/groups/ConfirmSheet';
 import AutoDeleteChip from '../components/ui/AutoDeleteChip';
 import { messageTimerLabel } from '../constants/messageTimer';
 import { useGroupMemberName } from '../hooks/useGroupMemberName';
@@ -44,23 +45,6 @@ import { useAccountStore } from '../stores/accountStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { groupDisplayName, isolate } from '../utils/groupName';
 import { ROUTES } from '../constants/routes';
-
-/**
- * The SDK publishes a message, and an edit, under this account's own name
- * only: the engine's node API (`publish_message`, `publish_edit`) takes no
- * author, although the protocol lets a member write as any member. Until it
- * does, the author button (UI5, UI6) is not shown. A local edit can change
- * the author (`local_edit`), but one control that works for one scope only
- * would mislead.
- */
-const SEND_AS_SUPPORTED = false;
-
-/**
- * The engine has no message kept on this device only (`local_edit` and
- * `local_delete` exist, no local send): "only for me" is offered for edits
- * and deletions, never for a new message.
- */
-const LOCAL_SEND_SUPPORTED = false;
 
 /** How long a new message glows once it comes into view, in ms. */
 const GLOW_MS = 1200;
@@ -73,6 +57,8 @@ const GLOW_MS = 1200;
 interface Sending {
   n: number;
   text: string;
+  /** The author it is sent under: the user, or the member chosen. */
+  author: string;
   reply: GroupMessage | null;
   at: bigint;
   /** Its id, once `sendMessage` gave it. */
@@ -86,14 +72,13 @@ interface Sending {
  * the real message replaces its row in the same render. A sent row goes when
  * its id is in the timeline, or at the latest with the first read started
  * after the send resolved (that read sees what the send recorded). A row not
- * resolved yet goes when the timeline already shows an own message with its
- * text that was not there before (`claimed`) and no other row took.
+ * resolved yet goes when the timeline already shows a message by its author
+ * with its text that was not there before (`claimed`) and no other row took.
  */
 function stillSending(
   rows: Sending[],
   items: GroupTimelineItem[],
   read: number,
-  me: string | undefined,
   claimed: Set<string>
 ): Sending[] {
   if (rows.length === 0) return rows;
@@ -108,7 +93,7 @@ function stillSending(
     const shown = items.find(
       i =>
         i.kind === 'message' &&
-        i.author === me &&
+        i.author === r.author &&
         !taken.has(i.syncObjId) &&
         i.body.type === 'text' &&
         i.body.text === r.text
@@ -157,6 +142,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const typedBeforeEdit = useRef('');
   // The message whose deletion asks for whom.
   const [deleting, setDeleting] = useState<GroupMessage | null>(null);
+  // The message whose "Retry synchronisation" waits for the warning's answer.
+  const [retrying, setRetrying] = useState<GroupMessage | null>(null);
   // The text of a send that failed, put back in a fresh composer (`n` keys it).
   const [draft, setDraft] = useState<{ text: string; n: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -228,7 +215,7 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
           setFresh(new Set(keys.filter(k => !seenBefore.has(k))));
         }
         setTimeline(items);
-        setSending(rows => stillSending(rows, items, read, me, before));
+        setSending(rows => stillSending(rows, items, read, before));
       })
       .catch(() => {});
     return () => {
@@ -388,42 +375,49 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
 
   const send = (text: string, options: { author: string; scope: Scope }) => {
     if (!service) return;
-    // Neither is offered yet (see SEND_AS_SUPPORTED, LOCAL_SEND_SUPPORTED).
-    if (options.author !== me || options.scope !== 'everyone') return;
     const reply = replyingTo?.message ?? null;
     setReplyingTo(null);
     const n = ++sent.current;
-    setSending(rows => [...rows, { n, text, reply, at: BigInt(Date.now()) }]);
-    void service
-      .sendMessage(group.groupId, text, {
-        replyTo: reply
-          ? [{ epochId: reply.epochId, syncObjId: reply.syncObjId }]
-          : undefined,
-      })
-      .then(
-        ({ syncObjId }) => {
-          claimed.current?.add(syncObjId);
-          const readsAtResolve = reads.current;
-          setSending(rows =>
-            rows.map(r =>
-              r.n === n ? { ...r, id: syncObjId, readsAtResolve } : r
-            )
-          );
-          refresh();
-        },
-        (e: unknown) => {
-          setSending(rows => rows.filter(r => r.n !== n));
-          // The composer was cleared on send: give the text back, after
-          // what was typed since, so that nothing typed is lost.
-          const now = typed();
-          putInComposer(now.trim() ? `${now}\n${text}` : text);
-          toast.error(
-            isTooLargeError(e)
-              ? t('composer.too_long')
-              : t('message_menu.failed')
-          );
-        }
-      );
+    const { author, scope } = options;
+    setSending(rows => [
+      ...rows,
+      { n, text, author, reply, at: BigInt(Date.now()) },
+    ]);
+    const sendOptions = {
+      replyTo: reply
+        ? [{ epochId: reply.epochId, syncObjId: reply.syncObjId }]
+        : undefined,
+      author: author === me ? undefined : author,
+    };
+    // "Only for me": stored on this device only, nothing sent. Nothing in the
+    // app remembers which messages were sent so: once shown, it is a message
+    // like any other (no label, no mark, no stored flag).
+    void (
+      scope === 'me'
+        ? service.sendMessageLocally(group.groupId, text, sendOptions)
+        : service.sendMessage(group.groupId, text, sendOptions)
+    ).then(
+      ({ syncObjId }) => {
+        claimed.current?.add(syncObjId);
+        const readsAtResolve = reads.current;
+        setSending(rows =>
+          rows.map(r =>
+            r.n === n ? { ...r, id: syncObjId, readsAtResolve } : r
+          )
+        );
+        refresh();
+      },
+      (e: unknown) => {
+        setSending(rows => rows.filter(r => r.n !== n));
+        // The composer was cleared on send: give the text back, after
+        // what was typed since, so that nothing typed is lost.
+        const now = typed();
+        putInComposer(now.trim() ? `${now}\n${text}` : text);
+        toast.error(
+          isTooLargeError(e) ? t('composer.too_long') : t('message_menu.failed')
+        );
+      }
+    );
   };
 
   // A chat of two shows no avatars or names beside messages: the header
@@ -523,8 +517,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
           me={me ?? ''}
           members={group.members}
           memberName={memberName}
-          canChooseAuthor={SEND_AS_SUPPORTED}
-          canSendLocally={LOCAL_SEND_SUPPORTED}
+          canChooseAuthor
+          canSendLocally
           localOnly={!canWrite}
           draft={draft}
           // A chat of two is no "group" to its users.
@@ -540,21 +534,28 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
           editing={editing}
           onCancelEdit={endEdit}
           onSend={send}
-          onEdit={(m, text, scope) => {
+          onEdit={(m, text, scope, author) => {
             setEditing(null);
             // What was typed before the edit comes back.
             if (typedBeforeEdit.current) putInComposer(typedBeforeEdit.current);
             typedBeforeEdit.current = '';
             if (!service) return;
             const { epochId, syncObjId } = m.message;
+            // The author is sent only when it changes (§7.2).
+            const newAuthor = author !== m.message.author ? author : undefined;
             // A local edit is stored like any other version: nothing marks
             // it, by design (it cannot be told apart from a normal edit).
             void run(() =>
               scope === 'me'
                 ? service.editMessageLocally(epochId, syncObjId, {
                     body: { type: 'text', text },
+                    author: newAuthor,
                   })
-                : service.editMessage(epochId, syncObjId, text)
+                : newAuthor
+                  ? service.editMessage(epochId, syncObjId, text, {
+                      author: newAuthor,
+                    })
+                  : service.editMessage(epochId, syncObjId, text)
             );
           }}
         />
@@ -658,13 +659,7 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
                 }}
                 onEdit={startEdit}
                 onDelete={setDeleting}
-                onRetry={m =>
-                  service &&
-                  void run(
-                    () => service.retryMessage(m.epochId, m.syncObjId),
-                    t('message_menu.retried')
-                  )
-                }
+                onRetry={setRetrying}
               />
             </div>
           )
@@ -677,7 +672,7 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
               kind: 'message',
               epochId: '',
               syncObjId: '',
-              author: me ?? '',
+              author: r.author,
               createdAt: r.at,
               lastModifiedAt: r.at,
               edited: false,
@@ -686,8 +681,8 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
               replyTo: [],
               reactions: [],
             }}
-            isOutgoing
-            authorName=""
+            isOutgoing={r.author === me}
+            authorName={r.author === me ? '' : memberName(r.author)}
             quotes={
               r.reply
                 ? [
@@ -703,6 +698,26 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
           />
         ))}
       </div>
+      {/*
+        Always asked, on every message: whether a message was changed or
+        created only on this device cannot be known, by construction (§9.4).
+      */}
+      <ConfirmSheet
+        isOpen={retrying !== null}
+        title={t('message_menu.retry_title')}
+        body={t('message_menu.retry_body')}
+        confirmLabel={t('message_menu.retry_confirm')}
+        onClose={() => setRetrying(null)}
+        onConfirm={() => {
+          const m = retrying;
+          setRetrying(null);
+          if (!m || !service) return;
+          void run(
+            () => service.retryMessage(m.epochId, m.syncObjId),
+            t('message_menu.retried')
+          );
+        }}
+      />
       <BaseModal
         isOpen={deleting !== null}
         onClose={() => setDeleting(null)}

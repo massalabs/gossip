@@ -38,6 +38,7 @@ export function makeFakeGroups() {
       syncObjId: 's',
       merge: 'Won',
     })),
+    sendMessageLocally: vi.fn(async () => ({ syncObjId: 'local' })),
     editMessage: vi.fn(async () => ({}) as never),
     deleteMessage: vi.fn(async () => ({}) as never),
     deleteMessageLocally: vi.fn(async () => {}),
