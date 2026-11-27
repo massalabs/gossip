@@ -241,14 +241,24 @@ describe('the timeline of a chat (G to K)', () => {
       expect(color(0)).not.toBe(color(2));
     });
 
-    it('keeps the width for the text in a chat of two', async () => {
-      await open([message({ syncObjId: 'a', author: 'bob' })]);
-      expect(
-        document.querySelector('[data-testid="group-message-avatar"]')
-      ).toBeNull();
-      expect(
-        document.querySelector('[data-testid="group-message-author"]')
-      ).toBeNull();
+    it('shows them in a chat of two as well, once per run', async () => {
+      await open([
+        message({ syncObjId: 'a', author: 'bob' }),
+        message({ syncObjId: 'b', author: 'bob' }),
+        message({ syncObjId: 'c', author: 'me' }),
+      ]);
+      const has = (i: number, id: string) =>
+        rows()[i].querySelector(`[data-testid="${id}"]`) !== null;
+      expect([0, 1, 2].map(i => has(i, 'group-message-avatar'))).toEqual([
+        true,
+        false,
+        false,
+      ]);
+      expect([0, 1, 2].map(i => has(i, 'group-message-author'))).toEqual([
+        true,
+        false,
+        false,
+      ]);
     });
   });
 

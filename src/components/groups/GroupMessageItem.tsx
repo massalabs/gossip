@@ -80,8 +80,8 @@ interface GroupMessageItemProps extends GroupMessageActions {
   quotes: ReplyQuote[];
   canWrite: boolean;
   /**
-   * Someone else's message: the author's avatar bubble beside it (none in a
-   * chat of two, where the header already names the other person).
+   * Someone else's message: the author's avatar bubble beside it, in every
+   * chat (a chat of two included).
    */
   showAvatar?: boolean;
   /**
@@ -256,7 +256,7 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
           </p>
         )}
         {!isOutgoing && !showAvatar && runStart && (
-          // A chat of two: who wrote is known, the name stays for readers.
+          // Without the avatar, who wrote stays for screen readers.
           <span className="sr-only">
             <SafeName name={authorName} />
           </span>

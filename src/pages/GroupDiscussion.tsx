@@ -420,10 +420,6 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     );
   };
 
-  // A chat of two shows no avatars or names beside messages: the header
-  // already names the other person, and the width goes to the text (J).
-  const showAvatars = group.members.length > 2;
-
   /**
    * The quotes of a reply (G): the target as the SDK read it from its own
    * timeline, in this chat or another, shown once the device holds it and
@@ -631,7 +627,10 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
                 isOutgoing={item.author === me}
                 authorName={memberName(item.author)}
                 quotes={quotesOf(item)}
-                showAvatar={showAvatars}
+                // In every chat, a chat of two included (product owner,
+                // 2026-11-27): a chat of two that looked different from the
+                // others surprised its users.
+                showAvatar
                 runStart={(() => {
                   const prev = timeline[i - 1];
                   return !(
