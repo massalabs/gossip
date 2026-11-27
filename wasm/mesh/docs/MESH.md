@@ -63,13 +63,20 @@ A link carries whole messages: fragmentation, if any, is below this interface.
 ### Roles and discovery
 
 Every phone is a GATT peripheral and a GATT central at the same time. It advertises one
-128-bit service UUID and scans for it.
+128-bit service UUID and scans for it (one per mesh version it can talk to).
 
 | Item | Value |
 |---|---|
-| Service UUID | `6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f60` |
+| Service UUID (mesh version 1) | `6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f01` |
 | Characteristic (write without response, notify) | `6a8b2f41-5c1d-4e2a-9b7f-3d0c8e1a5f60` |
 | ATT MTU requested | 517 |
+
+The last byte of the service UUID is the mesh version number itself, from 1 to 255: version 1
+ends in `01`, version 2 would end in `02`. A phone advertises the UUID of the version it speaks
+and scans for the UUIDs of the versions it can talk to, so phones on versions that cannot talk
+to each other never connect. The ending `00` is reserved as a marker for future extensions of
+this scheme and is never a version: no build advertises it, scans for it or connects to it.
+The characteristic UUID is the same for every version.
 
 When two phones see each other, the one whose advertised device address compares lower
 connects as central; the other only accepts. If the platform hides the address, both may
@@ -805,7 +812,7 @@ authorities who can scan radio, seize phones and ask operators for data.
 
 | Threat | What the attacker gets | Mitigation |
 |---|---|---|
-| A BLE scanner nearby | That a phone runs Gossip (the service UUID is fixed; iOS needs a fixed UUID to discover in the background) | Mesh mode is opt-in and says so. Links are encrypted from the second message on: a scanner that records links sees no peer id, clock, wanted entry or blob. The UUID itself cannot rotate |
+| A BLE scanner nearby | That a phone runs Gossip (the service UUID is fixed for a mesh version, and also shows which version; iOS needs exact UUIDs to discover in the background) | Mesh mode is opt-in and says so. Links are encrypted from the second message on: a scanner that records links sees no peer id, clock, wanted entry or blob. The UUID itself cannot rotate |
 | A hostile phone that joins the mesh | Opaque blobs, wanted seekers, traffic timing, a fresh peer id per link | Content is end-to-end encrypted. Seekers are unlinkable to people. Wanted entries are mixed and relayed with random hop counts. Hop counts and signal strength still say that someone within radio range waits for a seeker |
 | A hostile phone steering routes | Blobs sent its way instead of toward the recipient or a bridge | Hop budgets clamped, two directions per seeker plus 5 % spray, beacons signed |
 | A flood of junk from phones nearby | Wasted bandwidth and storage | Key-value signatures checked at every hop; per-peer and node-wide wanted budgets; fair-share eviction of the wanted table; mesh storage separate from internet storage; at most half the links to low-trust peers; keyring members first |
