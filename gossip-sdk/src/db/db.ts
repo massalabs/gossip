@@ -8,9 +8,16 @@
 /**
  * Whether the user accepted a contact, or it is an automatic connection
  * (§5.12), or an automatic connection whose peer also asked to become a
- * contact and waits for the user's answer (`requested`).
+ * contact and waits for the user's answer (`requested`), or a member the
+ * user added as a contact on this device only, the other person not knowing
+ * it yet (`added`): a contact for the user, an automatic connection for
+ * everything the peer can observe, until the relationship is mutual.
  */
-export type ContactConnection = 'accepted' | 'automatic' | 'requested';
+export type ContactConnection =
+  | 'accepted'
+  | 'automatic'
+  | 'requested'
+  | 'added';
 
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';

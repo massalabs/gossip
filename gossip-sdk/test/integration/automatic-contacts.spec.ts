@@ -188,11 +188,15 @@ describe('Automatic contacts', { timeout: 300_000 }, () => {
     });
     expect(sent).toEqual([]);
 
+    // Added on this side only: listed under its name, but not declared to
+    // the engine, which answers a newer version's plaintext with a version
+    // notice to declared contacts only (§13.8): the notice would tell Carol
+    // she was added.
     expect(await bob.contacts.get(carol.userId)).toMatchObject({
-      connection: 'accepted',
+      connection: 'added',
       name: 'Carol',
     });
-    expect(declared(bob)).toContain(bytesToHex(carol.userIdBytes));
+    expect(declared(bob)).not.toContain(bytesToHex(carol.userIdBytes));
     // Nothing changed on Carol's side.
     expect((await carol.contacts.get(bob.userId))?.connection).toBe(
       'automatic'
@@ -201,7 +205,9 @@ describe('Automatic contacts', { timeout: 300_000 }, () => {
     await carol.groups.sendMessage(groupId, 'still here');
     await deliver();
     expect(await texts(bob.groups, groupId)).toEqual(['still here']);
-    // An accepted contact is never revoked: still there once the chat is gone.
+    // The connection follows the automatic rule: it goes with the last
+    // shared chat, as for a member who is no contact; the contact and its
+    // name stay.
     await bob.groups.leave(groupId, 'Signed');
     await deliver();
     if ((await bob.groups.get(groupId)) !== null) {
@@ -210,7 +216,48 @@ describe('Automatic contacts', { timeout: 300_000 }, () => {
     await bob.groups.tick();
     await bob.groups.settle();
     await bob.conversations.catchUp();
+    expect(bob.discussions.getStatus(carol.userId)).not.toBe(
+      SessionStatus.Active
+    );
+    expect(await bob.contacts.get(carol.userId)).toMatchObject({
+      connection: 'added',
+      name: 'Carol',
+    });
+    expect(declared(bob)).not.toContain(bytesToHex(carol.userIdBytes));
+  });
+
+  it('makes a member added as a contact mutual once they accept the chat of two started with them', async () => {
+    const { bob, carol } = await trip(true);
+    expect(
+      (await bob.conversations.addAsContact(carol.userId, 'Carol')).success
+    ).toBe(true);
+    const direct = await bob.conversations.startDirectChat(carol.userId);
+    await deliver();
+    // Not mutual while Carol has not answered.
+    expect((await bob.contacts.get(carol.userId))?.connection).toBe('added');
+    expect(declared(bob)).not.toContain(bytesToHex(carol.userIdBytes));
+    await carol.conversations.acceptInvitation(direct);
+    await deliver();
+    await carol.groups.sendMessage(direct, 'hi');
+    await deliver();
     expect((await bob.contacts.get(carol.userId))?.connection).toBe('accepted');
+    expect(declared(bob)).toContain(bytesToHex(carol.userIdBytes));
+    // Carol accepted Bob's chat of two: he is her contact too.
+    expect((await carol.contacts.get(bob.userId))?.connection).toBe('accepted');
+    expect(declared(carol)).toContain(bytesToHex(bob.userIdBytes));
+  });
+
+  it('makes a member added as a contact mutual once the user accepts their chat of two', async () => {
+    const { bob, carol } = await trip(true);
+    expect(
+      (await bob.conversations.addAsContact(carol.userId, 'Carol')).success
+    ).toBe(true);
+    const direct = await carol.conversations.startDirectChat(bob.userId);
+    await deliver();
+    expect((await bob.contacts.get(carol.userId))?.connection).toBe('added');
+    await bob.conversations.acceptInvitation(direct);
+    expect((await bob.contacts.get(carol.userId))?.connection).toBe('accepted');
+    expect(declared(bob)).toContain(bytesToHex(carol.userIdBytes));
   });
 
   it('adds a member whose connection is not open yet with the keys the engine holds, sending nothing', async () => {
@@ -228,9 +275,10 @@ describe('Automatic contacts', { timeout: 300_000 }, () => {
     });
     expect(sent).toEqual([]);
     expect(await bob.contacts.get(carol.userId)).toMatchObject({
-      connection: 'accepted',
+      connection: 'added',
       name: 'Carol',
     });
+    expect(declared(bob)).not.toContain(bytesToHex(carol.userIdBytes));
   });
 
   it('still refuses a contact the user accepted, and a person it knows nothing of', async () => {

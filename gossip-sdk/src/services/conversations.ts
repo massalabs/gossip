@@ -30,8 +30,10 @@
  *   for the peer in the group outbox. A contact the user accepted is never
  *   revoked.
  * - **Adding a member as a contact.** A member who is no contact is made one
- *   on this device only (`addAsContact`): nothing is sent, the session
- *   already exists. A member who also asks to become a contact keeps the
+ *   on this device only (`addAsContact`, connection `added`): nothing is
+ *   sent, the session already exists, and until the relationship is mutual
+ *   the contact is neither declared to the engine nor kept connected beyond
+ *   the automatic rule, so that the peer cannot tell it was added. A member who also asks to become a contact keeps the
  *   connection the chats need while the request waits (`requested`), and
  *   declining the request keeps it (`declineContactRequest`).
  *
@@ -198,6 +200,7 @@ export class ConversationService {
       await this.declareArchives();
       await this.syncAcceptedContacts();
       await this.reconcileLinks();
+      await this.upgradeMutualContacts();
       await this.syncConnections();
     });
   }
@@ -306,7 +309,15 @@ export class ConversationService {
         inv.members.length === 2 &&
         inv.members.includes(this.owner) &&
         inv.owner !== this.owner;
-      if (ofTwo || options.addAsContact) await this.acceptAsContact(inv.owner);
+      // Accepting a chat of two from its owner is mutual and known to them:
+      // an accepted contact. Adding the owner of any other group is this
+      // user's own choice, unknown to them: `added`.
+      if (ofTwo) {
+        await this.acceptAsContact(inv.owner);
+        await this.syncAcceptedContacts();
+      } else if (options.addAsContact) {
+        await this.acceptAsContact(inv.owner, undefined, 'added');
+      }
       const d = await this.discussionOf(inv.owner);
       if (
         d &&
@@ -505,7 +516,19 @@ export class ConversationService {
 
   /**
    * Declares to the engine the contacts the user accepted, and clears those
-   * removed (§13.8). Automatic connections are never declared.
+   * removed (§13.8). Automatic connections are never declared, nor contacts
+   * added on this device only (`added`).
+   *
+   * _Why `added` is not declared (decided by the owner, D.91):_ the engine
+   * answers a plaintext of a newer, unsupported version with a version
+   * notice to declared contacts only. A modified client could send one on
+   * purpose and learn from the answer that this user added it, although
+   * adding sends nothing. A contact added on this device only therefore
+   * stays silent to that probe, as a member who is no contact does, until
+   * the relationship is mutual: they accepted this user's request or chat of
+   * two, or this user accepted theirs.
+   * _Cost:_ such a contact on a newer version is not told that this device
+   * cannot read their messages until then.
    */
   private async syncAcceptedContacts(): Promise<void> {
     const accepted = (await this.queries.contacts.getByOwner(this.owner))
@@ -515,26 +538,34 @@ export class ConversationService {
   }
 
   /**
-   * Makes `contactUserId` a contact the user accepted: an automatic contact
-   * (a request waiting included) is upgraded, and a member who is no contact
-   * is added with the keys the engine holds (and no name unless `name` is
-   * given: it is shown by its user ID until renamed). Local: sends nothing.
-   * False when the person is neither a contact nor known by a chat held.
+   * Makes `contactUserId` a contact of the user: `accepted` when the
+   * relationship is mutual and known to the other person (the default), or
+   * `added` when only this user chose it. An automatic contact (a request
+   * waiting included) is upgraded, an `added` one becomes `accepted` once
+   * mutual, and a member who is no contact is added with the keys the
+   * engine holds (and no name unless `name` is given: it is shown by its
+   * user ID until renamed). Local: sends nothing. False when the person is
+   * neither a contact nor known by a chat held.
    */
   private async acceptAsContact(
     contactUserId: string,
-    name?: string
+    name?: string,
+    connection: 'accepted' | 'added' = 'accepted'
   ): Promise<boolean> {
     const c = await this.queries.contacts.getByOwnerAndUser(
       this.owner,
       contactUserId
     );
     if (c) {
-      if (c.connection === 'automatic' || c.connection === 'requested') {
+      if (
+        c.connection === 'automatic' ||
+        c.connection === 'requested' ||
+        (c.connection === 'added' && connection === 'accepted')
+      ) {
         await this.queries.contacts.updateByOwnerAndUser(
           this.owner,
           contactUserId,
-          { connection: 'accepted', ...(name ? { name } : {}) }
+          { connection, ...(name ? { name } : {}) }
         );
         this.eventEmitter.emit(SdkEventType.CONTACT_UPDATED, {
           contactUserId,
@@ -554,24 +585,47 @@ export class ConversationService {
       isOnline: false,
       lastSeen: new Date(),
       createdAt: new Date(),
-      connection: 'accepted',
+      connection,
     });
     this.eventEmitter.emit(SdkEventType.CONTACT_UPDATED, { contactUserId });
     return true;
   }
 
   /**
+   * Contacts added on this device only (`added`) whose relationship has
+   * become mutual and known to them: the pair's chat is held and they are in
+   * it, because they accepted the chat this user started (they took part in
+   * it) or this user holds theirs. They become accepted contacts, declared
+   * to the engine (§13.8).
+   */
+  private async upgradeMutualContacts(): Promise<void> {
+    let changed = false;
+    for (const c of await this.queries.contacts.getByOwner(this.owner)) {
+      if (c.connection !== 'added') continue;
+      const groupId = await this.directChatWith(c.userId);
+      const g = groupId ? await this.groups.get(groupId) : null;
+      if (!g || g.status !== 'member') continue;
+      if (g.owner === this.owner && g.tookPart !== true) continue;
+      await this.acceptAsContact(c.userId);
+      changed = true;
+    }
+    if (changed) await this.syncAcceptedContacts();
+  }
+
+  /**
    * "Add as contact" (§5.12): makes a member of a chat held, who is no
-   * contact (an automatic connection, or no connection yet), a contact the
-   * user accepted, named `name`, on this device only.
+   * contact (an automatic connection, or no connection yet), a contact of the
+   * user named `name`, on this device only (`added`).
    *
    * Nothing is sent: the session the chats need already exists or is opened
-   * as for any member, and declaring the contact to the engine only changes
-   * who would get a version notice (§13.8). _Why:_ privacy first: no message
-   * exists that tells the other person, or anyone, who added whom; they
-   * learn nothing until a chat is started with them, which reaches them as
-   * an ordinary invitation. Being a contact is then one-sided until the
-   * other adds back or accepts a chat.
+   * as for any member. _Why:_ privacy first: no message exists that tells
+   * the other person, or anyone, who added whom; they learn nothing until a
+   * chat is started with them, which reaches them as an ordinary invitation.
+   * Being a contact is then one-sided until the other adds back or accepts
+   * a chat. Until then the contact is not declared to the engine and its
+   * connection follows the automatic rule (`syncAcceptedContacts`,
+   * `revokeConnections`, D.91), so that nothing observable differs from a
+   * member who is no contact.
    *
    * A member whose own contact request waits (`requested`) is added by
    * accepting that request, as the request screen does: it sends nothing
@@ -612,10 +666,9 @@ export class ConversationService {
           return { success: true };
         }
       }
-      if (!(await this.acceptAsContact(contactUserId, trimmed))) {
+      if (!(await this.acceptAsContact(contactUserId, trimmed, 'added'))) {
         return { success: false, reason: 'unknown' };
       }
-      await this.syncAcceptedContacts();
       return { success: true };
     });
     return result ?? { success: false, reason: 'unknown' };
@@ -710,6 +763,7 @@ export class ConversationService {
       });
     }
     await this.reconcileLinks();
+    await this.upgradeMutualContacts();
     if (connections) {
       await this.syncConnections();
     } else {
@@ -791,7 +845,8 @@ export class ConversationService {
       if (
         d &&
         contact.connection !== 'automatic' &&
-        contact.connection !== 'requested'
+        contact.connection !== 'requested' &&
+        contact.connection !== 'added'
       ) {
         // This member asked for a session before this device accepted the
         // group, so it arrived as a request from someone who is no contact,
@@ -840,11 +895,21 @@ export class ConversationService {
 
   private async revokeConnections(): Promise<void> {
     const contacts = await this.queries.contacts.getByOwner(this.owner);
+    // A contact added on this device only (`added`) follows the automatic
+    // rule exactly (D.91): a connection kept alive past the last shared chat
+    // would show the peer that it was added.
     const automatic = contacts
-      .filter(c => c.connection === 'automatic' || c.connection === 'requested')
+      .filter(
+        c =>
+          c.connection === 'automatic' ||
+          c.connection === 'requested' ||
+          c.connection === 'added'
+      )
       .map(c => c.userId);
     const requested = new Set(
-      contacts.filter(c => c.connection === 'requested').map(c => c.userId)
+      contacts
+        .filter(c => c.connection === 'requested' || c.connection === 'added')
+        .map(c => c.userId)
     );
     for (const peer of await this.groups.connectionsToRevoke(automatic)) {
       // A ciphertext still waiting for this peer, such as the signed leave
@@ -859,6 +924,8 @@ export class ConversationService {
         // does, whatever the user will answer, so that its lifetime tells
         // nothing of the answer; the request stays shown, now as an
         // ordinary request with no session (accepting it announces anew).
+        // A contact added on this device only stays listed, with its name
+        // and no session.
         await this.dropSessionKeepRequest(peer);
         this.opened.delete(peer);
         continue;

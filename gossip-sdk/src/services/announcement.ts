@@ -812,10 +812,25 @@ export class AnnouncementService {
     // to become a contact (`requested`) is still a connection.
     // A request kept after its connection went with the last shared chat
     // is judged again, as a new peer would be.
+    // A contact added on this device only (`added`) is answered exactly as
+    // an automatic connection would be (D.91): connected while its session
+    // lives, judged again as a new peer once it was revoked.
+    const added =
+      !isNewContact &&
+      contact!.connection === 'added' &&
+      (
+        await this.queries.discussions.getByOwnerAndContact(
+          this.session.userIdEncoded,
+          contactUserId
+        )
+      )?.weAccepted === true;
     const automatic =
-      isNewContact || contact!.connection === 'requested'
+      added ||
+      (isNewContact ||
+      contact!.connection === 'requested' ||
+      contact!.connection === 'added'
         ? ((await this.connections?.isCoMember(contactUserId)) ?? false)
-        : contact!.connection === 'automatic';
+        : contact!.connection === 'automatic');
     // A contact request always carries a payload, even with no name and no
     // message (`encodeContactRequestPayload`; a request of 0.1.0 or 0.1.1
     // carried its timer); the announcement of a connection, an answer or a
@@ -858,7 +873,10 @@ export class AnnouncementService {
         contactUserId
       );
       log.info('created new contact', { contactUserId, name });
-    } else if (asksContact && contact!.connection === 'automatic') {
+    } else if (
+      asksContact &&
+      (contact!.connection === 'automatic' || contact!.connection === 'added')
+    ) {
       await this.queries.contacts.updateByOwnerAndUser(
         this.session.userIdEncoded,
         contactUserId,
