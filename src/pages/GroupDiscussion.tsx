@@ -330,6 +330,14 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   const service = getGroupService();
   const blocked = composerBlockedReason(group);
   const canWrite = blocked === null;
+  // A chat this device can only read (left, removed, dissolved and kept)
+  // still takes new messages written on this device only (product owner,
+  // 2026-11-27, for plausible deniability): the composer stays, with "only
+  // for me" as its one scope. Nothing marks such a message, anywhere.
+  const writesLocally =
+    group.status === 'left' ||
+    group.status === 'removed' ||
+    group.status === 'dissolved';
   // A chat of two the other person left still names that person.
   const title = groupDisplayName(
     group,
@@ -504,11 +512,20 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     </HeaderBar>
   );
 
-  // A read-only chat shows the composer only to edit a message on this
-  // device, the one scope left to it.
+  // A read-only chat keeps the composer for this device only, the one scope
+  // left to it: new messages and edits stay here, nothing is sent.
   const composer =
-    canWrite || editing ? (
+    canWrite || writesLocally || editing ? (
       <div ref={composerRef} className="contents">
+        {!canWrite && (
+          <p
+            className="bg-card border-t border-border px-4 pt-2 text-center text-xs text-muted-foreground"
+            role="status"
+            data-testid="composer-local-only"
+          >
+            {t('composer.local_only_line')}
+          </p>
+        )}
         <GroupComposer
           me={me ?? ''}
           members={group.members}

@@ -139,7 +139,8 @@
     "edit_as_title": "Auteur du message",
     "edit_as_hint": "Choisissez de qui le message modifié semblera venir.",
     "edit_as": "Après cette modification, le message apparaîtra comme envoyé par {{name}}",
-    "edit_keep_author": "Garder l'auteur actuel"
+    "edit_keep_author": "Garder l'auteur actuel",
+    "local_only_line": "Ce Chat est en lecture seule pour les autres. Ce que vous écrivez ici reste sur cet appareil."
   },
   "message_menu": {
     "react": "Réagir",

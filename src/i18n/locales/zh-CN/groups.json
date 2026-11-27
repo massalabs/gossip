@@ -139,7 +139,8 @@
     "edit_as_title": "消息作者",
     "edit_as_hint": "选择编辑后的消息看起来由谁发送。",
     "edit_as": "编辑后，消息将显示为由 {{name}} 发送",
-    "edit_keep_author": "保留当前作者"
+    "edit_keep_author": "保留当前作者",
+    "local_only_line": "此聊天对其他人只读。你在这里写的内容只保留在本设备上。"
   },
   "message_menu": {
     "react": "回应",
