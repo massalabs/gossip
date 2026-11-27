@@ -31,6 +31,8 @@ vi.mock('react-i18next', () => ({
     i18n: { language: 'en' },
   }),
   initReactI18next: { type: '3rdParty', init: () => {} },
+  // The contact request fields of the contact's screen (ArchiveFooter).
+  Trans: ({ i18nKey }: { i18nKey: string }) => i18nKey,
 }));
 
 vi.mock('react-router-dom', () => ({
