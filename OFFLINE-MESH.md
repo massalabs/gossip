@@ -122,6 +122,12 @@ extra advertised byte: iOS can only advertise service UUIDs and a name, and an e
 would make a Gossip phone easier to recognise. The characteristic UUID is the same for
 every version.
 
+The last byte `00` (`6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f00`) is reserved as a marker for
+future extensions of this scheme, for example a later format that carries the version
+elsewhere. It is never a version: no build may advertise it or give it a version meaning
+without a new decision, and a build that does not implement such an extension neither
+scans for it nor connects to it.
+
 ## Neighbour choice and power modes
 
 A phone in a crowd hears far more neighbours than it can link to. Candidates above

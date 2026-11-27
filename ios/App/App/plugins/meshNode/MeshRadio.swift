@@ -13,6 +13,11 @@ enum MeshConstants {
     /// Versions this build can link with: it scans for each one's UUID. A
     /// version left out is never scanned for.
     static let supportedMeshVersions = [1]
+    /// Last byte `00` is reserved as a marker for future extensions of this scheme (for example
+    /// a later format that carries the version elsewhere). It is never a version: no build may
+    /// advertise it or give it a version meaning without a new decision, and a build that does
+    /// not implement such an extension neither scans for it nor connects to it.
+    static let reservedExtensionServiceUUID = CBUUID(string: "6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f00")
     /// The last byte of the service UUID is the version itself: version 1 is
     /// `…5f01`, version 2 `…5f02`, up to 255; 0 is not a version. The UUID of
     /// 0.1.0 and 0.1.1 (`…5f60`) reads as version 96, supported by no build:

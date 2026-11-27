@@ -46,6 +46,16 @@ class MeshVersionTest {
     }
 
     @Test
+    fun theReservedExtensionUuidIsNeverAVersionNorAdvertisedNorScanned() {
+        val reserved = MeshConstants.RESERVED_EXTENSION_SERVICE_UUID
+        assertEquals("6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f00", reserved.toString())
+        assertNull(MeshConstants.meshVersionOf(reserved))
+        assertFalse(reserved == MeshConstants.SERVICE_UUID)
+        assertFalse(reserved in MeshConstants.SUPPORTED_SERVICE_UUIDS)
+        assertThrows(IllegalArgumentException::class.java) { MeshConstants.serviceUuid(0) }
+    }
+
+    @Test
     fun anUnsupportedVersionIsNotScanned() {
         assertFalse(MeshConstants.serviceUuid(2) in MeshConstants.SUPPORTED_SERVICE_UUIDS)
     }

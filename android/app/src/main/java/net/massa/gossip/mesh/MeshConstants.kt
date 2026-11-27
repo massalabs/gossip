@@ -24,10 +24,17 @@ object MeshConstants {
     val SUPPORTED_MESH_VERSIONS: List<Int> = listOf(1)
 
     /**
-     * The service UUID with its last byte cleared. That byte is the mesh
-     * version itself; 0 is not a version, so the base UUID names none.
+     * The service UUID with last byte `00`: reserved as a marker for future
+     * extensions of this scheme (for example a later format that carries the
+     * version elsewhere). It is never a version: no build may advertise it or
+     * give it a version meaning without a new decision, and a build that does
+     * not implement such an extension neither scans for it nor connects to it.
+     * [meshVersionOf] returns null for it and [serviceUuid] rejects 0.
      */
-    private val SERVICE_UUID_BASE: UUID = UUID.fromString("6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f00")
+    val RESERVED_EXTENSION_SERVICE_UUID: UUID = UUID.fromString("6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f00")
+
+    /** Every mesh service UUID is this one with the version as last byte. */
+    private val SERVICE_UUID_BASE: UUID = RESERVED_EXTENSION_SERVICE_UUID
 
     const val MAX_MESH_VERSION = 0xff
 
