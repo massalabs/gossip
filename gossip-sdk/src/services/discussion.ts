@@ -113,37 +113,83 @@ export class DiscussionService {
     contact: Contact,
     payload?: AnnouncementPayload
   ): Promise<Result<DiscussionInitializationResult, Error>> {
+    const existing = await this.queries.discussions.getByOwnerAndContact(
+      this.session.userIdEncoded,
+      contact.userId
+    );
+    if (existing?.id) {
+      return {
+        success: false,
+        error: new Error('Discussion already exists'),
+      };
+    }
+    return this.sendRequest(contact, payload, undefined);
+  }
+
+  /**
+   * Sends a contact request to `contact`, an existing contact whose
+   * discussion row may exist already (a contact the user added on their own
+   * whose connection lapsed, §5.12, D.100). The request is the one
+   * `initialize` sends for the same inputs, byte for byte in what it
+   * carries: the same payload, nothing added. Only the device's own rows
+   * differ: the discussion is reused, as the request being sent anew.
+   */
+  async requestAgain(
+    contact: Contact,
+    payload?: AnnouncementPayload
+  ): Promise<Result<DiscussionInitializationResult, Error>> {
+    const existing = await this.queries.discussions.getByOwnerAndContact(
+      this.session.userIdEncoded,
+      contact.userId
+    );
+    return this.sendRequest(
+      contact,
+      payload,
+      existing?.id !== undefined ? existing : undefined
+    );
+  }
+
+  private async sendRequest(
+    contact: Contact,
+    payload: AnnouncementPayload | undefined,
+    existing:
+      | Pick<
+          Discussion,
+          'id' | 'weAccepted' | 'direction' | 'announcementMessage'
+        >
+      | undefined
+  ): Promise<Result<DiscussionInitializationResult, Error>> {
     const log = logger.forMethod('initialize');
 
     try {
       const userId = this.session.userIdEncoded;
 
-      const existing = await this.queries.discussions.getByOwnerAndContact(
-        userId,
-        contact.userId
-      );
-
-      if (existing?.id) {
-        return {
-          success: false,
-          error: new Error('Discussion already exists'),
-        };
-      }
-
       log.info(
         `${userId} is establishing session with contact ${contact.name}`
       );
-      const discussionId = await this.queries.discussions.insert({
-        ownerUserId: userId,
-        contactUserId: contact.userId,
-        weAccepted: true,
-        direction: DiscussionDirection.INITIATED,
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      log.info(`discussion created with id: ${discussionId}`);
+      let discussionId: number;
+      if (existing?.id !== undefined) {
+        discussionId = existing.id;
+        // As a discussion `initialize` creates: the request is sent by this
+        // user, and no request of the peer's waits on it any more.
+        await this.queries.discussions.updateById(discussionId, {
+          weAccepted: true,
+          direction: DiscussionDirection.INITIATED,
+          announcementMessage: null,
+          updatedAt: new Date(),
+        });
+      } else {
+        discussionId = await this.queries.discussions.insert({
+          ownerUserId: userId,
+          contactUserId: contact.userId,
+          weAccepted: true,
+          direction: DiscussionDirection.INITIATED,
+          unreadCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        log.info(`discussion created with id: ${discussionId}`);
+      }
 
       // Never empty: a contact request is told from a connection by its
       // payload (§5.12). No message timer: the request starts no chat.
@@ -153,7 +199,15 @@ export class DiscussionService {
       );
 
       if (!result.success) {
-        await this.queries.discussions.deleteById(discussionId);
+        if (existing?.id !== undefined) {
+          await this.queries.discussions.updateById(discussionId, {
+            weAccepted: existing.weAccepted,
+            direction: existing.direction,
+            announcementMessage: existing.announcementMessage,
+          });
+        } else {
+          await this.queries.discussions.deleteById(discussionId);
+        }
         return { success: false, error: result.error };
       }
 

@@ -29,6 +29,18 @@
 //! set: in a chat of 500, notices that always take a route through the claimed author
 //! would be observable.
 //!
+//! The record that lets that one notice through lives ONLY for the first round of sending
+//! after the wait (the first [`Node::poll_outbox`], decided by the owner on 2026-11-27,
+//! D.98): if the notice to that peer can be assembled in that round, it is; if not (no
+//! working session with that peer at that moment, or its work held back), the record is
+//! dropped and this device never notifies that peer of the event later: the hint then
+//! cancels the queued notice as it would for any relay. Why: the record exists only for
+//! fabricated events, so while it exists it is a trace on the device; a real relay never
+//! notifies the peer it got the event from, so a notice that never leaves looks like the
+//! normal case. Nothing is lost: the event stays a tip, the next event of this device names
+//! it as a parent (the peer then asks for it, and requests are always answered), and tip
+//! sync lists it.
+//!
 //! Not imitated on purpose (known limits, §16.13): the sample of ancestors a real arrival
 //! marks as seen by the deliverer (the claimed author may lack them, and the device would
 //! then skip real notices to that member); the credit a deliverer gets in the peer score
@@ -144,7 +156,8 @@ impl Node {
 
     /// Whether the notice of `id` to `peer` must be sent although a hint says `peer` has
     /// the event: it is the peer the hint of a relay-like publication names, and in its
-    /// notice set (see the module documentation).
+    /// notice set, and this is the first round of sending since the wait ended (see the
+    /// module documentation).
     pub(crate) fn notify_despite_hint(&self, chat: ChatId, peer: GossipId, id: EventId) -> bool {
         self.t
             .relays
@@ -152,11 +165,25 @@ impl Node {
             .is_some_and(|r| r.notify == Some(peer))
     }
 
-    /// The notice of `id` to `peer` left the queue (handed off, or dropped): the record that
-    /// kept the hint from cancelling it is not needed any more.
-    pub(crate) fn notice_left_queue(&mut self, chat: ChatId, peer: GossipId, id: EventId) {
-        if self.notify_despite_hint(chat, peer, id) {
-            self.t.relays.remove(&(chat, id));
+    /// Whether a record waits for its first round of sending.
+    pub(crate) fn relay_round_owed(&self) -> bool {
+        self.t.relays.iter().any(|(_, r)| r.notify.is_some())
+    }
+
+    /// The round of sending is over: every record that let a notice through despite the
+    /// hint is dropped, whether its notice was assembled or not (D.98). Why: it exists only
+    /// for fabricated events, so it must not stay on the device; a peer not reached in this
+    /// round is never notified of the event by this device, as for any relay.
+    pub(crate) fn end_relay_round(&mut self) {
+        let done: Vec<(ChatId, EventId)> = self
+            .t
+            .relays
+            .iter()
+            .filter(|(_, r)| r.notify.is_some())
+            .map(|(k, _)| *k)
+            .collect();
+        for k in done {
+            self.t.relays.remove(&k);
         }
     }
 

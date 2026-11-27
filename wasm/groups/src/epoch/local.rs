@@ -161,6 +161,26 @@ impl Epoch<'_> {
         Ok(())
     }
 
+    /// Whether a message on this device only may be created here (§9.7): the epoch was
+    /// accepted, and it is active or only readable on this device (after a kick or a visible
+    /// leave, or dissolved and kept). Refused while waiting for a kick and in a superseded
+    /// chat of two, where a normal send is refused too and nothing local is made.
+    ///
+    /// Why a read-only epoch takes one (decided by the owner on 2026-11-27, D.99): the user
+    /// may edit and delete every message there on this device only, and a new message must
+    /// be possible as well, under any member of the epoch, or the history of a chat the user
+    /// can only read would be the one place where it cannot be reshaped. Nothing is sent from
+    /// it: the device is inactive in the group and sends nothing for it anyway (§10.4).
+    fn check_can_create_locally(&self) -> Result<(), ChangeError> {
+        if !self.accepted {
+            return Err(ChangeError::NotAccepted);
+        }
+        match self.group_state {
+            GroupState::Active | GroupState::ReadOnlyAfterKick | GroupState::Dissolved => Ok(()),
+            GroupState::Waiting | GroupState::Superseded => Err(ChangeError::GroupState),
+        }
+    }
+
     /// Publishes a new message by `author`, this device's identity or any member of the
     /// epoch (a message published under another member's name, §10.2): `created_at =
     /// last_modified_at = now`, or `= S` when scheduled for `S` (§7.2). The sync-object ID is
@@ -539,6 +559,12 @@ impl Epoch<'_> {
     /// A reaction is refused (a reaction belongs to its author, and has its own action), and
     /// so is a date in the future: there is no scheduling for a message nobody else gets.
     ///
+    /// It is also accepted in an epoch this device can only read (see
+    /// [`Self::check_can_create_locally`]), with the same shape and no marker. Nothing there
+    /// would ever serve or announce it: an inactive device sends nothing for the group, and
+    /// if the device is later added back, the message is what an evicted message is in an
+    /// earlier epoch (no row, or one pruned stub that is never a tip, a parent or listed).
+    ///
     /// # Errors
     ///
     /// [`ChangeError`]; nothing was committed then.
@@ -551,7 +577,7 @@ impl Epoch<'_> {
         body: Body,
         metadata: BTreeMap<String, Vec<u8>>,
     ) -> Result<SyncObjId, ChangeError> {
-        self.check_can_send()?;
+        self.check_can_create_locally()?;
         if matches!(body, Body::Reaction(_)) {
             return Err(ChangeError::Invalid(Error::NotAllowed("a reaction")));
         }

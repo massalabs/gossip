@@ -308,5 +308,13 @@
     "started": "聊天已发起",
     "failed": "无法发起聊天",
     "open_failed": "无法打开此聊天"
+  },
+  "lapsed_contact": {
+    "no_longer_connected": "你和 {{name}} 已不再连接。",
+    "action": "发送联系人请求",
+    "warning": "{{name}} 会看到这个请求，并可以接受或拒绝。",
+    "send": "发送请求",
+    "sent": "联系人请求已发送。",
+    "failed": "无法发送联系人请求。"
   }
 }

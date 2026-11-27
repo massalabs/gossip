@@ -254,6 +254,29 @@ const added = await sdk.conversations.addAsContact(contactUserId, 'Alice');
 // Decline a contact request. A member of a shared chat keeps the connection
 // the chat needs; anyone else goes with their contact. Nothing is sent.
 await sdk.conversations.declineContactRequest(contactUserId);
+
+// A contact added on this device only ('added') whose connection lapsed (no
+// session, no shared chat): send it an ORDINARY contact request, the one a
+// first-time request with the same inputs is, with nothing that says the
+// contact existed already. The contact keeps its name, becomes 'accepted',
+// and is declared to the engine once the other person accepts.
+const sent = await sdk.conversations.sendContactRequest(contactUserId, {
+  username: 'Alice',
+  message: 'Hi again!',
+});
+```
+
+### Chat names
+
+```typescript
+// The user's own name for a chat: a device-only field (`local_name`) beside
+// the roots. The root, which holds the shared name and is hashed, is never
+// changed by it. null clears it.
+await sdk.groups.setLocalName(groupId, 'Family');
+
+// When the owner saves a shared name for everyone, the app also clears the
+// owner's own name, so that the owner sees what they typed.
+await sdk.groups.setLocalName(groupId, null);
 ```
 
 ### Announcements

@@ -1480,10 +1480,19 @@ Every root, of both types, has a `name` field: UTF-8, 0 to 256 bytes (§4.1).
 **Local name.** The user may give a group a name of their own.
 It is stored only on the device and is never sent; the official name stays in the root.
 
+- It is a separate field of the device's record of the group (`local_name`, §14.1), beside the
+  roots. The root, which holds the shared name and is hashed into the root ID, is never changed
+  by it and stays intact in storage, whatever local name is set or cleared.
+  _Why:_ a root is the signed, shared definition of the epoch; a device-only preference must not
+  touch what every member holds identically.
 - When a local name is set, the list, the conversation header and reply previews show it.
 - The group's information screen shows both, labelled "Your name for this chat" and "Group name".
 - When the owner renames the group, the conversation shows a line "\<owner\> renamed the group to
-  \<new name\>", whether or not a local name is set, and the local name is kept.
+  \<new name\>", whether or not a local name is set, and the other members' local names are kept.
+- When the owner saves a shared name ("Save for everyone"), the owner's own local name is cleared
+  on the owner's device (D.101).
+  _Why:_ the owner then sees what they typed; a local name left in place would hide the new shared
+  name from the person who just chose it.
 
 **Displaying a name safely.** The interface MUST apply the following to any name before showing it.
 The result is for display only; stored and relayed bytes are never changed.
@@ -1590,6 +1599,23 @@ _Impacts accepted:_
   known, as the user chose to reach them.
 - Starting a chat of two with that person reveals the relationship, by design: the invitation says
   who asks.
+
+**A contact added this way whose connection lapsed** (no active session, no shared chat, D.100).
+The contact's screen says the two are no longer connected and offers "Send a contact request",
+warning that the other person will see the request.
+
+- The request is an ordinary contact request, identical on the wire to one sent to someone new
+  with the same inputs: the requester's username if they choose, a short message, and no other
+  field. The device sends it for the existing contact instead of refusing it as a duplicate.
+- The contact keeps its name. Its connection becomes that of a contact added with a request
+  (`accepted`), and it is declared to the engine once the other person accepts, as any accepted
+  contact (§13.8). If they decline or never answer, the contact stays, not connected.
+- The other person sees an ordinary request, whatever their own record of this user: none, an
+  automatic connection, or a contact they too added on their own (shown as a request, below).
+
+_Why no special field:_ a field that told the request apart would tell the other person "this user
+already had me as a contact", which adding someone on this device must never reveal; the
+difference is handled on the device only.
 
 A contact request from a member of a chat this device has accepted is always shown. A request
 always carries a payload, a name and a message that may both be empty (a request of 0.1.0 or 0.1.1
@@ -2685,6 +2711,20 @@ recreate the work.
 
 A user may create a new message on this device only ("only for me"), under any member of the epoch
 as author, in the current epoch of an active group.
+
+It may also be created in a group this device can only read but keeps (D.99): after a kick (§5.6),
+after its own visible leave kept read-only (§5.3), or dissolved and kept (§5.8).
+There it goes into the last epoch the device holds, under any member of that epoch.
+Sending for everyone stays refused there, and so is a local-only message in a group waiting for a
+kick, in a superseded chat of two (§5.12), and in a group dissolved to be deleted.
+_Why:_ the user may edit and delete every message of such a history on this device only, and a
+chat the user can only read must not be the one place where it cannot be reshaped with a new
+message (plausible deniability, decided by the owner).
+Nothing is sent from it: a device no longer active in the group sends nothing for it (§10.4).
+If the device is added back later (§5.10), the message stays in the earlier epoch as what an
+evicted message is there: no event row (no timer) or one pruned stub (timer), never a tip, a parent
+or listed, so the device, which serves that epoch again, still never sends or announces it.
+The limits of D.94 then apply as for any local-only message.
 It is created with `created_at = last_modified_at = now`, `edited = false` and a fresh random
 sync-object ID; scheduling is refused.
 Nothing is sent, announced, listed or named as a parent, ever.
@@ -2789,7 +2829,9 @@ objects §4.6 and §5).
      closed during the wait still sends the notices afterwards;
   3. then it records one hint (§10.3) and sends notices to exactly the set of an ordinary
      dissemination: the eligible neighbors plus the extra random recipients below; nothing is
-     added or removed for anyone;
+     added or removed for anyone. The hint is always written for a version that still exists at
+     the end of the wait: a version replaced or pruned during the wait (the user edits or deletes
+     again within those seconds) gets no hint and no notice (D.102);
   4. explicit requests are answered with the full event, whoever asks, the peer named by the hint
      included.
 
@@ -2802,6 +2844,9 @@ objects §4.6 and §5).
   delay when it relays).
   _Why the claimed author is not forced into the notice set:_ in a chat of 500, notices that always
   take a route through the claimed author would be observable.
+  _Why nothing for a version gone during the wait:_ the device never announces what it can no
+  longer give; announcing it and then answering "not available" would lower its score with the
+  others (§11.8).
   _Why re-appropriation is not pushed in full:_ honest devices push in full only what they author,
   so a full push of an edit naming the user would tell the user's neighbors that the user took the
   message; as notices it reads as someone re-attributing it and this device relaying it.
@@ -2851,6 +2896,16 @@ the device records one hint for the event only, with no ancestor sample, naming:
 The hint is recorded after the notices are queued, and does not suppress the one notice to the peer
 it names when that peer is in the set: a relay announces to its neighbors whoever handed the event
 over.
+The record that lets that one notice through lives only for the **first round of sending** after
+the wait (D.98): if the notice to that peer can be assembled in that round, it is; if not (no
+working session with that peer at that moment), the record is dropped, the hint then suppresses
+the queued notice, and this device never notifies that peer of the event later.
+_Why:_ the record exists only for fabricated events, so while it exists it is a trace on the
+device; a real relay never notifies the peer it got the event from, so a notice that never leaves
+looks normal.
+Nothing is lost: the event stays a tip of this device, its next event names it as a parent (the
+peer then asks for it, and a request is always answered), and tip sync lists it (§12.1). In a chat
+of two this is how the other person gets it.
 Its first time is never rewritten afterwards (it tells "arrived here before I passed it on").
 _Why no ancestor sample:_ the claimed author may lack those ancestors, and the hints would then
 skip real notices to that member.
@@ -4220,7 +4275,7 @@ whether and when the other accepts it, as for any group (§4.8).
 
 ### 16.13 Known limitations: publishing under another member's name, local-only messages and edits
 
-Accepted on 2026-11-27 with D.92 to D.97; each is to analyse (the file named is the issue that
+Accepted on 2026-11-27 with D.92 to D.99 and D.102, D.103; each is to analyse (the file named is the issue that
 tracks it).
 
 **On the publishing device** (someone reading its storage; the owner considers a snapshot of an
@@ -4232,9 +4287,8 @@ unlocked device taken while it impersonates someone to be at the edge of the thr
 - No peer-score credit for a deliverer, where a real arrival credits one (§11.8). To analyse:
   `gossip-fabricated-message-leaves-other-local-records-unlike-a-relay.md`.
 - During the random wait, a pending relay record exists for the event, and after it, until the
-  notice to the peer named by the hint has left the queue, a record that keeps the hint from
-  suppressing that notice. Both hold no content and live seconds. To analyse with the previous
-  item.
+  first round of sending, a record that keeps the hint from suppressing the notice to the peer it
+  names (D.98). Both hold no content and live seconds. To analyse with the previous item.
 
 **Over the network:**
 
@@ -4248,13 +4302,19 @@ unlocked device taken while it impersonates someone to be at the edge of the thr
   `gossip-send-as-claimed-authors-neighbours-never-get-a-full-push.md`.
 - A version announced by notices and replaced soon after on this device is answered "not
   available" to the peers that ask for it, which penalises this device in their peer score
-  (§11.8); a full push never caused such a request. Seen in the network simulation (an honest
-  device ending below the credible score). To analyse:
+  (§11.8); a full push never caused such a request. Seen in the network simulation with the new
+  abilities in the mix (an honest device ending below the credible score, in 1 to 2 runs of 40).
+  Shipped as it is, decided by the owner (D.103); to reanalyse, a fix may not be needed:
   `gossip-relay-like-publications-lower-the-publishers-peer-score.md`.
+- When the peer named by the hint has no working session in the first round of sending after the
+  wait, it is not notified by this device at all (D.98); it gets the event a little later, by the
+  next event that names it as a parent or by tip sync.
 - A reply or a reaction for everyone to a local-only message (§9.7) tells the other members that
   this device holds a message they lack (not that it was made up: "a member sent it to me only"
   explains it too). To analyse:
   `gossip-local-only-message-replies-and-reactions-reveal-a-message-others-lack.md`.
+  The same holds for a local-only message created in a read-only group once the device is added
+  back (D.99).
 
 **Sequences of edits.** The rule "in full only when the user is the author before and after the
 edit" (§10.2) looks at the author stored at the moment of each edit, which earlier edits set, by
@@ -6594,3 +6654,109 @@ _Impacts accepted:_ the rule looks at the author stored at each edit, so across 
 than two edits the forms in which they leave can reveal more than each edit alone (§16.13):
 `gossip-edit-sequences-reveal-more-than-single-edits.md`. Changing a reaction's author (remove as
 one member, add as another) is documented and left for later.
+
+### D.98 The record that lets the hinted peer be notified lives one round of sending (§10.3, §16.13)
+
+_Context:_ after the random wait of a publication that is not the user's own (D.95, D.97), the hint
+names a peer, and a record keeps that hint from suppressing the one notice to that peer. As first
+built, the record lived until that notice left the queue, however long.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A). The record lives only for the first
+round of sending after the wait. If the notice to that peer can be assembled in that round, it is;
+if not (no working session with that peer at that moment), the record is dropped and this device
+does not notify that peer of the event later.
+
+_Why:_ the record exists only for fabricated events, so while it exists it is a trace on the
+device. A real relay never notifies the peer it got the event from, so a notice that never leaves
+looks normal.
+
+_Impacts accepted:_ that peer gets the event later, by the next event of this device that names it
+as a parent (it asks, and requests are always answered) or by tip sync; in a chat of two this is
+how the other person gets it. Both paths are covered by tests.
+
+### D.99 A local-only message in a chat the device can only read (§9.7, §10.4)
+
+_Context:_ in a chat the device can only read (kicked, left visibly and kept, dissolved and kept),
+Edit and Delete stay on every message, on this device only. The local-only message operation was
+first built to refuse wherever a normal send is refused.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A, with the owner's addition). New messages
+can be written there too, on this device only, under any member of the last epoch the device holds,
+with the storage shape of D.93 and no marker (D.92). Nothing can be sent to other people from such
+a chat; the only scope offered is "only for me". Waiting for a kick, a superseded chat of two and a
+chat dissolved to be deleted stay refused.
+
+_Why:_ plausible deniability, important for the owner: the history of a chat the user can only
+read must be as reshapable on the device as any other.
+
+_What happens if the device is added back:_ the message stays in the earlier epoch, shaped as an
+evicted message there; the device serves that epoch again and still never sends, announces or lists
+it. A reply, a reaction or a Retry for everyone then has the effects of D.94.
+
+### D.100 A contact request to a contact added on this device whose connection lapsed (§5.12)
+
+_Context:_ a contact the user added on their own (D.91) loses its connection with the last shared
+chat. The add-contact paths refuse it as a duplicate.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A). The contact's screen says the two are no
+longer connected and offers "Send a contact request", warning that the other person will see it.
+The request is an ordinary contact request, identical on the wire to one sent to a stranger, with
+no special field. The contact keeps its name; once accepted the relationship is mutual and the
+contact is declared to the engine as any accepted contact.
+
+_Why:_ a field that told the request apart would tell the other person "this user already had me
+as a contact", which adding someone locally must never reveal. The difference is handled on the
+device only.
+
+_Impacts accepted:_ the other person learns that this user wants them as a contact, as with any
+request; the user is warned before sending.
+
+### D.101 The user's own name for a chat is a device-only field (§5.11)
+
+_Decision:_ confirmed by the owner on 2026-11-27 (choice A). "Save for me" stores the name in a
+separate field of the device's record of the chat (`local_name`); the root, which holds the shared
+name and is hashed, is never changed by it and stays intact in storage. "Save for everyone" on the
+chat's name also clears the owner's own name for the chat.
+
+_Why:_ the owner then sees what they typed. The root is the shared, signed definition of the epoch,
+and a device-only preference must not touch it.
+
+### D.102 The hint is written for a version that still exists at the end of the wait (§10.2)
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A, as built). A version replaced or pruned
+during the random wait (the user edits or deletes again within those seconds) gets no hint and no
+notice.
+
+_Why:_ the device never announces what it can no longer give; announcing it and then answering
+"not available" lowers its score with the others.
+
+### D.103 Relay-like publications can lower the publisher's peer score (§11.8, §16.13)
+
+_Context:_ the network simulation with the new abilities in the mix showed an honest publisher
+ending below the credible score in 1 to 2 runs of 40: a version announced by notices and replaced
+soon after is answered "not available" to the peers that ask for it.
+
+_Decision:_ decided by the owner on 2026-11-27: shipped as it is and documented (§16.13); to
+reanalyse, a fix may not be necessary:
+`gossip-relay-like-publications-lower-the-publishers-peer-score.md`.
+
+### D.104 Tie-breaks in opposite directions (§4.9, §5.12, the mesh)
+
+_Context:_ the mesh's protected document said a duplicate link "keeps the one whose handshake
+completed first"; the mesh code keeps the link with the lower link key, which both ends compute
+alike (seen in the phone test of 2026-11-27). The document was corrected, as accepted by the owner
+on 2026-11-27.
+
+_Noted by the owner:_ group chats break some ties in the opposite direction (the interim rule of
+§4.9 takes the greatest `(created_at, chat_id)`). Nothing is changed in 0.1.2; one direction for
+every tie-break is to study: `gossip-one-direction-for-every-tie-break.md`.
+
+### D.105 The labels of the Bluetooth numbers (the app, the mesh)
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A for 0.1.2, labels only). The values were
+right and three labels were not: "Messages relayed" (items stored on this phone now, its own
+messages included) becomes "Messages stored on this phone"; "Waiting for a bridge" (every stored
+message waiting to reach the internet) becomes "Messages waiting for internet"; the offline line
+"Connected to the mesh · N links" (phones, in fact) becomes "Connected over Bluetooth · N phones
+nearby". A real count of messages relayed needs a new counter in the mesh core and is left for the
+Bluetooth reporting work (choice B, later). Nothing in this protocol changes.

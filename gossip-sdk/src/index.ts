@@ -35,7 +35,10 @@ export {
   ConversationService,
   MigrationUnavailableError,
 } from './services/conversations.js';
-export type { AddAsContactResult } from './services/conversations.js';
+export type {
+  AddAsContactResult,
+  SendContactRequestResult,
+} from './services/conversations.js';
 export type {
   GroupId,
   GroupSummary,

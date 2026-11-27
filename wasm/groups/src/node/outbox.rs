@@ -166,9 +166,6 @@ impl Node {
     }
 
     fn remove_work(&mut self, key: &WorkKey) {
-        if let Some(Work::Notice { chat_id, event_id }) = self.t.queue.get(key).cloned() {
-            self.notice_left_queue(chat_id, key.0, event_id);
-        }
         if let Some(w) = self.t.queue.remove(key)
             && let Some(r) = event_ref(&w)
             && let Some(set) = self.work_refs.get_mut(&r)
@@ -254,7 +251,9 @@ impl Node {
             .queue
             .keys()
             .any(|k| !self.outbox.items.contains(k) && self.assemblable(&k.0, now));
-        if !any {
+        // A record that lets a notice through despite its hint ends with this round, even
+        // when nothing can be assembled (see `relay`).
+        if !any && !self.relay_round_owed() {
             return Ok(Vec::new());
         }
         let r = self.run(store, now, rng, |n, cx| {
@@ -269,6 +268,7 @@ impl Node {
             }
             peers.dedup();
             if peers.is_empty() {
+                n.end_relay_round();
                 return Ok(Vec::new());
             }
             let mut due = u64::MAX;
@@ -314,6 +314,7 @@ impl Node {
                     });
                 }
             }
+            n.end_relay_round();
             Ok(out)
         });
         if r.is_err() {

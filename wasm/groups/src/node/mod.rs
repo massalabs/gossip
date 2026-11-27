@@ -1044,6 +1044,12 @@ impl Node {
     /// or listed, ever, and no marker is kept (see [`Epoch::local_message`] for the shape it
     /// is stored in, and why). Returns its sync-object ID.
     ///
+    /// Accepted in an active group, and in a group this device can only read but still
+    /// holds: after a kick, after its own visible leave, or dissolved and kept (D.99). There
+    /// the epoch is the last one this device holds, and any member of it may be the author.
+    /// Refused while waiting for a kick, in a superseded chat of two, and in a group
+    /// dissolved to be deleted.
+    ///
     /// # Errors
     ///
     /// [`NodeError`]; nothing was committed.
@@ -1063,11 +1069,24 @@ impl Node {
         }
         let entry = self.entry(&chat_id)?;
         let group = self.group_of(&chat_id);
-        // The same gate as a message sent to everyone: a read-only, waiting or dissolved
-        // group has its composer disabled (§5.4, §5.6, §5.8).
-        if self.group_status(&group) != records::GroupStatus::Active
-            || entry.state != GroupState::Active
-        {
+        // An active group, or one this device can only read and keeps (D.99): the user may
+        // reshape that history on this device as freely as an active one's. Nothing is sent
+        // from it either way. Waiting for a kick and a superseded chat of two stay refused,
+        // as a normal send is; a group dissolved to be deleted is about to be erased.
+        let allowed = match self.group_status(&group) {
+            records::GroupStatus::Active => entry.state == GroupState::Active,
+            records::GroupStatus::Removed { .. }
+            | records::GroupStatus::Left { .. }
+            | records::GroupStatus::Dissolved {
+                must_delete: false, ..
+            } => true,
+            records::GroupStatus::Dissolved {
+                must_delete: true, ..
+            }
+            | records::GroupStatus::Waiting { .. }
+            | records::GroupStatus::Superseded { .. } => false,
+        };
+        if !allowed {
             return Err(NodeError::NotAllowed);
         }
         self.run(store, now, rng, |_n, cx| {

@@ -152,6 +152,41 @@ describe('Sending as another member', { timeout: 240_000 }, () => {
     expect(await find(alice, syncObjId)).not.toBeNull();
   });
 
+  it('a message only for me is accepted in a chat this device can only read, and nothing is sent', async () => {
+    // Alice dissolves the chat; Bob keeps it, read only.
+    await alice.groups.dissolve(groupId, false);
+    await deliver();
+    await expect(
+      bob.groups.sendMessage(groupId, 'to everyone')
+    ).rejects.toThrow();
+    const transport = internals(bob).messageProtocol;
+    let sends = 0;
+    internals(bob).messageProtocol = {
+      sendMessage: async (m: unknown) => {
+        sends++;
+        return transport.sendMessage(m);
+      },
+    };
+    // Under any member of the chat's last epoch, Bob's own name included.
+    const asCarol = await bob.groups.sendMessageLocally(
+      groupId,
+      'only here, as carol',
+      { author: carol.userId }
+    );
+    const asBob = await bob.groups.sendMessageLocally(groupId, 'only here');
+    await bob.groups.settle();
+    await deliver([bob]);
+    expect(sends).toBe(0);
+    internals(bob).messageProtocol = transport;
+    expect((await find(bob, asCarol.syncObjId))?.author).toBe(carol.userId);
+    expect((await find(bob, asBob.syncObjId))?.author).toBe(bob.userId);
+    await deliver();
+    for (const peer of [alice, carol]) {
+      expect(await find(peer, asCarol.syncObjId)).toBeNull();
+      expect(await find(peer, asBob.syncObjId)).toBeNull();
+    }
+  });
+
   it('an edit that changes the author converges on every device', async () => {
     const p = await alice.groups.sendMessage(groupId, 'mine');
     await deliver();

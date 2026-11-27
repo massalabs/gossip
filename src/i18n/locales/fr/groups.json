@@ -308,5 +308,13 @@
     "started": "Chat lancé",
     "failed": "Le Chat n’a pas pu être lancé",
     "open_failed": "Ce Chat n’a pas pu être ouvert"
+  },
+  "lapsed_contact": {
+    "no_longer_connected": "Vous et {{name}} n’êtes plus connectés.",
+    "action": "Envoyer une demande de contact",
+    "warning": "{{name}} verra cette demande et pourra l’accepter ou la refuser.",
+    "send": "Envoyer la demande",
+    "sent": "La demande de contact a été envoyée.",
+    "failed": "La demande de contact n’a pas pu être envoyée."
   }
 }

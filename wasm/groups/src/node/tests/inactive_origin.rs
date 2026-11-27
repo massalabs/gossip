@@ -880,3 +880,147 @@ fn a_sync_object_lookup_in_progress_ends_not_found_when_the_group_goes_inactive(
         assert_eq!(results, vec![(c, sync, LookupResult::NotFound)], "{how:?}");
     }
 }
+
+// ── A message on this device only in a chat it can only read (§9.7, D.99) ───
+
+/// R creates `text` on this device only in C, as member `author`.
+fn local_in(
+    net: &mut MNet,
+    c: ChatId,
+    author: usize,
+    text: &str,
+) -> Result<SyncObjId, NodeError> {
+    let now = net.now;
+    let chat = net.current(R, &c).unwrap();
+    let dev = &mut net.devs[R];
+    dev.node.local_message(
+        &mut dev.store,
+        chat,
+        gid(author),
+        Body::Text(text.into()),
+        BTreeMap::new(),
+        now,
+        &mut net.rng,
+    )
+}
+
+/// §9.7, D.99: after a kick, a visible leave, or a dissolve, R keeps C read-only and may still
+/// create a message there on this device only, under any member of the last epoch it holds,
+/// itself included: stored in the shape of D.93, shown, and never sent. A normal send stays
+/// refused. Waiting for a kick is refused, as a normal send is.
+#[test]
+fn a_local_message_is_accepted_in_a_chat_the_device_can_only_read() {
+    let mut timers = 0;
+    for (how, timed) in ALL.into_iter().flat_map(|h| [(h, false), (h, true)]) {
+        let (mut net, [c, ..]) = setup(how, |net, c| {
+            if timed {
+                let cur = net.current(0, &c).unwrap();
+                net.change(0, cur, GroupChange::MessageTimer { timer: DAY })
+                    .unwrap();
+                net.run(2 * MIN);
+            }
+        });
+        let chat = net.current(R, &c).unwrap();
+        let timer = net.devs[R].node.root(&chat).unwrap().message_timer();
+        timers += usize::from(timer > 0);
+        if matches!(how, Inactive::Waiting) {
+            assert!(
+                matches!(local_in(&mut net, c, Q, "x"), Err(NodeError::NotAllowed)),
+                "{how:?}"
+            );
+            continue;
+        }
+        let as_q = local_in(&mut net, c, Q, "only here, as Q").unwrap();
+        let as_me = local_in(&mut net, c, R, "only here, as me").unwrap();
+        // Not a member of that epoch: refused, as for a published message.
+        assert!(local_in(&mut net, c, 2, "x").is_err(), "{how:?}");
+        let texts = net.texts(R, &c);
+        assert!(texts.contains(&"only here, as Q".to_owned()), "{how:?}");
+        assert!(texts.contains(&"only here, as me".to_owned()), "{how:?}");
+        for sync in [as_q, as_me] {
+            let obj = net.devs[R].store.object(&chat, &sync).unwrap().unwrap();
+            assert!(obj.current_events.is_empty(), "{how:?}");
+            assert_eq!(obj.stubs.len(), usize::from(timer > 0), "{how:?}");
+            assert!(obj.shareable);
+        }
+        // A normal send stays refused.
+        let now = net.now;
+        let dev = &mut net.devs[R];
+        assert!(
+            dev.node
+                .publish_message(
+                    &mut dev.store,
+                    chat,
+                    Body::Text("to everyone".into()),
+                    BTreeMap::new(),
+                    None,
+                    now,
+                    &mut net.rng,
+                )
+                .is_err(),
+            "{how:?}"
+        );
+        // Nothing of it ever leaves R.
+        for (_, pt) in sent_by_r(&mut net, never_replaced(), 3) {
+            for sync in [as_q, as_me] {
+                assert!(!pt.windows(32).any(|w| w == sync.as_bytes()), "{how:?}");
+            }
+        }
+        crate::epoch::check_invariants(&net.devs[R].store, &chat, net.now).unwrap();
+    }
+    // Both shapes are covered: with no timer, and with one when kicked or dissolved (after its
+    // own leave, or with the owner offline while it waits, R never gets the timer's epoch).
+    assert_eq!(timers, 2);
+}
+
+/// §9.7, §5.10, D.99: a local-only message created while R was kicked from C stays on R once R
+/// is added back, shaped as an evicted message of an earlier epoch: R serves the epoch again,
+/// and still never sends, announces or lists anything of it; the other members never get it.
+#[test]
+fn a_local_message_of_a_read_only_chat_stays_on_the_device_once_it_is_added_back() {
+    let (mut net, [c, ..]) = setup(Inactive::Removed, |_, _| {});
+    let old = net.current(R, &c).unwrap();
+    let sync = local_in(&mut net, c, Q, "only here, as Q").unwrap();
+    let cur = net.current(0, &c).unwrap();
+    net.change(
+        0,
+        cur,
+        GroupChange::Successor {
+            add: vec![gid(R)],
+            remove: vec![],
+            name: None,
+        },
+    )
+    .unwrap();
+    net.run(2 * MIN);
+    assert_eq!(net.accept_all(R).len(), 1);
+    assert_eq!(net.summary(R, &c).unwrap().status, MyStatus::Member);
+    assert_ne!(net.current(R, &c), Some(old));
+    // R talks with the others again, and sends nothing of the message.
+    net.say(R, &c, "back again");
+    let sent = sent_by_r(&mut net, never_replaced(), 30);
+    assert!(!sent.is_empty());
+    for (_, pt) in &sent {
+        assert!(!pt.windows(32).any(|w| w == sync.as_bytes()));
+    }
+    net.run(DAY);
+    assert!(net.texts(R, &c).contains(&"only here, as Q".to_owned()));
+    for d in [0, 2, Q] {
+        assert!(
+            !net.texts(d, &c).contains(&"only here, as Q".to_owned()),
+            "{d}"
+        );
+        assert!(net.devs[d].store.object(&old, &sync).unwrap().is_none());
+    }
+    // Its old epoch is served again, and the message is what an evicted message is there.
+    assert!(
+        net.devs[R]
+            .store
+            .object(&old, &sync)
+            .unwrap()
+            .unwrap()
+            .current_events
+            .is_empty()
+    );
+    crate::epoch::check_invariants(&net.devs[R].store, &old, net.now).unwrap();
+}
