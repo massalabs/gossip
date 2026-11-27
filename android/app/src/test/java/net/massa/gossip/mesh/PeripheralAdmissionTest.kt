@@ -8,7 +8,7 @@ import org.junit.Test
 class PeripheralAdmissionTest {
 
     private fun admission() = PeripheralAdmission(
-        gate = InboundGate(maxInbound = 4, cooldownMs = 60_000),
+        gate = InboundGate(maxInbound = 4, cooldownMs = MeshConstants.INBOUND_COOLDOWN_MS),
         maxLinks = 8,
         connectTimeoutMs = 20_000,
     )
@@ -66,9 +66,9 @@ class PeripheralAdmissionTest {
     fun aSubscribeIsRefusedWhileTheCentralCoolsDown() {
         val a = admission()
         a.onLinkClosed("peer", nowMs = 0)
-        assertRefused(a.onSubscribe("peer", slots(), nowMs = 59_999), cancel = true)
-        assertAdmitted(a.onSubscribe("other", slots(), nowMs = 59_999))
-        assertAdmitted(a.onSubscribe("peer", slots(), nowMs = 60_000))
+        assertRefused(a.onSubscribe("peer", slots(), nowMs = 29_999), cancel = true)
+        assertAdmitted(a.onSubscribe("other", slots(), nowMs = 29_999))
+        assertAdmitted(a.onSubscribe("peer", slots(), nowMs = 30_000))
     }
 
     @Test

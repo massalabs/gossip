@@ -93,8 +93,21 @@ object MeshConstants {
     /** Of [MAX_LINKS], how many other phones may open: the rest are for the neighbours this phone picks. */
     const val MAX_INBOUND_LINKS = 4
 
-    /** How long a central whose inbound link closed must wait before connecting again. */
-    const val INBOUND_COOLDOWN_MS = 60_000L
+    /**
+     * How long a central whose inbound link closed must wait before connecting again.
+     * Same as [RECONNECT_COOLDOWN_MS], for every close.
+     */
+    const val INBOUND_COOLDOWN_MS = 30_000L
+
+    /**
+     * How long a peer whose link closed (lost, or rotated out) is not picked again (see
+     * [NeighbourSelector]). At 60 s, with the inbound cooldown also at 60 s, a two-phone
+     * test measured 82 s without a link after one phone's Bluetooth restarted: the other
+     * retried at 10 s, was refused by the restarted phone's inbound cooldown, then waited
+     * its own 60 s. 30 s for both keeps a hostile or flapping peer from reconnecting in a
+     * loop while bringing a simply lost link back within about half a minute.
+     */
+    const val RECONNECT_COOLDOWN_MS = 30_000L
 
     /** A link the core closes within this time of coming up was refused, not lost. */
     const val QUICK_CLOSE_MS = 30_000L

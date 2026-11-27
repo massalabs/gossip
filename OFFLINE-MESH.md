@@ -134,7 +134,7 @@ A phone in a crowd hears far more neighbours than it can link to. Candidates abo
 −95 dBm are picked at random, never by signal strength alone, which would build clusters
 of nearby phones that only hear each other. When every slot is taken and someone new is
 waiting, one link older than the rotation interval is dropped for a new neighbour, and
-the dropped peer is not picked again for a minute.
+the dropped peer is not picked again for 30 s.
 
 | Mode                 | Scan on / off | Rotation |
 | -------------------- | ------------- | -------- |
@@ -164,7 +164,7 @@ These are starting values; the node's simulation is where they get tuned.
   refused subscribe is answered with an error (ATT "Insufficient Resources"), after which
   the app may cancel that connection.
 - Other phones may open at most 4 of the 8 links, and a central whose link closed waits
-  60 s before it may connect again. Long (prepared) writes and writes at an offset are
+  30 s before it may connect again. Long (prepared) writes and writes at an offset are
   refused. A link with more than 512 KiB received but not yet read by the core is closed.
 - BLE addresses are not logged.
 
@@ -178,7 +178,7 @@ These are starting values; the node's simulation is where they get tuned.
   the app open.
 - A peripheral cannot disconnect a central on iOS, so rotation only drops links this
   phone opened as central, and closing a link opened by the other phone only stops using it.
-  Such a central is then ignored for 60 s if it subscribes again, and other phones may hold
+  Such a central is then ignored for 30 s if it subscribes again, and other phones may hold
   at most 4 of the 8 links. Writes at an offset are refused, and a link with more than
   512 KiB received but not yet read by the core is closed.
 - The store (`Application Support/mesh`) and the install id file (`mesh-install-id`) are

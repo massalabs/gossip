@@ -43,8 +43,10 @@ enum MeshConstants {
     static let maxLinks = 8
     /// Of `maxLinks`, how many other phones may open: the rest are for the neighbours this phone picks.
     static let maxInboundLinks = 4
-    /// How long a central whose link closed is ignored if it subscribes again.
-    static let inboundCooldown: TimeInterval = 60
+    /// How long a central whose link closed is ignored if it subscribes again (as Android).
+    static let inboundCooldown: TimeInterval = 30
+    /// How long a peer whose link closed is not picked again (see Android's RECONNECT_COOLDOWN_MS).
+    static let reconnectCooldown: TimeInterval = 30
     /// A link the core closes within this time of coming up was refused, not lost.
     static let quickClose: TimeInterval = 30
     /// How long a phone that refused our link is left alone (see `NeighbourSelector`).
@@ -139,7 +141,7 @@ final class NeighbourSelector {
         maxLinks: Int = MeshConstants.maxLinks,
         minRssi: Int = -95,
         candidateTtl: TimeInterval = 30,
-        cooldown: TimeInterval = 60
+        cooldown: TimeInterval = MeshConstants.reconnectCooldown
     ) {
         self.maxLinks = maxLinks
         self.minRssi = minRssi
