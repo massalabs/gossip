@@ -731,9 +731,9 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
           )}
           <div>
             <Button
-              variant={canWrite ? 'secondary' : 'danger'}
+              variant={canWrite ? 'outline' : 'danger'}
               size="custom"
-              className="w-full h-11 rounded-lg font-semibold"
+              className={`w-full h-11 rounded-lg font-semibold ${canWrite ? 'text-destructive' : ''}`}
               onClick={() => {
                 const m = deleting;
                 setDeleting(null);

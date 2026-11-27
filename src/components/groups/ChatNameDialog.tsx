@@ -94,7 +94,7 @@ const ChatNameDialog: React.FC<ChatNameDialogProps> = ({
             </Button>
           )}
           <Button
-            variant={canSaveForEveryone ? 'secondary' : 'primary'}
+            variant={canSaveForEveryone ? 'outline' : 'primary'}
             size="custom"
             className="w-full h-11 rounded-lg font-semibold"
             disabled={tooLong}
