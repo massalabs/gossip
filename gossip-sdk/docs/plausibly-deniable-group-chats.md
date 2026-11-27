@@ -1567,6 +1567,30 @@ from the chat's members (§12.9), and the connection opens as for any member. No
 because of it. The other person learns nothing until a chat is started with them, which reaches
 them as an ordinary invitation.
 
+Such a contact is one-sided until the relationship is mutual and known to the other person: they
+accept a chat of two the user started with them, the user accepts their chat invitation or their
+contact request, or they accept the user's request. Until then it is a contact for the user (listed,
+named, offered for new chats and members), but everything the other person can observe treats it
+exactly as a member who is no contact:
+
+- It is not declared as an accepted contact to the engine, so it gets no version notice (§13.8).
+- Its connection follows the automatic rule above, in what is sent and in timing: it is revoked
+  with the last chat that keeps it, and the contact and its name stay, without a session.
+
+_Why (decided by the owner, D.91):_ privacy first, adding someone must stay invisible. The engine
+answers a plaintext of a newer, unsupported version with a version notice to accepted contacts only
+(§13.8). A modified client could send such a plaintext on purpose and learn from the answer that it
+was added, and a connection kept alive past the last shared chat would show the same.
+_Impacts accepted:_
+
+- A contact added this way that runs a newer version is not told that this user's device cannot
+  read their messages, until the relationship is mutual.
+- The connection to such a contact can lapse when no shared chat remains. Opening it again needs a
+  new announcement, which the other person sees as a contact request: the addition then becomes
+  known, as the user chose to reach them.
+- Starting a chat of two with that person reveals the relationship, by design: the invitation says
+  who asks.
+
 A contact request from a member of a chat this device has accepted is always shown. A request
 always carries a payload, a name and a message that may both be empty (a request of 0.1.0 or 0.1.1
 also carried a timer, now ignored); the announcement that opens a connection, answers one or renews
@@ -3570,7 +3594,10 @@ it; it is never relayed and never answered.
   one plaintext at its own highest version holding one response frame, with an empty `request_id`,
   `idx = 0` and status **unsupported**.
   - It is sent **only to a peer the user explicitly accepted as a contact** (§5.12), whether or
-    not they share a group. A peer whose connection is automatic, or any other peer, gets silence.
+    not they share a group, and only once that relationship is mutual and known to that peer: the
+    user accepted their contact request or chat invitation, or they accepted the user's. A peer
+    whose connection is automatic, a member the user added as a contact on this device only, or
+    any other peer, gets silence (D.91).
   - The version prefix is read **before** any other check, the size check included: a later
     version may use a larger container, and must still be answered.
   - It is sent at most once per peer and received version per 24 hours (a default, §2.2).
@@ -3584,7 +3611,10 @@ it; it is never relayed and never answered.
   A later version could do without it, by sending both versions to a peer whose version it does
   not know; the notice saves that, and it could not be added to version 1 after its release.
 - **What the notice reveals.** That this device speaks version 1 of this protocol, to a contact its
-  user accepted. Nothing about any group, and nothing to anyone else.
+  user accepted. Nothing about any group, and nothing to anyone else. Because only a contact
+  already known to be one gets it, the notice cannot be used as a probe: a modified client that
+  sends a plaintext of a higher version on purpose learns nothing about whether it was added as a
+  contact on this device (D.91).
 - A device that receives the notice takes no action required by this version; it MUST NOT treat it
   as an error or penalise its sender (§2.2).
 - Events carried under a newer prefix follow the version rules of §13.1.
@@ -6237,3 +6267,39 @@ _Alternatives not taken:_
   owner depends on timing.
 - Keep the timer in the request as a suggestion: a value that commits nobody and can differ from the
   chat's real timer.
+
+### D.91 A contact added on this device only stays silent to the version probe (§5.12, §13.8)
+
+_Context:_ a member of a shared chat can be added as a contact on this device only, sending nothing
+(§5.12). The engine answers a plaintext of a higher, unsupported version with a version notice to
+the peers declared as accepted contacts, and stays silent toward everyone else (§13.8). Declaring a
+contact added this way therefore let a modified client send such a plaintext on purpose and learn
+from the notice that this user added it, which contradicts "adding sends nothing and reveals
+nothing".
+
+_Decision:_ decided by the owner on 2026-11-27. A contact the user added on their own (`added`)
+stays silent toward that probe, exactly like a chat member who is not a contact. The version notice
+is given only where the other person already knows the two are contacts: the user accepted their
+contact request or chat invitation, or they accepted the user's request or the chat of two the user
+started. The contact then becomes `accepted` and is declared to the engine.
+
+- For the user an `added` contact is a contact: listed, named, offered for new chats and members.
+- For anything the other person can observe it is an automatic connection: not declared to the
+  engine, and its connection kept and revoked by the automatic rule, in what is sent and in timing.
+  The contact and its name stay when the connection goes.
+
+_Why:_ privacy first: adding someone must stay invisible, to them and to anyone else.
+
+_Impacts accepted:_
+
+- A contact added this way that runs a newer version is not told that this user's device cannot
+  read their messages, until the relationship is mutual.
+- The connection to such a contact can lapse when no shared chat remains; reaching them again needs
+  a new announcement, which they see as a contact request.
+- Starting a chat of two with that person reveals the relationship, by design.
+
+_Alternatives not taken:_
+
+- Declare every contact the user added: the version notice becomes a probe of who added whom.
+- Answer every peer with a version notice: it would tell anyone which version this device speaks,
+  which §13.8 limits to contacts on purpose.

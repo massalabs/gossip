@@ -246,7 +246,9 @@ await sdk.contacts.delete(contactUserId);
 
 // A member of a shared chat who is no contact (connection 'automatic', or
 // 'requested' while their own contact request waits): add them as a contact
-// on this device only. Nothing is sent.
+// on this device only. Nothing is sent. The contact stays 'added' (not
+// declared to the engine, its connection kept by the automatic rule) until
+// the relationship is mutual, then 'accepted'.
 const added = await sdk.conversations.addAsContact(contactUserId, 'Alice');
 
 // Decline a contact request. A member of a shared chat keeps the connection
