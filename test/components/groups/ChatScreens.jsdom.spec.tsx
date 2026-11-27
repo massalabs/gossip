@@ -1,7 +1,11 @@
 import './matchMedia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
-import { SessionStatus, type GossipSdk } from '@massalabs/gossip-sdk';
+import {
+  SdkEventType,
+  SessionStatus,
+  type GossipSdk,
+} from '@massalabs/gossip-sdk';
 import NewGroup from '../../../src/pages/NewGroup';
 import Discussions from '../../../src/pages/Discussions';
 import ArchivedChats from '../../../src/pages/ArchivedChats';
@@ -236,6 +240,61 @@ describe('chat screens', () => {
       expect(r.container.textContent).not.toContain('Kim');
     });
 
+    it('keeps an archived chat in the archived list when a message arrives, with a dot on the "Archived chats" row', async () => {
+      fake.state.groups = [
+        summary({ groupId: 'g1', currentEpoch: 'g1', name: 'Brunch' }),
+        summary({ groupId: 'g2', currentEpoch: 'g2', name: 'Lisbon' }),
+      ];
+      fake.state.archived = ['g2'];
+      useGroupStore.getState().init();
+      await act(flush);
+      const r = await renderAt(<Discussions />);
+      unmount = r.unmount;
+      await act(flush);
+      const row = () =>
+        r.container.querySelector('[data-testid="archived-chats-row"]');
+      // The earlier chat and the archived current chat.
+      expect(row()?.textContent).toContain('2');
+      expect(
+        r.container.querySelector('[data-testid="archived-chats-unread"]')
+      ).toBeNull();
+      const names = () =>
+        Array.from(r.container.querySelectorAll('[data-testid="group-row"]'))
+          .map(e => e.textContent ?? '')
+          .join('|');
+      expect(names()).toContain('Brunch');
+      expect(names()).not.toContain('Lisbon');
+
+      // A message arrives in the archived chat: it stays archived.
+      await act(async () => {
+        fake.sdk.emit(SdkEventType.GROUPS_CHANGED, {
+          changes: [{ groupId: 'g2', kind: 'Messages' }],
+        });
+        await flush();
+      });
+      expect(names()).not.toContain('Lisbon');
+      expect(
+        r.container.querySelector('[data-testid="archived-chats-unread"]')
+      ).not.toBeNull();
+      expect(fake.service.setArchived).not.toHaveBeenCalled();
+      await unmount();
+
+      // On the archived page, the chat shows its own unread dot.
+      const a = await renderAt(<ArchivedChats />);
+      unmount = a.unmount;
+      await act(flush);
+      const archivedRows = a.container.querySelectorAll(
+        '[data-testid="group-row"]'
+      );
+      expect(archivedRows).toHaveLength(1);
+      expect(archivedRows[0].textContent).toContain('Lisbon');
+      expect(
+        archivedRows[0].querySelector('[data-testid="group-unread"]')
+      ).not.toBeNull();
+      // The earlier chat is listed below it.
+      expect(a.container.textContent).toContain('Olga');
+    });
+
     it('shows a chat with its members\' avatars and its last message as "Author: text"', async () => {
       useDiscussionStore.setState({
         contacts: [
@@ -353,25 +412,74 @@ describe('chat screens', () => {
       });
     });
 
-    it('makes the owner pick the next owner before leaving', async () => {
+    const q = (id: string) => document.querySelector(`[data-testid="${id}"]`);
+    const checked = (id: string) => q(id)?.getAttribute('aria-checked');
+    const disabled = (id: string) => (q(id) as HTMLButtonElement).disabled;
+
+    it('makes the owner pick the next owner before leaving, then confirm', async () => {
       await openSettings();
       await click(buttonsNamed('details.leave')[0]);
+      expect(q('leave-chat-sheet')).not.toBeNull();
+      // Handing over is the way offered first (screen 12).
+      expect(checked('leave-how-handover')).toBe('true');
       expect(document.body.textContent).toContain('choices.pick_next_owner');
-      const leave = document.querySelector(
-        '[data-testid="handover-leave"]'
-      ) as HTMLButtonElement;
-      expect(leave.disabled).toBe(true);
-      await click(document.querySelector('[role="radio"]'));
-      expect(leave.disabled).toBe(false);
-      await click(leave);
+      expect(disabled('leave-chat-go')).toBe(true);
+      // Leaving this way closes the chat here: only "Delete it" applies.
+      expect(disabled('leave-keep-keep')).toBe(true);
+      expect(checked('leave-keep-delete')).toBe('true');
+      expect(q('leave-keep-fixed')?.textContent).toBe(
+        'choices.keep_fixed_leave'
+      );
+      await click(document.querySelector('[data-testid="next-owner"]'));
+      expect(disabled('leave-chat-go')).toBe(false);
+      await click(q('leave-chat-go'));
+      // The last confirmation, as for every way of leaving.
+      expect(document.body.textContent).toContain('choices.confirm_title');
+      expect(fake.service.handOver).not.toHaveBeenCalled();
+      await click(q('leave-chat-confirm'));
       await act(flush);
       expect(fake.service.handOver).toHaveBeenCalledWith('g1', 'bob', {
         leave: true,
       });
       expect(fake.service.leave).not.toHaveBeenCalled();
+      expect(fake.service.deleteGroup).not.toHaveBeenCalled();
     });
 
-    it('gives a member who is not the owner the ways to leave, each one a choice', async () => {
+    it('lets the owner keep or delete a dissolved chat, the only way that can keep it', async () => {
+      await openSettings();
+      await click(buttonsNamed('details.leave')[0]);
+      await click(q('leave-how-dissolveKeep'));
+      expect(disabled('leave-keep-keep')).toBe(false);
+      expect(checked('leave-keep-keep')).toBe('true');
+      expect(q('leave-keep-fixed')).toBeNull();
+      // "Delete it" turns the choice into "Dissolve & Delete".
+      await click(q('leave-keep-delete'));
+      expect(checked('leave-how-dissolveDelete')).toBe('true');
+      await click(q('leave-keep-keep'));
+      expect(checked('leave-how-dissolveKeep')).toBe('true');
+      await click(q('leave-chat-go'));
+      await click(q('leave-chat-confirm'));
+      await act(flush);
+      expect(fake.service.dissolve).toHaveBeenCalledWith('g1', false);
+      // Kept, read only: the settings stay open.
+      expect(q('elsewhere')).toBeNull();
+    });
+
+    it('deletes quietly as the owner with "Ignore and Delete"', async () => {
+      await openSettings();
+      await click(buttonsNamed('details.leave')[0]);
+      await click(q('leave-how-ownerIgnore'));
+      expect(disabled('leave-keep-keep')).toBe(true);
+      expect(q('leave-keep-fixed')?.textContent).toBe(
+        'choices.keep_fixed_quiet'
+      );
+      await click(q('leave-chat-go'));
+      await click(q('leave-chat-confirm'));
+      await act(flush);
+      expect(fake.service.leave).toHaveBeenCalledWith('g1', 'Silent');
+    });
+
+    it('gives a member who is not the owner the three ways to leave, each deleting from this device', async () => {
       await openSettings({ owner: 'bob' });
       expect(buttonsNamed('details.add_members')).toHaveLength(0);
       expect(
@@ -381,9 +489,31 @@ describe('chat screens', () => {
       expect(document.body.textContent).not.toContain(
         'choices.pick_next_owner'
       );
-      await click(byText('choices.leave_signed')?.closest('button'));
+      expect(q('leave-how-dissolveKeep')).toBeNull();
+      // Nothing chosen yet: nothing can be confirmed.
+      expect(disabled('leave-chat-go')).toBe(true);
+      for (const [how, line] of [
+        ['ask', 'choices.keep_fixed_quiet'],
+        ['ignore', 'choices.keep_fixed_quiet'],
+        ['signed', 'choices.keep_fixed_leave'],
+      ]) {
+        await click(q(`leave-how-${how}`));
+        expect(disabled('leave-keep-keep')).toBe(true);
+        expect(checked('leave-keep-delete')).toBe('true');
+        expect(q('leave-keep-fixed')?.textContent).toBe(line);
+      }
+      // The visibility stays in brackets in the labels.
+      expect(q('leave-how-signed')?.textContent).toContain(
+        'choices.leave_signed'
+      );
+      await click(q('leave-chat-go'));
+      await click(q('leave-chat-confirm'));
       await act(flush);
+      // One engine operation: the signed leave is queued before the chat
+      // closes on this device, never a leave then a delete.
       expect(fake.service.leave).toHaveBeenCalledWith('g1', 'Signed');
+      expect(fake.service.deleteGroup).not.toHaveBeenCalled();
+      expect(q('elsewhere')).not.toBeNull();
     });
 
     it('offers "Delete chat" only once the user is out of the chat, after a confirmation', async () => {
@@ -399,9 +529,34 @@ describe('chat screens', () => {
       expect(c.querySelector('[data-testid="elsewhere"]')).not.toBeNull();
     });
 
-    it('has no "Delete chat" while the user is a member', async () => {
+    it('archives the chat from its settings, a mark on this device only', async () => {
       await openSettings();
-      expect(buttonsNamed('details.delete_locally')).toHaveLength(0);
+      const button = document.querySelector('[data-testid="chat-archive"]');
+      expect(button?.textContent).toContain('details.archive');
+      expect(button?.textContent).toContain('details.archive_hint');
+      await click(button);
+      await act(flush);
+      expect(fake.service.setArchived).toHaveBeenCalledWith('g1', true);
+      expect(
+        document.querySelector('[data-testid="chat-archive"]')?.textContent
+      ).toContain('details.unarchive');
+      expect(fake.service.changeMembers).not.toHaveBeenCalled();
+    });
+
+    it('opens the leave screen with "Delete it" chosen on "Delete chat" while the user is a member', async () => {
+      await openSettings({ owner: 'bob' });
+      await click(buttonsNamed('details.delete_locally')[0]);
+      expect(q('leave-chat-sheet')).not.toBeNull();
+      expect(document.body.textContent).toContain('details.delete_title');
+      expect(document.body.textContent).toContain('choices.delete_needs_leave');
+      expect(checked('leave-keep-delete')).toBe('true');
+      await click(q('leave-how-ignore'));
+      await click(q('leave-chat-go'));
+      expect(fake.service.leave).not.toHaveBeenCalled();
+      await click(q('leave-chat-confirm'));
+      await act(flush);
+      expect(fake.service.leave).toHaveBeenCalledWith('g1', 'Silent');
+      expect(fake.service.deleteGroup).not.toHaveBeenCalled();
     });
   });
 
@@ -441,10 +596,57 @@ describe('chat screens', () => {
       expect(fake.service.deleteGroup).toHaveBeenCalledWith('g1');
     });
 
-    it('offers nothing on a chat the user is in: it cannot be deleted or archived here', async () => {
+    it('offers archiving, leaving and "Delete chat" on a chat the user is in, "Delete chat" opening the leave screen', async () => {
       const c = await openList('member');
       await longPress(c.querySelector('[data-testid="group-row"]'));
-      expect(document.querySelector('[role="menu"]')).toBeNull();
+      const items = () =>
+        Array.from(document.querySelectorAll('[role="menuitem"]'));
+      expect(items().map(e => e.textContent)).toEqual([
+        'details.archive',
+        'details.leave',
+        'details.delete_locally',
+      ]);
+      await click(
+        items().find(e => e.textContent === 'details.delete_locally')
+      );
+      expect(
+        document.querySelector('[data-testid="leave-chat-sheet"]')
+      ).not.toBeNull();
+      expect(
+        document
+          .querySelector('[data-testid="leave-keep-delete"]')
+          ?.getAttribute('aria-checked')
+      ).toBe('true');
+      expect(fake.service.leave).not.toHaveBeenCalled();
+      expect(fake.service.deleteGroup).not.toHaveBeenCalled();
+    });
+
+    it('archives a chat from its long press, and moves it back from the archived list', async () => {
+      const c = await openList('member');
+      await longPress(c.querySelector('[data-testid="group-row"]'));
+      const archive = Array.from(
+        document.querySelectorAll('[role="menuitem"]')
+      ).find(e => e.textContent === 'details.archive');
+      await click(archive);
+      await act(flush);
+      expect(fake.service.setArchived).toHaveBeenCalledWith('g1', true);
+      // Nothing is sent: no engine operation ran.
+      expect(fake.service.leave).not.toHaveBeenCalled();
+      expect(fake.service.deleteGroup).not.toHaveBeenCalled();
+      expect(c.querySelector('[data-testid="group-row"]')).toBeNull();
+      await unmount();
+
+      const r = await renderAt(<GroupListSection archived />);
+      unmount = r.unmount;
+      await act(flush);
+      await longPress(r.container.querySelector('[data-testid="group-row"]'));
+      const unarchive = Array.from(
+        document.querySelectorAll('[role="menuitem"]')
+      ).find(e => e.textContent === 'details.unarchive');
+      await click(unarchive);
+      await act(flush);
+      expect(fake.service.setArchived).toHaveBeenLastCalledWith('g1', false);
+      expect(r.container.querySelector('[data-testid="group-row"]')).toBeNull();
     });
   });
 });

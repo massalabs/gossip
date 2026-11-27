@@ -104,6 +104,14 @@ const ChatNameDialog: React.FC<ChatNameDialogProps> = ({
               ? t('details.use_shared_name')
               : t('details.save_for_me')}
           </Button>
+          {!clearsOwn && (
+            <p
+              className="-mt-1 text-center text-xs text-muted-foreground"
+              data-testid="save-for-me-hint"
+            >
+              {t('details.save_for_me_hint')}
+            </p>
+          )}
           <Button
             variant="ghost"
             size="custom"

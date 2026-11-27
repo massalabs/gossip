@@ -120,3 +120,22 @@ export const groupOutbox = sqliteTable(
   },
   table => [index('group_outbox_owner_idx').on(table.ownerUserId)]
 );
+
+/**
+ * Marks this device keeps for itself about a chat, never sent and never read
+ * by the engine: today only `archived` (the user moved the chat to the
+ * archived list). Keyed by the group key (`GroupSummary.groupId`).
+ *
+ * A row exists only while a mark is set: unarchiving deletes it, and so does
+ * the chat closing on this device, so that no row remains to tell that a chat
+ * was once archived, or that a deleted chat existed.
+ */
+export const groupLocalState = sqliteTable(
+  'groupLocalState',
+  {
+    ownerUserId: text('ownerUserId').notNull(),
+    groupId: text('groupId').notNull(),
+    archived: integer('archived', { mode: 'boolean' }).notNull(),
+  },
+  table => [primaryKey({ columns: [table.ownerUserId, table.groupId] })]
+);

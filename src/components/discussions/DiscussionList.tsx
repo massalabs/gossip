@@ -49,6 +49,11 @@ interface DiscussionListProps {
   searchQuery?: string;
   scrollParent: HTMLElement;
   filter?: DiscussionFilter;
+  /**
+   * The archived list's "No archived chats" when it holds no earlier chat;
+   * false when archived current chats are shown above it.
+   */
+  showEmpty?: boolean;
 }
 
 // =============================================================================
@@ -105,6 +110,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   searchQuery = '',
   scrollParent,
   filter = 'all',
+  showEmpty = true,
 }) => {
   const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
@@ -339,6 +345,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   // Empty states
   if (hasNoResults) {
     if (filter === 'archived') {
+      if (!showEmpty) return null;
       return (
         <div className="py-8 text-center">
           <p className="text-sm text-muted-foreground">{t('archived.empty')}</p>

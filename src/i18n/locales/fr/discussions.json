@@ -12,7 +12,8 @@
   },
   "archived": {
     "title": "Chats archivés",
-    "empty": "Aucun Chat archivé"
+    "empty": "Aucun Chat archivé",
+    "unread": "Nouveaux messages dans les Chats archivés"
   },
   "message_input": {
     "replying_to": "En réponse à",
@@ -39,10 +40,10 @@
     "pin_discussion": "Épingler",
     "unpin_discussion": "Désépingler",
     "edit_name": "Modifier le nom",
-    "edit_name_title": "Modifier le nom de la discussion",
+    "edit_name_title": "Modifier le nom du Chat",
     "name_updated": "Nom mis à jour",
     "name_update_failed": "Échec de la mise à jour du nom",
-    "pin_failed": "Échec de l'épinglage de la discussion",
+    "pin_failed": "Échec de l'épinglage du Chat",
     "no_chat": "Pas encore de Chat",
     "chat_invitation": "Vous invite à un Chat"
   },
@@ -71,10 +72,10 @@
   "test_messages_sent": "{{count}} messages de test envoyés !",
   "test_messages_failed": "Échec de l'envoi de certains messages de test",
   "settings": {
-    "title": "Paramètres de la discussion",
-    "loading": "Chargement de la discussion…",
-    "name_section": "Nom de la discussion",
-    "edit_name": "Modifier le nom de la discussion",
+    "title": "Paramètres du Chat",
+    "loading": "Chargement du Chat…",
+    "name_section": "Nom du Chat",
+    "edit_name": "Modifier le nom du Chat",
     "reset_connection": "Réinitialiser la connexion",
     "reset_description": "Si tu penses être déconnecté de ton correspondant, tu peux réinitialiser la connexion. Certains messages pourront être renvoyés, mais ton historique sera conservé.",
     "reconnected": "Reconnecté !",
@@ -112,7 +113,7 @@
   "header": {
     "contact_not_found": "Contact introuvable",
     "waiting_approval": "En attente d'approbation",
-    "discussion_settings": "Paramètres de la discussion",
+    "discussion_settings": "Paramètres du Chat",
     "search_messages": "Rechercher dans les messages",
     "auto_delete_active": "Suppression après {{duration}}"
   },
@@ -125,7 +126,7 @@
     "refuse_title": "Refuser la connexion ?",
     "refuse_body": "Refuser fermera cette demande de Chat.",
     "sections": {
-      "discussions": "Discussions",
+      "discussions": "Anciens Chats",
       "contacts": "Contacts",
       "pinned": "Épinglées",
       "pending": "En attente",
@@ -186,10 +187,10 @@
   "retention_separator": "Suppression automatique activée : {{duration}}",
   "filter_label": "Filtrer les Chats",
   "waiting_connection": "En attente de connexion...",
-  "mesh_connected_one": "Connecté au mesh · {{count}} lien",
-  "mesh_connected_few": "Connecté au mesh · {{count}} liens",
-  "mesh_connected_many": "Connecté au mesh · {{count}} liens",
-  "mesh_connected_other": "Connecté au mesh · {{count}} liens",
+  "mesh_connected_one": "Connecté en Bluetooth · {{count}} téléphone à proximité",
+  "mesh_connected_few": "Connecté en Bluetooth · {{count}} téléphones à proximité",
+  "mesh_connected_many": "Connecté en Bluetooth · {{count}} téléphones à proximité",
+  "mesh_connected_other": "Connecté en Bluetooth · {{count}} téléphones à proximité",
   "mesh_no_links": "Mesh activé · aucun téléphone à portée",
   "announcement": "Annonce",
   "lock_account": "Verrouiller"

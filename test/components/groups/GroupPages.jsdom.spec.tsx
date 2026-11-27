@@ -76,7 +76,10 @@ describe('group pages', () => {
     useSdkStore.setState({ sdk: null });
   });
 
-  async function openGroup(status: 'member' | 'removed', mustResolve = false) {
+  async function openGroup(
+    status: 'member' | 'removed' | 'left' | 'dissolved' | 'waiting',
+    mustResolve = false
+  ) {
     fake.state.groups = [summary({ status, mustResolve })];
     fake.state.timelines.set('g1', [
       {
@@ -257,14 +260,29 @@ describe('group pages', () => {
     ).toBe('message_input.placeholder');
   });
 
-  it('disables the composer with its reason when read only', async () => {
-    const r = await openGroup('removed');
-    unmount = r.unmount;
-    const blocked = r.container.querySelector(
+  it('keeps the composer in a chat it can only read, for this device only, and blocks it while waiting to be kicked', async () => {
+    for (const status of ['removed', 'left', 'dissolved'] as const) {
+      const r = await openGroup(status);
+      unmount = r.unmount;
+      expect(r.container.querySelector('textarea')).not.toBeNull();
+      expect(
+        r.container.querySelector('[data-testid="composer-local-only"]')
+          ?.textContent
+      ).toBe('composer.local_only_line');
+      expect(
+        r.container.querySelector('[data-testid="composer-blocked"]')
+      ).toBeNull();
+      await unmount();
+      unmount = async () => {};
+      useGroupStore.getState().cleanup();
+    }
+    const w = await openGroup('waiting');
+    unmount = w.unmount;
+    const blocked = w.container.querySelector(
       '[data-testid="composer-blocked"]'
     );
-    expect(blocked?.textContent).toContain('composer.disabled_removed');
-    expect(r.container.querySelector('textarea')).toBeNull();
+    expect(blocked?.textContent).toContain('composer.disabled_waiting');
+    expect(w.container.querySelector('textarea')).toBeNull();
   });
 
   it('points the owner to the resolution when competing ends wait', async () => {
@@ -817,10 +835,62 @@ describe('group pages', () => {
     expect(timeline).not.toMatch(/only|scope|local/i);
   });
 
+  it('in a read-only chat, writes new messages on this device only, under any member, with no mark', async () => {
+    const r = await openGroup('removed');
+    unmount = r.unmount;
+    // One scope, fixed: no menu to open, the button says where it goes.
+    expect(document.querySelector('[data-testid="send-options"]')).toBeNull();
+    expect(sendButton().getAttribute('aria-label')).toBe('composer.send_me');
+    // The author button works, as in a chat the user is in.
+    await click(document.querySelector('[data-testid="author-button"]'));
+    const bob = Array.from(
+      document.querySelectorAll('[data-testid="author-option"]')
+    ).find(b => b.textContent?.includes('bob'));
+    await click(bob);
+    fake.service.sendMessageLocally.mockResolvedValueOnce({
+      syncObjId: 'ro1',
+    });
+    await typeInto(
+      r.container.querySelector('textarea') as HTMLTextAreaElement,
+      'written here'
+    );
+    await longPress(sendButton());
+    expect(document.querySelector('[data-testid="scope-menu"]')).toBeNull();
+    await click(sendButton());
+    await act(flush);
+    expect(fake.service.sendMessageLocally).toHaveBeenCalledWith(
+      'g1',
+      'written here',
+      { replyTo: undefined, author: 'bob' }
+    );
+    expect(fake.service.sendMessage).not.toHaveBeenCalled();
+    // Read back from the engine, it is a message like any other.
+    fake.state.timelines.set('g1', [
+      ...(fake.state.timelines.get('g1') ?? []),
+      message({
+        syncObjId: 'ro1',
+        author: 'bob',
+        createdAt: 3_000n,
+        lastModifiedAt: 3_000n,
+        body: { type: 'text', text: 'written here' },
+      }),
+    ]);
+    await act(async () => {
+      useGroupStore.getState().refresh();
+    });
+    await act(flush);
+    const local = Array.from(
+      r.container.querySelectorAll('[data-testid="group-message"]')
+    ).find(x => x.textContent?.includes('written here'))!;
+    expect(local).toBeDefined();
+    expect(local.textContent).not.toMatch(/only|scope|local|composer\./i);
+    expect(local.outerHTML).not.toMatch(/dashed|only|scope_me|EyeOff/i);
+    expect(local.getAttribute('data-sending')).toBeNull();
+  });
+
   it('in a read-only chat, edits and deletes on this device only', async () => {
     const r = await openGroup('removed');
     unmount = r.unmount;
-    expect(r.container.querySelector('textarea')).toBeNull();
     await openMenu(r, 1);
     await click(byText('message_menu.edit'));
     await act(flush);
@@ -834,7 +904,8 @@ describe('group pages', () => {
       body: { type: 'text', text: 'answer' },
     });
     expect(fake.service.editMessage).not.toHaveBeenCalled();
-    expect(r.container.querySelector('textarea')).toBeNull();
+    // The composer stays, for new messages on this device.
+    expect(r.container.querySelector('textarea')).not.toBeNull();
     await openMenu(r, 1);
     await click(byText('message_menu.delete'));
     const buttons = Array.from(
@@ -1264,6 +1335,29 @@ describe('group pages', () => {
         name: 'Summer trip',
       });
       expect(fake.service.setLocalName).not.toHaveBeenCalled();
+    });
+
+    it("clears the owner's own name when the shared name is saved, so that the owner sees what they typed", async () => {
+      await settingsOf({ owner: 'me', localName: 'Holidays' });
+      await click(document.querySelector('[data-testid="chat-name-edit"]'));
+      await type(nameField(), 'Summer trip');
+      await click(byText('details.save_for_everyone'));
+      await act(flush);
+      expect(fake.service.changeMembers).toHaveBeenCalledWith('g1', {
+        name: 'Summer trip',
+      });
+      expect(fake.service.setLocalName).toHaveBeenCalledWith('g1', null);
+      expect(
+        fake.service.changeMembers.mock.invocationCallOrder[0]
+      ).toBeLessThan(fake.service.setLocalName.mock.invocationCallOrder[0]);
+    });
+
+    it('says under "Save for me" that the name stays on this device', async () => {
+      await settingsOf({ owner: 'me' });
+      await click(document.querySelector('[data-testid="chat-name-edit"]'));
+      expect(
+        document.querySelector('[data-testid="save-for-me-hint"]')?.textContent
+      ).toBe('details.save_for_me_hint');
     });
 
     it('refuses a name over 256 bytes', async () => {

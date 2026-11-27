@@ -258,6 +258,66 @@ export class GroupQueries {
     await db
       .delete(schema.groupRecords)
       .where(eq(schema.groupRecords.ownerUserId, ownerUserId));
+    // The device's own marks name chats the engine no longer holds.
+    await db
+      .delete(schema.groupLocalState)
+      .where(eq(schema.groupLocalState.ownerUserId, ownerUserId));
+  }
+
+  /** The group keys this device marked as archived (local only). */
+  async archivedGroups(ownerUserId: string): Promise<string[]> {
+    const rows = await this.conn.db
+      .select({ groupId: schema.groupLocalState.groupId })
+      .from(schema.groupLocalState)
+      .where(
+        and(
+          eq(schema.groupLocalState.ownerUserId, ownerUserId),
+          eq(schema.groupLocalState.archived, true)
+        )
+      )
+      .all();
+    return rows.map(r => r.groupId);
+  }
+
+  /**
+   * Marks a chat archived on this device, or removes the mark. Unarchiving
+   * deletes the row: no row is kept for a chat without a mark.
+   */
+  async setArchived(
+    ownerUserId: string,
+    groupId: string,
+    archived: boolean
+  ): Promise<void> {
+    if (archived) {
+      await this.conn.db
+        .insert(schema.groupLocalState)
+        .values({ ownerUserId, groupId, archived: true })
+        .onConflictDoUpdate({
+          target: [
+            schema.groupLocalState.ownerUserId,
+            schema.groupLocalState.groupId,
+          ],
+          set: { archived: true },
+        });
+    } else {
+      await this.forgetLocalState(ownerUserId, [groupId]);
+    }
+  }
+
+  /** Deletes the device's marks of these chats (closed or deleted). */
+  async forgetLocalState(
+    ownerUserId: string,
+    groupIds: string[]
+  ): Promise<void> {
+    if (groupIds.length === 0) return;
+    await this.conn.db
+      .delete(schema.groupLocalState)
+      .where(
+        and(
+          eq(schema.groupLocalState.ownerUserId, ownerUserId),
+          inArray(schema.groupLocalState.groupId, groupIds)
+        )
+      );
   }
 
   async deleteByOwner(ownerUserId: string, tx?: DbContext): Promise<void> {
@@ -277,6 +337,9 @@ export class GroupQueries {
     await db
       .delete(schema.groupOutbox)
       .where(eq(schema.groupOutbox.ownerUserId, ownerUserId));
+    await db
+      .delete(schema.groupLocalState)
+      .where(eq(schema.groupLocalState.ownerUserId, ownerUserId));
   }
 }
 

@@ -7,7 +7,7 @@
   "connection_pending": "Connection pending. You cannot chat yet.",
   "remove_modal": {
     "title": "Remove contact?",
-    "confirm": "Are you sure you want to remove <strong>{{name}}</strong> from your contacts? This will also delete all messages and discussions with this contact. This action cannot be undone.",
+    "confirm": "Are you sure you want to remove <strong>{{name}}</strong> from your contacts? This will also delete all messages and chats with this contact. This action cannot be undone.",
     "removing": "Removing...",
     "remove": "Remove",
     "failed": "Failed to delete contact. Please try again.",

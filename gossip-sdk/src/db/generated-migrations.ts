@@ -203,4 +203,13 @@ export const MIGRATIONS: EmbeddedMigration[] = [
     digest: 'aeb6c39c7c862c1a0ebc87c1cb952b1c038b236702b0108cb62351d99365d837',
     statements: ['ALTER TABLE `groupOutbox` ADD `meshOnlySince` integer;'],
   },
+  {
+    idx: 17,
+    tag: '0017_group_local_state',
+    when: 1795818524975,
+    digest: '88138a5fb9433c88f3cc49963cf2fe3cbfa229e2f26e8adb48c5de51b5e7000e',
+    statements: [
+      'CREATE TABLE `groupLocalState` (\n\t`ownerUserId` text NOT NULL,\n\t`groupId` text NOT NULL,\n\t`archived` integer NOT NULL,\n\tPRIMARY KEY(`ownerUserId`, `groupId`)\n);',
+    ],
+  },
 ];

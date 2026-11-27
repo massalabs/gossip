@@ -7,7 +7,7 @@
   "connection_pending": "连接待确认，暂时无法聊天。",
   "remove_modal": {
     "title": "移除联系人？",
-    "confirm": "确定要将 <strong>{{name}}</strong> 从联系人中移除吗？这将同时删除与该联系人的所有消息和会话。此操作无法撤销。",
+    "confirm": "确定要将 <strong>{{name}}</strong> 从联系人中移除吗？这将同时删除与该联系人的所有消息和聊天。此操作无法撤销。",
     "removing": "移除中...",
     "remove": "移除",
     "failed": "删除联系人失败，请重试。",

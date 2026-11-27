@@ -120,6 +120,13 @@
       "when": 1795778592170,
       "tag": "0016_group_outbox_mesh_only",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1795818524975,
+      "tag": "0017_group_local_state",
+      "breakpoints": true
     }
   ]
 }

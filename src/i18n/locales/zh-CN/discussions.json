@@ -1,10 +1,10 @@
 {
   "title": "Gossip",
   "share_contact": "分享我的联系方式",
-  "share_to_discussion": "分享内容到会话",
-  "share_select": "选择一个会话来分享内容。",
+  "share_to_discussion": "分享内容到聊天",
+  "share_select": "选择一个聊天来分享内容。",
   "cancel_sharing": "取消分享",
-  "start_new": "发起新会话",
+  "start_new": "发起新聊天",
   "filter": {
     "all": "全部",
     "unread": "未读",
@@ -12,7 +12,8 @@
   },
   "archived": {
     "title": "已归档的聊天",
-    "empty": "没有已归档的聊天"
+    "empty": "没有已归档的聊天",
+    "unread": "已归档的聊天中有新消息"
   },
   "message_input": {
     "replying_to": "回复",
@@ -39,10 +40,10 @@
     "pin_discussion": "置顶",
     "unpin_discussion": "取消置顶",
     "edit_name": "编辑名称",
-    "edit_name_title": "编辑会话名称",
+    "edit_name_title": "编辑聊天名称",
     "name_updated": "名称已更新",
     "name_update_failed": "更新名称失败",
-    "pin_failed": "置顶会话失败",
+    "pin_failed": "置顶聊天失败",
     "no_chat": "还没有聊天",
     "chat_invitation": "邀请你聊天"
   },
@@ -71,10 +72,10 @@
   "test_messages_sent": "已发送 {{count}} 条测试消息！",
   "test_messages_failed": "部分测试消息发送失败",
   "settings": {
-    "title": "会话设置",
-    "loading": "正在加载会话…",
-    "name_section": "会话名称",
-    "edit_name": "编辑会话名称",
+    "title": "聊天设置",
+    "loading": "正在加载聊天…",
+    "name_section": "聊天名称",
+    "edit_name": "编辑聊天名称",
     "reset_connection": "重置连接",
     "reset_description": "如果你认为与对方的连接已断开，可以重置连接。部分消息可能会被重新发送，但聊天记录将会保留。",
     "reconnected": "已重新连接！",
@@ -98,7 +99,7 @@
     "mute_update_failed": "更新通知设置失败"
   },
   "new_discussion": {
-    "title": "新会话",
+    "title": "新聊天",
     "new_contact": "新联系人",
     "new_group": "新建聊天",
     "contacts": "联系人",
@@ -112,7 +113,7 @@
   "header": {
     "contact_not_found": "未找到联系人",
     "waiting_approval": "等待批准",
-    "discussion_settings": "会话设置",
+    "discussion_settings": "聊天设置",
     "search_messages": "搜索消息",
     "auto_delete_active": "{{duration}}后删除"
   },
@@ -123,9 +124,9 @@
     "refuse": "拒绝",
     "set_contact_name": "设置联系人名称",
     "refuse_title": "拒绝连接？",
-    "refuse_body": "拒绝将关闭此会话请求。",
+    "refuse_body": "拒绝将关闭此聊天请求。",
     "sections": {
-      "discussions": "讨论",
+      "discussions": "早先的聊天",
       "contacts": "联系人",
       "pinned": "已置顶",
       "pending": "待处理",
@@ -133,13 +134,13 @@
     }
   },
   "empty": {
-    "no_discussions": "暂无会话",
-    "no_discussions_hint": "点击 <strong>+</strong> 按钮发起新会话",
+    "no_discussions": "暂无聊天",
+    "no_discussions_hint": "点击 <strong>+</strong> 按钮发起新聊天",
     "no_messages": "暂无消息",
     "no_messages_hint": "发送你的第一条消息来开始对话"
   },
   "initializing": {
-    "title": "正在初始化安全会话",
+    "title": "正在初始化安全聊天",
     "subtitle": "正在建立端到端加密..."
   },
   "loading_messages": "正在加载消息...",
@@ -184,12 +185,12 @@
     "info_message": "收到对方的消息可以更新加密密钥。如果攻击者获得了您当前的密钥，他们可以解密您最近发送的 {{count}} 条消息。"
   },
   "retention_separator": "自动删除已启用：{{duration}}",
-  "filter_label": "筛选会话",
+  "filter_label": "筛选聊天",
   "waiting_connection": "等待连接...",
-  "mesh_connected_one": "已连接 Mesh 网络 · {{count}} 个连接",
-  "mesh_connected_few": "已连接 Mesh 网络 · {{count}} 个连接",
-  "mesh_connected_many": "已连接 Mesh 网络 · {{count}} 个连接",
-  "mesh_connected_other": "已连接 Mesh 网络 · {{count}} 个连接",
+  "mesh_connected_one": "已通过蓝牙连接 · 附近 {{count}} 部手机",
+  "mesh_connected_few": "已通过蓝牙连接 · 附近 {{count}} 部手机",
+  "mesh_connected_many": "已通过蓝牙连接 · 附近 {{count}} 部手机",
+  "mesh_connected_other": "已通过蓝牙连接 · 附近 {{count}} 部手机",
   "mesh_no_links": "Mesh 网络已开启 · 附近没有手机",
   "announcement": "通告",
   "lock_account": "锁定"

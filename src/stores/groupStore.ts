@@ -25,6 +25,12 @@ export interface GroupListEntry {
   lastMessage: GroupLastMessage | null;
   /** Messages changed while the group was not open (memory only). */
   unread: boolean;
+  /**
+   * Moved to the archived list on this device (a local mark, never sent). A
+   * new message does not bring it back to the main list: the "Archived chats"
+   * row shows a dot instead.
+   */
+  archived: boolean;
 }
 
 interface GroupStoreState {
@@ -60,6 +66,8 @@ interface GroupStoreState {
    * anyone (no read receipt exists in chats); it changes this memory alone.
    */
   markSeen: (groupId: string, keys: string[]) => void;
+  /** Archives a chat on this device, or moves it back to the main list. */
+  setArchived: (groupId: string, archived: boolean) => Promise<void>;
 }
 
 /** The group service, or null when the engine could not be opened. */
@@ -158,6 +166,7 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
     if (!groups) return;
     try {
       const summaries = await groups.list();
+      const archived = new Set(await groups.archived());
       const entries: GroupListEntry[] = [];
       const supersededBy: Record<string, string> = {};
       for (const summary of summaries) {
@@ -180,6 +189,7 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
           unread:
             unread.has(summary.groupId) ||
             summary.earlier.some(e => unread.has(e)),
+          archived: archived.has(summary.groupId),
         });
       }
       entries.sort(
@@ -218,6 +228,13 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
         g.summary.groupId === groupId ? { ...g, unread: false } : g
       ),
     }));
+  },
+
+  setArchived: async (groupId: string, archived: boolean) => {
+    const groups = getGroupService();
+    if (!groups) return;
+    await groups.setArchived(groupId, archived);
+    await get().refresh();
   },
 
   seenOf: (groupId: string) => seen.get(groupId),
