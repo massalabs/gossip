@@ -718,6 +718,12 @@ impl WantedTable {
             .entries
             .iter()
             .filter(|(seeker, s)| s.expires_at > now_ms && !is_beacon(seeker))
+            // A forwarded entry whose links all dropped is not listed: this phone
+            // cannot route it, and listing it would make a returning peer take it as
+            // already known and never repeat it, so the held blob would never be
+            // offered (see `merge`). Cost: the peer resends only those entries, about
+            // 38 bytes each; no blob traffic, no extra copies.
+            .filter(|(_, s)| s.own || !s.via.is_empty())
             .map(|(seeker, s)| {
                 let units = (s.expires_at - now_ms)
                     .div_ceil(unit_ms)
@@ -1245,6 +1251,31 @@ mod tests {
         assert!(table
             .merge(&peer(), 0.0, 10, &[entry(8, 600)], now)
             .is_empty());
+    }
+
+    #[test]
+    fn a_summary_leaves_out_forwarded_entries_without_a_direction() {
+        let table = WantedTable::new(MeshConfig::phone());
+        let now = UnixMillis(5_000_000);
+        let (gone, live) = (peer(), peer());
+        table.merge(&gone, 0.0, 10, &[entry(1, 600)], now);
+        table.merge(&live, 0.0, 10, &[entry(2, 600)], now);
+        table.set_own(&[[3u8; WANTED_SEEKER_LEN]], now);
+        table.remove_peer(&gone);
+        let mut listed: Vec<u8> = table
+            .summary_items(now)
+            .iter()
+            .map(|(s, ..)| s[0])
+            .collect();
+        listed.sort_unstable();
+        // 1 lost its only direction; 2 has one; 3 is our own
+        assert_eq!(listed, vec![2, 3]);
+        // still wanted, and still forwarded in the wanted rounds
+        assert!(table.contains(&[1u8; WANTED_SEEKER_LEN], now));
+        let forwarded = table.outgoing(&peer(), now).into_iter().any(|m| {
+            matches!(m, BlobMessage::Wanted { entries, .. } if entries.iter().any(|e| e.seeker[0] == 1))
+        });
+        assert!(forwarded);
     }
 
     fn no_spray() -> MeshConfig {
