@@ -100,6 +100,48 @@ describe('DiscussionListItem', () => {
       .toBeInTheDocument();
   });
 
+  it('offers to archive an archive, or to move it back, from the long press', async () => {
+    const onToggleArchived = vi.fn();
+    const discussion = makeDiscussion({ isArchive: true, archived: false });
+    render(
+      <DiscussionListItem
+        discussion={discussion}
+        contact={makeContact()}
+        lastMessage={undefined}
+        onToggleArchived={onToggleArchived}
+        {...defaultProps}
+      />
+    );
+    const el = page.getByRole('button').element() as HTMLElement;
+    el.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    );
+    const item = page.getByRole('menuitem', { name: 'groups:archive.archive' });
+    await expect.element(item).toBeInTheDocument();
+    await item.click();
+    expect(onToggleArchived).toHaveBeenCalledWith(discussion);
+  });
+
+  it('offers no archiving for a discussion that is no archive', async () => {
+    render(
+      <DiscussionListItem
+        discussion={makeDiscussion()}
+        contact={makeContact()}
+        lastMessage={undefined}
+        onToggleArchived={vi.fn()}
+        {...defaultProps}
+      />
+    );
+    const el = page.getByRole('button').element() as HTMLElement;
+    el.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    );
+    await expect.element(page.getByRole('menu')).toBeInTheDocument();
+    await expect
+      .element(page.getByRole('menuitem', { name: 'groups:archive.archive' }))
+      .not.toBeInTheDocument();
+  });
+
   it('no context menu on pending items', async () => {
     mockSessionsStatuses.set('user-1', SessionStatus.PeerRequested);
 

@@ -1,7 +1,8 @@
 import { useCallback, useRef } from 'react';
 import { type DiscussionFilter } from '../stores/discussionStore';
 
-const FILTERS: DiscussionFilter[] = ['all', 'unread', 'pending', 'archived'];
+// The archived chats are a list of their own, not a filter.
+const FILTERS: DiscussionFilter[] = ['all', 'unread', 'pending'];
 const SWIPE_THRESHOLD = 50;
 
 /**

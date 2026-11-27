@@ -8,8 +8,11 @@
   "filter": {
     "all": "全部",
     "unread": "未读",
-    "pending": "待处理",
-    "archived": "存档"
+    "pending": "待处理"
+  },
+  "archived": {
+    "title": "已归档的聊天",
+    "empty": "没有已归档的聊天"
   },
   "message_input": {
     "replying_to": "回复",

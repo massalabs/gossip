@@ -225,6 +225,27 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     [gossip, patchDiscussion, t]
   );
 
+  // The same as the archive's footer (`ArchiveFooter`): nothing is sent.
+  const handleToggleArchived = useCallback(
+    async (discussion: Discussion) => {
+      const archived = !discussion.archived;
+      try {
+        await gossip.conversations.setArchived(
+          discussion.contactUserId,
+          archived
+        );
+        toast.success(
+          archived
+            ? t('groups:archive.archived')
+            : t('groups:archive.unarchived')
+        );
+      } catch {
+        toast.error(t('groups:details.failed'));
+      }
+    },
+    [gossip, t]
+  );
+
   // The peer's migration, answered from the archive's row (§5.12).
   const navigate = useNavigate();
   const refreshGroups = useGroupStore(s => s.refresh);
@@ -290,6 +311,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                 onRefuse={handleRefuseDiscussionRequest}
                 onEditName={handleEditName}
                 onTogglePin={handleTogglePin}
+                onToggleArchived={handleToggleArchived}
               />
             </div>
           );
@@ -305,6 +327,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
       handleRefuseDiscussionRequest,
       handleEditName,
       handleTogglePin,
+      handleToggleArchived,
       migrationOf,
       chatInvitationFrom,
       acceptMigration,
@@ -315,6 +338,13 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
 
   // Empty states
   if (hasNoResults) {
+    if (filter === 'archived') {
+      return (
+        <div className="py-8 text-center">
+          <p className="text-sm text-muted-foreground">{t('archived.empty')}</p>
+        </div>
+      );
+    }
     if (isSearching) {
       return (
         <div className="py-8 text-center">

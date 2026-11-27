@@ -1,10 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Check } from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import type { LeaveChoice } from '@massalabs/gossip-sdk';
 import ChoiceSheet, { type Choice } from './ChoiceSheet';
 import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import SafeName from './SafeName';
+import ContactAvatar from '../avatar/ContactAvatar';
 
 /** What the user chose in the leave, decline or owner popup. */
 export type LeaveAction =
@@ -26,14 +28,21 @@ interface LeaveGroupSheetProps {
   onClose: () => void;
 }
 
-type Pending =
-  | { kind: 'danger'; action: LeaveAction; label: string; body: string }
-  | { kind: 'pickOwner' }
-  | null;
+type Pending = {
+  kind: 'danger';
+  action: LeaveAction;
+  label: string;
+  body: string;
+} | null;
 
 /**
- * The popups of §5.2 (decline, leave) and §5.8 (the owner's leave), in the
- * order and wording of the specification. Danger-zone choices ask once more.
+ * The popups of §5.2 (decline, leave) and §5.8 (the owner's leave), with the
+ * wording of the specification. Danger-zone choices ask once more.
+ *
+ * The owner of a chat with other members first sees "Pick the next owner"
+ * (Lucas's screen 12): the members, and the hand-over button, disabled until
+ * one is picked; the other choices of §5.8 follow in the danger zone below,
+ * so that handing over stays the way to leave and the rest stays reachable.
  */
 const LeaveGroupSheet: React.FC<LeaveGroupSheetProps> = ({
   isOpen,
@@ -46,7 +55,12 @@ const LeaveGroupSheet: React.FC<LeaveGroupSheetProps> = ({
 }) => {
   const { t } = useTranslation('groups');
   const [pending, setPending] = useState<Pending>(null);
+  const [nextOwner, setNextOwner] = useState<string | null>(null);
   const onlyMember = otherMembers.length === 0;
+  const picksOwner = mode === 'leave' && isOwner && !onlyMember;
+  useEffect(() => {
+    if (isOpen) setNextOwner(null);
+  }, [isOpen]);
 
   const choices: Choice[] = useMemo(() => {
     if (mode === 'leave' && isOwner) {
@@ -61,19 +75,13 @@ const LeaveGroupSheet: React.FC<LeaveGroupSheetProps> = ({
           { key: 'cancel', label: t('choices.cancel') },
         ];
       }
+      // Below the members to pick, in the danger zone.
       return [
-        {
-          key: 'handover',
-          label: t('choices.handover_leave'),
-          description: t('choices.handover_leave_body'),
-        },
-        { key: 'cancel', label: t('choices.cancel_stay') },
         {
           key: 'dissolveKeep',
           label: t('choices.dissolve_keep'),
           description: t('choices.dissolve_keep_body'),
           danger: true,
-          sectionTitle: t('choices.danger_zone'),
         },
         {
           key: 'dissolveDelete',
@@ -131,9 +139,6 @@ const LeaveGroupSheet: React.FC<LeaveGroupSheetProps> = ({
       case 'ignore':
         onAction({ type: leaveType, choice: 'Silent' });
         return;
-      case 'handover':
-        setPending({ kind: 'pickOwner' });
-        return;
       case 'dissolveKeep':
         setPending({
           kind: 'danger',
@@ -179,7 +184,7 @@ const LeaveGroupSheet: React.FC<LeaveGroupSheetProps> = ({
   return (
     <>
       <ChoiceSheet
-        isOpen={isOpen && pending === null}
+        isOpen={isOpen && pending === null && !picksOwner}
         title={
           mode === 'decline'
             ? t('choices.decline_title')
@@ -226,30 +231,87 @@ const LeaveGroupSheet: React.FC<LeaveGroupSheetProps> = ({
         )}
       </BaseModal>
       <BaseModal
-        isOpen={isOpen && pending?.kind === 'pickOwner'}
-        onClose={() => setPending(null)}
+        isOpen={isOpen && pending === null && picksOwner}
+        onClose={onClose}
         title={t('choices.pick_next_owner')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
             {t('choices.handover_leave_body')}
           </p>
-          <ul className="max-h-[50vh] overflow-y-auto divide-y divide-border">
-            {otherMembers.map(m => (
-              <li key={m}>
-                <button
-                  type="button"
-                  className="w-full text-left px-2 py-3 text-sm text-foreground hover:bg-muted rounded"
-                  onClick={() => {
-                    closeAll();
-                    onAction({ type: 'handoverLeave', newOwner: m });
-                  }}
-                >
-                  <SafeName name={memberName(m)} />
-                </button>
-              </li>
-            ))}
+          <ul
+            className="max-h-[40vh] overflow-y-auto rounded-xl border border-border divide-y divide-border"
+            role="radiogroup"
+            aria-label={t('choices.pick_next_owner')}
+          >
+            {otherMembers.map(m => {
+              const picked = nextOwner === m;
+              return (
+                <li key={m}>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={picked}
+                    className={`w-full px-4 py-3 flex items-center gap-3 text-left text-sm text-foreground ${
+                      picked ? 'bg-accent-soft' : 'hover:bg-muted'
+                    }`}
+                    onClick={() => setNextOwner(m)}
+                  >
+                    <ContactAvatar
+                      contact={{ userId: m, name: memberName(m), avatar: null }}
+                      size={8}
+                    />
+                    <span className="flex-1 min-w-0 truncate">
+                      <SafeName name={memberName(m)} />
+                    </span>
+                    <span
+                      className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
+                        picked
+                          ? 'bg-primary border-primary text-primary-foreground'
+                          : 'border-border'
+                      }`}
+                    >
+                      {picked && <Check className="w-4 h-4" />}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
+          <Button
+            variant="danger"
+            fullWidth
+            disabled={nextOwner === null}
+            data-testid="handover-leave"
+            onClick={() => {
+              if (nextOwner === null) return;
+              const newOwner = nextOwner;
+              closeAll();
+              onAction({ type: 'handoverLeave', newOwner });
+            }}
+          >
+            {t('choices.handover_leave')}
+          </Button>
+          <div className="pt-3 border-t border-border">
+            <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-wide text-destructive">
+              {t('choices.danger_zone')}
+            </p>
+            {choices.map(choice => (
+              <button
+                key={choice.key}
+                type="button"
+                onClick={() => choose(choice.key)}
+                className="w-full text-left px-4 py-3 rounded-lg transition-colors hover:bg-muted"
+              >
+                <span className="block text-sm font-medium text-destructive">
+                  {choice.label}
+                </span>
+                <span className="block mt-1 text-xs text-muted-foreground">
+                  {choice.description}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       </BaseModal>
     </>
