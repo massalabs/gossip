@@ -61,7 +61,7 @@ import type { DiscussionService } from './discussion.js';
 import { SELF_CONTACT_ID } from './selfMessage.js';
 import { Logger } from '../utils/logs.js';
 import { dlog } from '../utils/debugLog.js';
-import { errFields } from '../utils/debugFields.js';
+import { errFields, shortId } from '../utils/debugFields.js';
 
 const logger = new Logger('ConversationService');
 
@@ -453,10 +453,19 @@ export class ConversationService {
       const held = await this.directChatWith(contactUserId);
       const d = await this.discussionOf(contactUserId);
       if (held) {
+        dlog('engine', 'chat.start', {
+          peer: shortId(contactUserId),
+          result: 'held',
+          group: shortId(held),
+        });
         if (d) await this.link(d, held);
         return held;
       }
       if (await this.directChatInvitation(contactUserId)) {
+        dlog('engine', 'chat.start', {
+          peer: shortId(contactUserId),
+          result: 'invitation-pending',
+        });
         throw new MigrationUnavailableError('invitation-pending');
       }
       const groupId = await this.groups.createDirectChat(
@@ -464,6 +473,12 @@ export class ConversationService {
         contactUserId,
         options.messageTimer
       );
+      dlog('engine', 'chat.start', {
+        peer: shortId(contactUserId),
+        result: 'founded',
+        group: shortId(groupId),
+        timer: options.messageTimer ?? null,
+      });
       if (d) await this.link(d, groupId);
       return groupId;
     });
@@ -564,6 +579,11 @@ export class ConversationService {
         c.connection === 'requested' ||
         (c.connection === 'added' && connection === 'accepted')
       ) {
+        dlog('engine', 'contact.connection', {
+          peer: shortId(contactUserId),
+          from: c.connection,
+          to: connection,
+        });
         await this.queries.contacts.updateByOwnerAndUser(
           this.owner,
           contactUserId,
@@ -579,6 +599,11 @@ export class ConversationService {
     // from the backend, which would learn who shares a chat.
     const keys = await this.groups.keysOf(contactUserId);
     if (!keys) return false;
+    dlog('engine', 'contact.connection', {
+      peer: shortId(contactUserId),
+      from: null,
+      to: connection,
+    });
     await this.queries.contacts.insert({
       ownerUserId: this.owner,
       userId: contactUserId,
@@ -654,6 +679,9 @@ export class ConversationService {
         return { success: false, reason: 'already-contact' };
       }
       if (c?.connection === 'requested') {
+        dlog('engine', 'contact.add.requested', {
+          peer: shortId(contactUserId),
+        });
         await this.queries.contacts.updateByOwnerAndUser(
           this.owner,
           contactUserId,
@@ -713,6 +741,11 @@ export class ConversationService {
       }
       return;
     }
+    dlog('engine', 'contact.connection', {
+      peer: shortId(contactUserId),
+      from: 'requested',
+      to: 'automatic',
+    });
     await this.queries.contacts.updateByOwnerAndUser(
       this.owner,
       contactUserId,
@@ -867,6 +900,11 @@ export class ConversationService {
         // - A contact request stays shown until the user answers it
         //   (`requested`): joining a chat never removes it.
         const asked = carriesRequest(contact, d);
+        dlog('engine', 'contact.connection', {
+          peer: shortId(peer),
+          from: contact.connection,
+          to: asked ? 'requested' : 'automatic',
+        });
         await this.queries.contacts.updateByOwnerAndUser(this.owner, peer, {
           connection: asked ? 'requested' : 'automatic',
           ...(!asked && isTemporaryContactName(contact.name)
