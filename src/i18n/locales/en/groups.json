@@ -194,7 +194,8 @@
     "name_hint_owner": "Save for everyone renames the chat for all members. Save for me keeps this name on this device only; nothing is sent. Empty the field and save for me to use the chat's name for everyone again.",
     "save_for_me": "Save for me",
     "save_for_everyone": "Save for everyone",
-    "use_shared_name": "Use the name for everyone"
+    "use_shared_name": "Use the name for everyone",
+    "open_settings": "Open the chat details of {{name}}"
   },
   "resolve": {
     "title": "Resolve competing versions",

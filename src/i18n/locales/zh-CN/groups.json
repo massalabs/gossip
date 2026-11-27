@@ -194,7 +194,8 @@
     "name_hint_owner": "“为所有人保存”会为所有成员重命名聊天。“仅为我保存”只把这个名称保存在本设备上，不会发送任何内容。清空输入框并仅为我保存，即可恢复所有人看到的聊天名称。",
     "save_for_me": "仅为我保存",
     "save_for_everyone": "为所有人保存",
-    "use_shared_name": "恢复所有人看到的名称"
+    "use_shared_name": "恢复所有人看到的名称",
+    "open_settings": "打开聊天详情：{{name}}"
   },
   "resolve": {
     "title": "处理相互竞争的版本",

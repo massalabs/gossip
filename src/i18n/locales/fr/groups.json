@@ -194,7 +194,8 @@
     "name_hint_owner": "« Enregistrer pour tous » renomme le Chat pour tous les membres. « Enregistrer pour moi » garde ce nom sur cet appareil seulement ; rien n'est envoyé. Videz le champ et enregistrez pour vous pour reprendre le nom du Chat pour tous.",
     "save_for_me": "Enregistrer pour moi",
     "save_for_everyone": "Enregistrer pour tous",
-    "use_shared_name": "Reprendre le nom pour tous"
+    "use_shared_name": "Reprendre le nom pour tous",
+    "open_settings": "Ouvrir les détails du Chat {{name}}"
   },
   "resolve": {
     "title": "Résoudre les versions concurrentes",

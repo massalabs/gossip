@@ -111,13 +111,15 @@ describe('group pages', () => {
     const timeline = r.container.querySelector(
       '[data-testid="group-timeline"]'
     )!;
-    const children = Array.from(timeline.children).map(c =>
-      c.getAttribute('data-testid')
+    const children = Array.from(timeline.children).map(
+      c =>
+        c.getAttribute('data-testid') ??
+        c.firstElementChild?.getAttribute('data-testid')
     );
     expect(children).toEqual(['group-line', 'group-message', 'group-message']);
     const bobs = timeline.querySelectorAll('[data-testid="group-message"]')[1];
     expect(bobs.textContent).toContain('bob');
-    expect(bobs.textContent).toContain('timeline.reply_to');
+    expect(bobs.textContent).toContain('list.you');
     expect(bobs.textContent).toContain('question');
     // A target in the same group names no group.
     expect(bobs.textContent).not.toContain('timeline.reply_in_group');
@@ -172,9 +174,9 @@ describe('group pages', () => {
       r.container.querySelectorAll('[data-testid="group-reply-preview"]')
     ).map(q => q.textContent);
     expect(quotes[0]).toContain('timeline.reply_in_group');
-    expect(quotes[1]).not.toContain('timeline.reply_in_group');
-    // A target not held yet says so; displaying it asks for nothing.
-    expect(text).toContain('timeline.reply_unavailable');
+    // A target in an epoch this device lacks has no quote (protocol limit);
+    // displaying it asks for nothing.
+    expect(quotes).toHaveLength(1);
   });
 
   it('says "in <group>" in every language', () => {
@@ -242,7 +244,8 @@ describe('group pages', () => {
   it('says its status rather than a member count once removed, and a neutral placeholder in a chat of two', async () => {
     const r = await openGroup('removed');
     unmount = r.unmount;
-    const header = r.container.querySelector('h1')!.parentElement!;
+    const header =
+      r.container.querySelector('[role="heading"]')!.parentElement!;
     expect(header.textContent).toContain('details.status_removed');
     expect(header.textContent).not.toContain('list.members_count');
     await unmount();

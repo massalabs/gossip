@@ -23,7 +23,9 @@ import GroupComposer, {
   type InputTarget,
   type Scope,
 } from '../components/groups/GroupComposer';
-import GroupMessageItem from '../components/groups/GroupMessageItem';
+import GroupMessageItem, {
+  type ReplyQuote,
+} from '../components/groups/GroupMessageItem';
 import {
   composerBlockedReason,
   isTooLargeError,
@@ -40,7 +42,7 @@ import { messageTimerLabel } from '../constants/messageTimer';
 import { useGroupMemberName } from '../hooks/useGroupMemberName';
 import { useAccountStore } from '../stores/accountStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
-import { groupDisplayName } from '../utils/groupName';
+import { groupDisplayName, isolate } from '../utils/groupName';
 import { ROUTES } from '../constants/routes';
 
 /**
@@ -59,6 +61,9 @@ const SEND_AS_SUPPORTED = false;
  * and deletions, never for a new message.
  */
 const LOCAL_SEND_SUPPORTED = false;
+
+/** How long a new message glows once it comes into view, in ms. */
+const GLOW_MS = 1200;
 
 /**
  * A message sent from this screen and not yet read back from the engine's
@@ -162,6 +167,21 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
   // The own messages the timeline already showed, or a send returned: a row
   // still sending is never matched with one of them.
   const claimed = useRef<Set<string> | null>(null);
+  // The message briefly marked after a tap on a quote of it.
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // New messages of others not seen yet on this device, and those glowing
+  // because they just came into view (K). Memory only: see `markSeen`.
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
+  const [glowing, setGlowing] = useState<ReadonlySet<string>>(new Set());
+  const glowTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(
+    () => () => {
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+      for (const timer of glowTimers.current) clearTimeout(timer);
+    },
+    []
+  );
 
   useEffect(() => {
     setCurrentGroup(groupId);
@@ -188,6 +208,25 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
         // The first read only tells what was there before any send.
         const before = new Set(claimed.current ?? shown);
         claimed.current = new Set([...before, ...shown]);
+        // What is new to this screen: the messages of others not seen here
+        // yet. At the first opening in this run nothing is known to be new
+        // (the unread state is per chat, not per message), so all is seen.
+        const store = useGroupStore.getState();
+        const keys = items.flatMap(i =>
+          i.kind === 'message' ? [`${i.epochId}:${i.syncObjId}`] : []
+        );
+        const seenBefore = store.seenOf(groupId);
+        if (!seenBefore) {
+          store.markSeen(groupId, keys);
+        } else {
+          const own = items.flatMap(i =>
+            i.kind === 'message' && i.author === me
+              ? [`${i.epochId}:${i.syncObjId}`]
+              : []
+          );
+          store.markSeen(groupId, own);
+          setFresh(new Set(keys.filter(k => !seenBefore.has(k))));
+        }
         setTimeline(items);
         setSending(rows => stillSending(rows, items, read, me, before));
       })
@@ -201,6 +240,63 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [timeline.length, sending.length]);
+
+  // A new message is seen when it comes into view: it glows a moment, and
+  // is recorded as seen in memory. Nothing else happens: no read receipt
+  // exists, nothing is sent or stored.
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || fresh.size === 0) return;
+    const seenNow = (keys: string[]) => {
+      if (keys.length === 0) return;
+      useGroupStore.getState().markSeen(groupId, keys);
+      setFresh(f => new Set([...f].filter(k => !keys.includes(k))));
+      setGlowing(g => new Set([...g, ...keys]));
+      glowTimers.current.push(
+        setTimeout(
+          () => setGlowing(g => new Set([...g].filter(k => !keys.includes(k)))),
+          GLOW_MS
+        )
+      );
+    };
+    const targets = Array.from(
+      root.querySelectorAll<HTMLElement>('[data-fresh]')
+    );
+    if (typeof IntersectionObserver === 'undefined') {
+      // No way to know what is in view: seen at once, without a glow.
+      useGroupStore.getState().markSeen(
+        groupId,
+        targets.map(e => e.dataset.fresh ?? '')
+      );
+      return;
+    }
+    const observer = new IntersectionObserver(
+      entries => {
+        const keys: string[] = [];
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const key = (e.target as HTMLElement).dataset.fresh;
+          if (key) keys.push(key);
+          observer.unobserve(e.target);
+        }
+        seenNow(keys);
+      },
+      { root, threshold: 0.6 }
+    );
+    for (const el of targets) observer.observe(el);
+    return () => observer.disconnect();
+  }, [fresh, groupId]);
+
+  const jumpTo = (key: string) => {
+    const el = Array.from(
+      scrollRef.current?.querySelectorAll<HTMLElement>('[data-key]') ?? []
+    ).find(e => e.dataset.key === key);
+    if (!el) return;
+    el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    setHighlighted(key);
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlighted(null), 1500);
+  };
 
   const byKey = useMemo(() => {
     const map = new Map<string, GroupMessage>();
@@ -330,35 +426,81 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
       );
   };
 
+  // A chat of two shows no avatars or names beside messages: the header
+  // already names the other person, and the width goes to the text (J).
+  const showAvatars = group.members.length > 2;
+
+  /**
+   * The quotes of a reply (G): the target as the SDK read it from its own
+   * timeline, in this chat or another, shown once the device holds it and
+   * never asked for because it is displayed. A target in an epoch this device
+   * lacks has no quote (the protocol cannot say what it was); one held but
+   * not shown (deleted, or not received yet) says it is not available.
+   */
+  const quotesOf = (item: GroupMessage): ReplyQuote[] =>
+    item.replyTo.flatMap(r => {
+      if (!r.epochId) return [];
+      const key = `${r.epochId}:${r.syncObjId}`;
+      const m = r.message ?? byKey.get(key) ?? null;
+      const other = groupOfEpoch.get(r.epochId);
+      const elsewhere = !!other && other.groupId !== groupId;
+      return [
+        {
+          author: m ? memberName(m.author) : null,
+          authorId: m?.author,
+          text: m ? messageText(m, t) : null,
+          // "in <chat>" for a quote of another chat (§7.6).
+          group: elsewhere
+            ? groupDisplayName(other, memberName, me, t('invitation.unnamed'))
+            : null,
+          onJump:
+            m && !elsewhere && byKey.has(key) ? () => jumpTo(key) : undefined,
+        },
+      ];
+    });
+
   const header = (
     <HeaderBar>
       <div className="flex items-center gap-3 w-full min-w-0">
         <BackButton onClick={() => navigate(ROUTES.discussions())} />
-        <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
-          <Users className="w-5 h-5 text-foreground" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-base font-semibold text-foreground truncate">
-            <SafeName name={title} />
-          </h1>
-          <p className="text-xs text-muted-foreground">
-            {group.status === 'member' || group.status === 'waiting'
-              ? t('list.members_count', { count: group.members.length })
-              : // Removed, left or dissolved: the member list is the one of
-                // the last epoch held, no longer the group's.
-                t(`details.status_${group.status}`)}
-          </p>
-          {group.messageTimer > 0 && (
-            // The current timer (§7.7), as the earlier one-to-one header
-            // shows its retention.
-            <div className="flex min-w-0">
-              <AutoDeleteChip
-                duration={messageTimerLabel(group.messageTimer, t)}
-                testId="group-timer-chip"
-              />
-            </div>
-          )}
-        </div>
+        {/* The whole title area opens the chat's settings (I). */}
+        <button
+          type="button"
+          onClick={() => navigate(ROUTES.groupSettings({ groupId }))}
+          aria-label={t('details.open_settings', { name: isolate(title) })}
+          className="flex-1 min-w-0 flex items-center gap-3 text-left rounded-lg hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="group-header-title"
+        >
+          <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
+            <Users className="w-5 h-5 text-foreground" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <span
+              role="heading"
+              aria-level={1}
+              className="block text-base font-semibold text-foreground truncate"
+            >
+              <SafeName name={title} />
+            </span>
+            <span className="block text-xs text-muted-foreground">
+              {group.status === 'member' || group.status === 'waiting'
+                ? t('list.members_count', { count: group.members.length })
+                : // Removed, left or dissolved: the member list is the one of
+                  // the last epoch held, no longer the group's.
+                  t(`details.status_${group.status}`)}
+            </span>
+            {group.messageTimer > 0 && (
+              // The current timer (§7.7), as the earlier one-to-one header
+              // shows its retention.
+              <div className="flex min-w-0">
+                <AutoDeleteChip
+                  duration={messageTimerLabel(group.messageTimer, t)}
+                  testId="group-timer-chip"
+                />
+              </div>
+            )}
+          </div>
+        </button>
         <button
           type="button"
           onClick={() => navigate(ROUTES.groupSettings({ groupId }))}
@@ -474,57 +616,57 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
               memberName={memberName}
             />
           ) : (
-            <GroupMessageItem
+            <div
               key={`${item.epochId}:${item.syncObjId}`}
-              message={item}
-              isOutgoing={item.author === me}
-              authorName={memberName(item.author)}
-              // The target as the SDK read it from its own timeline, in this
-              // chat or another; shown once the device holds it, never asked
-              // for because it is displayed.
-              replyPreviews={item.replyTo.map(r => {
-                const m =
-                  r.message ??
-                  (r.epochId
-                    ? byKey.get(`${r.epochId}:${r.syncObjId}`)
-                    : undefined);
-                return m ? messageText(m, t) : null;
-              })}
-              // "in <group>" for a quote of another group (§7.6).
-              replyGroups={item.replyTo.map(r => {
-                const other = r.epochId ? groupOfEpoch.get(r.epochId) : null;
-                return other && other.groupId !== groupId
-                  ? groupDisplayName(
-                      other,
-                      memberName,
-                      me,
-                      t('invitation.unnamed')
-                    )
-                  : null;
-              })}
-              canWrite={canWrite}
-              memberName={memberName}
-              onToggleReaction={toggleReaction}
-              onReply={m => {
-                setEditing(null);
-                setReplyingTo(target(m));
-              }}
-              onCopy={m => {
-                void navigator.clipboard
-                  ?.writeText(messageText(m, t))
-                  .then(() => toast.success(t('message_menu.copied')))
-                  .catch(() => {});
-              }}
-              onEdit={startEdit}
-              onDelete={setDeleting}
-              onRetry={m =>
-                service &&
-                void run(
-                  () => service.retryMessage(m.epochId, m.syncObjId),
-                  t('message_menu.retried')
-                )
+              data-key={`${item.epochId}:${item.syncObjId}`}
+              data-fresh={
+                fresh.has(`${item.epochId}:${item.syncObjId}`)
+                  ? `${item.epochId}:${item.syncObjId}`
+                  : undefined
               }
-            />
+            >
+              <GroupMessageItem
+                message={item}
+                isOutgoing={item.author === me}
+                authorName={memberName(item.author)}
+                quotes={quotesOf(item)}
+                showAvatar={showAvatars}
+                runStart={(() => {
+                  const prev = timeline[i - 1];
+                  return !(
+                    prev &&
+                    prev.kind === 'message' &&
+                    prev.author === item.author
+                  );
+                })()}
+                highlighted={
+                  highlighted === `${item.epochId}:${item.syncObjId}`
+                }
+                glow={glowing.has(`${item.epochId}:${item.syncObjId}`)}
+                canWrite={canWrite}
+                memberName={memberName}
+                onToggleReaction={toggleReaction}
+                onReply={m => {
+                  setEditing(null);
+                  setReplyingTo(target(m));
+                }}
+                onCopy={m => {
+                  void navigator.clipboard
+                    ?.writeText(messageText(m, t))
+                    .then(() => toast.success(t('message_menu.copied')))
+                    .catch(() => {});
+                }}
+                onEdit={startEdit}
+                onDelete={setDeleting}
+                onRetry={m =>
+                  service &&
+                  void run(
+                    () => service.retryMessage(m.epochId, m.syncObjId),
+                    t('message_menu.retried')
+                  )
+                }
+              />
+            </div>
           )
         )}
         {sending.map(r => (
@@ -546,7 +688,17 @@ const GroupDiscussionInner: React.FC<{ groupId: string }> = ({ groupId }) => {
             }}
             isOutgoing
             authorName=""
-            replyPreviews={r.reply ? [messageText(r.reply, t)] : []}
+            quotes={
+              r.reply
+                ? [
+                    {
+                      author: memberName(r.reply.author),
+                      text: messageText(r.reply, t),
+                      group: null,
+                    },
+                  ]
+                : []
+            }
             canWrite={false}
           />
         ))}
