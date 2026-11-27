@@ -1522,7 +1522,8 @@ a contact or the connection is **automatic**.
 
 - A connection asked by a member of a group this device has accepted is opened automatically and
   silently. The claim is checked against the member list of a group the device holds and has
-  accepted, never against a group it was only invited to. No conversation is created.
+  accepted, never against a group it was only invited to. No conversation is created. When that
+  member also asks to become a contact, the request is shown all the same (below).
 - A connection asked by anyone else needs the user's consent, on the invitation screen below.
 - An automatic connection is revoked once no chat that keeps connections lists its peer, as a
   member or a removed peer, and nothing pushed whole is still owed to it (below). A peer the user
@@ -1557,6 +1558,42 @@ also keeps a connection while a ciphertext for that peer waits in its outbox.
 
 _Note:_ a member whose connection is opened automatically learns that this device accepted the
 group; the scans that follow an acceptance already show it (D.77).
+
+**A member who is no contact.** The user may add a member of a chat held as a contact, from the
+new-contact form or from the chat's member list, under a name of their choice. This is local: the
+connection becomes accepted on this device (and is never revoked by the rule above), or, for a
+member no connection is open with yet, an accepted contact is made from the keys the device got
+from the chat's members (§12.9), and the connection opens as for any member. Nothing is sent
+because of it. The other person learns nothing until a chat is started with them, which reaches
+them as an ordinary invitation.
+
+A contact request from a member of a chat this device has accepted is always shown. A request
+states a name, a message or a timer; the announcement that opens a connection, answers one or
+renews one states none.
+
+- The connection is answered at once, exactly as for any member, so that the chats keep flowing.
+  The request, its message and the timer it announced are kept and shown for the user to accept
+  or decline.
+- Accepting makes that person a contact and gives the consent of a new contact below, with the
+  announced timer. Nothing more is sent: the session is open.
+- Declining refuses the contact, not the connection: it stays automatic, and is revoked by the
+  rule above once no chat needs it.
+- A request waiting is never removed by joining a chat: when the device accepts a chat that lists
+  the requester, the connection is opened underneath and the request stays until answered.
+- When the last chat that keeps the connection goes, the connection is revoked as an automatic
+  one is, whatever the answer will be. The request stays shown, now without a session: accepting
+  it then announces this device as accepting any request does.
+
+_Why (decided by the owner):_ privacy first. No message exists that tells the other person,
+or anyone, who added whom: adding a member is local, and the answer to a member's request is the
+same announcement, at the same moment, whatever the user later chooses, while the connection lives
+exactly as long as the chats need it. The requester can therefore not tell a request accepted,
+declined or not answered yet, except by what accepting does anyway: the chat it asked for is
+adopted (§4.8). _Cost accepted:_ being a contact is one-sided until the other person adds this
+user back or accepts a chat; a declined requester keeps a working connection while a chat is
+shared; and the requester's device founds the chat it asked for as soon as the connection is
+answered, so the user is shown both the request and that chat's invitation: accepting either
+accepts both, declining one leaves the other.
 
 **A new contact.** Accepting a contact request is the consent for a chat with that person.
 An accepted contact counts as an earlier conversation of format version 0 with that person, even

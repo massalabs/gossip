@@ -233,6 +233,15 @@ await sdk.contacts.updateName(contactUserId, 'Alice Smith');
 
 // Delete contact and all associated data
 await sdk.contacts.delete(contactUserId);
+
+// A member of a shared chat who is no contact (connection 'automatic', or
+// 'requested' while their own contact request waits): add them as a contact
+// on this device only. Nothing is sent.
+const added = await sdk.conversations.addAsContact(contactUserId, 'Alice');
+
+// Decline a contact request. A member of a shared chat keeps the connection
+// the chat needs; anyone else goes with their contact. Nothing is sent.
+await sdk.conversations.declineContactRequest(contactUserId);
 ```
 
 ### Announcements
