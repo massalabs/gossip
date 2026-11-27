@@ -458,6 +458,14 @@ impl WantedTable {
             let mut cleared = false;
             match inner.entries.get_mut(&e.seeker) {
                 Some(slot) => {
+                    // A link that dropped leaves a forwarded entry without a direction.
+                    // When the peer comes back (under a new peer id), its repeated entry
+                    // must count as news, or a blob sent while the phones were apart is
+                    // never offered to it. Cost: one Announce and the blob once, to the
+                    // peer that asked; no extra copies. Own seekers are not concerned.
+                    if !slot.own && slot.via.is_empty() {
+                        fresh.push(e.seeker);
+                    }
                     if expires_at > slot.expires_at.saturating_add(WANTED_RESEND_SLACK_MS) {
                         slot.expires_at = expires_at;
                     }
@@ -1203,6 +1211,40 @@ mod tests {
         assert_eq!(entries[0].lifetime_s, 3600);
         table.set_own(&[], now);
         assert!(!table.contains(&s, now), "dropped by the app");
+    }
+
+    #[test]
+    fn a_known_seeker_that_lost_its_direction_is_fresh_again_when_one_comes_back() {
+        let table = WantedTable::new(MeshConfig::phone());
+        let now = UnixMillis(5_000_000);
+        let (gone, back, other) = (peer(), peer(), peer());
+        assert_eq!(table.merge(&gone, 0.0, 10, &[entry(7, 600)], now).len(), 1);
+        // a live direction: a second advertiser brings nothing new, as before
+        assert!(table
+            .merge(&other, 0.0, 10, &[entry(7, 600)], now)
+            .is_empty());
+        table.remove_peer(&gone);
+        table.remove_peer(&other);
+        // the link dropped, the entry stayed without a direction: its return is news
+        assert_eq!(
+            table.merge(&back, 0.0, 10, &[entry(7, 600)], now),
+            vec![[7u8; WANTED_SEEKER_LEN]]
+        );
+        assert_eq!(
+            table.best_peers(&[7u8; WANTED_SEEKER_LEN], now),
+            Some(vec![back])
+        );
+        // and only once: the direction is live again
+        assert!(table
+            .merge(&back, 0.0, 10, &[entry(7, 600)], now)
+            .is_empty());
+
+        // an own seeker has no direction either: unchanged, never fresh
+        let own = [8u8; WANTED_SEEKER_LEN];
+        table.set_own(&[own], now);
+        assert!(table
+            .merge(&peer(), 0.0, 10, &[entry(8, 600)], now)
+            .is_empty());
     }
 
     fn no_spray() -> MeshConfig {
