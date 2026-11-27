@@ -1,10 +1,10 @@
 {
   "title": "Gossip",
   "share_contact": "Partager mon contact",
-  "share_to_discussion": "Partager du contenu dans une discussion",
-  "share_select": "Sélectionnez une discussion ci-dessous pour partager le contenu.",
+  "share_to_discussion": "Partager du contenu dans un Chat",
+  "share_select": "Sélectionnez un Chat ci-dessous pour partager le contenu.",
   "cancel_sharing": "Annuler le partage",
-  "start_new": "Nouvelle discussion",
+  "start_new": "Nouveau Chat",
   "filter": {
     "all": "Toutes",
     "unread": "Non lues",
@@ -40,8 +40,8 @@
     "name_updated": "Nom mis à jour",
     "name_update_failed": "Échec de la mise à jour du nom",
     "pin_failed": "Échec de l'épinglage de la discussion",
-    "no_chat": "Pas encore de discussion",
-    "chat_invitation": "Vous invite à une discussion"
+    "no_chat": "Pas encore de Chat",
+    "chat_invitation": "Vous invite à un Chat"
   },
   "scroll_to_bottom": "Aller aux derniers messages",
   "search": {
@@ -95,9 +95,9 @@
     "mute_update_failed": "Échec de la mise à jour des notifications"
   },
   "new_discussion": {
-    "title": "Nouvelle discussion",
+    "title": "Nouveau Chat",
     "new_contact": "Nouveau contact",
-    "new_group": "Nouvelle discussion",
+    "new_group": "Nouveau Chat",
     "contacts": "Contacts",
     "search_contacts": "Rechercher des contacts",
     "loading_contacts": "Chargement des contacts…",
@@ -120,7 +120,7 @@
     "refuse": "Refuser",
     "set_contact_name": "Définir le nom du contact",
     "refuse_title": "Refuser la connexion ?",
-    "refuse_body": "Refuser fermera cette demande de discussion.",
+    "refuse_body": "Refuser fermera cette demande de Chat.",
     "sections": {
       "discussions": "Discussions",
       "contacts": "Contacts",
@@ -130,13 +130,13 @@
     }
   },
   "empty": {
-    "no_discussions": "Aucune discussion pour le moment",
-    "no_discussions_hint": "Démarrez une discussion en appuyant sur le bouton <strong>+</strong>",
+    "no_discussions": "Aucun Chat pour le moment",
+    "no_discussions_hint": "Démarrez un Chat en appuyant sur le bouton <strong>+</strong>",
     "no_messages": "Aucun message pour le moment",
     "no_messages_hint": "Lance la conversation en envoyant ton premier message"
   },
   "initializing": {
-    "title": "Initialisation de la discussion sécurisée",
+    "title": "Initialisation du Chat sécurisé",
     "subtitle": "Mise en place du chiffrement de bout en bout..."
   },
   "loading_messages": "Chargement des messages...",
@@ -181,7 +181,7 @@
     "info_message": "La réception d'un message du correspondant permet de renouveler la clé de chiffrement. Si un attaquant obtient votre clé actuelle, il pourrait déchiffrer vos {{count}} derniers messages envoyés."
   },
   "retention_separator": "Suppression automatique activée : {{duration}}",
-  "filter_label": "Filtrer les discussions",
+  "filter_label": "Filtrer les Chats",
   "waiting_connection": "En attente de connexion...",
   "mesh_connected_one": "Connecté au mesh · {{count}} lien",
   "mesh_connected_few": "Connecté au mesh · {{count}} liens",

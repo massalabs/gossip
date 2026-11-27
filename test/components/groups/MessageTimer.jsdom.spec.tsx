@@ -230,7 +230,7 @@ describe('a chat whose timer is not the one the contact request announced', () =
         [
           'Alice a annoncé une autre durée en demandant à discuter.',
           'Annoncée : 1 semaine',
-          'Cette discussion : 5 minutes',
+          'Ce Chat : 5 minutes',
         ],
         'Annoncée : Pour toujours',
       ],

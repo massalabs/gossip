@@ -7,7 +7,7 @@
   "connection_pending": "Connexion en attente. Tu ne peux pas encore discuter.",
   "remove_modal": {
     "title": "Supprimer le contact ?",
-    "confirm": "Es-tu sûr de vouloir supprimer <strong>{{name}}</strong> de tes contacts ? Cela supprimera également tous les messages et discussions avec ce contact. Cette action est irréversible.",
+    "confirm": "Es-tu sûr de vouloir supprimer <strong>{{name}}</strong> de tes contacts ? Cela supprimera également tous les messages et Chats avec ce contact. Cette action est irréversible.",
     "removing": "Suppression...",
     "remove": "Supprimer",
     "failed": "Échec de la suppression du contact. Réessaie.",
@@ -41,7 +41,7 @@
     "share_username_placeholder": "Saisir le nom d'utilisateur à partager",
     "share_username_aria": "Nom d'utilisateur à partager avec le contact",
     "import_file_aria": "Importer un contact depuis un fichier YAML",
-    "connected_non_contact": "Vous êtes déjà en lien avec cette personne par une discussion commune. L'ajouter l'enregistre comme contact sur cet appareil uniquement : rien n'est envoyé, il n'y a donc pas de message à écrire.",
+    "connected_non_contact": "Vous êtes déjà en lien avec cette personne par un Chat commun. L'ajouter l'enregistre comme contact sur cet appareil uniquement : rien n'est envoyé, il n'y a donc pas de message à écrire.",
     "already_contact": "Cet utilisateur est déjà dans vos contacts"
   },
   "privacy_notice": {
