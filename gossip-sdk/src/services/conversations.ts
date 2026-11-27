@@ -58,6 +58,7 @@ import type {
 } from './groups.js';
 import { EARLIER_FORMAT_VERSION, retentionToMessageTimer } from './groups.js';
 import type { DiscussionService } from './discussion.js';
+import type { AnnouncementPayload } from '../utils/announcementPayload.js';
 import { SELF_CONTACT_ID } from './selfMessage.js';
 import { Logger } from '../utils/logs.js';
 import { dlog } from '../utils/debugLog.js';
@@ -92,6 +93,19 @@ export type AddAsContactResult =
        * contact row and no keys from any chat held; `empty-name`.
        */
       reason: 'already-contact' | 'unknown' | 'empty-name';
+    };
+
+/** What `sendContactRequest` did. */
+export type SendContactRequestResult =
+  | { success: true }
+  | {
+      success: false;
+      /**
+       * `not-added`: not a contact the user added on their own; `connected`:
+       * its session is active, nothing has lapsed; `failed`: the request
+       * could not be prepared (nothing changed).
+       */
+      reason: 'not-added' | 'connected' | 'failed';
     };
 
 /** Why "Migrate" is not done. */
@@ -702,6 +716,68 @@ export class ConversationService {
       return { success: true };
     });
     return result ?? { success: false, reason: 'unknown' };
+  }
+
+  /**
+   * "Send a contact request" (§5.12, D.100) to a contact the user added on
+   * their own (`added`) whose connection has lapsed: no active session, the
+   * last shared chat gone. The request is an ORDINARY contact request,
+   * identical to the one sent to someone new with the same `payload`
+   * (optional username, optional message), with no field that tells it
+   * apart. _Why:_ such a field would tell the other person that this user
+   * already had them as a contact, which adding someone on this device must
+   * never reveal; the difference is handled here only, by sending the
+   * request for the existing contact instead of refusing it as a duplicate.
+   *
+   * The contact keeps its name. Its connection becomes what a contact the
+   * user added with a request has (`accepted`, as `contacts.add` then
+   * `discussions.start` leave it); it is declared to the engine once the
+   * session is active, that is once the other person accepted, as any
+   * accepted contact. If they decline or never answer, the contact stays,
+   * not connected, as any contact whose request waits. The other person
+   * sees an ordinary request, whatever their own row says (D2): nothing if
+   * they have no row, an `added` contact of theirs gets it as a request too.
+   */
+  async sendContactRequest(
+    contactUserId: string,
+    payload?: AnnouncementPayload
+  ): Promise<SendContactRequestResult> {
+    contactUserId = canonicalUserId(contactUserId);
+    const result = await this.enqueue(
+      async (): Promise<SendContactRequestResult> => {
+        const c = await this.queries.contacts.getByOwnerAndUser(
+          this.owner,
+          contactUserId
+        );
+        if (!c || c.connection !== 'added') {
+          return { success: false, reason: 'not-added' };
+        }
+        if (
+          this.session.peerSessionStatus(decodeUserId(contactUserId)) ===
+          SessionStatus.Active
+        ) {
+          return { success: false, reason: 'connected' };
+        }
+        const sent = await this.discussions.requestAgain(c, payload);
+        if (!sent.success) return { success: false, reason: 'failed' };
+        dlog('engine', 'contact.connection', {
+          peer: shortId(contactUserId),
+          from: 'added',
+          to: 'accepted',
+          step: 'request_sent',
+        });
+        await this.queries.contacts.updateByOwnerAndUser(
+          this.owner,
+          contactUserId,
+          { connection: 'accepted' }
+        );
+        this.eventEmitter.emit(SdkEventType.CONTACT_UPDATED, {
+          contactUserId,
+        });
+        return { success: true };
+      }
+    );
+    return result ?? { success: false, reason: 'failed' };
   }
 
   /**
