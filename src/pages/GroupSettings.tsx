@@ -10,6 +10,7 @@ import {
   UserPlus,
   Users,
 } from 'react-feather';
+import { Star, UserMinus } from 'react-feather';
 import { SessionStatus, type GroupEpoch } from '@massalabs/gossip-sdk';
 import PageLayout from '../components/ui/Layout/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
@@ -21,6 +22,10 @@ import LeaveGroupSheet, {
   type LeaveAction,
 } from '../components/groups/LeaveGroupSheet';
 import ResolveForkPanel from '../components/groups/ResolveForkPanel';
+import ContactAvatar from '../components/avatar/ContactAvatar';
+import MemberPicker from '../components/groups/MemberPicker';
+import ConfirmSheet from '../components/groups/ConfirmSheet';
+import { canDeleteChat, useDeleteChat } from '../hooks/useDeleteChat';
 import MessageTimerField from '../components/groups/MessageTimerField';
 import { messageTimerSentence } from '../constants/messageTimer';
 import { useGossipSdk } from '../hooks/useGossipSdk';
@@ -93,6 +98,7 @@ const GroupSettings: React.FC = () => {
   const [toAdd, setToAdd] = useState<Set<string>>(new Set());
   const [contactNameError, setContactNameError] = useState<string | null>(null);
   const service = getGroupService();
+  const deleteChat = useDeleteChat(() => navigate(ROUTES.discussions()));
 
   const [ownedEnds, setOwnedEnds] = useState<GroupEpoch[]>([]);
   const ends = group?.mustResolve
@@ -179,12 +185,18 @@ const GroupSettings: React.FC = () => {
   // member of another chat who is no contact is added as a contact first
   // (§5.12): putting someone in a chat the user owns shows them to every
   // member, which only a contact the user chose should get.
-  const addable = contacts.filter(
-    c =>
-      isAcceptedContact(c) &&
-      !group.members.includes(c.userId) &&
-      gossip.discussions.getStatus(c.userId) === SessionStatus.Active
-  );
+  const addable = contacts
+    .filter(
+      c =>
+        isAcceptedContact(c) &&
+        !group.members.includes(c.userId) &&
+        gossip.discussions.getStatus(c.userId) === SessionStatus.Active
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const openAdd = () => {
+    setToAdd(new Set());
+    setModal({ kind: 'add' });
+  };
   // "Add as contact" for a member who is no contact the user accepted.
   const canAddAsContact = (m: string) => {
     if (m === me) return false;
@@ -305,53 +317,75 @@ const GroupSettings: React.FC = () => {
         )}
       </div>
 
-      <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <p className="px-4 pt-3 text-xs text-muted-foreground flex items-center gap-2">
-          <Users className="w-3.5 h-3.5" />
-          {t('details.members')} ({group.members.length})
+      {/* Members (Lucas's screen 09): adding and removing are here only. */}
+      <section>
+        <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {t('details.members')} · {group.members.length}
         </p>
-        <ul data-testid="group-members">
-          {group.members.map(m => (
-            <li
-              key={m}
-              className="px-4 py-2 flex items-center justify-between gap-2 border-b border-border last:border-b-0"
+        <div className="bg-card rounded-xl border border-border overflow-hidden">
+          {isOwner && active && (
+            <button
+              type="button"
+              onClick={openAdd}
+              className="w-full px-4 py-3 flex items-center gap-3 text-left border-b border-border hover:bg-muted"
             >
-              <span className="text-sm min-w-0 truncate">
-                <SafeName name={memberName(m)} />
-                {m === group.owner && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    ({t('details.owner')})
-                  </span>
-                )}
+              <span className="w-10 h-10 rounded-full bg-accent-soft flex items-center justify-center shrink-0">
+                <UserPlus className="w-5 h-5 text-accent-soft-foreground" />
               </span>
-              <span className="flex items-center gap-1 shrink-0">
-                {canAddAsContact(m) && (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    data-testid="member-add-contact"
-                    onClick={() => {
-                      setContactNameError(null);
-                      setModal({ kind: 'addContact', member: m });
-                    }}
-                  >
-                    {t('details.add_as_contact')}
-                  </Button>
-                )}
-                {isOwner && active && m !== me && (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    onClick={() => setModal({ kind: 'remove', member: m })}
-                  >
-                    {t('details.remove')}
-                  </Button>
-                )}
+              <span className="text-sm font-medium text-accent-soft-foreground">
+                {t('details.add_members')}
               </span>
-            </li>
-          ))}
-        </ul>
-      </div>
+            </button>
+          )}
+          <ul data-testid="group-members">
+            {group.members.map(m => (
+              <li
+                key={m}
+                className="px-4 py-2.5 flex items-center gap-3 border-b border-border last:border-b-0"
+              >
+                <ContactAvatar
+                  contact={{ userId: m, name: memberName(m), avatar: null }}
+                  size={10}
+                />
+                <span className="flex-1 text-sm text-foreground min-w-0 truncate">
+                  <SafeName name={memberName(m)} />
+                </span>
+                <span className="flex items-center gap-1 shrink-0">
+                  {m === group.owner && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-muted text-foreground">
+                      <Star className="w-3 h-3" />
+                      {t('details.owner')}
+                    </span>
+                  )}
+                  {canAddAsContact(m) && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      data-testid="member-add-contact"
+                      onClick={() => {
+                        setContactNameError(null);
+                        setModal({ kind: 'addContact', member: m });
+                      }}
+                    >
+                      {t('details.add_as_contact')}
+                    </Button>
+                  )}
+                  {isOwner && active && m !== me && (
+                    <Button
+                      variant="icon"
+                      ariaLabel={t('details.remove')}
+                      data-testid="member-remove"
+                      onClick={() => setModal({ kind: 'remove', member: m })}
+                    >
+                      <UserMinus className="w-5 h-5 text-muted-foreground" />
+                    </Button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
 
       {group.sideBranches.length > 0 && !group.mustResolve && (
         <div className="bg-card rounded-xl border border-border p-4">
@@ -416,14 +450,6 @@ const GroupSettings: React.FC = () => {
             {t('details.owner_tools')}
           </p>
           <ActionButton
-            icon={<UserPlus className="w-4 h-4" />}
-            label={t('details.add_members')}
-            onClick={() => {
-              setToAdd(new Set());
-              setModal({ kind: 'add' });
-            }}
-          />
-          <ActionButton
             icon={<Edit2 className="w-4 h-4" />}
             label={t('details.rename')}
             onClick={() => setModal({ kind: 'rename' })}
@@ -470,18 +496,17 @@ const GroupSettings: React.FC = () => {
             danger
           />
         )}
-        {!active && group.status !== 'waiting' && (
+        {/* Only a chat the user is no longer in can be deleted here. */}
+        {canDeleteChat(group.status) && (
           <ActionButton
             icon={<Trash2 className="w-4 h-4" />}
             label={t('details.delete_locally')}
             danger
-            onClick={async () => {
-              if (await run(() => service.deleteGroup(groupId)))
-                navigate(ROUTES.discussions());
-            }}
+            onClick={() => deleteChat.ask(groupId)}
           />
         )}
       </div>
+      {deleteChat.sheet}
 
       <LeaveGroupSheet
         isOpen={leaving}
@@ -535,81 +560,51 @@ const GroupSettings: React.FC = () => {
           void addAsContact(modal.member, name);
         }}
       />
-      <BaseModal
+      <ConfirmSheet
         isOpen={modal?.kind === 'remove'}
+        title={
+          modal?.kind === 'remove'
+            ? t('details.remove_title', {
+                name: `\u2068${memberName(modal.member)}\u2069`,
+              })
+            : ''
+        }
+        body={
+          modal?.kind === 'remove'
+            ? t('details.remove_confirm', {
+                name: `\u2068${memberName(modal.member)}\u2069`,
+              })
+            : ''
+        }
+        confirmLabel={t('details.remove')}
+        onConfirm={() => {
+          if (modal?.kind !== 'remove') return;
+          const member = modal.member;
+          setModal(null);
+          void run(() => service.changeMembers(groupId, { remove: [member] }));
+        }}
         onClose={() => setModal(null)}
-        title={t('details.remove')}
-      >
-        {modal?.kind === 'remove' && (
-          <div className="space-y-4">
-            <p className="text-sm text-foreground">
-              {t('details.remove_confirm', {
-                name: `⁨${memberName(modal.member)}⁩`,
-              })}
-            </p>
-            <div className="flex gap-3">
-              <Button
-                variant="danger"
-                size="custom"
-                className="flex-1 h-11 rounded-lg font-semibold"
-                onClick={() => {
-                  const member = modal.member;
-                  setModal(null);
-                  void run(() =>
-                    service.changeMembers(groupId, { remove: [member] })
-                  );
-                }}
-              >
-                {t('details.remove')}
-              </Button>
-              <Button
-                variant="secondary"
-                size="custom"
-                className="flex-1 h-11 rounded-lg font-semibold"
-                onClick={() => setModal(null)}
-              >
-                {t('choices.cancel')}
-              </Button>
-            </div>
-          </div>
-        )}
-      </BaseModal>
+      />
       <BaseModal
         isOpen={modal?.kind === 'add'}
         onClose={() => setModal(null)}
         title={t('details.add_members')}
       >
         <div className="space-y-3">
-          {addable.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {t('new_group.no_eligible_contacts')}
-            </p>
-          ) : (
-            <ul className="max-h-[50vh] overflow-y-auto divide-y divide-border">
-              {addable.map(c => (
-                <li key={c.userId}>
-                  <label className="flex items-center justify-between py-2 gap-2 cursor-pointer">
-                    <span className="text-sm min-w-0 truncate">
-                      <SafeName name={c.name} />
-                    </span>
-                    <input
-                      type="checkbox"
-                      aria-label={c.name}
-                      checked={toAdd.has(c.userId)}
-                      onChange={() =>
-                        setToAdd(s => {
-                          const n = new Set(s);
-                          if (n.has(c.userId)) n.delete(c.userId);
-                          else n.add(c.userId);
-                          return n;
-                        })
-                      }
-                    />
-                  </label>
-                </li>
-              ))}
-            </ul>
-          )}
+          {/* The picker of a new chat (Lucas's screen 10). */}
+          <MemberPicker
+            contacts={addable}
+            selected={toAdd}
+            onToggle={userId =>
+              setToAdd(s => {
+                const n = new Set(s);
+                if (n.has(userId)) n.delete(userId);
+                else n.add(userId);
+                return n;
+              })
+            }
+            emptyText={t('new_group.no_eligible_contacts')}
+          />
           <Button
             variant="primary"
             fullWidth

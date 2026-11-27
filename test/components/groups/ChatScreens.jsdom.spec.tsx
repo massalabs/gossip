@@ -5,6 +5,7 @@ import { SessionStatus, type GossipSdk } from '@massalabs/gossip-sdk';
 import NewGroup from '../../../src/pages/NewGroup';
 import Discussions from '../../../src/pages/Discussions';
 import ArchivedChats from '../../../src/pages/ArchivedChats';
+import GroupSettings from '../../../src/pages/GroupSettings';
 import GroupListSection from '../../../src/components/groups/GroupListSection';
 import { useDiscussionStore } from '../../../src/stores/discussionStore';
 import { useSdkStore } from '../../../src/stores/sdkStore';
@@ -271,6 +272,136 @@ describe('chat screens', () => {
       expect(
         row.querySelector('[data-testid="group-preview"]')?.textContent
       ).toBe('Alice: 12 Canal Street');
+    });
+  });
+
+  describe('chat settings (screens 09 to 13)', () => {
+    async function openSettings(
+      over: Parameters<typeof summary>[0] = {}
+    ): Promise<HTMLDivElement> {
+      useDiscussionStore.setState({
+        contacts: [
+          { userId: 'bob', name: 'Bob' },
+          { userId: 'carl', name: 'Carl' },
+          { userId: 'dan', name: 'Dan' },
+        ] as never,
+      });
+      fake.state.groups = [
+        summary({ members: ['me', 'bob', 'carl'], ...over }),
+      ];
+      useGroupStore.getState().init();
+      await act(flush);
+      const r = await renderAt(
+        <GroupSettings />,
+        '/group/g1/settings',
+        '/group/:groupId/settings'
+      );
+      unmount = r.unmount;
+      await act(flush);
+      return r.container;
+    }
+
+    it('lists the members with their avatars, the owner marked, and "Add members" once, above them', async () => {
+      const c = await openSettings();
+      const list = c.querySelector('[data-testid="group-members"]')!;
+      expect(list.querySelectorAll('li')).toHaveLength(3);
+      expect(list.querySelectorAll('[role="img"]')).toHaveLength(3);
+      expect(list.querySelectorAll('li')[0].textContent).toContain(
+        'details.owner'
+      );
+      expect(buttonsNamed('details.add_members')).toHaveLength(1);
+      expect(c.textContent).toContain('details.members · 3');
+      // Never the user's own row.
+      expect(
+        list
+          .querySelectorAll('li')[0]
+          .querySelector('[data-testid="member-remove"]')
+      ).toBeNull();
+    });
+
+    it('adds members with the picker of a new chat', async () => {
+      await openSettings();
+      await click(buttonsNamed('details.add_members')[0]);
+      const boxes = document.querySelectorAll('[role="checkbox"]');
+      expect(Array.from(boxes).map(b => b.getAttribute('aria-label'))).toEqual([
+        'Dan',
+      ]);
+      await click(boxes[0]);
+      const adds = buttonsNamed('details.add_members');
+      await click(adds[adds.length - 1]);
+      await act(flush);
+      expect(fake.service.changeMembers).toHaveBeenCalledWith('g1', {
+        add: ['dan'],
+      });
+    });
+
+    it('removes a member only after the confirmation', async () => {
+      const c = await openSettings();
+      await click(c.querySelectorAll('[data-testid="member-remove"]')[0]);
+      expect(document.body.textContent).toContain(
+        'details.remove_title:\u2068Bob\u2069'
+      );
+      expect(fake.service.changeMembers).not.toHaveBeenCalled();
+      await click(buttonsNamed('choices.cancel')[0]);
+      expect(fake.service.changeMembers).not.toHaveBeenCalled();
+      await click(c.querySelectorAll('[data-testid="member-remove"]')[0]);
+      const confirm = buttonsNamed('details.remove');
+      await click(confirm[confirm.length - 1]);
+      await act(flush);
+      expect(fake.service.changeMembers).toHaveBeenCalledWith('g1', {
+        remove: ['bob'],
+      });
+    });
+
+    it('makes the owner pick the next owner before leaving', async () => {
+      await openSettings();
+      await click(buttonsNamed('details.leave')[0]);
+      expect(document.body.textContent).toContain('choices.pick_next_owner');
+      const leave = document.querySelector(
+        '[data-testid="handover-leave"]'
+      ) as HTMLButtonElement;
+      expect(leave.disabled).toBe(true);
+      await click(document.querySelector('[role="radio"]'));
+      expect(leave.disabled).toBe(false);
+      await click(leave);
+      await act(flush);
+      expect(fake.service.handOver).toHaveBeenCalledWith('g1', 'bob', {
+        leave: true,
+      });
+      expect(fake.service.leave).not.toHaveBeenCalled();
+    });
+
+    it('gives a member who is not the owner the ways to leave, each one a choice', async () => {
+      await openSettings({ owner: 'bob' });
+      expect(buttonsNamed('details.add_members')).toHaveLength(0);
+      expect(
+        document.querySelector('[data-testid="member-remove"]')
+      ).toBeNull();
+      await click(buttonsNamed('details.leave')[0]);
+      expect(document.body.textContent).not.toContain(
+        'choices.pick_next_owner'
+      );
+      await click(byText('choices.leave_signed')?.closest('button'));
+      await act(flush);
+      expect(fake.service.leave).toHaveBeenCalledWith('g1', 'Signed');
+    });
+
+    it('offers "Delete chat" only once the user is out of the chat, after a confirmation', async () => {
+      const c = await openSettings({ status: 'left' });
+      expect(buttonsNamed('details.leave')).toHaveLength(0);
+      await click(buttonsNamed('details.delete_locally')[0]);
+      expect(document.body.textContent).toContain('details.delete_title');
+      expect(fake.service.deleteGroup).not.toHaveBeenCalled();
+      const del = buttonsNamed('common:delete');
+      await click(del[del.length - 1]);
+      await act(flush);
+      expect(fake.service.deleteGroup).toHaveBeenCalledWith('g1');
+      expect(c.querySelector('[data-testid="elsewhere"]')).not.toBeNull();
+    });
+
+    it('has no "Delete chat" while the user is a member', async () => {
+      await openSettings();
+      expect(buttonsNamed('details.delete_locally')).toHaveLength(0);
     });
   });
 });

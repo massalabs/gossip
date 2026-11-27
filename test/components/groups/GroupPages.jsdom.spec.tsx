@@ -657,16 +657,16 @@ describe('group pages', () => {
     unmount = r.unmount;
     await act(flush);
     await click(byText('details.add_members'));
-    // the name, not the box
+    // the name, not the box: the whole row picks
     await click(
-      Array.from(document.querySelectorAll('span')).find(
+      Array.from(document.querySelectorAll('bdi')).find(
         e => e.textContent === 'Carl'
       )
     );
     const box = document.querySelector(
-      'input[type="checkbox"][aria-label="Carl"]'
-    ) as HTMLInputElement;
-    expect(box.checked).toBe(true);
+      '[role="checkbox"][aria-label="Carl"]'
+    ) as HTMLElement;
+    expect(box.getAttribute('aria-checked')).toBe('true');
     const adds = Array.from(document.querySelectorAll('button')).filter(
       b => b.textContent?.trim() === 'details.add_members'
     );
@@ -760,7 +760,7 @@ describe('group pages', () => {
     await openSettings(['me', 'bob']);
     await click(byText('details.add_members'));
     const boxes = Array.from(
-      document.querySelectorAll('input[type="checkbox"]')
+      document.querySelectorAll('[role="checkbox"]')
     ).map(b => b.getAttribute('aria-label'));
     expect(boxes).toEqual(['Carl']);
   });
