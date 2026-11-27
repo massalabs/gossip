@@ -2622,6 +2622,15 @@ export class GroupService {
     );
   }
 
+  /**
+   * Sets (or, with null, clears) the user's own name for a chat (§5.11): a
+   * device-only field (`local_name`) of the device's record of the chat,
+   * beside its roots. Never sent. The root, which holds the shared name and
+   * is hashed into the root ID, is never changed by it and stays intact in
+   * storage. When the owner saves a shared name for everyone, the owner's
+   * own name is cleared with this call, so that the owner sees what they
+   * typed (D.101).
+   */
   setLocalName(groupId: GroupId, name: string | null): Promise<void> {
     return this.run(
       node =>
