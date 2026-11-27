@@ -68,7 +68,14 @@
     "delete_group_body": "Supprime le Chat de cet appareil.",
     "confirm_title": "Êtes-vous sûr ?",
     "confirm": "Confirmer",
-    "pick_next_owner": "Choisir le prochain propriétaire"
+    "pick_next_owner": "Choisir le prochain propriétaire",
+    "how_title": "Comment partir",
+    "keep_title": "Ce qui reste sur cet appareil",
+    "keep_read_only": "Le garder, en lecture seule",
+    "keep_delete": "Le supprimer",
+    "keep_fixed_quiet": "Partir discrètement supprime les messages de cet appareil.",
+    "keep_fixed_leave": "Partir de cette façon supprime le Chat et ses messages de cet appareil.",
+    "delete_needs_leave": "Vous êtes encore dans ce Chat. Choisissez d'abord comment le quitter."
   },
   "timeline": {
     "founded": "{{owner}} a créé le Chat",

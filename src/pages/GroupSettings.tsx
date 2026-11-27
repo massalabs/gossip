@@ -20,14 +20,15 @@ import BaseModal from '../components/ui/BaseModal';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import SafeName from '../components/groups/SafeName';
 import ChatNameDialog from '../components/groups/ChatNameDialog';
-import LeaveGroupSheet, {
-  type LeaveAction,
-} from '../components/groups/LeaveGroupSheet';
 import ResolveForkPanel from '../components/groups/ResolveForkPanel';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import MemberPicker from '../components/groups/MemberPicker';
 import ConfirmSheet from '../components/groups/ConfirmSheet';
-import { canDeleteChat, useDeleteChat } from '../hooks/useDeleteChat';
+import {
+  canDeleteChat,
+  canLeaveChat,
+  useChatExit,
+} from '../hooks/useDeleteChat';
 import MessageTimerField from '../components/groups/MessageTimerField';
 import { messageTimerSentence } from '../constants/messageTimer';
 import { useGossipSdk } from '../hooks/useGossipSdk';
@@ -99,11 +100,10 @@ const GroupSettings: React.FC = () => {
   const group = entry?.summary;
   const archived = entry?.archived ?? false;
   const [modal, setModal] = useState<Modal>(null);
-  const [leaving, setLeaving] = useState(false);
   const [toAdd, setToAdd] = useState<Set<string>>(new Set());
   const [contactNameError, setContactNameError] = useState<string | null>(null);
   const service = getGroupService();
-  const deleteChat = useDeleteChat(() => navigate(ROUTES.discussions()));
+  const exit = useChatExit(() => navigate(ROUTES.discussions()));
 
   const [ownedEnds, setOwnedEnds] = useState<GroupEpoch[]>([]);
   const ends = group?.mustResolve
@@ -230,27 +230,6 @@ const GroupSettings: React.FC = () => {
       const result = await gossip.conversations.addAsContact(member, trimmed);
       if (!result.success) throw new Error(result.reason);
     }, t('details.contact_added'));
-  };
-
-  const onLeaveAction = async (action: LeaveAction) => {
-    setLeaving(false);
-    let ok = false;
-    switch (action.type) {
-      case 'leave':
-        ok = await run(() => service.leave(groupId, action.choice));
-        break;
-      case 'handoverLeave':
-        ok = await run(() =>
-          service.handOver(groupId, action.newOwner, { leave: true })
-        );
-        break;
-      case 'dissolve':
-        ok = await run(() => service.dissolve(groupId, action.deleteMessages));
-        break;
-      default:
-        break;
-    }
-    if (ok && action.type !== 'dissolve') navigate(ROUTES.discussions());
   };
 
   return (
@@ -536,35 +515,26 @@ const GroupSettings: React.FC = () => {
             }
           />
         )}
-        {active && (
+        {canLeaveChat(group.status) && (
           <ActionButton
             icon={<LogOut className="w-4 h-4" />}
             label={t('details.leave')}
-            onClick={() => setLeaving(true)}
+            onClick={() => exit.leave(groupId)}
             danger
           />
         )}
-        {/* Only a chat the user is no longer in can be deleted here. */}
+        {/* On a chat the user is still in, it opens the leave screen with
+            "Delete it" chosen: the engine deletes a chat the user is out of. */}
         {canDeleteChat(group.status) && (
           <ActionButton
             icon={<Trash2 className="w-4 h-4" />}
             label={t('details.delete_locally')}
             danger
-            onClick={() => deleteChat.ask(groupId)}
+            onClick={() => exit.remove(groupId)}
           />
         )}
       </div>
-      {deleteChat.sheet}
-
-      <LeaveGroupSheet
-        isOpen={leaving}
-        mode="leave"
-        isOwner={isOwner}
-        otherMembers={others}
-        memberName={memberName}
-        onAction={action => void onLeaveAction(action)}
-        onClose={() => setLeaving(false)}
-      />
+      {exit.sheets}
 
       <ChatNameDialog
         isOpen={modal?.kind === 'name'}

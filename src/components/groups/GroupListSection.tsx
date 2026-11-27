@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Archive, Trash2 } from 'react-feather';
+import { Archive, LogOut, Trash2 } from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
@@ -23,7 +23,11 @@ import SafeName from './SafeName';
 import GroupAvatar from './GroupAvatar';
 import ContextMenu from '../ui/ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
-import { canDeleteChat, useDeleteChat } from '../../hooks/useDeleteChat';
+import {
+  canDeleteChat,
+  canLeaveChat,
+  useChatExit,
+} from '../../hooks/useDeleteChat';
 
 interface GroupListSectionProps {
   /** Only groups whose name matches (the list's search). */
@@ -50,7 +54,12 @@ const GroupRow: React.FC<{
   onOpen: () => void;
   /** "Archive chat" or "Unarchive", a mark on this device only. */
   onToggleArchived: () => void;
-  /** "Delete chat", with its confirmation, when the engine allows it. */
+  /** "Leave chat", while the user is in the chat: the leave screen. */
+  onLeave?: () => void;
+  /**
+   * "Delete chat": the leave screen with "Delete it" chosen while the user
+   * is in the chat, its simple confirmation once out of it.
+   */
   onDelete?: () => void;
 }> = ({
   entry,
@@ -62,12 +71,14 @@ const GroupRow: React.FC<{
   continuation,
   onOpen,
   onToggleArchived,
+  onLeave,
   onDelete,
 }) => {
   const { t } = useTranslation('groups');
   const readOnly = entry.summary.status !== 'member';
   // The long press offers what Lucas's design lists for a chat: archiving
-  // (a mark on this device only) and "Delete chat" where the engine allows it.
+  // (a mark on this device only), leaving, and "Delete chat", each leading to
+  // the same screen or confirmation as in the chat's settings.
   const [menuOpen, setMenuOpen] = useState(false);
   const longPress = useLongPress({
     onLongPress: () => setMenuOpen(true),
@@ -149,6 +160,16 @@ const GroupRow: React.FC<{
               icon: <Archive className="w-4 h-4" />,
               onClick: onToggleArchived,
             },
+            ...(onLeave
+              ? [
+                  {
+                    label: t('details.leave'),
+                    icon: <LogOut className="w-4 h-4" />,
+                    onClick: onLeave,
+                    danger: true,
+                  },
+                ]
+              : []),
             ...(onDelete
               ? [
                   {
@@ -190,7 +211,7 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
     : allInvitations.filter(i => !i.migrationOf && !i.continues);
   const refresh = useGroupStore(s => s.refresh);
   const setArchived = useGroupStore(s => s.setArchived);
-  const deleteChat = useDeleteChat();
+  const exit = useChatExit();
   const me = useAccountStore(s => s.userProfile?.userId);
   const memberName = useGroupMemberName();
   const discussions = useDiscussionStore(s => s.discussions);
@@ -308,9 +329,14 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
                     () => toast.error(t('details.failed'))
                   );
                 }}
+                onLeave={
+                  canLeaveChat(entry.summary.status)
+                    ? () => exit.leave(entry.summary.groupId)
+                    : undefined
+                }
                 onDelete={
                   canDeleteChat(entry.summary.status)
-                    ? () => deleteChat.ask(entry.summary.groupId)
+                    ? () => exit.remove(entry.summary.groupId)
                     : undefined
                 }
               />
@@ -318,7 +344,7 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
           })}
         </>
       )}
-      {deleteChat.sheet}
+      {exit.sheets}
     </section>
   );
 };

@@ -68,7 +68,14 @@
     "delete_group_body": "Deletes the chat from this device.",
     "confirm_title": "Are you sure?",
     "confirm": "Confirm",
-    "pick_next_owner": "Pick the next owner"
+    "pick_next_owner": "Pick the next owner",
+    "how_title": "How to leave",
+    "keep_title": "What to keep on this device",
+    "keep_read_only": "Keep it, read only",
+    "keep_delete": "Delete it",
+    "keep_fixed_quiet": "Leaving quietly deletes the messages from this device.",
+    "keep_fixed_leave": "Leaving this way deletes the chat and its messages from this device.",
+    "delete_needs_leave": "You are still in this chat. Choose how to leave it first."
   },
   "timeline": {
     "founded": "{{owner}} created the chat",

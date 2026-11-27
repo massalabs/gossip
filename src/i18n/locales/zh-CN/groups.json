@@ -68,7 +68,14 @@
     "delete_group_body": "从本设备删除此聊天。",
     "confirm_title": "确定吗？",
     "confirm": "确认",
-    "pick_next_owner": "选择下一任所有者"
+    "pick_next_owner": "选择下一任所有者",
+    "how_title": "如何退出",
+    "keep_title": "在本设备上保留什么",
+    "keep_read_only": "保留，只读",
+    "keep_delete": "删除",
+    "keep_fixed_quiet": "悄悄退出会从本设备删除消息。",
+    "keep_fixed_leave": "以这种方式退出会从本设备删除此聊天及其消息。",
+    "delete_needs_leave": "你仍在此聊天中。请先选择如何退出。"
   },
   "timeline": {
     "founded": "{{owner}} 创建了聊天",
