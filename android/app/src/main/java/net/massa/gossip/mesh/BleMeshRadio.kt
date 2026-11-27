@@ -76,14 +76,13 @@ class BleMeshRadio(
     private val handler = Handler(thread.looper)
     private val bluetoothManager = context.getSystemService(BluetoothManager::class.java)
     private val selector = NeighbourSelector(random = random)
-    private val inboundGate = InboundGate()
+    private val admission = PeripheralAdmission()
     private val nextLinkId = AtomicInteger(1)
 
     // Read from any thread by sendFrame/linkCount, written on the radio thread only.
     private val links = ConcurrentHashMap<Int, Link>()
     private val linkByAddress = HashMap<String, Int>()
     private val pendingCentral = HashMap<String, Pending>()
-    private val pendingPeripheral = HashMap<String, Pending>()
 
     private var listener: MeshRadioListener? = null
     private var mode = PowerMode.BALANCED
@@ -187,7 +186,7 @@ class BleMeshRadio(
             }
             for (pending in pendingCentral.values) pending.gatt?.close()
             pendingCentral.clear()
-            pendingPeripheral.clear()
+            admission.clear()
             gattServer?.close()
         } catch (e: SecurityException) {
             DebugLog.w(TAG, "Bluetooth permission missing while stopping", e)
@@ -290,7 +289,7 @@ class BleMeshRadio(
         }
 
         override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
-            handler.post { pendingPeripheral[device.address]?.mtu = mtu }
+            handler.post { admission.onMtuChanged(device.address, mtu) }
         }
 
         override fun onDescriptorWriteRequest(
@@ -308,13 +307,18 @@ class BleMeshRadio(
                 }
                 return
             }
-            if (responseNeeded) {
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+            if (descriptor.uuid != MeshConstants.CCCD_UUID ||
+                descriptor.characteristic?.uuid != MeshConstants.CHUNK_CHARACTERISTIC_UUID
+            ) {
+                if (responseNeeded) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                }
+                return
             }
-            if (descriptor.uuid != MeshConstants.CCCD_UUID) return
             val enabled = value != null &&
                 value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-            handler.post { onNotificationsSubscribed(device, enabled) }
+            // Answered on the radio thread: whether the subscribe is accepted depends on its state.
+            handler.post { onNotificationsSubscribed(device, requestId, responseNeeded, enabled) }
         }
 
         override fun onCharacteristicWriteRequest(
@@ -338,7 +342,7 @@ class BleMeshRadio(
             }
             if (characteristic.uuid != MeshConstants.CHUNK_CHARACTERISTIC_UUID || value == null) return
             val chunk = value.copyOf()
-            handler.post { deliver(device.address, Role.PERIPHERAL, chunk) }
+            handler.post { onChunkWritten(device, chunk) }
         }
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
@@ -354,45 +358,84 @@ class BleMeshRadio(
         }
     }
 
+    /**
+     * Android reports here every Bluetooth LE device connected to the phone,
+     * not only mesh centrals: the user's earbuds or watch, other apps' devices,
+     * this phone's own central connections, the contact exchange. A connection
+     * is therefore not a mesh peer; it becomes one only when it uses the mesh
+     * service (see [PeripheralAdmission]). Connects are ignored, and so is the
+     * disconnect of a device that never used the service.
+     */
     private fun onServerConnectionState(device: BluetoothDevice, newState: Int) {
+        if (newState != BluetoothProfile.STATE_DISCONNECTED) return
         val address = device.address
-        if (newState == BluetoothProfile.STATE_CONNECTED) {
-            // The server callback also reports the connections this phone opened as
-            // central; cancelling one of those would drop that link too.
-            if (!isCentralTo(address) &&
-                (!running || busyCount() >= MeshConstants.MAX_LINKS ||
-                    !inboundGate.admit(address, inboundCount(), SystemClock.elapsedRealtime()))
-            ) {
-                // A contact exchange shares the app's connections: cancelling this
-                // one could cut its link, so while one runs it is only left unused.
-                if (!ContactExchangeGate.active) gattServer?.cancelConnection(device)
-                return
-            }
-            pendingPeripheral[address] = Pending(SystemClock.elapsedRealtime())
-        } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-            pendingPeripheral.remove(address)
-            linkFor(address, Role.PERIPHERAL)?.let { removeLink(it) }
-        }
+        admission.onDisconnected(address)
+        linkFor(address, Role.PERIPHERAL)?.let { removeLink(it) }
     }
 
-    /** A central enabled notifications: the link works both ways from now on. */
-    private fun onNotificationsSubscribed(device: BluetoothDevice, enabled: Boolean) {
+    private fun slotsFor(address: String) = PeripheralAdmission.Slots(
+        running = running,
+        busy = links.size + pendingCentral.size,
+        inboundLinks = links.values.count { it.role == Role.PERIPHERAL },
+        isCentralTo = isCentralTo(address),
+        exchangeActive = ContactExchangeGate.active,
+    )
+
+    /**
+     * A central wrote the CCCD of the chunk characteristic: its first use of
+     * the mesh service, where the limits and the inbound gate apply. Enabled
+     * and admitted, the link works both ways from now on.
+     */
+    private fun onNotificationsSubscribed(device: BluetoothDevice, requestId: Int, responseNeeded: Boolean, enabled: Boolean) {
         val address = device.address
         if (!enabled) {
+            respond(device, requestId, responseNeeded, BluetoothGatt.GATT_SUCCESS)
             linkFor(address, Role.PERIPHERAL)?.let { closeNow(it) }
             return
         }
-        val pending = pendingPeripheral.remove(address) ?: return
-        addLink(
-            Link(
-                id = nextLinkId.getAndIncrement(),
-                role = Role.PERIPHERAL,
-                address = address,
-                mtu = pending.mtu,
-                upSinceMs = SystemClock.elapsedRealtime(),
-                device = device,
-            )
-        )
+        if (linkFor(address, Role.PERIPHERAL) != null) {
+            respond(device, requestId, responseNeeded, BluetoothGatt.GATT_SUCCESS)
+            return
+        }
+        when (val verdict = admission.onSubscribe(address, slotsFor(address), SystemClock.elapsedRealtime())) {
+            is PeripheralAdmission.Verdict.Admit -> {
+                respond(device, requestId, responseNeeded, BluetoothGatt.GATT_SUCCESS)
+                addLink(
+                    Link(
+                        id = nextLinkId.getAndIncrement(),
+                        role = Role.PERIPHERAL,
+                        address = address,
+                        mtu = verdict.mtu,
+                        upSinceMs = SystemClock.elapsedRealtime(),
+                        device = device,
+                    )
+                )
+            }
+            is PeripheralAdmission.Verdict.Refuse -> {
+                // A failed subscribe makes a Gossip central give up and disconnect on
+                // its own (Android: onSubscribed abandons the connection; iOS:
+                // didUpdateNotificationStateFor with an error abandons it). The cancel
+                // also covers a central that ignores the error.
+                respond(device, requestId, responseNeeded, SUBSCRIBE_REFUSED_STATUS)
+                if (verdict.cancel) gattServer?.cancelConnection(device)
+            }
+            PeripheralAdmission.Verdict.Wait -> respond(device, requestId, responseNeeded, BluetoothGatt.GATT_SUCCESS)
+        }
+    }
+
+    /** A chunk from a central: delivered on its link, or, with no link yet, a first use of the mesh service. */
+    private fun onChunkWritten(device: BluetoothDevice, chunk: ByteArray) {
+        val address = device.address
+        if (linkFor(address, Role.PERIPHERAL) != null) {
+            deliver(address, Role.PERIPHERAL, chunk)
+            return
+        }
+        val verdict = admission.onWriteBeforeSubscribe(address, slotsFor(address), SystemClock.elapsedRealtime())
+        if (verdict is PeripheralAdmission.Verdict.Refuse && verdict.cancel) gattServer?.cancelConnection(device)
+    }
+
+    private fun respond(device: BluetoothDevice, requestId: Int, responseNeeded: Boolean, status: Int) {
+        if (responseNeeded) gattServer?.sendResponse(device, requestId, status, 0, null)
     }
 
     // ── Central role ─────────────────────────────────────────────────────
@@ -439,7 +482,10 @@ class BleMeshRadio(
 
     private fun startScan() {
         val scanner = bluetoothManager?.adapter?.bluetoothLeScanner ?: return
-        val filters = listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(MeshConstants.SERVICE_UUID)).build())
+        // One filter per supported mesh version: a phone advertising any of them is a candidate.
+        val filters = MeshConstants.SUPPORTED_SERVICE_UUIDS.map {
+            ScanFilter.Builder().setServiceUuid(ParcelUuid(it)).build()
+        }
         val settings = ScanSettings.Builder()
             .setScanMode(
                 if (mode == PowerMode.PERFORMANCE) ScanSettings.SCAN_MODE_LOW_LATENCY
@@ -470,7 +516,7 @@ class BleMeshRadio(
         val busy = HashSet<String>().apply {
             addAll(linkByAddress.keys)
             addAll(pendingCentral.keys)
-            addAll(pendingPeripheral.keys)
+            addAll(admission.pendingAddresses())
         }
         for (address in selector.pickConnections(busy, SystemClock.elapsedRealtime())) {
             try {
@@ -563,7 +609,7 @@ class BleMeshRadio(
 
     private fun subscribe(gatt: BluetoothGatt, status: Int) {
         if (pendingCentral[gatt.device.address]?.gatt !== gatt) return
-        val characteristic = gatt.getService(MeshConstants.SERVICE_UUID)
+        val characteristic = MeshConstants.SUPPORTED_SERVICE_UUIDS.firstNotNullOfOrNull { gatt.getService(it) }
             ?.getCharacteristic(MeshConstants.CHUNK_CHARACTERISTIC_UUID)
         val cccd = characteristic?.getDescriptor(MeshConstants.CCCD_UUID)
         if (status != BluetoothGatt.GATT_SUCCESS || characteristic == null || cccd == null ||
@@ -622,10 +668,6 @@ class BleMeshRadio(
     private fun isCentralTo(address: String): Boolean =
         pendingCentral.containsKey(address) || linkFor(address, Role.CENTRAL) != null
 
-    private fun busyCount(): Int = links.size + pendingCentral.size + pendingPeripheral.size
-
-    private fun inboundCount(): Int = pendingPeripheral.size + links.values.count { it.role == Role.PERIPHERAL }
-
     private fun linkFor(address: String, role: Role): Link? {
         val link = linkByAddress[address]?.let { links[it] } ?: return null
         return if (link.role == role) link else null
@@ -648,7 +690,7 @@ class BleMeshRadio(
         if (linkByAddress[link.address] == link.id) linkByAddress.remove(link.address)
         link.queue.clear()
         selector.onDisconnected(link.address, SystemClock.elapsedRealtime())
-        if (link.role == Role.PERIPHERAL) inboundGate.onClosed(link.address, SystemClock.elapsedRealtime())
+        if (link.role == Role.PERIPHERAL) admission.onLinkClosed(link.address, SystemClock.elapsedRealtime())
         listener?.onLinkDown(link.id)
         scheduleEvaluate()
     }
@@ -750,15 +792,16 @@ class BleMeshRadio(
                 if (now - pending.startedMs > CONNECT_TIMEOUT_MS) pending.gatt?.let { abandon(it) }
                     ?: pendingCentral.remove(address)
             }
-            for ((address, pending) in pendingPeripheral.entries.toList()) {
-                if (now - pending.startedMs > CONNECT_TIMEOUT_MS) {
-                    pendingPeripheral.remove(address)
-                    if (isCentralTo(address) || ContactExchangeGate.active) continue
-                    try {
-                        bluetoothManager?.adapter?.getRemoteDevice(address)?.let { gattServer?.cancelConnection(it) }
-                    } catch (e: IllegalArgumentException) {
-                        DebugLog.w(TAG, "Bad pending address")
-                    }
+            // Only devices that wrote to the mesh service and never subscribed are pending
+            // here; a device that never used the service is not tracked, so never cut. A
+            // subscribed peer that then stalls is a link, closed by the core's handshake
+            // timeout (20 s) or by the stuck-send check below.
+            val expired = admission.expire(now) { !isCentralTo(it) && !ContactExchangeGate.active }
+            for (address in expired) {
+                try {
+                    bluetoothManager?.adapter?.getRemoteDevice(address)?.let { gattServer?.cancelConnection(it) }
+                } catch (e: IllegalArgumentException) {
+                    DebugLog.w(TAG, "Bad pending address")
                 }
             }
             for (link in links.values.toList()) {
@@ -770,8 +813,15 @@ class BleMeshRadio(
 
     private companion object {
         const val TAG = "GossipMeshRadio"
+
+        /**
+         * ATT "Insufficient Resources", the answer to a refused subscribe: the
+         * mesh is full. Not an authentication or encryption error, which would
+         * make the other phone start pairing and show a prompt.
+         */
+        const val SUBSCRIBE_REFUSED_STATUS = 0x11
         const val EVALUATE_DELAY_MS = 500L
-        const val CONNECT_TIMEOUT_MS = 20_000L
+        const val CONNECT_TIMEOUT_MS = PeripheralAdmission.CONNECT_TIMEOUT_MS
         const val SEND_TIMEOUT_MS = 5_000L
         const val WATCHDOG_INTERVAL_MS = 5_000L
     }

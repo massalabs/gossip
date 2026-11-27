@@ -103,13 +103,30 @@ node; a lock or another account does not need it (see
 
 | Item                                            | Value                                  |
 | ----------------------------------------------- | -------------------------------------- |
-| Service UUID                                    | `6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f60` |
+| Service UUID (mesh version 1)                   | `6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f01` |
 | Characteristic (write without response, notify) | `6a8b2f41-5c1d-4e2a-9b7f-3d0c8e1a5f60` |
 | ATT MTU requested (Android)                     | 517                                    |
 | Links per phone, both roles                     | 8                                      |
 
 The UUID is fixed on purpose: iOS only discovers peers in the background by exact UUID.
 It also tells a scanner nearby that the phone runs Gossip, which is why the mesh is opt-in.
+
+The last byte of the service UUID is the mesh version number itself (1 to 255; 0 is not a
+version): version 1 ends in `5f01`, version 2 would end in `5f02`. 0.1.0 and 0.1.1
+advertised `…5f60`, which now reads as version 96 and is supported by no build, so 0.1.2
+does not mesh with them (intended: no phone stays on those versions). A phone advertises
+and serves the UUID of the version it speaks and scans for the UUIDs of every version it
+can talk to (`MESH_VERSION` and `SUPPORTED_MESH_VERSIONS` in `MeshConstants.kt`,
+`meshVersion` and `supportedMeshVersions` in `MeshRadio.swift`). The version is not an
+extra advertised byte: iOS can only advertise service UUIDs and a name, and an extra byte
+would make a Gossip phone easier to recognise. The characteristic UUID is the same for
+every version.
+
+The last byte `00` (`6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f00`) is reserved as a marker for
+future extensions of this scheme, for example a later format that carries the version
+elsewhere. It is never a version: no build may advertise it or give it a version meaning
+without a new decision, and a build that does not implement such an extension neither
+scans for it nor connects to it.
 
 ## Neighbour choice and power modes
 
@@ -140,6 +157,12 @@ These are starting values; the node's simulation is where they get tuned.
 - The node's store (`files/mesh`) and the mesh switches (`GossipMeshPrefs.xml`, which
   also holds a random install id) are excluded from backups and device transfer, so a
   restored phone does not restart the mesh on its own.
+- Android reports every Bluetooth device connected to the phone to the mesh's GATT
+  server (earbuds, a watch, other apps' devices). Such a device is ignored until it
+  subscribes to or writes the mesh characteristic: it takes no link slot, is not
+  counted, and the app never disconnects it. The limits below apply at that point; a
+  refused subscribe is answered with an error (ATT "Insufficient Resources"), after which
+  the app may cancel that connection.
 - Other phones may open at most 4 of the 8 links, and a central whose link closed waits
   60 s before it may connect again. Long (prepared) writes and writes at an offset are
   refused. A link with more than 512 KiB received but not yet read by the core is closed.
