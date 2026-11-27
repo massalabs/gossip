@@ -1878,6 +1878,11 @@ export class GroupService {
     // so that the two never run together; this time only applies if that
     // answer never comes (the app closed first).
     const now = this.now();
+    dlog('sdk', 'message.mesh_only', {
+      outbox: id,
+      peer: shortId(contactUserId),
+      by: outcome.acceptedBy,
+    });
     await this.queries.groups
       .markOutboxMeshOnly(
         id,
@@ -1899,6 +1904,17 @@ export class GroupService {
   ): Promise<void> {
     // Closed: the row stays marked and is posted at the next open.
     if (this.closed) return;
+    if (debugLogEnabled()) {
+      dlog('sdk', 'message.send.settled', {
+        outbox: id,
+        peer: shortId(contactUserId),
+        by: settled.acceptedBy,
+        failed: settled.failures.map(f => f.kind),
+        conflict: settled.failures.some(
+          f => f.kind === 'internet' && isSeekerConflict(f.error)
+        ),
+      });
+    }
     if (settled.acceptedBy.includes('internet')) {
       this.outboxFailures.delete(id);
       await this.queries.groups.deleteOutbox(id);
@@ -2008,16 +2024,33 @@ export class GroupService {
     for (const [index, row] of due.entries()) {
       if (this.closed) return;
       if (now - row.meshOnlySince!.getTime() > NETWORK_RETENTION_MS) {
+        dlog('sdk', 'message.repost', {
+          outbox: row.id,
+          peer: shortId(row.contactUserId),
+          result: 'expired',
+        });
         this.outboxFailures.delete(row.id);
         await this.queries.groups.deleteOutbox(row.id);
         continue;
       }
+      const repostStarted = performance.now();
       try {
         await this.messageProtocol.sendMessage(
           { seeker: row.seeker, ciphertext: row.ciphertext },
           { internetOnly: true }
         );
       } catch (error) {
+        dlog(
+          'sdk',
+          'message.repost',
+          {
+            outbox: row.id,
+            peer: shortId(row.contactUserId),
+            result: 'failed',
+            ...errFields(error),
+          },
+          { lvl: 'warn', dur: since(repostStarted) }
+        );
         const kept = await this.outboxFailed(
           row.id,
           row.contactUserId,
@@ -2030,6 +2063,12 @@ export class GroupService {
         }
         return;
       }
+      dlog(
+        'sdk',
+        'message.repost',
+        { outbox: row.id, peer: shortId(row.contactUserId), result: 'sent' },
+        { dur: since(repostStarted) }
+      );
       this.outboxFailures.delete(row.id);
       await this.queries.groups.deleteOutbox(row.id);
     }

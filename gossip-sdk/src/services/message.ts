@@ -368,6 +368,13 @@ export class MessageService {
     const keys = new Set(seekers.map(s => encodeToBase64(s)));
     const added = [...keys].some(k => !this.lastWanted.has(k));
     this.lastWanted = keys;
+    if (debugLogEnabled()) {
+      dlog('sdk', 'mesh.wanted.updated', {
+        count: keys.size,
+        added,
+        updater: this.wantedSeekersUpdater !== null,
+      });
+    }
     this.wantedSeekersUpdater?.(seekers);
     return added;
   }
@@ -901,6 +908,13 @@ export class MessageService {
         const conflict = settled.failures.find(
           f => f.kind === 'internet' && isSeekerConflict(f.error)
         );
+        dlog('sdk', 'message.send.settled', {
+          row: messageId,
+          to: shortId(contactUserId),
+          by: settled.acceptedBy,
+          failed: settled.failures.map(f => f.kind),
+          conflict: conflict !== undefined,
+        });
         if (conflict) {
           await this.seekerConflicts?.handle(contactUserId);
           return;
@@ -1597,12 +1611,24 @@ export class MessageService {
       // holds another value at the seeker (an identical one is accepted):
       // the session is behind what was already published, and is renewed.
       let onServer = true;
+      const repostStarted = performance.now();
       try {
         await this.messageProtocol.sendMessage(
           { seeker: row.seeker, ciphertext: row.encryptedMessage },
           { internetOnly: true }
         );
       } catch (error) {
+        dlog(
+          'sdk',
+          'message.repost',
+          {
+            row: row.id,
+            to: shortId(row.contactUserId),
+            result: 'failed',
+            ...errFields(error),
+          },
+          { lvl: 'warn', dur: since(repostStarted) }
+        );
         const reason = error instanceof Error ? error.message : '';
         if (!/HTTP 4(?!29)\d\d/.test(reason)) {
           log.info('no server took a mesh-only message; retried later', {
@@ -1619,6 +1645,14 @@ export class MessageService {
         ) {
           continue;
         }
+      }
+      if (onServer) {
+        dlog(
+          'sdk',
+          'message.repost',
+          { row: row.id, to: shortId(row.contactUserId), result: 'sent' },
+          { dur: since(repostStarted) }
+        );
       }
       const latest = await this.queries.messages.getById(row.id);
       if (!latest || latest.status !== MessageStatus.SENT) continue;
