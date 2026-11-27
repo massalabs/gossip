@@ -292,6 +292,121 @@ fn the_notice_to_the_claimed_author_survives_a_restart_despite_the_hint() {
     assert_eq!(net.devs[0].node.t.relays.len(), 0);
 }
 
+// ── The record that lets the hinted peer be notified: one round only (D.98) ─
+
+#[test]
+fn the_record_for_the_hinted_peer_does_not_survive_the_first_round_when_its_notice_leaves() {
+    let mut net = Net::new(4, 1);
+    neighbors_of(&mut net, 0, &[1, 2]);
+    let chat = net.chat();
+    let e = publish_as(&mut net, 1, "as bob");
+    after_wait(&mut net);
+    // The record waits for the first round of sending.
+    assert_eq!(
+        net.devs[0].node.t.relays.get(&(chat, e.event_id())).map(|r| r.notify),
+        Some(Some(member(1)))
+    );
+    // The round: the notice to Bob is assembled, and the record is gone at once, before
+    // the transport even confirmed anything.
+    let now = net.now;
+    let dev = &mut net.devs[0];
+    let out = dev.node.poll_outbox(&mut dev.store, now, &mut net.rng).unwrap();
+    assert_eq!(dev.node.t.relays.len(), 0);
+    let to_bob: Vec<EventId> = out
+        .iter()
+        .filter(|o| o.to == member(1))
+        .flat_map(|o| announced(&frames(&o.plaintext)))
+        .collect();
+    assert_eq!(to_bob, vec![e.event_id()]);
+    // Abandoned by the transport: assembled again later, the hint now cancels it.
+    for o in out {
+        dev.node.abandon(o.handle);
+    }
+    dev.node.set_session(member(1), true);
+    net.now += MIN;
+    let again = net.poll_frames(0);
+    assert!(recipients(&again, announced, e.event_id()).contains(&2));
+    assert!(!recipients(&again, announced, e.event_id()).contains(&1));
+}
+
+#[test]
+fn the_record_for_the_hinted_peer_is_dropped_when_that_peer_has_no_session_in_the_first_round() {
+    let mut net = Net::new(4, 1);
+    neighbors_of(&mut net, 0, &[1, 2]);
+    let chat = net.chat();
+    let e = publish_as(&mut net, 1, "as bob");
+    after_wait(&mut net);
+    assert!(net.devs[0].node.t.relays.contains(&(chat, e.event_id())));
+    // No working session with Bob at that moment.
+    net.devs[0].node.set_session(member(1), false);
+    let sent = net.poll_frames(0);
+    assert!(recipients(&sent, announced, e.event_id()).contains(&2));
+    assert!(!sent.contains_key(&member(1)));
+    assert_eq!(net.devs[0].node.t.relays.len(), 0);
+    // Bob comes back: this device never notifies him of it.
+    net.devs[0].node.set_session(member(1), true);
+    net.now += MIN;
+    net.tick(0);
+    assert!(!recipients(&net.poll_frames(0), announced, e.event_id()).contains(&1));
+    // Even when nothing at all can be sent in that round, the record goes.
+    let f = publish_as(&mut net, 1, "as bob, again");
+    for p in [1, 2, 3] {
+        net.devs[0].node.set_session(member(p), false);
+    }
+    after_wait(&mut net);
+    assert!(net.devs[0].node.t.relays.contains(&(chat, f.event_id())));
+    assert!(net.poll(0).is_empty());
+    assert_eq!(net.devs[0].node.t.relays.len(), 0);
+}
+
+/// A chat of two: device 0 publishes as member 1, whose session is missing in the first round
+/// after the wait; member 1 is not notified then, nor later.
+fn chat_of_two_not_notified() -> (Net, MessageEvent) {
+    let mut net = Net::new(2, 2);
+    neighbors_of(&mut net, 0, &[1]);
+    neighbors_of(&mut net, 1, &[0]);
+    let e = publish_as(&mut net, 1, "as you");
+    net.devs[0].node.set_session(member(1), false);
+    after_wait(&mut net);
+    assert!(net.poll(0).is_empty());
+    assert_eq!(net.devs[0].node.t.relays.len(), 0);
+    net.devs[0].node.set_session(member(1), true);
+    net.now += MIN;
+    net.tick(0);
+    net.exchange();
+    assert!(!net.known(1, &e.event_id()), "not notified later");
+    (net, e)
+}
+
+#[test]
+fn in_a_chat_of_two_the_unnotified_member_gets_the_event_once_the_next_event_names_it() {
+    let (mut net, e) = chat_of_two_not_notified();
+    // The publisher's next message names it as a parent: member 1 asks, and is answered.
+    net.now += MIN;
+    let next = net.publish(0, "mine");
+    assert!(next.parents().contains(&e.event_id()));
+    // At the same moment: no lane or timer is involved, only the missing parent.
+    net.exchange();
+    assert!(net.held(1, &next.event_id()));
+    assert!(net.held(1, &e.event_id()));
+}
+
+#[test]
+fn in_a_chat_of_two_the_unnotified_member_gets_the_event_through_tip_sync() {
+    let (mut net, e) = chat_of_two_not_notified();
+    // Nothing else is published: member 1's periodic tip sync with device 0 lists it.
+    for _ in 0..12 {
+        net.now += 6 * HOUR;
+        net.tick(0);
+        net.tick(1);
+        net.exchange();
+        if net.held(1, &e.event_id()) {
+            break;
+        }
+    }
+    assert!(net.held(1, &e.event_id()));
+}
+
 #[test]
 fn the_first_time_of_the_hint_is_never_rewritten() {
     let mut net = Net::new(4, 1);

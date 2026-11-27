@@ -459,13 +459,14 @@ pub struct Hint {
 /// While `notify` is `None` the device is waiting until `due`, a random time after the
 /// publication ([`super::timing::RELAY_WAIT_MIN_MS`]): then it writes the hint and queues
 /// the notices, as a relay would once the event reached it. When the peer the hint names is
-/// in the notice set, the record stays with `notify` set to that peer until its notice has
-/// left the queue, so that the hint does not cancel that one notice: a relay announces an
-/// event to its neighbors whoever handed it over, and the hint is only this device's
-/// bookkeeping.
+/// in the notice set, the record stays with `notify` set to that peer for the first round of
+/// sending only ([`super::Node::poll_outbox`]), so that the hint does not cancel that one notice if
+/// it can be assembled then; after that round it is dropped, sent or not (D.98: it exists
+/// only for fabricated events, so it is a trace while it exists, and a real relay never
+/// notifies the peer it got the event from).
 ///
 /// Why durable: the notices must still go out if the app closes during the wait. The record
-/// lives a few seconds, or until that notice is handed to the transport; it holds no content.
+/// lives a few seconds, until the first round of sending after the wait; it holds no content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Relay {
     /// When the hint and the notices are due.
