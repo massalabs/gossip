@@ -111,6 +111,15 @@ node; a lock or another account does not need it (see
 The UUID is fixed on purpose: iOS only discovers peers in the background by exact UUID.
 It also tells a scanner nearby that the phone runs Gossip, which is why the mesh is opt-in.
 
+The last byte of the service UUID is the mesh version: version `v` ends in `0x5f + v`, so
+the UUID above is version 1 (the only one so far, spoken since 0.1.0), version 2 would end
+in `5f61`. A phone advertises and serves the UUID of the version it speaks and scans for
+the UUIDs of every version it can talk to (`MESH_VERSION` and `SUPPORTED_MESH_VERSIONS` in
+`MeshConstants.kt`, `meshVersion` and `supportedMeshVersions` in `MeshRadio.swift`). The
+version is not an extra advertised byte: iOS can only advertise service UUIDs and a name,
+and an extra byte would make a Gossip phone easier to recognise. The characteristic UUID
+is the same for every version.
+
 ## Neighbour choice and power modes
 
 A phone in a crowd hears far more neighbours than it can link to. Candidates above

@@ -439,7 +439,10 @@ class BleMeshRadio(
 
     private fun startScan() {
         val scanner = bluetoothManager?.adapter?.bluetoothLeScanner ?: return
-        val filters = listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(MeshConstants.SERVICE_UUID)).build())
+        // One filter per supported mesh version: a phone advertising any of them is a candidate.
+        val filters = MeshConstants.SUPPORTED_SERVICE_UUIDS.map {
+            ScanFilter.Builder().setServiceUuid(ParcelUuid(it)).build()
+        }
         val settings = ScanSettings.Builder()
             .setScanMode(
                 if (mode == PowerMode.PERFORMANCE) ScanSettings.SCAN_MODE_LOW_LATENCY
@@ -563,7 +566,7 @@ class BleMeshRadio(
 
     private fun subscribe(gatt: BluetoothGatt, status: Int) {
         if (pendingCentral[gatt.device.address]?.gatt !== gatt) return
-        val characteristic = gatt.getService(MeshConstants.SERVICE_UUID)
+        val characteristic = MeshConstants.SUPPORTED_SERVICE_UUIDS.firstNotNullOfOrNull { gatt.getService(it) }
             ?.getCharacteristic(MeshConstants.CHUNK_CHARACTERISTIC_UUID)
         val cccd = characteristic?.getDescriptor(MeshConstants.CCCD_UUID)
         if (status != BluetoothGatt.GATT_SUCCESS || characteristic == null || cccd == null ||

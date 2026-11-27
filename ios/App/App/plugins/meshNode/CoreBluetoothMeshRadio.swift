@@ -281,7 +281,7 @@ final class CoreBluetoothMeshRadio: NSObject, MeshRadio {
     private func startScan() {
         guard let central = central, central.state == .poweredOn, !scanning else { return }
         // Duplicates keep RSSI and last-seen fresh in the foreground; iOS ignores this in the background.
-        central.scanForPeripherals(withServices: [MeshConstants.serviceUUID], options: [
+        central.scanForPeripherals(withServices: MeshConstants.supportedServiceUUIDs, options: [
             CBCentralManagerScanOptionAllowDuplicatesKey: true,
         ])
         scanning = true
@@ -398,7 +398,7 @@ extension CoreBluetoothMeshRadio: CBCentralManagerDelegate {
             return
         }
         peripheral.delegate = self
-        peripheral.discoverServices([MeshConstants.serviceUUID])
+        peripheral.discoverServices(MeshConstants.supportedServiceUUIDs)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -427,7 +427,7 @@ extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil,
-              let service = peripheral.services?.first(where: { $0.uuid == MeshConstants.serviceUUID }) else {
+              let service = peripheral.services?.first(where: { MeshConstants.supportedServiceUUIDs.contains($0.uuid) }) else {
             abandon(peripheral)
             return
         }
@@ -485,7 +485,7 @@ extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
-        guard invalidatedServices.contains(where: { $0.uuid == MeshConstants.serviceUUID }),
+        guard invalidatedServices.contains(where: { MeshConstants.supportedServiceUUIDs.contains($0.uuid) }),
               let id = centralLinkByPeer[peripheral.identifier], let link = link(id) else { return }
         closeNow(link)
     }

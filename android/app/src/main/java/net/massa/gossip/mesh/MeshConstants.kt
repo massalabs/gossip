@@ -8,8 +8,64 @@ import java.util.UUID
  * the same ones in `MeshConstants.swift`.
  */
 object MeshConstants {
-    /** Advertised and scanned for. Fixed: iOS only discovers in the background by exact UUID. */
-    val SERVICE_UUID: UUID = UUID.fromString("6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f60")
+    /**
+     * Mesh protocol version this build speaks. It is carried in the last byte
+     * of the service UUID (see [serviceUuid]), not in an extra advertised
+     * byte: iOS can only advertise service UUIDs and a name, and any extra
+     * byte would make a Gossip phone easier to tell apart.
+     */
+    const val MESH_VERSION = 1
+
+    /**
+     * Versions this build can link with: it scans for the service UUID of
+     * each. A version left out here is never scanned for, so phones speaking
+     * only that version are never dialled.
+     */
+    val SUPPORTED_MESH_VERSIONS: List<Int> = listOf(1)
+
+    /** Version 1's UUID, the one 0.1.0 and 0.1.1 advertise: it must never change. */
+    private val VERSION_1_SERVICE_UUID: UUID = UUID.fromString("6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f60")
+
+    /** Last byte of [VERSION_1_SERVICE_UUID]; version v ends in `0x5f + v`. */
+    private const val VERSION_BYTE_OFFSET = 0x5f
+
+    const val MAX_MESH_VERSION = 0xff - VERSION_BYTE_OFFSET
+
+    /**
+     * The service UUID of mesh [version]: version 1's UUID with its last byte
+     * set to `0x5f + version`, so version 1 is `…5f60` (today's UUID, byte for
+     * byte), version 2 `…5f61`, up to version [MAX_MESH_VERSION] (`…5fff`).
+     * The simplest rule that keeps version 1 exact. Only the service UUID
+     * carries the version; the characteristic UUID is the same for all.
+     */
+    fun serviceUuid(version: Int): UUID {
+        require(version in 1..MAX_MESH_VERSION) { "mesh version out of range" }
+        val lsb = (VERSION_1_SERVICE_UUID.leastSignificantBits and 0xffL.inv()) or
+            (VERSION_BYTE_OFFSET + version).toLong()
+        return UUID(VERSION_1_SERVICE_UUID.mostSignificantBits, lsb)
+    }
+
+    /** The mesh version [uuid] names, or null when it is not a mesh service UUID. */
+    fun meshVersionOf(uuid: UUID): Int? {
+        if (uuid.mostSignificantBits != VERSION_1_SERVICE_UUID.mostSignificantBits ||
+            (uuid.leastSignificantBits and 0xffL.inv()) != (VERSION_1_SERVICE_UUID.leastSignificantBits and 0xffL.inv())
+        ) {
+            return null
+        }
+        val version = (uuid.leastSignificantBits and 0xffL).toInt() - VERSION_BYTE_OFFSET
+        return if (version in 1..MAX_MESH_VERSION) version else null
+    }
+
+    /**
+     * Advertised, and offered by the GATT server: the UUID of [MESH_VERSION].
+     * iOS only discovers in the background by exact UUID, which is why the
+     * version changes the UUID rather than adding to it.
+     */
+    val SERVICE_UUID: UUID = serviceUuid(MESH_VERSION)
+
+    /** Scanned for, and looked up on a peer: one UUID per supported version, the current one first. */
+    val SUPPORTED_SERVICE_UUIDS: List<UUID> =
+        (listOf(MESH_VERSION) + SUPPORTED_MESH_VERSIONS.filter { it != MESH_VERSION }).map(::serviceUuid)
 
     /** The one characteristic: centrals write chunks without response, peripherals notify them. */
     val CHUNK_CHARACTERISTIC_UUID: UUID = UUID.fromString("6a8b2f41-5c1d-4e2a-9b7f-3d0c8e1a5f60")
