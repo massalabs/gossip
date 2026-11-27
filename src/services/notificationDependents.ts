@@ -23,6 +23,7 @@ import { ForegroundSync } from './foregroundSync';
 import { backgroundRunnerStorageService } from './backgroundRunnerStorage';
 import { notificationService } from './notifications';
 import { bridgeSet } from '../sw-bridge';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
 
 /** KV key read by `public/runners/background-sync.js` — keep in sync. */
 export const NOTIFICATIONS_ENABLED_RUNNER_KEY = 'gossip-notifications-enabled';
@@ -68,11 +69,20 @@ async function applyKeepSync(notificationsOn: boolean): Promise<void> {
   const choice = await readKeepSyncChoice();
   const want = notificationsOn && choice;
   const running = await serviceFlag();
+  dlog('app', 'sync.keep_sync', {
+    notifications: notificationsOn,
+    choice,
+    running,
+    action: want === running ? 'none' : want ? 'start' : 'stop',
+  });
   if (want && !running) await ForegroundSync.start();
   if (!want && running) await ForegroundSync.stop();
 }
 
 async function applyUnlocked(notificationsOn: boolean): Promise<void> {
+  dlog('app', 'sync.notifications_dependents', {
+    notifications: notificationsOn,
+  });
   if (Capacitor.isNativePlatform()) {
     await backgroundRunnerStorageService.set(
       NOTIFICATIONS_ENABLED_RUNNER_KEY,
