@@ -790,9 +790,7 @@ export class AnnouncementService {
 
     log.info('announcement intended for us — decrypting');
 
-    const { username, message, messageTimer } = decodeAnnouncementPayload(
-      result.user_data
-    );
+    const { username, message } = decodeAnnouncementPayload(result.user_data);
 
     const announcerPkeys = result.announcer_public_keys;
     const contactUserIdRaw = announcerPkeys.derive_id();
@@ -818,18 +816,16 @@ export class AnnouncementService {
       isNewContact || contact!.connection === 'requested'
         ? ((await this.connections?.isCoMember(contactUserId)) ?? false)
         : contact!.connection === 'automatic';
-    // A contact request carries a payload (a name, a message or a timer);
-    // the announcement of a connection, an answer or a renewal carries none
-    // (`openConnection`, `createSessionForContact`).
-    const carriesRequest =
-      username !== undefined ||
-      message !== undefined ||
-      messageTimer !== undefined;
+    // A contact request always carries a payload, even with no name and no
+    // message (`encodeContactRequestPayload`; a request of 0.1.0 or 0.1.1
+    // carried its timer); the announcement of a connection, an answer or a
+    // renewal carries none (`openConnection`, `createSessionForContact`).
+    const carriesRequest = (result.user_data?.length ?? 0) > 0;
     // A member of a shared chat who also asks to become a contact (§5.12):
     // the connection is answered at once below, exactly as for any member,
     // so that the chat keeps flowing and the answer does not depend on the
-    // user; the request, its message and its timer are kept and shown for
-    // the user to accept or decline. Nothing sent depends on that answer.
+    // user; the request and its message are kept and shown for the user
+    // to accept or decline. Nothing sent depends on that answer.
     const asksContact = automatic && carriesRequest;
 
     if (isNewContact) {
@@ -896,7 +892,6 @@ export class AnnouncementService {
       contactUserId,
       keepsRequest ? message : undefined,
       automatic,
-      keepsRequest ? messageTimer : undefined,
       asksContact
     );
 
@@ -995,7 +990,6 @@ export class AnnouncementService {
     contactUserId: string,
     message?: string,
     automatic = false,
-    messageTimer?: number,
     asksContact = false
   ): Promise<{ discussionId: number }> {
     const log = logger.forMethod('handleReceivedDiscussion');
@@ -1008,11 +1002,6 @@ export class AnnouncementService {
     if (existing) {
       const updateData: Record<string, unknown> = { updatedAt: new Date() };
       if (message) updateData.announcementMessage = message;
-      // The timer the request states, shown before it is accepted; never
-      // over the one of a request this device sent and founds the chat of.
-      if (messageTimer !== undefined && !existing.directChatOwed) {
-        updateData.directChatTimer = messageTimer;
-      }
 
       log.info('updating existing discussion', {
         discussionId: existing.id,
@@ -1055,7 +1044,6 @@ export class AnnouncementService {
       contactUserId,
       direction: DiscussionDirection.RECEIVED,
       announcementMessage: message,
-      directChatTimer: messageTimer ?? null,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),

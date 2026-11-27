@@ -151,9 +151,9 @@ export interface GroupInvitation {
   messageTimer: number;
   /**
    * The message timer (ms, 0 = forever) the owner's contact request
-   * announced, when this chat of two keeps another (§5.12): accepting the
-   * request did not cover it, so it is asked, saying what differs. Null for
-   * any other invitation.
+   * announced, when this chat of two keeps another (§5.12, D.89). Always
+   * null since 0.1.2, which records no consent, except under a consent a
+   * device recorded with 0.1.0 or 0.1.1 (it expires within 14 days).
    */
   announcedTimer: number | null;
 }
@@ -1741,6 +1741,10 @@ export class GroupService {
   }
 
   /**
+   * Unused by the SDK since 0.1.2: accepting a contact request no longer
+   * consents to a chat (§5.12, D.89 withdrawn); kept until the engine's
+   * consent is removed.
+   *
    * Consents (or withdraws the consent) to the direct chat `peer` founds
    * after this user accepted its contact request (§5.12): one-shot, 14 days.
    * `announcedTimer` is the message timer the request announced (ms), if

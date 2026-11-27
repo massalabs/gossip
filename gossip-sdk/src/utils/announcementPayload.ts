@@ -3,42 +3,43 @@ import { Args } from '@massalabs/massa-web3';
 export interface AnnouncementPayload {
   username?: string;
   message?: string;
-  /**
-   * The message timer (§7.7, milliseconds, 0 keeps messages forever) of the
-   * direct chat a contact request asks for, as its sender chose it: the
-   * receiver sees it before accepting. Absent in a request of an earlier
-   * version, and in any other announcement.
-   */
-  messageTimer?: number;
 }
 
 /**
- * The payload of an announcement: the username and the message, then the
- * message timer as a decimal string when one is stated. A reader of an
- * earlier version reads the first two and ignores the rest.
+ * The payload of an announcement: the username and the message.
+ *
+ * A contact request of 0.1.0 or 0.1.1 also stated the message timer of the
+ * chat it asked for, as a third field (a decimal string). Since adding a
+ * contact no longer starts a chat (§5.12), no timer is sent, and one
+ * received is read past and ignored.
  */
 export const encodeAnnouncementPayload = (
   username?: string,
-  message?: string,
-  messageTimer?: number
+  message?: string
 ): Uint8Array | undefined => {
   const u = username?.trim() || '';
   const m = message?.trim() || '';
-  const timer =
-    messageTimer !== undefined &&
-    Number.isSafeInteger(messageTimer) &&
-    messageTimer >= 0
-      ? messageTimer
-      : undefined;
 
-  if (!u && !m && timer === undefined) {
+  if (!u && !m) {
     return undefined;
   }
 
-  const args = new Args().addString(u).addString(m);
-  if (timer !== undefined) args.addString(String(timer));
-  return args.serialize();
+  return new Args().addString(u).addString(m).serialize();
 };
+
+/**
+ * The payload of a contact request: as `encodeAnnouncementPayload`, but
+ * never empty, even with no username and no message. _Why:_ the
+ * announcement that opens, answers or renews a connection carries no
+ * payload, and a member of a shared chat tells a contact request from it by
+ * that alone (§5.12).
+ */
+export const encodeContactRequestPayload = (
+  username?: string,
+  message?: string
+): Uint8Array =>
+  encodeAnnouncementPayload(username, message) ??
+  new Args().addString('').addString('').serialize();
 
 export const decodeAnnouncementPayload = (
   data?: Uint8Array
@@ -47,24 +48,13 @@ export const decodeAnnouncementPayload = (
     return { username: undefined, message: undefined };
   }
 
-  let args: Args;
-  let username: string | undefined;
-  let message: string | undefined;
   try {
-    args = new Args(data);
-    username = args.nextString() || undefined;
-    message = args.nextString() || undefined;
+    const args = new Args(data);
+    const username = args.nextString() || undefined;
+    const message = args.nextString() || undefined;
+    // A third field, the timer of a request of 0.1.0 or 0.1.1, is ignored.
+    return { username, message };
   } catch {
     return { username: undefined, message: undefined };
   }
-  let messageTimer: number | undefined;
-  try {
-    const raw = args.nextString();
-    if (/^[0-9]{1,15}$/.test(raw)) messageTimer = Number(raw);
-  } catch {
-    // An earlier version: no timer stated.
-  }
-  return messageTimer === undefined
-    ? { username, message }
-    : { username, message, messageTimer };
 };

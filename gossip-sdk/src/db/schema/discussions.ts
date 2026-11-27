@@ -58,19 +58,16 @@ export const discussions = sqliteTable(
      */
     linkedGroupId: text('linkedGroupId'),
     /**
-     * This device sent the contact request: it founds the direct chat once
-     * the peer accepted (§5.12). Cleared when the chat is linked.
+     * 0.1.0 and 0.1.1 only: this device sent the contact request and was to
+     * found the direct chat once accepted. No longer written nor read: a
+     * contact request starts no chat (§5.12). Cleared when a chat is linked.
      */
     directChatOwed: integer('directChatOwed', { mode: 'boolean' })
       .notNull()
       .default(false),
     /**
-     * The message timer (§7.7, milliseconds, 0 keeps messages forever) the
-     * user chose when sending the contact request, for the direct chat this
-     * device founds once it is accepted. Null: the account's default at that
-     * time. Cleared when the chat is linked. On the side that received the
-     * request: the timer the request states, shown before it is accepted
-     * (null if it states none).
+     * 0.1.0 and 0.1.1 only: the message timer a contact request stated for
+     * the chat it asked for. No longer written nor read (§5.12).
      */
     directChatTimer: integer('directChatTimer'),
     /**

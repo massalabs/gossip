@@ -6,8 +6,9 @@
  *   device only, and adding them sends nothing;
  * - a normal contact is still refused as a duplicate;
  * - a real contact request from a member of a shared chat is shown with its
- *   message and timer, while the connection the chat needs is answered at
- *   once as before; accepting it sends nothing more, declining it keeps the
+ *   message, while the connection the chat needs is answered at once as
+ *   before, even when it states neither a name nor a message; accepting it
+ *   sends nothing more and starts no chat, declining it keeps the
  *   connection;
  * - a request still waiting is kept when this device accepts a chat that
  *   lists the requester, and when the connection goes with the last chat.
@@ -27,8 +28,6 @@ import { bytesToHex } from '@noble/hashes/utils';
 
 /** One clock for every SDK, advanced by the test. */
 let clock = 1_800_000_000_000;
-
-const ONE_HOUR = 60 * 60_000;
 
 function setClock(sdk: GossipSdk) {
   (sdk.groups as unknown as { now: () => number }).now = () => clock;
@@ -158,14 +157,17 @@ describe('Automatic contacts', { timeout: 300_000 }, () => {
   }
 
   /** Carol asks Bob to become a contact, with a message and a timer. */
-  async function carolRequests(carol: GossipSdk, bob: GossipSdk) {
+  async function carolRequests(
+    carol: GossipSdk,
+    bob: GossipSdk,
+    payload: { username?: string; message?: string } = {
+      username: 'Carol',
+      message: 'hello Bob',
+    }
+  ) {
     await carol.contacts.add(bob.userId, 'Bob', bob.publicKeys);
     const contact = (await carol.contacts.get(bob.userId))!;
-    const started = await carol.discussions.start(
-      contact,
-      { username: 'Carol', message: 'hello Bob' },
-      { messageTimer: ONE_HOUR }
-    );
+    const started = await carol.discussions.start(contact, payload);
     expect(started.success).toBe(true);
   }
 
@@ -268,7 +270,6 @@ describe('Automatic contacts', { timeout: 300_000 }, () => {
     });
     expect(await bob.discussions.get(carol.userId)).toMatchObject({
       announcementMessage: 'hello Bob',
-      directChatTimer: ONE_HOUR,
     });
     expect(declared(bob)).not.toContain(bytesToHex(carol.userIdBytes));
 
@@ -277,36 +278,70 @@ describe('Automatic contacts', { timeout: 300_000 }, () => {
     expect(bob.discussions.getStatus(carol.userId)).toBe(SessionStatus.Active);
   });
 
-  it('accepting the request of a member sends nothing and adopts the chat it asked for', async () => {
+  it('shows the request of a member that states neither a name nor a message', async () => {
+    const { bob, carol } = await trip(false);
+    const [inv] = await bob.groups.invitations();
+    await bob.conversations.acceptInvitation(inv.epochId);
+    await carolRequests(carol, bob, {});
+
+    const requested: unknown[] = [];
+    bob.on(SdkEventType.SESSION_REQUESTED, e => requested.push(e));
+    const sent = await sentDuring(net, () => bob.announcements.fetch());
+    expect(sent).toEqual(['announcement']);
+    expect(requested).toHaveLength(1);
+    expect((await bob.contacts.get(carol.userId))?.connection).toBe(
+      'requested'
+    );
+  });
+
+  it('accepting the request of a member sends nothing and starts no chat', async () => {
     const { bob, carol } = await trip(false);
     const [inv] = await bob.groups.invitations();
     await bob.conversations.acceptInvitation(inv.epochId);
     await carolRequests(carol, bob);
     await bob.announcements.fetch();
     await deliver();
-    // Carol founded the chat of two once answered; Bob holds it as an
-    // invitation until he answers the request.
-    const direct = await carol.conversations.directChatWith(bob.userId);
-    expect(direct).not.toBeNull();
+    // Carol's request asked for no chat: she founds none.
+    expect(await carol.conversations.directChatWith(bob.userId)).toBeNull();
 
     const d = (await bob.discussions.get(carol.userId))!;
     const sent = await sentDuring(net, async () => {
       expect((await bob.discussions.accept(d)).success).toBe(true);
       await bob.conversations.settle();
     });
-    // No announcement: the session is already open. Adopting the chat may
-    // query its members, as accepting any chat does.
-    expect(sent).not.toContain('announcement');
+    // No announcement: the session is already open; nothing else either.
+    expect(sent).toEqual([]);
     expect((await bob.contacts.get(carol.userId))?.connection).toBe('accepted');
     expect(declared(bob)).toContain(bytesToHex(carol.userIdBytes));
-    await deliver();
-    expect(await bob.groups.get(direct!)).not.toBeNull();
     expect(
-      (await bob.groups.invitations()).filter(i => i.epochId === direct)
+      JSON.parse(
+        (
+          (bob.groups as unknown as { node: never }).node as unknown as {
+            direct_chat_consents: () => string;
+          }
+        ).direct_chat_consents()
+      )
     ).toEqual([]);
-    await carol.groups.sendMessage(direct!, 'hi');
     await deliver();
-    expect(await texts(bob.groups, direct!)).toEqual(['hi']);
+    for (const p of [bob, carol]) {
+      const other = p === bob ? carol : bob;
+      expect(await p.conversations.directChatWith(other.userId)).toBeNull();
+      expect(
+        await p.conversations.directChatInvitation(other.userId)
+      ).toBeNull();
+    }
+
+    // Either starts the chat later: Bob receives Carol's as an invitation.
+    const direct = await carol.conversations.startDirectChat(bob.userId);
+    await deliver();
+    expect(
+      (await bob.conversations.directChatInvitation(carol.userId))?.epochId
+    ).toBe(direct);
+    await bob.conversations.acceptInvitation(direct);
+    await deliver();
+    await carol.groups.sendMessage(direct, 'hi');
+    await deliver();
+    expect(await texts(bob.groups, direct)).toEqual(['hi']);
   });
 
   it('declining the request of a member keeps the connection the shared chat needs', async () => {
@@ -367,7 +402,6 @@ describe('Automatic contacts', { timeout: 300_000 }, () => {
     });
     expect(await bob.discussions.get(carol.userId)).toMatchObject({
       announcementMessage: 'hello Bob',
-      directChatTimer: ONE_HOUR,
     });
 
     const [carolInv] = await carol.groups.invitations();
@@ -385,10 +419,7 @@ describe('Automatic contacts', { timeout: 300_000 }, () => {
     await carolRequests(carol, bob);
     await bob.announcements.fetch();
     await deliver();
-    // Bob declines Carol's chat of two silently, then leaves the trip.
-    for (const i of await bob.groups.invitations()) {
-      await bob.conversations.declineInvitation(i.epochId, 'Silent');
-    }
+    // Bob leaves the trip (Carol's request started no chat of two).
     await bob.groups.leave(groupId, 'Signed');
     await deliver();
     if ((await bob.groups.get(groupId)) !== null) {

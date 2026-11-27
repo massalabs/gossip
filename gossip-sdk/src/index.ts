@@ -57,7 +57,6 @@ export type {
   GroupMessageLimits,
   GroupEpochTimer,
 } from './services/groups.js';
-export type { DiscussionStartOptions } from './services/discussion.js';
 export {
   GROUP_MAX_SCHEDULE_MS,
   GROUP_DEVICE_KEY,

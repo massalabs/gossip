@@ -784,17 +784,17 @@ class GossipSdk {
           discussions
         );
         this._conversations = conversations;
-        discussions.setOnContactAccepted((peer, announcedTimer) =>
-          conversations.contactRequestAccepted(peer, announcedTimer)
+        discussions.setOnContactAccepted(peer =>
+          conversations.contactRequestAccepted(peer)
         );
         this._announcement.setConnectionPolicy({
           isCoMember: peer => conversations.isCoMember(peer),
           accept: async peer => {
             await discussions.createSessionForContact(peer, new Uint8Array(0));
           },
-          processed: async peer => {
-            void conversations.peerChanged(peer).catch(() => undefined);
-          },
+          // A contact request founds no chat (§5.12): nothing to do once
+          // an announcement is read.
+          processed: async () => undefined,
         });
         void conversations.start();
       } catch {

@@ -10,9 +10,11 @@
  *   (`set_earlier_conversation`), so that the peer's migration is shown in it.
  *   "Migrate" founds the direct chat and links it; a migration accepted is
  *   linked too, and the archive is shown first, read-only.
- * - **New contacts.** Accepting a contact request consents to the chat; the
- *   requester's device founds it once the session is active, and the
- *   accepter's device adopts it without a prompt.
+ * - **New contacts.** Adding a contact and starting a chat are two steps:
+ *   a contact request, once accepted, opens a session and starts no chat
+ *   (no chat is owed, no consent recorded). Either person then starts the
+ *   pair's chat explicitly (`startDirectChat`), owns it, and the other
+ *   receives it as an ordinary invitation.
  * - **Links.** A discussion names the direct chat that continues it
  *   (`linkedGroupId`); the link follows the chat that continues a replaced
  *   one (`Superseded`, kept as history), and is found again from the groups
@@ -61,13 +63,13 @@ const logger = new Logger('ConversationService');
 
 /**
  * Whether a request waiting from `contact` is a contact request: it stated a
- * name, a message or a timer. The announcement of a connection states none
- * and leaves the temporary name (`openConnection`).
+ * name or a message. The announcement of a connection states none and
+ * leaves the temporary name (`openConnection`). A request that stated
+ * neither cannot be told from it here, once stored.
  */
 function carriesRequest(contact: Contact, d: Discussion): boolean {
   return (
     !!d.announcementMessage ||
-    (d.directChatTimer !== null && d.directChatTimer !== undefined) ||
     (contact.name !== '' && !isTemporaryContactName(contact.name))
   );
 }
@@ -120,10 +122,9 @@ export class ConversationService {
     status: SessionStatus;
   }) => {
     if (p.status !== SessionStatus.Active) return;
-    void this.enqueue(async () => {
-      await this.foundOwedDirectChats();
-      await this.syncAcceptedContacts();
-    }).catch(() => logger.error('direct chats not founded'));
+    void this.enqueue(() => this.syncAcceptedContacts()).catch(() =>
+      logger.error('accepted contacts not declared')
+    );
   };
 
   private readonly onContactDeleted = () => {
@@ -186,23 +187,18 @@ export class ConversationService {
 
   /**
    * Everything this service keeps true, from the start: archives declared,
-   * links found, owed direct chats founded, connections opened and revoked.
+   * links found, connections opened and revoked.
+   *
+   * A discussion of 0.1.0 or 0.1.1 may still say that this device owes the
+   * chat of a contact request it sent (`directChatOwed`): it is no longer
+   * read, so no chat is ever founded by itself; the user starts one.
    */
   catchUp(): Promise<void> {
     return this.enqueue(async () => {
       await this.declareArchives();
       await this.syncAcceptedContacts();
       await this.reconcileLinks();
-      await this.foundOwedDirectChats();
       await this.syncConnections();
-    });
-  }
-
-  /** After a session with `contactUserId` changed (an announcement read). */
-  peerChanged(contactUserId: string): Promise<void> {
-    void contactUserId;
-    return this.enqueue(async () => {
-      await this.foundOwedDirectChats();
     });
   }
 
@@ -405,14 +401,41 @@ export class ConversationService {
   }
 
   /**
-   * Opens the chat with a contact: its direct chat, founded now if there is
-   * none (`migrate_from = 0`), with the message timer chosen or the
-   * account's default. For an archive, see `migrate`.
+   * The invitation to the pair's chat (a chat of two with `migrate_from`,
+   * §5.12) that `peer` started and this device has not answered, if any.
+   * While it waits, the contact's screen shows it instead of "Start a chat".
+   */
+  async directChatInvitation(peer: string): Promise<GroupInvitation | null> {
+    await this.groups.settle();
+    return (
+      (await this.groups.invitations()).find(
+        i =>
+          i.owner === peer &&
+          i.migrateFrom === EARLIER_FORMAT_VERSION &&
+          i.members.length === 2 &&
+          i.members.includes(this.owner)
+      ) ?? null
+    );
+  }
+
+  /**
+   * "Start a chat" with a contact (§5.12): the pair's chat, founded now if
+   * none is held (`migrate_from = 0`), with the message timer chosen or the
+   * account's default. Whoever starts it owns it; the other person receives
+   * an ordinary invitation. Nothing calls it by itself: adding a contact or
+   * opening one starts no chat. For an archive, see `migrate`.
+   *
+   * With an invitation to the pair's chat from that person waiting (or
+   * their migration of the archive), this throws
+   * `MigrationUnavailableError('invitation-pending')`: it is accepted
+   * instead. Two people who start at the same moment still end with one
+   * chat, by the tie rule.
    */
   startDirectChat(
     contactUserId: string,
     options: { messageTimer?: number } = {}
   ): Promise<GroupId> {
+    contactUserId = canonicalUserId(contactUserId);
     return this.enqueue(async () => {
       const held = await this.directChatWith(contactUserId);
       const d = await this.discussionOf(contactUserId);
@@ -420,7 +443,7 @@ export class ConversationService {
         if (d) await this.link(d, held);
         return held;
       }
-      if (d?.isArchive && (await this.migrationInvitation(contactUserId))) {
+      if (await this.directChatInvitation(contactUserId)) {
         throw new MigrationUnavailableError('invitation-pending');
       }
       const groupId = await this.groups.createDirectChat(
@@ -468,40 +491,14 @@ export class ConversationService {
   }
 
   /**
-   * The requester's side of a new contact (§5.12): once the session is
-   * active, found the direct chat it owes, unless one is held, with the
-   * message timer chosen with the request (the account's default if none).
+   * The accepter's side of a new contact (§5.12): the requester becomes a
+   * contact the user accepted. No consent to a chat is recorded and no chat
+   * is founded: either person starts one later, and the other receives it
+   * as an ordinary invitation. _Why:_ whoever starts a chat owns it, so the
+   * request commits nobody to a chat, and nothing races an automatic chat
+   * (the engine's consent, D.89, is unused from 0.1.2).
    */
-  private async foundOwedDirectChats(): Promise<void> {
-    for (const d of await this.discussionRows()) {
-      if (!d.directChatOwed || d.linkedGroupId) continue;
-      const status = this.session.peerSessionStatus(
-        decodeUserId(d.contactUserId)
-      );
-      if (status !== SessionStatus.Active) continue;
-      const held = await this.directChatWith(d.contactUserId);
-      const groupId =
-        held ??
-        (await this.groups.createDirectChat(
-          '',
-          d.contactUserId,
-          d.directChatTimer ?? undefined
-        ));
-      await this.link(d, groupId);
-    }
-  }
-
-  /**
-   * The accepter's side of a new contact: accepting the request consents to
-   * the chat its requester founds (one-shot, for two weeks), with the
-   * message timer the request announced, if any: a chat with another timer
-   * is then asked as an invitation that says so.
-   */
-  async contactRequestAccepted(
-    contactUserId: string,
-    announcedTimer?: number
-  ): Promise<void> {
-    await this.groups.consentToDirectChat(contactUserId, true, announcedTimer);
+  async contactRequestAccepted(contactUserId: string): Promise<void> {
     await this.acceptAsContact(contactUserId);
     await this.syncAcceptedContacts();
   }
@@ -577,9 +574,10 @@ export class ConversationService {
    * other adds back or accepts a chat.
    *
    * A member whose own contact request waits (`requested`) is added by
-   * accepting that request, as the request screen does: the consent to the
-   * chat it asked for, with the timer it announced. A contact the user
-   * accepted, or an ordinary request waiting, is refused (`already-contact`).
+   * accepting that request, as the request screen does: it sends nothing
+   * and, as any accepted request, starts no chat and consents to none. A
+   * contact the user accepted, or an ordinary request waiting, is refused
+   * (`already-contact`).
    */
   async addAsContact(
     contactUserId: string,
@@ -673,7 +671,6 @@ export class ConversationService {
     if (d?.id !== undefined) {
       await this.queries.discussions.updateById(d.id, {
         announcementMessage: null,
-        directChatTimer: d.directChatOwed ? d.directChatTimer : null,
         updatedAt: new Date(),
       });
     }

@@ -13,6 +13,7 @@
 
 import { GossipSdk } from '../../src/gossip';
 import { DiscussionDirection } from '../../src/db';
+import { SessionStatus } from '../../src/wasm/bindings';
 import type { GroupId, GroupMessage } from '../../src/services/groups';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { protocolConfig } from '../../src/config/protocol';
@@ -96,14 +97,14 @@ export async function pollUntil<T>(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Makes `a` and `b` contacts through the real API and waits for the chat of
- * two the SDK founds for them, as a user does:
+ * Makes `a` and `b` contacts through the real API, then has `a` start their
+ * chat of two, as a user does (§5.12: two steps):
  *
- *   1. A fetches B's public key and sends B a contact request carrying the
- *      message timer of the chat to come.
- *   2. B's polling receives the request, which shows that timer; B accepts.
- *   3. Both sides hold the same chat of two, B a member without a second
- *      prompt (no invitation to accept).
+ *   1. A fetches B's public key and sends B a contact request.
+ *   2. B's polling receives the request; B accepts. No chat exists yet.
+ *   3. A starts the chat with `messageTimer`; B receives it as an ordinary
+ *      invitation showing that timer, and accepts it.
+ *   4. Both sides hold the same chat of two, owned by A.
  *
  * Returns the chat's group key.
  */
@@ -129,12 +130,11 @@ export async function startChatOfTwo(
   const contactB = await a.contacts.get(b.userId);
   if (!contactB) throw new Error('Failed to add contact B on A');
 
-  // ── A sends the contact request, with the timer of the chat ──
-  const started = await a.discussions.start(
-    contactB,
-    { username: 'A', message: 'hello' },
-    { messageTimer }
-  );
+  // ── A sends the contact request ──
+  const started = await a.discussions.start(contactB, {
+    username: 'A',
+    message: 'hello',
+  });
   if (!started.success) {
     throw new Error(`Contact request failed: ${started.error}`);
   }
@@ -149,28 +149,48 @@ export async function startChatOfTwo(
     500,
     'the contact request on B'
   );
-  if (request.directChatTimer !== messageTimer) {
-    throw new Error(
-      `B sees the timer ${request.directChatTimer}, not ${messageTimer}`
-    );
-  }
   const accepted = await b.discussions.accept(request);
   if (!accepted.success) {
     throw new Error(`Accepting the request failed: ${accepted.error}`);
   }
 
-  // ── The same chat of two appears on both sides, B already a member ──
+  // ── Once the session is active, A starts the chat ──
+  await pollUntil(
+    async () =>
+      a.discussions.getStatus(b.userId) === SessionStatus.Active ? true : null,
+    60_000,
+    500,
+    'the session on A'
+  );
+  const groupId = await a.conversations.startDirectChat(b.userId, {
+    messageTimer,
+  });
+
+  // ── B receives an ordinary invitation with that timer, and accepts ──
+  const invitation = await pollUntil(
+    async () => b.conversations.directChatInvitation(a.userId),
+    90_000,
+    500,
+    'the invitation on B'
+  );
+  if (invitation.messageTimer !== messageTimer) {
+    throw new Error(
+      `B sees the timer ${invitation.messageTimer}, not ${messageTimer}`
+    );
+  }
+  await b.conversations.acceptInvitation(invitation.epochId);
+
+  // ── The same chat of two on both sides ──
   return pollUntil(
     async () => {
-      const onA = await a.conversations.directChatWith(b.userId);
       const onB = await b.conversations.directChatWith(a.userId);
-      if (!onA || onA !== onB) return null;
+      if (onB !== groupId) return null;
       const [chatA, chatB] = await Promise.all([
-        a.groups.get(onA),
-        b.groups.get(onB),
+        a.groups.get(groupId),
+        b.groups.get(groupId),
       ]);
       return chatA?.status === 'member' && chatB?.status === 'member'
-        ? onA
+        ? groupId
         : null;
     },
     90_000,
