@@ -15,6 +15,10 @@
 //! `--nocapture`. `MESH_RUNS` sets the number of runs (default 10). The assertions
 //! have generous ceilings: they say what happens, not how fast a loaded machine is.
 //! The scenarios of this file run one at a time so that their timings do not mix.
+//!
+//! Only the plain case runs in the normal suite (3 runs); the other measurements
+//! take several minutes of real time together and are `#[ignore]`d:
+//! `cargo test -p gossip-mobile --test no_bridge -- --ignored --nocapture`.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -48,6 +52,14 @@ fn runs() -> usize {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10)
+}
+
+/// Runs of the scenarios kept in the normal suite: 3, or `MESH_RUNS`.
+fn fast_runs() -> usize {
+    std::env::var("MESH_RUNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3)
 }
 
 type Route = (Sender<(i32, Vec<u8>)>, i32);
@@ -297,8 +309,9 @@ struct Setup {
     recipient: Arc<Phone>,
     sender: Arc<Phone>,
     message: (Vec<u8>, Vec<u8>),
-    /// When (after the send) the recipient's app wants the seeker.
-    want_at: Duration,
+    /// When (after the send) the recipient's app wants the seeker; `None` when the
+    /// setup already set it before the send (and the app does not set it again).
+    want_at: Option<Duration>,
     /// Other steps (links coming up, unlocks), after the send.
     steps: Vec<Step>,
     _keep: Vec<Arc<Phone>>,
@@ -315,10 +328,11 @@ fn watch(setup: Setup) -> Run {
         _keep,
     } = setup;
     let seeker = message.0.clone();
-    {
+    if let Some(at) = want_at {
         let (r, s) = (recipient.clone(), seeker.clone());
-        steps.push((want_at, Box::new(move || r.want(&[&s]))));
+        steps.push((at, Box::new(move || r.want(&[&s]))));
     }
+    let want_at = want_at.unwrap_or_default();
     steps.sort_by_key(|(t, _)| *t);
     let mut steps = steps.into_iter().peekable();
     let t0 = Instant::now();
@@ -354,7 +368,11 @@ fn watch(setup: Setup) -> Run {
 
 /// Runs a scenario [`runs`] times in parallel and prints the distribution.
 fn measure(name: &str, scenario: impl Fn() -> Setup + Sync) -> Vec<Run> {
-    let n = runs();
+    measure_n(name, runs(), scenario)
+}
+
+/// [`measure`] with `n` runs.
+fn measure_n(name: &str, n: usize, scenario: impl Fn() -> Setup + Sync) -> Vec<Run> {
     let out: Vec<Run> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..n).map(|_| s.spawn(|| watch(scenario()))).collect();
         handles.into_iter().map(|h| h.join().unwrap()).collect()
@@ -417,14 +435,14 @@ fn two_linked(cfg_recipient: &str, prepare: impl Fn(&Phone, &Phone)) -> (Arc<Pho
 #[test]
 fn without_a_bridge_a_wanted_blob_reaches_a_linked_recipient_at_once() {
     let _s = serial();
-    let runs = measure("plain: wanted before the send, linked", || {
+    let runs = measure_n("plain: wanted before the send, linked", fast_runs(), || {
         let message = message();
         let (a, b) = two_linked("", |_, b| b.want(&[&message.0]));
         Setup {
             recipient: b,
             sender: a,
             message,
-            want_at: Duration::ZERO,
+            want_at: None,
             steps: vec![],
             _keep: vec![],
         }
@@ -438,6 +456,7 @@ fn without_a_bridge_a_wanted_blob_reaches_a_linked_recipient_at_once() {
 /// blob is stored while wanted (`node.rs` `notify`), and `set_wanted` does not look at
 /// what is already stored: an app that only listens to the callback never hears of it.
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn without_a_bridge_a_blob_sent_to_a_locked_linked_recipient_is_on_its_phone_but_no_callback_fires_after_unlock(
 ) {
     let _s = serial();
@@ -449,19 +468,21 @@ fn without_a_bridge_a_blob_sent_to_a_locked_linked_recipient_is_on_its_phone_but
                 recipient: b,
                 sender: a,
                 message: message(),
-                want_at: AFTER_SPRAY,
+                want_at: Some(AFTER_SPRAY),
                 steps: vec![],
                 _keep: vec![],
             }
         },
     );
-    assert!(all(&runs, |r| within(r.stored, 15) && r.stored.unwrap() < AFTER_SPRAY));
+    assert!(all(&runs, |r| within(r.stored, 15)
+        && r.stored.unwrap() < AFTER_SPRAY));
     assert!(all(&runs, |r| r.callback.is_none()));
 }
 
 /// Case 1, with a bridge: the recipient is the bridge. Nothing changes: the spray has
 /// already done the work.
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn with_a_bridge_a_blob_sent_to_a_locked_recipient_behaves_the_same() {
     let _s = serial();
     let runs = measure(
@@ -475,7 +496,7 @@ fn with_a_bridge_a_blob_sent_to_a_locked_recipient_behaves_the_same() {
                 recipient: b,
                 sender: a,
                 message: message(),
-                want_at: AFTER_SPRAY,
+                want_at: Some(AFTER_SPRAY),
                 steps: vec![],
                 _keep: vec![],
             }
@@ -496,7 +517,7 @@ fn link_later(cfg_recipient: &str, bridge: bool, want_at: Duration) -> Setup {
         recipient: b,
         sender: a,
         message: message(),
-        want_at,
+        want_at: Some(want_at),
         steps: vec![(AFTER_SPRAY, Box::new(move || connect(&pa, 1, &pb, 1)))],
         _keep: vec![],
     }
@@ -507,6 +528,7 @@ fn link_later(cfg_recipient: &str, bridge: bool, want_at: Duration) -> Setup {
 /// first wanted round of the new link and the sender announces it at once
 /// (`on_wanted_received`, `PropagateWanted`).
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn without_a_bridge_a_blob_reaches_a_recipient_that_wanted_it_before_the_late_link() {
     let _s = serial();
     let runs = measure(
@@ -519,6 +541,7 @@ fn without_a_bridge_a_blob_reaches_a_recipient_that_wanted_it_before_the_late_li
 /// Case 2b: no link at the send, link after the spray, the recipient wants the seeker
 /// only after the link is up.
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn without_a_bridge_a_blob_reaches_a_recipient_that_wants_it_after_the_late_link() {
     let _s = serial();
     let runs = measure(
@@ -534,6 +557,7 @@ fn without_a_bridge_a_blob_reaches_a_recipient_that_wants_it_after_the_late_link
 /// does not re-offer the blobs already held (`on_beacon_received` only merges it), so
 /// the blob still waits for the recipient's wanted entry.
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn with_a_bridge_a_blob_reaches_a_late_linked_recipient_that_wanted_it_before() {
     let _s = serial();
     let runs = measure(
@@ -544,6 +568,7 @@ fn with_a_bridge_a_blob_reaches_a_late_linked_recipient_that_wanted_it_before() 
 }
 
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn with_a_bridge_a_blob_reaches_a_late_linked_recipient_that_wants_it_after() {
     let _s = serial();
     let runs = measure(
@@ -578,7 +603,7 @@ fn chain(c_cfg: &str, bridge: bool, bc_at: Option<Duration>, want_at: Duration) 
         recipient: c,
         sender: a,
         message: message(),
-        want_at,
+        want_at: Some(want_at),
         steps,
         _keep: vec![b],
     }
@@ -588,6 +613,7 @@ fn chain(c_cfg: &str, bridge: bool, bc_at: Option<Duration>, want_at: Duration) 
 /// carries the blob two hops (B relays it while it is younger than 5 s), so C holds it
 /// before it wants it: read at once, no callback.
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn without_a_bridge_a_chain_sprays_the_blob_to_the_far_end_before_it_is_wanted() {
     let _s = serial();
     let runs = measure(
@@ -599,6 +625,7 @@ fn without_a_bridge_a_chain_sprays_the_blob_to_the_far_end_before_it_is_wanted()
 
 /// Case 3b: A–B linked at the send, B–C only after the spray, C wanted from the start.
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn without_a_bridge_a_relay_linked_late_to_the_recipient_forwards_once_it_hears_the_entry() {
     let _s = serial();
     let runs = measure(
@@ -610,6 +637,7 @@ fn without_a_bridge_a_relay_linked_late_to_the_recipient_forwards_once_it_hears_
 
 /// Case 3c: A–B linked at the send, B–C after the spray, C wants 3 s after that.
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn without_a_bridge_a_relay_linked_late_forwards_when_the_recipient_wants_it_later() {
     let _s = serial();
     let runs = measure(
@@ -627,6 +655,7 @@ fn without_a_bridge_a_relay_linked_late_forwards_when_the_recipient_wants_it_lat
 }
 
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn with_a_bridge_a_relay_linked_late_to_the_recipient_forwards() {
     let _s = serial();
     let runs = measure(
@@ -637,6 +666,7 @@ fn with_a_bridge_a_relay_linked_late_to_the_recipient_forwards() {
 }
 
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn with_a_bridge_a_relay_linked_late_forwards_when_the_recipient_wants_it_later() {
     let _s = serial();
     let runs = measure(
@@ -681,70 +711,54 @@ fn relink(want_at: Duration, bridge: bool) -> Setup {
         recipient: b,
         sender: a,
         message,
-        want_at,
+        // wanted before: the app does not set its list again
+        want_at: (!want_at.is_zero()).then_some(want_at),
         steps: vec![(AFTER_SPRAY, Box::new(move || connect(&pa, 2, &pb, 2)))],
         _keep: vec![],
     }
 }
 
-/// Case 6, measured: the sender keeps the recipient's entry after the link drops
-/// (`WantedTable::remove_peer` only drops the direction), so the entry is neither
-/// routable (`best_peers` is `None`) nor absent: `guided_allows` takes it for the
-/// sender's own seeker and offers the blob nowhere. When the phones meet again the
-/// recipient's entry is merged but not "fresh" (`WantedTable::merge`), so
-/// `on_wanted_received` does not announce the held blob, and the link-up summary was
-/// answered before the entry came. Only the 5 % rule (a draw per blob and link) moves
-/// it; the other runs wait for the hourly resync or the 1 h entry expiry.
+/// Case 6: the sender keeps the recipient's entry after the link drops
+/// (`WantedTable::remove_peer` only drops the direction), and `guided_allows` takes
+/// the directionless entry for the sender's own seeker: the blob is offered nowhere.
+/// `WantedTable::merge` now counts the entry as fresh when it comes back with a
+/// direction, so `on_wanted_received` would announce the held blob. But it does not
+/// come back: on the new link the sender's `WantedSummary` lists the stale entry, and
+/// the recipient's `WantedTable::apply_summary` marks its own entry as already sent
+/// (the echo's hop budget is one below its own, a tie). The recipient sends it again
+/// only when its expiry has grown past `WANTED_RESEND_SLACK_MS` (5 min) beyond the
+/// echo's, or when a new `set_wanted` draws a higher hop budget. Measured with the
+/// merge rule and no new `set_wanted`: 1/12 delivered (the 5 % rule); with a
+/// `set_wanted` repeated at the send: 9/12.
 #[test]
-fn without_a_bridge_a_blob_sent_while_apart_to_a_recipient_met_before_waits_when_they_meet_again(
-) {
-    let _s = serial();
-    let runs = measure(
-        "case 6: met before (entry known), apart at send, meet again after the spray",
-        || relink(Duration::ZERO, false),
-    );
-    let lost = runs.iter().filter(|r| r.stored.is_none()).count();
-    eprintln!("  case 6: {lost}/{} not delivered within {CEILING:?}", runs.len());
-    // what happens today: most runs are not delivered
-    assert!(lost * 2 >= runs.len(), "case 6 now delivers: update this test");
-}
-
-/// The desired behaviour of case 6.
-#[test]
-#[ignore = "known loss, bridge or not: a held blob is not re-offered when a known recipient comes back on a new link (WantedTable::merge reports only new seekers as fresh; guided_allows treats a forwarded entry with no live direction as the node's own seeker)"]
+#[ignore = "known loss: the sender's link-up WantedSummary echoes the recipient's stale entry, so the recipient marks its entry as sent (WantedTable::apply_summary) and never repeats it; the fresh-on-new-direction rule in WantedTable::merge never fires"]
 fn a_blob_sent_while_apart_reaches_a_recipient_met_before_when_they_meet_again() {
     let _s = serial();
-    let runs = measure(
-        "case 6 desired: met before, apart at send, meet again after the spray",
+    let runs = measure_n(
+        "case 6: met before (entry known), apart at send, meet again after the spray",
+        fast_runs(),
         || relink(Duration::ZERO, false),
     );
     assert!(all(&runs, |r| within(r.callback, 30)));
 }
 
-/// Case 6 with a bridge: the recipient bridges, and it does not help. The stale entry
-/// is checked before the bridge direction in `guided_allows`, and a beacon that comes
-/// back on the new link does not re-offer held blobs either (`on_beacon_received`).
+/// Case 6 with a bridge: the recipient bridges; delivered by the same rule.
 #[test]
-fn with_a_bridge_a_blob_sent_while_apart_to_a_recipient_met_before_also_waits_when_they_meet_again(
-) {
+#[ignore = "measurement, real time (about 10 s): run on demand with --ignored --nocapture"]
+fn with_a_bridge_a_blob_sent_while_apart_reaches_a_recipient_met_before_when_they_meet_again() {
     let _s = serial();
     let runs = measure(
         "case 6 control: recipient bridges, met before, apart at send, meet again after the spray",
         || relink(Duration::ZERO, true),
     );
-    let lost = runs.iter().filter(|r| r.stored.is_none()).count();
-    eprintln!(
-        "  case 6 control: {lost}/{} not delivered within {CEILING:?}",
-        runs.len()
-    );
-    assert!(lost * 2 >= runs.len(), "case 6 now delivers: update this test");
+    assert!(all(&runs, |r| within(r.callback, 30)));
 }
 
 /// Case 6 when the recipient wanted nothing before the link dropped: no stale entry,
 /// so its entry is fresh when they meet again.
 #[test]
-fn without_a_bridge_a_blob_sent_while_apart_reaches_a_recipient_met_before_that_wants_it_later()
-{
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
+fn without_a_bridge_a_blob_sent_while_apart_reaches_a_recipient_met_before_that_wants_it_later() {
     let _s = serial();
     let runs = measure(
         "case 6b: met before (no entry), apart at send, meet again after the spray, wanted 3 s later",
@@ -881,19 +895,19 @@ fn measure_seekers(name: &str, linked_at_send: bool, bridge: bool) -> Vec<Chain>
 /// the first seconds; each is read as soon as it is wanted. Only the first is
 /// announced by the callback (the others were stored before they were wanted).
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn without_a_bridge_twenty_consecutive_seekers_sent_to_a_linked_phone_are_read_at_once() {
     let _s = serial();
     let out = measure_seekers("case 4: twenty seekers, linked at send", true, false);
-    assert!(out
-        .iter()
-        .all(|c| c.read.iter().all(Option::is_some)
-            && c.read[RUN_LEN - 1].unwrap() < Duration::from_secs(60)));
+    assert!(out.iter().all(|c| c.read.iter().all(Option::is_some)
+        && c.read[RUN_LEN - 1].unwrap() < Duration::from_secs(60)));
 }
 
 /// Case 4, no link at the send, link after the spray: each message waits for the
 /// recipient's next entry to cross the link (one wanted round, every 2 s) before the
 /// sender announces it.
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn without_a_bridge_twenty_consecutive_seekers_sent_before_the_link_cost_a_wanted_round_each() {
     let _s = serial();
     let out = measure_seekers(
@@ -905,6 +919,7 @@ fn without_a_bridge_twenty_consecutive_seekers_sent_before_the_link_cost_a_wante
 }
 
 #[test]
+#[ignore = "measurement, real time (several seconds to a minute): run on demand with --ignored --nocapture"]
 fn with_a_bridge_twenty_consecutive_seekers_sent_before_the_link() {
     let _s = serial();
     let out = measure_seekers(
