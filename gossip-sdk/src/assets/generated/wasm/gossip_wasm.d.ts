@@ -244,9 +244,12 @@ export class GroupsNode {
    * An edit starts from the message's current metadata (§2.2: entries a client does not
    * know, `replyTo` included, survive it). `metadata` is a patch: `[]` or `null` keeps
    * everything, an array of `[name, hex]` sets those entries, and
-   * `{"set":[[name, hex], …],"remove":[name, …]}` also removes.
+   * `{"set":[[name, hex], …],"remove":[name, …]}` also removes. `author`: absent keeps
+   * the message's author, or the Gossip ID of any member of the epoch (§7.2; refused for
+   * a reaction). The edit goes in full only when this account is the author before and
+   * after it; any other edit leaves like a relay (§10.2).
    */
-  publish_edit(epoch: Uint8Array, sync_obj_id: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, now: number): string;
+  publish_edit(epoch: Uint8Array, sync_obj_id: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, author: Uint8Array | null | undefined, now: number): string;
   /**
    * The batches committed since the last call, oldest first: an array of
    * `{rows, removedRows, edges, removedEdges, objects, removedObjects, node, erase}`, to
@@ -258,11 +261,19 @@ export class GroupsNode {
    */
   take_changes(now: number): string;
   /**
+   * A new message on this device only (§9.7): nothing is sent, announced or listed, and no
+   * marker is kept. `body` and `metadata` as for `publish_message` (no reaction, no
+   * scheduling); `author` absent for this account or any member of the epoch. Returns
+   * `{syncObjId}` in JSON.
+   */
+  local_message(epoch: Uint8Array, body: string, metadata: string, author: Uint8Array | null | undefined, now: number): string;
+  /**
    * A media message (§7.6): `mimetype` is `type/subtype` (lowercase, no parameters, at most
    * 127 bytes), `data` any bytes the event can hold; `metadata` as for `publish_message`
-   * (a name or a caption). Returns `{eventId, syncObjId, merge}` in JSON.
+   * (a name or a caption); `author` as for `publish_message`. Returns
+   * `{eventId, syncObjId, merge}` in JSON.
    */
-  publish_media(epoch: Uint8Array, mimetype: string, data: Uint8Array, metadata: string, now: number): string;
+  publish_media(epoch: Uint8Array, mimetype: string, data: Uint8Array, metadata: string, author: Uint8Array | null | undefined, now: number): string;
   dissolve_group(group: Uint8Array, must_delete: boolean, now: number): void;
   set_local_name(group: Uint8Array, name: string | null | undefined, now: number): void;
   /**
@@ -283,10 +294,12 @@ export class GroupsNode {
    * `{"t":"Forward","content_type":"Text"|"Media","content":hex}` (a forwarded media
    * message is the canonical encoding of a `Media`), or
    * `{"t":"Media","media":{"mimetype":…,"data":hex}}`; a reaction goes through
-   * `publish_reaction`. `metadata`: an array of `[name, hex]`. Returns
+   * `publish_reaction`. `metadata`: an array of `[name, hex]`. `author`: absent for this
+   * account, or the Gossip ID of any member of the epoch: the message is then published
+   * under that member's name and leaves like a relay (§10.2). Returns
    * `{eventId, syncObjId, merge}` in JSON.
    */
-  publish_message(epoch: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, now: number): string;
+  publish_message(epoch: Uint8Array, body: string, metadata: string, scheduled_for: number | null | undefined, author: Uint8Array | null | undefined, now: number): string;
   /**
    * A group plaintext received from `from` in its one-to-one session.
    */
@@ -815,6 +828,7 @@ export interface InitOutput {
   readonly groupsnode_link_groups: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly groupsnode_local_delete: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
   readonly groupsnode_local_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+  readonly groupsnode_local_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
   readonly groupsnode_lookup_sync_object: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
   readonly groupsnode_me: (a: number) => [number, number];
   readonly groupsnode_media: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
@@ -826,9 +840,9 @@ export interface InitOutput {
   readonly groupsnode_pending_batches: (a: number) => number;
   readonly groupsnode_poll_outbox: (a: number, b: number) => [number, number, number];
   readonly groupsnode_publish_deletion: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
-  readonly groupsnode_publish_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
-  readonly groupsnode_publish_media: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
-  readonly groupsnode_publish_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+  readonly groupsnode_publish_edit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => [number, number, number, number];
+  readonly groupsnode_publish_media: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
+  readonly groupsnode_publish_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
   readonly groupsnode_publish_reaction: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
   readonly groupsnode_published: (a: number, b: number, c: number) => [number, number];
   readonly groupsnode_ref_chat_id: (a: number, b: number, c: number) => [number, number, number, number];

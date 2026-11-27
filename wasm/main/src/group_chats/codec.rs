@@ -20,7 +20,7 @@ use groups::node::records::{
     AnswerOp, Attempt, Backoff, Candidate, CandidateState, ChangeKind, EpochRecord, EpochStatus,
     FrozenScan, GroupRecord, GroupStatus, GroupSync, HeldRoot, Hint, Invitation, Junction,
     JunctionKind, Lane, Marker, MarkerKind, Meta, PeerRecord, PendingLeave, Purpose, RefEntry,
-    RefLookup, RefReply, ReplyCount, RequestRef, Run, ScanAttempt, ScanOp, SignedObject,
+    RefLookup, RefReply, Relay, ReplyCount, RequestRef, Run, ScanAttempt, ScanOp, SignedObject,
     SignedRecord, Target, Task, TaskKey, Trigger, TriggerKind, Work,
 };
 use groups::node::timing::Bucket;
@@ -477,6 +477,7 @@ record!(PeerRecord {
     pause_ms
 });
 record!(Hint { first, used });
+record!(Relay { due, notify });
 record!(Backoff {
     since,
     until,
@@ -1311,6 +1312,14 @@ mod tests {
             pause_ms: 12,
         });
         round_trip(Hint { first: 1, used: 2 });
+        round_trip(Relay {
+            due: 1,
+            notify: None,
+        });
+        round_trip(Relay {
+            due: 2,
+            notify: Some(GossipId::from_bytes([3; 32])),
+        });
         let mut works = vec![
             Work::Full {
                 chat_id: chat,

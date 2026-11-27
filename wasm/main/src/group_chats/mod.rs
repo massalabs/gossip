@@ -503,7 +503,9 @@ impl GroupsNode {
     /// `{"t":"Forward","content_type":"Text"|"Media","content":hex}` (a forwarded media
     /// message is the canonical encoding of a `Media`), or
     /// `{"t":"Media","media":{"mimetype":…,"data":hex}}`; a reaction goes through
-    /// `publish_reaction`. `metadata`: an array of `[name, hex]`. Returns
+    /// `publish_reaction`. `metadata`: an array of `[name, hex]`. `author`: absent for this
+    /// account, or the Gossip ID of any member of the epoch: the message is then published
+    /// under that member's name and leaves like a relay (§10.2). Returns
     /// `{eventId, syncObjId, merge}` in JSON.
     pub fn publish_message(
         &mut self,
@@ -511,27 +513,57 @@ impl GroupsNode {
         body: &str,
         metadata: &str,
         scheduled_for: Option<f64>,
+        author: Option<Vec<u8>>,
         now: f64,
     ) -> Result<String, JsValue> {
         let scheduled_for = scheduled_for.map(ms).transpose()?;
+        let author = author.as_deref().map(peer).transpose()?;
         self.core
-            .publish_message(chat(epoch)?, body, metadata, scheduled_for, ms(now)?)
+            .publish_message(
+                chat(epoch)?,
+                body,
+                metadata,
+                scheduled_for,
+                author,
+                ms(now)?,
+            )
+            .map_err(js)
+    }
+
+    /// A new message on this device only (§9.7): nothing is sent, announced or listed, and no
+    /// marker is kept. `body` and `metadata` as for `publish_message` (no reaction, no
+    /// scheduling); `author` absent for this account or any member of the epoch. Returns
+    /// `{syncObjId}` in JSON.
+    pub fn local_message(
+        &mut self,
+        epoch: &[u8],
+        body: &str,
+        metadata: &str,
+        author: Option<Vec<u8>>,
+        now: f64,
+    ) -> Result<String, JsValue> {
+        let author = author.as_deref().map(peer).transpose()?;
+        self.core
+            .local_message(chat(epoch)?, body, metadata, author, ms(now)?)
             .map_err(js)
     }
 
     /// A media message (§7.6): `mimetype` is `type/subtype` (lowercase, no parameters, at most
     /// 127 bytes), `data` any bytes the event can hold; `metadata` as for `publish_message`
-    /// (a name or a caption). Returns `{eventId, syncObjId, merge}` in JSON.
+    /// (a name or a caption); `author` as for `publish_message`. Returns
+    /// `{eventId, syncObjId, merge}` in JSON.
     pub fn publish_media(
         &mut self,
         epoch: &[u8],
         mimetype: String,
         data: Vec<u8>,
         metadata: &str,
+        author: Option<Vec<u8>>,
         now: f64,
     ) -> Result<String, JsValue> {
+        let author = author.as_deref().map(peer).transpose()?;
         self.core
-            .publish_media(chat(epoch)?, mimetype, data, metadata, ms(now)?)
+            .publish_media(chat(epoch)?, mimetype, data, metadata, author, ms(now)?)
             .map_err(js)
     }
 
@@ -554,7 +586,11 @@ impl GroupsNode {
     /// An edit starts from the message's current metadata (§2.2: entries a client does not
     /// know, `replyTo` included, survive it). `metadata` is a patch: `[]` or `null` keeps
     /// everything, an array of `[name, hex]` sets those entries, and
-    /// `{"set":[[name, hex], …],"remove":[name, …]}` also removes.
+    /// `{"set":[[name, hex], …],"remove":[name, …]}` also removes. `author`: absent keeps
+    /// the message's author, or the Gossip ID of any member of the epoch (§7.2; refused for
+    /// a reaction). The edit goes in full only when this account is the author before and
+    /// after it; any other edit leaves like a relay (§10.2).
+    #[allow(clippy::too_many_arguments)]
     pub fn publish_edit(
         &mut self,
         epoch: &[u8],
@@ -562,9 +598,11 @@ impl GroupsNode {
         body: &str,
         metadata: &str,
         scheduled_for: Option<f64>,
+        author: Option<Vec<u8>>,
         now: f64,
     ) -> Result<String, JsValue> {
         let scheduled_for = scheduled_for.map(ms).transpose()?;
+        let author = author.as_deref().map(peer).transpose()?;
         self.core
             .publish_edit(
                 chat(epoch)?,
@@ -572,6 +610,7 @@ impl GroupsNode {
                 body,
                 metadata,
                 scheduled_for,
+                author,
                 ms(now)?,
             )
             .map_err(js)
