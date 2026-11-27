@@ -2744,6 +2744,12 @@ export class GroupService {
    * marker is kept anywhere: it is stored as a message this device no longer
    * serves, and cannot be told apart from one afterwards. No scheduling.
    * Returns the message's sync-object ID.
+   *
+   * Also accepted in a chat this device can only read but keeps (after a
+   * kick, after its own visible leave, or dissolved and kept), in the last
+   * epoch held, under any member of that epoch (D.99), where `sendMessage`
+   * is refused. Refused while waiting to be removed and in a replaced chat
+   * of two.
    */
   sendMessageLocally(
     groupId: GroupId,
