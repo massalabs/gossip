@@ -17,6 +17,7 @@ import { decodeUserId } from '../utils/userId.js';
 import {
   IMessageProtocol,
   EncryptedMessage,
+  type SendOutcome,
   type TransportConnectivity,
 } from '../api/messageProtocol/index.js';
 import { SessionStatus } from '../wasm/bindings.js';
@@ -35,6 +36,7 @@ import {
 } from '../wasm/session.js';
 import { Logger } from '../utils/logs.js';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
+import { NETWORK_RETENTION_MS } from '../config/protocol.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import { Queries } from '../db/queries/index.js';
 import { QueueManager } from '../utils/queue.js';
@@ -42,6 +44,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { GossipSqliteTx } from '../db/sqlite.js';
 import { POST_MESSAGE_TYPES } from '../utils/message.js';
 import { isSeekerConflict } from '../api/errors.js';
+import { sendTracked } from '../api/messageProtocol/composite.js';
 import type { SeekerConflictHandler } from './seekerConflicts.js';
 
 /** Options for the simplified sendText method */
@@ -266,7 +269,7 @@ const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
  * How long a pushed message waits for its seeker to come up: the sessions'
  * maximum message age, past which nobody could still send it.
  */
-const PUSHED_MESSAGE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const PUSHED_MESSAGE_TTL_MS = NETWORK_RETENTION_MS;
 
 const logger = new Logger('MessageService');
 export class MessageService {
@@ -276,7 +279,17 @@ export class MessageService {
   private config: SdkConfig;
   private queueManager?: QueueManager;
   private processingContacts = new Set<string>();
-  private isFetchingMessages = false;
+  /** The fetch running now, if any. */
+  private fetching: Promise<MessageResult> | null = null;
+  /** The fetch queued to start once the running one ends (one at most). */
+  private fetchAgain: Promise<MessageResult> | null = null;
+  /** The read seekers last given to the wanted-seekers updater, base64. */
+  private lastWanted = new Set<string>();
+  /**
+   * Gives the transports that wait on seekers (a mesh node's wanted list)
+   * the seekers read now, without waiting for the fetch to end.
+   */
+  private wantedSeekersUpdater: ((seekers: Uint8Array[]) => void) | null = null;
   private queries: Queries;
   /**
    * Message ids currently being sent via `sendMessageFastPath`. The row is
@@ -322,6 +335,40 @@ export class MessageService {
 
   /** Renews a session whose seekers the server already holds (409). */
   private seekerConflicts?: SeekerConflictHandler;
+
+  /** See `wantedSeekersUpdater`. */
+  setWantedSeekersUpdater(
+    updater: ((seekers: Uint8Array[]) => void) | null
+  ): void {
+    this.wantedSeekersUpdater = updater;
+  }
+
+  /**
+   * Tells the transports that wait on seekers the ones read now: called when
+   * they change outside a fetch (a session created or renewed, a login).
+   */
+  announceWantedSeekers(): void {
+    if (!this.session || !this.wantedSeekersUpdater) return;
+    const seekers = this.session.getMessageBoardReadKeys();
+    // A mesh node pushes only what it stores after a seeker is wanted: a blob
+    // it took before (the account was locked, the seeker not predicted yet,
+    // a relay) is only found by asking it. A new seeker is read at once.
+    if (this.giveWanted(seekers) && this.messageProtocol.isMeshEnabled?.()) {
+      void this.fetchMessages().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Gives `seekers` to the wanted-seekers updater; returns whether one of
+   * them was not given before.
+   */
+  private giveWanted(seekers: Uint8Array[]): boolean {
+    const keys = new Set(seekers.map(s => encodeToBase64(s)));
+    const added = [...keys].some(k => !this.lastWanted.has(k));
+    this.lastWanted = keys;
+    this.wantedSeekersUpdater?.(seekers);
+    return added;
+  }
   setSeekerConflictHandler(handler: SeekerConflictHandler): void {
     this.seekerConflicts = handler;
   }
@@ -387,6 +434,8 @@ export class MessageService {
     const added = await this.queries.pendingEncryptedMessages.insertNew(
       messages.filter(m => wanted.has(encodeToBase64(m.seeker)))
     );
+    // A fetch running now may have read the inbox already: fetchMessages
+    // then reads it again once that one ends.
     if (added > 0) await this.fetchMessages();
     return added;
   }
@@ -400,15 +449,31 @@ export class MessageService {
     this.queueManager = queueManager;
   }
 
-  async fetchMessages(): Promise<MessageResult> {
+  /**
+   * Reads the messages at the seekers the sessions wait on, round after
+   * round while they move on. A call made while a fetch runs gets one fetch
+   * that starts after that one ends (shared by every such call): what
+   * arrived meanwhile (a push, a late answer, a new wanted seeker) is read
+   * then, not at the next poll.
+   */
+  fetchMessages(): Promise<MessageResult> {
+    if (this.fetching) {
+      this.fetchAgain ??= this.fetching.then(() => {
+        this.fetchAgain = null;
+        return this.fetchMessages();
+      });
+      return this.fetchAgain;
+    }
+    const run = this.runFetch().finally(() => {
+      if (this.fetching === run) this.fetching = null;
+    });
+    this.fetching = run;
+    return run;
+  }
+
+  private async runFetch(): Promise<MessageResult> {
     const log = logger.forMethod('fetchMessages');
 
-    if (this.isFetchingMessages) {
-      log.info('fetch already in progress, skipping');
-      return { success: true, newMessagesCount: 0 };
-    }
-
-    this.isFetchingMessages = true;
     try {
       if (!this.session) throw new Error('Session module not initialized');
 
@@ -443,6 +508,14 @@ export class MessageService {
         for (const seeker of seekers) {
           waitedSeekers.set(encodeToBase64(seeker), seeker);
         }
+
+        // The seekers moved on (a message was read): a mesh node waits on
+        // the new ones from now, rather than from the end of this fetch,
+        // which waits for every transport. Until then the next message sits
+        // on the phones that hold it, since a blob nobody asked for only
+        // travels toward a peer that wants it. The local-only rules apply as
+        // at the end of a fetch (same updater).
+        if (iterations > 0) this.giveWanted(seekers);
 
         // Messages pushed by a transport wait in the inbox until their seeker
         // comes up; they are read after the fetched ones, so the first copy of a
@@ -497,6 +570,7 @@ export class MessageService {
 
       try {
         await this.queries.activeSeekers.replaceAll(seekers);
+        this.lastWanted = new Set(seekers.map(s => encodeToBase64(s)));
         this.eventEmitter.emit(SdkEventType.SEEKERS_UPDATED, seekers);
       } catch (error) {
         log.error('failed to update active seekers', error);
@@ -534,8 +608,6 @@ export class MessageService {
         newMessagesCount: 0,
         error: err instanceof Error ? err.message : 'Unknown error',
       };
-    } finally {
-      this.isFetchingMessages = false;
     }
   }
 
@@ -685,11 +757,40 @@ export class MessageService {
    */
   private meshOnlyMetadata(
     msg: Message,
-    seeker: Uint8Array
+    outcome: SendOutcome
   ): Record<string, unknown> | undefined {
-    const kinds = this.messageProtocol.takeAcceptedBy?.(seeker);
-    if (!kinds || kinds.includes('internet')) return undefined;
+    if (outcome.acceptedBy.includes('internet')) return undefined;
     return { ...(msg.metadata ?? {}), via: 'mesh' };
+  }
+
+  /**
+   * The backend's answer to a send that a mesh took first, which came after
+   * the message was marked sent: a 409 renews the session, as when the send
+   * fails with it, but the message stays sent (the mesh took it and may
+   * deliver it; it is never marked failed); a backend that took it clears
+   * the mesh mark, as `repostMeshOnly` would. Never rejects.
+   */
+  private watchLateAnswer(
+    contactUserId: string,
+    messageId: number,
+    outcome: SendOutcome
+  ): void {
+    if (outcome.acceptedBy.includes('internet')) return;
+    void outcome.settled
+      .then(async settled => {
+        const conflict = settled.failures.find(
+          f => f.kind === 'internet' && isSeekerConflict(f.error)
+        );
+        if (conflict) {
+          await this.seekerConflicts?.handle(contactUserId);
+          return;
+        }
+        if (!settled.acceptedBy.includes('internet')) return;
+        const latest = await this.queries.messages.getById(messageId);
+        if (!latest || latest.status !== MessageStatus.SENT) return;
+        await this.clearMeshMark(latest, true);
+      })
+      .catch(() => undefined);
   }
 
   async findMessageByMsgId(
@@ -1033,9 +1134,10 @@ export class MessageService {
           //   - Persist failed → bubbles up, row stays
           //     WAITING_SESSION (no SENT update). The next session
           //     activation re-runs the loop.
+          let freshOutcome: SendOutcome;
           try {
-            await Promise.all([
-              this.messageProtocol.sendMessage({
+            [freshOutcome] = await Promise.all([
+              sendTracked(this.messageProtocol, {
                 seeker,
                 ciphertext: encryptedMessage,
               }),
@@ -1119,7 +1221,7 @@ export class MessageService {
           //     mostly in tap-to-sent perception, not raw
           //     throughput on rapid bursts.
           sentCount++;
-          const freshMeshMetadata = this.meshOnlyMetadata(msg, seeker);
+          const freshMeshMetadata = this.meshOnlyMetadata(msg, freshOutcome);
           log.debug('message sent (skipped READY)', {
             messageId: msg.id,
             status: MessageStatus.SENT,
@@ -1166,6 +1268,7 @@ export class MessageService {
                 { messageId: msgId, error }
               );
             });
+          this.watchLateAnswer(contactUserId, msgId!, freshOutcome);
           continue;
         }
 
@@ -1208,7 +1311,7 @@ export class MessageService {
 
           /* Sending on network */
           try {
-            await this.messageProtocol.sendMessage({
+            const queuedOutcome = await sendTracked(this.messageProtocol, {
               seeker,
               ciphertext: encryptedMessage,
             });
@@ -1217,7 +1320,10 @@ export class MessageService {
             const latestRow = await this.queries.messages.getById(msg.id);
 
             let sent = false;
-            const queuedMeshMetadata = this.meshOnlyMetadata(msg, seeker);
+            const queuedMeshMetadata = this.meshOnlyMetadata(
+              msg,
+              queuedOutcome
+            );
             if (
               latestRow && // ensure the discussion has not been deleted
               latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
@@ -1233,6 +1339,7 @@ export class MessageService {
                 }),
               });
               sent = true;
+              this.watchLateAnswer(contactUserId, msg.id, queuedOutcome);
             }
 
             if (sent) {
@@ -1338,23 +1445,34 @@ export class MessageService {
       }
       const latest = await this.queries.messages.getById(row.id);
       if (!latest || latest.status !== MessageStatus.SENT) continue;
-      const metadata = deserializeMetadata(latest.metadata) ?? {};
-      if (onServer) delete metadata.via;
-      await this.queries.messages.updateById(row.id, {
-        encryptedMessage: null,
-        metadata: serializeMetadata(
-          Object.keys(metadata).length > 0 ? metadata : undefined
-        ),
-      });
+      await this.clearMeshMark(latest, onServer);
       if (onServer) posted++;
-      const updated = await this.queries.messages.getById(row.id);
-      if (updated) {
-        this.eventEmitter.emit(SdkEventType.MESSAGE_UPDATED, {
-          messages: [rowToMessage(updated)],
-        });
-      }
     }
     return posted;
+  }
+
+  /**
+   * Drops the ciphertext a sent message kept for a server, and its mesh mark
+   * when a server took it (`onServer`).
+   */
+  private async clearMeshMark(
+    row: { id: number; metadata: string | null },
+    onServer: boolean
+  ): Promise<void> {
+    const metadata = deserializeMetadata(row.metadata) ?? {};
+    if (onServer) delete metadata.via;
+    await this.queries.messages.updateById(row.id, {
+      encryptedMessage: null,
+      metadata: serializeMetadata(
+        Object.keys(metadata).length > 0 ? metadata : undefined
+      ),
+    });
+    const updated = await this.queries.messages.getById(row.id);
+    if (updated) {
+      this.eventEmitter.emit(SdkEventType.MESSAGE_UPDATED, {
+        messages: [rowToMessage(updated)],
+      });
+    }
   }
 
   /**
