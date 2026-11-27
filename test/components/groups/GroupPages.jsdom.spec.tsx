@@ -450,6 +450,158 @@ describe('group pages', () => {
     });
   });
 
+  describe('a message being sent (D5)', () => {
+    /** A `sendMessage` that settles when the test says so. */
+    function deferSend() {
+      let resolve!: (syncObjId: string) => void;
+      let reject!: (e: Error) => void;
+      fake.service.sendMessage.mockImplementationOnce(
+        () =>
+          new Promise((res, rej) => {
+            resolve = syncObjId =>
+              res({ eventId: 'ev', syncObjId, merge: 'Won' });
+            reject = rej;
+          })
+      );
+      return {
+        resolve: (id: string) =>
+          act(async () => {
+            resolve(id);
+            await flush();
+          }),
+        reject: (e: Error) =>
+          act(async () => {
+            reject(e);
+            await flush();
+          }),
+      };
+    }
+
+    const rows = (r: { container: HTMLDivElement }) =>
+      Array.from(
+        r.container.querySelectorAll('[data-testid="group-message"]')
+      ).map(e => ({
+        text: e.querySelector('.whitespace-pre-wrap')?.textContent,
+        sending: e.getAttribute('data-sending') === 'true',
+      }));
+
+    /** Adds an own message to the engine's timeline. */
+    function record(syncObjId: string, text: string) {
+      fake.state.timelines.get('g1')!.push(
+        message({
+          syncObjId,
+          createdAt: 3_000n,
+          lastModifiedAt: 3_000n,
+          body: { type: 'text', text },
+        })
+      );
+    }
+
+    async function send(r: { container: HTMLDivElement }, text: string) {
+      const textarea = r.container.querySelector(
+        'textarea'
+      ) as HTMLTextAreaElement;
+      await typeInto(textarea, text);
+      await pressEnter(textarea);
+    }
+
+    it('shows it at once with its reply, then the real one in its place', async () => {
+      const r = await openGroup('member');
+      unmount = r.unmount;
+      const sent = deferSend();
+      const bobs = r.container
+        .querySelectorAll('[data-testid="group-message"]')[1]
+        .querySelector('[role="button"]');
+      await click(bobs);
+      await click(byText('message_menu.reply'));
+      await send(r, 'hello');
+      expect(rows(r)).toEqual([
+        { text: 'question', sending: false },
+        { text: 'answer', sending: false },
+        { text: 'hello', sending: true },
+      ]);
+      const local = r.container.querySelector('[data-sending="true"]')!;
+      expect(
+        local.querySelector('[data-testid="group-reply-preview"]')?.textContent
+      ).toContain('answer');
+      expect(
+        local.querySelector('[data-testid="group-message-sending"]')
+      ).not.toBeNull();
+      // No menu on it while it is being sent.
+      await click(local.querySelector('[role="button"]'));
+      expect(byText('message_menu.reply')).toBeUndefined();
+      expect(byText('message_menu.delete_locally')).toBeUndefined();
+
+      record('s9', 'hello');
+      await sent.resolve('s9');
+      expect(rows(r)).toEqual([
+        { text: 'question', sending: false },
+        { text: 'answer', sending: false },
+        { text: 'hello', sending: false },
+      ]);
+    });
+
+    it('never shows it twice when the timeline has it before the send resolves', async () => {
+      const r = await openGroup('member');
+      unmount = r.unmount;
+      const sent = deferSend();
+      await send(r, 'hello');
+      record('s9', 'hello');
+      await act(() => useGroupStore.getState().refresh());
+      await act(flush);
+      expect(rows(r).filter(x => x.text === 'hello')).toEqual([
+        { text: 'hello', sending: false },
+      ]);
+      await sent.resolve('s9');
+      expect(rows(r).filter(x => x.text === 'hello')).toEqual([
+        { text: 'hello', sending: false },
+      ]);
+    });
+
+    it('removes it on failure and gives the text back after what was typed since', async () => {
+      const r = await openGroup('member');
+      unmount = r.unmount;
+      const sent = deferSend();
+      await send(r, 'hello');
+      expect(rows(r).at(-1)).toEqual({ text: 'hello', sending: true });
+      const textarea = r.container.querySelector(
+        'textarea'
+      ) as HTMLTextAreaElement;
+      await typeInto(textarea, 'later');
+      await sent.reject(new Error('network'));
+      expect(rows(r).map(x => x.text)).toEqual(['question', 'answer']);
+      expect(await toastErrors()).toEqual(['message_menu.failed']);
+      expect(
+        (r.container.querySelector('textarea') as HTMLTextAreaElement).value
+      ).toBe('later\nhello');
+    });
+
+    it('keeps several sends in their order, each replaced by its message', async () => {
+      const r = await openGroup('member');
+      unmount = r.unmount;
+      const first = deferSend();
+      const second = deferSend();
+      await send(r, 'one');
+      await send(r, 'two');
+      expect(rows(r).slice(2)).toEqual([
+        { text: 'one', sending: true },
+        { text: 'two', sending: true },
+      ]);
+      record('s8', 'one');
+      await first.resolve('s8');
+      expect(rows(r).slice(2)).toEqual([
+        { text: 'one', sending: false },
+        { text: 'two', sending: true },
+      ]);
+      record('s9', 'two');
+      await second.resolve('s9');
+      expect(rows(r).slice(2)).toEqual([
+        { text: 'one', sending: false },
+        { text: 'two', sending: false },
+      ]);
+    });
+  });
+
   it('creates a group with contacts that have an active session only', async () => {
     fake.sdk.contacts.list.mockResolvedValue([
       { userId: 'alice', name: 'Alice' },
