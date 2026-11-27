@@ -41,7 +41,7 @@
     "share_username_placeholder": "Enter username to share",
     "share_username_aria": "Username to share with contact",
     "import_file_aria": "Import contact from YAML file",
-    "connected_non_contact": "You are already connected to this person through a shared chat. Adding them saves them as a contact on this device only: nothing is sent, so there is no message or timer to choose.",
+    "connected_non_contact": "You are already connected to this person through a shared chat. Adding them saves them as a contact on this device only: nothing is sent, so there is no message to write.",
     "already_contact": "This user is already in your contacts"
   },
   "privacy_notice": {

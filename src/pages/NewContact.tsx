@@ -18,7 +18,6 @@ import PageLayout from '../components/ui/Layout/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import ConnectionBanner from '../components/ui/ConnectionBanner';
 import Toggle from '../components/ui/Toggle';
-import MessageTimerField from '../components/groups/MessageTimerField';
 
 const NewContact: React.FC = () => {
   const { t } = useTranslation('contacts');
@@ -40,7 +39,6 @@ const NewContact: React.FC = () => {
     shareUsername,
     customUsername,
     customUsernameError,
-    messageTimer,
     connectedNonContact,
     isSubmitting,
     canSubmit,
@@ -53,7 +51,6 @@ const NewContact: React.FC = () => {
     handleMessageChange,
     handleShareUsernameChange,
     handleCustomUsernameChange,
-    handleMessageTimerChange,
     handleSubmit,
   } = useContactForm();
 
@@ -403,16 +400,6 @@ const NewContact: React.FC = () => {
                   </div>
                 </div>
               )}
-            </div>
-
-            {/* The message timer of the chat founded once accepted */}
-            <div className="border-t border-border">
-              <MessageTimerField
-                value={messageTimer}
-                onChange={handleMessageTimerChange}
-                hint={t('groups:timer.contact_request_hint')}
-                testId="contact-message-timer"
-              />
             </div>
           </div>
         )}
