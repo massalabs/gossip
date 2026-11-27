@@ -525,6 +525,9 @@ extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
         }
     }
 
+    // No equivalent of Android's catch-all connection callback here: the peripheral manager
+    // only reports a central once it subscribes to or writes our characteristic, so other
+    // devices connected to the phone (earbuds, watch) never reach this radio or its limits.
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral,
                            didSubscribeTo characteristic: CBCharacteristic) {
         guard running, characteristic.uuid == MeshConstants.chunkCharacteristicUUID,
