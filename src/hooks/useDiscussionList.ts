@@ -33,7 +33,11 @@ export const useDiscussionList = () => {
     async (discussion: Discussion) => {
       try {
         if (userProfile?.userId == null) return;
-        await gossip.contacts.delete(discussion.contactUserId);
+        // The request goes with its contact; for a member of a shared chat,
+        // the SDK keeps the connection the chat needs (§5.12).
+        await gossip.conversations.declineContactRequest(
+          discussion.contactUserId
+        );
       } catch (error) {
         logger.error('Failed to refuse discussion:', error);
       }

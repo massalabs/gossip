@@ -75,12 +75,16 @@ const Invitation: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [declining, setDeclining] = useState(false);
 
+  // A request waiting; a member of a shared chat has a connection open for
+  // the chat while its request waits (§5.12).
   const request: Discussion | undefined =
     kind === 'contact'
       ? discussions.find(
           d =>
             d.contactUserId === id &&
-            !d.weAccepted &&
+            (!d.weAccepted ||
+              contacts.find(c => c.userId === id)?.connection ===
+                'requested') &&
             statuses.get(d.contactUserId) === SessionStatus.PeerRequested
         )
       : undefined;
