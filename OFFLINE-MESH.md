@@ -209,18 +209,68 @@ and it is off until the user turns it on in **Settings → Offline mesh**
 Both toggles carry the privacy warnings: a phone with the mesh on advertises a fixed
 Gossip service UUID, and a bridge uploads other people's traffic from its own connection.
 
+### When the backend is slow or out of reach
+
+`CompositeMessageProtocol` sends and fetches on the backend and the mesh at once. While
+the mesh is on, the mesh never waits for the backend. A backend call makes three
+attempts with a 10 s timeout (`restClient.ts`): about 8 s to fail with no network, 31 to
+54 s on a network that swallows requests, measured on a phone. The chat service runs its
+sends on the same queue as everything else, incoming messages included, so each of
+those waits used to hold the whole queue.
+
+- **A send is done as soon as one transport took it** (`sendMessageTracked`). The other
+  goes on in the background and its answer is still used: a `409` from the backend after
+  the mesh took the message renews the session as on a failed send (the message stays
+  sent: the mesh may deliver it), and a backend that took it ends the repost below. If
+  the first transport to answer refused it, the send waits for the other. If both
+  refused it, the error names both reasons (`TransportsFailedError`), and it is final
+  only if both refusals are: a backend `4xx` other than `408`/`429`, or a mesh refusal
+  for good (seeker taken, malformed or expired blob). A taken seeker on the mesh counts
+  as a `409` only when the backend refused for good too; the backend's `409` alone
+  still decides, as before.
+- **A fetch returns without waiting for a slow transport.** Once one transport answered,
+  the others get `FETCH_GRACE_MS` (1 s) more; what comes later goes to the SDK like what
+  the node pushes (`onLateMessages` → `ingestMessages`, kept until its seeker comes up).
+  A backend fetch still running is not asked again meanwhile. The board is read on the
+  mesh at the same time as on the backend; a backend page that comes too late is read
+  again by the next call (the cursor has not moved), on the same request if it still runs.
+- **A pause after a network failure.** When a backend call fails without an HTTP answer
+  (`NetworkError`: no route, timeout, a captive portal), the backend is skipped for 30
+  s, then 60 s, doubling up to 5 minutes; any answer from it ends the pause, and so does
+  a change of the device's network (`useOnlineStore` → `GossipSdk.networkChanged`).
+  While paused, sends go to the mesh only and are kept for the backend (below), and
+  fetches read the mesh only.
+- **Without the mesh on**, every call waits for the backend exactly as with a single
+  REST transport, and the backend is never paused: the switched-off mesh member is left
+  out of each call, and the pause only starts while a mesh transport is on.
+
 ### In the conversation
 
-- An outgoing message that only the mesh took (no internet node did) is stored with
-  `metadata.via = 'mesh'` and shows a Bluetooth mark next to its ✓ until it is delivered.
-  The composite tells the message service which transports took each send
-  (`takeAcceptedBy`). The row keeps its ciphertext, in the account's own storage, and
-  every refresh round posts it to the server once one answers (`repostMeshOnly`, with
-  `internetOnly` routing, which the mesh never sees); then `via` goes and the ciphertext
-  with it. The node no longer uploads the phone's own blobs unless it bridges (it cannot
-  tell them from relayed ones), so this is what gets a message out when the phone, not a
-  bridge, reaches the internet. An announcement only the mesh took stays queued the same
-  way, flagged `internetOnly`, without its addressed copy.
+- A group ciphertext that only the mesh took stays in the account's group outbox
+  (`groupOutbox`, in the account's own storage, like any ciphertext waiting to be sent),
+  marked `meshOnlySince`. The message counts as sent from then (the engine is told it was
+  published once, when the first transport took it). The outbox posts it to the backend
+  with `internetOnly` routing, which the mesh never sees: off the chat queue, oldest
+  first, at its retry time (the wait doubles up to 5 minutes; a post while the backend is
+  paused costs no request), and at once when the network changes. It is deleted once the
+  backend has it (or refused it for good: a `409` renews the session as on a first send),
+  or 14 days after the mesh took it (`NETWORK_RETENTION_MS`, how long the backend and the
+  mesh keep a message: past it the backend would drop it and the peer flag it stale).
+  The mark is in the database, so a restart in between keeps it.
+- An outgoing message of the earlier one-to-one kind (keep-alives) that only the mesh
+  took is stored with `metadata.via = 'mesh'` and shows a Bluetooth mark next to its ✓
+  until it is delivered. The row keeps its ciphertext, in the account's own storage,
+  and every refresh round posts it to the server once one answers (`repostMeshOnly`, with
+  `internetOnly` routing); then `via` goes and the ciphertext with it. A backend that
+  takes the first send after the mesh did clears the mark too.
+- The node no longer uploads the phone's own blobs unless it bridges (it cannot tell
+  them from relayed ones), so these posts are what get a message out when the phone, not
+  a bridge, reaches the internet. An announcement only the mesh took stays queued the
+  same way, flagged `internetOnly`, without its addressed copy. An announcement still
+  waits for the backend's answer (unless paused): the board's counter says the backend
+  has it, and posting it again later would make a second entry on the board.
+- Accepted cost: when the internet returns, the delayed posts come in a burst, which
+  shows the backend that the account was offline for a while.
 - An incoming message read more than 10 minutes after its sender dated it, or that the
   session flagged `stale`, is stored with `metadata.delayed = true` and shows "delayed".
 
@@ -263,6 +313,27 @@ The node keeps them off the internet too:
 The flag is honoured by honest phones and bridges; a modified one can ignore it and
 upload what it relays (`wasm/mesh/docs/MESH.md`, "Local-only blobs and seekers"). The
 mailbox rotation and the separate ciphertext still limit what that reveals.
+
+### When the wanted list is updated
+
+The node is given the seekers the account reads (`setWantedSeekers`, which adds the
+lookahead and mailbox seekers as `localSeekers` while the mesh is on) as soon as they
+change: after each round of a message fetch in which a message was read, when a session
+changes status or is renewed, and at login, besides the end of every fetch. A blob
+nobody asked for is offered to every link for 5 s, then only travels toward a phone that
+wants it or toward a bridge, so the next message of a chat waits on the phones that hold
+it until this list reaches them; it used to be sent only at the end of a whole fetch,
+which waited for the backend. The rules do not change: the extra seekers stay
+local-only, nothing goes to the backend (the REST transport has no wanted list), and a
+lock still empties the list.
+
+The node pushes (`arrival`) only a blob stored while its seeker is wanted; setting the
+list does not look at what it already holds. A blob that reached the phone before (the
+account was locked, the seeker not predicted yet, a relay) is only found by asking the
+node. So when the list gains a seeker outside a fetch (login, a session that changes),
+the SDK fetches at once while the mesh is on, and inside a fetch the next round asks for
+the new seekers anyway. A fetch asked for while one runs starts right after it, rather
+than being skipped.
 
 ## Plausible deniability
 
@@ -338,9 +409,9 @@ Limits:
 - **iOS** locks late when the app stays suspended (above), and the native code there has
   not been built on this branch (no macOS here).
 - **Messages not yet on the server** wait in the account's storage, encrypted with it,
-  until the account opens with a server in reach. A message a bridge uploaded first is
-  posted again, and the server keeps the copy it has (an identical one, or `409` for
-  another value at the seeker, which also ends the retries).
+  until the account opens with a server in reach, for 14 days at most. A message a
+  bridge uploaded first is posted again, and the server keeps the copy it has (an
+  identical one, or `409` for another value at the seeker, which also ends the retries).
 - **A phone without a decoy**, or a modified app, is outside this: the property is that
   locked Gossip shows nothing, not that an open one hides anything.
 - **Neighbours** saw this phone send blobs first and advertise its seekers while the

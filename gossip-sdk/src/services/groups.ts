@@ -35,15 +35,23 @@ import {
   SessionMessageTooLargeError,
   type SessionModule,
 } from '../wasm/session.js';
-import type { IMessageProtocol } from '../api/messageProtocol/types.js';
+import type {
+  IMessageProtocol,
+  SendOutcome,
+  SettledSend,
+} from '../api/messageProtocol/types.js';
+import {
+  BACKEND_PAUSE_MAX_MS,
+  sendTracked,
+} from '../api/messageProtocol/composite.js';
+import { NETWORK_RETENTION_MS } from '../config/protocol.js';
 import type { Queries, GroupBatch } from '../db/queries/index.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { SdkConfig } from '../config/sdk.js';
 import { serializeGroupPlaintext } from '../utils/messageSerialization.js';
 import { decodeUserId, encodeUserId } from '../utils/userId.js';
 import { Logger } from '../utils/logs.js';
-import { isFinalStatus } from '../api/restClient.js';
-import { isSeekerConflict } from '../api/errors.js';
+import { isFinalSendError, isSeekerConflict } from '../api/errors.js';
 import type { SeekerConflictHandler } from './seekerConflicts.js';
 
 const logger = new Logger('GroupService');
@@ -436,16 +444,12 @@ const MAX_WAKEUP_MS = 60 * 60 * 1000;
 const MAX_OUTBOX_RETRY_MS = 60 * 60 * 1000;
 
 /**
- * Whether a send failed for good: the server answered a 4xx other than a
- * timeout or rate limiting. A 409 means that it holds another value under the
- * seeker (the same value would have been taken), so this one never arrives.
+ * The longest wait between two posts to the backend of a ciphertext only a
+ * mesh took: the backend's longest pause, so that a post follows soon after
+ * the backend is asked again. A post while the backend is paused costs no
+ * request (the composite transport refuses it at once).
  */
-function isFinalSendError(error: unknown): boolean {
-  const status = /HTTP (\d{3})/.exec(
-    error instanceof Error ? error.message : ''
-  );
-  return status !== null && isFinalStatus(Number(status[1]));
-}
+const MESH_REPOST_MAX_RETRY_MS = BACKEND_PAUSE_MAX_MS;
 
 function userIdOf(hex: string): string {
   return encodeUserId(hexToBytes(hex));
@@ -805,6 +809,8 @@ export class GroupService {
   private closed = false;
   /** Failed sends of each outbox row since this service opened. */
   private outboxFailures = new Map<number, number>();
+  /** Posts to the backend of what only a mesh took, while they run. */
+  private reposting: Promise<void> | null = null;
   /**
    * The end of the chain when it is a send that has not started yet: a kick
    * then adds nothing, since that send runs after everything queued so far.
@@ -1081,7 +1087,7 @@ export class GroupService {
       .catch(() => undefined);
     let waited: ReturnType<typeof setTimeout> | null = null;
     await Promise.race([
-      this.chain,
+      Promise.all([this.chain, this.reposting]),
       this.opening?.catch(() => undefined),
       new Promise<void>(resolve => {
         waited = setTimeout(resolve, CLOSE_WAIT_MS);
@@ -1478,8 +1484,9 @@ export class GroupService {
         return;
       }
       this.encrypted.shift();
+      let outcome: SendOutcome;
       try {
-        await this.messageProtocol.sendMessage({
+        outcome = await sendTracked(this.messageProtocol, {
           seeker: e.seeker,
           ciphertext: e.ciphertext,
         });
@@ -1491,15 +1498,80 @@ export class GroupService {
         }
         continue;
       }
-      if (id !== null) {
-        this.outboxFailures.delete(id);
-        await this.queries.groups.deleteOutbox(id).catch(() => undefined);
-      }
+      if (id !== null) await this.sent(id, encodeUserId(e.to), outcome);
+      // Published once, when the first transport took it: that is what makes
+      // the message sent. A later post to the backend is not a new send.
       if (handOff && this.alive(e.node)) {
         e.node.published(e.handle!, this.now());
         await this.persist();
       }
     }
+  }
+
+  /**
+   * A stored ciphertext that a transport took. Once the backend has it, it
+   * goes. One that only a mesh took stays, marked, to be posted to the
+   * backend later (`repostMeshOnly`): a mesh node uploads nothing of its own
+   * unless it bridges, so a peer that reads the backend alone would never get
+   * it, and its session's chain would stop there. The mark is in the
+   * database, so a restart in between keeps it. The backend's own answer to
+   * this send may still come (`settled`): it then deletes the row, or brings
+   * a 409, handled as on a send that failed.
+   */
+  private async sent(
+    id: number,
+    contactUserId: string,
+    outcome: SendOutcome
+  ): Promise<void> {
+    this.outboxFailures.delete(id);
+    if (outcome.acceptedBy.includes('internet')) {
+      await this.queries.groups.deleteOutbox(id).catch(() => undefined);
+      return;
+    }
+    // The first post waits for the backend's answer to this send (below),
+    // so that the two never run together; this time only applies if that
+    // answer never comes (the app closed first).
+    const now = this.now();
+    await this.queries.groups
+      .markOutboxMeshOnly(
+        id,
+        new Date(now),
+        new Date(now + MESH_REPOST_MAX_RETRY_MS)
+      )
+      .catch(() => undefined);
+    // Never awaited (the chain goes on) and never rejects.
+    void outcome.settled
+      .then(settled => this.settledLate(id, contactUserId, settled))
+      .catch(() => undefined);
+  }
+
+  /** The backend answered a send that a mesh had taken first. */
+  private async settledLate(
+    id: number,
+    contactUserId: string,
+    settled: SettledSend
+  ): Promise<void> {
+    // Closed: the row stays marked and is posted at the next open.
+    if (this.closed) return;
+    if (settled.acceptedBy.includes('internet')) {
+      this.outboxFailures.delete(id);
+      await this.queries.groups.deleteOutbox(id);
+      return;
+    }
+    const conflict = settled.failures.find(
+      f => f.kind === 'internet' && isSeekerConflict(f.error)
+    );
+    if (conflict) {
+      await this.outboxFailed(id, contactUserId, conflict.error);
+      return;
+    }
+    // Any other failure: posted again (repostMeshOnly) after the usual wait;
+    // while the backend is paused, a post costs no request.
+    await this.queries.groups.rescheduleOutbox(
+      id,
+      new Date(this.now() + this.config.messages.retryDelayMs)
+    );
+    this.schedule();
   }
 
   /** Sends again, as stored, the ciphertexts that failed. */
@@ -1510,8 +1582,11 @@ export class GroupService {
     );
     for (const row of due) {
       if (this.closed) return;
+      // posted off the operation queue, by repostMeshOnly
+      if (row.meshOnlySince) continue;
+      let outcome: SendOutcome;
       try {
-        await this.messageProtocol.sendMessage({
+        outcome = await sendTracked(this.messageProtocol, {
           seeker: row.seeker,
           ciphertext: row.ciphertext,
         });
@@ -1521,9 +1596,87 @@ export class GroupService {
         );
         continue;
       }
-      this.outboxFailures.delete(row.id);
-      await this.queries.groups.deleteOutbox(row.id).catch(() => undefined);
+      await this.sent(row.id, row.contactUserId, outcome);
     }
+    this.repostMeshOnly();
+  }
+
+  /**
+   * Starts posting to the backend, in the background, the due ciphertexts
+   * that only a mesh took; nothing if a run is going on.
+   *
+   * Off the operation queue: these posts change nothing in the engine, and
+   * a backend that fails takes up to a minute to say so, which every
+   * operation queued behind would wait for.
+   */
+  private repostMeshOnly(): void {
+    if (this.reposting || this.closed) return;
+    this.reposting = this.repostDue()
+      .catch(() => undefined)
+      .finally(() => {
+        this.reposting = null;
+      });
+  }
+
+  /**
+   * Posts the due ciphertexts only a mesh took, oldest first, with
+   * `internetOnly` routing (the mesh has them already). Each goes once the
+   * backend has it, or refuses it for good (a 409 renews the session, as on a
+   * first send), or once the network's retention has passed since the mesh
+   * took it: the backend would no longer keep it, nor the peer accept it.
+   * `published` is not called again.
+   *
+   * Stops at the first failure that may pass: the backend is out of reach,
+   * and the rest are moved to the same time rather than each paying for a
+   * failing request. Accepted cost: when the internet returns, these posts
+   * come in a burst, which shows the backend that the account was offline
+   * for a while.
+   */
+  private async repostDue(): Promise<void> {
+    const now = this.now();
+    const due = (
+      await this.queries.groups.dueOutbox(this.owner, new Date(now))
+    ).filter(row => row.meshOnlySince !== null);
+    for (const [index, row] of due.entries()) {
+      if (this.closed) return;
+      if (now - row.meshOnlySince!.getTime() > NETWORK_RETENTION_MS) {
+        this.outboxFailures.delete(row.id);
+        await this.queries.groups.deleteOutbox(row.id);
+        continue;
+      }
+      try {
+        await this.messageProtocol.sendMessage(
+          { seeker: row.seeker, ciphertext: row.ciphertext },
+          { internetOnly: true }
+        );
+      } catch (error) {
+        const kept = await this.outboxFailed(
+          row.id,
+          row.contactUserId,
+          error,
+          MESH_REPOST_MAX_RETRY_MS
+        );
+        if (kept === null) continue;
+        for (const rest of due.slice(index + 1)) {
+          await this.queries.groups.rescheduleOutbox(rest.id, kept);
+        }
+        return;
+      }
+      this.outboxFailures.delete(row.id);
+      await this.queries.groups.deleteOutbox(row.id);
+    }
+  }
+
+  /**
+   * The network changed: the ciphertexts only a mesh took are posted to the
+   * backend now, rather than at their next retry.
+   */
+  async networkChanged(): Promise<void> {
+    if (this.closed) return;
+    await this.queries.groups
+      .meshOnlyOutboxDueNow(this.owner, new Date(this.now()))
+      .catch(() => 0);
+    this.repostMeshOnly();
   }
 
   /**
@@ -1531,40 +1684,45 @@ export class GroupService {
    * is deleted: its plaintext was handed off but is never published, so the
    * engine records no delivery hint for it and its events stay to be
    * synchronised. Any other failure is retried, each wait twice the one
-   * before, up to an hour.
+   * before, up to an hour (`maxDelayMs`); returns when, or null once deleted.
+   * When the backend and a mesh both refused it, it is final only if both
+   * were (see `isFinalSendError`).
    *
    * A seeker the server already holds (409) means the session with the peer
    * is behind what was already published: it is renewed (at most once an
-   * hour), and the content is assembled again on the new one.
+   * hour), and the content is assembled again on the new one. A 409 that
+   * comes after a mesh took the ciphertext renews the session the same way;
+   * the content was published by then (the mesh may still deliver it), so it
+   * is not assembled again.
    */
   private async outboxFailed(
     id: number,
     contactUserId: string,
-    error: unknown
-  ): Promise<void> {
+    error: unknown,
+    maxDelayMs = MAX_OUTBOX_RETRY_MS
+  ): Promise<Date | null> {
     if (isSeekerConflict(error)) {
       this.outboxFailures.delete(id);
       await this.queries.groups.deleteOutbox(id);
       // Not awaited: the renewal posts an announcement and tells this
       // service, which must not wait for its own queue.
       void this.seekerConflicts?.handle(contactUserId);
-      return;
+      return null;
     }
     if (isFinalSendError(error)) {
       this.outboxFailures.delete(id);
       await this.queries.groups.deleteOutbox(id);
-      return;
+      return null;
     }
     const failures = (this.outboxFailures.get(id) ?? 0) + 1;
     this.outboxFailures.set(id, failures);
     const delay = Math.min(
-      MAX_OUTBOX_RETRY_MS,
+      maxDelayMs,
       this.config.messages.retryDelayMs * 2 ** Math.min(failures - 1, 20)
     );
-    await this.queries.groups.rescheduleOutbox(
-      id,
-      new Date(this.now() + delay)
-    );
+    const at = new Date(this.now() + delay);
+    await this.queries.groups.rescheduleOutbox(id, at);
+    return at;
   }
 
   /**
