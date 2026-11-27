@@ -160,7 +160,8 @@ describe('DiscussionListItem — pin icon', () => {
   });
 
   it('shows last message content and relative timestamp', async () => {
-    const discussion = makeDiscussion();
+    // An archive: its last message. A contact with no chat says so instead.
+    const discussion = makeDiscussion({ isArchive: true });
     const contact = makeContact();
     const lastMessage = {
       content: 'Hey there!',
@@ -179,6 +180,41 @@ describe('DiscussionListItem — pin icon', () => {
     );
 
     await expect.element(page.getByText('Hey there!')).toBeInTheDocument();
+  });
+
+  it('says that a contact has no chat yet, rather than the request message', async () => {
+    render(
+      <DiscussionListItem
+        discussion={makeDiscussion()}
+        contact={makeContact()}
+        lastMessage={{
+          content: 'hello from the request',
+          timestamp: new Date(),
+        }}
+        onSelect={onSelect}
+      />
+    );
+    await expect
+      .element(page.getByText('list_item.no_chat'))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText('hello from the request'))
+      .not.toBeInTheDocument();
+  });
+
+  it('says that a contact with no chat invites to one', async () => {
+    render(
+      <DiscussionListItem
+        discussion={makeDiscussion()}
+        contact={makeContact()}
+        lastMessage={undefined}
+        chatInvitation
+        onSelect={onSelect}
+      />
+    );
+    await expect
+      .element(page.getByText('list_item.chat_invitation'))
+      .toBeInTheDocument();
   });
 
   it('shows unread count badge when unreadCount > 0', async () => {

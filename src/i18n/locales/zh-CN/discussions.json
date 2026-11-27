@@ -39,7 +39,9 @@
     "edit_name_title": "编辑会话名称",
     "name_updated": "名称已更新",
     "name_update_failed": "更新名称失败",
-    "pin_failed": "置顶会话失败"
+    "pin_failed": "置顶会话失败",
+    "no_chat": "还没有聊天",
+    "chat_invitation": "邀请你聊天"
   },
   "scroll_to_bottom": "滚动到最新消息",
   "search": {

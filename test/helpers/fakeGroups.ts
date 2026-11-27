@@ -66,6 +66,8 @@ export function makeFakeGroups() {
     conversations: {
       migrationTimer: vi.fn(async () => 0),
       migrate: vi.fn(async () => 'g9'),
+      startDirectChat: vi.fn(async () => 'g8'),
+      directChatWith: vi.fn(async () => null),
       acceptInvitation: vi.fn(async (e: string) => e),
       declineInvitation: vi.fn(async () => {}),
       setArchived: vi.fn(async () => {}),

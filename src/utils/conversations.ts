@@ -3,13 +3,17 @@
  *
  * Every conversation is a group; a discussion is only a session with a peer.
  * The list shows a discussion as a row when it is an archive not yet
- * continued by a direct chat held here, a contact request, or a new contact
- * whose chat is not founded yet. A discussion whose direct chat is held is
+ * continued by a direct chat held here, a contact request, or a contact
+ * with no chat yet (adding a contact starts none: either person starts it). A discussion whose direct chat is held is
  * shown through that group, and an automatic connection (a member of a group
  * who is no contact) is never a conversation.
  */
 import { SELF_CONTACT_ID, SessionStatus } from '@massalabs/gossip-sdk';
-import type { Contact, Discussion } from '@massalabs/gossip-sdk';
+import type {
+  Contact,
+  Discussion,
+  GroupInvitation,
+} from '@massalabs/gossip-sdk';
 
 export function isConversationRow(
   discussion: Discussion,
@@ -72,5 +76,25 @@ export function isDisplayNameTaken(
   const n = name.trim().toLowerCase();
   return contacts.some(
     c => c.userId !== exceptUserId && c.name.toLowerCase() === n
+  );
+}
+
+/**
+ * Whether `invitation` is the invitation to the pair's chat (§5.12) that
+ * `peer` started with `me`: a chat of two, with `migrate_from`, owned by
+ * `peer`. While it waits, the contact's screen shows it instead of "Start a
+ * chat", so that the second person accepts rather than starts another.
+ */
+export function isDirectChatInvitationFrom(
+  invitation: GroupInvitation,
+  peer: string,
+  me: string | undefined
+): boolean {
+  return (
+    invitation.owner === peer &&
+    invitation.migrateFrom === 0 &&
+    invitation.members.length === 2 &&
+    !!me &&
+    invitation.members.includes(me)
   );
 }

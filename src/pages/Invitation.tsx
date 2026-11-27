@@ -50,8 +50,13 @@ const Section: React.FC<{
  * that apply, in this order: who asks; adding them as a contact; the group,
  * its owner and members; its message timer (§7.7), which only its owner
  * changes; the earlier conversation it continues; warnings
- * (§4.8, §5.11); the choices. A person who is no contact and asks for a chat
- * is shown once, as asking both to become a contact and to open the chat.
+ * (§4.8, §5.11); the choices. Who asks is said for each case:
+ *
+ * - a contact request asks only to become a contact: accepting starts no
+ *   chat (§5.12), and its message is shown here only;
+ * - a chat of two from a contact invites to a chat;
+ * - a chat of two from someone who is no contact invites to a chat and asks
+ *   to become a contact: accepting does both.
  *
  * `kind` is `group` (an invitation, by its epoch) or `contact` (a contact
  * request, by the requester's user ID).
@@ -115,6 +120,13 @@ const Invitation: React.FC = () => {
     invitation.members.includes(me);
   // A chat asked by someone who is no contact also asks to become one.
   const asksContact = !!request || (ofTwo && !isContact);
+  const asks = request
+    ? 'invite.asks_contact'
+    : ofTwo
+      ? isContact
+        ? 'invite.invites_to_chat'
+        : 'invite.asks_chat_and_contact'
+      : null;
   const name = isolate(memberName(asker));
 
   const run = async (fn: () => Promise<void>) => {
@@ -186,9 +198,9 @@ const Invitation: React.FC = () => {
             <SafeName name={memberName(invitation.receivedFrom)} />
           </p>
         )}
-        {asksContact && (
-          <p className="text-sm text-foreground">
-            {t('invite.asks_contact_and_chat', { name })}
+        {asks && (
+          <p className="text-sm text-foreground" data-testid="invite-asks">
+            {t(asks, { name })}
           </p>
         )}
         {request?.lastAnnouncementMessage && (
@@ -206,7 +218,9 @@ const Invitation: React.FC = () => {
       {asksContact && (
         <Section title={t('invite.add_contact')} testId="invite-contact">
           <p className="text-sm text-foreground">
-            {t('invite.add_contact_hint', { name })}
+            {request
+              ? t('invite.add_contact_request_hint', { name })
+              : t('invite.add_contact_hint', { name })}
           </p>
         </Section>
       )}
@@ -269,20 +283,6 @@ const Invitation: React.FC = () => {
             )}
         </Section>
       )}
-
-      {request &&
-        request.directChatTimer !== null &&
-        request.directChatTimer !== undefined && (
-          <Section title={t('timer.label')} testId="invite-timer">
-            <p className="flex items-center gap-2 text-sm text-foreground">
-              <Clock className="w-4 h-4 shrink-0 text-muted-foreground" />
-              {messageTimerSentence(request.directChatTimer, t)}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {t('timer.owner_only')}
-            </p>
-          </Section>
-        )}
 
       {(invitation?.migrationOf || invitation?.continues) && (
         <Section title={t('invite.continues')} testId="invite-continues">

@@ -207,7 +207,7 @@
     "invitation": "{{name}} invites you to continue this conversation in a new chat.",
     "junction": "Earlier conversation above · this chat continues it",
     "waiting_contact": "Waiting for {{name}} to accept your request.",
-    "request_received": "{{name}} asks to become your contact and to chat with you.",
+    "request_received": "{{name}} asks to become your contact.",
     "continue_invitation": "{{name}} wants to continue this conversation in a new group.",
     "earlier_junction": "Earlier chat above · read only",
     "unsent": "Not sent"
@@ -215,7 +215,6 @@
   "invite": {
     "title": "Invitation",
     "who_asks": "Who asks",
-    "asks_contact_and_chat": "{{name}} asks to become your contact and to open a chat with you.",
     "their_message": "Their message",
     "add_contact": "Contact",
     "add_contact_hint": "Accepting adds {{name}} to your contacts.",
@@ -228,13 +227,16 @@
     "untrusted_names": "Names are chosen by the people who send them and may imitate someone else: check the user ID.",
     "choices": "Your answer",
     "open": "Open",
-    "not_found": "This invitation is no longer pending."
+    "not_found": "This invitation is no longer pending.",
+    "asks_contact": "{{name}} asks to become your contact.",
+    "asks_chat_and_contact": "{{name}} invites you to a chat and asks to become your contact.",
+    "invites_to_chat": "{{name}} invites you to a chat.",
+    "add_contact_request_hint": "Accepting adds {{name}} to your contacts. It starts no chat: either of you can start one later."
   },
   "timer": {
     "label": "Message timer",
     "choose_hint": "Messages disappear this long after they are sent, on every device. A change only applies to messages sent after it.",
     "new_chat_hint": "Messages in this chat disappear this long after they are sent.",
-    "contact_request_hint": "For the chat that starts when they accept.",
     "migration_hint": "For the new chat. Your earlier messages keep their own rule.",
     "change_hint": "Only messages sent after a change get the new timer.",
     "owner_only": "Only the owner can change it.",
@@ -265,5 +267,14 @@
     "weeks_few": "{{count}} weeks",
     "weeks_many": "{{count}} weeks",
     "weeks_other": "{{count}} weeks"
+  },
+  "start_chat": {
+    "action": "Start a chat",
+    "no_chat": "No chat with {{name}} yet.",
+    "hint": "{{name}} receives an invitation to accept or decline. You own the chat.",
+    "connecting": "Connecting with {{name}}…",
+    "started": "Chat started",
+    "failed": "The chat could not be started",
+    "open_failed": "This chat could not be opened"
   }
 }
