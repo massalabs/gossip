@@ -2,31 +2,32 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
-import { Check } from 'react-feather';
+import { ArrowRight, Users, X } from 'react-feather';
 import { SessionStatus, type Contact } from '@massalabs/gossip-sdk';
 import PageLayout from '../components/ui/Layout/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import FormInput from '../components/ui/FormInput';
 import Button from '../components/ui/Button';
-import SearchBar from '../components/ui/SearchBar';
 import ContactAvatar from '../components/avatar/ContactAvatar';
-import UserIdDisplay from '../components/ui/UserIdDisplay';
+import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import SafeName from '../components/groups/SafeName';
 import MessageTimerField from '../components/groups/MessageTimerField';
+import MemberPicker from '../components/groups/MemberPicker';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { useDefaultMessageTimer } from '../hooks/useDefaultMessageTimer';
 import { useDiscussionStore } from '../stores/discussionStore';
+import { useAccountStore } from '../stores/accountStore';
 import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { ROUTES } from '../constants/routes';
-import { safeName } from '../utils/groupName';
 import { isAcceptedContact } from '../utils/conversations';
 
 /** The largest group name, in UTF-8 bytes (§5.11). */
 export const GROUP_NAME_MAX_BYTES = 256;
 
 /**
- * New group: a name and members picked among the contacts that have an
- * active session (a root is delivered inside the one-to-one sessions).
+ * New chat, in two steps (Lucas's screens 01 and 02): the members, picked
+ * among the contacts that have an active session (a root is delivered inside
+ * the one-to-one sessions), then the name and the message timer.
  */
 const NewGroup: React.FC = () => {
   const { t } = useTranslation('groups');
@@ -34,9 +35,11 @@ const NewGroup: React.FC = () => {
   const gossip = useGossipSdk();
   const refresh = useGroupStore(s => s.refresh);
   const storeContacts = useDiscussionStore(s => s.contacts);
+  const username = useAccountStore(s => s.userProfile?.username);
   const [contacts, setContacts] = useState<Contact[]>(storeContacts);
   const [name, setName] = useState('');
-  const [query, setQuery] = useState('');
+  // Members first, then the name (Lucas's screens 01 and 02).
+  const [step, setStep] = useState<'members' | 'name'>('members');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   // The creator's default, pre-selected (§7.7).
@@ -70,16 +73,6 @@ const NewGroup: React.FC = () => {
     [contacts, gossip]
   );
 
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return eligible;
-    return eligible.filter(
-      c =>
-        safeName(c.name).toLowerCase().includes(q) ||
-        c.userId.toLowerCase().includes(q)
-    );
-  }, [eligible, query]);
-
   const nameTooLong =
     new TextEncoder().encode(name).length > GROUP_NAME_MAX_BYTES;
   const canCreate = selected.size > 0 && !nameTooLong && !creating;
@@ -110,17 +103,88 @@ const NewGroup: React.FC = () => {
     }
   };
 
+  const picked = eligible.filter(c => selected.has(c.userId));
+
+  if (step === 'members') {
+    return (
+      <PageLayout
+        header={
+          <PageHeader
+            title={t('new_group.title')}
+            onBack={() => navigate(ROUTES.newDiscussion())}
+          />
+        }
+        className="app-max-w mx-auto"
+        contentClassName="px-6 py-6 space-y-4"
+      >
+        {picked.length > 0 && (
+          <ul
+            className="flex gap-4 overflow-x-auto pb-1"
+            data-testid="picked-members"
+          >
+            {picked.map(c => (
+              <li key={c.userId} className="w-14 shrink-0 text-center">
+                <button
+                  type="button"
+                  onClick={() => toggle(c.userId)}
+                  className="relative block mx-auto"
+                  aria-label={t('new_group.unselect', { name: c.name })}
+                >
+                  <ContactAvatar contact={c} size={14} />
+                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-muted border border-border flex items-center justify-center">
+                    <X className="w-3 h-3 text-muted-foreground" />
+                  </span>
+                </button>
+                <p className="mt-1 text-xs text-foreground truncate">
+                  <SafeName name={c.name.split(' ')[0] || c.name} />
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <MemberPicker
+          contacts={eligible}
+          selected={selected}
+          onToggle={toggle}
+          emptyText={t('new_group.no_eligible_contacts')}
+        />
+        <p className="px-1 text-xs text-muted-foreground">
+          {t('new_group.members_hint')}
+        </p>
+
+        <div className="sticky bottom-0 pt-2 pb-4 bg-background">
+          <Button
+            onClick={() => setStep('name')}
+            disabled={selected.size === 0}
+            variant="primary"
+            fullWidth
+          >
+            {t('common:next')}
+            <ArrowRight className="w-5 h-5" />
+          </Button>
+        </div>
+      </PageLayout>
+    );
+  }
+
   return (
     <PageLayout
       header={
         <PageHeader
           title={t('new_group.title')}
-          onBack={() => navigate(ROUTES.newDiscussion())}
+          onBack={() => setStep('members')}
         />
       }
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6 space-y-4"
     >
+      <div className="flex justify-center">
+        <div className="w-20 h-20 rounded-full bg-accent-soft flex items-center justify-center">
+          <Users className="w-9 h-9 text-accent-soft-foreground" />
+        </div>
+      </div>
+
       <div className="bg-card rounded-xl border border-border p-4">
         <FormInput
           id="group-name"
@@ -142,78 +206,39 @@ const NewGroup: React.FC = () => {
       </div>
 
       <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <div className="border-b border-border px-4 py-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-foreground">
-              {t('new_group.members_title')}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {t('new_group.selected', { count: selected.size })}
-            </p>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {t('new_group.members_hint')}
-          </p>
-          <SearchBar
-            value={query}
-            onChange={setQuery}
-            placeholder={t('common:search')}
-            aria-label={t('common:search')}
-          />
-        </div>
-        {eligible.length === 0 ? (
-          <p className="p-6 text-center text-sm text-muted-foreground">
-            {t('new_group.no_eligible_contacts')}
-          </p>
-        ) : (
-          <ul className="max-h-[50vh] overflow-y-auto">
-            {shown.map(contact => {
-              const isSelected = selected.has(contact.userId);
-              return (
-                <li key={contact.userId}>
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={isSelected}
-                    onClick={() => toggle(contact.userId)}
-                    className="hover-fill w-full px-4 py-3 flex items-center gap-3 text-left border-b border-border last:border-b-0"
-                  >
-                    <ContactAvatar contact={contact} size={10} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate">
-                        <SafeName name={contact.name} />
-                      </p>
-                      <UserIdDisplay
-                        userId={contact.userId}
-                        textClassName="text-muted-foreground"
-                      />
-                    </div>
-                    <span
-                      className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
-                        isSelected
-                          ? 'bg-primary border-primary text-primary-foreground'
-                          : 'border-border'
-                      }`}
-                    >
-                      {isSelected && <Check className="w-4 h-4" />}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <p className="px-4 py-3 text-sm font-medium text-foreground border-b border-border">
+          {t('new_group.members_title')} · {picked.length + 1}
+        </p>
+        <ul data-testid="new-chat-members">
+          <li className="px-4 py-2.5 flex items-center gap-3 border-b border-border">
+            <UserProfileAvatar name={username} size={8} />
+            <span className="text-sm text-foreground">{t('list.you')}</span>
+          </li>
+          {picked.map(c => (
+            <li
+              key={c.userId}
+              className="px-4 py-2.5 flex items-center gap-3 border-b border-border last:border-b-0"
+            >
+              <ContactAvatar contact={c} size={8} />
+              <span className="text-sm text-foreground min-w-0 truncate">
+                <SafeName name={c.name} />
+              </span>
+            </li>
+          ))}
+        </ul>
       </div>
 
-      <Button
-        onClick={create}
-        disabled={!canCreate}
-        loading={creating}
-        variant="primary"
-        fullWidth
-      >
-        {creating ? t('new_group.creating') : t('new_group.create')}
-      </Button>
+      <div className="sticky bottom-0 pt-2 pb-4 bg-background">
+        <Button
+          onClick={create}
+          disabled={!canCreate}
+          loading={creating}
+          variant="primary"
+          fullWidth
+        >
+          {creating ? t('new_group.creating') : t('new_group.create')}
+        </Button>
+      </div>
     </PageLayout>
   );
 };

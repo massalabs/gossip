@@ -9,7 +9,8 @@ import {
   IMessageProtocol,
   MessageProtocolResponse,
 } from './types.js';
-import { RestClient } from '../restClient.js';
+import { RestClient, type RestResponse } from '../restClient.js';
+import { NetworkError } from '../errors.js';
 import { encodeToBase64, decodeFromBase64 } from '../../utils/base64.js';
 
 const BULLETIN_ENDPOINT = '/bulletin';
@@ -24,6 +25,16 @@ type FetchMessagesResponse = {
   key: string;
   value: string;
 };
+
+/**
+ * The error of a failed request: the server's answer (an HTTP status, a 409
+ * kept recognisable) when there was one, otherwise a `NetworkError`, which
+ * tells the composite transport that the backend is out of reach. The
+ * message is the same either way.
+ */
+function failed(response: RestResponse<unknown>, fallback: string): Error {
+  return response.httpError ?? new NetworkError(response.error || fallback);
+}
 
 /** An internet node must never see traffic meant for the mesh only. */
 function refuseMeshOnly(routing?: MessageRouting): void {
@@ -51,7 +62,7 @@ export class RestMessageProtocol
     });
 
     if (!response.success || !response.data) {
-      throw new Error(response.error || 'Failed to fetch messages');
+      throw failed(response, 'Failed to fetch messages');
     }
 
     return response.data.map((item: FetchMessagesResponse) => {
@@ -82,11 +93,7 @@ export class RestMessageProtocol
     });
 
     if (!response.success) {
-      // A 409 tells a seeker the server already holds: kept recognisable.
-      throw (
-        response.httpError ??
-        new Error(response.error || 'Failed to send message')
-      );
+      throw failed(response, 'Failed to send message');
     }
   }
 
@@ -102,7 +109,7 @@ export class RestMessageProtocol
     });
 
     if (!response.success || !response.data) {
-      throw new Error(response.error || 'Failed to broadcast outgoing session');
+      throw failed(response, 'Failed to broadcast outgoing session');
     }
 
     return response.data.counter;
@@ -126,7 +133,7 @@ export class RestMessageProtocol
     });
 
     if (!response.success || response.data == null) {
-      throw new Error(response.error || 'Failed to fetch announcements');
+      throw failed(response, 'Failed to fetch announcements');
     }
 
     return response.data.map(item => ({
@@ -143,7 +150,7 @@ export class RestMessageProtocol
     });
 
     if (!response.success || !response.data) {
-      throw new Error(response.error || 'Failed to fetch bulletin counter');
+      throw failed(response, 'Failed to fetch bulletin counter');
     }
 
     return response.data.counter;

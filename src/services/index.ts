@@ -21,6 +21,7 @@ import { setActiveSeekersInPreferences } from '../utils/preferences';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
 import { useGroupStore } from '../stores/groupStore';
+import { onNetworkChange } from '../stores/useOnlineStore';
 
 let outputEpoch = 0;
 let activeOutputOwner: { sdk: GossipSdk; epoch: number } | null = null;
@@ -125,6 +126,10 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     epoch: outputEpoch,
     generation: webOwnerGeneration,
   });
+  // A network that changes may reach the backend again: the SDK stops
+  // skipping it after a failure, and posts what only the mesh took.
+  onNetworkChange(() => gossip.networkChanged());
+
   // Propagate seekers to SW bridge (web) and BackgroundRunner (mobile)
   gossip.on(SdkEventType.SEEKERS_UPDATED, (seekers: Uint8Array[]) => {
     const { epoch: ownerEpoch, generation } = owner();

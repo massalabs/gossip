@@ -13,6 +13,7 @@ import DiscussionSettings from '../pages/DiscussionSettings';
 import GroupDiscussion from '../pages/GroupDiscussion';
 import GroupSettings from '../pages/GroupSettings';
 import NewGroup from '../pages/NewGroup';
+import ArchivedChats from '../pages/ArchivedChats';
 import Invitation from '../pages/Invitation';
 import SecuritySettings from '../pages/settings/SecuritySettings';
 import NotificationsSettings from '../pages/settings/NotificationsSettings';
@@ -53,6 +54,7 @@ export const AuthenticatedRoutes: React.FC = () => {
     <MainLayout>
       <AnimatedRoutes>
         <Route path={ROUTES.discussions()} element={<Discussions />} />
+        <Route path={ROUTES.archivedChats()} element={<ArchivedChats />} />
         <Route path={ROUTES.discussion()} element={<Discussion />} />
         <Route path={ROUTES.newDiscussion()} element={<NewDiscussion />} />
         <Route path={ROUTES.newContact()} element={<NewContact />} />

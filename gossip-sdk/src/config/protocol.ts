@@ -64,6 +64,14 @@ function buildProtocolApiBaseUrl(): string {
   return `${trimmed}/api`;
 }
 
+/**
+ * How long the network keeps a message: the backend and the mesh nodes keep a
+ * blob 14 days (`retention_ms` in `gossip-pools`), the sessions' maximum
+ * message age. Past it a message can no longer be fetched, and a peer that
+ * still got it would flag it stale.
+ */
+export const NETWORK_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+
 export const protocolConfig: ProtocolConfig = {
   get baseUrl() {
     return buildProtocolApiBaseUrl();

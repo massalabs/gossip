@@ -235,6 +235,7 @@
     "foreground_title": "Android：高可靠性模式",
     "foreground_description": "即使应用在后台也保持同步运行。显示常驻通知。更耗电。",
     "foreground_toggle": "保持同步活跃",
+    "needs_notifications": "这些设置需要开启通知。通知关闭时，Gossip 不会在后台检查新消息。",
     "debug_sync_preset": "同步预设：{{preset}}",
     "debug_foreground_sync": "前台同步：{{value}}",
     "title": "后台同步",

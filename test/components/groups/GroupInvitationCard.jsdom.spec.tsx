@@ -126,7 +126,7 @@ describe('LeaveGroupSheet', () => {
     });
   });
 
-  it('asks the owner for the next owner on "hand over and leave"', async () => {
+  it('asks the owner for the next owner first, and hands over only once one is picked', async () => {
     const onAction = vi.fn();
     const r = await renderAt(
       <LeaveGroupSheet
@@ -140,8 +140,14 @@ describe('LeaveGroupSheet', () => {
       />
     );
     unmount = r.unmount;
-    await click(byText('choices.handover_leave')?.closest('button'));
+    expect(document.body.textContent).toContain('choices.pick_next_owner');
+    const leave = byText('choices.handover_leave') as HTMLButtonElement;
+    expect(leave.disabled).toBe(true);
+    await click(leave);
+    expect(onAction).not.toHaveBeenCalled();
     await click(byText('name-bob')?.closest('button'));
+    expect(leave.disabled).toBe(false);
+    await click(leave);
     expect(onAction).toHaveBeenCalledWith({
       type: 'handoverLeave',
       newOwner: 'bob',

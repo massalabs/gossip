@@ -24,6 +24,8 @@ export enum SdkEventType {
   DISCUSSION_UPDATED = 'discussionUpdated',
   MESSAGE_ACKNOWLEDGED = 'messageAcknowledged',
   CONTACT_DELETED = 'contactDeleted',
+  /** A contact's name or connection changed (§5.12). */
+  CONTACT_UPDATED = 'contactUpdated',
   /** Group chats changed: invitations, membership, messages, state. */
   GROUPS_CHANGED = 'groupsChanged',
   /**
@@ -65,6 +67,7 @@ export type SdkEvents = {
     messageDbId: number;
   };
   [SdkEventType.CONTACT_DELETED]: { contactUserId: string };
+  [SdkEventType.CONTACT_UPDATED]: { contactUserId: string };
   [SdkEventType.GROUPS_CHANGED]: {
     changes: GroupChange[];
   };

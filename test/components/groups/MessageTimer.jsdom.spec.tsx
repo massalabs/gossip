@@ -230,7 +230,7 @@ describe('a chat whose timer is not the one the contact request announced', () =
         [
           'Alice a annoncé une autre durée en demandant à discuter.',
           'Annoncée : 1 semaine',
-          'Cette discussion : 5 minutes',
+          'Ce Chat : 5 minutes',
         ],
         'Annoncée : Pour toujours',
       ],
@@ -301,6 +301,9 @@ describe('message timer screens', () => {
     const r = await renderAt(<NewGroup />);
     unmount = r.unmount;
     await act(flush);
+    // Members first; the timer is on the second step, with the name.
+    await click(r.container.querySelector('[role="checkbox"]'));
+    await click(byText('common:next'));
     const field = r.container.querySelector(
       '[data-testid="message-timer-field-value"]'
     );
@@ -310,7 +313,6 @@ describe('message timer screens', () => {
     );
     await click(option('groups:timer.days:3'));
     expect(field?.textContent).toBe('groups:timer.days:3');
-    await click(r.container.querySelector('[role="checkbox"]'));
     await click(byText('new_group.create'));
     await act(flush);
     expect(fake.service.createGroup).toHaveBeenCalledWith('', ['alice'], {
@@ -444,12 +446,13 @@ describe('message timer screens', () => {
     useDiscussionStore.setState({ contacts: [] } as never);
   });
 
-  it('shows the timer a contact request states before it is accepted', async () => {
+  it('shows no timer on a contact request, even one an earlier version stated: it starts no chat', async () => {
     useDiscussionStore.setState({
       discussions: [
         {
           contactUserId: 'bob',
           weAccepted: false,
+          // What a request of 0.1.0 or 0.1.1 left in the database.
           directChatTimer: HOUR,
         },
       ] as never,
@@ -462,12 +465,68 @@ describe('message timer screens', () => {
     );
     unmount = r.unmount;
     await act(flush);
-    const section = r.container.querySelector('[data-testid="invite-timer"]');
-    expect(section?.textContent).toContain('timer.disappear_after');
+    expect(
+      r.container.querySelector('[data-testid="invite-timer"]')
+    ).toBeNull();
+    expect(
+      r.container.querySelector('[data-testid="invite-asks"]')?.textContent
+    ).toBe('invite.asks_contact');
+    expect(
+      r.container.querySelector('[data-testid="invite-contact"]')?.textContent
+    ).toContain('invite.add_contact_request_hint');
     useDiscussionStore.setState({
       discussions: [],
       sessionsStatuses: new Map(),
     } as never);
+  });
+
+  it('says a chat of two from a contact invites to a chat, and asks nothing about becoming a contact', async () => {
+    useDiscussionStore.setState({
+      contacts: [{ userId: 'bob', name: 'Bob' }] as never,
+    });
+    fake.state.invitations = [
+      invitation({ members: ['bob', 'me'], migrateFrom: 0 }),
+    ];
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <Invitation />,
+      '/invitation/group/e1',
+      '/invitation/:kind/:id'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    expect(
+      r.container.querySelector('[data-testid="invite-asks"]')?.textContent
+    ).toBe('invite.invites_to_chat');
+    expect(
+      r.container.querySelector('[data-testid="invite-contact"]')
+    ).toBeNull();
+    expect(
+      r.container.querySelector('[data-testid="invite-timer"]')?.textContent
+    ).toContain('timer.disappear_after');
+    useDiscussionStore.setState({ contacts: [] } as never);
+  });
+
+  it('says a chat of two from someone who is no contact invites to a chat and asks to become a contact', async () => {
+    fake.state.invitations = [
+      invitation({ members: ['bob', 'me'], migrateFrom: 0 }),
+    ];
+    useGroupStore.getState().init();
+    await act(flush);
+    const r = await renderAt(
+      <Invitation />,
+      '/invitation/group/e1',
+      '/invitation/:kind/:id'
+    );
+    unmount = r.unmount;
+    await act(flush);
+    expect(
+      r.container.querySelector('[data-testid="invite-asks"]')?.textContent
+    ).toBe('invite.asks_chat_and_contact');
+    expect(
+      r.container.querySelector('[data-testid="invite-contact"]')?.textContent
+    ).toContain('invite.add_contact_hint');
   });
 
   it('says on the invitation of a chat of two that its timer is not the one the request announced, with both', async () => {
@@ -603,7 +662,7 @@ describe('message timer screens', () => {
     ).not.toBeNull();
   });
 
-  it('sends a contact request with the timer chosen, the default pre-selected', async () => {
+  it('sends a contact request without a timer', async () => {
     const start = vi.fn(async () => ({ success: true }));
     Object.assign(fake.sdk, {
       contacts: {
@@ -621,22 +680,119 @@ describe('message timer screens', () => {
     const r = await renderAt(<Probe />);
     unmount = r.unmount;
     await act(flush);
-    expect(form!.messageTimer).toBe(MONTH);
     await act(async () => {
       form!.handleNameChange('Bob');
       form!.handleShareUsernameChange(false);
     });
     await act(async () => {
-      form!.handleMessageTimerChange(12 * HOUR);
-    });
-    expect(form!.messageTimer).toBe(12 * HOUR);
-    await act(async () => {
       await form!.handleSubmit();
     });
     expect(start).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'bob' }),
-      expect.anything(),
-      { messageTimer: 12 * HOUR }
+      { username: undefined, message: '' }
     );
+  });
+
+  describe('the screen of a contact with no chat', () => {
+    const contact = { userId: 'bob', name: 'Bob' } as Contact;
+    const discussion = {
+      contactUserId: 'bob',
+      isArchive: false,
+      archived: false,
+      weAccepted: true,
+      direction: 'received',
+    } as unknown as Discussion;
+
+    beforeEach(() => {
+      useDiscussionStore.setState({
+        sessionsStatuses: new Map([['bob', SessionStatus.Active]]),
+      } as never);
+    });
+    afterEach(() => {
+      useDiscussionStore.setState({ sessionsStatuses: new Map() } as never);
+    });
+
+    it('offers "Start a chat" with the default timer pre-selected, and starts it only on that action with the timer chosen', async () => {
+      useGroupStore.getState().init();
+      await act(flush);
+      const r = await renderAt(
+        <ArchiveFooter contact={contact} discussion={discussion} />
+      );
+      unmount = r.unmount;
+      await act(flush);
+      expect(r.container.textContent).toContain('start_chat.no_chat');
+      expect(fake.sdk.conversations.startDirectChat).not.toHaveBeenCalled();
+      await click(r.container.querySelector('[data-testid="start-chat"]'));
+      await act(flush);
+      expect(fake.sdk.conversations.startDirectChat).not.toHaveBeenCalled();
+      expect(
+        document.querySelector('[data-testid="start-chat-message-timer-value"]')
+          ?.textContent
+      ).toBe('groups:timer.month');
+      await click(
+        document.querySelector('[data-testid="start-chat-message-timer"]')
+      );
+      await click(option('groups:timer.weeks:1'));
+      await click(document.querySelector('[data-testid="start-chat-confirm"]'));
+      await act(flush);
+      expect(fake.sdk.conversations.startDirectChat).toHaveBeenCalledWith(
+        'bob',
+        { messageTimer: 168 * HOUR }
+      );
+    });
+
+    it('shows the contact\'s pending chat invitation instead of "Start a chat"', async () => {
+      fake.state.invitations = [
+        invitation({ members: ['bob', 'me'], migrateFrom: 0 }),
+      ];
+      useGroupStore.getState().init();
+      await act(flush);
+      const r = await renderAt(
+        <ArchiveFooter contact={contact} discussion={discussion} />
+      );
+      unmount = r.unmount;
+      await act(flush);
+      expect(
+        r.container.querySelector('[data-testid="start-chat"]')
+      ).toBeNull();
+      expect(r.container.textContent).toContain('invite.invites_to_chat');
+      expect(
+        r.container.querySelector('[data-testid="archive-invitation-timer"]')
+          ?.textContent
+      ).toBe('groups:timer.disappear_after');
+      await click(
+        r.container.querySelector('[data-testid="archive-accept-migration"]')
+      );
+      await act(flush);
+      expect(fake.sdk.conversations.acceptInvitation).toHaveBeenCalledWith(
+        'e1'
+      );
+      expect(fake.sdk.conversations.startDirectChat).not.toHaveBeenCalled();
+    });
+
+    it('offers nothing to start while the request waits for an answer', async () => {
+      useDiscussionStore.setState({
+        sessionsStatuses: new Map([['bob', SessionStatus.SelfRequested]]),
+      } as never);
+      useGroupStore.getState().init();
+      await act(flush);
+      const r = await renderAt(
+        <ArchiveFooter
+          contact={contact}
+          discussion={
+            {
+              ...discussion,
+              direction: 'initiated',
+            } as unknown as Discussion
+          }
+        />
+      );
+      unmount = r.unmount;
+      await act(flush);
+      expect(
+        r.container.querySelector('[data-testid="start-chat"]')
+      ).toBeNull();
+      expect(r.container.textContent).toContain('archive.waiting_contact');
+    });
   });
 });

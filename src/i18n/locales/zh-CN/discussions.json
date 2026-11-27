@@ -8,8 +8,11 @@
   "filter": {
     "all": "全部",
     "unread": "未读",
-    "pending": "待处理",
-    "archived": "存档"
+    "pending": "待处理"
+  },
+  "archived": {
+    "title": "已归档的聊天",
+    "empty": "没有已归档的聊天"
   },
   "message_input": {
     "replying_to": "回复",
@@ -39,7 +42,9 @@
     "edit_name_title": "编辑会话名称",
     "name_updated": "名称已更新",
     "name_update_failed": "更新名称失败",
-    "pin_failed": "置顶会话失败"
+    "pin_failed": "置顶会话失败",
+    "no_chat": "还没有聊天",
+    "chat_invitation": "邀请你聊天"
   },
   "scroll_to_bottom": "滚动到最新消息",
   "search": {
@@ -95,7 +100,7 @@
   "new_discussion": {
     "title": "新会话",
     "new_contact": "新联系人",
-    "new_group": "新群组",
+    "new_group": "新建聊天",
     "contacts": "联系人",
     "search_contacts": "搜索联系人",
     "loading_contacts": "正在加载联系人…",

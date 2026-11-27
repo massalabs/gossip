@@ -196,4 +196,11 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'ALTER TABLE `discussions` ADD `renewalAnswerOwed` integer DEFAULT false NOT NULL;',
     ],
   },
+  {
+    idx: 16,
+    tag: '0016_group_outbox_mesh_only',
+    when: 1795778592170,
+    digest: 'aeb6c39c7c862c1a0ebc87c1cb952b1c038b236702b0108cb62351d99365d837',
+    statements: ['ALTER TABLE `groupOutbox` ADD `meshOnlySince` integer;'],
+  },
 ];

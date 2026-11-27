@@ -5,9 +5,10 @@ import type { Discussion } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
 import { createDiscussionEventHandlers } from './discussionStore.events';
 import { createSelectors } from './utils/createSelectors';
+import { shownStatus } from '../utils/conversations';
 import { useAccountStore } from './accountStore';
 
-/** `archived`: the archives the user moved out of the list (§5.12). */
+/** `archived`: the archives the user moved out of the list (§5.12), on their own page. */
 export type DiscussionFilter = 'all' | 'unread' | 'pending' | 'archived';
 
 interface DiscussionStoreState {
@@ -49,6 +50,8 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     // with the previous account's data after logout.
     let disposed = false;
     let isFetching = false;
+    // Peers whose status is shown as a request waiting (`shownStatus`).
+    const shownAsRequest = new Set<string>();
     const fetchData = async () => {
       if (isFetching || disposed) return;
       isFetching = true;
@@ -62,14 +65,31 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           : [];
         if (disposed) return;
 
-        // Initialize sessionsStatuses map if empty
-        if (isSessionOpen && get().sessionsStatuses.size === 0) {
-          const statusMap = new Map<string, SessionStatus>();
+        // Fetch contacts
+        let contactsList: Contact[] = [];
+        if (isSessionOpen) {
+          contactsList = await sdk.contacts.list();
+        }
+        if (disposed) return;
+        const contactOf = new Map(contactsList.map(c => [c.userId, c]));
+
+        // Initialize sessionsStatuses map if empty. The request of a member
+        // of a shared chat is shown as a request waiting, its connection
+        // open or not (§5.12); once answered, its live status again.
+        if (isSessionOpen) {
+          const initial = get().sessionsStatuses.size === 0;
+          const statusMap = new Map(get().sessionsStatuses);
           for (const d of discussionsList) {
             if (d.contactUserId === SELF_CONTACT_ID) continue;
+            const contact = contactOf.get(d.contactUserId);
+            const isRequest = contact?.connection === 'requested';
+            if (!initial && !isRequest && !shownAsRequest.has(d.contactUserId))
+              continue;
+            if (isRequest) shownAsRequest.add(d.contactUserId);
+            else shownAsRequest.delete(d.contactUserId);
             statusMap.set(
               d.contactUserId,
-              sdk.discussions.getStatus(d.contactUserId)
+              shownStatus(sdk.discussions.getStatus(d.contactUserId), contact)
             );
           }
           set({ sessionsStatuses: statusMap });
@@ -135,13 +155,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
             });
           }
         });
-
-        // Fetch contacts
-        let contactsList: Contact[] = [];
-        if (isSessionOpen) {
-          contactsList = await sdk.contacts.list();
-        }
-        if (disposed) return;
 
         set({
           discussions: sortedDiscussions,

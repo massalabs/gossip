@@ -20,6 +20,8 @@ export type BulletinItem = {
  */
 export type TransportConnectivity = 'internet' | 'mesh-only' | 'offline';
 
+import type { TransportFailure, TransportKind } from '../errors.js';
+
 export interface EncryptedMessage {
   seeker: Uint8Array;
   ciphertext: Uint8Array;
@@ -38,6 +40,22 @@ export interface MessageRouting {
    * mesh took before (see `MessageService.repostMeshOnly`).
    */
   internetOnly?: boolean;
+}
+
+/** What a send that several transports carry did (`sendMessageTracked`). */
+export interface SendOutcome {
+  /** The kinds of transport that had taken it when the send resolved. */
+  acceptedBy: TransportKind[];
+  /**
+   * Resolves, never rejects, once every transport answered: all those that
+   * took it, and the refusals (a backend's 409 among them).
+   */
+  settled: Promise<SettledSend>;
+}
+
+export interface SettledSend {
+  acceptedBy: TransportKind[];
+  failures: TransportFailure[];
 }
 
 export interface MessageProtocolResponse<T = unknown> {
@@ -131,4 +149,26 @@ export interface IMessageProtocol {
    * send at `seeker` ('internet', 'mesh'), read once.
    */
   takeAcceptedBy?(seeker: Uint8Array): ('internet' | 'mesh')[] | undefined;
+
+  /**
+   * For transports that run several paths: sends, and resolves as soon as
+   * one path took the message, telling which; the others' answers follow in
+   * `settled`. Transports that omit it are used through `sendMessage`.
+   */
+  sendMessageTracked?(
+    message: EncryptedMessage,
+    routing?: MessageRouting
+  ): Promise<SendOutcome>;
+
+  /**
+   * For transports whose fetch may return before every path answered: gets
+   * the messages a path brought after that (null to stop). Without a
+   * handler, a fetch waits for every path.
+   */
+  onLateMessages?(
+    handler: ((messages: EncryptedMessage[]) => void) | null
+  ): void;
+
+  /** The device's network changed: a backend skipped for a while is asked again. */
+  networkChanged?(): void;
 }

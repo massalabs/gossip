@@ -5,8 +5,19 @@
  * Database operations use SQLite via Drizzle ORM (see sqlite.ts and schema.ts).
  */
 
-/** Whether the user accepted a contact, or it is an automatic connection (§5.12). */
-export type ContactConnection = 'accepted' | 'automatic';
+/**
+ * Whether the user accepted a contact, or it is an automatic connection
+ * (§5.12), or an automatic connection whose peer also asked to become a
+ * contact and waits for the user's answer (`requested`), or a member the
+ * user added as a contact on this device only, the other person not knowing
+ * it yet (`added`): a contact for the user, an automatic connection for
+ * everything the peer can observe, until the relationship is mutual.
+ */
+export type ContactConnection =
+  | 'accepted'
+  | 'automatic'
+  | 'requested'
+  | 'added';
 
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
@@ -33,7 +44,8 @@ export interface Contact {
   createdAt: Date;
   /**
    * Whether the user accepted this contact, or it is only an automatic
-   * connection to a member of a group (§5.12). Absent means accepted.
+   * connection to a member of a group (§5.12), or such a connection whose
+   * peer asked to become a contact, not answered yet. Absent means accepted.
    */
   connection?: ContactConnection;
 }
@@ -281,13 +293,15 @@ export interface Discussion {
   archived: boolean;
   /** The direct chat (group key) that continues it, if any. */
   linkedGroupId: string | null;
-  /** This device sent the contact request and founds the direct chat. */
+  /**
+   * 0.1.0 and 0.1.1 only: this device sent the contact request and was to
+   * found the direct chat. Never written since a contact request starts no
+   * chat (§5.12), and never read: an old row founds nothing.
+   */
   directChatOwed: boolean;
   /**
-   * The message timer (ms, 0 = forever) chosen with the contact request, for
-   * the direct chat this device founds; null for the account's default. On
-   * the side that received the request: the timer it states, shown before
-   * it is accepted (null if it states none).
+   * 0.1.0 and 0.1.1 only: the message timer a contact request stated for
+   * the chat it asked for. Never written nor read since (§5.12).
    */
   directChatTimer: number | null;
   /**

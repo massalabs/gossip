@@ -73,6 +73,7 @@ export const ROUTES = {
 
   // Main tabs
   discussions: route(`/${AppRoute.discussions}`),
+  archivedChats: route(`/${AppRoute.discussions}/archived`),
   wallet: route(`/${AppRoute.wallet}`),
   settings: route(`/${AppRoute.settings}`),
 

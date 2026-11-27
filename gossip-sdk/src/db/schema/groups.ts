@@ -97,8 +97,13 @@ export const groupRecords = sqliteTable(
 
 /**
  * The encrypted outbox of group plaintexts: a ciphertext stored before it is
- * sent and retried as stored (§15.3), deleted once the transport took it.
- * It names the recipient only, never a group.
+ * sent and retried as stored (§15.3), deleted once the backend took it, or
+ * once a transport did when no backend is in use. It names the recipient
+ * only, never a group.
+ *
+ * `meshOnlySince` marks a ciphertext that only a mesh took (the message is
+ * sent; the backend has not got it yet): it stays to be posted to the backend
+ * when one answers, at `whenToSend`, until the network's retention ends.
  */
 export const groupOutbox = sqliteTable(
   'groupOutbox',
@@ -111,6 +116,7 @@ export const groupOutbox = sqliteTable(
     seeker: bytes('seeker').notNull(),
     ciphertext: bytes('ciphertext').notNull(),
     whenToSend: integer('whenToSend', { mode: 'timestamp_ms' }).notNull(),
+    meshOnlySince: integer('meshOnlySince', { mode: 'timestamp_ms' }),
   },
   table => [index('group_outbox_owner_idx').on(table.ownerUserId)]
 );

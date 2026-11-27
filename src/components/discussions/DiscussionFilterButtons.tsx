@@ -9,7 +9,6 @@ interface DiscussionFilterButtonsProps {
     all: number;
     unread: number;
     pending: number;
-    archived: number;
   };
   className?: string;
 }
@@ -39,11 +38,6 @@ const DiscussionFilterButtons: React.FC<DiscussionFilterButtonsProps> = ({
       value: 'pending',
       label: t('filter.pending'),
       count: filterCounts.pending,
-    },
-    {
-      value: 'archived',
-      label: t('filter.archived'),
-      count: filterCounts.archived,
     },
   ];
 

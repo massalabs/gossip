@@ -49,6 +49,17 @@ interface GroupStoreState {
   refresh: () => Promise<void>;
   setCurrentGroup: (groupId: string | null) => void;
   markRead: (groupId: string) => void;
+  /**
+   * The messages of a chat seen on this screen in this run of the app
+   * (`epochId:syncObjId`), or undefined before its first opening. Memory only,
+   * like `unread`.
+   */
+  seenOf: (groupId: string) => ReadonlySet<string> | undefined;
+  /**
+   * Records messages as seen. Local only: nothing is sent, stored or told to
+   * anyone (no read receipt exists in chats); it changes this memory alone.
+   */
+  markSeen: (groupId: string, keys: string[]) => void;
 }
 
 /** The group service, or null when the engine could not be opened. */
@@ -83,6 +94,8 @@ async function lastMessageOf(
  * traffic than the engine's own records. It resets when the app restarts.
  */
 const unread = new Set<string>();
+/** Per chat, the messages seen in this run (see `seenOf`). */
+const seen = new Map<string, Set<string>>();
 
 const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
   available: false,
@@ -129,6 +142,7 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
   cleanup: () => {
     get().cleanupFn?.();
     unread.clear();
+    seen.clear();
     set({
       available: false,
       groups: [],
@@ -204,6 +218,17 @@ const useGroupStoreBase = create<GroupStoreState>((set, get) => ({
         g.summary.groupId === groupId ? { ...g, unread: false } : g
       ),
     }));
+  },
+
+  seenOf: (groupId: string) => seen.get(groupId),
+
+  markSeen: (groupId: string, keys: string[]) => {
+    let s = seen.get(groupId);
+    if (!s) {
+      s = new Set();
+      seen.set(groupId, s);
+    }
+    for (const k of keys) s.add(k);
   },
 }));
 

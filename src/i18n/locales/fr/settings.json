@@ -211,7 +211,7 @@
   "privacy": {
     "title": "Confidentialité",
     "default_retention_title": "Suppression automatique par défaut",
-    "default_retention_description": "Les nouvelles discussions que vous lancez ont cette durée. Vous pouvez en choisir une autre en lançant une discussion."
+    "default_retention_description": "Les nouveaux Chats que vous lancez ont cette durée. Vous pouvez en choisir une autre en lançant un Chat."
   },
   "web3": {
     "title": "Web3",
@@ -235,6 +235,7 @@
     "foreground_title": "Android : mode haute fiabilité",
     "foreground_description": "Maintient la synchro active même quand l’app est en arrière-plan. Affiche une notification persistante. Consomme plus de batterie.",
     "foreground_toggle": "Maintenir la synchro active",
+    "needs_notifications": "Ces réglages nécessitent les notifications. Tant qu'elles sont désactivées, Gossip ne vérifie pas les nouveaux messages en arrière-plan.",
     "debug_sync_preset": "Préréglage synchro : {{preset}}",
     "debug_foreground_sync": "Synchro premier plan : {{value}}",
     "title": "Sync en arrière-plan",

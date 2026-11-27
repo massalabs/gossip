@@ -8,8 +8,11 @@
   "filter": {
     "all": "All",
     "unread": "Unread",
-    "pending": "Pending",
-    "archived": "Archived"
+    "pending": "Pending"
+  },
+  "archived": {
+    "title": "Archived chats",
+    "empty": "No archived chats"
   },
   "message_input": {
     "replying_to": "Replying to",
@@ -39,7 +42,9 @@
     "edit_name_title": "Edit discussion name",
     "name_updated": "Name updated",
     "name_update_failed": "Failed to update name",
-    "pin_failed": "Failed to pin discussion"
+    "pin_failed": "Failed to pin discussion",
+    "no_chat": "No chat yet",
+    "chat_invitation": "Invites you to a chat"
   },
   "scroll_to_bottom": "Scroll to latest messages",
   "search": {
@@ -95,7 +100,7 @@
   "new_discussion": {
     "title": "New discussion",
     "new_contact": "New contact",
-    "new_group": "New group",
+    "new_group": "New chat",
     "contacts": "Contacts",
     "search_contacts": "Search contacts",
     "loading_contacts": "Loading contacts…",

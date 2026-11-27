@@ -18,7 +18,6 @@ import PageLayout from '../components/ui/Layout/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import ConnectionBanner from '../components/ui/ConnectionBanner';
 import Toggle from '../components/ui/Toggle';
-import MessageTimerField from '../components/groups/MessageTimerField';
 
 const NewContact: React.FC = () => {
   const { t } = useTranslation('contacts');
@@ -40,7 +39,7 @@ const NewContact: React.FC = () => {
     shareUsername,
     customUsername,
     customUsernameError,
-    messageTimer,
+    connectedNonContact,
     isSubmitting,
     canSubmit,
     hasUnsavedChanges,
@@ -52,7 +51,6 @@ const NewContact: React.FC = () => {
     handleMessageChange,
     handleShareUsernameChange,
     handleCustomUsernameChange,
-    handleMessageTimerChange,
     handleSubmit,
   } = useContactForm();
 
@@ -312,96 +310,99 @@ const NewContact: React.FC = () => {
           )}
         </div>
 
-        {/* Request details — share username + message */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
-          {/* Share username */}
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <span className="text-sm text-foreground">
-              {t('new_contact.share_username')}
-            </span>
-            <Toggle
-              checked={shareUsername}
-              onChange={handleShareUsernameChange}
-              ariaLabel={t('new_contact.share_username')}
-            />
-          </div>
-          {shareUsername && (
-            <div className="px-4 pb-3">
-              <input
-                type="text"
-                value={customUsername}
-                onChange={e => handleCustomUsernameChange(e.target.value)}
-                placeholder={t('new_contact.share_username_placeholder')}
-                className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none rounded-lg px-3 py-2 text-sm"
-                aria-label={t('new_contact.share_username_aria')}
-                maxLength={USERNAME_MAX_LENGTH}
-              />
-              {customUsernameError && (
-                <p className="mt-1.5 text-sm text-destructive" role="alert">
-                  {customUsernameError}
-                </p>
-              )}
-            </div>
-          )}
+        {/* A member of a shared chat: nothing is sent, so no request
+            details (§5.12). */}
+        {connectedNonContact && (
+          <p
+            className="text-sm text-muted-foreground mb-6 px-1"
+            data-testid="contact-connected-note"
+          >
+            {t('new_contact.connected_non_contact')}
+          </p>
+        )}
 
-          {/* Custom message */}
-          <div className="border-t border-border">
+        {/* Request details — share username + message */}
+        {!connectedNonContact && (
+          <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
+            {/* Share username */}
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <span className="text-sm text-foreground">
-                {t('new_contact.announcement_label')}
+                {t('new_contact.share_username')}
               </span>
               <Toggle
-                checked={message.value.length > 0 || showMessage}
-                onChange={v => {
-                  setShowMessage(v);
-                  if (!v) handleMessageChange('');
-                }}
-                ariaLabel={t('new_contact.announcement_label')}
+                checked={shareUsername}
+                onChange={handleShareUsernameChange}
+                ariaLabel={t('new_contact.share_username')}
               />
             </div>
-            {(showMessage || message.value.length > 0) && (
+            {shareUsername && (
               <div className="px-4 pb-3">
-                <textarea
-                  id="contact-message"
-                  value={message.value}
-                  onChange={e => handleMessageChange(e.target.value)}
-                  placeholder={getDefaultMessage()}
-                  rows={3}
-                  maxLength={500}
-                  className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none resize-none text-sm rounded-lg px-3 py-2"
-                  aria-label={t('new_contact.announcement_aria')}
+                <input
+                  type="text"
+                  value={customUsername}
+                  onChange={e => handleCustomUsernameChange(e.target.value)}
+                  placeholder={t('new_contact.share_username_placeholder')}
+                  className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none rounded-lg px-3 py-2 text-sm"
+                  aria-label={t('new_contact.share_username_aria')}
+                  maxLength={USERNAME_MAX_LENGTH}
                 />
-                {message.value && (
-                  <div className="flex items-center justify-end mt-1">
-                    <span className="text-xs text-muted-foreground">
-                      {message.value.length}/500
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-start gap-2 mt-2 bg-muted/30 rounded-lg p-2.5">
-                  <Info className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    <Trans
-                      i18nKey="privacy_notice.body"
-                      ns="contacts"
-                      components={{ strong: <strong /> }}
-                    />
+                {customUsernameError && (
+                  <p className="mt-1.5 text-sm text-destructive" role="alert">
+                    {customUsernameError}
                   </p>
-                </div>
+                )}
               </div>
             )}
-          </div>
 
-          {/* The message timer of the chat founded once accepted */}
-          <div className="border-t border-border">
-            <MessageTimerField
-              value={messageTimer}
-              onChange={handleMessageTimerChange}
-              hint={t('groups:timer.contact_request_hint')}
-              testId="contact-message-timer"
-            />
+            {/* Custom message */}
+            <div className="border-t border-border">
+              <div className="flex items-center justify-between gap-3 px-4 py-3">
+                <span className="text-sm text-foreground">
+                  {t('new_contact.announcement_label')}
+                </span>
+                <Toggle
+                  checked={message.value.length > 0 || showMessage}
+                  onChange={v => {
+                    setShowMessage(v);
+                    if (!v) handleMessageChange('');
+                  }}
+                  ariaLabel={t('new_contact.announcement_label')}
+                />
+              </div>
+              {(showMessage || message.value.length > 0) && (
+                <div className="px-4 pb-3">
+                  <textarea
+                    id="contact-message"
+                    value={message.value}
+                    onChange={e => handleMessageChange(e.target.value)}
+                    placeholder={getDefaultMessage()}
+                    rows={3}
+                    maxLength={500}
+                    className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none resize-none text-sm rounded-lg px-3 py-2"
+                    aria-label={t('new_contact.announcement_aria')}
+                  />
+                  {message.value && (
+                    <div className="flex items-center justify-end mt-1">
+                      <span className="text-xs text-muted-foreground">
+                        {message.value.length}/500
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-start gap-2 mt-2 bg-muted/30 rounded-lg p-2.5">
+                    <Info className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      <Trans
+                        i18nKey="privacy_notice.body"
+                        ns="contacts"
+                        components={{ strong: <strong /> }}
+                      />
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Hidden file input for file import */}
         <input

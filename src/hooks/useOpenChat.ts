@@ -4,15 +4,15 @@ import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from './useGossipSdk';
-import { useGroupStore } from '../stores/groupStore';
 import { ROUTES } from '../constants/routes';
 import { logger } from '../utils/logger.ts';
 
 /**
  * Opens the conversation with a contact (§5.12): its direct chat when one is
- * held; its archive, contact request or pending request when there is no
- * chat yet; otherwise a direct chat is founded (`migrate_from = 0`).
- * Resolves to where it went, or null.
+ * held; otherwise the contact's screen (its archive, request, pending
+ * request, or "Start a chat"). Opening a contact never starts a chat by
+ * itself and sends nothing: a chat is started only by the explicit action
+ * on that screen. Resolves to where it went, or null.
  */
 export function useOpenChat(): (
   contactUserId: string,
@@ -20,7 +20,6 @@ export function useOpenChat(): (
 ) => Promise<string | null> {
   const gossip = useGossipSdk();
   const navigate = useNavigate();
-  const refresh = useGroupStore(s => s.refresh);
   const { t } = useTranslation('groups');
 
   return useCallback(
@@ -32,29 +31,17 @@ export function useOpenChat(): (
       }
       try {
         const held = await gossip.conversations.directChatWith(contactUserId);
-        if (held) {
-          const to = ROUTES.group({ groupId: held });
-          navigate(to, navigateOptions);
-          return to;
-        }
-        const d = await gossip.discussions.get(contactUserId);
-        if (d && (d.isArchive || !d.weAccepted || d.directChatOwed)) {
-          const to = ROUTES.discussion({ userId: contactUserId });
-          navigate(to, navigateOptions);
-          return to;
-        }
-        const groupId =
-          await gossip.conversations.startDirectChat(contactUserId);
-        await refresh();
-        const to = ROUTES.group({ groupId });
+        const to = held
+          ? ROUTES.group({ groupId: held })
+          : ROUTES.discussion({ userId: contactUserId });
         navigate(to, navigateOptions);
         return to;
       } catch (error) {
         logger.error('Chat not opened', error);
-        toast.error(t('archive.migrate_failed'));
+        toast.error(t('start_chat.open_failed'));
         return null;
       }
     },
-    [gossip, navigate, refresh, t]
+    [gossip, navigate, t]
   );
 }

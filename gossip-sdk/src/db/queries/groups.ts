@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, lte } from 'drizzle-orm';
 import * as schema from '../schema/index.js';
 import type { DatabaseConnection } from '../sqlite.js';
 import type { DbContext } from './sqlBatch.js';
@@ -186,6 +186,41 @@ export class GroupQueries {
     await this.conn.db
       .delete(schema.groupOutbox)
       .where(eq(schema.groupOutbox.id, id));
+  }
+
+  /**
+   * Marks a ciphertext as taken by a mesh only, to be posted to the backend
+   * at `whenToSend` (see `groupOutbox`).
+   */
+  async markOutboxMeshOnly(
+    id: number,
+    since: Date,
+    whenToSend: Date
+  ): Promise<void> {
+    await this.conn.db
+      .update(schema.groupOutbox)
+      .set({ meshOnlySince: since, whenToSend })
+      .where(eq(schema.groupOutbox.id, id));
+  }
+
+  /**
+   * Makes every ciphertext only a mesh took due now: the backend may answer
+   * again (the network changed, or it answered another request).
+   */
+  async meshOnlyOutboxDueNow(ownerUserId: string, now: Date): Promise<number> {
+    const rows = await this.conn.db
+      .update(schema.groupOutbox)
+      .set({ whenToSend: now })
+      .where(
+        and(
+          eq(schema.groupOutbox.ownerUserId, ownerUserId),
+          isNotNull(schema.groupOutbox.meshOnlySince),
+          gt(schema.groupOutbox.whenToSend, now)
+        )
+      )
+      .returning({ id: schema.groupOutbox.id })
+      .all();
+    return rows.length;
   }
 
   async rescheduleOutbox(id: number, whenToSend: Date): Promise<void> {

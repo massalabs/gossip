@@ -67,6 +67,22 @@ describe('useOnlineStore — offline login / connection detection', () => {
     expect(store.getState().isOnline).toBe(true);
   });
 
+  it('tells the network-change listeners of every change, connection type included', async () => {
+    const mod = await import('../../src/stores/useOnlineStore');
+    await mod.useOnlineStoreBase.getState().initOnlineStore();
+    const heard = vi.fn();
+    const stop = mod.onNetworkChange(heard);
+
+    networkChangeListener!({ connected: false, connectionType: 'none' });
+    networkChangeListener!({ connected: true, connectionType: 'cellular' });
+    networkChangeListener!({ connected: true, connectionType: 'wifi' });
+    expect(heard).toHaveBeenCalledTimes(3);
+
+    stop();
+    networkChangeListener!({ connected: false, connectionType: 'none' });
+    expect(heard).toHaveBeenCalledTimes(3);
+  });
+
   it('updates state when Capacitor fires a networkStatusChange event', async () => {
     mockConnected = true;
 

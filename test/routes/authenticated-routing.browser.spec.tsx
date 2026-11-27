@@ -86,6 +86,9 @@ vi.mock('../../src/pages/GroupSettings', () => ({
 vi.mock('../../src/pages/Invitation', () => ({
   default: stubPage('page-invitation'),
 }));
+vi.mock('../../src/pages/ArchivedChats', () => ({
+  default: stubPage('page-archived-chats'),
+}));
 
 // Settings sub-pages
 vi.mock('../../src/pages/settings/SecuritySettings', () => ({

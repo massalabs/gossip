@@ -286,6 +286,8 @@ class GossipSdk {
   private _discussion: DiscussionService | null = null;
   private _message: MessageService | null = null;
   private _refresh: RefreshService | null = null;
+  /** Announces the wanted seekers again when a session changes. */
+  private _seekersChangedListener: (() => void) | null = null;
   private _wantedSeekersListener: ((seekers: Uint8Array[]) => void) | null =
     null;
   private _contact: ContactService | null = null;
@@ -820,17 +822,17 @@ class GossipSdk {
           discussions
         );
         this._conversations = conversations;
-        discussions.setOnContactAccepted((peer, announcedTimer) =>
-          conversations.contactRequestAccepted(peer, announcedTimer)
+        discussions.setOnContactAccepted(peer =>
+          conversations.contactRequestAccepted(peer)
         );
         this._announcement.setConnectionPolicy({
           isCoMember: peer => conversations.isCoMember(peer),
           accept: async peer => {
             await discussions.createSessionForContact(peer, new Uint8Array(0));
           },
-          processed: async peer => {
-            void conversations.peerChanged(peer).catch(() => undefined);
-          },
+          // A contact request founds no chat (§5.12): nothing to do once
+          // an announcement is read.
+          processed: async () => undefined,
         });
         void conversations.start();
       } catch (error) {
@@ -850,6 +852,33 @@ class GossipSdk {
       // during multi-account onboarding, where we open each account's
       // session just long enough to write its profile — polling during
       // that window would race with session switches.
+      // What a transport answers after its fetch returned (a slow backend
+      // while the mesh answered) is taken like what a mesh node pushes.
+      messageProtocol.onLateMessages?.(messages => {
+        this._message?.ingestMessages(messages).catch(() => undefined);
+      });
+
+      // A mesh node waits on the seekers it was given: they are given again
+      // as soon as they change, not at the end of the next message fetch,
+      // which may wait for a slow backend. The same listener applies the
+      // local-only rules as after a fetch.
+      if (this._wantedSeekersListener) {
+        this._message.setWantedSeekersUpdater(this._wantedSeekersListener);
+        const message = this._message;
+        this._seekersChangedListener = () => message.announceWantedSeekers();
+        this.eventEmitter.on(
+          SdkEventType.SESSION_STATUS_CHANGED,
+          this._seekersChangedListener
+        );
+        this.eventEmitter.on(
+          SdkEventType.SESSION_RENEWED,
+          this._seekersChangedListener
+        );
+        // at login too, unless the caller opens the session only briefly
+        // (multi-account onboarding), when nothing must run in the background
+        if (options.autoStartPolling !== false) message.announceWantedSeekers();
+      }
+
       if (config.polling.enabled && options.autoStartPolling !== false) {
         this.startPolling();
       }
@@ -879,6 +908,8 @@ class GossipSdk {
       if (!committed) {
         this.stopPublicKeyPublication();
         this.pollingManager.stop();
+        initializedState.messageProtocol.onLateMessages?.(null);
+        this.stopSeekersChangedListener();
         session?.dispose();
         if (ownsEncryptionKey) encryptionKey?.free();
         this._announcement = null;
@@ -906,6 +937,32 @@ class GossipSdk {
     } finally {
       releaseLifecycle();
     }
+  }
+
+  private stopSeekersChangedListener(): void {
+    if (!this._seekersChangedListener) return;
+    this.eventEmitter.off(
+      SdkEventType.SESSION_STATUS_CHANGED,
+      this._seekersChangedListener
+    );
+    this.eventEmitter.off(
+      SdkEventType.SESSION_RENEWED,
+      this._seekersChangedListener
+    );
+    this._seekersChangedListener = null;
+  }
+
+  /**
+   * Tells the SDK that the device's network changed (a connection came or
+   * went), from the platform's network observer. A backend skipped after a
+   * network failure while the mesh carried the traffic is asked again at
+   * once, and what only the mesh took is posted to it now rather than at its
+   * next retry. Does nothing without an open session but the first part.
+   */
+  networkChanged(): void {
+    if (this.state.status === SdkStatus.UNINITIALIZED) return;
+    this.state.messageProtocol.networkChanged?.();
+    void this._groups?.networkChanged().catch(() => undefined);
   }
 
   /**
@@ -1016,6 +1073,9 @@ class GossipSdk {
     // Stop session-scoped background work first.
     this.stopPublicKeyPublication();
     this.pollingManager.stop();
+    this.state.messageProtocol.onLateMessages?.(null);
+    this._message?.setWantedSeekersUpdater(null);
+    this.stopSeekersChangedListener();
 
     // The group engine before the session state is drained or frozen: its
     // last operation may still encrypt and persist (bounded wait), and it

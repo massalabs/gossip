@@ -3,8 +3,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { Args } from '@massalabs/massa-web3';
 import {
   encodeAnnouncementPayload,
+  encodeContactRequestPayload,
   decodeAnnouncementPayload,
 } from '../../src/utils/announcementPayload';
 
@@ -50,29 +52,50 @@ describe('announcement payload', () => {
     expect(decoded?.message).toBe('Hello: how are you?');
   });
 
-  it('round-trips the message timer a contact request states', () => {
-    const decoded = decodeAnnouncementPayload(
-      encodeAnnouncementPayload('Alice', 'hi', 3_600_000)
-    );
-    expect(decoded).toEqual({
+  it('reads a contact request of 0.1.0 or 0.1.1 that states a timer: the timer is ignored', () => {
+    // The third field those versions sent: the timer of the chat the
+    // request asked for, as a decimal string.
+    const older = new Args()
+      .addString('Alice')
+      .addString('hi')
+      .addString('3600000')
+      .serialize();
+    expect(decodeAnnouncementPayload(older)).toEqual({
       username: 'Alice',
       message: 'hi',
-      messageTimer: 3_600_000,
     });
-    // Forever (0), with nothing else.
-    expect(
-      decodeAnnouncementPayload(encodeAnnouncementPayload('', '', 0))
-        .messageTimer
-    ).toBe(0);
+    const onlyTimer = new Args()
+      .addString('')
+      .addString('')
+      .addString('0')
+      .serialize();
+    expect(decodeAnnouncementPayload(onlyTimer)).toEqual({
+      username: undefined,
+      message: undefined,
+    });
   });
 
-  it('reads a payload of an earlier version as stating no timer', () => {
-    const decoded = decodeAnnouncementPayload(
-      encodeAnnouncementPayload('Alice', 'hi')
-    );
-    expect(decoded.username).toBe('Alice');
-    expect(decoded.message).toBe('hi');
-    expect(decoded.messageTimer).toBeUndefined();
+  it('encodes no timer: a name and a message only', () => {
+    const encoded = encodeAnnouncementPayload('Alice', 'hi')!;
+    const args = new Args(encoded);
+    expect(args.nextString()).toBe('Alice');
+    expect(args.nextString()).toBe('hi');
+    expect(() => args.nextString()).toThrow();
+  });
+
+  it('encodes a contact request with nothing to state as a payload all the same', () => {
+    // A contact request always carries a payload, so that a member of a
+    // shared chat can tell it from the announcement of a connection, which
+    // carries none (§5.12).
+    const encoded = encodeContactRequestPayload('  ', '');
+    expect(encoded.length).toBeGreaterThan(0);
+    expect(decodeAnnouncementPayload(encoded)).toEqual({
+      username: undefined,
+      message: undefined,
+    });
+    expect(
+      decodeAnnouncementPayload(encodeContactRequestPayload('Alice', 'hi'))
+    ).toEqual({ username: 'Alice', message: 'hi' });
   });
 
   it('returns undefined fields for invalid payloads', () => {

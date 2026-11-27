@@ -235,6 +235,7 @@
     "foreground_title": "Android: high reliability mode",
     "foreground_description": "Keeps sync running even when the app is in the background. Shows a persistent notification. Uses more battery.",
     "foreground_toggle": "Keep sync active",
+    "needs_notifications": "These settings need notifications. While notifications are off, Gossip does not check for new messages in the background.",
     "debug_sync_preset": "Sync preset: {{preset}}",
     "debug_foreground_sync": "Foreground sync: {{value}}",
     "title": "Background Sync",

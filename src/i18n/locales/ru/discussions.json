@@ -8,8 +8,11 @@
   "filter": {
     "all": "Все",
     "unread": "Непрочитанные",
-    "pending": "Ожидающие",
-    "archived": "Архив"
+    "pending": "Ожидающие"
+  },
+  "archived": {
+    "title": "Архивные чаты",
+    "empty": "Нет архивных чатов"
   },
   "message_input": {
     "replying_to": "Ответ для",
@@ -39,7 +42,9 @@
     "edit_name_title": "Изменить название чата",
     "name_updated": "Имя обновлено",
     "name_update_failed": "Не удалось обновить имя",
-    "pin_failed": "Не удалось закрепить чат"
+    "pin_failed": "Не удалось закрепить чат",
+    "no_chat": "Чата пока нет",
+    "chat_invitation": "Приглашает вас в чат"
   },
   "scroll_to_bottom": "К последним сообщениям",
   "search": {
@@ -95,7 +100,7 @@
   "new_discussion": {
     "title": "Новый чат",
     "new_contact": "Новый контакт",
-    "new_group": "Новая группа",
+    "new_group": "Новый чат",
     "contacts": "Контакты",
     "search_contacts": "Поиск контактов",
     "loading_contacts": "Загрузка контактов…",

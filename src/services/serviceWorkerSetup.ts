@@ -16,6 +16,7 @@ import { protocolConfig } from '../config/protocol';
 import { Capacitor } from '@capacitor/core';
 import { networkObserverService } from './networkObserver';
 import { logPermission } from '../utils/debugPermissions';
+import { syncNotificationDependents } from './notificationDependents';
 
 /**
  * Setup service worker: register, listen for messages, and start sync scheduler
@@ -135,6 +136,11 @@ async function initializeBackgroundSync(): Promise<void> {
     // The background runner can't access import.meta.env, so we persist it via Preferences
     await setApiBaseUrlForBackgroundSync(protocolConfig.baseUrl);
     await syncBackgroundSyncPresetToRunner();
+    // Notifications off: stop what exists only to notify (also repairs a
+    // "Keep sync active" left running by an older version).
+    await syncNotificationDependents().catch(error => {
+      logger.error('[App] Failed to apply the notifications switch:', error);
+    });
     logSyncDiagnostics('Background sync preferences initialized', {
       baseUrl: protocolConfig.baseUrl,
     });

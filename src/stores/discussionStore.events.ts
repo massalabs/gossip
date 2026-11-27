@@ -5,6 +5,7 @@ import {
   type SessionStatus,
 } from '@massalabs/gossip-sdk';
 import type { getSdk } from './sdkStore';
+import { shownStatus } from '../utils/conversations';
 
 /** State fields touched by discussion list / session event handlers. */
 export interface DiscussionStoreEventSlice {
@@ -43,7 +44,13 @@ export function createDiscussionEventHandlers(
   }) => {
     set(state => {
       const next = new Map(state.sessionsStatuses);
-      next.set(contactUserId, status);
+      next.set(
+        contactUserId,
+        shownStatus(
+          status,
+          state.contacts.find(c => c.userId === contactUserId)
+        )
+      );
       return { sessionsStatuses: next };
     });
   };
@@ -76,6 +83,7 @@ export function createDiscussionEventHandlers(
   sdk.on(SdkEventType.SESSION_REQUESTED, debouncedFetch);
   sdk.on(SdkEventType.DISCUSSION_UPDATED, debouncedFetch);
   sdk.on(SdkEventType.CONTACT_DELETED, onContactDeleted);
+  sdk.on(SdkEventType.CONTACT_UPDATED, debouncedFetch);
   sdk.on(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
 
   return () => {
@@ -88,6 +96,7 @@ export function createDiscussionEventHandlers(
       sdk.off(SdkEventType.SESSION_REQUESTED, debouncedFetch);
       sdk.off(SdkEventType.DISCUSSION_UPDATED, debouncedFetch);
       sdk.off(SdkEventType.CONTACT_DELETED, onContactDeleted);
+      sdk.off(SdkEventType.CONTACT_UPDATED, debouncedFetch);
       sdk.off(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
     } catch {
       // SDK might not be available during cleanup

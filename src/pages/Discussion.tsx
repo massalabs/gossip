@@ -29,10 +29,12 @@ import { ROUTES } from '../constants/routes';
 const EMPTY_REACTIONS: never[] = [];
 
 /**
- * An earlier one-to-one conversation (§2.1, §5.12): read only, nothing of it
- * is sent. Its footer offers the peer's pending migration, or "Migrate to a
- * new group" and "Archive". Once a direct chat held here continues it, the
- * conversation is that group, which shows these messages first.
+ * The screen of a contact with no chat held (§2.1, §5.12): an earlier
+ * one-to-one conversation (read only, nothing of it is sent), a contact
+ * request, or a contact with no chat yet. Its footer offers the peer's
+ * pending migration or chat invitation, "Migrate to a new group" and
+ * "Archive", or "Start a chat". Once a direct chat held here continues it,
+ * the conversation is that group, which shows these messages first.
  */
 const DiscussionInner: React.FC = () => {
   const { t } = useTranslation('discussions');
