@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
-import { Trash2 } from 'react-feather';
+import { Archive, Trash2 } from 'react-feather';
 import { useTranslation } from 'react-i18next';
+import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import type { GroupInvitation, LeaveChoice } from '@massalabs/gossip-sdk';
 import { useMinuteTick } from '../../hooks/useMinuteTick';
@@ -29,6 +30,11 @@ interface GroupListSectionProps {
   searchQuery?: string;
   /** Only unread groups (the list's "unread" filter). */
   unreadOnly?: boolean;
+  /**
+   * The archived chats (the "Archived chats" page) instead of the others.
+   * Invitations are shown with the others only.
+   */
+  archived?: boolean;
 }
 
 const GroupRow: React.FC<{
@@ -42,6 +48,8 @@ const GroupRow: React.FC<{
   /** Another person's new chat that continues this one (§5.12). */
   continuation?: GroupInvitation;
   onOpen: () => void;
+  /** "Archive chat" or "Unarchive", a mark on this device only. */
+  onToggleArchived: () => void;
   /** "Delete chat", with its confirmation, when the engine allows it. */
   onDelete?: () => void;
 }> = ({
@@ -53,17 +61,16 @@ const GroupRow: React.FC<{
   memberName,
   continuation,
   onOpen,
+  onToggleArchived,
   onDelete,
 }) => {
   const { t } = useTranslation('groups');
   const readOnly = entry.summary.status !== 'member';
-  // The long press offers what Lucas's design lists for a chat and the engine
-  // allows here: "Delete chat" once the user is out of it. Archiving a chat
-  // has no engine support yet.
+  // The long press offers what Lucas's design lists for a chat: archiving
+  // (a mark on this device only) and "Delete chat" where the engine allows it.
   const [menuOpen, setMenuOpen] = useState(false);
   const longPress = useLongPress({
     onLongPress: () => setMenuOpen(true),
-    disabled: !onDelete,
   });
   return (
     <div
@@ -132,22 +139,31 @@ const GroupRow: React.FC<{
           )}
         </div>
       </div>
-      {onDelete && (
-        <div onClick={e => e.stopPropagation()}>
-          <ContextMenu
-            items={[
-              {
-                label: t('details.delete_locally'),
-                icon: <Trash2 className="w-4 h-4" />,
-                onClick: onDelete,
-                danger: true,
-              },
-            ]}
-            isOpen={menuOpen}
-            onClose={() => setMenuOpen(false)}
-          />
-        </div>
-      )}
+      <div onClick={e => e.stopPropagation()}>
+        <ContextMenu
+          items={[
+            {
+              label: entry.archived
+                ? t('details.unarchive')
+                : t('details.archive'),
+              icon: <Archive className="w-4 h-4" />,
+              onClick: onToggleArchived,
+            },
+            ...(onDelete
+              ? [
+                  {
+                    label: t('details.delete_locally'),
+                    icon: <Trash2 className="w-4 h-4" />,
+                    onClick: onDelete,
+                    danger: true,
+                  },
+                ]
+              : []),
+          ]}
+          isOpen={menuOpen}
+          onClose={() => setMenuOpen(false)}
+        />
+      </div>
     </div>
   );
 };
@@ -159,6 +175,7 @@ const GroupRow: React.FC<{
 const GroupListSection: React.FC<GroupListSectionProps> = ({
   searchQuery = '',
   unreadOnly = false,
+  archived = false,
 }) => {
   const { t } = useTranslation('groups');
   const navigate = useNavigate();
@@ -168,10 +185,11 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
   // A migration is shown on its archive's row and inside it, and an
   // invitation to continue a chat on that chat's row and inside it (§5.12).
   const allInvitations = useGroupStore(s => s.invitations);
-  const invitations = allInvitations.filter(
-    i => !i.migrationOf && !i.continues
-  );
+  const invitations = archived
+    ? []
+    : allInvitations.filter(i => !i.migrationOf && !i.continues);
   const refresh = useGroupStore(s => s.refresh);
+  const setArchived = useGroupStore(s => s.setArchived);
   const deleteChat = useDeleteChat();
   const me = useAccountStore(s => s.userProfile?.userId);
   const memberName = useGroupMemberName();
@@ -208,6 +226,10 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
     // A group dissolved with "Delete" is only kept to relay the dissolve
     // (§5.8); its messages are gone and it is no longer a conversation.
     .filter(entry => entry.summary.status !== 'dissolved-deleted')
+    // An archived chat stays in the archived list, new messages included
+    // (product owner, closer to Telegram): the "Archived chats" row shows a
+    // dot instead.
+    .filter(entry => !!entry.archived === archived)
     .map(entry => ({
       entry,
       name: groupDisplayName(
@@ -249,9 +271,11 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
       )}
       {shown.length > 0 && (
         <>
-          <p className="px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {t('list.section_title')}
-          </p>
+          {!archived && (
+            <p className="px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('list.section_title')}
+            </p>
+          )}
           {shown.map(({ entry, name }) => {
             const last = entry.lastMessage;
             const preview = last
@@ -274,6 +298,16 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
                 onOpen={() =>
                   navigate(ROUTES.group({ groupId: entry.summary.groupId }))
                 }
+                onToggleArchived={() => {
+                  const to = !entry.archived;
+                  setArchived(entry.summary.groupId, to).then(
+                    () =>
+                      toast.success(
+                        to ? t('archive.archived') : t('archive.unarchived')
+                      ),
+                    () => toast.error(t('details.failed'))
+                  );
+                }}
                 onDelete={
                   canDeleteChat(entry.summary.status)
                     ? () => deleteChat.ask(entry.summary.groupId)

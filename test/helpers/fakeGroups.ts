@@ -11,6 +11,7 @@ export function makeFakeGroups() {
     groups: [] as GroupSummary[],
     invitations: [] as GroupInvitation[],
     timelines: new Map<string, GroupTimelineItem[]>(),
+    archived: [] as string[],
   };
   const handlers = new Map<string, Set<(p: unknown) => void>>();
   const service = {
@@ -33,6 +34,11 @@ export function makeFakeGroups() {
     declineInvitation: vi.fn(async () => {}),
     resendRoot: vi.fn(async () => {}),
     setLocalName: vi.fn(async () => {}),
+    archived: vi.fn(async () => state.archived),
+    setArchived: vi.fn(async (id: string, archived: boolean) => {
+      state.archived = state.archived.filter(g => g !== id);
+      if (archived) state.archived.push(id);
+    }),
     sendMessage: vi.fn(async () => ({
       eventId: 'ev',
       syncObjId: 's',

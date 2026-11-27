@@ -12,7 +12,8 @@
   },
   "archived": {
     "title": "Archived chats",
-    "empty": "No archived chats"
+    "empty": "No archived chats",
+    "unread": "New messages in archived chats"
   },
   "message_input": {
     "replying_to": "Replying to",

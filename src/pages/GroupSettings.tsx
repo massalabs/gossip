@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import {
+  Archive,
   Edit2,
   LogOut,
   RefreshCw,
@@ -91,9 +92,12 @@ const GroupSettings: React.FC = () => {
   const memberName = useGroupMemberName();
   const contacts = useDiscussionStore(s => s.contacts);
   const refresh = useGroupStore(s => s.refresh);
-  const group = useGroupStore(s =>
+  const setArchived = useGroupStore(s => s.setArchived);
+  const entry = useGroupStore(s =>
     s.groups.find(g => g.summary.groupId === groupId)
-  )?.summary;
+  );
+  const group = entry?.summary;
+  const archived = entry?.archived ?? false;
   const [modal, setModal] = useState<Modal>(null);
   const [leaving, setLeaving] = useState(false);
   const [toAdd, setToAdd] = useState<Set<string>>(new Set());
@@ -492,6 +496,34 @@ const GroupSettings: React.FC = () => {
       )}
 
       <div className="bg-card rounded-xl border border-border overflow-hidden">
+        {/* Lucas's screen 09: a mark on this device only, nothing is sent. */}
+        <button
+          type="button"
+          onClick={() => {
+            const to = !archived;
+            setArchived(groupId, to).then(
+              () =>
+                toast.success(
+                  to ? t('archive.archived') : t('archive.unarchived')
+                ),
+              () => toast.error(t('details.failed'))
+            );
+          }}
+          className="w-full px-4 py-3 flex items-start gap-3 text-left text-sm text-foreground border-b border-border last:border-b-0 hover:bg-muted"
+          data-testid="chat-archive"
+        >
+          <Archive className="w-4 h-4 mt-0.5 shrink-0" />
+          <span className="min-w-0">
+            <span className="block">
+              {archived ? t('details.unarchive') : t('details.archive')}
+            </span>
+            {!archived && (
+              <span className="block mt-0.5 text-xs text-muted-foreground">
+                {t('details.archive_hint')}
+              </span>
+            )}
+          </span>
+        </button>
         {active && (
           <ActionButton
             icon={<RefreshCw className="w-4 h-4" />}

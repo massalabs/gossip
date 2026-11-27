@@ -207,7 +207,10 @@
     "save_for_me": "Enregistrer pour moi",
     "save_for_everyone": "Enregistrer pour tous",
     "use_shared_name": "Reprendre le nom pour tous",
-    "open_settings": "Ouvrir les détails du Chat {{name}}"
+    "open_settings": "Ouvrir les détails du Chat {{name}}",
+    "archive": "Archiver le Chat",
+    "archive_hint": "Les Chats archivés sont masqués de votre liste, mais vous en restez membre.",
+    "unarchive": "Désarchiver"
   },
   "resolve": {
     "title": "Résoudre les versions concurrentes",

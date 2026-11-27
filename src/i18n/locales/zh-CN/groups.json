@@ -207,7 +207,10 @@
     "save_for_me": "仅为我保存",
     "save_for_everyone": "为所有人保存",
     "use_shared_name": "恢复所有人看到的名称",
-    "open_settings": "打开聊天详情：{{name}}"
+    "open_settings": "打开聊天详情：{{name}}",
+    "archive": "归档聊天",
+    "archive_hint": "已归档的聊天会从你的列表中隐藏，但你仍是成员。",
+    "unarchive": "取消归档"
   },
   "resolve": {
     "title": "处理相互竞争的版本",

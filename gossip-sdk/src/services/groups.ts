@@ -1519,6 +1519,15 @@ export class GroupService {
         { dur: since(pumpStarted) }
       );
     }
+    // A chat closed on this device keeps no local mark (`groupLocalState`).
+    const closed = changes
+      .filter(c => variant(c.kind)[0] === 'Closed')
+      .map(c => c.group as string);
+    if (closed.length > 0) {
+      await this.queries.groups
+        .forgetLocalState(this.owner, closed)
+        .catch(() => logger.error('local marks of a closed chat not deleted'));
+    }
     if (changes.length > 0) {
       this.eventEmitter.emit(SdkEventType.GROUPS_CHANGED, {
         changes: changes.map(c => {
@@ -2620,6 +2629,20 @@ export class GroupService {
       'resend_root',
       { group: shortId(groupId) }
     );
+  }
+
+  /**
+   * The chats archived on this device: a mark kept on this device only
+   * (`groupLocalState`), never sent nor given to the engine, so that nobody
+   * else can tell. An archived chat keeps receiving like any other.
+   */
+  archived(): Promise<GroupId[]> {
+    return this.queries.groups.archivedGroups(this.owner);
+  }
+
+  /** Archives a chat on this device, or moves it back (see `archived`). */
+  setArchived(groupId: GroupId, archived: boolean): Promise<void> {
+    return this.queries.groups.setArchived(this.owner, groupId, archived);
   }
 
   setLocalName(groupId: GroupId, name: string | null): Promise<void> {

@@ -207,7 +207,10 @@
     "save_for_me": "Save for me",
     "save_for_everyone": "Save for everyone",
     "use_shared_name": "Use the name for everyone",
-    "open_settings": "Open the chat details of {{name}}"
+    "open_settings": "Open the chat details of {{name}}",
+    "archive": "Archive chat",
+    "archive_hint": "Archived chats are hidden from your list but you stay a member.",
+    "unarchive": "Unarchive"
   },
   "resolve": {
     "title": "Resolve competing versions",

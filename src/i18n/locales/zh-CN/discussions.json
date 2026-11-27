@@ -12,7 +12,8 @@
   },
   "archived": {
     "title": "已归档的聊天",
-    "empty": "没有已归档的聊天"
+    "empty": "没有已归档的聊天",
+    "unread": "已归档的聊天中有新消息"
   },
   "message_input": {
     "replying_to": "回复",

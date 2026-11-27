@@ -4,6 +4,8 @@ import { Archive, ChevronRight } from 'react-feather';
 
 interface ArchivedChatsRowProps {
   count: number;
+  /** An archived chat has new messages: a dot, the chat itself stays there. */
+  unread?: boolean;
   onOpen: () => void;
 }
 
@@ -13,6 +15,7 @@ interface ArchivedChatsRowProps {
  */
 const ArchivedChatsRow: React.FC<ArchivedChatsRowProps> = ({
   count,
+  unread = false,
   onOpen,
 }) => {
   const { t } = useTranslation('discussions');
@@ -27,6 +30,14 @@ const ArchivedChatsRow: React.FC<ArchivedChatsRowProps> = ({
       <span className="flex-1 text-sm font-medium text-foreground">
         {t('archived.title')}
       </span>
+      {unread && (
+        <span
+          className="inline-block w-2.5 h-2.5 rounded-full bg-accent-soft-foreground shrink-0"
+          role="img"
+          aria-label={t('archived.unread')}
+          data-testid="archived-chats-unread"
+        />
+      )}
       <span className="text-sm text-muted-foreground">{count}</span>
       <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
     </button>

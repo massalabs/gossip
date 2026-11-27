@@ -1,7 +1,11 @@
 import './matchMedia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
-import { SessionStatus, type GossipSdk } from '@massalabs/gossip-sdk';
+import {
+  SdkEventType,
+  SessionStatus,
+  type GossipSdk,
+} from '@massalabs/gossip-sdk';
 import NewGroup from '../../../src/pages/NewGroup';
 import Discussions from '../../../src/pages/Discussions';
 import ArchivedChats from '../../../src/pages/ArchivedChats';
@@ -236,6 +240,61 @@ describe('chat screens', () => {
       expect(r.container.textContent).not.toContain('Kim');
     });
 
+    it('keeps an archived chat in the archived list when a message arrives, with a dot on the "Archived chats" row', async () => {
+      fake.state.groups = [
+        summary({ groupId: 'g1', currentEpoch: 'g1', name: 'Brunch' }),
+        summary({ groupId: 'g2', currentEpoch: 'g2', name: 'Lisbon' }),
+      ];
+      fake.state.archived = ['g2'];
+      useGroupStore.getState().init();
+      await act(flush);
+      const r = await renderAt(<Discussions />);
+      unmount = r.unmount;
+      await act(flush);
+      const row = () =>
+        r.container.querySelector('[data-testid="archived-chats-row"]');
+      // The earlier chat and the archived current chat.
+      expect(row()?.textContent).toContain('2');
+      expect(
+        r.container.querySelector('[data-testid="archived-chats-unread"]')
+      ).toBeNull();
+      const names = () =>
+        Array.from(r.container.querySelectorAll('[data-testid="group-row"]'))
+          .map(e => e.textContent ?? '')
+          .join('|');
+      expect(names()).toContain('Brunch');
+      expect(names()).not.toContain('Lisbon');
+
+      // A message arrives in the archived chat: it stays archived.
+      await act(async () => {
+        fake.sdk.emit(SdkEventType.GROUPS_CHANGED, {
+          changes: [{ groupId: 'g2', kind: 'Messages' }],
+        });
+        await flush();
+      });
+      expect(names()).not.toContain('Lisbon');
+      expect(
+        r.container.querySelector('[data-testid="archived-chats-unread"]')
+      ).not.toBeNull();
+      expect(fake.service.setArchived).not.toHaveBeenCalled();
+      await unmount();
+
+      // On the archived page, the chat shows its own unread dot.
+      const a = await renderAt(<ArchivedChats />);
+      unmount = a.unmount;
+      await act(flush);
+      const archivedRows = a.container.querySelectorAll(
+        '[data-testid="group-row"]'
+      );
+      expect(archivedRows).toHaveLength(1);
+      expect(archivedRows[0].textContent).toContain('Lisbon');
+      expect(
+        archivedRows[0].querySelector('[data-testid="group-unread"]')
+      ).not.toBeNull();
+      // The earlier chat is listed below it.
+      expect(a.container.textContent).toContain('Olga');
+    });
+
     it('shows a chat with its members\' avatars and its last message as "Author: text"', async () => {
       useDiscussionStore.setState({
         contacts: [
@@ -399,6 +458,20 @@ describe('chat screens', () => {
       expect(c.querySelector('[data-testid="elsewhere"]')).not.toBeNull();
     });
 
+    it('archives the chat from its settings, a mark on this device only', async () => {
+      await openSettings();
+      const button = document.querySelector('[data-testid="chat-archive"]');
+      expect(button?.textContent).toContain('details.archive');
+      expect(button?.textContent).toContain('details.archive_hint');
+      await click(button);
+      await act(flush);
+      expect(fake.service.setArchived).toHaveBeenCalledWith('g1', true);
+      expect(
+        document.querySelector('[data-testid="chat-archive"]')?.textContent
+      ).toContain('details.unarchive');
+      expect(fake.service.changeMembers).not.toHaveBeenCalled();
+    });
+
     it('has no "Delete chat" while the user is a member', async () => {
       await openSettings();
       expect(buttonsNamed('details.delete_locally')).toHaveLength(0);
@@ -441,10 +514,32 @@ describe('chat screens', () => {
       expect(fake.service.deleteGroup).toHaveBeenCalledWith('g1');
     });
 
-    it('offers nothing on a chat the user is in: it cannot be deleted or archived here', async () => {
+    it('archives a chat from its long press, and moves it back from the archived list', async () => {
       const c = await openList('member');
       await longPress(c.querySelector('[data-testid="group-row"]'));
-      expect(document.querySelector('[role="menu"]')).toBeNull();
+      const archive = Array.from(
+        document.querySelectorAll('[role="menuitem"]')
+      ).find(e => e.textContent === 'details.archive');
+      await click(archive);
+      await act(flush);
+      expect(fake.service.setArchived).toHaveBeenCalledWith('g1', true);
+      // Nothing is sent: no engine operation ran.
+      expect(fake.service.leave).not.toHaveBeenCalled();
+      expect(fake.service.deleteGroup).not.toHaveBeenCalled();
+      expect(c.querySelector('[data-testid="group-row"]')).toBeNull();
+      await unmount();
+
+      const r = await renderAt(<GroupListSection archived />);
+      unmount = r.unmount;
+      await act(flush);
+      await longPress(r.container.querySelector('[data-testid="group-row"]'));
+      const unarchive = Array.from(
+        document.querySelectorAll('[role="menuitem"]')
+      ).find(e => e.textContent === 'details.unarchive');
+      await click(unarchive);
+      await act(flush);
+      expect(fake.service.setArchived).toHaveBeenLastCalledWith('g1', false);
+      expect(r.container.querySelector('[data-testid="group-row"]')).toBeNull();
     });
   });
 });
