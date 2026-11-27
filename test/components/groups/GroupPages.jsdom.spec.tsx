@@ -763,6 +763,123 @@ describe('group pages', () => {
     expect(boxes).toEqual(['Carl']);
   });
 
+  describe("the chat's name (UI1)", () => {
+    async function settingsOf(over: Parameters<typeof summary>[0]) {
+      fake.state.groups = [summary(over)];
+      useGroupStore.getState().init();
+      await act(flush);
+      const r = await renderAt(
+        <GroupSettings />,
+        '/group/g1/settings',
+        '/group/:groupId/settings'
+      );
+      unmount = r.unmount;
+      await act(flush);
+      return r;
+    }
+    const dialogButtons = () =>
+      Array.from(
+        document
+          .querySelector('[data-testid="chat-name-dialog"]')!
+          .querySelectorAll('button')
+      ).map(b => b.textContent?.trim());
+    const nameField = () =>
+      document.querySelector('input#chat-name') as HTMLInputElement;
+
+    it('shows the name once, with one edit button, and none of the old name rows', async () => {
+      const r = await settingsOf({ owner: 'bob' });
+      expect(
+        r.container.querySelector('[data-testid="chat-name"]')?.textContent
+      ).toBe('Trip');
+      expect(
+        r.container.querySelectorAll('[data-testid="chat-name-edit"]')
+      ).toHaveLength(1);
+      // The shared name only shows apart when the user has another one.
+      expect(
+        r.container.querySelector('[data-testid="chat-shared-name"]')
+      ).toBeNull();
+      const text = r.container.textContent ?? '';
+      for (const gone of [
+        'details.your_name',
+        'details.group_name',
+        'details.set_name',
+        'details.rename',
+      ]) {
+        expect(text).not.toContain(gone);
+      }
+    });
+
+    it("shows the user's own name first, and the shared name under it", async () => {
+      const r = await settingsOf({ owner: 'bob', localName: 'Holidays' });
+      expect(
+        r.container.querySelector('[data-testid="chat-name"]')?.textContent
+      ).toBe('Holidays');
+      expect(
+        r.container.querySelector('[data-testid="chat-shared-name"]')
+          ?.textContent
+      ).toBe('details.name_shared');
+    });
+
+    it('gives a member "Save for me" only, which stores a name on this device', async () => {
+      await settingsOf({ owner: 'bob' });
+      await click(document.querySelector('[data-testid="chat-name-edit"]'));
+      expect(dialogButtons()).toEqual([
+        'details.save_for_me',
+        'choices.cancel',
+      ]);
+      expect(nameField().value).toBe('Trip');
+      await type(nameField(), ' Holidays ');
+      await click(byText('details.save_for_me'));
+      await act(flush);
+      expect(fake.service.setLocalName).toHaveBeenCalledWith('g1', 'Holidays');
+      expect(fake.service.changeMembers).not.toHaveBeenCalled();
+    });
+
+    it('goes back to the shared name with an empty field, and says so', async () => {
+      await settingsOf({ owner: 'bob', localName: 'Holidays' });
+      await click(document.querySelector('[data-testid="chat-name-edit"]'));
+      expect(nameField().value).toBe('Holidays');
+      await type(nameField(), '  ');
+      expect(dialogButtons()).toEqual([
+        'details.use_shared_name',
+        'choices.cancel',
+      ]);
+      await click(byText('details.use_shared_name'));
+      await act(flush);
+      expect(fake.service.setLocalName).toHaveBeenCalledWith('g1', null);
+    });
+
+    it('gives the owner "Save for everyone" too, which renames the chat', async () => {
+      await settingsOf({ owner: 'me' });
+      await click(document.querySelector('[data-testid="chat-name-edit"]'));
+      expect(dialogButtons()).toEqual([
+        'details.save_for_everyone',
+        'details.save_for_me',
+        'choices.cancel',
+      ]);
+      await type(nameField(), 'Summer trip');
+      await click(byText('details.save_for_everyone'));
+      await act(flush);
+      expect(fake.service.changeMembers).toHaveBeenCalledWith('g1', {
+        name: 'Summer trip',
+      });
+      expect(fake.service.setLocalName).not.toHaveBeenCalled();
+    });
+
+    it('refuses a name over 256 bytes', async () => {
+      await settingsOf({ owner: 'me' });
+      await click(document.querySelector('[data-testid="chat-name-edit"]'));
+      await type(nameField(), '\u00e9'.repeat(129));
+      expect(byText('new_group.name_too_long')).toBeDefined();
+      const save = byText('details.save_for_everyone') as HTMLButtonElement;
+      expect(save.disabled).toBe(true);
+      await click(save);
+      await click(byText('details.save_for_me'));
+      expect(fake.service.changeMembers).not.toHaveBeenCalled();
+      expect(fake.service.setLocalName).not.toHaveBeenCalled();
+    });
+  });
+
   it("shows former owners' branches as information and lets the owner merge them", async () => {
     fake.state.groups = [
       summary({ members: ['me', 'bob', 'old'], formerOwnerBranches: ['f1'] }),
