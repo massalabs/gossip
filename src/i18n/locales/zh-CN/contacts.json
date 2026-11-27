@@ -40,7 +40,9 @@
     "share_username_hint": "对方收到你的请求时将看到此名称",
     "share_username_placeholder": "输入要分享的用户名",
     "share_username_aria": "分享给联系人的用户名",
-    "import_file_aria": "从 YAML 文件导入联系人"
+    "import_file_aria": "从 YAML 文件导入联系人",
+    "connected_non_contact": "你已通过共同的聊天与此人建立连接。添加后仅在此设备上保存为联系人：不会发送任何内容，因此无需选择消息或计时器。",
+    "already_contact": "该用户已在你的联系人中"
   },
   "privacy_notice": {
     "title": "隐私提示",
