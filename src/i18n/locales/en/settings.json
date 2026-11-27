@@ -251,7 +251,7 @@
     "on": "On",
     "off": "Off",
     "open_settings": "Open Settings",
-    "ios_limitation": "iOS limits background execution to every 15–30 minutes at best. This cannot be changed — it is a system restriction.",
+    "ios_limitation": "iOS limits background execution to every 15–30 minutes at best. This cannot be changed. It is a system restriction.",
     "battery_optimization": "Battery optimization disabled",
     "yes": "Yes",
     "no": "No",

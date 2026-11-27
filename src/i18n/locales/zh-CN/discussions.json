@@ -1,10 +1,10 @@
 {
   "title": "Gossip",
   "share_contact": "分享我的联系方式",
-  "share_to_discussion": "分享内容到会话",
-  "share_select": "选择一个会话来分享内容。",
+  "share_to_discussion": "分享内容到聊天",
+  "share_select": "选择一个聊天来分享内容。",
   "cancel_sharing": "取消分享",
-  "start_new": "发起新会话",
+  "start_new": "发起新聊天",
   "filter": {
     "all": "全部",
     "unread": "未读",
@@ -98,7 +98,7 @@
     "mute_update_failed": "更新通知设置失败"
   },
   "new_discussion": {
-    "title": "新会话",
+    "title": "新聊天",
     "new_contact": "新联系人",
     "new_group": "新建聊天",
     "contacts": "联系人",
@@ -123,7 +123,7 @@
     "refuse": "拒绝",
     "set_contact_name": "设置联系人名称",
     "refuse_title": "拒绝连接？",
-    "refuse_body": "拒绝将关闭此会话请求。",
+    "refuse_body": "拒绝将关闭此聊天请求。",
     "sections": {
       "discussions": "早先的聊天",
       "contacts": "联系人",
@@ -133,13 +133,13 @@
     }
   },
   "empty": {
-    "no_discussions": "暂无会话",
-    "no_discussions_hint": "点击 <strong>+</strong> 按钮发起新会话",
+    "no_discussions": "暂无聊天",
+    "no_discussions_hint": "点击 <strong>+</strong> 按钮发起新聊天",
     "no_messages": "暂无消息",
     "no_messages_hint": "发送你的第一条消息来开始对话"
   },
   "initializing": {
-    "title": "正在初始化安全会话",
+    "title": "正在初始化安全聊天",
     "subtitle": "正在建立端到端加密..."
   },
   "loading_messages": "正在加载消息...",
@@ -184,7 +184,7 @@
     "info_message": "收到对方的消息可以更新加密密钥。如果攻击者获得了您当前的密钥，他们可以解密您最近发送的 {{count}} 条消息。"
   },
   "retention_separator": "自动删除已启用：{{duration}}",
-  "filter_label": "筛选会话",
+  "filter_label": "筛选聊天",
   "waiting_connection": "等待连接...",
   "mesh_connected_one": "已连接 Mesh 网络 · {{count}} 个连接",
   "mesh_connected_few": "已连接 Mesh 网络 · {{count}} 个连接",

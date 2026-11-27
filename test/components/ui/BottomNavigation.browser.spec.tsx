@@ -50,20 +50,20 @@ describe('BottomNavigation', () => {
     vi.clearAllMocks();
   });
 
-  it('renders two navigation buttons (Discussions and Settings)', async () => {
+  it('renders two navigation buttons (Chats and Settings)', async () => {
     await renderWithRouter();
 
-    const discussionsBtn = page.getByTitle('Discussions');
+    const discussionsBtn = page.getByTitle('Chats');
     const settingsBtn = page.getByTitle('Settings');
 
     await expect.element(discussionsBtn).toBeInTheDocument();
     await expect.element(settingsBtn).toBeInTheDocument();
   });
 
-  it('highlights Discussions tab when on /discussions route', async () => {
+  it('highlights Chats tab when on /discussions route', async () => {
     await renderWithRouter('/discussions');
 
-    const discussionsBtn = page.getByTitle('Discussions');
+    const discussionsBtn = page.getByTitle('Chats');
     // Active tab gets scale-[1.02] class
     await expect.element(discussionsBtn).toHaveClass('scale-[1.02]');
   });
