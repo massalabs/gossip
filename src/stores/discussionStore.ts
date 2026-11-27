@@ -8,7 +8,7 @@ import { createSelectors } from './utils/createSelectors';
 import { shownStatus } from '../utils/conversations';
 import { useAccountStore } from './accountStore';
 
-/** `archived`: the archives the user moved out of the list (§5.12). */
+/** `archived`: the archives the user moved out of the list (§5.12), on their own page. */
 export type DiscussionFilter = 'all' | 'unread' | 'pending' | 'archived';
 
 interface DiscussionStoreState {

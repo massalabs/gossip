@@ -8,8 +8,11 @@
   "filter": {
     "all": "Toutes",
     "unread": "Non lues",
-    "pending": "En attente",
-    "archived": "Archives"
+    "pending": "En attente"
+  },
+  "archived": {
+    "title": "Chats archivés",
+    "empty": "Aucun Chat archivé"
   },
   "message_input": {
     "replying_to": "En réponse à",

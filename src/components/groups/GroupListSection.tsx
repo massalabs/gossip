@@ -1,7 +1,6 @@
 import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Users } from 'react-feather';
 import type { GroupInvitation, LeaveChoice } from '@massalabs/gossip-sdk';
 import { useMinuteTick } from '../../hooks/useMinuteTick';
 import { formatRelativeTime } from '../../utils/timeUtils';
@@ -19,6 +18,7 @@ import { useDiscussionStore } from '../../stores/discussionStore';
 import GroupInvitationCard from './GroupInvitationCard';
 import ContinuationPrompt from './ContinuationPrompt';
 import SafeName from './SafeName';
+import GroupAvatar from './GroupAvatar';
 
 interface GroupListSectionProps {
   /** Only groups whose name matches (the list's search). */
@@ -30,11 +30,24 @@ interface GroupListSectionProps {
 const GroupRow: React.FC<{
   entry: GroupListEntry;
   name: string;
+  /** The last message's author, shown before it as "Author: text". */
+  author: string | null;
   preview: string;
+  me?: string;
+  memberName: (userId: string) => string;
   /** Another person's new chat that continues this one (§5.12). */
   continuation?: GroupInvitation;
   onOpen: () => void;
-}> = ({ entry, name, preview, continuation, onOpen }) => {
+}> = ({
+  entry,
+  name,
+  author,
+  preview,
+  me,
+  memberName,
+  continuation,
+  onOpen,
+}) => {
   const { t } = useTranslation('groups');
   const readOnly = entry.summary.status !== 'member';
   return (
@@ -49,9 +62,11 @@ const GroupRow: React.FC<{
       data-testid="group-row"
     >
       <div className="flex items-center space-x-3">
-        <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center shrink-0">
-          <Users className="w-6 h-6 text-foreground" />
-        </div>
+        <GroupAvatar
+          members={entry.summary.members}
+          me={me}
+          memberName={memberName}
+        />
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-medium text-foreground truncate min-w-0">
@@ -71,7 +86,17 @@ const GroupRow: React.FC<{
             </div>
           </div>
           <div className="flex items-center justify-between mt-1">
-            <p className="text-sm text-muted-foreground truncate">{preview}</p>
+            <p
+              className="text-sm text-muted-foreground truncate"
+              data-testid="group-preview"
+            >
+              {author !== null && (
+                <span className="font-medium text-foreground">
+                  <bdi dir="auto">{author}</bdi>:{' '}
+                </span>
+              )}
+              {preview}
+            </p>
             {entry.unread && (
               <span
                 className="inline-block w-2.5 h-2.5 rounded-full bg-accent-soft-foreground animate-badge-pop shrink-0"
@@ -191,14 +216,19 @@ const GroupListSection: React.FC<GroupListSectionProps> = ({
           {shown.map(({ entry, name }) => {
             const last = entry.lastMessage;
             const preview = last
-              ? `${memberName(last.author)}: ${last.media ? t('timeline.media') : safeName(last.text, 80)}`
+              ? last.media
+                ? t('timeline.media')
+                : safeName(last.text, 80)
               : t('list.no_messages');
             return (
               <GroupRow
                 key={entry.summary.groupId}
                 entry={entry}
                 name={name}
+                author={last ? memberName(last.author) : null}
                 preview={preview}
+                me={me}
+                memberName={memberName}
                 continuation={allInvitations.find(
                   i => i.continues === entry.summary.groupId
                 )}

@@ -8,8 +8,11 @@
   "filter": {
     "all": "Все",
     "unread": "Непрочитанные",
-    "pending": "Ожидающие",
-    "archived": "Архив"
+    "pending": "Ожидающие"
+  },
+  "archived": {
+    "title": "Архивные чаты",
+    "empty": "Нет архивных чатов"
   },
   "message_input": {
     "replying_to": "Ответ для",

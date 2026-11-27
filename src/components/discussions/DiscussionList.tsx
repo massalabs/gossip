@@ -315,6 +315,13 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
 
   // Empty states
   if (hasNoResults) {
+    if (filter === 'archived') {
+      return (
+        <div className="py-8 text-center">
+          <p className="text-sm text-muted-foreground">{t('archived.empty')}</p>
+        </div>
+      );
+    }
     if (isSearching) {
       return (
         <div className="py-8 text-center">
