@@ -166,6 +166,9 @@ impl Node {
     }
 
     fn remove_work(&mut self, key: &WorkKey) {
+        if let Some(Work::Notice { chat_id, event_id }) = self.t.queue.get(key).cloned() {
+            self.notice_left_queue(chat_id, key.0, event_id);
+        }
         if let Some(w) = self.t.queue.remove(key)
             && let Some(r) = event_ref(&w)
             && let Some(set) = self.work_refs.get_mut(&r)
@@ -176,6 +179,14 @@ impl Node {
             }
         }
         self.outbox.items.remove(key);
+    }
+
+    /// Whether a notice of the event to `peer` is queued.
+    pub(crate) fn notice_queued(&self, peer: GossipId, chat: ChatId, id: EventId) -> bool {
+        self.work_refs.get(&(chat, id)).is_some_and(|keys| {
+            keys.iter()
+                .any(|k| k.0 == peer && matches!(self.t.queue.get(k), Some(Work::Notice { .. })))
+        })
     }
 
     /// Whether a full send (or, with `notice`, any send) of the event to `peer` is queued.
@@ -603,8 +614,11 @@ impl Node {
                     }
                 }
                 Work::Notice { chat_id, event_id } => {
+                    // The one notice a relay-like publication owes the peer its own hint
+                    // names is not cancelled by that hint (see `relay`).
                     let ok = self.sendable(cx, &peer, &chat_id, &event_id)?.is_some()
-                        && !self.has_hint(chat_id, peer, event_id, cx.now);
+                        && (!self.has_hint(chat_id, peer, event_id, cx.now)
+                            || self.notify_despite_hint(chat_id, peer, event_id));
                     if ok {
                         notices.push((
                             key,
@@ -1162,6 +1176,7 @@ impl Node {
             self.task_wakeup(),
             self.scan_wakeup(),
             self.next_hint_expiry(),
+            self.relay_wakeup(),
         ]
         .into_iter()
         .flatten()

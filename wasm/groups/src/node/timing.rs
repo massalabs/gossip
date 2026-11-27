@@ -75,6 +75,31 @@ pub const HINT_EXPIRY_MS: u64 = 28 * DAY_MS;
 /// Hints per group, shared across its peers, with least-recently-used eviction.
 pub const HINT_CAPACITY: usize = 65_536;
 
+// ── What this device publishes under another member's name (§10.2) ──────────
+
+/// The shortest wait before this device writes the hint and sends the notices of an event
+/// it published that is attributed to another member, or of an edit that is not the user's
+/// own edit of the user's own message (§10.2): 0.5 s.
+///
+/// PROVISIONAL (decided 2026-11-27, D.96): to be tuned from the real one-hop travel times
+/// the debug build records (a phone fetches from the backend every 5 s; the mesh is usually
+/// under 2 s; the engine itself adds no delay when it relays).
+///
+/// Why a wait: such an event is handled as if that member had delivered it and this device
+/// relayed it, and a relay announces an event some time after its author wrote it. Why a
+/// wait and not a backdated timestamp: the event keeps its true date, which stays safe with
+/// features that set dates on purpose, such as a message prepared for a later date.
+pub const RELAY_WAIT_MIN_MS: u64 = 500;
+/// The longest such wait: 5 s. PROVISIONAL, see [`RELAY_WAIT_MIN_MS`]. The wait is drawn
+/// uniformly between the two, bounds included.
+pub const RELAY_WAIT_MAX_MS: u64 = 5_000;
+
+/// A wait drawn uniformly in `[RELAY_WAIT_MIN_MS, RELAY_WAIT_MAX_MS]`.
+pub(crate) fn relay_wait(rng: &mut dyn Randomness) -> u64 {
+    let span = RELAY_WAIT_MAX_MS - RELAY_WAIT_MIN_MS + 1;
+    RELAY_WAIT_MIN_MS + uniform_below(rng, usize::try_from(span).unwrap_or(usize::MAX)) as u64
+}
+
 // ── Version notices (§13.8) ──────────────────────────────────────────────────
 
 /// At most one version notice per peer and received version per 24 h.

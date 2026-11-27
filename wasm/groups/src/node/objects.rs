@@ -591,6 +591,7 @@ impl Node {
     pub(crate) fn erase_messages(&mut self, chat: ChatId) {
         self.erase.insert(chat);
         self.forget_replies_in(&chat);
+        self.forget_relays_in(&chat);
         let keys: Vec<_> = self
             .t
             .hints

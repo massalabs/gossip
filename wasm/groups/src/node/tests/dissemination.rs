@@ -81,6 +81,12 @@ fn a_message_attributed_to_another_member_is_announced_not_sent() {
         )
         .unwrap()
         .event;
+    // Nothing during the random wait (§10.2), then notices only.
+    let sent = net.poll_frames(0);
+    assert!(recipients(&sent, full_events, edit.event_id()).is_empty());
+    assert!(recipients(&sent, announced, edit.event_id()).is_empty());
+    net.now = now + 1 + crate::node::timing::RELAY_WAIT_MAX_MS;
+    net.tick(0);
     let sent = net.poll_frames(0);
     assert!(recipients(&sent, full_events, edit.event_id()).is_empty());
     let noticed = recipients(&sent, announced, edit.event_id());
