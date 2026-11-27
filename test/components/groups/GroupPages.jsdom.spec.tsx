@@ -617,6 +617,9 @@ describe('group pages', () => {
     const boxes = r.container.querySelectorAll('[role="checkbox"]');
     expect(boxes).toHaveLength(1);
     expect(boxes[0].textContent).toContain('Alice');
+    // Members first, then the name.
+    await click(boxes[0]);
+    await click(byText('common:next'));
     const input = r.container.querySelector(
       'input#group-name'
     ) as HTMLInputElement;
@@ -628,7 +631,6 @@ describe('group pages', () => {
       setter.call(input, 'Trip');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await click(boxes[0]);
     await click(byText('new_group.create'));
     await act(flush);
     // The creator's default timer, pre-selected: the earlier 1 month as 28 days.

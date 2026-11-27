@@ -23,6 +23,7 @@
     "selected_few": "{{count}} sélectionnés",
     "selected_many": "{{count}} sélectionnés",
     "selected_other": "{{count}} sélectionnés",
+    "unselect": "Retirer {{name}}",
     "create": "Créer le Chat",
     "creating": "Création…",
     "created": "Chat créé",

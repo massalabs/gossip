@@ -23,6 +23,7 @@
     "selected_few": "Выбрано {{count}}",
     "selected_many": "Выбрано {{count}}",
     "selected_other": "Выбрано {{count}}",
+    "unselect": "Убрать {{name}}",
     "create": "Создать чат",
     "creating": "Создание…",
     "created": "Чат создан",

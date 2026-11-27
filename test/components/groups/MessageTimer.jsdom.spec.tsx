@@ -301,6 +301,9 @@ describe('message timer screens', () => {
     const r = await renderAt(<NewGroup />);
     unmount = r.unmount;
     await act(flush);
+    // Members first; the timer is on the second step, with the name.
+    await click(r.container.querySelector('[role="checkbox"]'));
+    await click(byText('common:next'));
     const field = r.container.querySelector(
       '[data-testid="message-timer-field-value"]'
     );
@@ -310,7 +313,6 @@ describe('message timer screens', () => {
     );
     await click(option('groups:timer.days:3'));
     expect(field?.textContent).toBe('groups:timer.days:3');
-    await click(r.container.querySelector('[role="checkbox"]'));
     await click(byText('new_group.create'));
     await act(flush);
     expect(fake.service.createGroup).toHaveBeenCalledWith('', ['alice'], {
