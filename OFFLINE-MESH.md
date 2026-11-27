@@ -103,7 +103,7 @@ node; a lock or another account does not need it (see
 
 | Item                                            | Value                                  |
 | ----------------------------------------------- | -------------------------------------- |
-| Service UUID                                    | `6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f60` |
+| Service UUID (mesh version 1)                   | `6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f01` |
 | Characteristic (write without response, notify) | `6a8b2f41-5c1d-4e2a-9b7f-3d0c8e1a5f60` |
 | ATT MTU requested (Android)                     | 517                                    |
 | Links per phone, both roles                     | 8                                      |
@@ -111,14 +111,16 @@ node; a lock or another account does not need it (see
 The UUID is fixed on purpose: iOS only discovers peers in the background by exact UUID.
 It also tells a scanner nearby that the phone runs Gossip, which is why the mesh is opt-in.
 
-The last byte of the service UUID is the mesh version: version `v` ends in `0x5f + v`, so
-the UUID above is version 1 (the only one so far, spoken since 0.1.0), version 2 would end
-in `5f61`. A phone advertises and serves the UUID of the version it speaks and scans for
-the UUIDs of every version it can talk to (`MESH_VERSION` and `SUPPORTED_MESH_VERSIONS` in
-`MeshConstants.kt`, `meshVersion` and `supportedMeshVersions` in `MeshRadio.swift`). The
-version is not an extra advertised byte: iOS can only advertise service UUIDs and a name,
-and an extra byte would make a Gossip phone easier to recognise. The characteristic UUID
-is the same for every version.
+The last byte of the service UUID is the mesh version number itself (1 to 255; 0 is not a
+version): version 1 ends in `5f01`, version 2 would end in `5f02`. 0.1.0 and 0.1.1
+advertised `…5f60`, which now reads as version 96 and is supported by no build, so 0.1.2
+does not mesh with them (intended: no phone stays on those versions). A phone advertises
+and serves the UUID of the version it speaks and scans for the UUIDs of every version it
+can talk to (`MESH_VERSION` and `SUPPORTED_MESH_VERSIONS` in `MeshConstants.kt`,
+`meshVersion` and `supportedMeshVersions` in `MeshRadio.swift`). The version is not an
+extra advertised byte: iOS can only advertise service UUIDs and a name, and an extra byte
+would make a Gossip phone easier to recognise. The characteristic UUID is the same for
+every version.
 
 ## Neighbour choice and power modes
 

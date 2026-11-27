@@ -13,15 +13,14 @@ enum MeshConstants {
     /// Versions this build can link with: it scans for each one's UUID. A
     /// version left out is never scanned for.
     static let supportedMeshVersions = [1]
-    /// Version v's UUID ends in `0x5f + v`, so version 1 is `…5f60`.
-    static let maxMeshVersion = 0xff - 0x5f
-    /// Version 1's UUID with the last byte set to `0x5f + version`: version 1
-    /// is today's UUID byte for byte (0.1.0 and 0.1.1 advertise it), version 2
-    /// ends in `5f61`. The characteristic UUID is the same for all versions.
+    /// The last byte of the service UUID is the version itself: version 1 is
+    /// `…5f01`, version 2 `…5f02`, up to 255; 0 is not a version. The UUID of
+    /// 0.1.0 and 0.1.1 (`…5f60`) reads as version 96, supported by no build:
+    /// they do not mesh with this one, on purpose. The characteristic UUID is
+    /// the same for all versions.
     static func meshServiceUUID(version: Int) -> CBUUID {
-        precondition((1...MeshConstants.maxMeshVersion).contains(version), "mesh version out of range")
-        // 0x5f + version is 0x60…0xff: always two hex digits
-        return CBUUID(string: "6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f" + String(0x5f + version, radix: 16))
+        precondition((1...255).contains(version), "mesh version out of range")
+        return CBUUID(string: "6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f" + String(format: "%02x", version))
     }
     /// Advertised and offered by the peripheral: the current version's UUID.
     /// In the background iOS only finds peers by exact UUID, hence a UUID per version.

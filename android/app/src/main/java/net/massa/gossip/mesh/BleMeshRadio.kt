@@ -414,8 +414,8 @@ class BleMeshRadio(
             is PeripheralAdmission.Verdict.Refuse -> {
                 // A failed subscribe makes a Gossip central give up and disconnect on
                 // its own (Android: onSubscribed abandons the connection; iOS:
-                // didUpdateNotificationStateFor with an error abandons it), 0.1.0 and
-                // 0.1.1 included. The cancel also covers a central that ignores the error.
+                // didUpdateNotificationStateFor with an error abandons it). The cancel
+                // also covers a central that ignores the error.
                 respond(device, requestId, responseNeeded, SUBSCRIBE_REFUSED_STATUS)
                 if (verdict.cancel) gattServer?.cancelConnection(device)
             }

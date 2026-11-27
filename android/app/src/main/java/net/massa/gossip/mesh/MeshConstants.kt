@@ -23,36 +23,35 @@ object MeshConstants {
      */
     val SUPPORTED_MESH_VERSIONS: List<Int> = listOf(1)
 
-    /** Version 1's UUID, the one 0.1.0 and 0.1.1 advertise: it must never change. */
-    private val VERSION_1_SERVICE_UUID: UUID = UUID.fromString("6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f60")
+    /**
+     * The service UUID with its last byte cleared. That byte is the mesh
+     * version itself; 0 is not a version, so the base UUID names none.
+     */
+    private val SERVICE_UUID_BASE: UUID = UUID.fromString("6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f00")
 
-    /** Last byte of [VERSION_1_SERVICE_UUID]; version v ends in `0x5f + v`. */
-    private const val VERSION_BYTE_OFFSET = 0x5f
-
-    const val MAX_MESH_VERSION = 0xff - VERSION_BYTE_OFFSET
+    const val MAX_MESH_VERSION = 0xff
 
     /**
-     * The service UUID of mesh [version]: version 1's UUID with its last byte
-     * set to `0x5f + version`, so version 1 is `…5f60` (today's UUID, byte for
-     * byte), version 2 `…5f61`, up to version [MAX_MESH_VERSION] (`…5fff`).
-     * The simplest rule that keeps version 1 exact. Only the service UUID
+     * The service UUID of mesh [version]: the base UUID with its last byte set
+     * to the version, so version 1 is `…5f01`, version 2 `…5f02`, up to 255
+     * (`…5fff`). The UUID 0.1.0 and 0.1.1 advertised (`…5f60`) now reads as
+     * version 96, which no build supports: 0.1.2 does not mesh with them, on
+     * purpose (no phone stays on those versions). Only the service UUID
      * carries the version; the characteristic UUID is the same for all.
      */
     fun serviceUuid(version: Int): UUID {
         require(version in 1..MAX_MESH_VERSION) { "mesh version out of range" }
-        val lsb = (VERSION_1_SERVICE_UUID.leastSignificantBits and 0xffL.inv()) or
-            (VERSION_BYTE_OFFSET + version).toLong()
-        return UUID(VERSION_1_SERVICE_UUID.mostSignificantBits, lsb)
+        return UUID(SERVICE_UUID_BASE.mostSignificantBits, SERVICE_UUID_BASE.leastSignificantBits or version.toLong())
     }
 
     /** The mesh version [uuid] names, or null when it is not a mesh service UUID. */
     fun meshVersionOf(uuid: UUID): Int? {
-        if (uuid.mostSignificantBits != VERSION_1_SERVICE_UUID.mostSignificantBits ||
-            (uuid.leastSignificantBits and 0xffL.inv()) != (VERSION_1_SERVICE_UUID.leastSignificantBits and 0xffL.inv())
+        if (uuid.mostSignificantBits != SERVICE_UUID_BASE.mostSignificantBits ||
+            (uuid.leastSignificantBits and 0xffL.inv()) != SERVICE_UUID_BASE.leastSignificantBits
         ) {
             return null
         }
-        val version = (uuid.leastSignificantBits and 0xffL).toInt() - VERSION_BYTE_OFFSET
+        val version = (uuid.leastSignificantBits and 0xffL).toInt()
         return if (version in 1..MAX_MESH_VERSION) version else null
     }
 
