@@ -24,6 +24,7 @@ import {
   TransportConnectivity,
 } from './types.js';
 import { encodeToBase64 } from '../../utils/base64.js';
+import { dlog } from '../../utils/debugLog.js';
 
 export type { TransportKind };
 
@@ -165,7 +166,13 @@ export class CompositeMessageProtocol implements IMessageProtocol {
     }
   }
 
-  private backendAnswered(): void {
+  private backendAnswered(reason = 'answer'): void {
+    if (this.pausedUntil !== 0) {
+      dlog('api', 'api.backend.pause.end', {
+        reason,
+        early: Date.now() < this.pausedUntil,
+      });
+    }
     this.pausedUntil = 0;
     this.nextPauseMs = BACKEND_PAUSE_FIRST_MS;
   }
@@ -177,6 +184,7 @@ export class CompositeMessageProtocol implements IMessageProtocol {
     // Requests started before the pause fail during it: one pause each time.
     if (now < this.pausedUntil) return;
     this.pausedUntil = now + this.nextPauseMs;
+    dlog('api', 'api.backend.pause.start', { ms: this.nextPauseMs });
     this.nextPauseMs = Math.min(this.nextPauseMs * 2, BACKEND_PAUSE_MAX_MS);
   }
 
@@ -190,7 +198,7 @@ export class CompositeMessageProtocol implements IMessageProtocol {
    * worth asking again at once, and its next failure starts a short pause.
    */
   networkChanged(): void {
-    this.backendAnswered();
+    this.backendAnswered('network');
   }
 
   /** Receives what a transport answered after its fetch had returned. */
@@ -317,6 +325,10 @@ export class CompositeMessageProtocol implements IMessageProtocol {
           .then(
             messages => {
               if (done) {
+                dlog('api', 'api.fetch.late', {
+                  kind: t.kind,
+                  count: messages.length,
+                });
                 // after the fetch returned: offered as if pushed
                 if (messages.length > 0) this.lateMessages?.(messages);
                 return;
@@ -397,7 +409,10 @@ export class CompositeMessageProtocol implements IMessageProtocol {
           .then(
             () => {
               acceptedBy.push(t.kind);
-              if (done) return;
+              if (done) {
+                dlog('api', 'api.send.late', { kind: t.kind, ok: true });
+                return;
+              }
               done = true;
               const conflict = failures.find(
                 f => f.kind === 'internet' && isSeekerConflict(f.error)
@@ -414,6 +429,18 @@ export class CompositeMessageProtocol implements IMessageProtocol {
             },
             error => {
               failures.push({ kind: t.kind, error });
+              if (done) {
+                dlog(
+                  'api',
+                  'api.send.late',
+                  {
+                    kind: t.kind,
+                    ok: false,
+                    conflict: isSeekerConflict(error),
+                  },
+                  { lvl: 'warn' }
+                );
+              }
             }
           )
           .catch(() => undefined)
