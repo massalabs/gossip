@@ -235,6 +235,7 @@
     "foreground_title": "Android : mode haute fiabilité",
     "foreground_description": "Maintient la synchro active même quand l’app est en arrière-plan. Affiche une notification persistante. Consomme plus de batterie.",
     "foreground_toggle": "Maintenir la synchro active",
+    "needs_notifications": "Ces réglages nécessitent les notifications. Tant qu'elles sont désactivées, Gossip ne vérifie pas les nouveaux messages en arrière-plan.",
     "debug_sync_preset": "Préréglage synchro : {{preset}}",
     "debug_foreground_sync": "Synchro premier plan : {{value}}",
     "title": "Sync en arrière-plan",

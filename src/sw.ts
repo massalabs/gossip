@@ -463,6 +463,11 @@ async function performSyncAndNotify(): Promise<number | null> {
 
 async function performSyncAndNotifyUnlocked(): Promise<number | null> {
   try {
+    // This fetch exists only to notify (it stores nothing). With the app's
+    // notifications switch off, send nothing. Missing means on (app default).
+    if ((await bridgeGet<boolean>('notificationsEnabled')) === false) {
+      return null;
+    }
     const result = await messageReception.fetchAllDiscussions();
 
     if (result.blocked) return null;
