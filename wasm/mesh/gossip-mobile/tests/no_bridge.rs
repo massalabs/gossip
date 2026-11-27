@@ -16,8 +16,8 @@
 //! have generous ceilings: they say what happens, not how fast a loaded machine is.
 //! The scenarios of this file run one at a time so that their timings do not mix.
 //!
-//! Only the plain case runs in the normal suite (3 runs); the other measurements
-//! take several minutes of real time together and are `#[ignore]`d:
+//! Only the plain case and case 6 run in the normal suite (3 runs each); the other
+//! measurements take several minutes of real time together and are `#[ignore]`d:
 //! `cargo test -p gossip-mobile --test no_bridge -- --ignored --nocapture`.
 
 use std::collections::HashMap;
@@ -721,17 +721,12 @@ fn relink(want_at: Duration, bridge: bool) -> Setup {
 /// Case 6: the sender keeps the recipient's entry after the link drops
 /// (`WantedTable::remove_peer` only drops the direction), and `guided_allows` takes
 /// the directionless entry for the sender's own seeker: the blob is offered nowhere.
-/// `WantedTable::merge` now counts the entry as fresh when it comes back with a
-/// direction, so `on_wanted_received` would announce the held blob. But it does not
-/// come back: on the new link the sender's `WantedSummary` lists the stale entry, and
-/// the recipient's `WantedTable::apply_summary` marks its own entry as already sent
-/// (the echo's hop budget is one below its own, a tie). The recipient sends it again
-/// only when its expiry has grown past `WANTED_RESEND_SLACK_MS` (5 min) beyond the
-/// echo's, or when a new `set_wanted` draws a higher hop budget. Measured with the
-/// merge rule and no new `set_wanted`: 1/12 delivered (the 5 % rule); with a
-/// `set_wanted` repeated at the send: 9/12.
+/// When the phones meet again, the sender's `WantedSummary` no longer lists that
+/// entry (`WantedTable::summary_items`), so the recipient repeats it; the entry gains
+/// a direction and counts as fresh (`WantedTable::merge`), and `on_wanted_received`
+/// announces the held blob. Before those two rules: 0/12 runs delivered within 60 s
+/// (1/12 by the 5 % rule); with them: 12/12, about 1 s after the link comes up.
 #[test]
-#[ignore = "known loss: the sender's link-up WantedSummary echoes the recipient's stale entry, so the recipient marks its entry as sent (WantedTable::apply_summary) and never repeats it; the fresh-on-new-direction rule in WantedTable::merge never fires"]
 fn a_blob_sent_while_apart_reaches_a_recipient_met_before_when_they_meet_again() {
     let _s = serial();
     let runs = measure_n(
