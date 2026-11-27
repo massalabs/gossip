@@ -17,6 +17,8 @@ export const contacts = sqliteTable(
     /**
      * `accepted`: the user accepted this contact. `automatic`: only a
      * connection opened for a group (§5.12), revoked once no group needs it.
+     * `requested`: an automatic connection whose peer also asked to become a
+     * contact; shown as a request until the user answers it.
      */
     connection: text('connection')
       .$type<ContactConnection>()

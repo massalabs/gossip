@@ -810,19 +810,37 @@ export class AnnouncementService {
     );
     const isNewContact = !contact;
     // A member of a group this device accepted: connected without a prompt,
-    // and no conversation is created (§5.12).
-    const automatic = isNewContact
-      ? ((await this.connections?.isCoMember(contactUserId)) ?? false)
-      : contact!.connection === 'automatic';
+    // and no conversation is created (§5.12). A connection whose peer asked
+    // to become a contact (`requested`) is still a connection.
+    // A request kept after its connection went with the last shared chat
+    // is judged again, as a new peer would be.
+    const automatic =
+      isNewContact || contact!.connection === 'requested'
+        ? ((await this.connections?.isCoMember(contactUserId)) ?? false)
+        : contact!.connection === 'automatic';
+    // A contact request carries a payload (a name, a message or a timer);
+    // the announcement of a connection, an answer or a renewal carries none
+    // (`openConnection`, `createSessionForContact`).
+    const carriesRequest =
+      username !== undefined ||
+      message !== undefined ||
+      messageTimer !== undefined;
+    // A member of a shared chat who also asks to become a contact (§5.12):
+    // the connection is answered at once below, exactly as for any member,
+    // so that the chat keeps flowing and the answer does not depend on the
+    // user; the request, its message and its timer are kept and shown for
+    // the user to accept or decline. Nothing sent depends on that answer.
+    const asksContact = automatic && carriesRequest;
 
     if (isNewContact) {
       // Use extracted username if present, otherwise generate temporary name
-      const name = automatic
-        ? (username ?? '')
-        : username ||
-          (await this._generateTemporaryContactName(
-            this.session.userIdEncoded
-          ));
+      const name =
+        automatic && !asksContact
+          ? (username ?? '')
+          : username ||
+            (await this._generateTemporaryContactName(
+              this.session.userIdEncoded
+            ));
 
       await this.queries.contacts.insert({
         ownerUserId: this.session.userIdEncoded,
@@ -832,7 +850,11 @@ export class AnnouncementService {
         isOnline: false,
         lastSeen: new Date(),
         createdAt: new Date(),
-        connection: automatic ? 'automatic' : 'accepted',
+        connection: asksContact
+          ? 'requested'
+          : automatic
+            ? 'automatic'
+            : 'accepted',
       });
 
       contact = await this.queries.contacts.getByOwnerAndUser(
@@ -840,6 +862,27 @@ export class AnnouncementService {
         contactUserId
       );
       log.info('created new contact', { contactUserId, name });
+    } else if (asksContact && contact!.connection === 'automatic') {
+      await this.queries.contacts.updateByOwnerAndUser(
+        this.session.userIdEncoded,
+        contactUserId,
+        {
+          connection: 'requested',
+          ...(contact!.name
+            ? {}
+            : {
+                name:
+                  username ||
+                  (await this._generateTemporaryContactName(
+                    this.session.userIdEncoded
+                  )),
+              }),
+        }
+      );
+      contact = await this.queries.contacts.getByOwnerAndUser(
+        this.session.userIdEncoded,
+        contactUserId
+      );
     }
 
     if (!contact) {
@@ -847,12 +890,14 @@ export class AnnouncementService {
       throw new Error('Could not find or create contact');
     }
 
+    const keepsRequest = !automatic || asksContact;
     const { discussionId } = await this._handleReceivedDiscussion(
       this.session.userIdEncoded,
       contactUserId,
-      automatic ? undefined : message,
+      keepsRequest ? message : undefined,
       automatic,
-      automatic ? undefined : messageTimer
+      keepsRequest ? messageTimer : undefined,
+      asksContact
     );
 
     const row = await this.queries.discussions.getById(discussionId);
@@ -900,7 +945,7 @@ export class AnnouncementService {
     }
 
     // Store announcement message as an incoming message if present
-    if (message && !automatic) {
+    if (message && keepsRequest) {
       const timestamp = new Date(result.timestamp);
       const windowStart = new Date(timestamp.getTime() - 1000);
       const windowEnd = new Date(timestamp.getTime() + 1000);
@@ -950,7 +995,8 @@ export class AnnouncementService {
     contactUserId: string,
     message?: string,
     automatic = false,
-    messageTimer?: number
+    messageTimer?: number,
+    asksContact = false
   ): Promise<{ discussionId: number }> {
     const log = logger.forMethod('handleReceivedDiscussion');
 
@@ -988,11 +1034,12 @@ export class AnnouncementService {
         contactUserId
       );
       if (
-        !automatic &&
         newDiscussion &&
         contactRow &&
-        this.session.peerSessionStatus(decodeUserId(contactUserId)) ===
-          SessionStatus.PeerRequested
+        (asksContact ||
+          (!automatic &&
+            this.session.peerSessionStatus(decodeUserId(contactUserId)) ===
+              SessionStatus.PeerRequested))
       ) {
         this.eventEmitter.emit(SdkEventType.SESSION_REQUESTED, {
           discussion: toDiscussion(newDiscussion),
@@ -1019,7 +1066,7 @@ export class AnnouncementService {
       ownerUserId,
       contactUserId
     );
-    if (!automatic && discussion && contactRow) {
+    if ((!automatic || asksContact) && discussion && contactRow) {
       this.eventEmitter.emit(SdkEventType.SESSION_REQUESTED, {
         discussion: toDiscussion(discussion),
         contact: contactRow,

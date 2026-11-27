@@ -285,6 +285,20 @@ export class DiscussionService {
         return { success: false, error: new Error('Discussion ID is missing') };
       }
 
+      // The request of a member of a chat held (§5.12): its connection was
+      // answered when it arrived, and the session is open. Accepting sends
+      // nothing more: a new announcement would only tell the requester when
+      // the user answered, and replace a session the chats use.
+      const contact = await this.queries.contacts.getByOwnerAndUser(
+        this.session.userIdEncoded,
+        discussion.contactUserId
+      );
+      const connected =
+        contact?.connection === 'requested' &&
+        this.session.peerSessionStatus(
+          decodeUserId(discussion.contactUserId)
+        ) === SessionStatus.Active;
+
       try {
         // The timer the request announced, as the screen showed it; none
         // when this device sent a request too (it then holds its own).
@@ -297,6 +311,18 @@ export class DiscussionService {
         );
       } catch {
         log.error('consent to the direct chat not recorded');
+      }
+
+      if (connected) {
+        await this.queries.discussions.updateById(discussion.id, {
+          weAccepted: true,
+          updatedAt: new Date(),
+        });
+        this.eventEmitter.emit(
+          SdkEventType.SESSION_ACCEPTED,
+          discussion.contactUserId
+        );
+        return { success: true, data: new Uint8Array(0) };
       }
 
       const result = await this.createSessionForContact(
