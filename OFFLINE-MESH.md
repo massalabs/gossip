@@ -149,6 +149,12 @@ These are starting values; the node's simulation is where they get tuned.
 - The node's store (`files/mesh`) and the mesh switches (`GossipMeshPrefs.xml`, which
   also holds a random install id) are excluded from backups and device transfer, so a
   restored phone does not restart the mesh on its own.
+- Android reports every Bluetooth device connected to the phone to the mesh's GATT
+  server (earbuds, a watch, other apps' devices). Such a device is ignored until it
+  subscribes to or writes the mesh characteristic: it takes no link slot, is not
+  counted, and the app never disconnects it. The limits below apply at that point; a
+  refused subscribe is answered with an error (ATT "Insufficient Resources"), after which
+  the app may cancel that connection.
 - Other phones may open at most 4 of the 8 links, and a central whose link closed waits
   60 s before it may connect again. Long (prepared) writes and writes at an offset are
   refused. A link with more than 512 KiB received but not yet read by the core is closed.
