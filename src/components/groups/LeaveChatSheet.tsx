@@ -319,58 +319,64 @@ const LeaveChatSheet: React.FC<LeaveChatSheetProps> = ({
               </div>
             )}
           </section>
-          <section className="pt-3 border-t border-border">
-            {sectionTitle(t('choices.keep_title'))}
-            <ul
-              role="radiogroup"
-              aria-label={t('choices.keep_title')}
-              className="flex flex-col gap-1"
-            >
-              {keepOptions.map(k => {
-                const picked = keep === k.key;
-                const enabled = allowed.includes(k.key);
-                return (
-                  <li key={k.key}>
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={picked}
-                      aria-disabled={!enabled}
-                      disabled={!enabled}
-                      data-testid={`leave-keep-${k.key}`}
-                      onClick={() => chooseKeep(k.key)}
-                      className={`w-full px-4 py-2.5 flex items-center gap-3 text-left text-sm rounded-lg ${
-                        picked
-                          ? 'bg-accent-soft'
-                          : enabled
-                            ? 'hover:bg-muted'
-                            : ''
-                      } ${enabled ? 'text-foreground' : 'text-muted-foreground opacity-60'}`}
-                    >
-                      <span
-                        className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
+          {/* The second question is asked only when it has two answers
+              (today: once a dissolve is chosen). Where leaving always deletes the chat
+              from this device, only the line saying so is shown. */}
+          {how !== null && allowed.length > 1 ? (
+            <section className="pt-3 border-t border-border">
+              {sectionTitle(t('choices.keep_title'))}
+              <ul
+                role="radiogroup"
+                aria-label={t('choices.keep_title')}
+                className="flex flex-col gap-1"
+              >
+                {keepOptions.map(k => {
+                  const picked = keep === k.key;
+                  const enabled = allowed.includes(k.key);
+                  return (
+                    <li key={k.key}>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={picked}
+                        aria-disabled={!enabled}
+                        disabled={!enabled}
+                        data-testid={`leave-keep-${k.key}`}
+                        onClick={() => chooseKeep(k.key)}
+                        className={`w-full px-4 py-2.5 flex items-center gap-3 text-left text-sm rounded-lg ${
                           picked
-                            ? 'bg-primary border-primary text-primary-foreground'
-                            : 'border-border'
-                        }`}
+                            ? 'bg-accent-soft'
+                            : enabled
+                              ? 'hover:bg-muted'
+                              : ''
+                        } ${enabled ? 'text-foreground' : 'text-muted-foreground opacity-60'}`}
                       >
-                        {picked && <Check className="w-3.5 h-3.5" />}
-                      </span>
-                      {k.label}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-            {fixedLine && (
+                        <span
+                          className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
+                            picked
+                              ? 'bg-primary border-primary text-primary-foreground'
+                              : 'border-border'
+                          }`}
+                        >
+                          {picked && <Check className="w-3.5 h-3.5" />}
+                        </span>
+                        {k.label}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ) : (
+            fixedLine && (
               <p
-                className="px-1 pt-2 text-xs text-muted-foreground"
+                className="px-1 pt-3 border-t border-border text-xs text-muted-foreground"
                 data-testid="leave-keep-fixed"
               >
                 {fixedLine}
               </p>
-            )}
-          </section>
+            )
+          )}
           <div className="flex gap-3 pt-1">
             <Button
               variant="secondary"

@@ -425,8 +425,8 @@ describe('chat screens', () => {
       expect(document.body.textContent).toContain('choices.pick_next_owner');
       expect(disabled('leave-chat-go')).toBe(true);
       // Leaving this way closes the chat here: only "Delete it" applies.
-      expect(disabled('leave-keep-keep')).toBe(true);
-      expect(checked('leave-keep-delete')).toBe('true');
+      expect(q('leave-keep-keep')).toBeNull();
+      expect(q('leave-keep-delete')).toBeNull();
       expect(q('leave-keep-fixed')?.textContent).toBe(
         'choices.keep_fixed_leave'
       );
@@ -469,7 +469,7 @@ describe('chat screens', () => {
       await openSettings();
       await click(buttonsNamed('details.leave')[0]);
       await click(q('leave-how-ownerIgnore'));
-      expect(disabled('leave-keep-keep')).toBe(true);
+      expect(q('leave-keep-keep')).toBeNull();
       expect(q('leave-keep-fixed')?.textContent).toBe(
         'choices.keep_fixed_quiet'
       );
@@ -498,8 +498,8 @@ describe('chat screens', () => {
         ['signed', 'choices.keep_fixed_leave'],
       ]) {
         await click(q(`leave-how-${how}`));
-        expect(disabled('leave-keep-keep')).toBe(true);
-        expect(checked('leave-keep-delete')).toBe('true');
+        expect(q('leave-keep-keep')).toBeNull();
+        expect(q('leave-keep-delete')).toBeNull();
         expect(q('leave-keep-fixed')?.textContent).toBe(line);
       }
       // The visibility stays in brackets in the labels.
@@ -549,7 +549,8 @@ describe('chat screens', () => {
       expect(q('leave-chat-sheet')).not.toBeNull();
       expect(document.body.textContent).toContain('details.delete_title');
       expect(document.body.textContent).toContain('choices.delete_needs_leave');
-      expect(checked('leave-keep-delete')).toBe('true');
+      // One answer only for a member: the second question is not shown.
+      expect(q('leave-keep-delete')).toBeNull();
       await click(q('leave-how-ignore'));
       await click(q('leave-chat-go'));
       expect(fake.service.leave).not.toHaveBeenCalled();
@@ -613,10 +614,8 @@ describe('chat screens', () => {
         document.querySelector('[data-testid="leave-chat-sheet"]')
       ).not.toBeNull();
       expect(
-        document
-          .querySelector('[data-testid="leave-keep-delete"]')
-          ?.getAttribute('aria-checked')
-      ).toBe('true');
+        document.querySelector('[data-testid="leave-keep-delete"]')
+      ).toBeNull();
       expect(fake.service.leave).not.toHaveBeenCalled();
       expect(fake.service.deleteGroup).not.toHaveBeenCalled();
     });
