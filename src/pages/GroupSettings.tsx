@@ -17,6 +17,7 @@ import Button from '../components/ui/Button';
 import BaseModal from '../components/ui/BaseModal';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import SafeName from '../components/groups/SafeName';
+import ChatNameDialog from '../components/groups/ChatNameDialog';
 import LeaveGroupSheet, {
   type LeaveAction,
 } from '../components/groups/LeaveGroupSheet';
@@ -31,10 +32,10 @@ import { getGroupService, useGroupStore } from '../stores/groupStore';
 import { ROUTES } from '../constants/routes';
 import { GROUP_NAME_MAX_BYTES } from './NewGroup';
 import { isAcceptedContact, isDisplayNameTaken } from '../utils/conversations';
+import { groupDisplayName, isolate, safeName } from '../utils/groupName';
 
 type Modal =
-  | { kind: 'localName' }
-  | { kind: 'rename' }
+  | { kind: 'name' }
   | { kind: 'add' }
   | { kind: 'transfer' }
   | { kind: 'remove'; member: string }
@@ -174,6 +175,12 @@ const GroupSettings: React.FC = () => {
 
   const isOwner = group.owner === me;
   const active = group.status === 'member';
+  // The name shown: the user's own name for the chat, else the shared one
+  // (else the members, as in the chat list). The shared name is shown under
+  // it when the two differ.
+  const ownName = safeName(group.localName);
+  const sharedName = safeName(group.name);
+  const shownName = groupDisplayName(group, memberName, me);
   const others = group.members.filter(m => m !== me);
   // As "New group": contacts the user accepted, with an active session. A
   // member of another chat who is no contact is added as a contact first
@@ -263,30 +270,44 @@ const GroupSettings: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <Row label={t('details.your_name')}>
-          <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate">
-              <SafeName
-                name={group.localName ?? ''}
-                fallback={t('details.not_set')}
-              />
-            </span>
-            <Button
-              variant="link"
-              size="sm"
-              onClick={() => setModal({ kind: 'localName' })}
-            >
-              {t('details.set_name')}
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            {t('details.your_name_hint')}
+      <div className="flex flex-col items-center text-center pt-2 pb-1">
+        <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+          <Users className="w-8 h-8 text-foreground" />
+        </div>
+        <div className="mt-3 flex items-center justify-center gap-1 max-w-full min-w-0">
+          <h2
+            className="text-xl font-semibold text-foreground min-w-0 truncate"
+            data-testid="chat-name"
+          >
+            <SafeName name={shownName} fallback={t('invitation.unnamed')} />
+          </h2>
+          <button
+            type="button"
+            onClick={() => setModal({ kind: 'name' })}
+            aria-label={t('details.name_edit')}
+            title={t('details.name_edit')}
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full hover:bg-muted"
+            data-testid="chat-name-edit"
+          >
+            <Edit2 className="w-5 h-5 text-muted-foreground" />
+          </button>
+        </div>
+        {ownName && ownName !== sharedName && (
+          <p
+            className="text-xs text-muted-foreground max-w-full min-w-0 truncate"
+            data-testid="chat-shared-name"
+          >
+            {sharedName
+              ? t('details.name_shared', { name: isolate(sharedName) })
+              : t('details.name_shared_none')}
           </p>
-        </Row>
-        <Row label={t('details.group_name')}>
-          <SafeName name={group.name} fallback={t('details.not_set')} />
-        </Row>
+        )}
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t('list.members_count', { count: group.members.length })}
+        </p>
+      </div>
+
+      <div className="bg-card rounded-xl border border-border overflow-hidden">
         <Row label={t('details.owner')}>
           <SafeName name={memberName(group.owner)} />
         </Row>
@@ -423,11 +444,6 @@ const GroupSettings: React.FC = () => {
               setModal({ kind: 'add' });
             }}
           />
-          <ActionButton
-            icon={<Edit2 className="w-4 h-4" />}
-            label={t('details.rename')}
-            onClick={() => setModal({ kind: 'rename' })}
-          />
           <div className="border-b border-border last:border-b-0">
             <MessageTimerField
               value={group.messageTimer}
@@ -493,33 +509,27 @@ const GroupSettings: React.FC = () => {
         onClose={() => setLeaving(false)}
       />
 
-      <ContactNameModal
-        isOpen={modal?.kind === 'localName'}
+      <ChatNameDialog
+        isOpen={modal?.kind === 'name'}
         onClose={() => setModal(null)}
-        title={t('details.your_name')}
-        initialName={group.localName ?? ''}
-        confirmLabel={t('common:save')}
-        allowEmpty
-        onConfirm={name => {
+        initialName={group.localName ?? group.name}
+        hasOwnName={group.localName !== null}
+        canSaveForEveryone={isOwner && active}
+        maxBytes={GROUP_NAME_MAX_BYTES}
+        onSaveForMe={name => {
           setModal(null);
-          void run(() => service.setLocalName(groupId, name?.trim() || null));
+          void run(() => service.setLocalName(groupId, name));
         }}
-      />
-      <ContactNameModal
-        isOpen={modal?.kind === 'rename'}
-        onClose={() => setModal(null)}
-        title={t('details.rename_title')}
-        initialName={group.name}
-        confirmLabel={t('common:save')}
-        allowEmpty
-        onConfirm={name => {
-          const next = name?.trim() ?? '';
-          if (new TextEncoder().encode(next).length > GROUP_NAME_MAX_BYTES) {
-            toast.error(t('new_group.name_too_long'));
-            return;
-          }
+        onSaveForEveryone={name => {
           setModal(null);
-          void run(() => service.changeMembers(groupId, { name: next }));
+          void run(async () => {
+            await service.changeMembers(groupId, { name });
+            // The owner's own name for the chat would hide the new shared
+            // name on this device: what they just typed is what they see.
+            if (group.localName !== null) {
+              await service.setLocalName(groupId, null);
+            }
+          });
         }}
       />
       <ContactNameModal

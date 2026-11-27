@@ -65,8 +65,16 @@ const EarlierChats: React.FC<EarlierChatsProps> = ({
             message={item}
             isOutgoing={item.author === me}
             authorName={memberName(item.author)}
-            replyPreviews={item.replyTo.map(r =>
-              r.message ? messageText(r.message, t) : null
+            quotes={item.replyTo.flatMap(r =>
+              r.epochId
+                ? [
+                    {
+                      author: r.message ? memberName(r.message.author) : null,
+                      text: r.message ? messageText(r.message, t) : null,
+                      group: null,
+                    },
+                  ]
+                : []
             )}
             canWrite={false}
             memberName={memberName}

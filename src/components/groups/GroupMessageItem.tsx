@@ -1,11 +1,10 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Clock,
   Copy,
   CornerUpLeft,
   Edit2,
-  EyeOff,
   RefreshCw,
   Smile,
   Trash2,
@@ -23,18 +22,48 @@ import ReactionBar, {
   type ReactionChipGroup,
 } from '../discussions/ReactionBar';
 import { useLongPress } from '../../hooks/useLongPress';
+import {
+  SWIPE_THRESHOLD,
+  SWIPE_THRESHOLD_OUTGOING,
+  useSwipeToReply,
+} from '../discussions/hooks/useSwipeToReply';
+import ContactAvatar from '../avatar/ContactAvatar';
+import { getAuthorNameClass as authorColor } from '../avatar/avatarIdentity';
 import SafeName from './SafeName';
 import { isolate } from '../../utils/groupName';
+
+/** How wide the swipe-to-reply indicator grows, as in `MessageBubble`. */
+const SWIPE_INDICATOR_MAX_WIDTH = 60;
+
+/** What a reply shows of a message it answers (§7.6). */
+export interface ReplyQuote {
+  /** The target's author, null when this device does not hold it. */
+  author: string | null;
+  /** Its user ID, for the colour of the name. */
+  authorId?: string;
+  /**
+   * One line of the target, null when this device does not hold it (deleted,
+   * or not received yet): the quote then says the message is not available.
+   */
+  text: string | null;
+  /** The other chat the target is in, when it is not this one. */
+  group: string | null;
+  /** Scrolls to the target, when this timeline shows it. */
+  onJump?: () => void;
+}
 import { messageText, toDate } from '../../utils/groupTimeline';
 
 /** What the menu of a message can do; an absent handler hides its item. */
 export interface GroupMessageActions {
   onReply?: (m: GroupMessage) => void;
   onCopy?: (m: GroupMessage) => void;
+  /**
+   * Edits the message, anyone's (UI4, UI7): who sees the edit is chosen
+   * where it is written, not here.
+   */
   onEdit?: (m: GroupMessage) => void;
-  onDeleteForEveryone?: (m: GroupMessage) => void;
-  onEditLocally?: (m: GroupMessage) => void;
-  onDeleteLocally?: (m: GroupMessage) => void;
+  /** Deletes the message, anyone's: a confirmation asks for whom (UI3). */
+  onDelete?: (m: GroupMessage) => void;
   onRetry?: (m: GroupMessage) => void;
   /** Adds this account's reaction `emoji`, or removes it if there is one. */
   onToggleReaction?: (m: GroupMessage, emoji: string) => void;
@@ -44,14 +73,26 @@ interface GroupMessageItemProps extends GroupMessageActions {
   message: GroupMessage;
   isOutgoing: boolean;
   authorName: string;
-  /** The text of the messages it replies to, or null when not available. */
-  replyPreviews: (string | null)[];
   /**
-   * For each message it replies to, the name of the group it is in when
-   * that is another group (§7.6 "Display"), else null.
+   * The messages it replies to. A target in an epoch this device lacks has
+   * no quote: the protocol cannot say what it was.
    */
-  replyGroups?: (string | null)[];
+  quotes: ReplyQuote[];
   canWrite: boolean;
+  /**
+   * Someone else's message: the author's avatar bubble beside it (none in a
+   * chat of two, where the header already names the other person).
+   */
+  showAvatar?: boolean;
+  /**
+   * The first message of a run of the same author: the name above it and
+   * the avatar beside it; the rest of the run leaves their place empty.
+   */
+  runStart?: boolean;
+  /** Briefly marked after a tap on a quote of it. */
+  highlighted?: boolean;
+  /** A new message just seen: a slight glow that fades. */
+  glow?: boolean;
   /** The name shown for a member, for the list of who reacted. */
   memberName?: (userId: string) => string;
   /**
@@ -69,17 +110,18 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   message,
   isOutgoing,
   authorName,
-  replyPreviews,
-  replyGroups,
+  quotes,
   canWrite,
   memberName,
   sending = false,
+  showAvatar = false,
+  runStart = true,
+  highlighted = false,
+  glow = false,
   onReply,
   onCopy,
   onEdit,
-  onDeleteForEveryone,
-  onEditLocally,
-  onDeleteLocally,
+  onDelete,
   onRetry,
   onToggleReaction,
 }) => {
@@ -106,6 +148,25 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
     if (!sending) setMenuOpen(true);
   };
   const longPress = useLongPress({ onLongPress: openMenu });
+  // Slide to reply, as in the one-to-one chats (`MessageBubble`).
+  const canSwipeReply = canWrite && !!onReply && !sending;
+  const suppressClickRef = useRef(false);
+  const suppressClicksUntilRef = useRef(0);
+  const longPressPosRef = useRef<{ x: number; y: number } | null>(null);
+  const swipe = useSwipeToReply<GroupMessage>({
+    isOutgoing,
+    isDeleted: sending,
+    isSelecting: false,
+    isTextSelectable: false,
+    canReply: canSwipeReply,
+    canForward: false,
+    onReplyTo: onReply,
+    message,
+    longPress,
+    suppressClickRef,
+    suppressClicksUntilRef,
+    longPressPosRef,
+  });
   const text = messageText(message, t);
   const segments = useMemo(() => parseLinks(text), [text]);
 
@@ -139,114 +200,210 @@ const GroupMessageItem: React.FC<GroupMessageItemProps> = ({
   if (canWrite)
     add(onReply, t('message_menu.reply'), <CornerUpLeft className="w-4 h-4" />);
   if (isText) add(onCopy, t('message_menu.copy'), <Copy className="w-4 h-4" />);
-  if (canWrite && isOutgoing && isText) {
+  // One Edit and one Delete, on every message: in a read-only chat they act
+  // on this device only, which the screen behind them says.
+  if (isText)
     add(onEdit, t('message_menu.edit'), <Edit2 className="w-4 h-4" />);
-  }
-  if (canWrite && isOutgoing) {
-    add(
-      onDeleteForEveryone,
-      t('message_menu.delete_everyone'),
-      <Trash2 className="w-4 h-4" />,
-      true
-    );
-  }
-  if (isText) {
-    add(
-      onEditLocally,
-      t('message_menu.edit_locally'),
-      <EyeOff className="w-4 h-4" />
-    );
-  }
-  add(
-    onDeleteLocally,
-    t('message_menu.delete_locally'),
-    <EyeOff className="w-4 h-4" />,
-    true
-  );
+  add(onDelete, t('message_menu.delete'), <Trash2 className="w-4 h-4" />, true);
   if (canWrite)
     add(onRetry, t('message_menu.retry'), <RefreshCw className="w-4 h-4" />);
 
   const shownTime = message.edited ? message.lastModifiedAt : message.createdAt;
 
+  const { swipeOffset, isAnimatingBack, indicatorThreshold } = swipe;
+  const showName = !isOutgoing && runStart && showAvatar;
+
   return (
     <div
-      className={`flex flex-col max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] my-1 ${
-        isOutgoing ? 'ml-auto mr-3' : 'ml-3 mr-auto'
+      className={`flex items-start gap-2 ${runStart ? 'mt-2' : 'mt-0.5'} mb-0.5 ${
+        isOutgoing ? 'justify-end pl-12 pr-3' : 'pl-3 pr-12'
       } ${sending ? 'opacity-70' : ''}`}
       data-testid="group-message"
       data-sending={sending || undefined}
+      data-highlighted={highlighted || undefined}
+      data-glow={glow || undefined}
+      // pan-y: the browser keeps vertical scrolling and hands horizontal
+      // panning to the swipe (React touch listeners are passive).
+      style={{ touchAction: 'pan-y' }}
     >
-      {!isOutgoing && (
-        <p className="px-1 pb-0.5 text-xs font-medium text-muted-foreground">
-          <SafeName name={authorName} />
-        </p>
+      {!isOutgoing && showAvatar && (
+        <div className="w-8 shrink-0" aria-hidden="true">
+          {runStart && (
+            <span data-testid="group-message-avatar">
+              <ContactAvatar
+                contact={{
+                  userId: message.author,
+                  name: authorName,
+                  avatar: undefined,
+                }}
+                size={8}
+              />
+            </span>
+          )}
+        </div>
       )}
       <div
-        className={`relative px-3.5 py-3 font-normal text-[15px] leading-tight rounded-2xl select-none cursor-pointer focus:outline-none ${
-          isOutgoing
-            ? 'bg-bubble-sent text-bubble-sent-foreground'
-            : 'bg-bubble-received text-bubble-received-foreground'
-        } ${menuOpen ? 'shadow-xl brightness-[1.08]' : ''}`}
-        role="button"
-        tabIndex={0}
-        onClick={() => {
-          if (longPress.longPressTriggered.current) return;
-          openMenu();
-        }}
-        onKeyDown={e => {
-          if (e.key === 'Enter') openMenu();
-        }}
-        onTouchStart={longPress.onTouchStart}
-        onTouchMove={longPress.onTouchMove}
-        onTouchEnd={longPress.onTouchEnd}
-        onContextMenu={longPress.onContextMenu}
+        className={`flex flex-col min-w-0 max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] ${
+          isOutgoing ? 'items-end' : 'items-start'
+        }`}
       >
-        {replyPreviews.map((preview, i) => (
-          <div
-            key={i}
-            data-testid="group-reply-preview"
-            className="mb-2 pl-2 border-l-2 border-current/40 text-xs opacity-80 truncate"
+        {showName && (
+          <p
+            className={`px-1 pb-0.5 text-xs font-semibold max-w-full ${authorColor(message.author)}`}
+            data-testid="group-message-author"
           >
-            <span className="font-medium">
-              {t('timeline.reply_to')}
-              {preview !== null && replyGroups?.[i]
-                ? ` (${t('timeline.reply_in_group', { name: isolate(replyGroups[i]) })})`
-                : ''}
-              :{' '}
-            </span>
-            {preview ?? t('timeline.reply_unavailable')}
-          </div>
-        ))}
-        <p className="whitespace-pre-wrap wrap-break-word">
-          <LinkText
-            segments={segments}
-            onLinkClick={handleLinkClick}
-            linkAriaLabel={content =>
-              td('message_item.link_opens_new_tab', { content })
+            <SafeName name={authorName} />
+          </p>
+        )}
+        {!isOutgoing && !showAvatar && runStart && (
+          // A chat of two: who wrote is known, the name stays for readers.
+          <span className="sr-only">
+            <SafeName name={authorName} />
+          </span>
+        )}
+        <div
+          className={`relative max-w-full px-3.5 py-3 font-normal text-[15px] leading-tight rounded-2xl select-none cursor-pointer focus:outline-none transition-shadow motion-reduce:transition-none ${
+            isOutgoing
+              ? 'bg-bubble-sent text-bubble-sent-foreground'
+              : 'bg-bubble-received text-bubble-received-foreground'
+          } ${menuOpen ? 'shadow-xl brightness-[1.08]' : ''} ${
+            highlighted ? 'ring-2 ring-primary' : ''
+          } ${
+            glow
+              ? 'shadow-[0_0_14px_3px_var(--color-primary)] duration-0'
+              : 'duration-[1500ms]'
+          }`}
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            if (longPress.longPressTriggered.current) return;
+            if (
+              suppressClickRef.current ||
+              Date.now() < suppressClicksUntilRef.current
+            ) {
+              suppressClickRef.current = false;
+              return;
             }
-          />
-        </p>
-        <p className="mt-1 text-[11px] opacity-70 text-right">
-          {message.edited && (
-            <span className="mr-1">{t('timeline.edited')}</span>
+            openMenu();
+          }}
+          onKeyDown={e => {
+            if (e.key === 'Enter') openMenu();
+          }}
+          onTouchStart={swipe.handleTouchStart}
+          onTouchMove={swipe.handleTouchMove}
+          onTouchEnd={swipe.handleTouchEnd}
+          onTouchCancel={swipe.handleTouchCancel}
+          onContextMenu={longPress.onContextMenu}
+          style={{
+            transform:
+              swipeOffset !== 0 ? `translateX(${swipeOffset}px)` : undefined,
+            transition: isAnimatingBack
+              ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+              : undefined,
+          }}
+        >
+          {-swipeOffset > indicatorThreshold && canSwipeReply && (
+            <div
+              className={`absolute right-0 top-0 bottom-0 flex items-center justify-center ${isOutgoing ? 'bg-bubble-sent/40' : 'bg-card/20'} rounded-r-2xl`}
+              style={{
+                width: `${Math.min(-swipeOffset, SWIPE_INDICATOR_MAX_WIDTH)}px`,
+                opacity: Math.min(-swipeOffset / SWIPE_INDICATOR_MAX_WIDTH, 1),
+              }}
+              aria-hidden="true"
+            >
+              <CornerUpLeft
+                className={`w-5 h-5 text-muted-foreground transition-transform ${
+                  -swipeOffset >=
+                  (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
+                    ? 'scale-110'
+                    : 'scale-100'
+                }`}
+              />
+            </div>
           )}
-          {formatTime(toDate(shownTime))}
-          {sending && (
-            <Clock
-              className="inline w-3 h-3 ml-1 align-[-2px]"
-              aria-label={td('message_item.sending')}
-              data-testid="group-message-sending"
+          {quotes.map((q, i) => {
+            const body = (
+              <>
+                <span
+                  className={`block text-xs font-semibold truncate ${
+                    q.authorId && !isOutgoing ? authorColor(q.authorId) : ''
+                  }`}
+                >
+                  {q.author ? (
+                    <SafeName name={q.author} />
+                  ) : (
+                    t('timeline.reply_to')
+                  )}
+                  {q.group
+                    ? ` · ${t('timeline.reply_in_group', { name: isolate(q.group) })}`
+                    : ''}
+                </span>
+                <span
+                  className={`block text-xs truncate opacity-80 ${
+                    q.text === null ? 'italic' : ''
+                  }`}
+                >
+                  {q.text ?? t('timeline.reply_unavailable')}
+                </span>
+              </>
+            );
+            const cls = `block w-full min-w-0 text-left mb-2 pl-2 pr-1 py-1 border-l-2 rounded-r bg-black/5 dark:bg-white/5 ${
+              isOutgoing
+                ? 'border-bubble-sent-foreground/40'
+                : 'border-card-foreground/30'
+            }`;
+            return q.onJump ? (
+              <button
+                key={i}
+                type="button"
+                data-testid="group-reply-preview"
+                className={`${cls} hover:bg-black/10 dark:hover:bg-white/10`}
+                aria-label={td('message_item.jump_to_original')}
+                onClick={e => {
+                  e.stopPropagation();
+                  q.onJump?.();
+                }}
+                onKeyDown={e => e.stopPropagation()}
+              >
+                {body}
+              </button>
+            ) : (
+              <div key={i} data-testid="group-reply-preview" className={cls}>
+                {body}
+              </div>
+            );
+          })}
+          <p className="whitespace-pre-wrap wrap-break-word">
+            <LinkText
+              segments={segments}
+              onLinkClick={handleLinkClick}
+              linkAriaLabel={content =>
+                td('message_item.link_opens_new_tab', { content })
+              }
             />
-          )}
-        </p>
+          </p>
+          <p className="mt-1 text-[11px] opacity-70 text-right">
+            {message.edited && (
+              <span className="mr-1">{t('timeline.edited')}</span>
+            )}
+            {formatTime(toDate(shownTime))}
+            {sending && (
+              <Clock
+                className="inline w-3 h-3 ml-1 align-[-2px]"
+                aria-label={td('message_item.sending')}
+                data-testid="group-message-sending"
+              />
+            )}
+          </p>
+        </div>
+        <ReactionBar
+          reactions={chips}
+          message={message}
+          isOutgoing={isOutgoing}
+          onToggleReaction={toggle ? (m, emoji) => toggle(m, emoji) : undefined}
+          onShowReactors={setReactorsOf}
+        />
       </div>
-      <ReactionBar
-        reactions={chips}
-        message={message}
-        isOutgoing={isOutgoing}
-        onToggleReaction={toggle ? (m, emoji) => toggle(m, emoji) : undefined}
-        onShowReactors={setReactorsOf}
-      />
       <MessageContextMenu
         items={items}
         isOpen={menuOpen}
