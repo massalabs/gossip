@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, lte } from 'drizzle-orm';
 import * as schema from '../schema/index.js';
 import type { DatabaseConnection } from '../sqlite.js';
 import type { DbContext } from './sqlBatch.js';
@@ -188,6 +188,41 @@ export class GroupQueries {
       .where(eq(schema.groupOutbox.id, id));
   }
 
+  /**
+   * Marks a ciphertext as taken by a mesh only, to be posted to the backend
+   * at `whenToSend` (see `groupOutbox`).
+   */
+  async markOutboxMeshOnly(
+    id: number,
+    since: Date,
+    whenToSend: Date
+  ): Promise<void> {
+    await this.conn.db
+      .update(schema.groupOutbox)
+      .set({ meshOnlySince: since, whenToSend })
+      .where(eq(schema.groupOutbox.id, id));
+  }
+
+  /**
+   * Makes every ciphertext only a mesh took due now: the backend may answer
+   * again (the network changed, or it answered another request).
+   */
+  async meshOnlyOutboxDueNow(ownerUserId: string, now: Date): Promise<number> {
+    const rows = await this.conn.db
+      .update(schema.groupOutbox)
+      .set({ whenToSend: now })
+      .where(
+        and(
+          eq(schema.groupOutbox.ownerUserId, ownerUserId),
+          isNotNull(schema.groupOutbox.meshOnlySince),
+          gt(schema.groupOutbox.whenToSend, now)
+        )
+      )
+      .returning({ id: schema.groupOutbox.id })
+      .all();
+    return rows.length;
+  }
+
   async rescheduleOutbox(id: number, whenToSend: Date): Promise<void> {
     await this.conn.db
       .update(schema.groupOutbox)
@@ -223,6 +258,66 @@ export class GroupQueries {
     await db
       .delete(schema.groupRecords)
       .where(eq(schema.groupRecords.ownerUserId, ownerUserId));
+    // The device's own marks name chats the engine no longer holds.
+    await db
+      .delete(schema.groupLocalState)
+      .where(eq(schema.groupLocalState.ownerUserId, ownerUserId));
+  }
+
+  /** The group keys this device marked as archived (local only). */
+  async archivedGroups(ownerUserId: string): Promise<string[]> {
+    const rows = await this.conn.db
+      .select({ groupId: schema.groupLocalState.groupId })
+      .from(schema.groupLocalState)
+      .where(
+        and(
+          eq(schema.groupLocalState.ownerUserId, ownerUserId),
+          eq(schema.groupLocalState.archived, true)
+        )
+      )
+      .all();
+    return rows.map(r => r.groupId);
+  }
+
+  /**
+   * Marks a chat archived on this device, or removes the mark. Unarchiving
+   * deletes the row: no row is kept for a chat without a mark.
+   */
+  async setArchived(
+    ownerUserId: string,
+    groupId: string,
+    archived: boolean
+  ): Promise<void> {
+    if (archived) {
+      await this.conn.db
+        .insert(schema.groupLocalState)
+        .values({ ownerUserId, groupId, archived: true })
+        .onConflictDoUpdate({
+          target: [
+            schema.groupLocalState.ownerUserId,
+            schema.groupLocalState.groupId,
+          ],
+          set: { archived: true },
+        });
+    } else {
+      await this.forgetLocalState(ownerUserId, [groupId]);
+    }
+  }
+
+  /** Deletes the device's marks of these chats (closed or deleted). */
+  async forgetLocalState(
+    ownerUserId: string,
+    groupIds: string[]
+  ): Promise<void> {
+    if (groupIds.length === 0) return;
+    await this.conn.db
+      .delete(schema.groupLocalState)
+      .where(
+        and(
+          eq(schema.groupLocalState.ownerUserId, ownerUserId),
+          inArray(schema.groupLocalState.groupId, groupIds)
+        )
+      );
   }
 
   async deleteByOwner(ownerUserId: string, tx?: DbContext): Promise<void> {
@@ -242,6 +337,9 @@ export class GroupQueries {
     await db
       .delete(schema.groupOutbox)
       .where(eq(schema.groupOutbox.ownerUserId, ownerUserId));
+    await db
+      .delete(schema.groupLocalState)
+      .where(eq(schema.groupLocalState.ownerUserId, ownerUserId));
   }
 }
 

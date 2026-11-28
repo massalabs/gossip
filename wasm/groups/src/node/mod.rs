@@ -62,6 +62,7 @@ mod neighbors;
 mod objects;
 mod outbox;
 mod references;
+mod relay;
 mod retrieval;
 mod scan;
 mod serve;
@@ -903,6 +904,7 @@ impl Node {
                 n.run_lanes(cx, group);
             }
             n.expire_hints(cx.now);
+            n.relay_timers(cx)?;
             Ok(())
         })
     }
@@ -962,12 +964,36 @@ impl Node {
         rng: &mut dyn Randomness,
     ) -> Result<Published, NodeError> {
         let me = self.me;
+        self.publish_message_as(store, chat_id, me, body, metadata, scheduled_for, now, rng)
+    }
+
+    /// Publishes a new message by `author`, this device's identity or any member of the
+    /// epoch (§7.2, §10.2). A message of the user's own goes in full to the neighbors; one
+    /// attributed to another member is handled as if that member had delivered it to this
+    /// device: notices only, after a random wait (see [`Node::disseminate_own`]).
+    ///
+    /// # Errors
+    ///
+    /// [`NodeError`]; nothing was committed. An author who is not a member of the epoch is
+    /// refused.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_message_as<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        chat_id: ChatId,
+        author: GossipId,
+        body: Body,
+        metadata: BTreeMap<String, Vec<u8>>,
+        scheduled_for: Option<u64>,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<Published, NodeError> {
         // A new message is published in the current epoch of its group (§10.4).
         if self.current_epoch(&chat_id).is_some_and(|c| c != chat_id) {
             return Err(NodeError::NotAllowed);
         }
         self.publish_with(store, chat_id, now, rng, move |e, ov, now, rng| {
-            e.publish_message(ov, now, rng, me, body, metadata, scheduled_for)
+            e.publish_message(ov, now, rng, author, body, metadata, scheduled_for)
         })
     }
 
@@ -988,8 +1014,93 @@ impl Node {
         now: u64,
         rng: &mut dyn Randomness,
     ) -> Result<Published, NodeError> {
+        let me = self.me;
+        self.publish_media_as(store, chat_id, me, mimetype, data, metadata, now, rng)
+    }
+
+    /// [`Node::publish_media`] by `author`, as [`Node::publish_message_as`].
+    ///
+    /// # Errors
+    ///
+    /// [`NodeError`]; nothing was committed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_media_as<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        chat_id: ChatId,
+        author: GossipId,
+        mimetype: String,
+        data: Vec<u8>,
+        metadata: BTreeMap<String, Vec<u8>>,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<Published, NodeError> {
         let body = Body::Media(crate::event::Media { mimetype, data });
-        self.publish_message(store, chat_id, body, metadata, None, now, rng)
+        self.publish_message_as(store, chat_id, author, body, metadata, None, now, rng)
+    }
+
+    /// A new message on this device only (§9.7), by `author` (this device's identity or any
+    /// member of the epoch), in the current epoch of its group: nothing is sent, announced
+    /// or listed, ever, and no marker is kept (see [`Epoch::local_message`] for the shape it
+    /// is stored in, and why). Returns its sync-object ID.
+    ///
+    /// Accepted in an active group, and in a group this device can only read but still
+    /// holds: after a kick, after its own visible leave, or dissolved and kept (D.99). There
+    /// the epoch is the last one this device holds, and any member of it may be the author.
+    /// Refused while waiting for a kick, in a superseded chat of two, and in a group
+    /// dissolved to be deleted.
+    ///
+    /// # Errors
+    ///
+    /// [`NodeError`]; nothing was committed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn local_message<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        chat_id: ChatId,
+        author: GossipId,
+        body: Body,
+        metadata: BTreeMap<String, Vec<u8>>,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<SyncObjId, NodeError> {
+        if self.current_epoch(&chat_id).is_some_and(|c| c != chat_id) {
+            return Err(NodeError::NotAllowed);
+        }
+        let entry = self.entry(&chat_id)?;
+        let group = self.group_of(&chat_id);
+        // An active group, or one this device can only read and keeps (D.99): the user may
+        // reshape that history on this device as freely as an active one's. Nothing is sent
+        // from it either way. Waiting for a kick and a superseded chat of two stay refused,
+        // as a normal send is; a group dissolved to be deleted is about to be erased.
+        let allowed = match self.group_status(&group) {
+            records::GroupStatus::Active => entry.state == GroupState::Active,
+            records::GroupStatus::Removed { .. }
+            | records::GroupStatus::Left { .. }
+            | records::GroupStatus::Dissolved {
+                must_delete: false, ..
+            } => true,
+            records::GroupStatus::Dissolved {
+                must_delete: true, ..
+            }
+            | records::GroupStatus::Waiting { .. }
+            | records::GroupStatus::Superseded { .. } => false,
+        };
+        if !allowed {
+            return Err(NodeError::NotAllowed);
+        }
+        self.run(store, now, rng, |_n, cx| {
+            let id = entry
+                .epoch()
+                .local_message(cx.ov, cx.now, cx.rng, author, body, metadata)?;
+            // The full debug build logs everything, this too; nothing of it exists in a
+            // normal build (the macro expands to nothing).
+            dbg_event!(Info, "engine.local.message", {
+                "epoch" => crate::debug::short(&chat_id), "id" => crate::debug::short(&id),
+                "as_other" => author != _n.me,
+            });
+            Ok(id)
+        })
     }
 
     /// Adds (`add`) or removes this device's reaction `emoji` to the message `target` of the
@@ -1022,7 +1133,7 @@ impl Node {
         })
     }
 
-    /// Publishes an edit of a message (§7.2).
+    /// Publishes an edit of a message (§7.2), keeping its author.
     ///
     /// # Errors
     ///
@@ -1039,9 +1150,52 @@ impl Node {
         now: u64,
         rng: &mut dyn Randomness,
     ) -> Result<Published, NodeError> {
+        self.publish_edit_as(
+            store,
+            chat_id,
+            sync_obj_id,
+            body,
+            metadata,
+            scheduled_for,
+            None,
+            now,
+            rng,
+        )
+    }
+
+    /// Publishes an edit of a message (§7.2) that may set its author to `author`, any member
+    /// of the epoch (`None` keeps it). It goes in full only when the user is the author
+    /// before and after it; any other edit leaves like a relay (see
+    /// [`Node::disseminate_own`]).
+    ///
+    /// # Errors
+    ///
+    /// [`NodeError`]; nothing was committed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_edit_as<S: NodeStorage>(
+        &mut self,
+        store: &mut S,
+        chat_id: ChatId,
+        sync_obj_id: SyncObjId,
+        body: Body,
+        metadata: impl Into<crate::MetadataPatch>,
+        scheduled_for: Option<u64>,
+        author: Option<GossipId>,
+        now: u64,
+        rng: &mut dyn Randomness,
+    ) -> Result<Published, NodeError> {
         let metadata: crate::MetadataPatch = metadata.into();
         self.publish_with(store, chat_id, now, rng, move |e, ov, now, rng| {
-            e.publish_edit(ov, now, rng, sync_obj_id, body, metadata, scheduled_for)
+            e.publish_edit(
+                ov,
+                now,
+                rng,
+                sync_obj_id,
+                body,
+                metadata,
+                scheduled_for,
+                author,
+            )
         })
     }
 
@@ -1122,7 +1276,7 @@ impl Node {
                 target: Target::Event(published.event.event_id()),
             });
             if published.merge != Merge::Lost {
-                n.disseminate_own(cx, &entry, &published.event)?;
+                n.disseminate_own(cx, &entry, &published)?;
             }
             Ok(published)
         })
@@ -1451,27 +1605,52 @@ impl Node {
 
     // ── Dissemination (§10.2, §10.4) ─────────────────────────────────────────
 
-    /// Disseminates an event published by this device: in full when it is a deletion or
-    /// attributed to this device, by notices otherwise (a fabricated message or an edit of
-    /// another member's message looks like a relay, §10.2). A deletion in an epoch with
-    /// removed peers is also pushed in full to each of them (§10.4).
+    /// Disseminates an event published by this device (§10.2).
+    ///
+    /// - A deletion goes in full, as before (unchanged by the rules below).
+    /// - A message version goes in full, as the user's own, ONLY when the user is the
+    ///   author before the publication (or it is a new message) AND after it.
+    /// - Every other version leaves like a relay: a new message or a Retry under another
+    ///   member's name, an edit that sets the author to another member, an edit of another
+    ///   member's message that keeps that author, and an edit that gives the message to the
+    ///   user ("re-appropriation"). See [`Node::defer_relay`].
+    ///
+    /// Why (D.95, D.97, decided by the owner on 2026-11-27): honest devices push in full only
+    /// what they author, and relay everything else by notice. Anything this device publishes
+    /// under another member's name must leave as such a relay, so that the sending pattern
+    /// does not single out the fabricator (§16.1). A full push of a re-appropriation would
+    /// tell the user's neighbors that the user took the message; as a notice it reads as
+    /// someone else re-attributing it and this device relaying it.
+    ///
+    /// Known limit (§16.13): the rule looks at the author stored at the moment of each edit,
+    /// which earlier edits set, so across a sequence of edits the forms in which they leave
+    /// can reveal more than each edit alone.
     fn disseminate_own(
         &mut self,
         cx: &mut Cx<'_>,
         entry: &EpochEntry,
-        event: &MessageEvent,
+        published: &Published,
     ) -> Result<(), NodeError> {
-        let form = match event.payload() {
-            Payload::Delete { .. } => Form::Full,
-            Payload::Content(c) if c.author == self.me => Form::Full,
-            Payload::Content(_) => Form::Notice,
-        };
-        self.disseminate(cx, entry, event, form, true)
+        let event = &published.event;
+        let own = |a: &GossipId| *a == self.me;
+        match event.payload() {
+            Payload::Delete { .. } => {
+                self.disseminate(cx, entry, event, Form::Full, true)?;
+            }
+            Payload::Content(c)
+                if own(&c.author) && published.previous_author.as_ref().is_none_or(own) =>
+            {
+                self.disseminate(cx, entry, event, Form::Full, true)?;
+            }
+            Payload::Content(_) => self.defer_relay(cx, entry, event),
+        }
+        Ok(())
     }
 
     /// Sends `event` to the neighbors that may receive it and to up to
     /// `min(2, eligible − eligible neighbors)` eligible non-neighbors drawn uniformly once
     /// for this dissemination, in `form` (§10.2). Notices are suppressed by hints (§10.3).
+    /// Returns the recipients drawn (the notice set), whether or not a hint suppressed one.
     fn disseminate(
         &mut self,
         cx: &mut Cx<'_>,
@@ -1479,7 +1658,7 @@ impl Node {
         event: &MessageEvent,
         form: Form,
         own: bool,
-    ) -> Result<(), NodeError> {
+    ) -> Result<Vec<GossipId>, NodeError> {
         let chat = entry.root.chat_id();
         let id = event.event_id();
         let deletion = matches!(event.payload(), Payload::Delete { .. });
@@ -1539,7 +1718,7 @@ impl Node {
         if own && deletion {
             self.push_to_removed(entry, id, &recipients);
         }
-        Ok(())
+        Ok(recipients)
     }
 
     /// Pushes the deletion `id` in full to every removed peer of `entry` not in `sent` (§10.4):
@@ -1559,6 +1738,8 @@ impl Node {
             self.stale_in_flight(chat, pruned);
         }
         for id in pruned {
+            // A relay still waiting for a pruned event has nothing left to announce.
+            self.t.relays.remove(&(chat, *id));
             if let Some(keys) = self.work_refs.remove(&(chat, *id)) {
                 for k in keys {
                     if self.t.queue.remove(&k).is_some() {

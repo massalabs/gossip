@@ -401,20 +401,26 @@ impl Core {
 
     /// `body` is a [`Body`] and `metadata` a list of `[name, hex]` pairs, in JSON. Returns
     /// `{eventId, syncObjId, merge}`.
+    ///
+    /// `author`: `None` for this device's identity, or any member of the epoch (a message
+    /// published under that member's name, §10.2).
     pub fn publish_message(
         &mut self,
         chat: ChatId,
         body: &str,
         metadata: &str,
         scheduled_for: Option<u64>,
+        author: Option<GossipId>,
         now: u64,
     ) -> R<String> {
         let body: Body = parse(body)?;
         let metadata: BTreeMap<String, Vec<u8>> = parse(metadata)?;
+        let author = author.unwrap_or(self.node.me());
         self.node
-            .publish_message(
+            .publish_message_as(
                 &mut self.store,
                 chat,
+                author,
                 body,
                 metadata,
                 scheduled_for,
@@ -427,19 +433,23 @@ impl Core {
 
     /// A media message of `data` (any bytes) and `mimetype` (`type/subtype`, §7.6), with
     /// `metadata` as for [`Self::publish_message`].
+    #[allow(clippy::too_many_arguments)]
     pub fn publish_media(
         &mut self,
         chat: ChatId,
         mimetype: String,
         data: Vec<u8>,
         metadata: &str,
+        author: Option<GossipId>,
         now: u64,
     ) -> R<String> {
         let metadata: BTreeMap<String, Vec<u8>> = parse(metadata)?;
+        let author = author.unwrap_or(self.node.me());
         self.node
-            .publish_media(
+            .publish_media_as(
                 &mut self.store,
                 chat,
+                author,
                 mimetype,
                 data,
                 metadata,
@@ -466,6 +476,8 @@ impl Core {
             .map_err(err)
     }
 
+    /// `author`: `None` keeps the message's author, or any member of the epoch (§7.2).
+    #[allow(clippy::too_many_arguments)]
     pub fn publish_edit(
         &mut self,
         chat: ChatId,
@@ -473,18 +485,20 @@ impl Core {
         body: &str,
         metadata: &str,
         scheduled_for: Option<u64>,
+        author: Option<GossipId>,
         now: u64,
     ) -> R<String> {
         let body: Body = parse(body)?;
         let metadata: groups::MetadataPatch = parse(metadata)?;
         self.node
-            .publish_edit(
+            .publish_edit_as(
                 &mut self.store,
                 chat,
                 sync_obj_id,
                 body,
                 metadata,
                 scheduled_for,
+                author,
                 now,
                 &mut rng,
             )
@@ -531,6 +545,26 @@ impl Core {
         self.node
             .local_edit(&mut self.store, chat, sync_obj_id, edit, now, &mut rng)
             .map(|p| p.enc().to_text())
+            .map_err(err)
+    }
+
+    /// A new message on this device only (§9.7), by `author` (`None`: this device's
+    /// identity), with `body` and `metadata` as for [`Self::publish_message`]. Nothing is
+    /// sent and no marker is kept. Returns `{syncObjId}` in JSON.
+    pub fn local_message(
+        &mut self,
+        chat: ChatId,
+        body: &str,
+        metadata: &str,
+        author: Option<GossipId>,
+        now: u64,
+    ) -> R<String> {
+        let body: Body = parse(body)?;
+        let metadata: BTreeMap<String, Vec<u8>> = parse(metadata)?;
+        let author = author.unwrap_or(self.node.me());
+        self.node
+            .local_message(&mut self.store, chat, author, body, metadata, now, &mut rng)
+            .map(|id| J::Obj(vec![("syncObjId".into(), id.enc())]).to_text())
             .map_err(err)
     }
 

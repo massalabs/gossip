@@ -25,4 +25,5 @@ export {
   groupObjects,
   groupRecords,
   groupOutbox,
+  groupLocalState,
 } from './groups.js';

@@ -317,14 +317,14 @@ fn three_members_create_invite_message_edit_delete_remove_leave() {
     // Alice writes, Bob answers.
     let p = net.peers[0]
         .core
-        .publish_message(group, &text("hello"), "[]", None, net.now)
+        .publish_message(group, &text("hello"), "[]", None, None, net.now)
         .unwrap();
     let sync = J::parse(&p).unwrap().field("syncObjId").unwrap().clone();
     net.peers[0].persist();
     net.now += 10;
     net.peers[1]
         .core
-        .publish_message(group, &text("hi alice"), "[]", None, net.now)
+        .publish_message(group, &text("hi alice"), "[]", None, None, net.now)
         .unwrap();
     net.peers[1].persist();
     net.settle(1_000);
@@ -340,7 +340,7 @@ fn three_members_create_invite_message_edit_delete_remove_leave() {
     let sync_a = Codec::dec(&sync).unwrap();
     net.peers[0]
         .core
-        .publish_edit(group, sync_a, &text("hello all"), "[]", None, net.now)
+        .publish_edit(group, sync_a, &text("hello all"), "[]", None, None, net.now)
         .unwrap();
     net.peers[0].persist();
     net.settle(1_000);
@@ -495,11 +495,11 @@ fn messages_over_the_size_limits_are_refused_with_their_measure() {
     let max = groups::constants::MAX_TEXT_BYTES;
     let core = &mut net.peers[0].core;
     assert!(
-        core.publish_message(group, &text(&"x".repeat(max)), "[]", None, now)
+        core.publish_message(group, &text(&"x".repeat(max)), "[]", None, None, now)
             .is_ok()
     );
     let e = core
-        .publish_message(group, &text(&"x".repeat(max + 1)), "[]", None, now)
+        .publish_message(group, &text(&"x".repeat(max + 1)), "[]", None, None, now)
         .unwrap_err();
     assert!(e.starts_with("groups:change: text: at most 16384"), "{e}");
     // Metadata, measured as the engine counts it: one entry of a 1-byte key and an
@@ -512,11 +512,11 @@ fn messages_over_the_size_limits_are_refused_with_their_measure() {
     assert_eq!(super::engine::metadata_bytes("[]").unwrap(), 0);
     assert!(super::engine::metadata_bytes("[1]").is_err());
     assert!(
-        core.publish_message(group, &text("x"), &meta(16_375), None, now)
+        core.publish_message(group, &text("x"), &meta(16_375), None, None, now)
             .is_ok()
     );
     let e = core
-        .publish_message(group, &text("x"), &meta(16_376), None, now)
+        .publish_message(group, &text("x"), &meta(16_376), None, None, now)
         .unwrap_err();
     assert!(
         e.starts_with("groups:change: metadata: at most 16384"),
@@ -898,7 +898,7 @@ fn reactions_and_media_through_the_bindings() {
     let now = net.now;
     let hello = net.peers[0]
         .core
-        .publish_message(g, &text("hello"), "[]", None, now)
+        .publish_message(g, &text("hello"), "[]", None, None, now)
         .unwrap();
     let data = vec![7u8; 3_000];
     let media = net.peers[0]
@@ -908,6 +908,7 @@ fn reactions_and_media_through_the_bindings() {
             "image/png".into(),
             data.clone(),
             r#"[["name","00"]]"#,
+            None,
             now,
         )
         .unwrap();
@@ -995,7 +996,7 @@ fn reactions_and_media_through_the_bindings() {
     let now = net.now;
     let e = net.peers[0]
         .core
-        .publish_media(g, "image/png; q=1".into(), vec![], "[]", now)
+        .publish_media(g, "image/png; q=1".into(), vec![], "[]", None, now)
         .unwrap_err();
     assert!(e.starts_with("groups:change:"), "{e}");
     let e = net.peers[0]
@@ -1023,6 +1024,7 @@ fn an_edit_keeps_metadata_by_default() {
             &text("hi"),
             r#"[["x.unknown","0102"],["k","03"]]"#,
             None,
+            None,
             now,
         )
         .unwrap();
@@ -1046,7 +1048,7 @@ fn an_edit_keeps_metadata_by_default() {
     };
     net.peers[0]
         .core
-        .publish_edit(g, sync, &text("edited"), "[]", None, now + 1)
+        .publish_edit(g, sync, &text("edited"), "[]", None, None, now + 1)
         .unwrap();
     assert_eq!(metadata(&net), r#"[["k","03"],["x.unknown","0102"]]"#);
     net.peers[0]
@@ -1056,6 +1058,7 @@ fn an_edit_keeps_metadata_by_default() {
             sync,
             &text("again"),
             r#"{"remove":["k"]}"#,
+            None,
             None,
             now + 2,
         )
@@ -1130,7 +1133,7 @@ fn a_message_timer_through_the_bindings() {
     let published = J::parse(
         &net.peers[0]
             .core
-            .publish_message(group, &text("brief"), "[]", None, sent)
+            .publish_message(group, &text("brief"), "[]", None, None, sent)
             .unwrap(),
     )
     .unwrap();

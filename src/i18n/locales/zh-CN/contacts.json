@@ -7,7 +7,7 @@
   "connection_pending": "连接待确认，暂时无法聊天。",
   "remove_modal": {
     "title": "移除联系人？",
-    "confirm": "确定要将 <strong>{{name}}</strong> 从联系人中移除吗？这将同时删除与该联系人的所有消息和会话。此操作无法撤销。",
+    "confirm": "确定要将 <strong>{{name}}</strong> 从联系人中移除吗？这将同时删除与该联系人的所有消息和聊天。此操作无法撤销。",
     "removing": "移除中...",
     "remove": "移除",
     "failed": "删除联系人失败，请重试。",
@@ -40,7 +40,9 @@
     "share_username_hint": "对方收到你的请求时将看到此名称",
     "share_username_placeholder": "输入要分享的用户名",
     "share_username_aria": "分享给联系人的用户名",
-    "import_file_aria": "从 YAML 文件导入联系人"
+    "import_file_aria": "从 YAML 文件导入联系人",
+    "connected_non_contact": "你已通过共同的聊天与此人建立连接。添加后仅在此设备上保存为联系人：不会发送任何内容，因此无需填写消息。",
+    "already_contact": "该用户已在你的联系人中"
   },
   "privacy_notice": {
     "title": "隐私提示",

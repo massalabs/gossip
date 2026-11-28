@@ -58,6 +58,11 @@
 //! - `engine.event.out`: one per plaintext handed off: `to`, `size`, counts and `items`
 //!   (`kind:why:epoch/item`: `event:first_send`, `event:push_to_removed`, `notice:relay`,
 //!   `query:<target>`, `query:tip_sync`, `answer:<event|page|busy|…>`, `root:send`, …).
+//! - `engine.publish.relay_like` (§10.2): a version this device published that leaves like
+//!   a relay: `step` `waiting` (with the random `wait`), then `announced` (`notices`, whether
+//!   the peer the hint names is in the notice set, `as_other`).
+//! - `engine.local.message` (§9.7): a message created on this device only (`as_other`).
+//!   Only this build logs it: a normal build keeps no trace of it, by design.
 //! - `engine.retrieval.want` (task created, trigger), `.ask` (what, who, `tier` 0 announced /
 //!   1 neighbor / 2 session / 3 other, `attempt`, `run`, `stage`, `ttl`, `resend`),
 //!   `.result` (`found`, `not_available`, `busy`, `expired`, `malformed`, `refused`,

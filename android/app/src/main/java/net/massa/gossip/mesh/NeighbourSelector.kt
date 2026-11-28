@@ -20,7 +20,7 @@ class NeighbourSelector(
     /** A candidate not heard for this long is forgotten. */
     private val candidateTtlMs: Long = 30_000,
     /** A peer just disconnected or rotated out is not picked again for this long. */
-    private val cooldownMs: Long = 60_000,
+    private val cooldownMs: Long = MeshConstants.RECONNECT_COOLDOWN_MS,
     /**
      * A peer whose link the core closed right away (a second link to a phone
      * already linked the other way, or no slot left) is not picked again for

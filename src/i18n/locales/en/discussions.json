@@ -1,15 +1,19 @@
 {
   "title": "Gossip",
   "share_contact": "Share my contact",
-  "share_to_discussion": "Share content to discussion",
-  "share_select": "Select a discussion below to share the content.",
+  "share_to_discussion": "Share content to a chat",
+  "share_select": "Select a chat below to share the content.",
   "cancel_sharing": "Cancel sharing",
-  "start_new": "Start new discussion",
+  "start_new": "Start a new chat",
   "filter": {
     "all": "All",
     "unread": "Unread",
-    "pending": "Pending",
-    "archived": "Archived"
+    "pending": "Pending"
+  },
+  "archived": {
+    "title": "Archived chats",
+    "empty": "No archived chats",
+    "unread": "New messages in archived chats"
   },
   "message_input": {
     "replying_to": "Replying to",
@@ -36,10 +40,12 @@
     "pin_discussion": "Pin",
     "unpin_discussion": "Unpin",
     "edit_name": "Edit Name",
-    "edit_name_title": "Edit discussion name",
+    "edit_name_title": "Edit chat name",
     "name_updated": "Name updated",
     "name_update_failed": "Failed to update name",
-    "pin_failed": "Failed to pin discussion"
+    "pin_failed": "Failed to pin chat",
+    "no_chat": "No chat yet",
+    "chat_invitation": "Invites you to a chat"
   },
   "scroll_to_bottom": "Scroll to latest messages",
   "search": {
@@ -66,10 +72,10 @@
   "test_messages_sent": "Sent {{count}} test messages!",
   "test_messages_failed": "Failed to send some test messages",
   "settings": {
-    "title": "Discussion Settings",
-    "loading": "Loading discussion…",
-    "name_section": "Discussion Name",
-    "edit_name": "Edit discussion name",
+    "title": "Chat settings",
+    "loading": "Loading chat…",
+    "name_section": "Chat name",
+    "edit_name": "Edit chat name",
     "reset_connection": "Reset Connection",
     "reset_description": "If you think you're disconnected from your peer, you can reset the connection. Some messages may be resent but your history will be preserved.",
     "reconnected": "Reconnected!",
@@ -93,9 +99,9 @@
     "mute_update_failed": "Failed to update notification setting"
   },
   "new_discussion": {
-    "title": "New discussion",
+    "title": "New chat",
     "new_contact": "New contact",
-    "new_group": "New group",
+    "new_group": "New chat",
     "contacts": "Contacts",
     "search_contacts": "Search contacts",
     "loading_contacts": "Loading contacts…",
@@ -107,7 +113,7 @@
   "header": {
     "contact_not_found": "Contact not found",
     "waiting_approval": "Waiting approval",
-    "discussion_settings": "Discussion settings",
+    "discussion_settings": "Chat settings",
     "search_messages": "Search messages",
     "auto_delete_active": "Deletes after {{duration}}"
   },
@@ -118,9 +124,9 @@
     "refuse": "Refuse",
     "set_contact_name": "Set contact name",
     "refuse_title": "Refuse connection?",
-    "refuse_body": "Refusing will close this discussion request.",
+    "refuse_body": "Refusing will close this chat request.",
     "sections": {
-      "discussions": "Discussions",
+      "discussions": "Earlier chats",
       "contacts": "Contacts",
       "pinned": "Pinned",
       "pending": "Pending",
@@ -128,13 +134,13 @@
     }
   },
   "empty": {
-    "no_discussions": "No discussions yet",
-    "no_discussions_hint": "Start a discussion by tapping the <strong>+</strong> button",
+    "no_discussions": "No chats yet",
+    "no_discussions_hint": "Start a chat by tapping the <strong>+</strong> button",
     "no_messages": "No messages yet",
     "no_messages_hint": "Start the conversation by sending your first message"
   },
   "initializing": {
-    "title": "Initializing secure discussion",
+    "title": "Initializing secure chat",
     "subtitle": "Setting up end-to-end encryption..."
   },
   "loading_messages": "Loading messages...",
@@ -179,12 +185,12 @@
     "info_message": "Receiving a message from the peer allows the encryption key to be renewed. If an attacker gets your current key, they could decrypt your last {{count}} sent messages."
   },
   "retention_separator": "Auto-delete enabled: {{duration}}",
-  "filter_label": "Filter discussions",
+  "filter_label": "Filter chats",
   "waiting_connection": "Waiting for connection...",
-  "mesh_connected_one": "Connected to the mesh · {{count}} link",
-  "mesh_connected_few": "Connected to the mesh · {{count}} links",
-  "mesh_connected_many": "Connected to the mesh · {{count}} links",
-  "mesh_connected_other": "Connected to the mesh · {{count}} links",
+  "mesh_connected_one": "Connected over Bluetooth · {{count}} phone nearby",
+  "mesh_connected_few": "Connected over Bluetooth · {{count}} phones nearby",
+  "mesh_connected_many": "Connected over Bluetooth · {{count}} phones nearby",
+  "mesh_connected_other": "Connected over Bluetooth · {{count}} phones nearby",
   "mesh_no_links": "Mesh on · no phone in range",
   "announcement": "Announcement",
   "lock_account": "Lock"

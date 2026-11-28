@@ -1480,10 +1480,19 @@ Every root, of both types, has a `name` field: UTF-8, 0 to 256 bytes (§4.1).
 **Local name.** The user may give a group a name of their own.
 It is stored only on the device and is never sent; the official name stays in the root.
 
+- It is a separate field of the device's record of the group (`local_name`, §14.1), beside the
+  roots. The root, which holds the shared name and is hashed into the root ID, is never changed
+  by it and stays intact in storage, whatever local name is set or cleared.
+  _Why:_ a root is the signed, shared definition of the epoch; a device-only preference must not
+  touch what every member holds identically.
 - When a local name is set, the list, the conversation header and reply previews show it.
 - The group's information screen shows both, labelled "Your name for this chat" and "Group name".
 - When the owner renames the group, the conversation shows a line "\<owner\> renamed the group to
-  \<new name\>", whether or not a local name is set, and the local name is kept.
+  \<new name\>", whether or not a local name is set, and the other members' local names are kept.
+- When the owner saves a shared name ("Save for everyone"), the owner's own local name is cleared
+  on the owner's device (D.101).
+  _Why:_ the owner then sees what they typed; a local name left in place would hide the new shared
+  name from the person who just chose it.
 
 **Displaying a name safely.** The interface MUST apply the following to any name before showing it.
 The result is for display only; stored and relayed bytes are never changed.
@@ -1522,7 +1531,8 @@ a contact or the connection is **automatic**.
 
 - A connection asked by a member of a group this device has accepted is opened automatically and
   silently. The claim is checked against the member list of a group the device holds and has
-  accepted, never against a group it was only invited to. No conversation is created.
+  accepted, never against a group it was only invited to. No conversation is created. When that
+  member also asks to become a contact, the request is shown all the same (below).
 - A connection asked by anyone else needs the user's consent, on the invitation screen below.
 - An automatic connection is revoked once no chat that keeps connections lists its peer, as a
   member or a removed peer, and nothing pushed whole is still owed to it (below). A peer the user
@@ -1558,24 +1568,118 @@ also keeps a connection while a ciphertext for that peer waits in its outbox.
 _Note:_ a member whose connection is opened automatically learns that this device accepted the
 group; the scans that follow an acceptance already show it (D.77).
 
-**A new contact.** Accepting a contact request is the consent for a chat with that person.
-An accepted contact counts as an earlier conversation of format version 0 with that person, even
-when it holds nothing but the request. The requester's device then creates a group of the two,
-which it owns, with `migrate_from = 0`, and the accepting device adopts that root without a prompt.
+**A member who is no contact.** The user may add a member of a chat held as a contact, from the
+new-contact form or from the chat's member list, under a name of their choice. This is local: the
+connection becomes accepted on this device (and is never revoked by the rule above), or, for a
+member no connection is open with yet, an accepted contact is made from the keys the device got
+from the chat's members (§12.9), and the connection opens as for any member. Nothing is sent
+because of it. The other person learns nothing until a chat is started with them, which reaches
+them as an ordinary invitation.
 
-**The timer the request announced.** A contact request may state the message timer (§7.7) its
-sender chose for that chat, and the accepting device shows it before the user accepts. The consent
-then covers only a root that carries that timer; `0` and a root without a timer are the same. The
-first root from that person that the consent would cover, but with another timer, uses the consent
-up and is shown as an ordinary invitation, with Accept and Decline, saying which timer was
-announced and which the chat keeps. A request that states no timer (from an earlier version)
-leaves nothing to compare: the root is adopted as before. The announced timer is kept by the
-accepting device only, beside the consent: never sent, never hashed, and it expires with the
-consent.
+Such a contact is one-sided until the relationship is mutual and known to the other person: they
+accept a chat of two the user started with them, the user accepts their chat invitation or their
+contact request, or they accept the user's request. Until then it is a contact for the user (listed,
+named, offered for new chats and members), but everything the other person can observe treats it
+exactly as a member who is no contact:
 
-_Why (decided by the owner, D.89):_ the device compares in the engine and asks, so that the user
-decides before the chat is active, rather than learning afterwards that the chat keeps another
-timer than the one accepted.
+- It is not declared as an accepted contact to the engine, so it gets no version notice (§13.8).
+- Its connection follows the automatic rule above, in what is sent and in timing: it is revoked
+  with the last chat that keeps it, and the contact and its name stay, without a session.
+
+_Why (decided by the owner, D.91):_ privacy first, adding someone must stay invisible. The engine
+answers a plaintext of a newer, unsupported version with a version notice to accepted contacts only
+(§13.8). A modified client could send such a plaintext on purpose and learn from the answer that it
+was added, and a connection kept alive past the last shared chat would show the same.
+_Impacts accepted:_
+
+- A contact added this way that runs a newer version is not told that this user's device cannot
+  read their messages, until the relationship is mutual.
+- The connection to such a contact can lapse when no shared chat remains. Opening it again needs a
+  new announcement, which the other person sees as a contact request: the addition then becomes
+  known, as the user chose to reach them.
+- Starting a chat of two with that person reveals the relationship, by design: the invitation says
+  who asks.
+
+**A contact added this way whose connection lapsed** (no active session, no shared chat, D.100).
+The contact's screen says the two are no longer connected and offers "Send a contact request",
+warning that the other person will see the request.
+
+- The request is an ordinary contact request, identical on the wire to one sent to someone new
+  with the same inputs: the requester's username if they choose, a short message, and no other
+  field. The device sends it for the existing contact instead of refusing it as a duplicate.
+- The contact keeps its name. Its connection becomes that of a contact added with a request
+  (`accepted`), and it is declared to the engine once the other person accepts, as any accepted
+  contact (§13.8). If they decline or never answer, the contact stays, not connected.
+- The other person sees an ordinary request, whatever their own record of this user: none, an
+  automatic connection, or a contact they too added on their own (shown as a request, below).
+
+_Why no special field:_ a field that told the request apart would tell the other person "this user
+already had me as a contact", which adding someone on this device must never reveal; the
+difference is handled on the device only.
+
+A contact request from a member of a chat this device has accepted is always shown. A request
+always carries a payload, a name and a message that may both be empty (a request of 0.1.0 or 0.1.1
+also carried a timer, now ignored); the announcement that opens a connection, answers one or renews
+one carries none.
+
+- The connection is answered at once, exactly as for any member, so that the chats keep flowing.
+  The request and its message are kept and shown for the user to accept or decline.
+- Accepting makes that person a contact, as accepting any request does (below): it starts no chat
+  and consents to none. Nothing more is sent: the session is open.
+- Declining refuses the contact, not the connection: it stays automatic, and is revoked by the
+  rule above once no chat needs it.
+- A request waiting is never removed by joining a chat: when the device accepts a chat that lists
+  the requester, the connection is opened underneath and the request stays until answered.
+- When the last chat that keeps the connection goes, the connection is revoked as an automatic
+  one is, whatever the answer will be. The request stays shown, now without a session: accepting
+  it then announces this device as accepting any request does.
+
+_Why (decided by the owner):_ privacy first. No message exists that tells the other person,
+or anyone, who added whom: adding a member is local, and the answer to a member's request is the
+same announcement, at the same moment, whatever the user later chooses, while the connection lives
+exactly as long as the chats need it. The requester can therefore not tell a request accepted,
+declined or not answered yet: accepting starts no chat (below), so nothing follows from it.
+_Cost accepted:_ being a contact is one-sided until the other person adds this user back or
+accepts a chat; a declined requester keeps a working connection while a chat is shared.
+
+**A new contact.** Adding a contact and starting a chat are two steps (D.90).
+
+1. A contact request asks only to become a contact. It may carry a short message and the
+   requester's username, and nothing else. Accepting it makes each the other's contact and opens
+   the session; it creates no chat, and records no consent to one. Nobody owes a chat.
+2. Later, either person opens the contact and starts the pair's chat explicitly, choosing its
+   message timer (§7.7) as for any new chat. That device creates a group of the two, which it
+   owns, with `migrate_from = 0`. The other person receives it as an ordinary invitation, with
+   Accept and Decline, showing the chat's timer (§4.8, case 5). Accepting it links it to that
+   contact on both sides. Until then, the other person's screen for that contact shows the
+   invitation instead of "Start a chat".
+
+Whoever starts the chat owns it. Two people who start it at the same moment end with one chat, by
+the tie rule below (row 1).
+
+_Why (decided by the owner, D.90):_ who owns a chat is who started it, which the user chose; a
+contact request no longer commits anyone to a chat; and the race that let the accepter's device
+found its own chat before the requester's arrived, and so become the owner by the tie rule, is
+gone, as there is no automatic chat to race against. The request's message stays apart from any
+chat: it is written before the session exists, with other plausible deniability properties than a
+chat message, so it is shown only on the contact request screen.
+_Cost accepted:_ starting a chat is one more step, and the other person is asked to accept it.
+
+An accepted contact is not an earlier conversation of format version 0 by itself: only an archive
+is (below), so the pair's chat of a new contact is never shown as a migration.
+
+**The timer the request announced (withdrawn).** Until 0.1.1 a contact request stated the message
+timer its sender chose for the chat that accepting it started, and accepting gave the engine a
+one-shot consent covering only a root with that timer (D.89). Since a contact request starts no
+chat (D.90), no timer is sent and no consent is recorded: the timer is chosen when the chat is
+started and shown on its invitation. A request of 0.1.0 or 0.1.1 that states a timer is accepted
+and its timer ignored. The engine's consent and announced-timer code is unused from this version
+and is scheduled for removal; until then a consent recorded by 0.1.1 still applies for its two
+weeks. What follows describes that unused code, kept for its history.
+
+_Why (decided by the owner, D.89, withdrawn by D.90):_ the device compares in the engine and asks,
+so that the user decides before the chat is active, rather than learning afterwards that the chat
+keeps another timer than the one accepted.
 
 - It covers the first adoption only. The owner may change the timer afterwards with a new root,
   which the device follows as every member does (§7.7), and the timeline shows it. An owner can
@@ -1594,8 +1698,8 @@ timer than the one accepted.
   with that person: it is the ordinary invitation of that rule whatever its timer, and it names no
   announced timer.
 
-**One automatic chat per pair.** Every group a device creates by itself, after a contact request
-or by migrating an earlier conversation, carries `migrate_from = 0`, and at most one such group
+**One automatic chat per pair.** Every chat of two a device creates for a contact, started from
+that contact or by migrating an earlier conversation, carries `migrate_from = 0`, and at most one such group
 exists between two people. A group a user creates deliberately never carries the field: it is
 always a new conversation, and a user may have any number of them with the same single person.
 
@@ -1649,12 +1753,10 @@ to continue below: one of the two ended the earlier chat on purpose, so the othe
 When both chats still list both people, the device first applies the tie rule: the chat whose
 owner's GossipID sorts first (raw bytes, ascending) is the one to keep.
 
-The tie rule does not compare the timer a contact request announced: when it decides, the device
-switches to the winning chat without a prompt whatever its timer, so in that one case a user can
-end in a chat whose timer differs from the one announced. This is a decided, known gap (D.89,
-§16.12). The app does not reach it: when two contact requests cross, each device sent one, so
-neither is asked to accept and neither gives a consent. It can arise only at engine level, for
-example with another client built on the engine.
+The tie rule compares no timer: when it decides, the device switches to the winning chat without a
+prompt whatever its timer. Since a contact request announces no timer (D.90), there is no announced
+timer it could differ from; two people who start the pair's chat at once each chose a timer, and
+the chat kept has the timer its owner chose.
 
 - **If mine is the one to keep,** the other chat becomes history, without a prompt, whatever the
   boolean says.
@@ -1689,23 +1791,23 @@ it first) treats that root as received directly: it pairs with the device's own 
 The cases, with L the person whose GossipID sorts first, H the other, and G_L and G_H the chats
 each created. "Asked" means the invitation to continue above.
 
-| #   | Situation                                                                         | L's device                              | H's device                                 | Continues in                               |
-| --- | --------------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------ | ------------------------------------------ |
-| 1   | Both create at the same moment                                                    | not asked: keeps G_L                    | not asked: switches to G_L                 | G_L                                        |
-| 2a  | H creates after L accepted H's contact request; L has none yet                    | not asked: the contact was the consent¹ |                                            | G_H                                        |
-| 2b  | H migrates an earlier conversation with history; L has none yet                   | asked                                   |                                            | G_H if L accepts                           |
-| 3   | H creates and writes in G_H while L is offline; L had created G_L                 | not asked: keeps G_L, G_H is history    | not asked: switches to G_L, G_H is history | G_L                                        |
-| 4a  | L ignored H's invitation without answering; later L creates G_L                   | not asked: keeps G_L                    | not asked: switches to G_L, G_H is history | G_L                                        |
-| 4b  | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L                    | asked                                      | G_L if H accepts                           |
-| 5   | L took part in G_H, then sends a new G_L                                          |                                         | asked                                      | G_H; G_L if H accepts                      |
-| 6   | H sends a new G_H, whether or not H took part in G_L                              | not asked: keeps G_L, G_H is history    |                                            | G_L                                        |
-| 7   | H joined G_L, then restores an old backup and creates G_H                         | not asked: keeps G_L                    | not asked: switches to G_L                 | G_L                                        |
-| 8   | L joined G_H, then restores an old backup and creates G_L                         | not asked: keeps G_L                    | asked                                      | each on its own until H accepts, then G_L  |
-| 9   | H restores a backup from before L took part; L sends G_L                          |                                         | not asked: switches to G_L, G_H is history | G_L                                        |
-| 10  | H holds G_L, which L created; L reinstalls into an empty device and creates G_L2  |                                         | asked (an ordinary invitation)²            | each on its own until H accepts, then G_L2 |
+| #   | Situation                                                                         | L's device                           | H's device                                 | Continues in                               |
+| --- | --------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------ | ------------------------------------------ |
+| 1   | Both create at the same moment                                                    | not asked: keeps G_L                 | not asked: switches to G_L                 | G_L                                        |
+| 2a  | H starts the chat with L, a contact; L has none yet                               | asked (an ordinary invitation)¹      |                                            | G_H if L accepts                           |
+| 2b  | H migrates an earlier conversation with history; L has none yet                   | asked                                |                                            | G_H if L accepts                           |
+| 3   | H creates and writes in G_H while L is offline; L had created G_L                 | not asked: keeps G_L, G_H is history | not asked: switches to G_L, G_H is history | G_L                                        |
+| 4a  | L ignored H's invitation without answering; later L creates G_L                   | not asked: keeps G_L                 | not asked: switches to G_L, G_H is history | G_L                                        |
+| 4b  | L declined visibly, or H removed L, so G_H no longer lists L; later L creates G_L | not asked: keeps G_L                 | asked                                      | G_L if H accepts                           |
+| 5   | L took part in G_H, then sends a new G_L                                          |                                      | asked                                      | G_H; G_L if H accepts                      |
+| 6   | H sends a new G_H, whether or not H took part in G_L                              | not asked: keeps G_L, G_H is history |                                            | G_L                                        |
+| 7   | H joined G_L, then restores an old backup and creates G_H                         | not asked: keeps G_L                 | not asked: switches to G_L                 | G_L                                        |
+| 8   | L joined G_H, then restores an old backup and creates G_L                         | not asked: keeps G_L                 | asked                                      | each on its own until H accepts, then G_L  |
+| 9   | H restores a backup from before L took part; L sends G_L                          |                                      | not asked: switches to G_L, G_H is history | G_L                                        |
+| 10  | H holds G_L, which L created; L reinstalls into an empty device and creates G_L2  |                                      | asked (an ordinary invitation)²            | each on its own until H accepts, then G_L2 |
 
-¹ Unless G_H carries another timer than H's request announced: then G_H is an ordinary invitation
-on L's device (above).
+¹ Accepting a contact request gives no consent (D.90): G_H is asked with its timer, whoever sent
+the request. Until 0.1.1 the contact was the consent and G_H was adopted without a prompt.
 
 ² Whatever timer G_L2 carries: H holds a chat of two with L, so no consent applies and the
 invitation names no announced timer.
@@ -1725,8 +1827,9 @@ that starts a second one on purpose, so the user decides; accepting is the only 
 accepted last is the current one, with no date compared.
 
 **Example (row 10).** Alice and Carol have a chat of two that Carol created. Carol reinstalls Gossip
-from her recovery phrase into an empty device. Her new device holds no chat with Alice, so it
-creates a new automatic chat of two, which Carol owns. Alice receives it as an ordinary invitation:
+from her recovery phrase into an empty device. Her new device holds no chat with Alice: Carol adds
+Alice again and starts a chat with her (two steps, D.90), a new automatic chat of two, which Carol
+owns. Alice receives it as an ordinary invitation:
 it looks like any other invitation and is titled with Carol's name. If Alice accepts, the chat she
 already held with Carol becomes read-only history linked to the new chat: Alice sees one
 conversation with Carol, the earlier messages first, then the new chat. If Alice declines, nothing
@@ -1748,12 +1851,17 @@ _Known limits (also §16.11):_
   stay an ordinary invitation there (D.88).
 
 **The invitation screen.** Every invitation uses one screen made of sections shown as they apply:
-who asks; adding that person as a contact; the group, its owner and its members; the earlier
-conversation it continues; warnings (§4.8, §5.11); and the choices.
-A person who is not a contact and asks for a chat is shown once, on that screen, as asking both to
-become a contact and to open the chat.
-An invitation is named as the conversation list would name that group: a chat of two without a
-name by the other person's name, never "Unnamed group".
+who asks; adding that person as a contact; the group, its owner and its members; its message
+timer; the earlier conversation it continues; warnings (§4.8, §5.11); and the choices.
+Who asks is said for each case:
+
+- a contact request asks only to become a contact, with its message if any; accepting starts no
+  chat, which the screen says;
+- a chat of two from a contact invites to a chat, and says nothing of becoming a contact;
+- a chat of two from someone who is not a contact invites to a chat and asks to become a contact:
+  accepting does both.
+  An invitation is named as the conversation list would name that group: a chat of two without a
+  name by the other person's name, never "Unnamed group".
 
 ## 6. Events
 
@@ -1942,6 +2050,15 @@ Arrivals under an already-known, pruned event ID follow §9.5.
   `last_modified_at = max(now, previous last_modified_at + 1)`, where the previous value is that of
   the **current applied** result, never of a pending scheduled version (§7.3).
   A scheduled edit uses its chosen time `S` instead.
+- A published edit keeps the author, or sets it to any member of the epoch (D.97).
+  _Why:_ the edit event already carries the whole result, author included, and receivers accept
+  any member as the author of any version, so this is a choice of the publisher only: no format
+  or merge change, and unmodified devices accept it; the latest modification wins as for any
+  edit.
+  How such an edit is sent is in §10.2.
+- A reaction's author cannot be changed by an edit: its ID is derived from its author (§7.6).
+  The same result is reached by removing the reaction as one member and adding it as another;
+  this is documented, not implemented yet.
 - Every new event's timestamp `ts` is the creator's `now`.
 - A message event's timestamp `ts` MUST be at most local `now + 5 minutes`, both for outgoing
   events and on receipt.
@@ -2542,10 +2659,21 @@ so it cannot leak the alteration or contradict it.
 The UI offers **Retry synchronisation** on messages of any accepted group, regardless of whether
 they were altered; eligibility is rechecked when the action runs.
 
+The UI MUST show a warning before every Retry of a message, and act only on confirmation: it sends
+to everyone the version this device holds, including anything changed or created only on this
+device (D.94).
+_Why:_ a local-only edit (§9.1) or a local-only message (§9.7) keeps no marker, so the device cannot
+tell which messages are concerned; a warning shown only for some messages would itself be such a
+marker.
+
 - **Message:** republish the stored complete result in a fresh event of the message's own epoch
   (new event ID with the current timestamp, current tips as parents), unchanged, to the peers
   allowed by §10.4.
   Peers merge it normally.
+  It is sent by the rule of §10.2: in full only when the result's author is the user, like a
+  relay otherwise.
+  A Retry of a local-only message (§9.7) publishes it to everyone as a new message with its
+  original date.
 - **Group:** resend the exact root of the group's current epoch to its other members.
 
 ### 9.5 Events arriving under an already-known ID
@@ -2578,6 +2706,70 @@ Reactivation uses the normal retry renewal (§11.5).
 The marker is cleared on the first valid acceptance of that event.
 The marker lives while the group is retained; if capacity forces it out, a later advertisement may
 recreate the work.
+
+### 9.7 Local-only messages
+
+A user may create a new message on this device only ("only for me"), under any member of the epoch
+as author, in the current epoch of an active group.
+
+It may also be created in a group this device can only read but keeps (D.99): after a kick (§5.6),
+after its own visible leave kept read-only (§5.3), or dissolved and kept (§5.8).
+There it goes into the last epoch the device holds, under any member of that epoch.
+Sending for everyone stays refused there, and so is a local-only message in a group waiting for a
+kick, in a superseded chat of two (§5.12), and in a group dissolved to be deleted.
+_Why:_ the user may edit and delete every message of such a history on this device only, and a
+chat the user can only read must not be the one place where it cannot be reshaped with a new
+message (plausible deniability, decided by the owner).
+Nothing is sent from it: a device no longer active in the group sends nothing for it (§10.4).
+If the device is added back later (§5.10), the message stays in the earlier epoch as what an
+evicted message is there: no event row (no timer) or one pruned stub (timer), never a tip, a parent
+or listed, so the device, which serves that epoch again, still never sends or announces it.
+The limits of D.94 then apply as for any local-only message.
+It is created with `created_at = last_modified_at = now`, `edited = false` and a fresh random
+sync-object ID; scheduling is refused.
+Nothing is sent, announced, listed or named as a parent, ever.
+The result must pass every rule a published version passes (§6.2, §7.2), so that a Retry of it
+stays valid.
+
+**No marker.** No flag, field, table, log (outside a full debug build) or UI mark records that a
+message was created this way (D.92).
+_Why:_ deniability. It must be indistinguishable from a message whose events this device evicted
+while keeping its result (§8.2, §9.3); a marker would prove the opposite.
+
+**Storage shape** (D.93, chosen on 2026-11-27, **may be revised**): it takes the shape a message
+of this device has once all its events were pruned.
+
+- **Epoch with no message timer:** the result only: no event row, no stub, no parent edge.
+  Without a timer the stubs of a real message are not linked to its record (§14.1), so a result
+  with no event is an ordinary state; a fabricated stub would be a permanent object that need not
+  exist.
+- **Epoch with a message timer:** the result plus **one** fabricated stub: a fresh event ID dated
+  now, parent links to the current eligible tips chosen as a publication would (§6.1), listed in
+  the record's stubs, with the record's moment and erasure as for a real message (§7.7).
+  _Why:_ under a timer a real message always lists at least one carrier or stub, so an empty list
+  would be a structural mark on that device; the timer erases the stub with the message.
+
+The stub is a pruned row like any other: never a tip, never a parent, never announced or listed,
+and a request for it is answered "not available", the answer given for an unknown ID (§9.3,
+§11.7).
+
+**No special rule** (D.94). Since nothing marks it, everything that applies to a message the device
+no longer serves applies unchanged: replies and reactions for everyone, local-only edits and
+deletions, and Retry (§9.4), which publishes it to everyone as a new message with its original
+date.
+A reply or a reaction for everyone to it tells the other members that this device holds a message
+they do not hold; "a member sent it to this device only" explains it as well (§16.13).
+
+**What remains detectable**, accepted for now:
+
+- Only by someone reading this device's storage, and only statistically.
+  Under a timer: no later event ever names the stub as a parent; no delivery hint exists for it
+  (hints are kept 28 days for real events, §10.3); the stub is unusually recent for an eviction
+  (already true of any local-only edit, D.35).
+  With no timer: no event row has a timestamp equal to the message's `created_at`, as every
+  unscheduled real message has on devices that received its first version.
+- By someone comparing two devices: the message's ID exists on one device only, in every design;
+  the innocent explanation is that a member sent it to this device only.
 
 ## 10. Dissemination
 
@@ -2622,9 +2814,44 @@ objects §4.6 and §5).
 
 - **Own messages:** send the full event to every neighbor that is a member of the event's epoch.
   _Why:_ neighbors hold copies even if the sender goes offline right after sending.
+  An edit (or a Retry) is "own" only when the message's author is the user both before it and after
+  it (D.97); a new message or a reaction is own when its author is the user.
 - **Relayed events and fabricated messages** (attributed to another member): send gossip notices
   only, and answer explicit requests with the full event.
   _Why:_ fabrication then looks like an honest relay.
+- **What this device publishes that is not its own** (D.95, D.96, D.97): a new message or a Retry
+  under another member's name, an edit that sets the author to another member, an edit of another
+  member's message that keeps that author, and an edit that changes the author to the user
+  ("re-appropriation") are handled as if another member had delivered the event to this device
+  and this device relayed it:
+  1. the event keeps its **true** timestamp and is shown on this device at once;
+  2. the device waits a random time, uniform between 0.5 s and 5 s (provisional), durably: an app
+     closed during the wait still sends the notices afterwards;
+  3. then it records one hint (§10.3) and sends notices to exactly the set of an ordinary
+     dissemination: the eligible neighbors plus the extra random recipients below; nothing is
+     added or removed for anyone. The hint is always written for a version that still exists at
+     the end of the wait: a version replaced or pruned during the wait (the user edits or deletes
+     again within those seconds) gets no hint and no notice (D.102);
+  4. explicit requests are answered with the full event, whoever asks, the peer named by the hint
+     included.
+
+  _Why a wait:_ a relay announces an event some time after its author wrote it.
+  _Why a wait and not a backdated timestamp:_ the event keeps its true date, which stays safe with
+  features that set dates on purpose (a message prepared for a later date); the cost is that such a
+  message leaves a few seconds late.
+  The range is provisional, to be tuned from the one-hop travel times measured by the debug build
+  (a phone fetches from the backend every 5 s; the mesh is usually under 2 s; the engine adds no
+  delay when it relays).
+  _Why the claimed author is not forced into the notice set:_ in a chat of 500, notices that always
+  take a route through the claimed author would be observable.
+  _Why nothing for a version gone during the wait:_ the device never announces what it can no
+  longer give; announcing it and then answering "not available" would lower its score with the
+  others (§11.8).
+  _Why re-appropriation is not pushed in full:_ honest devices push in full only what they author,
+  so a full push of an edit naming the user would tell the user's neighbors that the user took the
+  message; as notices it reads as someone re-attributing it and this device relaying it.
+  Deletions are not concerned: they are sent as before.
+
 - **Roots and signed objects:** their first send is defined in §4.6, §5.3, §5.6 and §5.8.
   A device that received one relays it by notice only, and answers explicit requests with the full
   object.
@@ -2654,6 +2881,34 @@ by Bob when:
 - Bob sends it a gossip notice for E (honest peers announce only events they hold in full).
 
 Sending a notice, query requests and N/A answers never create hints.
+
+**Hint of a publication that is not the user's own** (§10.2, D.95, D.97): when the wait is over,
+the device records one hint for the event only, with no ancestor sample, naming:
+
+- the claimed author, when the event is attributed to another member ("they sent it to me"),
+  whether or not that member is a neighbor;
+- for a re-appropriation, **one peer drawn uniformly inside the notice set**: not the previous
+  author, which would name who gave the message up; and not a member outside the set, whom the
+  hint would then keep from ever being notified.
+  An entry only says "this peer has this event", which becomes true once that peer fetched it.
+  In a chat of two that peer is necessarily the previous author, who knows anyway.
+
+The hint is recorded after the notices are queued, and does not suppress the one notice to the peer
+it names when that peer is in the set: a relay announces to its neighbors whoever handed the event
+over.
+The record that lets that one notice through lives only for the **first round of sending** after
+the wait (D.98): if the notice to that peer can be assembled in that round, it is; if not (no
+working session with that peer at that moment), the record is dropped, the hint then suppresses
+the queued notice, and this device never notifies that peer of the event later.
+_Why:_ the record exists only for fabricated events, so while it exists it is a trace on the
+device; a real relay never notifies the peer it got the event from, so a notice that never leaves
+looks normal.
+Nothing is lost: the event stays a tip of this device, its next event names it as a parent (the
+peer then asks for it, and a request is always answered), and tip sync lists it (§12.1). In a chat
+of two this is how the other person gets it.
+Its first time is never rewritten afterwards (it tells "arrived here before I passed it on").
+_Why no ancestor sample:_ the claimed author may lack those ancestors, and the hints would then
+skip real notices to that member.
 Query requests never clear hints, and an event with older parents never clears hints for other
 branches.
 
@@ -3512,7 +3767,10 @@ it; it is never relayed and never answered.
   one plaintext at its own highest version holding one response frame, with an empty `request_id`,
   `idx = 0` and status **unsupported**.
   - It is sent **only to a peer the user explicitly accepted as a contact** (§5.12), whether or
-    not they share a group. A peer whose connection is automatic, or any other peer, gets silence.
+    not they share a group, and only once that relationship is mutual and known to that peer: the
+    user accepted their contact request or chat invitation, or they accepted the user's. A peer
+    whose connection is automatic, a member the user added as a contact on this device only, or
+    any other peer, gets silence (D.91).
   - The version prefix is read **before** any other check, the size check included: a later
     version may use a larger container, and must still be answered.
   - It is sent at most once per peer and received version per 24 hours (a default, §2.2).
@@ -3526,7 +3784,10 @@ it; it is never relayed and never answered.
   A later version could do without it, by sending both versions to a peer whose version it does
   not know; the notice saves that, and it could not be added to version 1 after its release.
 - **What the notice reveals.** That this device speaks version 1 of this protocol, to a contact its
-  user accepted. Nothing about any group, and nothing to anyone else.
+  user accepted. Nothing about any group, and nothing to anyone else. Because only a contact
+  already known to be one gets it, the notice cannot be used as a probe: a modified client that
+  sends a plaintext of a higher version on purpose learns nothing about whether it was added as a
+  contact on this device (D.91).
 - A device that receives the notice takes no action required by this version; it MUST NOT treat it
   as an error or penalise its sender (§2.2).
 - Events carried under a newer prefix follow the version rules of §13.1.
@@ -3813,7 +4074,7 @@ Every member can create a valid message attributed to any other member, and can 
 proof of any event.
 Agraphon authenticates only the immediate peer.
 Fabricated messages are sent like relays (notice, then answer requests), so the sending pattern
-does not single out the fabricator.
+does not single out the fabricator; the residual differences are listed in §16.13.
 
 The create event's `author` is likewise an unauthenticated claim.
 A member can show others the create event, but it proves nothing about who made it.
@@ -4000,26 +4261,70 @@ compared, by the owner's choice (D.88).
 This is accepted: a silent switch would let a device move a conversation without the user's
 consent.
 
-### 16.12 Known limitation: the timer a contact request announced
+### 16.12 Withdrawn: the timer a contact request announced
 
-A device that accepted a contact request adopts the chat its requester founds without a prompt
-only if that chat keeps the timer the request announced; otherwise the chat is an ordinary
-invitation that names both timers (§5.12, D.89).
+Until 0.1.1 a device that accepted a contact request adopted the chat its requester founded without
+a prompt only if that chat kept the timer the request announced, and the requester could tell from
+the device's traffic whether it compared them (D.89). Since 0.1.2 a contact request starts no chat
+and announces no timer, and accepting it records no consent (§5.12, D.90): every chat of two is an
+ordinary invitation showing its own timer, so this limitation no longer applies. The gap of the tie
+rule it described has no announced timer left to differ from.
 
-- **What the requester can learn.** A requester that announces one timer and founds the chat with
-  another can tell that the receiver's device compared them, and when the user accepted: a chat held
-  as an invitation sends nothing until it is answered, while an adopted chat queries and connects
-  at once. A requester that founds with the timer it announced learns nothing. This cost is
-  accepted.
-- **The first adoption only.** The owner can change the timer afterwards with a new root, as any
-  owner can; the timeline line shows the change.
-- **The tie rule.** When both people founded an automatic chat at once and the other person's chat
-  wins the tie rule, the device switches to it without a prompt whatever its timer, so a user can
-  end in a chat whose timer differs from the one announced. The app does not reach this case, as
-  no consent is given when two requests cross; it can arise only at engine level, for example with
-  another client built on the engine. Closing it means changing row 1 of the table in §5.12 and
-  deciding what the device's own chat becomes while the user is asked; this is left for after the
-  first release.
+What a peer can still observe is what any invitation shows: the person who starts the chat learns
+whether and when the other accepts it, as for any group (§4.8).
+
+### 16.13 Known limitations: publishing under another member's name, local-only messages and edits
+
+Accepted on 2026-11-27 with D.92 to D.99 and D.102, D.103; each is to analyse (the file named is the issue that
+tracks it).
+
+**On the publishing device** (someone reading its storage; the owner considers a snapshot of an
+unlocked device taken while it impersonates someone to be at the edge of the threat model):
+
+- No ancestor hints for the claimed author, where a real arrival marks a sample of up to 31
+  ancestors as seen by the deliverer (§10.3). To analyse:
+  `gossip-fabricated-message-leaves-other-local-records-unlike-a-relay.md`.
+- No peer-score credit for a deliverer, where a real arrival credits one (§11.8). To analyse:
+  `gossip-fabricated-message-leaves-other-local-records-unlike-a-relay.md`.
+- During the random wait, a pending relay record exists for the event, and after it, until the
+  first round of sending, a record that keeps the hint from suppressing the notice to the peer it
+  names (D.98). Both hold no content and live seconds. To analyse with the previous item.
+
+**Over the network:**
+
+- The claimed author, when it is in the notice set, receives a notice for a message under its own
+  name. It already knows it did not write it, and cannot tell a fabricator from a relay. To
+  analyse: `gossip-send-as-claimed-author-may-get-a-notice-for-its-own-name.md`.
+- The parents named by the event are the publisher's tips, not the claimed author's. To analyse:
+  `gossip-send-as-parents-are-the-publishers-tips.md`.
+- The claimed author's neighbors never receive the message in full directly, as they would for
+  that member's real messages; this reads as a loss or as that member being offline. To analyse:
+  `gossip-send-as-claimed-authors-neighbours-never-get-a-full-push.md`.
+- A version announced by notices and replaced soon after on this device is answered "not
+  available" to the peers that ask for it, which penalises this device in their peer score
+  (§11.8); a full push never caused such a request. Seen in the network simulation with the new
+  abilities in the mix (an honest device ending below the credible score, in 1 to 2 runs of 40).
+  Shipped as it is, decided by the owner (D.103); to reanalyse, a fix may not be needed:
+  `gossip-relay-like-publications-lower-the-publishers-peer-score.md`.
+- When the peer named by the hint has no working session in the first round of sending after the
+  wait, it is not notified by this device at all (D.98); it gets the event a little later, by the
+  next event that names it as a parent or by tip sync.
+- A reply or a reaction for everyone to a local-only message (§9.7) tells the other members that
+  this device holds a message they lack (not that it was made up: "a member sent it to me only"
+  explains it too). To analyse:
+  `gossip-local-only-message-replies-and-reactions-reveal-a-message-others-lack.md`.
+  The same holds for a local-only message created in a read-only group once the device is added
+  back (D.99).
+
+**Sequences of edits.** The rule "in full only when the user is the author before and after the
+edit" (§10.2) looks at the author stored at the moment of each edit, which earlier edits set, by
+the user or by anyone.
+Across a sequence of more than two edits, the way successive edits leave the device (in full, or as
+notices) can reveal more than each edit does alone.
+Example: a message of Bob's is re-attributed to the user, as notices, deniably; the user then edits
+it again: the author is now the user before and after, so that edit is pushed in full, which shows
+the user's neighbors that the user treats the message as their own.
+To analyse and fix: `gossip-edit-sequences-reveal-more-than-single-edits.md`.
 
 ## 17. Readiness, validation and future work
 
@@ -4211,6 +4516,7 @@ accept and relay such a root unchanged.
 | Scheduled-delete timers                                                                 | wait ≤ 2 h; fallback 30 min (5 min when open)                                                                                      |
 | Message timer                                                                           | per epoch, in its root: a message is deleted at `created_at + T` (§7.7)                                                            |
 | Hint expiry                                                                             | 28 days                                                                                                                            |
+| Wait before announcing what is published under another name (local policy, provisional) | uniform in [0.5 s, 5 s] (§10.2)                                                                                                    |
 | Invitation delay `PROMPT_DELAY`                                                         | 5 min after receiving the root (§4.8)                                                                                              |
 | Successor after a leave or request                                                      | 30 s without a new one; at most 5 min after the first (§5.5)                                                                       |
 | Owner-only request resend                                                               | every 24 h (§5.4)                                                                                                                  |
@@ -6080,7 +6386,11 @@ _Alternatives not taken:_
 - Only document the two chats: parallel chats of two with the same person would pile up with each
   reinstall.
 
-### D.89 The timer a contact request announced (§5.12, §16.12)
+### D.89 The timer a contact request announced (§5.12, §16.12), withdrawn
+
+_Withdrawn by D.90 (2026-11-27):_ a contact request no longer starts a chat nor states a timer, and
+accepting it records no consent, so there is nothing to compare. The engine code stays unused until
+its removal. The entry is kept as written, for its history.
 
 _Context:_ a contact request states the message timer its sender chose, and the accepting user
 sees it before accepting. Accepting is the consent to the chat the requester then founds, which
@@ -6134,3 +6444,319 @@ _Alternatives not taken:_
   another without being told.
 - Announce no timer in the request: the user would accept without knowing how long the messages
   of the chat last.
+
+### D.90 Adding a contact and starting a chat are two steps (§5.12, §16.12)
+
+_Context:_ accepting a contact request was the consent to a chat of two that the requester's device
+founded as soon as the session was active, and the accepter's device adopted it without a prompt
+(D.89). A user who opened the new contact before that chat arrived made their own device found one,
+and the tie rule then kept the chat of the person whose GossipID sorts first, so the accepter could
+end as the owner of a chat the other person started. Crossing requests gave the same.
+
+_Decision:_ adding a contact and starting a chat are two steps, decided by the owner on 2026-11-27.
+
+- A contact request asks only to become a contact. It carries the requester's username if they
+  choose and a short message, and no message timer. Accepting it records no consent and creates no
+  chat on either side.
+- A chat is started explicitly, from the contact, with the message timer chosen then. The device
+  that starts it owns it (`migrate_from = 0`, unchanged), and the other person receives an ordinary
+  invitation that shows that timer. While such an invitation waits, the app shows it on the
+  contact's screen instead of "Start a chat"; two people who start at the same moment still end with
+  one chat by the tie rule (row 1).
+- A request of 0.1.0 or 0.1.1 that states a timer is accepted, and its timer ignored. A discussion of
+  those versions that still owes the chat of a request it sent founds nothing.
+
+_Why:_
+
+- Who owns a chat is who started it: owning a chat allows adding people to it, so it follows the
+  user's own action, not the order in which two devices happened to act.
+- The request no longer commits anyone to a chat, nor to a timer chosen before the session exists.
+- The race that made the accepter the owner disappears: there is no automatic chat to race against.
+- The request's message stays apart from any chat: it is sent with the announcement, before the
+  session exists, and has other plausible deniability properties than a chat message (it could be
+  decrypted if the keys were later compromised). Linking it to the first chat of two is left for
+  later.
+- The engine's consent and announced-timer code (D.89) is unused from this version and scheduled for
+  removal; it stays in place meanwhile.
+
+_What a peer or the backend can newly observe:_ nothing that was hidden before. Less is sent: the
+requester's device no longer founds and sends a chat when the session becomes active, and the
+accepter's device no longer adopts one and queries its members at once. A chat started later sends
+what any new chat sends, at the moment the user chooses.
+
+_Accepted cost:_ starting a chat is one more step, and the other person is asked to accept it.
+
+_Alternatives not taken:_
+
+- Offer "Start a chat with X?" right after the contact is accepted: a prompt at a moment the user
+  did not choose.
+- Keep one step and only fix the race: the request would still commit both people to a chat whose
+  owner depends on timing.
+- Keep the timer in the request as a suggestion: a value that commits nobody and can differ from the
+  chat's real timer.
+
+### D.91 A contact added on this device only stays silent to the version probe (§5.12, §13.8)
+
+_Context:_ a member of a shared chat can be added as a contact on this device only, sending nothing
+(§5.12). The engine answers a plaintext of a higher, unsupported version with a version notice to
+the peers declared as accepted contacts, and stays silent toward everyone else (§13.8). Declaring a
+contact added this way therefore let a modified client send such a plaintext on purpose and learn
+from the notice that this user added it, which contradicts "adding sends nothing and reveals
+nothing".
+
+_Decision:_ decided by the owner on 2026-11-27. A contact the user added on their own (`added`)
+stays silent toward that probe, exactly like a chat member who is not a contact. The version notice
+is given only where the other person already knows the two are contacts: the user accepted their
+contact request or chat invitation, or they accepted the user's request or the chat of two the user
+started. The contact then becomes `accepted` and is declared to the engine.
+
+- For the user an `added` contact is a contact: listed, named, offered for new chats and members.
+- For anything the other person can observe it is an automatic connection: not declared to the
+  engine, and its connection kept and revoked by the automatic rule, in what is sent and in timing.
+  The contact and its name stay when the connection goes.
+
+_Why:_ privacy first: adding someone must stay invisible, to them and to anyone else.
+
+_Impacts accepted:_
+
+- A contact added this way that runs a newer version is not told that this user's device cannot
+  read their messages, until the relationship is mutual.
+- The connection to such a contact can lapse when no shared chat remains; reaching them again needs
+  a new announcement, which they see as a contact request.
+- Starting a chat of two with that person reveals the relationship, by design.
+
+_Alternatives not taken:_
+
+- Declare every contact the user added: the version notice becomes a probe of who added whom.
+- Answer every peer with a version notice: it would tell anyone which version this device speaks,
+  which §13.8 limits to contacts on purpose.
+
+### D.92 No marker on a local-only message (§9.7, §9.3, §16.3)
+
+_Context:_ the engine gains a new message created on this device only (§9.7). The interface's
+design marked such a message ("Only for you", a dashed outline).
+
+_Decision:_ decided by the owner on 2026-11-27. No marker of any kind: no flag, field, table or
+log outside a full debug build in the engine, and no label, outline or remembered state in the
+app. The message is stored so that it cannot be told apart from an evicted message whose result
+is still on the device, as §9.3 already requires for local changes. The designer's label is
+dropped, for new messages as it was for edits.
+
+_Why:_ plausible deniability; the owner considers this point very important. Any marker would
+prove what the message is.
+
+### D.93 The shape of a local-only message (§9.7, §7.7, §14.1), may be revised
+
+_Context:_ after a local change or an eviction, the engine keeps the message's result and, for
+each event that carried it, a bare stub (an ID and its parent links); both go through the same
+code. Event retention (14 days) and the message timer are separate: with no timer stubs are not
+linked to their message; with a timer the message's record lists them, and a real message always
+has at least one carrier or stub.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice C), **open to revision** in the coming days
+or weeks. With no message timer: the result only, no stub. With a timer: the result plus one
+fabricated stub (fresh ID dated now, parents the current tips chosen as a publication would,
+listed in the record's stubs), erased with the message by the timer.
+
+_Why:_ without a timer a result with no identifiable stub is an ordinary state and a fabricated
+stub would be a permanent object that need not exist; under a timer an empty list would be a
+structural mark.
+
+_Impacts accepted:_ only someone reading the device's storage, and only statistically, can notice
+it: under a timer no later event names the stub as a parent, no hint exists for it, and the stub
+is recent for an eviction (as for any local edit, D.35); with no timer no event row has the
+message's `created_at` as its timestamp. Two devices compared show the ID on one only, in every
+design ("a member sent it to me only").
+
+_Alternatives not taken:_
+
+- Always a stub (A): a needless permanent object when there is no timer.
+- Never a stub (B): a structural mark under a timer, which is the default (28 days).
+
+### D.94 No special rule for a local-only message, and a warning on Retry (§9.4, §9.7)
+
+_Context:_ with no marker (D.92), the engine cannot tell a local-only message from any message it
+no longer serves.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A). Everything that applies to a message
+the device no longer serves applies unchanged: replies and reactions for everyone, local edits and
+deletions, Retry. "Retry synchronisation" always shows a warning first, on every message: it sends
+to everyone the version this device holds, including anything changed only on this device.
+
+_Why:_ the case cannot be detected by construction, so no rule can depend on it, and a warning
+shown only for some messages would be a marker.
+
+_Impacts accepted:_ a reply or a reaction for everyone to such a message tells the other members
+that this device holds a message they lack (§16.13). A Retry publishes it to everyone as a new
+message with its original date.
+
+_Alternatives not taken:_ forbidding replies and reactions for everyone to any message the device
+no longer serves: it would forbid replying to any message older than 14 days.
+
+### D.95 A message published under another member's name looks delivered by that member (§10.2, §10.3)
+
+_Context:_ §10.2 already sends fabricated messages as notices. The engine lacked the author
+parameter from the node to the SDK; no wire change is needed.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice D). The message is handled as if the claimed
+author had delivered it: after a random wait (D.96) the device records the hint "the claimed author
+has this event", for the event only (no ancestor sample), whether or not that member is a neighbor,
+and its first time is never rewritten; then notices go to exactly the normal set of a
+dissemination (selected neighbors plus the random extra recipients), nothing added or removed for
+the claimed author, who is notified only if in that set, despite the hint. A request for the event
+is answered whoever asks.
+
+_Why:_ fabrication then looks like an honest relay. Forcing the claimed author into the set would
+be observable in a large chat (a chat of 500). Ancestor hints are not written because the claimed
+author may lack them and real notices to that member would be skipped.
+
+_Impacts accepted:_ the known limits of §16.13 (no ancestor hints, no score credit; the claimed
+author may get a notice; parents are the publisher's tips; the claimed author's neighbors never get
+a full push).
+
+### D.96 The random time is a wait, not a backdated timestamp (§10.2, Appendix B)
+
+_Decision:_ decided by the owner on 2026-11-27 (choice B). The message keeps its true timestamp;
+the device waits a random time, uniform between 0.5 s and 5 s, before it records the hint and sends
+the notices. The wait survives the app closing. The range is provisional, to be tuned from the
+one-hop travel times recorded by the debug build.
+
+_Why:_ safer against future features that set dates on purpose, such as preparing a message to be
+sent at a later date, which the protocol allows.
+
+_Impacts accepted:_ a message sent as someone else leaves a few seconds late.
+
+_Alternatives not taken:_ backdating the timestamp by the random value and sending at once, which
+dates the message before the moment it was sent and can show it before a message that arrived in
+those seconds. Kept as a possible improvement if that drawback can be fixed:
+`gossip-fabricated-message-backdate-the-timestamp-instead-of-waiting.md`.
+
+### D.97 One rule for everything attributed to another member, edits and re-appropriation included (§7.2, §10.2, §10.3)
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A, then A'). An edit for everyone may set the
+message's author to any member (publisher side only; reactions excluded, their ID is bound to the
+author). An edit is pushed in full, as the user's own, only when the author was the user before
+the edit and is the user after it. Every other edit is handled as in D.95 and D.96: an edit that
+sets the author to another member (the hint names that member), an edit of another member's
+message that keeps that author (until now a notice sent at once, now a few seconds later, with the
+hint for that author), and an edit that gives the message to the user (re-appropriation), whose
+hint names one peer drawn at random inside the notice set, who is notified anyway. In a chat of two
+that peer is necessarily the previous author. Deletions are sent as before.
+
+_Why:_ honest devices push in full only what they author. A full push of a re-appropriation would
+tell the user's neighbors that the user took the message; as notices it reads as someone else
+re-attributing it and this device relaying it. The random peer is picked inside the notice set
+because a peer outside it is one the device never notifies, whom the hint would then keep from
+ever being told; an entry only says "this peer has this event", which becomes true once it fetched
+the edit.
+
+_Impacts accepted:_ the rule looks at the author stored at each edit, so across sequences of more
+than two edits the forms in which they leave can reveal more than each edit alone (§16.13):
+`gossip-edit-sequences-reveal-more-than-single-edits.md`. Changing a reaction's author (remove as
+one member, add as another) is documented and left for later.
+
+### D.98 The record that lets the hinted peer be notified lives one round of sending (§10.3, §16.13)
+
+_Context:_ after the random wait of a publication that is not the user's own (D.95, D.97), the hint
+names a peer, and a record keeps that hint from suppressing the one notice to that peer. As first
+built, the record lived until that notice left the queue, however long.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A). The record lives only for the first
+round of sending after the wait. If the notice to that peer can be assembled in that round, it is;
+if not (no working session with that peer at that moment), the record is dropped and this device
+does not notify that peer of the event later.
+
+_Why:_ the record exists only for fabricated events, so while it exists it is a trace on the
+device. A real relay never notifies the peer it got the event from, so a notice that never leaves
+looks normal.
+
+_Impacts accepted:_ that peer gets the event later, by the next event of this device that names it
+as a parent (it asks, and requests are always answered) or by tip sync; in a chat of two this is
+how the other person gets it. Both paths are covered by tests.
+
+### D.99 A local-only message in a chat the device can only read (§9.7, §10.4)
+
+_Context:_ in a chat the device can only read (kicked, left visibly and kept, dissolved and kept),
+Edit and Delete stay on every message, on this device only. The local-only message operation was
+first built to refuse wherever a normal send is refused.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A, with the owner's addition). New messages
+can be written there too, on this device only, under any member of the last epoch the device holds,
+with the storage shape of D.93 and no marker (D.92). Nothing can be sent to other people from such
+a chat; the only scope offered is "only for me". Waiting for a kick, a superseded chat of two and a
+chat dissolved to be deleted stay refused.
+
+_Why:_ plausible deniability, important for the owner: the history of a chat the user can only
+read must be as reshapable on the device as any other.
+
+_What happens if the device is added back:_ the message stays in the earlier epoch, shaped as an
+evicted message there; the device serves that epoch again and still never sends, announces or lists
+it. A reply, a reaction or a Retry for everyone then has the effects of D.94.
+
+### D.100 A contact request to a contact added on this device whose connection lapsed (§5.12)
+
+_Context:_ a contact the user added on their own (D.91) loses its connection with the last shared
+chat. The add-contact paths refuse it as a duplicate.
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A). The contact's screen says the two are no
+longer connected and offers "Send a contact request", warning that the other person will see it.
+The request is an ordinary contact request, identical on the wire to one sent to a stranger, with
+no special field. The contact keeps its name; once accepted the relationship is mutual and the
+contact is declared to the engine as any accepted contact.
+
+_Why:_ a field that told the request apart would tell the other person "this user already had me
+as a contact", which adding someone locally must never reveal. The difference is handled on the
+device only.
+
+_Impacts accepted:_ the other person learns that this user wants them as a contact, as with any
+request; the user is warned before sending.
+
+### D.101 The user's own name for a chat is a device-only field (§5.11)
+
+_Decision:_ confirmed by the owner on 2026-11-27 (choice A). "Save for me" stores the name in a
+separate field of the device's record of the chat (`local_name`); the root, which holds the shared
+name and is hashed, is never changed by it and stays intact in storage. "Save for everyone" on the
+chat's name also clears the owner's own name for the chat.
+
+_Why:_ the owner then sees what they typed. The root is the shared, signed definition of the epoch,
+and a device-only preference must not touch it.
+
+### D.102 The hint is written for a version that still exists at the end of the wait (§10.2)
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A, as built). A version replaced or pruned
+during the random wait (the user edits or deletes again within those seconds) gets no hint and no
+notice.
+
+_Why:_ the device never announces what it can no longer give; announcing it and then answering
+"not available" lowers its score with the others.
+
+### D.103 Relay-like publications can lower the publisher's peer score (§11.8, §16.13)
+
+_Context:_ the network simulation with the new abilities in the mix showed an honest publisher
+ending below the credible score in 1 to 2 runs of 40: a version announced by notices and replaced
+soon after is answered "not available" to the peers that ask for it.
+
+_Decision:_ decided by the owner on 2026-11-27: shipped as it is and documented (§16.13); to
+reanalyse, a fix may not be necessary:
+`gossip-relay-like-publications-lower-the-publishers-peer-score.md`.
+
+### D.104 Tie-breaks in opposite directions (§4.9, §5.12, the mesh)
+
+_Context:_ the mesh's protected document said a duplicate link "keeps the one whose handshake
+completed first"; the mesh code keeps the link with the lower link key, which both ends compute
+alike (seen in the phone test of 2026-11-27). The document was corrected, as accepted by the owner
+on 2026-11-27.
+
+_Noted by the owner:_ group chats break some ties in the opposite direction (the interim rule of
+§4.9 takes the greatest `(created_at, chat_id)`). Nothing is changed in 0.1.2; one direction for
+every tie-break is to study: `gossip-one-direction-for-every-tie-break.md`.
+
+### D.105 The labels of the Bluetooth numbers (the app, the mesh)
+
+_Decision:_ decided by the owner on 2026-11-27 (choice A for 0.1.2, labels only). The values were
+right and three labels were not: "Messages relayed" (items stored on this phone now, its own
+messages included) becomes "Messages stored on this phone"; "Waiting for a bridge" (every stored
+message waiting to reach the internet) becomes "Messages waiting for internet"; the offline line
+"Connected to the mesh · N links" (phones, in fact) becomes "Connected over Bluetooth · N phones
+nearby". A real count of messages relayed needs a new counter in the mesh core and is left for the
+Bluetooth reporting work (choice B, later). Nothing in this protocol changes.

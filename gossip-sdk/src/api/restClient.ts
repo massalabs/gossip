@@ -1,7 +1,9 @@
 import { logger } from '../utils/logs.js';
-import { HttpStatusError } from './errors.js';
+import { HttpStatusError, isFinalStatus } from './errors.js';
 import { debugLogEnabled, dlog } from '../utils/debugLog.js';
 import { errFields, since } from '../utils/debugFields.js';
+
+export { isFinalStatus };
 /**
  * Base REST client with retry and timeout support.
  * Shared by RestMessageProtocol and RestAuthProtocol.
@@ -129,11 +131,6 @@ function logRequest(
   } catch {
     // Never let a debug line change a request.
   }
-}
-
-/** A 4xx answer other than a timeout (408) or rate limiting (429). */
-export function isFinalStatus(status: number): boolean {
-  return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 function failure<T>(error: Error | null): RestResponse<T> {

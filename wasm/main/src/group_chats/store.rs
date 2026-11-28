@@ -136,7 +136,8 @@ macro_rules! node_tables {
             announced_timers,
             backoff,
             contacts,
-            ref_lookups
+            ref_lookups,
+            relays
         )
     };
 }

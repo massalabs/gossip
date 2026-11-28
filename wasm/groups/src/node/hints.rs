@@ -150,6 +150,17 @@ impl Node {
             for k in gone {
                 self.remove_hint(&k);
             }
+            // Nor a relay still due for one of them.
+            let relays: Vec<(ChatId, EventId)> = self
+                .t
+                .relays
+                .keys()
+                .filter(|k| k.0 == c.chat_id && c.removed_edges.contains(&k.1))
+                .copied()
+                .collect();
+            for k in relays {
+                self.t.relays.remove(&k);
+            }
         }
     }
 

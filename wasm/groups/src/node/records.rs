@@ -453,6 +453,28 @@ pub struct Hint {
     pub used: u64,
 }
 
+/// An event this device published that leaves like a relay (§10.2): attributed to another
+/// member, or an edit that is not the user's own edit of the user's own message.
+///
+/// While `notify` is `None` the device is waiting until `due`, a random time after the
+/// publication ([`super::timing::RELAY_WAIT_MIN_MS`]): then it writes the hint and queues
+/// the notices, as a relay would once the event reached it. When the peer the hint names is
+/// in the notice set, the record stays with `notify` set to that peer for the first round of
+/// sending only ([`super::Node::poll_outbox`]), so that the hint does not cancel that one notice if
+/// it can be assembled then; after that round it is dropped, sent or not (D.98: it exists
+/// only for fabricated events, so it is a trace while it exists, and a real relay never
+/// notifies the peer it got the event from).
+///
+/// Why durable: the notices must still go out if the app closes during the wait. The record
+/// lives a few seconds, until the first round of sending after the wait; it holds no content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Relay {
+    /// When the hint and the notices are due.
+    pub due: u64,
+    /// Once they were queued: the peer the hint names, whose notice the hint must not cancel.
+    pub notify: Option<GossipId>,
+}
+
 // ── Pending plaintext work (§15.1) ───────────────────────────────────────────
 
 /// What an answer will carry, decided again at assembly (§15.1).
@@ -682,6 +704,7 @@ tables! {
     backoff: GossipId => Backoff,
     contacts: GossipId => u64,
     ref_lookups: RefChatId => RefLookup,
+    relays: (ChatId, EventId) => Relay,
 }
 
 /// A table of the in-memory copy: the records and the keys written since the last commit.

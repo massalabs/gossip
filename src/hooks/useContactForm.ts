@@ -12,11 +12,16 @@ import { validateUsernameFormat } from '../utils/validation';
 import { useGossipSdk } from './useGossipSdk';
 import { useFileShareContact } from './useFileShareContact';
 import { useUserIdResolution, FieldState } from './useUserIdResolution';
-import { useDefaultMessageTimer } from './useDefaultMessageTimer';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 import { ROUTES } from '../constants/routes';
+import {
+  isConnectedNonContact,
+  isDisplayNameTaken,
+} from '../utils/conversations';
 
 export function useContactForm() {
+  const { t } = useTranslation('contacts');
   const gossip = useGossipSdk();
   const navigate = useNavigate();
   const userProfile = useAccountStore(s => s.userProfile);
@@ -27,6 +32,8 @@ export function useContactForm() {
     setUserId,
     publicKeys,
     setPublicKeys,
+    connectedNonContact,
+    setConnectedNonContact,
     mnsState,
     handleUserIdChange,
     cachePublicKey,
@@ -62,18 +69,13 @@ export function useContactForm() {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // The message timer of the chat this device founds once the request is
-  // accepted (§7.7): the account's default, pre-selected.
-  const defaultMessageTimer = useDefaultMessageTimer();
-  const [chosenTimer, setChosenTimer] = useState<number | null>(null);
-  const messageTimer = chosenTimer ?? defaultMessageTimer;
-
   const canSubmit =
     !name.error &&
     name.value.trim().length > 0 &&
     !userId.error &&
     userId.value.trim().length > 0 &&
-    (!shareUsername || !customUsernameError) &&
+    // Nothing is sent to a member of a shared chat: no username to check.
+    (connectedNonContact || !shareUsername || !customUsernameError) &&
     publicKeys !== null &&
     !isSubmitting &&
     !userId.loading;
@@ -126,15 +128,17 @@ export function useContactForm() {
         return;
       }
 
-      // check here if user already exists in contacts
+      // A contact already, unless a member of a shared chat who is no
+      // contact: adding them is local (§5.12).
       const contact = await gossip.contacts.get(derivedUserId);
 
-      if (contact) {
-        toast.error('User already registred');
+      if (contact && !isConnectedNonContact(contact)) {
+        toast.error(t('new_contact.already_contact'));
         return;
       }
 
       setPublicKeys(pubKeys);
+      setConnectedNonContact(!!contact);
       cachePublicKey(derivedUserId, pubKeys);
 
       if (fileContact.userName) {
@@ -149,8 +153,10 @@ export function useContactForm() {
       gossip.contacts,
       handleNameChange,
       setPublicKeys,
+      setConnectedNonContact,
       cachePublicKey,
       setUserId,
+      t,
     ]
   );
 
@@ -205,7 +211,7 @@ export function useContactForm() {
       }));
     }
 
-    if (shareUsername) {
+    if (shareUsername && !connectedNonContact) {
       const customUsernameResult = validateUsernameFormat(
         customUsername.trim()
       );
@@ -240,10 +246,7 @@ export function useContactForm() {
     try {
       // Duplicate checks
       const contacts = await gossip.contacts.list();
-      const nameTaken = contacts.some(
-        c => c.name.toLowerCase() === trimmedName.toLowerCase()
-      );
-      if (nameTaken) {
+      if (isDisplayNameTaken(contacts, trimmedName, effectiveUserId)) {
         setName(prev => ({
           ...prev,
           error: 'This display name is already in use',
@@ -253,6 +256,21 @@ export function useContactForm() {
       }
 
       const existing = await gossip.contacts.get(effectiveUserId);
+      if (isConnectedNonContact(existing)) {
+        // A member of a shared chat (§5.12): made a contact on this device
+        // only. No request is sent, so no message or username: the session
+        // exists already, and no message tells anyone who added whom.
+        const added = await gossip.conversations.addAsContact(
+          effectiveUserId,
+          trimmedName
+        );
+        if (!added.success) {
+          setGeneralError('Failed to add contact. Please try again.');
+          return;
+        }
+        navigate(ROUTES.default());
+        return;
+      }
       if (existing) {
         setUserId(prev => ({
           ...prev,
@@ -290,8 +308,9 @@ export function useContactForm() {
       };
 
       try {
-        // Remembered by the SDK until it founds the chat.
-        await gossip.discussions.start(contact, payload, { messageTimer });
+        // A contact request starts no chat (§5.12): either person starts
+        // one later from the contact's screen, with its message timer.
+        await gossip.discussions.start(contact, payload);
       } catch (e) {
         logger.error(
           'Failed to initialize discussion after contact creation:',
@@ -317,7 +336,7 @@ export function useContactForm() {
     shareUsername,
     customUsername,
     message.value,
-    messageTimer,
+    connectedNonContact,
     gossip,
     navigate,
     setUserId,
@@ -331,7 +350,7 @@ export function useContactForm() {
     shareUsername,
     customUsername,
     customUsernameError,
-    messageTimer,
+    connectedNonContact,
 
     generalError,
     isSubmitting,
@@ -345,7 +364,6 @@ export function useContactForm() {
     handleMessageChange,
     handleShareUsernameChange,
     handleCustomUsernameChange,
-    handleMessageTimerChange: setChosenTimer,
     handleFileImport,
     handleVerifiedContact,
     handleSubmit,

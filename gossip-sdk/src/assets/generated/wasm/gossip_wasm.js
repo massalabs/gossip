@@ -919,18 +919,22 @@ export class GroupsNode {
      * An edit starts from the message's current metadata (§2.2: entries a client does not
      * know, `replyTo` included, survive it). `metadata` is a patch: `[]` or `null` keeps
      * everything, an array of `[name, hex]` sets those entries, and
-     * `{"set":[[name, hex], …],"remove":[name, …]}` also removes.
+     * `{"set":[[name, hex], …],"remove":[name, …]}` also removes. `author`: absent keeps
+     * the message's author, or the Gossip ID of any member of the epoch (§7.2; refused for
+     * a reaction). The edit goes in full only when this account is the author before and
+     * after it; any other edit leaves like a relay (§10.2).
      * @param {Uint8Array} epoch
      * @param {Uint8Array} sync_obj_id
      * @param {string} body
      * @param {string} metadata
      * @param {number | null | undefined} scheduled_for
+     * @param {Uint8Array | null | undefined} author
      * @param {number} now
      * @returns {string}
      */
-    publish_edit(epoch, sync_obj_id, body, metadata, scheduled_for, now) {
-        let deferred6_0;
-        let deferred6_1;
+    publish_edit(epoch, sync_obj_id, body, metadata, scheduled_for, author, now) {
+        let deferred7_0;
+        let deferred7_1;
         try {
             const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
             const len0 = WASM_VECTOR_LEN;
@@ -940,18 +944,20 @@ export class GroupsNode {
             const len2 = WASM_VECTOR_LEN;
             const ptr3 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len3 = WASM_VECTOR_LEN;
-            const ret = wasm.groupsnode_publish_edit(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, !isLikeNone(scheduled_for), isLikeNone(scheduled_for) ? 0 : scheduled_for, now);
-            var ptr5 = ret[0];
-            var len5 = ret[1];
+            var ptr4 = isLikeNone(author) ? 0 : passArray8ToWasm0(author, wasm.__wbindgen_malloc);
+            var len4 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_publish_edit(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, !isLikeNone(scheduled_for), isLikeNone(scheduled_for) ? 0 : scheduled_for, ptr4, len4, now);
+            var ptr6 = ret[0];
+            var len6 = ret[1];
             if (ret[3]) {
-                ptr5 = 0; len5 = 0;
+                ptr6 = 0; len6 = 0;
                 throw takeFromExternrefTable0(ret[2]);
             }
-            deferred6_0 = ptr5;
-            deferred6_1 = len5;
-            return getStringFromWasm0(ptr5, len5);
+            deferred7_0 = ptr6;
+            deferred7_1 = len6;
+            return getStringFromWasm0(ptr6, len6);
         } finally {
-            wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+            wasm.__wbindgen_free(deferred7_0, deferred7_1, 1);
         }
     }
     /**
@@ -991,29 +997,30 @@ export class GroupsNode {
         }
     }
     /**
-     * A media message (§7.6): `mimetype` is `type/subtype` (lowercase, no parameters, at most
-     * 127 bytes), `data` any bytes the event can hold; `metadata` as for `publish_message`
-     * (a name or a caption). Returns `{eventId, syncObjId, merge}` in JSON.
+     * A new message on this device only (§9.7): nothing is sent, announced or listed, and no
+     * marker is kept. `body` and `metadata` as for `publish_message` (no reaction, no
+     * scheduling); `author` absent for this account or any member of the epoch. Returns
+     * `{syncObjId}` in JSON.
      * @param {Uint8Array} epoch
-     * @param {string} mimetype
-     * @param {Uint8Array} data
+     * @param {string} body
      * @param {string} metadata
+     * @param {Uint8Array | null | undefined} author
      * @param {number} now
      * @returns {string}
      */
-    publish_media(epoch, mimetype, data, metadata, now) {
+    local_message(epoch, body, metadata, author, now) {
         let deferred6_0;
         let deferred6_1;
         try {
             const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
             const len0 = WASM_VECTOR_LEN;
-            const ptr1 = passStringToWasm0(mimetype, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const ptr1 = passStringToWasm0(body, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len1 = WASM_VECTOR_LEN;
-            const ptr2 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+            const ptr2 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len2 = WASM_VECTOR_LEN;
-            const ptr3 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len3 = WASM_VECTOR_LEN;
-            const ret = wasm.groupsnode_publish_media(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, now);
+            var ptr3 = isLikeNone(author) ? 0 : passArray8ToWasm0(author, wasm.__wbindgen_malloc);
+            var len3 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_local_message(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, now);
             var ptr5 = ret[0];
             var len5 = ret[1];
             if (ret[3]) {
@@ -1025,6 +1032,47 @@ export class GroupsNode {
             return getStringFromWasm0(ptr5, len5);
         } finally {
             wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+        }
+    }
+    /**
+     * A media message (§7.6): `mimetype` is `type/subtype` (lowercase, no parameters, at most
+     * 127 bytes), `data` any bytes the event can hold; `metadata` as for `publish_message`
+     * (a name or a caption); `author` as for `publish_message`. Returns
+     * `{eventId, syncObjId, merge}` in JSON.
+     * @param {Uint8Array} epoch
+     * @param {string} mimetype
+     * @param {Uint8Array} data
+     * @param {string} metadata
+     * @param {Uint8Array | null | undefined} author
+     * @param {number} now
+     * @returns {string}
+     */
+    publish_media(epoch, mimetype, data, metadata, author, now) {
+        let deferred7_0;
+        let deferred7_1;
+        try {
+            const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(mimetype, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ptr3 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len3 = WASM_VECTOR_LEN;
+            var ptr4 = isLikeNone(author) ? 0 : passArray8ToWasm0(author, wasm.__wbindgen_malloc);
+            var len4 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_publish_media(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, now);
+            var ptr6 = ret[0];
+            var len6 = ret[1];
+            if (ret[3]) {
+                ptr6 = 0; len6 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred7_0 = ptr6;
+            deferred7_1 = len6;
+            return getStringFromWasm0(ptr6, len6);
+        } finally {
+            wasm.__wbindgen_free(deferred7_0, deferred7_1, 1);
         }
     }
     /**
@@ -1110,18 +1158,21 @@ export class GroupsNode {
      * `{"t":"Forward","content_type":"Text"|"Media","content":hex}` (a forwarded media
      * message is the canonical encoding of a `Media`), or
      * `{"t":"Media","media":{"mimetype":…,"data":hex}}`; a reaction goes through
-     * `publish_reaction`. `metadata`: an array of `[name, hex]`. Returns
+     * `publish_reaction`. `metadata`: an array of `[name, hex]`. `author`: absent for this
+     * account, or the Gossip ID of any member of the epoch: the message is then published
+     * under that member's name and leaves like a relay (§10.2). Returns
      * `{eventId, syncObjId, merge}` in JSON.
      * @param {Uint8Array} epoch
      * @param {string} body
      * @param {string} metadata
      * @param {number | null | undefined} scheduled_for
+     * @param {Uint8Array | null | undefined} author
      * @param {number} now
      * @returns {string}
      */
-    publish_message(epoch, body, metadata, scheduled_for, now) {
-        let deferred5_0;
-        let deferred5_1;
+    publish_message(epoch, body, metadata, scheduled_for, author, now) {
+        let deferred6_0;
+        let deferred6_1;
         try {
             const ptr0 = passArray8ToWasm0(epoch, wasm.__wbindgen_malloc);
             const len0 = WASM_VECTOR_LEN;
@@ -1129,18 +1180,20 @@ export class GroupsNode {
             const len1 = WASM_VECTOR_LEN;
             const ptr2 = passStringToWasm0(metadata, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len2 = WASM_VECTOR_LEN;
-            const ret = wasm.groupsnode_publish_message(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, !isLikeNone(scheduled_for), isLikeNone(scheduled_for) ? 0 : scheduled_for, now);
-            var ptr4 = ret[0];
-            var len4 = ret[1];
+            var ptr3 = isLikeNone(author) ? 0 : passArray8ToWasm0(author, wasm.__wbindgen_malloc);
+            var len3 = WASM_VECTOR_LEN;
+            const ret = wasm.groupsnode_publish_message(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, !isLikeNone(scheduled_for), isLikeNone(scheduled_for) ? 0 : scheduled_for, ptr3, len3, now);
+            var ptr5 = ret[0];
+            var len5 = ret[1];
             if (ret[3]) {
-                ptr4 = 0; len4 = 0;
+                ptr5 = 0; len5 = 0;
                 throw takeFromExternrefTable0(ret[2]);
             }
-            deferred5_0 = ptr4;
-            deferred5_1 = len4;
-            return getStringFromWasm0(ptr4, len4);
+            deferred6_0 = ptr5;
+            deferred6_1 = len5;
+            return getStringFromWasm0(ptr5, len5);
         } finally {
-            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+            wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
         }
     }
     /**

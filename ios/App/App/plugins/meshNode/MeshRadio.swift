@@ -5,8 +5,36 @@ import Foundation
 /// specification (`wasm/mesh/docs/MESH.md`, "BLE link"). Android uses the
 /// same values in `MeshConstants.kt`.
 enum MeshConstants {
-    /// Advertised and scanned for. Fixed: in the background iOS only finds peers by exact UUID.
-    static let serviceUUID = CBUUID(string: "6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f60")
+    /// Mesh protocol version this build speaks, carried in the last byte of the
+    /// service UUID (see `meshServiceUUID(version:)`): an app can only advertise
+    /// service UUIDs and a name, and an extra byte would make Gossip phones
+    /// easier to tell apart. Same rule as `MeshConstants.kt`.
+    static let meshVersion = 1
+    /// Versions this build can link with: it scans for each one's UUID. A
+    /// version left out is never scanned for.
+    static let supportedMeshVersions = [1]
+    /// Last byte `00` is reserved as a marker for future extensions of this scheme (for example
+    /// a later format that carries the version elsewhere). It is never a version: no build may
+    /// advertise it or give it a version meaning without a new decision, and a build that does
+    /// not implement such an extension neither scans for it nor connects to it.
+    static let reservedExtensionServiceUUID = CBUUID(string: "6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f00")
+    /// The last byte of the service UUID is the version itself: version 1 is
+    /// `…5f01`, version 2 `…5f02`, up to 255; 0 is not a version. The UUID of
+    /// 0.1.0 and 0.1.1 (`…5f60`) reads as version 96, supported by no build:
+    /// they do not mesh with this one, on purpose. The characteristic UUID is
+    /// the same for all versions.
+    static func meshServiceUUID(version: Int) -> CBUUID {
+        precondition((1...255).contains(version), "mesh version out of range")
+        return CBUUID(string: "6a8b2f40-5c1d-4e2a-9b7f-3d0c8e1a5f" + String(format: "%02x", version))
+    }
+    /// Advertised and offered by the peripheral: the current version's UUID.
+    /// In the background iOS only finds peers by exact UUID, hence a UUID per version.
+    static let serviceUUID = MeshConstants.meshServiceUUID(version: MeshConstants.meshVersion)
+    /// Scanned for and looked up on a peer, the current version first. iOS
+    /// background scanning needs this explicit list.
+    static let supportedServiceUUIDs: [CBUUID] =
+        ([MeshConstants.meshVersion] + MeshConstants.supportedMeshVersions.filter { $0 != MeshConstants.meshVersion })
+            .map { MeshConstants.meshServiceUUID(version: $0) }
     /// The one characteristic: centrals write chunks without response, peripherals notify them.
     static let chunkCharacteristicUUID = CBUUID(string: "6a8b2f41-5c1d-4e2a-9b7f-3d0c8e1a5f60")
     /// A chunk is one write or notification of at most `ATT MTU − 3` bytes.
@@ -15,8 +43,10 @@ enum MeshConstants {
     static let maxLinks = 8
     /// Of `maxLinks`, how many other phones may open: the rest are for the neighbours this phone picks.
     static let maxInboundLinks = 4
-    /// How long a central whose link closed is ignored if it subscribes again.
-    static let inboundCooldown: TimeInterval = 60
+    /// How long a central whose link closed is ignored if it subscribes again (as Android).
+    static let inboundCooldown: TimeInterval = 30
+    /// How long a peer whose link closed is not picked again (see Android's RECONNECT_COOLDOWN_MS).
+    static let reconnectCooldown: TimeInterval = 30
     /// A link the core closes within this time of coming up was refused, not lost.
     static let quickClose: TimeInterval = 30
     /// How long a phone that refused our link is left alone (see `NeighbourSelector`).
@@ -111,7 +141,7 @@ final class NeighbourSelector {
         maxLinks: Int = MeshConstants.maxLinks,
         minRssi: Int = -95,
         candidateTtl: TimeInterval = 30,
-        cooldown: TimeInterval = 60
+        cooldown: TimeInterval = MeshConstants.reconnectCooldown
     ) {
         self.maxLinks = maxLinks
         self.minRssi = minRssi

@@ -282,7 +282,7 @@ final class CoreBluetoothMeshRadio: NSObject, MeshRadio {
     private func startScan() {
         guard let central = central, central.state == .poweredOn, !scanning else { return }
         // Duplicates keep RSSI and last-seen fresh in the foreground; iOS ignores this in the background.
-        central.scanForPeripherals(withServices: [MeshConstants.serviceUUID], options: [
+        central.scanForPeripherals(withServices: MeshConstants.supportedServiceUUIDs, options: [
             CBCentralManagerScanOptionAllowDuplicatesKey: true,
         ])
         scanning = true
@@ -409,7 +409,7 @@ extension CoreBluetoothMeshRadio: CBCentralManagerDelegate {
             return
         }
         peripheral.delegate = self
-        peripheral.discoverServices([MeshConstants.serviceUUID])
+        peripheral.discoverServices(MeshConstants.supportedServiceUUIDs)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -449,7 +449,7 @@ extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error = error { DebugLog.w("mesh", "discover services failed", error) }
         guard error == nil,
-              let service = peripheral.services?.first(where: { $0.uuid == MeshConstants.serviceUUID }) else {
+              let service = peripheral.services?.first(where: { MeshConstants.supportedServiceUUIDs.contains($0.uuid) }) else {
             abandon(peripheral)
             return
         }
@@ -524,7 +524,7 @@ extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
-        guard invalidatedServices.contains(where: { $0.uuid == MeshConstants.serviceUUID }),
+        guard invalidatedServices.contains(where: { MeshConstants.supportedServiceUUIDs.contains($0.uuid) }),
               let id = centralLinkByPeer[peripheral.identifier], let link = link(id) else { return }
         closeNow(link)
     }
@@ -571,6 +571,9 @@ extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
         }
     }
 
+    // No equivalent of Android's catch-all connection callback here: the peripheral manager
+    // only reports a central once it subscribes to or writes our characteristic, so other
+    // devices connected to the phone (earbuds, watch) never reach this radio or its limits.
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral,
                            didSubscribeTo characteristic: CBCharacteristic) {
         guard running, characteristic.uuid == MeshConstants.chunkCharacteristicUUID,

@@ -8,8 +8,12 @@
   "filter": {
     "all": "Все",
     "unread": "Непрочитанные",
-    "pending": "Ожидающие",
-    "archived": "Архив"
+    "pending": "Ожидающие"
+  },
+  "archived": {
+    "title": "Архивные чаты",
+    "empty": "Нет архивных чатов",
+    "unread": "Новые сообщения в архивных чатах"
   },
   "message_input": {
     "replying_to": "Ответ для",
@@ -39,7 +43,9 @@
     "edit_name_title": "Изменить название чата",
     "name_updated": "Имя обновлено",
     "name_update_failed": "Не удалось обновить имя",
-    "pin_failed": "Не удалось закрепить чат"
+    "pin_failed": "Не удалось закрепить чат",
+    "no_chat": "Чата пока нет",
+    "chat_invitation": "Приглашает вас в чат"
   },
   "scroll_to_bottom": "К последним сообщениям",
   "search": {
@@ -95,7 +101,7 @@
   "new_discussion": {
     "title": "Новый чат",
     "new_contact": "Новый контакт",
-    "new_group": "Новая группа",
+    "new_group": "Новый чат",
     "contacts": "Контакты",
     "search_contacts": "Поиск контактов",
     "loading_contacts": "Загрузка контактов…",
@@ -120,7 +126,7 @@
     "refuse_title": "Отклонить запрос на связь?",
     "refuse_body": "При отклонении этот запрос на чат будет закрыт.",
     "sections": {
-      "discussions": "Обсуждения",
+      "discussions": "Прежние чаты",
       "contacts": "Контакты",
       "pinned": "Закреплённые",
       "pending": "Ожидающие",
@@ -181,10 +187,10 @@
   "retention_separator": "Автоудаление включено: {{duration}}",
   "filter_label": "Фильтр чатов",
   "waiting_connection": "Ожидание подключения...",
-  "mesh_connected_one": "Подключено к mesh-сети · {{count}} связь",
-  "mesh_connected_few": "Подключено к mesh-сети · {{count}} связи",
-  "mesh_connected_many": "Подключено к mesh-сети · {{count}} связей",
-  "mesh_connected_other": "Подключено к mesh-сети · {{count}} связи",
+  "mesh_connected_one": "Подключено по Bluetooth · {{count}} телефон рядом",
+  "mesh_connected_few": "Подключено по Bluetooth · {{count}} телефона рядом",
+  "mesh_connected_many": "Подключено по Bluetooth · {{count}} телефонов рядом",
+  "mesh_connected_other": "Подключено по Bluetooth · {{count}} телефона рядом",
   "mesh_no_links": "Mesh-сеть включена · рядом нет телефонов",
   "announcement": "Объявление",
   "lock_account": "Заблокировать"

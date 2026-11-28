@@ -14,5 +14,14 @@ export {
   type BulletinItem,
   type TransportConnectivity,
   type MessageRouting,
+  type SendOutcome,
+  type SettledSend,
 } from './messageProtocol/index.js';
-export { HttpStatusError, isSeekerConflict } from './errors.js';
+export {
+  BackendPausedError,
+  HttpStatusError,
+  NetworkError,
+  TransportsFailedError,
+  isSeekerConflict,
+  type TransportFailure,
+} from './errors.js';

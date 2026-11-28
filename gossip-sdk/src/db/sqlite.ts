@@ -1959,6 +1959,7 @@ export class DatabaseConnection {
       await tx.delete(schema.groupObjects);
       await tx.delete(schema.groupRecords);
       await tx.delete(schema.groupOutbox);
+      await tx.delete(schema.groupLocalState);
     });
   }
 
@@ -2000,6 +2001,7 @@ export class DatabaseConnection {
         schema.groupObjects,
         schema.groupRecords,
         schema.groupOutbox,
+        schema.groupLocalState,
       ]) {
         await tx.delete(table).where(eq(table.ownerUserId, userId));
       }
@@ -2020,6 +2022,7 @@ export class DatabaseConnection {
       await tx.delete(schema.groupObjects);
       await tx.delete(schema.groupRecords);
       await tx.delete(schema.groupOutbox);
+      await tx.delete(schema.groupLocalState);
     });
   }
 }

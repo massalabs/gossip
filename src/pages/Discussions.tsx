@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
 import GroupListSection from '../components/groups/GroupListSection';
+import ArchivedChatsRow from '../components/discussions/ArchivedChatsRow';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
@@ -63,7 +64,7 @@ const Discussions: React.FC = () => {
   const groups = useGroupStore(s => s.groups);
   const openChat = useOpenChat();
   // The discussions shown as conversations (§5.12), outside the archived list.
-  const { discussions, archivedCount } = useMemo(() => {
+  const { discussions, archivedCount, archivedUnread } = useMemo(() => {
     const held = new Set(groups.map(g => g.summary.groupId));
     const rows = allDiscussions.filter(d =>
       isConversationRow(
@@ -72,9 +73,18 @@ const Discussions: React.FC = () => {
         held
       )
     );
+    // Archived chats stay archived when a message arrives (product owner,
+    // closer to Telegram): the row of the archived list shows a dot instead.
+    const archivedRows = rows.filter(d => d.archived);
+    const archivedGroups = groups.filter(
+      g => g.archived && g.summary.status !== 'dissolved-deleted'
+    );
     return {
       discussions: rows.filter(d => !d.archived),
-      archivedCount: rows.filter(d => d.archived).length,
+      archivedCount: archivedRows.length + archivedGroups.length,
+      archivedUnread:
+        archivedRows.some(d => d.unreadCount > 0) ||
+        archivedGroups.some(g => g.unread),
     };
   }, [allDiscussions, contacts, groups]);
   const filter = useDiscussionStore(s => s.filter);
@@ -161,7 +171,7 @@ const Discussions: React.FC = () => {
   // Calculate filter counts
   const filterCounts = useMemo(() => {
     if (!gossip.isSessionOpen) {
-      return { all: 0, unread: 0, pending: 0, archived: 0 };
+      return { all: 0, unread: 0, pending: 0 };
     }
     const allCount = discussions.length;
     const unreadCount = discussions.filter(d => {
@@ -186,9 +196,8 @@ const Discussions: React.FC = () => {
       all: allCount,
       unread: unreadCount,
       pending: pendingCount,
-      archived: archivedCount,
     };
-  }, [discussions, archivedCount, gossip.isSessionOpen, sessionsStatuses]);
+  }, [discussions, gossip.isSessionOpen, sessionsStatuses]);
 
   const menuItems: MenuItem[] = useMemo(
     () => [
@@ -305,7 +314,14 @@ const Discussions: React.FC = () => {
       )}
       {/* Swipe left/right to change filter */}
       <div className="flex-1 min-h-0" {...swipeHandlers}>
-        {filter !== 'pending' && filter !== 'archived' && (
+        {filter === 'all' && archivedCount > 0 && !searchQuery.trim() && (
+          <ArchivedChatsRow
+            count={archivedCount}
+            unread={archivedUnread}
+            onOpen={() => navigate(ROUTES.archivedChats())}
+          />
+        )}
+        {filter !== 'pending' && (
           <GroupListSection
             searchQuery={debouncedSearchQuery}
             unreadOnly={filter === 'unread'}

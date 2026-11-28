@@ -320,38 +320,36 @@ describe('Group message timer', { timeout: 300_000 }, () => {
     expect((await alice.groups.get(withCarol))!.messageTimer).toBe(ONE_HOUR);
   });
 
-  it('remembers the timer of a contact request until the chat is founded', async () => {
+  it('starts the chat of a new contact with the timer chosen when starting it', async () => {
     const [alice, bob] = await open(2);
     await alice.contacts.add(bob.userId, 'Bob', bob.publicKeys);
     await bob.contacts.add(alice.userId, 'Alice', alice.publicKeys);
     const contact = (await alice.contacts.get(bob.userId))!;
-    const started = await alice.discussions.start(
-      contact,
-      { username: 'Alice', message: 'hello' },
-      { messageTimer: ONE_HOUR }
-    );
-    expect(started.success).toBe(true);
-    expect(await alice.discussions.get(bob.userId)).toMatchObject({
-      directChatOwed: true,
-      directChatTimer: ONE_HOUR,
+    const started = await alice.discussions.start(contact, {
+      username: 'Alice',
+      message: 'hello',
     });
-
+    expect(started.success).toBe(true);
     await bob.announcements.fetch();
     const d = (await bob.discussions.get(alice.userId))!;
-    // Bob sees the timer before he accepts.
-    expect(d.directChatTimer).toBe(ONE_HOUR);
     expect((await bob.discussions.accept(d)).success).toBe(true);
     await deliver();
+    expect(await alice.conversations.directChatWith(bob.userId)).toBeNull();
 
-    const groupId = await alice.conversations.directChatWith(bob.userId);
-    expect(groupId).not.toBeNull();
-    for (const p of [alice, bob]) {
-      expect((await p.groups.get(groupId!))!.messageTimer).toBe(ONE_HOUR);
-    }
-    expect(await alice.discussions.get(bob.userId)).toMatchObject({
-      directChatOwed: false,
-      directChatTimer: null,
-      linkedGroupId: groupId,
+    const groupId = await alice.conversations.startDirectChat(bob.userId, {
+      messageTimer: ONE_HOUR,
     });
+    await deliver();
+    expect(
+      (await bob.conversations.directChatInvitation(alice.userId))?.messageTimer
+    ).toBe(ONE_HOUR);
+    await bob.conversations.acceptInvitation(groupId);
+    await deliver();
+    for (const p of [alice, bob]) {
+      expect((await p.groups.get(groupId))!.messageTimer).toBe(ONE_HOUR);
+    }
+    expect((await alice.discussions.get(bob.userId))?.linkedGroupId).toBe(
+      groupId
+    );
   });
 });

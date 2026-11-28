@@ -178,6 +178,14 @@ impl Node {
         self.outbox.items.remove(key);
     }
 
+    /// Whether a notice of the event to `peer` is queued.
+    pub(crate) fn notice_queued(&self, peer: GossipId, chat: ChatId, id: EventId) -> bool {
+        self.work_refs.get(&(chat, id)).is_some_and(|keys| {
+            keys.iter()
+                .any(|k| k.0 == peer && matches!(self.t.queue.get(k), Some(Work::Notice { .. })))
+        })
+    }
+
     /// Whether a full send (or, with `notice`, any send) of the event to `peer` is queued.
     fn queued_for(&self, peer: GossipId, chat: ChatId, id: EventId, notice: bool) -> bool {
         self.work_refs.get(&(chat, id)).is_some_and(|keys| {
@@ -243,7 +251,9 @@ impl Node {
             .queue
             .keys()
             .any(|k| !self.outbox.items.contains(k) && self.assemblable(&k.0, now));
-        if !any {
+        // A record that lets a notice through despite its hint ends with this round, even
+        // when nothing can be assembled (see `relay`).
+        if !any && !self.relay_round_owed() {
             return Ok(Vec::new());
         }
         let r = self.run(store, now, rng, |n, cx| {
@@ -258,6 +268,7 @@ impl Node {
             }
             peers.dedup();
             if peers.is_empty() {
+                n.end_relay_round();
                 return Ok(Vec::new());
             }
             let mut due = u64::MAX;
@@ -303,6 +314,7 @@ impl Node {
                     });
                 }
             }
+            n.end_relay_round();
             Ok(out)
         });
         if r.is_err() {
@@ -603,8 +615,11 @@ impl Node {
                     }
                 }
                 Work::Notice { chat_id, event_id } => {
+                    // The one notice a relay-like publication owes the peer its own hint
+                    // names is not cancelled by that hint (see `relay`).
                     let ok = self.sendable(cx, &peer, &chat_id, &event_id)?.is_some()
-                        && !self.has_hint(chat_id, peer, event_id, cx.now);
+                        && (!self.has_hint(chat_id, peer, event_id, cx.now)
+                            || self.notify_despite_hint(chat_id, peer, event_id));
                     if ok {
                         notices.push((
                             key,
@@ -1162,6 +1177,7 @@ impl Node {
             self.task_wakeup(),
             self.scan_wakeup(),
             self.next_hint_expiry(),
+            self.relay_wakeup(),
         ]
         .into_iter()
         .flatten()

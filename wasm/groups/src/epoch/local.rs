@@ -66,6 +66,11 @@ pub struct Published {
     pub merge: Merge,
     /// The events the publication pruned that were retained before it, ascending (§9.3).
     pub pruned: Vec<EventId>,
+    /// The author of the message's current result just before the publication: `None` for
+    /// a new message, or when there was no current result (a deletion, a tombstone).
+    /// Dissemination needs it: an edit goes out in full only when the user is the author
+    /// before and after it (§10.2).
+    pub previous_author: Option<GossipId>,
 }
 
 /// A change of a message's metadata (§6.2, §7.6): an edit starts from the current entries,
@@ -156,9 +161,30 @@ impl Epoch<'_> {
         Ok(())
     }
 
-    /// Publishes a new message by `author` (this device's identity): `created_at =
+    /// Whether a message on this device only may be created here (§9.7): the epoch was
+    /// accepted, and it is active or only readable on this device (after a kick or a visible
+    /// leave, or dissolved and kept). Refused while waiting for a kick and in a superseded
+    /// chat of two, where a normal send is refused too and nothing local is made.
+    ///
+    /// Why a read-only epoch takes one (decided by the owner on 2026-11-27, D.99): the user
+    /// may edit and delete every message there on this device only, and a new message must
+    /// be possible as well, under any member of the epoch, or the history of a chat the user
+    /// can only read would be the one place where it cannot be reshaped. Nothing is sent from
+    /// it: the device is inactive in the group and sends nothing for it anyway (§10.4).
+    fn check_can_create_locally(&self) -> Result<(), ChangeError> {
+        if !self.accepted {
+            return Err(ChangeError::NotAccepted);
+        }
+        match self.group_state {
+            GroupState::Active | GroupState::ReadOnlyAfterKick | GroupState::Dissolved => Ok(()),
+            GroupState::Waiting | GroupState::Superseded => Err(ChangeError::GroupState),
+        }
+    }
+
+    /// Publishes a new message by `author`, this device's identity or any member of the
+    /// epoch (a message published under another member's name, §10.2): `created_at =
     /// last_modified_at = now`, or `= S` when scheduled for `S` (§7.2). The sync-object ID is
-    /// fresh and random.
+    /// fresh and random. An author who is not a member is refused when the event is created.
     ///
     /// # Errors
     ///
@@ -191,8 +217,14 @@ impl Epoch<'_> {
 
     /// Publishes an edit of a message of this epoch (§7.2): its metadata is the current one
     /// with `metadata` applied (a map sets those entries and keeps the others),
-    /// `created_at` and the author are kept, `edited = true`, and `last_modified_at = max(now, previous + 1)` with the
+    /// `created_at` is kept, the author is kept or set to `author` (any member of the epoch,
+    /// §7.2), `edited = true`, and `last_modified_at = max(now, previous + 1)` with the
     /// previous value of the current applied result, or `S` when scheduled for `S`.
+    ///
+    /// Why an edit may change the author: the edit event already carries the whole result,
+    /// author included, and receivers accept any member as the author of any version
+    /// (§6.2, §7.1), so this is a publisher-side choice with no format or merge change. A
+    /// reaction is refused, as for every edit: its ID is computed from its author (§7.6).
     ///
     /// # Errors
     ///
@@ -207,6 +239,7 @@ impl Epoch<'_> {
         body: Body,
         metadata: impl Into<MetadataPatch>,
         scheduled_for: Option<u64>,
+        author: Option<GossipId>,
     ) -> Result<Published, ChangeError> {
         let metadata: MetadataPatch = metadata.into();
         let scheduled = scheduled_time(scheduled_for, now)?;
@@ -220,7 +253,7 @@ impl Epoch<'_> {
             };
             Ok(Payload::Content(Content {
                 sync_obj_id,
-                author: current.author,
+                author: author.unwrap_or(current.author),
                 created_at: current.created_at,
                 last_modified_at,
                 body,
@@ -345,6 +378,10 @@ impl Epoch<'_> {
         let mut tx = self.tx(&*store);
         tick(&mut tx, now)?;
         let payload = build(&tx)?;
+        let previous_author = match tx.object(&payload.sync_obj_id())?.and_then(|o| o.current) {
+            Some(StoredResult::Content(c)) => Some(c.author),
+            _ => None,
+        };
         let tips = dag::tips(&tx, &chat, now)?;
         let parents = dag::choose_parents(&tips, rng);
         let event_id = EventId::new(now, bytes(rng));
@@ -361,6 +398,7 @@ impl Epoch<'_> {
             event,
             merge,
             pruned,
+            previous_author,
         })
     }
 
@@ -490,6 +528,109 @@ impl Epoch<'_> {
         let (changes, pruned) = tx.finish()?;
         store.commit(changes)?;
         Ok(pruned)
+    }
+
+    /// A new message on this device only (§9.7), by `author`, this device's identity or any
+    /// member of the epoch: `created_at = last_modified_at = now`, a fresh random sync-object
+    /// ID, nothing sent, announced or listed, ever. Returns its sync-object ID.
+    ///
+    /// It is stored in the shape a message of this device's own takes once all its events
+    /// were pruned (§9.3), so that it is indistinguishable from an evicted message whose
+    /// result is still shown:
+    ///
+    /// - in an epoch with no message timer: the result only, no event row, no stub, no
+    ///   edge. A real message's stubs are not linked to it there (`stubs` stays empty
+    ///   without a timer), so a result with no event is an ordinary state, and a
+    ///   fabricated stub would be a permanent object that need not exist;
+    /// - in an epoch with a timer: the result plus ONE fabricated stub, a fresh event ID
+    ///   dated now with parent links to the current tips chosen as a publication would
+    ///   ([`dag::choose_parents`]), listed in the object's `stubs`, so that the timer erases
+    ///   the stub with the message. Why: under a timer a real message always lists at least
+    ///   one carrier or stub, so an empty list would be a structural mark.
+    ///
+    /// No marker of any kind is kept (no flag, field, table or log outside the debug build):
+    /// that is the whole point (deniability, §16.3). The stub is a pruned row: never a tip,
+    /// never a parent, never announced or listed, and a request for it is answered "not
+    /// available", as for an unknown ID. Everything that applies to a message the device no
+    /// longer serves applies to this one unchanged (replies, reactions, local edit, local
+    /// deletion, Retry): the engine cannot tell it apart, by construction. This shape was
+    /// chosen by the owner on 2026-11-27 and MAY BE REVISED (D.93).
+    ///
+    /// A reaction is refused (a reaction belongs to its author, and has its own action), and
+    /// so is a date in the future: there is no scheduling for a message nobody else gets.
+    ///
+    /// It is also accepted in an epoch this device can only read (see
+    /// [`Self::check_can_create_locally`]), with the same shape and no marker. Nothing there
+    /// would ever serve or announce it: an inactive device sends nothing for the group, and
+    /// if the device is later added back, the message is what an evicted message is in an
+    /// earlier epoch (no row, or one pruned stub that is never a tip, a parent or listed).
+    ///
+    /// # Errors
+    ///
+    /// [`ChangeError`]; nothing was committed then.
+    pub fn local_message<S: Storage + ?Sized>(
+        &self,
+        store: &mut S,
+        now: u64,
+        rng: &mut dyn Randomness,
+        author: GossipId,
+        body: Body,
+        metadata: BTreeMap<String, Vec<u8>>,
+    ) -> Result<SyncObjId, ChangeError> {
+        self.check_can_create_locally()?;
+        if matches!(body, Body::Reaction(_)) {
+            return Err(ChangeError::Invalid(Error::NotAllowed("a reaction")));
+        }
+        let chat = self.chat_id();
+        let mut tx = self.tx(&*store);
+        tick(&mut tx, now)?;
+        let sync_obj_id = SyncObjId::from_bytes(bytes(rng));
+        if tx.object(&sync_obj_id)?.is_some() {
+            return Err(ChangeError::IdCollision);
+        }
+        let content = Content {
+            sync_obj_id,
+            author,
+            created_at: now,
+            last_modified_at: now,
+            body,
+            edited: false,
+            metadata,
+        };
+        // The result must pass every rule a published one passes (a member as the author,
+        // sizes, metadata), so that a Retry of it stays valid: validated as an event created
+        // now, as a local-only edit is.
+        MessageEvent::create(
+            self.root,
+            EventId::new(now, [0; 16]),
+            &[],
+            Payload::Content(content.clone()),
+        )
+        .map_err(ChangeError::Invalid)?;
+        let timer = tx.message_timer();
+        let mut obj = ObjectRecord::empty(sync_obj_id, true);
+        // The same bookkeeping as a received or published first version (`apply_new`):
+        // the moment of the timer and the date of the erasure.
+        note_version(&mut obj, &content, timer);
+        obj.expires_at = super::moment(&content, timer);
+        obj.current = Some(StoredResult::Content(content));
+        if obj.erase_at.is_some() {
+            // The parents a publication would name now (§6.1), so that the stub's links
+            // look like those of an event of this device created at this moment.
+            let tips = dag::tips(&tx, &chat, now)?;
+            let parents = dag::choose_parents(&tips, rng);
+            let stub = EventId::new(now, bytes(rng));
+            if tx.row(&stub)?.is_some() || parents.contains(&stub) {
+                return Err(ChangeError::IdCollision);
+            }
+            tx.put_edges(stub, parents);
+            prune_in(&mut tx, &mut obj, stub);
+        }
+        tx.put_object(obj);
+        expire(&mut tx, now)?;
+        let (changes, _) = tx.finish()?;
+        store.commit(changes)?;
+        Ok(sync_obj_id)
     }
 }
 
@@ -747,6 +888,7 @@ mod tests {
                         body.clone(),
                         metadata.clone(),
                         None,
+                        None,
                     )
                     .map(|_| ()),
                 Err(err.clone())
@@ -784,6 +926,7 @@ mod tests {
                 Body::Text("edited".into()),
                 BTreeMap::new(),
                 None,
+                None,
             )
             .unwrap();
         assert_eq!(edit.merge, Merge::Won);
@@ -806,6 +949,7 @@ mod tests {
                 sync,
                 Body::Text("again".into()),
                 BTreeMap::new(),
+                None,
                 None,
             )
             .unwrap();
@@ -856,6 +1000,7 @@ mod tests {
                         sync,
                         Body::Text("edited".into()),
                         metadata,
+                        None,
                         None,
                     )
                     .unwrap(),
@@ -938,6 +1083,7 @@ mod tests {
                 Body::Text("friday".into()),
                 BTreeMap::new(),
                 Some(s),
+                None,
             )
             .unwrap();
         assert_eq!(scheduled.merge, Merge::Pending);
@@ -950,6 +1096,7 @@ mod tests {
                 sync,
                 Body::Text("now".into()),
                 BTreeMap::new(),
+                None,
                 None,
             )
             .unwrap();
@@ -980,6 +1127,7 @@ mod tests {
                 sync,
                 Body::Text("x".into()),
                 BTreeMap::new(),
+                None,
                 None,
             )
         };
@@ -1400,6 +1548,7 @@ mod tests {
                 id,
                 Body::Text("x".into()),
                 BTreeMap::new(),
+                None,
                 None
             ),
             refused

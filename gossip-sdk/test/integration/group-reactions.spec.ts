@@ -320,6 +320,7 @@ describe('Group reactions and media', { timeout: 180_000 }, () => {
         mimetype: string,
         data: Uint8Array,
         metadata: string,
+        author: Uint8Array | undefined,
         now: number
       ) => string;
     };
@@ -332,7 +333,14 @@ describe('Group reactions and media', { timeout: 180_000 }, () => {
         run: (op: (n: unknown) => unknown) => Promise<unknown>;
       }
     ).run(() =>
-      node.publish_media(epoch, 'image/png', new Uint8Array(1234), '[]', clock)
+      node.publish_media(
+        epoch,
+        'image/png',
+        new Uint8Array(1234),
+        '[]',
+        undefined,
+        clock
+      )
     );
     await deliver();
     for (const p of peers) {

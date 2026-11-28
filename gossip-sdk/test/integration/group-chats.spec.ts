@@ -190,11 +190,26 @@ describe('Group chats', { timeout: 120_000 }, () => {
       )
     ).toBe(true);
 
-    // Bob leaves: the group is closed and erased on his device.
+    // Bob archives the chat: a mark on his device only. Unarchiving leaves
+    // no row; the chat keeps receiving while archived.
+    expect(await bob.groups.archived()).toEqual([]);
+    await bob.groups.setArchived(groupId, true);
+    expect(await bob.groups.archived()).toEqual([groupId]);
+    expect(await alice.groups.archived()).toEqual([]);
+    await bob.groups.setArchived(groupId, false);
+    expect(await bob.groups.archived()).toEqual([]);
+    await bob.groups.setArchived(groupId, true);
+    await alice.groups.sendMessage(groupId, 'while archived');
+    await deliver();
+    expect(await texts(bob.groups, groupId)).toContain('while archived');
+
+    // Bob leaves: the group is closed and erased on his device, its archive
+    // mark with it.
     await bob.groups.leave(groupId, 'Signed');
     await deliver();
     expect(await bob.groups.get(groupId)).toBeNull();
     expect(await bob.groups.list()).toEqual([]);
+    expect(await bob.groups.archived()).toEqual([]);
     // The owner's device removes the leaver once the leaves are quiet (§5.5).
     clock += 31_000;
     await deliver();

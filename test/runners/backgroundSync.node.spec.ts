@@ -81,6 +81,30 @@ describe('background sync runner', () => {
     expect(runner.fetch).not.toHaveBeenCalled();
   });
 
+  it('sends no request while notifications are off', async () => {
+    const runner = loadRunner({
+      'gossip-active-seekers': seekers,
+      'gossip-api-base-url': 'https://api.example.test/v2/',
+      'gossip-notifications-enabled': 'false',
+    });
+
+    await runner.run();
+
+    expect(runner.fetch).not.toHaveBeenCalled();
+  });
+
+  it('fetches when notifications are back on', async () => {
+    const runner = loadRunner({
+      'gossip-active-seekers': seekers,
+      'gossip-api-base-url': 'https://api.example.test/v2/',
+      'gossip-notifications-enabled': 'true',
+    });
+
+    await runner.run();
+
+    expect(runner.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('fetches from the stored API URL', async () => {
     const runner = loadRunner({
       'gossip-active-seekers': seekers,

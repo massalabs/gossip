@@ -35,15 +35,23 @@ import {
   SessionMessageTooLargeError,
   type SessionModule,
 } from '../wasm/session.js';
-import type { IMessageProtocol } from '../api/messageProtocol/types.js';
+import type {
+  IMessageProtocol,
+  SendOutcome,
+  SettledSend,
+} from '../api/messageProtocol/types.js';
+import {
+  BACKEND_PAUSE_MAX_MS,
+  sendTracked,
+} from '../api/messageProtocol/composite.js';
+import { NETWORK_RETENTION_MS } from '../config/protocol.js';
 import type { Queries, GroupBatch } from '../db/queries/index.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { SdkConfig } from '../config/sdk.js';
 import { serializeGroupPlaintext } from '../utils/messageSerialization.js';
 import { decodeUserId, encodeUserId } from '../utils/userId.js';
 import { Logger } from '../utils/logs.js';
-import { isFinalStatus } from '../api/restClient.js';
-import { isSeekerConflict } from '../api/errors.js';
+import { isFinalSendError, isSeekerConflict } from '../api/errors.js';
 import type { SeekerConflictHandler } from './seekerConflicts.js';
 import {
   debugLogEnabled,
@@ -212,9 +220,9 @@ export interface GroupInvitation {
   messageTimer: number;
   /**
    * The message timer (ms, 0 = forever) the owner's contact request
-   * announced, when this chat of two keeps another (§5.12): accepting the
-   * request did not cover it, so it is asked, saying what differs. Null for
-   * any other invitation.
+   * announced, when this chat of two keeps another (§5.12, D.89). Always
+   * null since 0.1.2, which records no consent, except under a consent a
+   * device recorded with 0.1.0 or 0.1.1 (it expires within 14 days).
    */
   announcedTimer: number | null;
 }
@@ -497,16 +505,12 @@ const MAX_WAKEUP_MS = 60 * 60 * 1000;
 const MAX_OUTBOX_RETRY_MS = 60 * 60 * 1000;
 
 /**
- * Whether a send failed for good: the server answered a 4xx other than a
- * timeout or rate limiting. A 409 means that it holds another value under the
- * seeker (the same value would have been taken), so this one never arrives.
+ * The longest wait between two posts to the backend of a ciphertext only a
+ * mesh took: the backend's longest pause, so that a post follows soon after
+ * the backend is asked again. A post while the backend is paused costs no
+ * request (the composite transport refuses it at once).
  */
-function isFinalSendError(error: unknown): boolean {
-  const status = /HTTP (\d{3})/.exec(
-    error instanceof Error ? error.message : ''
-  );
-  return status !== null && isFinalStatus(Number(status[1]));
-}
+const MESH_REPOST_MAX_RETRY_MS = BACKEND_PAUSE_MAX_MS;
 
 function userIdOf(hex: string): string {
   return encodeUserId(hexToBytes(hex));
@@ -514,6 +518,18 @@ function userIdOf(hex: string): string {
 
 function hexOfUser(userId: string): string {
   return bytesToHex(decodeUserId(userId));
+}
+
+/**
+ * The author of a new message as the engine takes it: absent for this
+ * account (`owner`), otherwise the member's 32-byte ID.
+ */
+function authorBytes(
+  author: string | undefined,
+  owner: string
+): Uint8Array | undefined {
+  if (author === undefined || author === owner) return undefined;
+  return decodeUserId(author);
 }
 
 function variant(v: unknown): [string, Raw] {
@@ -866,6 +882,8 @@ export class GroupService {
   private closed = false;
   /** Failed sends of each outbox row since this service opened. */
   private outboxFailures = new Map<number, number>();
+  /** Posts to the backend of what only a mesh took, while they run. */
+  private reposting: Promise<void> | null = null;
   /**
    * The end of the chain when it is a send that has not started yet: a kick
    * then adds nothing, since that send runs after everything queued so far.
@@ -1194,7 +1212,7 @@ export class GroupService {
       .catch(() => undefined);
     let waited: ReturnType<typeof setTimeout> | null = null;
     await Promise.race([
-      this.chain,
+      Promise.all([this.chain, this.reposting]),
       this.opening?.catch(() => undefined),
       new Promise<void>(resolve => {
         waited = setTimeout(resolve, CLOSE_WAIT_MS);
@@ -1501,6 +1519,15 @@ export class GroupService {
         { dur: since(pumpStarted) }
       );
     }
+    // A chat closed on this device keeps no local mark (`groupLocalState`).
+    const closed = changes
+      .filter(c => variant(c.kind)[0] === 'Closed')
+      .map(c => c.group as string);
+    if (closed.length > 0) {
+      await this.queries.groups
+        .forgetLocalState(this.owner, closed)
+        .catch(() => logger.error('local marks of a closed chat not deleted'));
+    }
     if (changes.length > 0) {
       this.eventEmitter.emit(SdkEventType.GROUPS_CHANGED, {
         changes: changes.map(c => {
@@ -1799,8 +1826,9 @@ export class GroupService {
       });
       this.encrypted.shift();
       const sendStarted = performance.now();
+      let outcome: SendOutcome;
       try {
-        await this.messageProtocol.sendMessage({
+        outcome = await sendTracked(this.messageProtocol, {
           seeker: e.seeker,
           ciphertext: e.ciphertext,
         });
@@ -1833,20 +1861,100 @@ export class GroupService {
           seeker: shortId(e.seeker),
           size: e.ciphertext.length,
           retry: false,
+          by: outcome.acceptedBy,
         },
         { dur: since(sendStarted) }
       );
-      if (id !== null) {
-        this.outboxFailures.delete(id);
-        await this.queries.groups
-          .deleteOutbox(id)
-          .catch(swallowed('delete_outbox'));
-      }
+      if (id !== null) await this.sent(id, encodeUserId(e.to), outcome);
+      // Published once, when the first transport took it: that is what makes
+      // the message sent. A later post to the backend is not a new send.
       if (handOff && this.alive(e.node)) {
         e.node.published(e.handle!, this.now());
         await this.persist();
       }
     }
+  }
+
+  /**
+   * A stored ciphertext that a transport took. Once the backend has it, it
+   * goes. One that only a mesh took stays, marked, to be posted to the
+   * backend later (`repostMeshOnly`): a mesh node uploads nothing of its own
+   * unless it bridges, so a peer that reads the backend alone would never get
+   * it, and its session's chain would stop there. The mark is in the
+   * database, so a restart in between keeps it. The backend's own answer to
+   * this send may still come (`settled`): it then deletes the row, or brings
+   * a 409, handled as on a send that failed.
+   */
+  private async sent(
+    id: number,
+    contactUserId: string,
+    outcome: SendOutcome
+  ): Promise<void> {
+    this.outboxFailures.delete(id);
+    if (outcome.acceptedBy.includes('internet')) {
+      await this.queries.groups.deleteOutbox(id).catch(() => undefined);
+      return;
+    }
+    // The first post waits for the backend's answer to this send (below),
+    // so that the two never run together; this time only applies if that
+    // answer never comes (the app closed first).
+    const now = this.now();
+    dlog('sdk', 'message.mesh_only', {
+      outbox: id,
+      peer: shortId(contactUserId),
+      by: outcome.acceptedBy,
+    });
+    await this.queries.groups
+      .markOutboxMeshOnly(
+        id,
+        new Date(now),
+        new Date(now + MESH_REPOST_MAX_RETRY_MS)
+      )
+      .catch(() => undefined);
+    // Never awaited (the chain goes on) and never rejects.
+    void outcome.settled
+      .then(settled => this.settledLate(id, contactUserId, settled))
+      .catch(() => undefined);
+  }
+
+  /** The backend answered a send that a mesh had taken first. */
+  private async settledLate(
+    id: number,
+    contactUserId: string,
+    settled: SettledSend
+  ): Promise<void> {
+    // Closed: the row stays marked and is posted at the next open.
+    if (this.closed) return;
+    if (debugLogEnabled()) {
+      dlog('sdk', 'message.send.settled', {
+        outbox: id,
+        peer: shortId(contactUserId),
+        by: settled.acceptedBy,
+        failed: settled.failures.map(f => f.kind),
+        conflict: settled.failures.some(
+          f => f.kind === 'internet' && isSeekerConflict(f.error)
+        ),
+      });
+    }
+    if (settled.acceptedBy.includes('internet')) {
+      this.outboxFailures.delete(id);
+      await this.queries.groups.deleteOutbox(id);
+      return;
+    }
+    const conflict = settled.failures.find(
+      f => f.kind === 'internet' && isSeekerConflict(f.error)
+    );
+    if (conflict) {
+      await this.outboxFailed(id, contactUserId, conflict.error);
+      return;
+    }
+    // Any other failure: posted again (repostMeshOnly) after the usual wait;
+    // while the backend is paused, a post costs no request.
+    await this.queries.groups.rescheduleOutbox(
+      id,
+      new Date(this.now() + this.config.messages.retryDelayMs)
+    );
+    this.schedule();
   }
 
   /** Sends again, as stored, the ciphertexts that failed. */
@@ -1857,6 +1965,8 @@ export class GroupService {
     );
     for (const row of due) {
       if (this.closed) return;
+      // posted off the operation queue, by repostMeshOnly
+      if (row.meshOnlySince) continue;
       const sendStarted = performance.now();
       const rowFields = debugLogEnabled()
         ? {
@@ -1867,8 +1977,9 @@ export class GroupService {
             failures: this.outboxFailures.get(row.id) ?? 0,
           }
         : undefined;
+      let outcome: SendOutcome;
       try {
-        await this.messageProtocol.sendMessage({
+        outcome = await sendTracked(this.messageProtocol, {
           seeker: row.seeker,
           ciphertext: row.ciphertext,
         });
@@ -1887,14 +1998,113 @@ export class GroupService {
       dlog(
         'sdk',
         'message.sent',
-        { ...rowFields, retry: true },
+        { ...rowFields, retry: true, by: outcome.acceptedBy },
         { dur: since(sendStarted) }
       );
-      this.outboxFailures.delete(row.id);
-      await this.queries.groups
-        .deleteOutbox(row.id)
-        .catch(swallowed('delete_outbox'));
+      await this.sent(row.id, row.contactUserId, outcome);
     }
+    this.repostMeshOnly();
+  }
+
+  /**
+   * Starts posting to the backend, in the background, the due ciphertexts
+   * that only a mesh took; nothing if a run is going on.
+   *
+   * Off the operation queue: these posts change nothing in the engine, and
+   * a backend that fails takes up to a minute to say so, which every
+   * operation queued behind would wait for.
+   */
+  private repostMeshOnly(): void {
+    if (this.reposting || this.closed) return;
+    this.reposting = this.repostDue()
+      .catch(() => undefined)
+      .finally(() => {
+        this.reposting = null;
+      });
+  }
+
+  /**
+   * Posts the due ciphertexts only a mesh took, oldest first, with
+   * `internetOnly` routing (the mesh has them already). Each goes once the
+   * backend has it, or refuses it for good (a 409 renews the session, as on a
+   * first send), or once the network's retention has passed since the mesh
+   * took it: the backend would no longer keep it, nor the peer accept it.
+   * `published` is not called again.
+   *
+   * Stops at the first failure that may pass: the backend is out of reach,
+   * and the rest are moved to the same time rather than each paying for a
+   * failing request. Accepted cost: when the internet returns, these posts
+   * come in a burst, which shows the backend that the account was offline
+   * for a while.
+   */
+  private async repostDue(): Promise<void> {
+    const now = this.now();
+    const due = (
+      await this.queries.groups.dueOutbox(this.owner, new Date(now))
+    ).filter(row => row.meshOnlySince !== null);
+    for (const [index, row] of due.entries()) {
+      if (this.closed) return;
+      if (now - row.meshOnlySince!.getTime() > NETWORK_RETENTION_MS) {
+        dlog('sdk', 'message.repost', {
+          outbox: row.id,
+          peer: shortId(row.contactUserId),
+          result: 'expired',
+        });
+        this.outboxFailures.delete(row.id);
+        await this.queries.groups.deleteOutbox(row.id);
+        continue;
+      }
+      const repostStarted = performance.now();
+      try {
+        await this.messageProtocol.sendMessage(
+          { seeker: row.seeker, ciphertext: row.ciphertext },
+          { internetOnly: true }
+        );
+      } catch (error) {
+        dlog(
+          'sdk',
+          'message.repost',
+          {
+            outbox: row.id,
+            peer: shortId(row.contactUserId),
+            result: 'failed',
+            ...errFields(error),
+          },
+          { lvl: 'warn', dur: since(repostStarted) }
+        );
+        const kept = await this.outboxFailed(
+          row.id,
+          row.contactUserId,
+          error,
+          MESH_REPOST_MAX_RETRY_MS
+        );
+        if (kept === null) continue;
+        for (const rest of due.slice(index + 1)) {
+          await this.queries.groups.rescheduleOutbox(rest.id, kept);
+        }
+        return;
+      }
+      dlog(
+        'sdk',
+        'message.repost',
+        { outbox: row.id, peer: shortId(row.contactUserId), result: 'sent' },
+        { dur: since(repostStarted) }
+      );
+      this.outboxFailures.delete(row.id);
+      await this.queries.groups.deleteOutbox(row.id);
+    }
+  }
+
+  /**
+   * The network changed: the ciphertexts only a mesh took are posted to the
+   * backend now, rather than at their next retry.
+   */
+  async networkChanged(): Promise<void> {
+    if (this.closed) return;
+    await this.queries.groups
+      .meshOnlyOutboxDueNow(this.owner, new Date(this.now()))
+      .catch(() => 0);
+    this.repostMeshOnly();
   }
 
   /**
@@ -1902,17 +2112,23 @@ export class GroupService {
    * is deleted: its plaintext was handed off but is never published, so the
    * engine records no delivery hint for it and its events stay to be
    * synchronised. Any other failure is retried, each wait twice the one
-   * before, up to an hour.
+   * before, up to an hour (`maxDelayMs`); returns when, or null once deleted.
+   * When the backend and a mesh both refused it, it is final only if both
+   * were (see `isFinalSendError`).
    *
    * A seeker the server already holds (409) means the session with the peer
    * is behind what was already published: it is renewed (at most once an
-   * hour), and the content is assembled again on the new one.
+   * hour), and the content is assembled again on the new one. A 409 that
+   * comes after a mesh took the ciphertext renews the session the same way;
+   * the content was published by then (the mesh may still deliver it), so it
+   * is not assembled again.
    */
   private async outboxFailed(
     id: number,
     contactUserId: string,
-    error: unknown
-  ): Promise<void> {
+    error: unknown,
+    maxDelayMs = MAX_OUTBOX_RETRY_MS
+  ): Promise<Date | null> {
     if (isSeekerConflict(error)) {
       dlog(
         'sessions',
@@ -1925,7 +2141,7 @@ export class GroupService {
       // Not awaited: the renewal posts an announcement and tells this
       // service, which must not wait for its own queue.
       void this.seekerConflicts?.handle(contactUserId);
-      return;
+      return null;
     }
     if (isFinalSendError(error)) {
       dlog(
@@ -1936,12 +2152,12 @@ export class GroupService {
       );
       this.outboxFailures.delete(id);
       await this.queries.groups.deleteOutbox(id);
-      return;
+      return null;
     }
     const failures = (this.outboxFailures.get(id) ?? 0) + 1;
     this.outboxFailures.set(id, failures);
     const delay = Math.min(
-      MAX_OUTBOX_RETRY_MS,
+      maxDelayMs,
       this.config.messages.retryDelayMs * 2 ** Math.min(failures - 1, 20)
     );
     dlog('sdk', 'message.retry.scheduled', {
@@ -1950,10 +2166,9 @@ export class GroupService {
       failures,
       delay,
     });
-    await this.queries.groups.rescheduleOutbox(
-      id,
-      new Date(this.now() + delay)
-    );
+    const at = new Date(this.now() + delay);
+    await this.queries.groups.rescheduleOutbox(id, at);
+    return at;
   }
 
   /**
@@ -2167,6 +2382,10 @@ export class GroupService {
   }
 
   /**
+   * Unused by the SDK since 0.1.2: accepting a contact request no longer
+   * consents to a chat (§5.12, D.89 withdrawn); kept until the engine's
+   * consent is removed.
+   *
    * Consents (or withdraws the consent) to the direct chat `peer` founds
    * after this user accepted its contact request (§5.12): one-shot, 14 days.
    * `announcedTimer` is the message timer the request announced (ms), if
@@ -2412,6 +2631,29 @@ export class GroupService {
     );
   }
 
+  /**
+   * The chats archived on this device: a mark kept on this device only
+   * (`groupLocalState`), never sent nor given to the engine, so that nobody
+   * else can tell. An archived chat keeps receiving like any other.
+   */
+  archived(): Promise<GroupId[]> {
+    return this.queries.groups.archivedGroups(this.owner);
+  }
+
+  /** Archives a chat on this device, or moves it back (see `archived`). */
+  setArchived(groupId: GroupId, archived: boolean): Promise<void> {
+    return this.queries.groups.setArchived(this.owner, groupId, archived);
+  }
+
+  /**
+   * Sets (or, with null, clears) the user's own name for a chat (§5.11): a
+   * device-only field (`local_name`) of the device's record of the chat,
+   * beside its roots. Never sent. The root, which holds the shared name and
+   * is hashed into the root ID, is never changed by it and stays intact in
+   * storage. When the owner saves a shared name for everyone, the owner's
+   * own name is cleared with this call, so that the owner sees what they
+   * typed (D.101).
+   */
   setLocalName(groupId: GroupId, name: string | null): Promise<void> {
     return this.run(
       node =>
@@ -2440,7 +2682,45 @@ export class GroupService {
     };
   }
 
-  /** Sends a message to the group's current epoch, possibly as a reply. */
+  /**
+   * The metadata of a new message as the engine takes it: `metadata`, with
+   * `replyTo` encoded from the reply targets.
+   */
+  private newMessageMetadata(
+    node: GroupsNode,
+    options: {
+      metadata?: Record<string, Uint8Array>;
+      replyTo?: GroupMessageRef[];
+    }
+  ): string {
+    const metadata = { ...(options.metadata ?? {}) };
+    if (options.replyTo && options.replyTo.length > 0) {
+      const targets = options.replyTo.map(t => {
+        const reference = node.ref_chat_id(hexToBytes(t.epochId));
+        if (!reference) {
+          throw new Error('groups:unknown-epoch: reply target');
+        }
+        return {
+          ref_chat_id: bytesToHex(reference),
+          sync_obj_id: t.syncObjId,
+        };
+      });
+      metadata.replyTo = node.encode_reply_to(JSON.stringify(targets));
+    }
+    const meta = metadataJson(metadata);
+    checkMetadata(meta);
+    return meta;
+  }
+
+  /**
+   * Sends a message to the group's current epoch, possibly as a reply.
+   *
+   * `author`: this account when absent, or any member of the chat (a user
+   * ID). A message under another member's name is handled as if that member
+   * had delivered it to this device (§10.2): it keeps its true date and is
+   * shown here at once, and after a short random wait it is announced like a
+   * relayed message, never pushed in full.
+   */
   sendMessage(
     groupId: GroupId,
     message: GroupMessageBody | string,
@@ -2448,42 +2728,31 @@ export class GroupService {
       metadata?: Record<string, Uint8Array>;
       scheduledFor?: number;
       replyTo?: GroupMessageRef[];
+      author?: string;
     } = {}
   ): Promise<GroupPublished> {
     const b =
       typeof message === 'string'
         ? { type: 'text' as const, text: message }
         : message;
+    let author: Uint8Array | undefined;
     try {
       checkText(b);
+      author = authorBytes(options.author, this.owner);
     } catch (e) {
       return Promise.reject(e);
     }
     return this.ownMessageOp(
       node => {
         const epoch = this.currentEpoch(node, groupId);
-        const metadata = { ...(options.metadata ?? {}) };
-        if (options.replyTo && options.replyTo.length > 0) {
-          const targets = options.replyTo.map(t => {
-            const reference = node.ref_chat_id(hexToBytes(t.epochId));
-            if (!reference) {
-              throw new Error('groups:unknown-epoch: reply target');
-            }
-            return {
-              ref_chat_id: bytesToHex(reference),
-              sync_obj_id: t.syncObjId,
-            };
-          });
-          metadata.replyTo = node.encode_reply_to(JSON.stringify(targets));
-        }
-        const meta = metadataJson(metadata);
-        checkMetadata(meta);
+        const meta = this.newMessageMetadata(node, options);
         const published = this.published(
           node.publish_message(
             hexToBytes(epoch),
             bodyJson(b),
             meta,
             options.scheduledFor,
+            author,
             this.now()
           )
         );
@@ -2491,6 +2760,7 @@ export class GroupService {
           replies: options.replyTo?.length ?? 0,
           scheduled: options.scheduledFor !== undefined,
           metaSize: meta.length,
+          asOther: author !== undefined,
         });
         return published;
       },
@@ -2500,10 +2770,76 @@ export class GroupService {
   }
 
   /**
-   * Edits one of this account's messages, in the epoch that holds it. The
-   * edit keeps the message's metadata (§2.2: entries this client does not
-   * know, `replyTo` included): `metadata` sets entries and `removeMetadata`
-   * removes them; neither keeps everything.
+   * Creates a message on this device only (§9.7), in the group's current
+   * epoch, possibly as a reply and under any member's name (`author`, this
+   * account when absent). Nothing is sent, announced or listed, ever, and no
+   * marker is kept anywhere: it is stored as a message this device no longer
+   * serves, and cannot be told apart from one afterwards. No scheduling.
+   * Returns the message's sync-object ID.
+   *
+   * Also accepted in a chat this device can only read but keeps (after a
+   * kick, after its own visible leave, or dissolved and kept), in the last
+   * epoch held, under any member of that epoch (D.99), where `sendMessage`
+   * is refused. Refused while waiting to be removed and in a replaced chat
+   * of two.
+   */
+  sendMessageLocally(
+    groupId: GroupId,
+    message: GroupMessageBody | string,
+    options: {
+      metadata?: Record<string, Uint8Array>;
+      replyTo?: GroupMessageRef[];
+      author?: string;
+    } = {}
+  ): Promise<{ syncObjId: string }> {
+    const b =
+      typeof message === 'string'
+        ? { type: 'text' as const, text: message }
+        : message;
+    let author: Uint8Array | undefined;
+    try {
+      checkText(b);
+      author = authorBytes(options.author, this.owner);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return this.ownMessageOp(
+      node => {
+        const epoch = this.currentEpoch(node, groupId);
+        const meta = this.newMessageMetadata(node, options);
+        const r = JSON.parse(
+          node.local_message(
+            hexToBytes(epoch),
+            bodyJson(b),
+            meta,
+            author,
+            this.now()
+          )
+        ) as Raw;
+        // Only the full debug build logs this (`dlog` is a no-op and stripped
+        // from every other build).
+        dlog('sdk', 'message.created.local', {
+          group: shortId(groupId),
+          epoch: shortId(epoch),
+          id: shortId(r.syncObjId as string),
+          asOther: author !== undefined,
+        });
+        return { syncObjId: r.syncObjId as string };
+      },
+      'local_message',
+      { group: shortId(groupId) }
+    );
+  }
+
+  /**
+   * Edits a message for everyone, in the epoch that holds it. The edit keeps
+   * the message's metadata (§2.2: entries this client does not know,
+   * `replyTo` included): `metadata` sets entries and `removeMetadata` removes
+   * them; neither keeps everything. `author` sets the message's author to any
+   * member of the chat (a user ID); absent, the author is kept (§7.2). The
+   * edit is pushed in full only when this account is the author before and
+   * after it; any other edit is announced like a relayed message after a
+   * short random wait (§10.2).
    */
   editMessage(
     epochId: GroupId,
@@ -2513,6 +2849,7 @@ export class GroupService {
       metadata?: Record<string, Uint8Array>;
       removeMetadata?: string[];
       scheduledFor?: number;
+      author?: string;
     } = {}
   ): Promise<GroupPublished> {
     const b =
@@ -2527,9 +2864,14 @@ export class GroupService {
         : options.metadata && Object.keys(options.metadata).length > 0
           ? set
           : 'null';
+    let author: Uint8Array | undefined;
     try {
       checkText(b);
       checkMetadata(set);
+      author =
+        options.author === undefined
+          ? undefined
+          : hexToBytes(hexOfUser(options.author));
     } catch (e) {
       return Promise.reject(e);
     }
@@ -2542,11 +2884,13 @@ export class GroupService {
             bodyJson(b),
             meta,
             options.scheduledFor,
+            author,
             this.now()
           )
         );
         this.logCreated('edit', epochId, epochId, published, b, {
           target: shortId(syncObjId),
+          author: author === undefined ? 'kept' : 'set',
         });
         return published;
       },

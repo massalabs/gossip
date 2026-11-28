@@ -31,9 +31,11 @@ import type {
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../../constants/routes';
 import { useGroupStore } from '../../stores/groupStore';
+import { useAccountStore } from '../../stores/accountStore';
 import {
   isAcceptedContact,
   isConversationRow,
+  isDirectChatInvitationFrom,
 } from '../../utils/conversations';
 
 // =============================================================================
@@ -47,6 +49,11 @@ interface DiscussionListProps {
   searchQuery?: string;
   scrollParent: HTMLElement;
   filter?: DiscussionFilter;
+  /**
+   * The archived list's "No archived chats" when it holds no earlier chat;
+   * false when archived current chats are shown above it.
+   */
+  showEmpty?: boolean;
 }
 
 // =============================================================================
@@ -103,6 +110,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   searchQuery = '',
   scrollParent,
   filter = 'all',
+  showEmpty = true,
 }) => {
   const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
@@ -133,6 +141,17 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
         ) && (filter === 'archived') === !!d.archived
     );
   }, [allDiscussions, allContacts, groups, filter]);
+  // The contacts whose invitation to the pair's chat waits (§5.12).
+  const me = useAccountStore(s => s.userProfile?.userId);
+  const chatInvitationFrom = React.useMemo(
+    () =>
+      new Set(
+        invitations
+          .filter(i => isDirectChatInvitationFrom(i, i.owner, me))
+          .map(i => i.owner)
+      ),
+    [invitations, me]
+  );
   const migrationOf = React.useMemo(
     () =>
       new Map(
@@ -212,6 +231,27 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     [gossip, patchDiscussion, t]
   );
 
+  // The same as the archive's footer (`ArchiveFooter`): nothing is sent.
+  const handleToggleArchived = useCallback(
+    async (discussion: Discussion) => {
+      const archived = !discussion.archived;
+      try {
+        await gossip.conversations.setArchived(
+          discussion.contactUserId,
+          archived
+        );
+        toast.success(
+          archived
+            ? t('groups:archive.archived')
+            : t('groups:archive.unarchived')
+        );
+      } catch {
+        toast.error(t('groups:details.failed'));
+      }
+    },
+    [gossip, t]
+  );
+
   // The peer's migration, answered from the archive's row (§5.12).
   const navigate = useNavigate();
   const refreshGroups = useGroupStore(s => s.refresh);
@@ -265,6 +305,9 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                 migrationInvitation={migrationOf.get(
                   item.discussion.contactUserId
                 )}
+                chatInvitation={chatInvitationFrom.has(
+                  item.discussion.contactUserId
+                )}
                 onAcceptMigration={acceptMigration}
                 onDeclineMigration={declineMigration}
                 onOpenInvitation={openInvitation}
@@ -274,6 +317,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                 onRefuse={handleRefuseDiscussionRequest}
                 onEditName={handleEditName}
                 onTogglePin={handleTogglePin}
+                onToggleArchived={handleToggleArchived}
               />
             </div>
           );
@@ -289,7 +333,9 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
       handleRefuseDiscussionRequest,
       handleEditName,
       handleTogglePin,
+      handleToggleArchived,
       migrationOf,
+      chatInvitationFrom,
       acceptMigration,
       declineMigration,
       openInvitation,
@@ -298,6 +344,14 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
 
   // Empty states
   if (hasNoResults) {
+    if (filter === 'archived') {
+      if (!showEmpty) return null;
+      return (
+        <div className="py-8 text-center">
+          <p className="text-sm text-muted-foreground">{t('archived.empty')}</p>
+        </div>
+      );
+    }
     if (isSearching) {
       return (
         <div className="py-8 text-center">
