@@ -168,7 +168,9 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.3.10'
+          # Not a patch version: GitHub's newer Linux images offer only the latest
+          # patch of each Ruby series (3.3.10 does not exist for ubuntu-26.04).
+          ruby-version: '3.3'
           bundler-cache: true
           working-directory: android
 
@@ -394,7 +396,9 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.3.10'
+          # Not a patch version: GitHub's newer Linux images offer only the latest
+          # patch of each Ruby series (3.3.10 does not exist for ubuntu-26.04).
+          ruby-version: '3.3'
           bundler-cache: true
           working-directory: android
 
