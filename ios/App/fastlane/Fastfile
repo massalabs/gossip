@@ -43,6 +43,11 @@ platform :ios do
       api_key: api_key   # Use API Key for authentication
     )
 
+    # Profile names as match installed them, not hardcoded: when a profile is recreated
+    # while the expired one still holds its name on the Dev Portal, match appends a
+    # suffix ("match AppStore net.massa.gossip 1795687704").
+    profiles = lane_context[SharedValues::MATCH_PROVISIONING_PROFILE_MAPPING]
+
     # Force manual signing for both targets using the appropriate App Store profiles
     # Main app target
     update_code_signing_settings(
@@ -50,7 +55,7 @@ platform :ios do
       path: "App.xcodeproj",
       team_id: ENV["APPLE_TEAM_ID"],
       targets: ["Gossip"],
-      profile_name: "match AppStore net.massa.gossip",
+      profile_name: profiles["net.massa.gossip"],
       code_sign_identity: "Apple Distribution",
       bundle_identifier: "net.massa.gossip"
     )
@@ -61,7 +66,7 @@ platform :ios do
       path: "App.xcodeproj",
       team_id: ENV["APPLE_TEAM_ID"],
       targets: ["GossipShareExtension"],
-      profile_name: "match AppStore net.massa.gossip.GossipShareExtension",
+      profile_name: profiles["net.massa.gossip.GossipShareExtension"],
       code_sign_identity: "Apple Distribution",
       bundle_identifier: "net.massa.gossip.GossipShareExtension"
     )
@@ -93,10 +98,7 @@ platform :ios do
       clean: false,
       export_options: {
         method: "app-store",
-        provisioningProfiles: {
-          "net.massa.gossip" => "match AppStore net.massa.gossip",
-          "net.massa.gossip.GossipShareExtension" => "match AppStore net.massa.gossip.GossipShareExtension"
-        },
+        provisioningProfiles: profiles,
         teamID: ENV["APPLE_TEAM_ID"]
       }
     )

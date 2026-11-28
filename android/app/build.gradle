@@ -63,7 +63,7 @@ android {
                     ") exceeds 32-bit int max value (" + Integer.MAX_VALUE + ").")
         }
         versionCode resolvedVersionCode.toInteger()
-        versionName "0.1.0"
+        versionName "0.1.2"
         buildConfigField "boolean", "FULL_DEBUG", fullDebug ? "true" : "false"
         if (fullDebug) {
             applicationIdSuffix ".debug"
