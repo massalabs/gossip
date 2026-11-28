@@ -230,6 +230,7 @@ final class CoreBluetoothMeshRadio: NSObject, MeshRadio {
             }
             guard accepted else { return }
             link.queue.removeFirst()
+            DebugLog.event("mesh", "mesh.frame_out", lvl: "debug", ["link": link.id, "size": chunk.count])
         }
     }
 
@@ -285,12 +286,14 @@ final class CoreBluetoothMeshRadio: NSObject, MeshRadio {
             CBCentralManagerScanOptionAllowDuplicatesKey: true,
         ])
         scanning = true
+        DebugLog.event("mesh", "mesh.scan", lvl: "debug", ["on": true])
     }
 
     private func stopScan() {
         guard scanning else { return }
         if central?.state == .poweredOn { central?.stopScan() }
         scanning = false
+        DebugLog.event("mesh", "mesh.scan", lvl: "debug", ["on": false])
     }
 
     private func connectToNewNeighbours() {
@@ -363,6 +366,11 @@ final class CoreBluetoothMeshRadio: NSObject, MeshRadio {
 
 extension CoreBluetoothMeshRadio: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        DebugLog.event("mesh", "mesh.central_state", [
+            "state": central.state.rawValue,
+            "authorization": CBManager.authorization.rawValue,
+            "running": running,
+        ])
         guard running else { return }
         if central.state == .poweredOn {
             startScan()
@@ -377,6 +385,7 @@ extension CoreBluetoothMeshRadio: CBCentralManagerDelegate {
         // Connections iOS kept for us while the app was not running: drop them and
         // reconnect through the selector, since their link state did not survive.
         let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral] ?? []
+        DebugLog.event("mesh", "mesh.central_restored", ["peripherals": peripherals.count])
         for peripheral in peripherals {
             central.cancelPeripheralConnection(peripheral)
         }
@@ -385,6 +394,7 @@ extension CoreBluetoothMeshRadio: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         let rssi = RSSI.intValue
+        DebugLog.event("mesh", "mesh.seen", lvl: "debug", ["peer": peripheral.identifier.uuidString, "rssi": rssi])
         // 127 means the RSSI is not available.
         guard rssi != 127 else { return }
         discovered[peripheral.identifier] = peripheral
@@ -393,6 +403,7 @@ extension CoreBluetoothMeshRadio: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        DebugLog.event("mesh", "mesh.connected", ["peer": peripheral.identifier.uuidString, "role": "central"])
         guard running, connecting[peripheral.identifier] != nil else {
             central.cancelPeripheralConnection(peripheral)
             return
@@ -402,11 +413,20 @@ extension CoreBluetoothMeshRadio: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        DebugLog.event("mesh", "mesh.connect_failed", lvl: "warn", [
+            "peer": peripheral.identifier.uuidString,
+            "err": error.map { String(describing: $0) } ?? "",
+        ])
         connecting.removeValue(forKey: peripheral.identifier)
         selector.onDisconnected(peripheral.identifier.uuidString, now: now())
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        DebugLog.event("mesh", "mesh.disconnected", lvl: error == nil ? "info" : "warn", [
+            "peer": peripheral.identifier.uuidString,
+            "role": "central",
+            "err": error.map { String(describing: $0) } ?? "",
+        ])
         connecting.removeValue(forKey: peripheral.identifier)
         if let id = centralLinkByPeer[peripheral.identifier], let link = link(id) {
             removeLink(link)
@@ -420,12 +440,14 @@ extension CoreBluetoothMeshRadio: CBCentralManagerDelegate {
 
 extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
     private func abandon(_ peripheral: CBPeripheral) {
+        DebugLog.event("mesh", "mesh.handshake_abandoned", lvl: "warn", ["peer": peripheral.identifier.uuidString])
         connecting.removeValue(forKey: peripheral.identifier)
         selector.onDisconnected(peripheral.identifier.uuidString, now: now())
         central?.cancelPeripheralConnection(peripheral)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        if let error = error { DebugLog.w("mesh", "discover services failed", error) }
         guard error == nil,
               let service = peripheral.services?.first(where: { $0.uuid == MeshConstants.serviceUUID }) else {
             abandon(peripheral)
@@ -435,6 +457,7 @@ extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        if let error = error { DebugLog.w("mesh", "discover characteristics failed", error) }
         guard error == nil,
               let characteristic = service.characteristics?.first(where: {
                   $0.uuid == MeshConstants.chunkCharacteristicUUID
@@ -449,6 +472,11 @@ extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
                     error: Error?) {
         guard characteristic.uuid == MeshConstants.chunkCharacteristicUUID else { return }
         guard error == nil, characteristic.isNotifying else {
+            DebugLog.event("mesh", "mesh.notify_failed", lvl: "warn", [
+                "peer": peripheral.identifier.uuidString,
+                "notifying": characteristic.isNotifying,
+                "err": error.map { String(describing: $0) } ?? "",
+            ])
             if let id = centralLinkByPeer[peripheral.identifier], let link = link(id) {
                 closeNow(link)
             } else {
@@ -461,6 +489,12 @@ extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
         let id = nextLinkId
         nextLinkId += 1
         centralLinkByPeer[peripheral.identifier] = id
+        DebugLog.event("mesh", "mesh.link_up", [
+            "link": id,
+            "role": "central",
+            "peer": peripheral.identifier.uuidString,
+            "maxWrite": peripheral.maximumWriteValueLength(for: .withoutResponse),
+        ])
         addLink(Link(
             id: id,
             role: .central,
@@ -473,6 +507,11 @@ extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error { DebugLog.w("mesh", "notification value error", error) }
+        DebugLog.event("mesh", "mesh.frame_in", lvl: "debug", [
+            "peer": peripheral.identifier.uuidString,
+            "size": characteristic.value?.count ?? 0,
+        ])
         guard error == nil, characteristic.uuid == MeshConstants.chunkCharacteristicUUID,
               let value = characteristic.value,
               let id = centralLinkByPeer[peripheral.identifier] else { return }
@@ -495,6 +534,11 @@ extension CoreBluetoothMeshRadio: CBPeripheralDelegate {
 
 extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        DebugLog.event("mesh", "mesh.peripheral_state", [
+            "state": peripheral.state.rawValue,
+            "authorization": CBManager.authorization.rawValue,
+            "running": running,
+        ])
         guard running else { return }
         if peripheral.state == .poweredOn {
             addServiceIfNeeded()
@@ -509,6 +553,7 @@ extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
     func peripheralManager(_ peripheral: CBPeripheralManager, willRestoreState dict: [String: Any]) {
         // The service survives in the restored manager; adding it again would duplicate it.
         let services = dict[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService] ?? []
+        DebugLog.event("mesh", "mesh.peripheral_restored", ["services": services.count])
         if let service = services.first(where: { $0.uuid == MeshConstants.serviceUUID }),
            let characteristic = service.characteristics?.first(where: {
                $0.uuid == MeshConstants.chunkCharacteristicUUID
@@ -519,6 +564,7 @@ extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
+        if let error = error { DebugLog.e("mesh", "add service failed", error) }
         if error != nil {
             serviceAdded = false
             serverCharacteristic = nil
@@ -542,6 +588,12 @@ extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
         let id = nextLinkId
         nextLinkId += 1
         peripheralLinkByCentral[central.identifier] = id
+        DebugLog.event("mesh", "mesh.link_up", [
+            "link": id,
+            "role": "peripheral",
+            "peer": central.identifier.uuidString,
+            "maxUpdate": central.maximumUpdateValueLength,
+        ])
         addLink(Link(
             id: id,
             role: .peripheral,
@@ -554,6 +606,7 @@ extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
 
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral,
                            didUnsubscribeFrom characteristic: CBCharacteristic) {
+        DebugLog.event("mesh", "mesh.disconnected", ["peer": central.identifier.uuidString, "role": "peripheral"])
         guard let id = peripheralLinkByCentral[central.identifier], let link = link(id) else { return }
         removeLink(link)
     }
@@ -563,6 +616,7 @@ extension CoreBluetoothMeshRadio: CBPeripheralManagerDelegate {
             // a chunk is one plain write: anything at an offset is refused
             guard request.offset == 0, let value = request.value,
                   let id = peripheralLinkByCentral[request.central.identifier] else { continue }
+            DebugLog.event("mesh", "mesh.frame_in", lvl: "debug", ["link": id, "size": value.count])
             listener?.onFrameIn(linkId: id, frame: value)
         }
         // The characteristic only allows writes without response, so there is nothing to answer.

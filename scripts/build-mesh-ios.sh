@@ -7,7 +7,11 @@
 #
 # macOS with Xcode only.
 #
-# Usage: bash scripts/build-mesh-ios.sh [--release|--debug|-h]
+# Usage: bash scripts/build-mesh-ios.sh [--release|--debug|-h] [--full-debug]
+#   --full-debug  Full debug app only (GOSSIP_FULL_DEBUG=true): the mesh log
+#                 lines are compiled in (cargo feature full-debug, without
+#                 quiet-release) and written to stderr, prefixed GossipMesh,
+#                 where the app's DebugLogWriter.swift reads them back
 
 set -Eeuo pipefail
 
@@ -15,8 +19,23 @@ PROFILE="${1:---release}"
 case "$PROFILE" in
     --release) CARGO_FLAGS=("--release"); TARGET_DIR="release" ;;
     --debug)   CARGO_FLAGS=();             TARGET_DIR="debug" ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "error: unknown profile '$PROFILE'" >&2; exit 2 ;;
+esac
+# Full debug: no quiet-release anywhere in the mesh crates (see
+# wasm/mesh/gossip-mobile/Cargo.toml). Without it, the command is unchanged.
+FEATURE_FLAGS=()
+case "${2:-}" in
+    "") ;;
+    --full-debug)
+        FEATURE_FLAGS=("--no-default-features" "--features" "full-debug")
+        # One codegen unit: the static library's single gossip-mobile object then
+        # carries the __mod_init_func entry that installs the log forwarder (an
+        # archive member nothing references would not be linked into the app).
+        export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+        export CARGO_PROFILE_DEV_CODEGEN_UNITS=1
+        ;;
+    *) echo "error: unknown option '$2'" >&2; exit 2 ;;
 esac
 
 [[ "$(uname -s)" == Darwin ]] || { echo "error: the iOS build needs macOS and Xcode" >&2; exit 1; }
@@ -44,7 +63,8 @@ echo "[1/3] cargo build (aarch64-apple-ios + aarch64-apple-ios-sim)..."
 for target in aarch64-apple-ios aarch64-apple-ios-sim; do
     rustup target add "$target" >/dev/null
     cargo build --locked -p gossip-mobile --target "$target" -j "${JOBS:-3}" \
-        --config "$(bash "$ROOT_DIR/scripts/rust-remap-flags.sh")" ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
+        --config "$(bash "$ROOT_DIR/scripts/rust-remap-flags.sh")" ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"} \
+        ${FEATURE_FLAGS[@]+"${FEATURE_FLAGS[@]}"}
 done
 DEVICE_LIB="$CARGO_TARGET_DIR/aarch64-apple-ios/$TARGET_DIR/libgossip_mobile.a"
 SIM_LIB="$CARGO_TARGET_DIR/aarch64-apple-ios-sim/$TARGET_DIR/libgossip_mobile.a"

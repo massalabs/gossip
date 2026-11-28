@@ -460,16 +460,19 @@ impl Node {
         let id = root.chat_id();
         match self.marker_kind(&id) {
             Some(MarkerKind::Dissolved) => {
+                dbg_do! { self.dbg_root(&from, &root, via, "ignored", "dissolved_and_deleted"); }
                 self.marker_reference(&id, root.ref_chat_id());
                 return Ok(Answer::Refused);
             }
             Some(MarkerKind::Closed | MarkerKind::ClosedFrom(_)) if via != Via::Direct => {
+                dbg_do! { self.dbg_root(&from, &root, via, "ignored", "closed_not_direct"); }
                 self.marker_reference(&id, root.ref_chat_id());
                 return Ok(Answer::Refused);
             }
             _ => {}
         }
         if self.t.epochs.contains(&id) {
+            dbg_do! { self.dbg_root(&from, &root, via, "duplicate", "held_already"); }
             // A duplicate changes nothing (§4.7).
             return Ok(Answer::Supplied);
         }
@@ -494,6 +497,7 @@ impl Node {
                 .iter()
                 .any(|c| self.t.epochs.contains(c))
         {
+            dbg_do! { self.dbg_root(&from, &root, via, "held", "handover_from_non_member_parent_unknown"); }
             self.hold_handover(cx, from, root);
             return Ok(Answer::Supplied);
         }
@@ -515,10 +519,21 @@ impl Node {
                 .verify_signature(self.t.epochs.get(&parent).map(|r| &r.root))
                 .is_ok()
         {
+            dbg_do! { self.dbg_root(&from, &root, via, "accepted", "own_handover_left"); }
             self.left_by_handover(cx, parent, &root);
             return Ok(Answer::Supplied);
         }
         if !root.is_member(&self.me) || !(root.is_member(&from) || signer_left) || from == self.me {
+            dbg_do! {
+                let reason = if !root.is_member(&self.me) {
+                    "not_member_self"
+                } else if from == self.me {
+                    "from_self"
+                } else {
+                    "sender_not_member"
+                };
+                self.dbg_root(&from, &root, via, "malformed", reason);
+            }
             self.failed_announcement(cx, &from);
             return Ok(Answer::Invalid);
         }
@@ -537,6 +552,7 @@ impl Node {
         let handover_parent = if root.root_type() == RootType::Handover {
             let parent = matched.iter().find(|c| self.t.epochs.contains(c)).copied();
             let Some(parent) = parent else {
+                dbg_do! { self.dbg_root(&from, &root, via, "held", "handover_parent_unknown"); }
                 // Discarded without penalty; the parent is looked up (§4.7).
                 self.hold_handover(cx, from, root);
                 return Ok(Answer::Supplied);
@@ -548,6 +564,7 @@ impl Node {
         let parent_root =
             handover_parent.and_then(|p| self.t.epochs.get(&p).map(|r| r.root.clone()));
         if root.verify_signature(parent_root.as_ref()).is_err() {
+            dbg_do! { self.dbg_root(&from, &root, via, "malformed", "bad_signature"); }
             self.failed_announcement(cx, &from);
             return Ok(Answer::Invalid);
         }
@@ -569,16 +586,19 @@ impl Node {
         // pair is closed, and a copy delivered again is judged again), or a direct chat the
         // caller consented to.
         if self.receive_direct(cx, from, &root, !matched.is_empty(), closed_before, via)? {
+            dbg_do! { self.dbg_root(&from, &root, via, "accepted", "direct_chat"); }
             return Ok(Answer::Supplied);
         }
         // Case 1, closed by the user: a full root delivered directly prompts again.
         if closed_before {
+            dbg_do! { self.dbg_root(&from, &root, via, "accepted", "invitation_after_close"); }
             self.invite(cx, from, root, Vec::new(), true, None, via);
             return Ok(Answer::Supplied);
         }
         // Case 2: a retained member (see `continuation`).
         let continuation = self.continuation(&installed);
         if let Some(Continuation::Adopt { relay: true }) = continuation {
+            dbg_do! { self.dbg_root(&from, &root, via, "accepted", "adopted"); }
             self.adopt(cx, root, from, installed, true)?;
             return Ok(Answer::Supplied);
         }
@@ -590,6 +610,7 @@ impl Node {
             .filter(|c| self.t.markers.get(c).is_some_and(Marker::is_closed))
             .count();
         if closed > 0 && closed == root.parents().len() {
+            dbg_do! { self.dbg_root(&from, &root, via, "ignored", "continues_closed_chat"); }
             if self.record_closed(id, root.ref_chat_id(), from) {
                 self.reject_continuations(id);
             }
@@ -598,10 +619,12 @@ impl Node {
         // Case 4: kicked, dissolved or waiting (see `continuation`).
         match continuation {
             Some(Continuation::Adopt { relay }) => {
+                dbg_do! { self.dbg_root(&from, &root, via, "accepted", "adopted_inactive_group"); }
                 self.adopt(cx, root, from, installed, relay)?;
                 return Ok(Answer::Supplied);
             }
             Some(Continuation::Rejoin(p)) => {
+                dbg_do! { self.dbg_root(&from, &root, via, "accepted", "invitation_rejoin"); }
                 self.invite(cx, from, root, Vec::new(), false, Some(p), via);
                 return Ok(Answer::Supplied);
             }
@@ -611,6 +634,7 @@ impl Node {
         // migration this device acts on (§5.12): it continues no epoch, and a parent found
         // would only make it an ordinary invitation.
         if self.direct_creation(&root, false).is_some() {
+            dbg_do! { self.dbg_root(&from, &root, via, "accepted", "invitation_migration"); }
             self.invite(cx, from, root, Vec::new(), false, None, via);
             return Ok(Answer::Supplied);
         }
@@ -620,6 +644,15 @@ impl Node {
             .filter(|c| !matched.iter().any(|m| root.commitment_for(m) == **c))
             .copied()
             .collect();
+        dbg_do! {
+            self.dbg_root(
+                &from,
+                &root,
+                via,
+                if unmatched.is_empty() { "accepted" } else { "held" },
+                if unmatched.is_empty() { "invitation" } else { "invitation_waiting_for_parents" },
+            );
+        }
         self.invite(cx, from, root, unmatched, false, None, via);
         Ok(Answer::Supplied)
     }
@@ -728,9 +761,19 @@ impl Node {
             .filter(|(_, h)| h.from == from)
             .count();
         if mine >= HELD_ROOTS_PER_SENDER || self.t.held_roots.len() >= HELD_ROOTS_PER_DEVICE {
+            dbg_event!(Warn, "engine.held.dropped", {
+                "type" => "root", "epoch" => crate::debug::short(&id),
+                "from" => crate::debug::short(&from),
+                "limit" => if mine >= HELD_ROOTS_PER_SENDER { "held_roots_per_sender" } else { "held_roots_per_device" },
+            });
             self.stats.capped += 1;
             return;
         }
+        dbg_event!(Info, "engine.held", {
+            "type" => "root", "epoch" => crate::debug::short(&id),
+            "from" => crate::debug::short(&from), "waiting_for" => "parent_root",
+            "held" => self.t.held_roots.len() + 1,
+        });
         let commitment = root.parents()[0];
         self.put_held(
             id,
@@ -1048,6 +1091,11 @@ impl Node {
                     })
                     .count();
                 if depth > FETCHED_PARENT_DEPTH || count >= FETCHED_PARENTS_PER_INVITATION {
+                    dbg_event!(Warn, "engine.held.dropped", {
+                        "type" => "invitation", "epoch" => crate::debug::short(&id),
+                        "from" => crate::debug::short(&from),
+                        "limit" => if depth > FETCHED_PARENT_DEPTH { "fetched_parent_depth" } else { "fetched_parents_per_invitation" },
+                    });
                     self.stats.capped += 1;
                     return;
                 }
@@ -1071,6 +1119,10 @@ impl Node {
                 .and_then(|c| c.trigger)
                 .is_some_and(|t| t.kind == TriggerKind::Page);
         if !hidden && !self.room_for_invitation(cx, &from) {
+            dbg_event!(Warn, "engine.held.dropped", {
+                "type" => "invitation", "epoch" => crate::debug::short(&id),
+                "from" => crate::debug::short(&from), "limit" => "invitations",
+            });
             self.stats.capped += 1;
             return;
         }
@@ -1196,6 +1248,10 @@ impl Node {
     /// Removes a kept handover root.
     pub(crate) fn take_held(&mut self, id: &ChatId) -> Option<HeldRoot> {
         let h = self.t.held_roots.remove(id)?;
+        dbg_event!(Info, "engine.held.released", {
+            "type" => "root", "epoch" => crate::debug::short(id),
+            "from" => crate::debug::short(&h.from), "held_since" => h.at,
+        });
         if !self.t.epochs.contains(id) {
             self.index_remove(id);
         }

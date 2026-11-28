@@ -15,5 +15,10 @@ thiserror = { workspace = true }
 # used directly on hand-written structs, so no protoc or build script is needed.
 prost = { version = "=0.13.5", default-features = false, features = ["std", "prost-derive"] }
 
+[features]
+# The full debug build of the app: debug events at the engine's decision points (see
+# src/debug.rs). Off in every normal build, where the event macros expand to nothing.
+full-debug = []
+
 [dev-dependencies]
 hex = "0.4"

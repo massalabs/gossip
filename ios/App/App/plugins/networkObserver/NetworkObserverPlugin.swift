@@ -152,6 +152,10 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let becameOnline = isOnline && !wasOnline
+        DebugLog.event("network", "network.update", [
+            "online": isOnline, "type": networkType,
+            "wasOnline": wasOnline, "previousType": previousNetworkType,
+        ])
         let networkTypeChanged = isOnline && wasOnline &&
                 networkType != previousNetworkType &&
                 previousNetworkType != "none"

@@ -12,6 +12,8 @@ import type { DiscussionService } from './discussion.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import { toDiscussion } from '../utils/discussions.js';
 import { Logger } from '../utils/logs.js';
+import { dlog } from '../utils/debugLog.js';
+import { shortId } from '../utils/debugFields.js';
 
 const logger = new Logger('SeekerConflicts');
 
@@ -61,6 +63,17 @@ export class SeekerConflictHandler {
       !row ||
       (last !== undefined && now - last < SEEKER_CONFLICT_RENEWAL_MS)
     ) {
+      dlog(
+        'sessions',
+        'session.conflict.handled',
+        {
+          peer: shortId(contactUserId),
+          renewed: false,
+          reason: !row ? 'no-discussion' : 'renewed-within-hour',
+          lastRenewal: last,
+        },
+        { lvl: 'warn' }
+      );
       this.eventEmitter.emit(SdkEventType.SEEKER_CONFLICT, {
         contactUserId,
         renewed: false,
@@ -82,6 +95,17 @@ export class SeekerConflictHandler {
       logger.error('session not renewed after a seeker conflict', {
         error: renewed.error,
       });
+      dlog(
+        'sessions',
+        'session.conflict.handled',
+        {
+          peer: shortId(contactUserId),
+          renewed: false,
+          reason: 'renewal-failed',
+          msg: renewed.error,
+        },
+        { lvl: 'error' }
+      );
       return false;
     }
     const after = await this.queries.discussions.getByOwnerAndContact(
@@ -91,6 +115,12 @@ export class SeekerConflictHandler {
     if (after) {
       this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, toDiscussion(after));
     }
+    dlog(
+      'sessions',
+      'session.conflict.handled',
+      { peer: shortId(contactUserId), renewed: true },
+      { lvl: 'info' }
+    );
     this.eventEmitter.emit(SdkEventType.SEEKER_CONFLICT, {
       contactUserId,
       renewed: true,

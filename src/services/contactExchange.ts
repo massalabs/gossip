@@ -19,6 +19,9 @@ import {
   verifyContactPayload,
   encodePayload,
 } from '../utils/contactExchange';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
+import { errFields } from '@massalabs/gossip-sdk/utils/debugFields.js';
+import { logPermission } from '../utils/debugPermissions';
 
 export type BluetoothPermission = 'granted' | 'denied' | 'prompt';
 
@@ -88,17 +91,28 @@ export function isBluetoothExchangeSupported(): boolean {
 export async function checkBluetoothPermission(): Promise<BluetoothPermission> {
   if (!isBluetoothExchangeSupported()) return 'denied';
   try {
-    return (await ContactExchange.checkBluetooth()).state;
-  } catch {
+    const { state } = await ContactExchange.checkBluetooth();
+    logPermission('permission.check', 'bluetooth', state);
+    return state;
+  } catch (error) {
+    logPermission('permission.check', 'bluetooth', 'error', {
+      msg: error instanceof Error ? error.message : String(error),
+    });
     return 'denied';
   }
 }
 
 export async function requestBluetoothPermission(): Promise<BluetoothPermission> {
   if (!isBluetoothExchangeSupported()) return 'denied';
+  logPermission('permission.request', 'bluetooth');
   try {
-    return (await ContactExchange.requestBluetooth()).state;
-  } catch {
+    const { state } = await ContactExchange.requestBluetooth();
+    logPermission('permission.result', 'bluetooth', state);
+    return state;
+  } catch (error) {
+    logPermission('permission.result', 'bluetooth', 'error', {
+      msg: error instanceof Error ? error.message : String(error),
+    });
     return 'denied';
   }
 }
@@ -175,7 +189,11 @@ export class ContactCodeSession {
         characteristicUuid,
         timeoutMs: PRESENT_TIMEOUT_MS,
       });
+      dlog('app', 'contact.bt.present', {}, { lvl: 'info' });
     } catch (error) {
+      dlog('app', 'contact.bt.present.failed', errFields(error), {
+        lvl: 'error',
+      });
       await this.stopBluetooth();
       throw error;
     }
@@ -192,11 +210,22 @@ export class ContactCodeSession {
 
   private answer(requestId: number, data: string): void {
     if (!this.presenting || !this.keyPair) return;
-    if (++this.responses > MAX_RESPONSES) return;
+    if (++this.responses > MAX_RESPONSES) {
+      dlog('app', 'contact.bt.request', {
+        answered: false,
+        reason: 'too-many',
+      });
+      return;
+    }
     let request: Uint8Array;
     try {
       request = fromBase64(data);
-    } catch {
+    } catch (error) {
+      dlog('app', 'contact.bt.request', {
+        answered: false,
+        reason: 'undecodable',
+        ...errFields(error),
+      });
       return;
     }
     const response = sealResponse(
@@ -205,6 +234,11 @@ export class ContactCodeSession {
       request,
       this.payload
     );
+    dlog('app', 'contact.bt.request', {
+      answered: !!response,
+      size: request.length,
+      ...(!response && { reason: 'malformed' }),
+    });
     // A malformed request gets no answer: the native side times it out.
     if (!response) return;
     ContactExchange.respond({ requestId, data: toBase64(response) }).catch(
@@ -243,6 +277,17 @@ export async function fetchContactOverBluetooth(
     header.rendezvousId
   );
   const { request, keyPair } = createRequest();
+  const started = performance.now();
+  const outcome = (result: string, fields?: Record<string, unknown>) =>
+    dlog(
+      'app',
+      'contact.bt.exchange',
+      { result, ...fields },
+      {
+        lvl: result === 'ok' ? 'info' : 'warn',
+        dur: performance.now() - started,
+      }
+    );
   try {
     const { response } = await ContactExchange.exchange({
       serviceUuid,
@@ -251,11 +296,20 @@ export async function fetchContactOverBluetooth(
       timeoutMs: EXCHANGE_TIMEOUT_MS,
     });
     const plain = openResponse(keyPair, header, fromBase64(response));
-    if (!plain) return null;
+    if (!plain) {
+      outcome('unopenable', { size: response.length });
+      return null;
+    }
     const payload = decodePayload(plain);
-    if (!payload || !sameHeader(payload.header, header)) return null;
-    return verifyContactPayload(payload);
+    if (!payload || !sameHeader(payload.header, header)) {
+      outcome(payload ? 'other-header' : 'undecodable');
+      return null;
+    }
+    const verified = verifyContactPayload(payload);
+    outcome(verified ? 'ok' : 'unverified');
+    return verified;
   } catch (error) {
+    outcome('failed', errFields(error));
     logger.warn('[ContactExchange] bluetooth exchange failed', error);
     return null;
   } finally {

@@ -42,6 +42,8 @@ import {
   wipeAccountPrivateKey,
 } from './utils/accountHelpers';
 import { registerAccountStoreSubscriptions } from './accountStore.subscriptions';
+import { dlog } from '@massalabs/gossip-sdk/utils/debugLog.js';
+import { errFields } from '@massalabs/gossip-sdk/utils/debugFields.js';
 
 export type PrivateMigrationPhase = 1 | 2 | 3 | 4 | 5;
 
@@ -284,6 +286,20 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     deferExternalSideEffects = false,
     slotAlreadyCreated = false,
   }: SetupAccountParams): Promise<void> => {
+    // Test build, fresh accounts: the phrase and password are recorded as
+    // secrets on purpose (user's decision), never sent without the tick box.
+    dlog(
+      'app',
+      'onboarding.setup',
+      {
+        skipHistorical,
+        prepared: prepared !== undefined,
+        publishPublicKey,
+        deferExternalSideEffects,
+        slotAlreadyCreated,
+      },
+      { lvl: 'info', c: { username }, s: { mnemonic, password } }
+    );
     await cleanupSession();
 
     const sdk = getSdk();
@@ -764,6 +780,16 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     },
 
     loadAccount: async (method: LoginMethod) => {
+      const loginStarted = performance.now();
+      dlog(
+        'app',
+        'login.start',
+        {
+          type: method.type,
+          resetMessagingSessions: !!method.resetMessagingSessions,
+        },
+        { lvl: 'info', s: { password: method.password } }
+      );
       let unlockedThisCall = false;
       let callerOwnedEncryptionKey: EncryptionKey | null = null;
       let derivedAccount: Account | null = null;
@@ -1112,6 +1138,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         }
         logger.error('Error loading account:', error);
+        dlog(
+          'app',
+          'login.failed',
+          { unlockedThisCall, sessionOpenedThisCall, ...errFields(error) },
+          { lvl: 'error', dur: performance.now() - loginStarted }
+        );
         set({ isLoading: false, privateMigrationPhase: null });
         throw error;
       }

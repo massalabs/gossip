@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { configureAppLogging, logger } from './utils/logger.ts';
+import { installDebugUiEvents } from './utils/debugUi.ts';
 import { showInitError } from './utils/initError.ts';
 import { installSafariWorkerDedup } from './utils/safariWorkerDedup';
 import { createSdk } from './sdk';
@@ -11,6 +12,7 @@ import { useAppStore } from './stores/appStore';
 import { establishFirstInstallCreationGrant } from './hooks/useProfileLoader';
 import { protocolConfig } from './config/protocol';
 import { SECURE_STORAGE_ENABLED } from './config/features';
+import { FULL_DEBUG } from './config/fullDebug';
 import {
   attachMeshArrivals,
   createMeshTransport,
@@ -73,6 +75,8 @@ document.addEventListener('keydown', e => {
 // Configure the shared app/SDK logger before creating the SDK so all
 // runtime logging uses the same sinks. Release builds configure no sinks.
 configureAppLogging();
+// Inert until a debug log sink is installed (full debug build only).
+installDebugUiEvents();
 
 const isNative = Capacitor.isNativePlatform();
 
@@ -129,6 +133,16 @@ const renderOpenElsewhere = () => {
 };
 
 async function start() {
+  // Full debug build only: the record starts before anything else, so that
+  // it holds a failed start, a failed login or a broken database.
+  if (FULL_DEBUG) {
+    try {
+      const { bootFullDebug } = await import('./fullDebug/boot');
+      await bootFullDebug();
+    } catch {
+      // the app runs without the record
+    }
+  }
   // One tab of the web app at a time, decided before any storage is opened.
   if (!isNative) {
     await runSingleInstance(startApp, renderOpenElsewhere);

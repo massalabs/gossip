@@ -93,6 +93,23 @@ pub struct GroupsNode {
     core: Core,
 }
 
+/// Full debug build only: the engine's debug events go to a JavaScript callback.
+#[cfg(feature = "full-debug")]
+#[wasm_bindgen]
+impl GroupsNode {
+    /// Installs (a function) or removes (`null`) the callback that receives each debug event
+    /// of the group engine as one JSON string `{"ev","lvl","f","c"?,"s"?}`. One callback for
+    /// the module: every engine of this instance uses it. A callback that throws is ignored.
+    /// This method exists only in the full debug build of the module.
+    pub fn set_debug_sink(cb: Option<js_sys::Function>) {
+        groups::debug::set_sink(cb.map(|cb| -> Box<dyn Fn(&groups::debug::DebugEvent)> {
+            Box::new(move |e| {
+                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&e.to_json()));
+            })
+        }));
+    }
+}
+
 #[wasm_bindgen]
 impl GroupsNode {
     /// Opens the engine of the identity from a snapshot of its stored records

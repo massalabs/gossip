@@ -10,6 +10,7 @@ import { reconcileDebugLogsGeneration } from './stores/useDebugLogs';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
 import { DebugConsole } from './components/ui/DebugConsole';
 import { Toaster } from 'react-hot-toast';
+import { DebugRouteLogger } from './utils/debugUi.ts';
 
 // Hooks
 import { useProfileLoader } from './hooks/useProfileLoader';
@@ -25,6 +26,7 @@ import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions, toasterContainerStyle } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
+import { FullDebugFrame } from './fullDebug/lazy';
 import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore';
 import { useTheme } from './hooks/useTheme.ts';
@@ -194,24 +196,43 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const toaster = (
+    <Toaster
+      position="top-center"
+      containerStyle={toasterContainerStyle}
+      toastOptions={toastOptions}
+    />
+  );
+
+  const appScreens = (
+    <>
+      <AppUrlListener />
+      <PortableBackupStartupGate>
+        <AppContent />
+        <CleanupGatedDebugConsole />
+      </PortableBackupStartupGate>
+      {/* <div className="hidden">
+        <PWABadge />
+      </div> */}
+    </>
+  );
+
   return (
     <BrowserRouter>
+      <DebugRouteLogger />
       <ErrorBoundary>
         <KeyboardAwareWrapper>
-          <AppUrlListener />
-          <PortableBackupStartupGate>
-            <AppContent />
-            <CleanupGatedDebugConsole />
-          </PortableBackupStartupGate>
-          {/* <div className="hidden">
-            <PWABadge />
-          </div> */}
+          {FullDebugFrame ? (
+            // Full debug build: toasts too stay below its banner.
+            <FullDebugFrame>
+              {appScreens}
+              {toaster}
+            </FullDebugFrame>
+          ) : (
+            appScreens
+          )}
         </KeyboardAwareWrapper>
-        <Toaster
-          position="top-center"
-          containerStyle={toasterContainerStyle}
-          toastOptions={toastOptions}
-        />
+        {!FullDebugFrame && toaster}
       </ErrorBoundary>
     </BrowserRouter>
   );

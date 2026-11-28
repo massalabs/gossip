@@ -75,6 +75,9 @@ public class ContactExchangePlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func hasBluetooth(_ call: CAPPluginCall) -> Bool {
         if CBManager.authorization == .allowedAlways { return true }
+        DebugLog.event("contactExchange", "exchange.permission_denied", lvl: "warn", [
+            "authorization": CBManager.authorization.rawValue,
+        ])
         call.reject("Bluetooth permission denied", "PERMISSION_DENIED")
         return false
     }
@@ -88,6 +91,7 @@ public class ContactExchangePlugin: CAPPlugin, CAPBridgedPlugin {
         let timeout = min(max((call.getDouble("timeoutMs") ?? Self.maxPresent * 1000) / 1000, 1), Self.maxPresent)
         presenter.start(service: service, characteristic: characteristic, timeout: timeout) { error in
             if let error = error {
+                DebugLog.event("contactExchange", "exchange.present_failed", lvl: "error", ["code": error])
                 call.reject("Could not start Bluetooth", error)
             } else {
                 call.resolve()
@@ -130,8 +134,10 @@ public class ContactExchangePlugin: CAPPlugin, CAPBridgedPlugin {
         client.exchange(service: service, characteristic: characteristic, request: request, timeout: timeout) { outcome in
             switch outcome {
             case .success(let response):
+                DebugLog.event("contactExchange", "exchange.done", ["responseBytes": response.count])
                 call.resolve(["response": response.base64EncodedString()])
             case .failure(let error):
+                DebugLog.event("contactExchange", "exchange.failed", lvl: "error", ["code": error.code])
                 call.reject("Bluetooth exchange failed", error.code)
             }
         }
@@ -169,6 +175,9 @@ private final class BluetoothAuthorizer: NSObject, CBCentralManagerDelegate {
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         guard CBManager.authorization != .notDetermined else { return }
+        DebugLog.event("contactExchange", "permission.result", [
+            "permission": "bluetooth", "authorization": CBManager.authorization.rawValue,
+        ])
         let callback = onDecided
         onDecided = nil
         manager?.delegate = nil
@@ -608,11 +617,17 @@ final class ContactExchangeClient: NSObject, CBCentralManagerDelegate, CBPeriphe
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         guard ongoing(peripheral) != nil else { return }
+        DebugLog.event("contactExchange", "exchange.connect_failed", lvl: "warn", [
+            "err": error.map { String(describing: $0) } ?? "",
+        ])
         fail("CONNECT_FAILED")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard ongoing(peripheral) != nil else { return }
+        DebugLog.event("contactExchange", "exchange.disconnected", lvl: "warn", [
+            "err": error.map { String(describing: $0) } ?? "",
+        ])
         fail("DISCONNECTED")
     }
 

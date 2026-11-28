@@ -20,6 +20,10 @@ pub mod seal;
 pub mod store;
 pub mod upstream;
 
+// Full-debug build only: forwards the mesh log lines to the app
+#[cfg(feature = "full-debug")]
+mod full_debug_log;
+
 use std::sync::Arc;
 
 use gossip_wire::BlobKind;
@@ -424,9 +428,13 @@ impl MeshNodeCore {
         s.core.stop();
         drop(s.core);
         let dir = std::path::Path::new(&s.data_dir);
-        let _ = crypt::destroy_key_file(&dir.join(node::POOLS_KEY_FILE));
+        if let Err(e) = crypt::destroy_key_file(&dir.join(node::POOLS_KEY_FILE)) {
+            tracing::warn!(error = %e, "wipe: the pools key file was not destroyed");
+        }
         for f in [node::POOLS_FILE, node::WANTED_FILE] {
-            let _ = std::fs::remove_file(dir.join(f));
+            if let Err(e) = std::fs::remove_file(dir.join(f)) {
+                tracing::debug!(file = f, error = %e, "wipe: file not removed");
+            }
         }
         let config_json = new_config_json.unwrap_or(s.config_json);
         let core = Core::start(

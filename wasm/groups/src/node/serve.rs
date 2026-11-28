@@ -34,7 +34,17 @@ impl Node {
         q: Query,
     ) -> Result<(), NodeError> {
         if ignored_query(q.sent_at, q.ttl, cx.now) {
+            dbg_event!(Info, "engine.event.in", {
+                "type" => "query", "from" => crate::debug::short(&from),
+                "request" => crate::debug::short(&q.request_id), "entries" => q.entries.len(),
+                "verdict" => "ignored", "reason" => "bad_timing",
+                "sent_at" => q.sent_at, "ttl" => q.ttl,
+            });
             return Ok(());
+        }
+        dbg_do! {
+            // Per entry: what it asked and how it was answered.
+            let mut dbg_entries: Vec<String> = Vec::new();
         }
         let live = may_answer(q.sent_at, q.ttl, cx.now);
         let mut queued = self
@@ -54,6 +64,7 @@ impl Node {
             // chat". A peer that shares no active chat gets silence, as before.
             let unservable = !self.authorize(from, entry);
             if unservable && !self.unservable_answered(from, entry) {
+                dbg_do! { dbg_entries.push(format!("{}:silent_unauthorized", dbg_query_op(entry))); }
                 continue;
             }
             // A query about the messages of a chat of two is taking part in it (§5.12).
@@ -70,6 +81,7 @@ impl Node {
             // An authorized entry from a member: it is online (§10.1).
             alive = alive || self.shares_epoch(&from);
             if queued >= QUEUED_ANSWERS_PER_PEER {
+                dbg_do! { dbg_entries.push(format!("{}:dropped_answer_queue_full", dbg_query_op(entry))); }
                 // Dropped unanswered: one `busy` per entry cannot be bounded otherwise, and
                 // the wire format has no status for a whole frame.
                 continue;
@@ -114,12 +126,22 @@ impl Node {
                             deadline(q.sent_at, q.ttl),
                         )? {
                             Some(op) => op,
-                            None => continue,
+                            None => {
+                                dbg_do! { dbg_entries.push("tips_scan:no_page".to_string()); }
+                                continue;
+                            }
                         }
                     }
-                    QueryEntry::Op(_) => continue,
+                    QueryEntry::Op(_) => {
+                        dbg_do! { dbg_entries.push(format!("{}:unhandled", dbg_query_op(entry))); }
+                        continue;
+                    }
                 }]
             };
+            dbg_do! {
+                let answers: Vec<&str> = ops.iter().map(dbg_answer_op).collect();
+                dbg_entries.push(format!("{}:{}", dbg_query_op(entry), answers.join("+")));
+            }
             // A removed peer is told of its removal, a former owner of its handover (§5.6), by
             // any query that names the epoch, the three membership lookups included. Why one
             // wide rule: which frames a later client sends first is local policy and may
@@ -162,6 +184,12 @@ impl Node {
         if alive {
             self.answered(&from);
         }
+        dbg_event!(Debug, "engine.event.in", {
+            "type" => "query", "from" => crate::debug::short(&from),
+            "request" => crate::debug::short(&q.request_id), "entries" => q.entries.len(),
+            "verdict" => "answered", "reason" => if live { "live" } else { "past_deadline" },
+            "answers" => dbg_entries,
+        });
         Ok(())
     }
 
@@ -297,6 +325,12 @@ impl Node {
         r: Response,
     ) -> Result<(), NodeError> {
         let Some(request_id) = r.request_id else {
+            dbg_event!(Info, "engine.event.in", {
+                "type" => "version_notice", "from" => crate::debug::short(&from),
+                "version" => version,
+                "verdict" => if self.shares_epoch(&from) { "accepted" } else { "ignored" },
+                "reason" => if self.shares_epoch(&from) { "peer_version_noted" } else { "shares_no_epoch" },
+            });
             if self.shares_epoch(&from) {
                 self.peer_mut(&from).version = Some(version);
             }
@@ -324,10 +358,12 @@ impl Node {
             .filter(|d| *d < cx.now)
         {
             if cx.now > d.saturating_add(EXPIRED_GRACE_MS) {
+                dbg_do! { self.dbg_uncorrelated(&from, request_id, &r, "past_grace"); }
                 self.t.requests.remove(&(from, request_id));
                 return self.uncorrelated(cx, from, version, &r.result);
             }
             if !expired {
+                dbg_do! { self.dbg_uncorrelated(&from, request_id, &r, "past_deadline"); }
                 return self.uncorrelated(cx, from, version, &r.result);
             }
         }
@@ -336,6 +372,7 @@ impl Node {
                 .get(r.idx as usize)
                 .map(|e| (e.clone(), q.sent_at, q.ttl))
         }) else {
+            dbg_do! { self.dbg_uncorrelated(&from, request_id, &r, "unknown_request"); }
             return self.uncorrelated(cx, from, version, &r.result);
         };
         // An `expired` acknowledgement is plausible once the request is past its receiver
@@ -354,7 +391,32 @@ impl Node {
         }
         match entry.purpose {
             Purpose::Task(key) => {
+                dbg_ctx!("response", dbg_result_size(&r.result));
                 let answer = self.lookup_answer(cx, from, version, key, &r.result, plausible)?;
+                dbg_do! {
+                    let (kind, item) = super::debug::target(&key.target);
+                    let a = super::debug::answer_name(answer.0);
+                    let lvl_warn = matches!(answer.0, Answer::Invalid);
+                    let ev = crate::debug::DebugEvent {
+                        ev: "engine.retrieval.result",
+                        lvl: if lvl_warn { crate::debug::Level::Warn } else { crate::debug::Level::Debug },
+                        f: vec![
+                            ("what", crate::debug::IntoVal::into_val(kind)),
+                            ("item", item),
+                            ("epoch", crate::debug::short(&key.chat_id)),
+                            ("peer", crate::debug::short(&from)),
+                            ("result", crate::debug::IntoVal::into_val(a)),
+                            ("response", crate::debug::IntoVal::into_val(super::debug::result_name(&r.result))),
+                            ("first", crate::debug::IntoVal::into_val(first)),
+                            ("dur", crate::debug::IntoVal::into_val(cx.now.saturating_sub(sent_at))),
+                        ],
+                        c: Vec::new(),
+                        s: Vec::new(),
+                    };
+                    if crate::debug::enabled() {
+                        crate::debug::emit(&ev);
+                    }
+                }
                 if first {
                     self.task_answer(cx, key, from, answer.0);
                     if let (Target::SyncObj(_), Some(id)) = (key.target, answer.1) {
@@ -369,6 +431,12 @@ impl Node {
                 | QueryOp::SharedChatsScan { scan_id, offset } = entry.op
                     && first
                 {
+                    dbg_event!(Debug, "engine.tipsync.page", {
+                        "group" => crate::debug::short(&chat), "peer" => crate::debug::short(&from),
+                        "offset" => offset, "result" => super::debug::result_name(&r.result),
+                        "entries" => match &r.result { wire::ResponseResult::Page(p) => Some(p.entries.len()), _ => None },
+                        "dur" => cx.now.saturating_sub(sent_at),
+                    });
                     self.scan_answer(cx, chat, from, (scan_id, offset), &r.result, plausible)?;
                 }
             }
@@ -391,6 +459,7 @@ impl Node {
         if let ResponseResult::Event(blob) = result
             && let Ok(EventObject::Message(e)) = wire::decode_event_blob(blob, version)
         {
+            dbg_ctx!("late_response", blob.len());
             self.receive_event(cx, from, e)?;
         }
         // A malformed page counts against its sender even when it answers nothing (D.23).
@@ -550,6 +619,11 @@ impl Node {
         from: GossipId,
         n: Notice,
     ) -> Result<(), NodeError> {
+        dbg_do! {
+            let (mut dbg_known, mut dbg_wanted, mut dbg_ignored, mut dbg_objects) = (0u32, 0u32, 0u32, 0u32);
+            let dbg_total = n.entries.len();
+            let dbg_chat = n.entries.first().map(|e| e.chat_id);
+        }
         for e in n.entries {
             let chat = e.chat_id;
             // A removed peer is told of its removal, a former owner of its handover (§5.6),
@@ -569,16 +643,19 @@ impl Node {
                     if self.shares_epoch(&from) {
                         self.root_announced(cx, from, chat, TriggerKind::Notice);
                     }
+                    dbg_do! { dbg_objects += 1; }
                     continue;
                 }
                 item @ (EntryItem::Leave(_) | EntryItem::Kick(_) | EntryItem::Dissolve(_)) => {
                     self.object_announced(cx, from, chat, item, TriggerKind::Notice);
+                    dbg_do! { dbg_objects += 1; }
                     continue;
                 }
             };
             // A device no longer active in the group of `chat` acts on it as a device that does
             // not hold the epoch: nothing is looked up, nothing is noted (§10.4, D.74).
             if !self.serves(&chat) || !self.may_receive(&chat, &from, false) {
+                dbg_do! { dbg_ignored += 1; }
                 continue;
             }
             // A valid entry from a member: it is responsive (§10.1).
@@ -592,10 +669,20 @@ impl Node {
                     self.reward(&from);
                 }
                 self.mark_seen(cx, chat, from, id)?;
+                dbg_do! { dbg_known += 1; }
             } else {
                 self.want_event(cx, chat, id, Some(from), TriggerKind::Notice)?;
+                dbg_do! { dbg_wanted += 1; }
             }
         }
+        dbg_event!(Debug, "engine.event.in", {
+            "type" => "notice", "from" => crate::debug::short(&from),
+            "epoch" => dbg_chat.as_ref().map(crate::debug::short),
+            "entries" => dbg_total, "known" => dbg_known, "wanted" => dbg_wanted,
+            "objects" => dbg_objects, "ignored_inactive_or_not_member" => dbg_ignored,
+            "verdict" => if dbg_ignored as usize == dbg_total && dbg_total > 0 { "ignored" } else { "accepted" },
+            "reason" => if dbg_ignored as usize == dbg_total && dbg_total > 0 { "inactive_device_or_not_member" } else { "noted" },
+        });
         Ok(())
     }
 
@@ -622,6 +709,10 @@ impl Node {
     /// shares a group (`handle_response`).
     pub(crate) fn version_notice(&mut self, cx: &mut Cx<'_>, from: GossipId, version: u64) {
         if !self.t.contacts.contains(&from) {
+            dbg_event!(Info, "engine.event.in", {
+                "type" => "plaintext", "from" => crate::debug::short(&from), "version" => version,
+                "verdict" => "ignored", "reason" => "higher_version_not_a_contact",
+            });
             return;
         }
         let pending = self
@@ -630,6 +721,10 @@ impl Node {
             .range((from, 0)..=(from, u64::MAX))
             .any(|(_, w)| matches!(w, Work::VersionNotice));
         if pending {
+            dbg_event!(Info, "engine.event.in", {
+                "type" => "plaintext", "from" => crate::debug::short(&from), "version" => version,
+                "verdict" => "ignored", "reason" => "higher_version_notice_pending",
+            });
             return;
         }
         let now = cx.now;
@@ -641,9 +736,17 @@ impl Node {
         if r.version_notices.contains_key(&version)
             || r.version_notices.len() >= VERSION_NOTICES_PER_PEER
         {
+            dbg_event!(Info, "engine.event.in", {
+                "type" => "plaintext", "from" => crate::debug::short(&from), "version" => version,
+                "verdict" => "ignored", "reason" => "higher_version_notice_rate_limited",
+            });
             return;
         }
         r.version_notices.insert(version, now);
+        dbg_event!(Info, "engine.event.in", {
+            "type" => "plaintext", "from" => crate::debug::short(&from), "version" => version,
+            "verdict" => "answered", "reason" => "higher_version", "answer" => "version_notice",
+        });
         self.queue_work(from, Work::VersionNotice);
     }
 
@@ -1110,5 +1213,68 @@ impl Node {
                     super::records::GroupStatus::Dissolved { .. }
                 )
         })
+    }
+}
+
+#[cfg(feature = "full-debug")]
+fn dbg_query_op(e: &QueryEntry) -> &'static str {
+    match e {
+        QueryEntry::Malformed(_) => "malformed",
+        QueryEntry::Op(op) => match op {
+            QueryOp::ChatById(_) => "chat_by_id",
+            QueryOp::ChatByRef(_) => "chat_by_ref",
+            QueryOp::ChatByParent { .. } => "chat_by_parent",
+            QueryOp::SharedChatsScan { .. } => "shared_chats_scan",
+            QueryOp::Event { .. } => "event",
+            QueryOp::SyncObj { .. } => "sync_obj",
+            QueryOp::SignedObject { .. } => "signed_object",
+            QueryOp::TipsScan { .. } => "tips_scan",
+            QueryOp::Removal { .. } => "removal",
+            QueryOp::Keys { .. } => "keys",
+        },
+    }
+}
+
+#[cfg(feature = "full-debug")]
+fn dbg_answer_op(op: &AnswerOp) -> &'static str {
+    match op {
+        AnswerOp::Event { .. } => "event",
+        AnswerOp::SyncObj { .. } => "sync_obj",
+        AnswerOp::Page { .. } => "page",
+        AnswerOp::Status(Status::Busy) => "busy",
+        AnswerOp::Status(Status::Expired) => "expired",
+        AnswerOp::Status(Status::NotAvailable) => "not_available",
+        AnswerOp::Status(Status::Malformed) => "malformed",
+        AnswerOp::Status(_) => "status",
+        AnswerOp::Root { .. } => "root",
+        AnswerOp::Object { .. } => "object",
+        AnswerOp::Keys { .. } => "keys",
+    }
+}
+
+#[cfg(feature = "full-debug")]
+fn dbg_result_size(r: &ResponseResult) -> usize {
+    match r {
+        ResponseResult::Event(b) | ResponseResult::Keys(b) => b.len(),
+        _ => 0,
+    }
+}
+
+#[cfg(feature = "full-debug")]
+impl Node {
+    fn dbg_uncorrelated(
+        &self,
+        from: &GossipId,
+        request_id: crate::ids::RequestId,
+        r: &Response,
+        reason: &'static str,
+    ) {
+        dbg_event!(Info, "engine.event.in", {
+            "type" => "response", "from" => crate::debug::short(from),
+            "request" => crate::debug::short(&request_id), "idx" => r.idx,
+            "result" => super::debug::result_name(&r.result),
+            "verdict" => "ignored", "reason" => reason,
+            "note" => "a message event in it is still received",
+        });
     }
 }

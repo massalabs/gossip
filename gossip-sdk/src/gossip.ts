@@ -103,6 +103,8 @@ import {
   type SdkEvents,
 } from './core/SdkEventEmitter.js';
 import { SdkPolling } from './core/SdkPolling.js';
+import { debugLogEnabled, dlog } from './utils/debugLog.js';
+import { errFields, hex, shortId, since } from './utils/debugFields.js';
 import type {
   PortableChunkWriter,
   PortableProgressCallback,
@@ -587,6 +589,7 @@ class GossipSdk {
     }
 
     const releaseLifecycle = this.reserveAccountLifecycle();
+    const openStarted = performance.now();
     const initializedState = this.state;
     const ownsEncryptionKey = options.encryptionKey === undefined;
     let encryptionKey: EncryptionKey | undefined;
@@ -622,10 +625,43 @@ class GossipSdk {
       }
 
       // Generate keys from mnemonic
+      const keysStarted = performance.now();
       const userKeys = await generateVersionedIdentityUserKeys(
         options.mnemonic,
         identityDerivationVersion
       );
+      if (debugLogEnabled()) {
+        try {
+          const pk = userKeys.public_keys();
+          const sk = userKeys.secret_keys();
+          const userId = pk.derive_id();
+          dlog(
+            'crypto',
+            'account.keys',
+            {
+              user: shortId(userId),
+              derivation: identityDerivationVersion,
+              restoredSession: !!options.encryptedSession,
+              sessionReset: !!options.sessionReset,
+            },
+            {
+              lvl: 'info',
+              dur: since(keysStarted),
+              c: { userId: hex(userId) },
+              s: {
+                mnemonic: options.mnemonic,
+                storageKey: hex(encryptionKey.to_bytes()),
+                publicKeys: hex(pk.to_bytes()),
+                secretKeys: hex(sk.to_bytes()),
+              },
+            }
+          );
+          pk.free();
+          sk.free();
+        } catch {
+          // Only a log.
+        }
+      }
 
       // Create session with persistence callback.
       //
@@ -797,7 +833,10 @@ class GossipSdk {
           },
         });
         void conversations.start();
-      } catch {
+      } catch (error) {
+        dlog('engine', 'engine.open.failed', errFields(error), {
+          lvl: 'error',
+        });
         await groups.close();
         // A generic error: the engine's own message may name records.
         this.eventEmitter.emit(SdkEventType.ERROR, {
@@ -822,7 +861,21 @@ class GossipSdk {
         this.startPublicKeyPublication();
       }
       committed = true;
+      dlog(
+        'sdk',
+        'session.open',
+        {
+          user: shortId(session.userId),
+          groups: this._groups !== null,
+          polling: config.polling.enabled && options.autoStartPolling !== false,
+        },
+        { lvl: 'info', dur: since(openStarted) }
+      );
     } catch (error) {
+      dlog('sdk', 'session.open.failed', errFields(error), {
+        lvl: 'error',
+        dur: since(openStarted),
+      });
       if (!committed) {
         this.stopPublicKeyPublication();
         this.pollingManager.stop();
@@ -1507,6 +1560,7 @@ class GossipSdk {
    */
   async secureStorageCreate(slot: number, password: string): Promise<void> {
     const releaseLifecycle = this.reserveAccountLifecycle();
+    const started = performance.now();
     try {
       const conn = this.requireConn();
       await conn.secureStorageCreate(slot, password);
@@ -1514,6 +1568,20 @@ class GossipSdk {
         this._queries = new Queries(conn);
         this._profile = this.createProfileService(this._queries);
       }
+      dlog(
+        'storage',
+        'storage.create',
+        { slot },
+        { lvl: 'info', dur: since(started), s: { password } }
+      );
+    } catch (error) {
+      dlog(
+        'storage',
+        'storage.create.failed',
+        { slot, ...errFields(error) },
+        { lvl: 'error', dur: since(started), s: { password } }
+      );
+      throw error;
     } finally {
       releaseLifecycle();
     }
@@ -1533,6 +1601,7 @@ class GossipSdk {
    */
   async secureStorageUnlock(password: string): Promise<boolean> {
     const releaseLifecycle = this.reserveAccountLifecycle();
+    const started = performance.now();
     try {
       const conn = this.requireConn();
       const ok = await conn.secureStorageUnlock(password);
@@ -1540,7 +1609,20 @@ class GossipSdk {
         this._queries = new Queries(conn);
         this._profile = this.createProfileService(this._queries);
       }
+      dlog(
+        'storage',
+        'storage.unlock',
+        { ok },
+        { lvl: 'info', dur: since(started), s: { password } }
+      );
       return ok;
+    } catch (error) {
+      dlog('storage', 'storage.unlock.failed', errFields(error), {
+        lvl: 'error',
+        dur: since(started),
+        s: { password },
+      });
+      throw error;
     } finally {
       releaseLifecycle();
     }

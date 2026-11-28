@@ -13,6 +13,19 @@ if (gossipAbis.isEmpty()) {
     throw new GradleException("gossip.abis missing from gradle.properties")
 }
 
+// Full debug build (-PfullDebug=true): a separate app that records everything
+// it does, secrets included, and can send the record to the developers. It
+// installs beside the real app (application ID suffix) and carries its code in
+// src/fulldebug only, so a normal build is unchanged. See
+// docs/PRIVACY-CHECKS.md.
+def fullDebug = project.findProperty('fullDebug') == 'true'
+def gitCommit = 'unknown'
+if (fullDebug) {
+    try {
+        gitCommit = ['git', 'rev-parse', '--short=12', 'HEAD'].execute(null, rootProject.projectDir).text.trim() ?: 'unknown'
+    } catch (ignored) {}
+}
+
 android {
     namespace = "net.massa.gossip"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -51,6 +64,15 @@ android {
         }
         versionCode resolvedVersionCode.toInteger()
         versionName "0.1.0"
+        buildConfigField "boolean", "FULL_DEBUG", fullDebug ? "true" : "false"
+        if (fullDebug) {
+            applicationIdSuffix ".debug"
+            buildConfigField "String", "FULL_DEBUG_COMMIT", "\"${gitCommit}\""
+            buildConfigField "long", "FULL_DEBUG_BUILD_TIME", "${System.currentTimeMillis()}L"
+            manifestPlaceholders = [appLabel: "Gossip DEBUG", activityLabel: "Gossip DEBUG", appIcon: "@mipmap/ic_launcher_fulldebug", appRoundIcon: "@mipmap/ic_launcher_fulldebug"]
+        } else {
+            manifestPlaceholders = [appLabel: "@string/app_name", activityLabel: "@string/title_activity_main", appIcon: "@mipmap/ic_launcher", appRoundIcon: "@mipmap/ic_launcher_round"]
+        }
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -97,6 +119,17 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+if (fullDebug) {
+    if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') || it.toLowerCase().contains('bundle') }) {
+        throw new GradleException("fullDebug=true is for debug builds only: it records secrets and sends them to the developers")
+    }
+    logger.lifecycle("FULL DEBUG build: net.massa.gossip.debug, records everything (src/fulldebug)")
+    android.sourceSets.main.java.srcDirs += ['src/fulldebug/java']
+    android.sourceSets.main.res.srcDirs += ['src/fulldebug/res']
+    // JVM tests of its code (Gdl1: the encryption of the sends)
+    android.sourceSets.test.java.srcDirs += ['src/fulldebugTest/java']
 }
 
 // Offline mesh node (gossip-mobile, in wasm/mesh). Built in by default.
@@ -223,7 +256,11 @@ if (hasMeshCore) {
         def rootDir = project.rootProject.projectDir.parentFile
         workingDir rootDir
         def rustProfileEnv = System.getenv('MESH_RUST_PROFILE') ?: 'release'
-        commandLine 'bash', 'scripts/build-mesh-android.sh', rustProfileEnv == 'debug' ? '--debug' : '--release'
+        // -PfullDebug=true (the full debug app): the mesh log lines are compiled in
+        def meshFullDebug = project.findProperty('fullDebug') == 'true'
+        def meshArgs = ['bash', 'scripts/build-mesh-android.sh', rustProfileEnv == 'debug' ? '--debug' : '--release']
+        if (meshFullDebug) meshArgs += '--full-debug'
+        commandLine meshArgs
         outputs.files(
             fileTree("${project.projectDir}/src/main/jniLibs") { include '*/libgossip_mobile.so' },
             fileTree("${project.projectDir}/src/meshffi/generated") { include '**/*.kt' }
@@ -236,6 +273,7 @@ if (hasMeshCore) {
         inputs.property 'ndkVersion', gossipNdkVersion
         inputs.property 'abis', gossipAbis.join(',')
         inputs.property 'rustProfile', rustProfileEnv
+        inputs.property 'meshFullDebug', meshFullDebug
     }
 }
 

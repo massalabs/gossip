@@ -12,7 +12,8 @@
     "dev": "vite",
     "dev:host": "vite --host",
     "build:sdk": "cd gossip-sdk && npm run build",
-    "build": "npm run audit:logging && npm run audit:paths && npm run build:sdk && tsc -b && vite build && npm run audit:production-worker:dist && npm run strip:logging:sw && npm run audit:logging:dist && npm run audit:hosts:dist && npm run audit:paths:dist",
+    "build": "npm run audit:logging && npm run audit:paths && npm run build:sdk && tsc -b && vite build && npm run audit:production-worker:dist && npm run strip:logging:sw && npm run audit:logging:dist && npm run audit:hosts:dist && npm run audit:paths:dist && npm run audit:full-debug:dist",
+    "build:full-debug": "VITE_FULL_DEBUG=true VITE_DEBUG_LOGS=true sh -c 'npm run audit:paths && npm run wasm:build:main:full-debug && npm run build:sdk && tsc -b && vite build && npm run audit:production-worker:dist && npm run strip:logging:sw && npm run audit:hosts:dist && npm run audit:paths:dist && node scripts/audit-full-debug.mjs dist --expect-debug-wasm'",
     "test": "vitest --silent='passed-only'",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
@@ -31,6 +32,7 @@
     "audit:paths": "node scripts/audit-paths.mjs source",
     "audit:paths:dist": "node scripts/audit-paths.mjs dist",
     "audit:hosts:dist": "node scripts/audit-hosts.mjs dist",
+    "audit:full-debug:dist": "node scripts/audit-full-debug.mjs dist",
     "audit:production-worker:dist": "node gossip-sdk/scripts/audit-production-worker.mjs dist",
     "strip:logging:sw": "node scripts/strip-service-worker-console.mjs",
     "fmt": "prettier --write . && eslint . --fix",
@@ -41,6 +43,7 @@
     "prepare": "husky",
     "wasm:build": "npm run wasm:build:main && npm run wasm:build:secure-storage",
     "wasm:build:main": "wasm-pack build --out-dir ../../gossip-sdk/src/assets/generated/wasm --target web wasm/main --config \"$(bash scripts/rust-remap-flags.sh)\" && rm -f gossip-sdk/src/assets/generated/wasm/.gitignore",
+    "wasm:build:main:full-debug": "wasm-pack build --out-dir ../../gossip-sdk/src/assets/generated/wasm-full-debug --target web wasm/main --config \"$(bash scripts/rust-remap-flags.sh)\" --features full-debug && rm -f gossip-sdk/src/assets/generated/wasm-full-debug/.gitignore",
     "wasm:build:secure-storage": "RUSTUP_TOOLCHAIN=nightly wasm-pack build --out-dir ../../gossip-sdk/src/assets/generated/wasm-secureStorage --out-name secureStorage --target web wasm/secure-storage --features wasm --config \"$(bash scripts/rust-remap-flags.sh target.wasm32-unknown-unknown.rustflags)\" && rm -f gossip-sdk/src/assets/generated/wasm-secureStorage/.gitignore gossip-sdk/src/assets/generated/wasm-secureStorage/package.json && printf 'export * from \"./secureStorage.js\";\\nexport { default } from \"./secureStorage.js\";\\n' > gossip-sdk/src/assets/generated/wasm-secureStorage/index.js",
     "wasm:check:secure-storage": "cd wasm/secure-storage && cargo +nightly check --target wasm32-unknown-unknown --features wasm",
     "native:build:ios": "bash scripts/build-native-ios.sh --release",
@@ -73,6 +76,7 @@
     "cap:copy:ios": "cap copy ios",
     "cap:copy:android": "cap copy android",
     "build:apk": "cd android && bundle exec fastlane build_debug",
+    "android:full-debug": "npm run build:full-debug && cap sync android && cd android && ./gradlew assembleDebug -PfullDebug=true",
     "release": "node scripts/release.mjs"
   },
   "dependencies": {

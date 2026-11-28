@@ -1,5 +1,6 @@
 import React from 'react';
 import { PrivacyGraphic } from '../../components/graphics';
+import { FullDebugActions } from '../../fullDebug/lazy';
 
 interface LoginLayoutProps {
   title: string;
@@ -46,6 +47,11 @@ export const LoginLayout: React.FC<LoginLayoutProps> = ({
         </div>
 
         <div className="w-full max-w-md space-y-2 px-4 pt-4">{children}</div>
+        {FullDebugActions && (
+          <div className="w-full max-w-md px-4 pt-4">
+            <FullDebugActions />
+          </div>
+        )}
       </div>
     </div>
   );

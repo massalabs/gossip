@@ -113,6 +113,11 @@ impl Node {
         if let Target::SyncObj(sync) = key.target
             && !self.retrieves(&key.chat_id)
         {
+            dbg_event!(Info, "engine.retrieval.result", {
+                "what" => "sync_obj", "item" => crate::debug::short(&sync),
+                "epoch" => crate::debug::short(&key.chat_id), "result" => "not_found",
+                "reason" => "inactive_device",
+            });
             self.t
                 .lookup_results
                 .insert((key.chat_id, sync), LookupResult::NotFound);
@@ -126,6 +131,14 @@ impl Node {
                 // rather than being lost (§17.4 leaves the choice to the implementation).
                 let parent = matches!(from, Some((_, TriggerKind::Child)));
                 if !(parent && self.evict_suspect(&key.chat_id)) {
+                    dbg_do! {
+                        let (what, item) = super::debug::target(&key.target);
+                        dbg_event!(Warn, "engine.retrieval.dropped", {
+                            "what" => what, "item" => item,
+                            "epoch" => crate::debug::short(&key.chat_id),
+                            "limit" => "queued_missing", "tasks" => self.t.tasks.len(),
+                        });
+                    }
                     self.stats.backpressure += 1;
                     return;
                 }
@@ -140,6 +153,19 @@ impl Node {
                 },
             );
             self.stats.tasks_created += 1;
+            dbg_do! {
+                let (what, item) = super::debug::target(&key.target);
+                dbg_event!(Debug, "engine.retrieval.want", {
+                    "what" => what, "item" => item, "epoch" => crate::debug::short(&key.chat_id),
+                    "from" => from.map(|(p, _)| crate::debug::short(&p)),
+                    "trigger" => from.map(|(_, k)| match k {
+                        TriggerKind::Notice => "notice",
+                        TriggerKind::Child => "child",
+                        TriggerKind::Page => "page",
+                    }),
+                    "active" => self.retrieves(&key.chat_id),
+                });
+            }
         }
         let eligible = from.is_some_and(|(p, _)| self.task_candidate_ok(&key, &p));
         let now = cx.now;
@@ -418,6 +444,10 @@ impl Node {
         match answer {
             Answer::Supplied => unreachable!(),
             Answer::TemporarilyInvalid => {
+                dbg_event!(Info, "engine.retrieval.paused", {
+                    "epoch" => crate::debug::short(&key.chat_id), "peer" => crate::debug::short(&peer),
+                    "reason" => "future_dated",
+                });
                 task.run = Run::Paused;
                 self.stats.tasks_paused += 1;
             }
@@ -689,6 +719,15 @@ impl Node {
     }
 
     fn pause(&mut self, key: TaskKey) {
+        dbg_do! {
+            let (what, item) = super::debug::target(&key.target);
+            dbg_event!(Info, "engine.retrieval.paused", {
+                "what" => what, "item" => item, "epoch" => crate::debug::short(&key.chat_id),
+                "reason" => "stages_or_candidates_exhausted",
+                "runs" => self.t.tasks.get(&key).map(|t| t.runs),
+                "candidates" => self.t.tasks.get(&key).map(|t| t.candidates.len()),
+            });
+        }
         match key.target {
             Target::SyncObj(_) => self.complete_lookup(key, LookupResult::NotFound),
             Target::Parent(c) => {
@@ -844,6 +883,27 @@ impl Node {
     /// local wait starts (a resend keeps the one running), and the peer is
     /// outstanding until the request's deadline.
     pub(crate) fn task_sent(&mut self, key: TaskKey, peer: GossipId, sent_at: u64, ttl: u64) {
+        dbg_do! {
+            if let Some(task) = self.t.tasks.get(&key) {
+                let (what, item) = super::debug::target(&key.target);
+                let (stage, resend, resends) = match task.run {
+                    Run::Active { stage, attempt, expired_resends, .. } => (
+                        Some(stage),
+                        matches!(attempt, Some(Attempt::Sent { peer: p, .. }) if p == peer),
+                        expired_resends,
+                    ),
+                    Run::Paused => (None, false, 0),
+                };
+                let c = task.candidates.get(&peer);
+                dbg_event!(Debug, "engine.retrieval.ask", {
+                    "what" => what, "item" => item, "epoch" => crate::debug::short(&key.chat_id),
+                    "peer" => crate::debug::short(&peer), "tier" => self.dbg_tier(&key, &peer),
+                    "attempt" => c.map_or(0, |c| c.attempts) + 1, "run" => task.runs,
+                    "stage" => stage, "ttl" => ttl, "resend" => resend, "expired_resends" => resends,
+                    "candidates" => task.candidates.len(), "score" => self.score(&peer),
+                });
+            }
+        }
         let Some(task) = self.t.tasks.get_mut(&key) else {
             return;
         };
@@ -906,6 +966,15 @@ impl Node {
             if deadline > cx.now {
                 break;
             }
+            dbg_do! {
+                let (what, item) = super::debug::target(&key.target);
+                dbg_event!(Info, "engine.retrieval.result", {
+                    "what" => what, "item" => item, "epoch" => crate::debug::short(&key.chat_id),
+                    "result" => "deadline_passed",
+                    "runs" => self.t.tasks.get(&key).map(|t| t.runs),
+                    "dur" => self.t.tasks.get(&key).map(|t| cx.now.saturating_sub(t.created_at)),
+                });
+            }
             self.t.tasks.remove(&key);
             self.reindex(key);
             self.stats.tasks_expired += 1;
@@ -924,6 +993,14 @@ impl Node {
                 self.reindex(key);
                 continue;
             };
+            dbg_do! {
+                let (what, item) = super::debug::target(&key.target);
+                dbg_event!(Debug, "engine.retrieval.result", {
+                    "what" => what, "item" => item, "epoch" => crate::debug::short(&key.chat_id),
+                    "peer" => crate::debug::short(&peer), "result" => "timeout",
+                    "dur" => cx.now.saturating_sub(sent_at),
+                });
+            }
             self.stats.timeouts += 1;
             self.note_query_timeout(&peer, sent_at, cx.now);
             if let Some(c) = self

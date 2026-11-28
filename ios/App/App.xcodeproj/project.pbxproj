@@ -22,6 +22,9 @@
 		D0F41CFE2F73FD8B003FC4E1 /* secureStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F41CE72F73ED03003FC4E1 /* secureStorage.swift */; };
 		FA11BB012F00A00000000001 /* SSLBypassPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */; };
 		FA11BB012F00A00000000002 /* AppLockPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11BB002F00A00000000002 /* AppLockPlugin.swift */; };
+		FA11BB012F00A00000000003 /* DebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11BB002F00A00000000003 /* DebugLog.swift */; };
+		FA11BB012F00A00000000004 /* DebugLogWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11BB002F00A00000000004 /* DebugLogWriter.swift */; };
+		FA11BB012F00A00000000005 /* DebugLogFilePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11BB002F00A00000000005 /* DebugLogFilePlugin.swift */; };
 		FAA8F08A2EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F0892EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift */; };
 		FAA8F0912EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */; };
 		FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */; };
@@ -82,6 +85,9 @@
 		D0F41D122F73ED03003FC4E1 /* PortableBackupSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortableBackupSupport.swift; sourceTree = "<group>"; };
 		FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSLBypassPlugin.swift; sourceTree = "<group>"; };
 		FA11BB002F00A00000000002 /* AppLockPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLockPlugin.swift; sourceTree = "<group>"; };
+		FA11BB002F00A00000000003 /* DebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLog.swift; sourceTree = "<group>"; };
+		FA11BB002F00A00000000004 /* DebugLogWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogWriter.swift; sourceTree = "<group>"; };
+		FA11BB002F00A00000000005 /* DebugLogFilePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogFilePlugin.swift; sourceTree = "<group>"; };
 		FAA8F0892EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRunnerStoragePlugin.swift; sourceTree = "<group>"; };
 		FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefreshPlugin.swift; sourceTree = "<group>"; };
 		FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyViewController.swift; sourceTree = "<group>"; };
@@ -176,6 +182,9 @@
 				FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */,
 				FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */,
 				FA11BB002F00A00000000002 /* AppLockPlugin.swift */,
+				FA11BB002F00A00000000003 /* DebugLog.swift */,
+				FA11BB002F00A00000000004 /* DebugLogWriter.swift */,
+				FA11BB002F00A00000000005 /* DebugLogFilePlugin.swift */,
 				FAA8F0862EE6DCD100CE65AE /* plugins */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -465,6 +474,9 @@
 				FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */,
 				FA11BB012F00A00000000001 /* SSLBypassPlugin.swift in Sources */,
 				FA11BB012F00A00000000002 /* AppLockPlugin.swift in Sources */,
+				FA11BB012F00A00000000003 /* DebugLog.swift in Sources */,
+				FA11BB012F00A00000000004 /* DebugLogWriter.swift in Sources */,
+				FA11BB012F00A00000000005 /* DebugLogFilePlugin.swift in Sources */,
 				D0F41CEC2F73ED03003FC4E1 /* SecureStoragePlugin.swift in Sources */,
 				D0F41D112F73ED03003FC4E1 /* PortableBackupFilePlugin.swift in Sources */,
 				D0F41D132F73ED03003FC4E1 /* PortableBackupSupport.swift in Sources */,
@@ -675,7 +687,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = net.ben.gossip;
 				PRODUCT_NAME = Gossip;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(GOSSIP_SWIFT_CONDITIONS)";
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/App/plugins/secureStorage";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -731,7 +743,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = net.ben.gossip;
 				PRODUCT_NAME = Gossip;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(GOSSIP_SWIFT_CONDITIONS)";
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/App/plugins/secureStorage";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";

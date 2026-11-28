@@ -36,7 +36,7 @@ type View = 'welcome' | 'terms' | 'restore' | 'import';
  * The rest of the app uses React Router for proper browser navigation support.
  * This is acceptable for a one-time onboarding experience
  */
-export const Onboarding: React.FC = () => {
+const OnboardingFlow: React.FC = () => {
   const { t } = useTranslation('onboarding');
   const authorizedAtMount = useRef(
     !SECURE_STORAGE_ENABLED ||
@@ -210,3 +210,6 @@ export const Onboarding: React.FC = () => {
     />
   );
 };
+
+/** (The full debug build's warning is above every screen: FullDebugFrame.) */
+export const Onboarding: React.FC = () => <OnboardingFlow />;

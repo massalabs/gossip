@@ -39,15 +39,18 @@ public class QrScannerPlugin: CAPPlugin, CAPBridgedPlugin {
             self.closeRequested = false
         }
         AVCaptureDevice.requestAccess(for: .video) { granted in
+            DebugLog.event("qrScanner", "permission.result", ["permission": "camera", "granted": granted])
             DispatchQueue.main.async {
                 let closeRequested = self.closeRequested
                 self.opening = false
                 self.closeRequested = false
                 guard granted else {
+                    DebugLog.event("qrScanner", "qr.failed", lvl: "warn", ["code": "PERMISSION_DENIED"])
                     call.reject("Camera permission denied", "PERMISSION_DENIED")
                     return
                 }
                 guard let host = self.bridge?.viewController else {
+                    DebugLog.event("qrScanner", "qr.failed", lvl: "warn", ["code": "UNAVAILABLE"])
                     call.reject("No view controller", "UNAVAILABLE")
                     return
                 }
@@ -143,6 +146,7 @@ final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjec
         guard let device = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: device),
               session.canAddInput(input) else {
+            DebugLog.event("qrScanner", "qr.setup_failed", lvl: "error", ["step": "input"])
             setupFailed = true
             return
         }
@@ -150,6 +154,7 @@ final class QrScanViewController: UIViewController, AVCaptureMetadataOutputObjec
 
         let output = AVCaptureMetadataOutput()
         guard session.canAddOutput(output) else {
+            DebugLog.event("qrScanner", "qr.setup_failed", lvl: "error", ["step": "output"])
             setupFailed = true
             return
         }

@@ -146,6 +146,11 @@ impl Node {
         chat: ChatId,
     ) {
         if from == self.me || !self.take_request_token(&from, cx.now) {
+            dbg_event!(Warn, "engine.event.in", {
+                "type" => "neighbor_request", "epoch" => crate::debug::short(&chat),
+                "from" => crate::debug::short(&from), "verdict" => "ignored",
+                "reason" => if from == self.me { "from_self" } else { "request_budget" },
+            });
             return;
         }
         let r_chat = chat;
@@ -162,11 +167,21 @@ impl Node {
                 )
         });
         if !member {
+            dbg_event!(Debug, "engine.event.in", {
+                "type" => "neighbor_request", "epoch" => crate::debug::short(&chat),
+                "from" => crate::debug::short(&from), "verdict" => "answered",
+                "reason" => "not_member_or_inactive", "answer" => "declined",
+            });
             self.queue_work(from, decline);
             return;
         }
         // A removed peer is no member of a current epoch: told of its removal (§5.6).
         if self.removed_peer(&chat, &from) {
+            dbg_event!(Debug, "engine.event.in", {
+                "type" => "neighbor_request", "epoch" => crate::debug::short(&chat),
+                "from" => crate::debug::short(&from), "verdict" => "answered",
+                "reason" => "removed_peer", "answer" => "declined",
+            });
             self.removed_contact(cx, chat, from);
             self.queue_work(from, decline);
             return;
@@ -177,6 +192,11 @@ impl Node {
         // The request names the requester's current epoch; the relation is the group's.
         let chat = self.group_of(&chat);
         if !self.may_receive(&self.cur(&chat), &from, false) {
+            dbg_event!(Debug, "engine.event.in", {
+                "type" => "neighbor_request", "epoch" => crate::debug::short(&r_chat),
+                "from" => crate::debug::short(&from), "verdict" => "answered",
+                "reason" => "not_member_of_current", "answer" => "declined",
+            });
             self.queue_work(
                 from,
                 Work::NeighborResponse {
@@ -200,6 +220,13 @@ impl Node {
         } else {
             self.suggestions(cx, chat, from)
         };
+        dbg_event!(Debug, "engine.event.in", {
+            "type" => "neighbor_request", "epoch" => crate::debug::short(&r_chat),
+            "group" => crate::debug::short(&chat), "from" => crate::debug::short(&from),
+            "verdict" => "answered", "reason" => if accepted { "capacity" } else { "full" },
+            "answer" => if accepted { "accepted" } else { "declined" },
+            "suggestions" => suggestions.len(),
+        });
         self.queue_work(
             from,
             Work::NeighborResponse {
@@ -221,6 +248,11 @@ impl Node {
     ) {
         let epoch = r.chat_id;
         if !self.epochs.contains_key(&epoch) || !self.may_receive(&epoch, &from, false) {
+            dbg_event!(Debug, "engine.event.in", {
+                "type" => "neighbor_response", "epoch" => crate::debug::short(&epoch),
+                "from" => crate::debug::short(&from), "verdict" => "ignored",
+                "reason" => if self.epochs.contains_key(&epoch) { "peer_may_not_receive" } else { "unknown_epoch" },
+            });
             return;
         }
         let chat = self.group_of(&epoch);
@@ -230,8 +262,20 @@ impl Node {
             .get(&chat)
             .is_some_and(|g| g.asked.contains_key(&from))
         {
+            dbg_event!(Debug, "engine.event.in", {
+                "type" => "neighbor_response", "epoch" => crate::debug::short(&epoch),
+                "from" => crate::debug::short(&from), "verdict" => "ignored",
+                "reason" => "not_asked",
+            });
             return;
         }
+        dbg_event!(Debug, "engine.event.in", {
+            "type" => "neighbor_response", "epoch" => crate::debug::short(&epoch),
+            "group" => crate::debug::short(&chat), "from" => crate::debug::short(&from),
+            "verdict" => "accepted",
+            "reason" => if r.accepted { "neighbor_accepted" } else { "neighbor_declined" },
+            "suggestions" => r.suggestions.len(),
+        });
         self.answered(&from);
         let eligible = self.eligible(&self.cur(&chat));
         let now = cx.now;
@@ -355,6 +399,7 @@ impl Node {
             g.cooldown
                 .insert(*peer, now.saturating_add(NEIGHBOR_COOLDOWN_MS));
             self.stats.neighbors_replaced += 1;
+            dbg_event!(Info, "engine.neighbor.replaced", { "reason" => "unanswered" });
         }
     }
 }

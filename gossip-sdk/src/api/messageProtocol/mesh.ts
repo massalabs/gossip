@@ -15,6 +15,23 @@ import {
   TransportConnectivity,
 } from './types.js';
 import { decodeFromBase64, encodeToBase64 } from '../../utils/base64.js';
+import { debugLogEnabled, dlog } from '../../utils/debugLog.js';
+import { errFields, shortId, since } from '../../utils/debugFields.js';
+
+/** `mesh.call.failed`: a call into the mesh plugin that threw. */
+function meshFailed(
+  call: string,
+  started: number,
+  error: unknown,
+  fields?: Record<string, unknown>
+): void {
+  dlog(
+    'mesh',
+    'mesh.call.failed',
+    { call, ...fields, ...errFields(error) },
+    { lvl: 'error', dur: since(started) }
+  );
+}
 
 export type MeshBlobKind = 'message' | 'announcement' | 'keys';
 
@@ -104,9 +121,22 @@ export class MeshNodeProtocol implements IMessageProtocol {
   }
 
   async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
-    const { messages } = await this.plugin.fetch({
-      seekers: seekers.map(encodeToBase64),
-    });
+    const started = performance.now();
+    let messages: { seeker: string; ciphertext: string }[];
+    try {
+      ({ messages } = await this.plugin.fetch({
+        seekers: seekers.map(encodeToBase64),
+      }));
+    } catch (error) {
+      meshFailed('fetch', started, error, { seekers: seekers.length });
+      throw error;
+    }
+    dlog(
+      'mesh',
+      'mesh.fetch',
+      { seekers: seekers.length, messages: messages.length },
+      { dur: since(started) }
+    );
     return messages.map(m => ({
       seeker: decodeFromBase64(m.seeker),
       ciphertext: decodeFromBase64(m.ciphertext),
@@ -122,19 +152,56 @@ export class MeshNodeProtocol implements IMessageProtocol {
     message: EncryptedMessage,
     routing?: MessageRouting
   ): Promise<void> {
-    await this.plugin.sendBlob({
-      kind: 'message',
-      key: encodeToBase64(message.seeker),
-      payload: encodeToBase64(message.ciphertext),
-      ...(routing?.meshOnly ? { localOnly: true } : {}),
-    });
+    const started = performance.now();
+    const fields = debugLogEnabled()
+      ? {
+          kind: 'message',
+          seeker: shortId(message.seeker),
+          size: message.ciphertext.length,
+          localOnly: !!routing?.meshOnly,
+        }
+      : undefined;
+    let sent: { id: string };
+    try {
+      sent = await this.plugin.sendBlob({
+        kind: 'message',
+        key: encodeToBase64(message.seeker),
+        payload: encodeToBase64(message.ciphertext),
+        ...(routing?.meshOnly ? { localOnly: true } : {}),
+      });
+    } catch (error) {
+      meshFailed('sendBlob', started, error, fields);
+      throw error;
+    }
+    dlog(
+      'mesh',
+      'mesh.send',
+      { ...fields, blob: shortId(sent?.id) },
+      { dur: since(started) }
+    );
   }
 
   async sendAnnouncement(announcement: Uint8Array): Promise<string> {
-    const { counter } = await this.plugin.sendBlob({
-      kind: 'announcement',
-      payload: encodeToBase64(announcement),
-    });
+    const started = performance.now();
+    let counter: string | undefined;
+    try {
+      ({ counter } = await this.plugin.sendBlob({
+        kind: 'announcement',
+        payload: encodeToBase64(announcement),
+      }));
+    } catch (error) {
+      meshFailed('sendBlob', started, error, {
+        kind: 'announcement',
+        size: announcement.length,
+      });
+      throw error;
+    }
+    dlog(
+      'mesh',
+      'mesh.send',
+      { kind: 'announcement', size: announcement.length, counter },
+      { dur: since(started) }
+    );
     return counter ?? '';
   }
 
@@ -142,7 +209,20 @@ export class MeshNodeProtocol implements IMessageProtocol {
     limit?: number,
     cursor?: string
   ): Promise<BulletinItem[]> {
-    const { items } = await this.plugin.fetchBulletin({ cursor, limit });
+    const started = performance.now();
+    let items: { counter: string; data: string }[];
+    try {
+      ({ items } = await this.plugin.fetchBulletin({ cursor, limit }));
+    } catch (error) {
+      meshFailed('fetchBulletin', started, error, { cursor, limit });
+      throw error;
+    }
+    dlog(
+      'mesh',
+      'mesh.fetch_bulletin',
+      { cursor, limit, items: items.length },
+      { dur: since(started) }
+    );
     return items.map(item => ({
       counter: item.counter,
       data: decodeFromBase64(item.data),
@@ -161,10 +241,25 @@ export class MeshNodeProtocol implements IMessageProtocol {
     seekers: Uint8Array[],
     localSeekers: Uint8Array[] = []
   ): Promise<void> {
-    await this.plugin.setWanted({
-      seekers: seekers.map(encodeToBase64),
-      localSeekers: localSeekers.map(encodeToBase64),
-    });
+    const started = performance.now();
+    try {
+      await this.plugin.setWanted({
+        seekers: seekers.map(encodeToBase64),
+        localSeekers: localSeekers.map(encodeToBase64),
+      });
+    } catch (error) {
+      meshFailed('setWanted', started, error, {
+        seekers: seekers.length,
+        localSeekers: localSeekers.length,
+      });
+      throw error;
+    }
+    dlog(
+      'mesh',
+      'mesh.wanted',
+      { seekers: seekers.length, localSeekers: localSeekers.length },
+      { dur: since(started) }
+    );
   }
 
   /** Public key set published under `blake3(keys)`, if the node holds it. */
@@ -189,15 +284,28 @@ export class MeshNodeProtocol implements IMessageProtocol {
       announcements: Uint8Array[];
     }) => void
   ): Promise<{ remove(): Promise<void> }> {
-    return this.plugin.addListener('arrival', arrival =>
+    return this.plugin.addListener('arrival', arrival => {
+      if (debugLogEnabled()) {
+        dlog('mesh', 'mesh.arrival', {
+          messages: arrival.messages.length,
+          announcements: arrival.announcements.length,
+          seekers: arrival.messages.map(m => {
+            try {
+              return shortId(decodeFromBase64(m.seeker));
+            } catch {
+              return '';
+            }
+          }),
+        });
+      }
       handler({
         messages: arrival.messages.map(m => ({
           seeker: decodeFromBase64(m.seeker),
           ciphertext: decodeFromBase64(m.ciphertext),
         })),
         announcements: arrival.announcements.map(decodeFromBase64),
-      })
-    );
+      });
+    });
   }
 
   /**
@@ -220,6 +328,18 @@ export class MeshNodeProtocol implements IMessageProtocol {
   private async refreshStatus(): Promise<MeshNodeStatus> {
     this.lastStatusAt = Date.now();
     const status = await this.plugin.status();
+    const before = this.lastStatus;
+    if (
+      debugLogEnabled() &&
+      (!before ||
+        before.running !== status.running ||
+        before.meshPeers !== status.meshPeers ||
+        before.upstreamReachable !== status.upstreamReachable ||
+        before.bridgeEnabled !== status.bridgeEnabled)
+    ) {
+      // Link up/down, peers and bridging, logged only when they change.
+      dlog('mesh', 'mesh.status', { ...status }, { lvl: 'info' });
+    }
     this.lastStatus = status;
     return status;
   }

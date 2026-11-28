@@ -63,6 +63,7 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
                 try bridgeNode.startCore(configJson: defaults.string(forKey: Self.configKey) ?? "{}")
                 bridgeNode.startRadio(mode: MeshPowerMode(name: defaults.string(forKey: Self.powerModeKey)))
             } catch {
+                DebugLog.e("mesh", "could not restore the mesh node", error)
                 #if DEBUG
                 CAPLog.print("[MeshNode] could not restore the mesh node: \(error.localizedDescription)")
                 #endif
@@ -82,6 +83,7 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
         do {
             try bridgeNode.startCore(configJson: config)
         } catch {
+            DebugLog.e("mesh", "could not start the mesh node", error)
             call.reject("Could not start the mesh node", "START_FAILED", error)
             return
         }
@@ -117,6 +119,7 @@ public class MeshNodePlugin: CAPPlugin, CAPBridgedPlugin {
     /// iOS shows its prompt when the radio first creates its managers, which `start` does;
     /// this reports the state without prompting.
     @objc override public func requestPermissions(_ call: CAPPluginCall) {
+        DebugLog.event("mesh", "permission.result", ["permission": "bluetooth", "state": Self.permissionState()])
         call.resolve(["bluetooth": Self.permissionState()])
     }
 
